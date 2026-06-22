@@ -2,74 +2,54 @@ import type { StatusTone } from "../../components/StatusPill";
 import type { OrchestrationLatestTurn, OrchestrationSession } from "@t3tools/contracts";
 import { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 
-export type ThreadStatusKind =
-  | "pending-approval"
-  | "awaiting-input"
-  | "working"
-  | "connecting"
-  | "error"
-  | "plan-ready";
-
-export interface ThreadStatusPresentation extends StatusTone {
-  readonly kind: ThreadStatusKind;
-  /** Whether the indicator represents in-flight activity. */
-  readonly pulse: boolean;
+export function threadSortValue(thread: EnvironmentThreadShell): number {
+  const candidate = Date.parse(thread.updatedAt ?? thread.createdAt);
+  return Number.isNaN(candidate) ? 0 : candidate;
 }
 
-function isLatestTurnSettled(
-  latestTurn: OrchestrationLatestTurn | null,
-  session: OrchestrationSession | null,
-): boolean {
-  if (!latestTurn?.startedAt) return false;
-  if (!latestTurn.completedAt) return false;
-  if (!session) return true;
-  return session.status !== "running";
-}
-
-/**
- * Resolves the user-facing status of a thread, in priority order. Returns
- * `null` for quiescent threads so rows stay free of "Idle"-style noise.
- * Mirrors `resolveThreadStatusPill` in apps/web/src/components/Sidebar.logic.ts.
- */
-export function resolveThreadStatus(
-  thread: EnvironmentThreadShell,
-): ThreadStatusPresentation | null {
-  if (thread.hasPendingApprovals) {
+export function threadStatusTone(thread: EnvironmentThreadShell): StatusTone {
+  const status = thread.runtime?.status;
+  if (status === "running" || status === "waiting") {
     return {
       kind: "pending-approval",
       label: "Needs Approval",
       pillClassName: "bg-warning",
       textClassName: "text-warning-foreground",
+      iconColor: "#ff9f0a",
+      iconBackground: "rgba(255,159,10,0.22)",
       pulse: false,
     };
   }
-
-  if (thread.hasPendingUserInput) {
+  if (status === "completed") {
     return {
       kind: "awaiting-input",
       label: "Awaiting Input",
-      pillClassName: "bg-adaptive-indigo-500-a12-a16",
-      textClassName: "text-adaptive-indigo-600-300",
+      pillClassName: "bg-primary/10",
+      textClassName: "text-foreground-secondary",
+      iconColor: "#5e5ce6",
+      iconBackground: "rgba(94,92,230,0.22)",
       pulse: false,
     };
   }
-
-  if (thread.session?.status === "running") {
+  if (status === "queued" || status === "starting") {
     return {
       kind: "working",
       label: "Working",
-      pillClassName: "bg-adaptive-sky-500-a12-a16",
+      pillClassName: "bg-primary/10",
       textClassName: "text-adaptive-sky-600-400",
+      iconColor: "#0a84ff",
+      iconBackground: "rgba(10,132,255,0.22)",
       pulse: true,
     };
   }
-
-  if (thread.session?.status === "starting") {
+  if (status === "failed") {
     return {
       kind: "connecting",
       label: "Connecting",
-      pillClassName: "bg-adaptive-sky-500-a12-a16",
-      textClassName: "text-adaptive-sky-600-400",
+      pillClassName: "bg-primary/10",
+      textClassName: "text-foreground-secondary",
+      iconColor: "#0a84ff",
+      iconBackground: "rgba(10,132,255,0.22)",
       pulse: true,
     };
   }
@@ -80,6 +60,8 @@ export function resolveThreadStatus(
       label: "Error",
       pillClassName: "bg-danger",
       textClassName: "text-danger-foreground",
+      iconColor: "#ff453a",
+      iconBackground: "rgba(255,69,58,0.22)",
       pulse: false,
     };
   }
@@ -92,8 +74,10 @@ export function resolveThreadStatus(
     return {
       kind: "plan-ready",
       label: "Plan Ready",
-      pillClassName: "bg-adaptive-violet-500-a12-a16",
-      textClassName: "text-adaptive-violet-600-400",
+      pillClassName: "bg-primary/10",
+      textClassName: "text-foreground-secondary",
+      iconColor: "#bf5af2",
+      iconBackground: "rgba(191,90,242,0.22)",
       pulse: false,
     };
   }
