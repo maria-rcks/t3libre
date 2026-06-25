@@ -45,6 +45,7 @@ import { cn, isMacPlatform, isWindowsPlatform } from "~/lib/utils";
 import { shellEnvironment } from "~/state/shell";
 import { useAtomCommand } from "~/state/use-atom-command";
 import {
+  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_PRIMARY_CLASS,
@@ -323,7 +324,7 @@ export const OpenInPicker = memo(function OpenInPicker({
       <Button
         aria-label={compact ? "Open file in preferred editor" : primaryLabel}
         size={isPanel ? "sm" : "xs"}
-        variant="outline"
+        variant={isPanel ? "ghost" : "outline"}
         className={isPanel ? THREAD_DETAILS_PANEL_SPLIT_PRIMARY_CLASS : undefined}
         disabled={!preferredEditor || !openInCwd}
         onClick={() => openInEditor(preferredEditor)}
@@ -356,12 +357,15 @@ export const OpenInPicker = memo(function OpenInPicker({
             <Button
               aria-label="Choose editor"
               size={isPanel ? "sm" : "icon-xs"}
-              variant="outline"
+              variant={isPanel ? "ghost" : "outline"}
               className={isPanel ? THREAD_DETAILS_PANEL_SPLIT_SECONDARY_CLASS : undefined}
             />
           }
         >
-          <ChevronDownIcon aria-hidden="true" className="size-4" />
+          <ChevronDownIcon
+            aria-hidden="true"
+            className={isPanel ? THREAD_DETAILS_PANEL_CHEVRON_CLASS : "size-4"}
+          />
         </MenuTrigger>
         <MenuPopup align="end">
           {options.length === 0 && <MenuItem disabled>No installed editors found</MenuItem>}
