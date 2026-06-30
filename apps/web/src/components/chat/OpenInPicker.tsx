@@ -1,5 +1,5 @@
 import { EditorId, type EnvironmentId, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
 import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
@@ -47,6 +47,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
+  THREAD_DETAILS_PANEL_ROW_POPUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_PRIMARY_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SECONDARY_CLASS,
@@ -220,6 +221,7 @@ export const OpenInPicker = memo(function OpenInPicker({
 }) {
   const isPanel = displayMode === "panel";
   const ActionGroup = isPanel ? "div" : Group;
+  const panelAnchorRef = useRef<HTMLDivElement | null>(null);
   const openInEditorMutation = useAtomCommand(shellEnvironment.openInEditor, "open in editor");
   const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors);
   const options = useMemo(
@@ -319,7 +321,9 @@ export const OpenInPicker = memo(function OpenInPicker({
     <ActionGroup
       aria-label="Open in editor"
       role="group"
-      {...(isPanel ? { className: THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS } : {})}
+      {...(isPanel
+        ? { className: THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS, ref: panelAnchorRef }
+        : {})}
     >
       <Button
         aria-label={compact ? "Open file in preferred editor" : primaryLabel}
@@ -367,7 +371,11 @@ export const OpenInPicker = memo(function OpenInPicker({
             className={isPanel ? THREAD_DETAILS_PANEL_CHEVRON_CLASS : "size-4"}
           />
         </MenuTrigger>
-        <MenuPopup align="end">
+        <MenuPopup
+          align="end"
+          {...(isPanel ? { anchor: panelAnchorRef } : {})}
+          className={isPanel ? THREAD_DETAILS_PANEL_ROW_POPUP_CLASS : undefined}
+        >
           {options.length === 0 && <MenuItem disabled>No installed editors found</MenuItem>}
           {options.map(({ label, Icon, value, kind }) => (
             <MenuItem key={value} onClick={() => openInEditor(value)}>

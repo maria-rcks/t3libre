@@ -110,6 +110,7 @@ import { readLocalApi } from "~/localApi";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
+  THREAD_DETAILS_PANEL_ROW_POPUP_CLASS,
   THREAD_DETAILS_PANEL_ROW_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_PRIMARY_CLASS,
@@ -1037,6 +1038,7 @@ export default function GitActionsControl({
 }: GitActionsControlProps) {
   const isPanel = displayMode === "panel";
   const ActionGroup = isPanel ? "div" : Group;
+  const panelAnchorRef = useRef<HTMLDivElement | null>(null);
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
     "thread branch metadata update",
@@ -1872,6 +1874,7 @@ export default function GitActionsControl({
         <ActionGroup
           role="group"
           aria-label="Git actions"
+          {...(isPanel ? { ref: panelAnchorRef } : {})}
           className={cn("shrink-0", isPanel && THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS)}
         >
           {quickActionDisabledReason ? (
@@ -1959,8 +1962,83 @@ export default function GitActionsControl({
                 className={isPanel ? THREAD_DETAILS_PANEL_CHEVRON_CLASS : "size-4"}
               />
             </MenuTrigger>
-            <MenuPopup align="end" className="w-full">
-              {gitItems}
+            <MenuPopup
+              align="end"
+              {...(isPanel ? { anchor: panelAnchorRef } : {})}
+              className={isPanel ? THREAD_DETAILS_PANEL_ROW_POPUP_CLASS : "w-full"}
+            >
+              {gitActionMenuItems.map((item) => {
+                const disabledReason = getMenuActionDisabledReason({
+                  item,
+                  gitStatus: gitStatusForActions,
+                  isBusy: isGitActionRunning,
+                  hasPrimaryRemote,
+                });
+                if (item.disabled && disabledReason) {
+                  return (
+                    <Popover key={`${item.id}-${item.label}`}>
+                      <PopoverTrigger
+                        openOnHover
+                        nativeButton={false}
+                        render={<span className="block w-max cursor-not-allowed" />}
+                      >
+                        <MenuItem className="w-full" disabled>
+                          <GitActionItemIcon
+                            icon={item.icon}
+                            SourceControlIcon={SourceControlIcon}
+                          />
+                          {item.label}
+                        </MenuItem>
+                      </PopoverTrigger>
+                      <PopoverPopup tooltipStyle side="left" align="center">
+                        {disabledReason}
+                      </PopoverPopup>
+                    </Popover>
+                  );
+                }
+
+                return (
+                  <MenuItem
+                    key={`${item.id}-${item.label}`}
+                    disabled={item.disabled}
+                    onClick={() => {
+                      openDialogForMenuItem(item);
+                    }}
+                  >
+                    <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
+                    {item.label}
+                  </MenuItem>
+                );
+              })}
+              {canPublishRepository ? (
+                <MenuItem
+                  disabled={isGitActionRunning}
+                  onClick={() => {
+                    setIsPublishDialogOpen(true);
+                  }}
+                >
+                  <CloudUploadIcon />
+                  Publish repository...
+                </MenuItem>
+              ) : null}
+              {gitStatusForActions?.refName === null && (
+                <p className="px-2 py-1.5 text-xs text-warning">
+                  Detached HEAD: create and check out a branch to enable push and pull request
+                  actions.
+                </p>
+              )}
+              {gitStatusForActions &&
+                gitStatusForActions.refName !== null &&
+                !gitStatusForActions.hasWorkingTreeChanges &&
+                gitStatusForActions.behindCount > 0 &&
+                gitStatusForActions.aheadCount === 0 && (
+                  <p className="px-2 py-1.5 text-xs text-warning">
+                    Behind upstream. Pull/rebase first.
+                  </p>
+                )}
+              {gitStatusError && (
+                <p className="px-2 py-1.5 text-xs text-destructive">{gitStatusError}</p>
+              )}
             </MenuPopup>
           </Menu>
         </ActionGroup>
