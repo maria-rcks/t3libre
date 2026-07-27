@@ -16,7 +16,11 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import { CheckpointRollbackServiceV2 } from "./CheckpointRollbackService.ts";
-import { EffectOutboxV2, type OrchestrationEffectV2 } from "./EffectOutbox.ts";
+import {
+  EffectOutboxV2,
+  PENDING_TERMINALIZATION_MARKER,
+  type OrchestrationEffectV2,
+} from "./EffectOutbox.ts";
 import {
   executorLayer,
   isNonRetryableProviderTurnControlFailure,
@@ -365,13 +369,17 @@ it.effect("retries instead of failing the outbox effect when terminal projection
       attemptCount: 5,
       leaseOwner: "projection-retry-worker",
     };
+    const retryErrors: Array<string> = [];
     const outboxLayer = Layer.mock(EffectOutboxV2)({
       claimNext: () => Effect.succeed(Option.some(effect)),
       get: () => Effect.succeed(Option.some(effect)),
       awaitCancellation: () => Effect.never,
       clearCancellation: () => Effect.void,
       fail: () => record("outbox-fail").pipe(Effect.as(true)),
-      retry: () => record("outbox-retry").pipe(Effect.as(true)),
+      retry: ({ error }) =>
+        Effect.sync(() => {
+          retryErrors.push(error);
+        }).pipe(Effect.andThen(record("outbox-retry")), Effect.as(true)),
     });
     const executorLayer = Layer.succeed(
       OrchestrationEffectExecutorV2,
@@ -410,6 +418,52 @@ it.effect("retries instead of failing the outbox effect when terminal projection
       ),
     );
     assert.deepEqual(yield* Ref.get(events), ["terminalize", "outbox-retry"]);
+    assert.equal(retryErrors.length, 1);
+    assert.isTrue(retryErrors[0]?.startsWith(PENDING_TERMINALIZATION_MARKER));
+  }),
+);
+
+it.effect("only retries the terminal projection when reclaiming a pending terminalization", () =>
+  Effect.gen(function* () {
+    const now = yield* DateTime.now;
+    const events = yield* Ref.make<ReadonlyArray<string>>([]);
+    const record = (event: string) => Ref.update(events, (current) => [...current, event]);
+    const effect = {
+      ...restartEffect(now, { type: "detach" }),
+      attemptCount: 2,
+      leaseOwner: "pending-terminalization-worker",
+      lastError: `${PENDING_TERMINALIZATION_MARKER}simulated transport failure`,
+    };
+    const outboxLayer = Layer.mock(EffectOutboxV2)({
+      claimNext: () => Effect.succeed(Option.some(effect)),
+      get: () => Effect.succeed(Option.some(effect)),
+      awaitCancellation: () => Effect.never,
+      clearCancellation: () => Effect.void,
+      fail: ({ error }) => record(`outbox-fail:${error}`).pipe(Effect.as(true)),
+    });
+    const executorLayer = Layer.succeed(
+      OrchestrationEffectExecutorV2,
+      OrchestrationEffectExecutorV2.of({
+        execute: () => record("execute").pipe(Effect.asVoid),
+        handlePermanentFailure: () => record("terminalize"),
+      }),
+    );
+    const workerLayer = effectWorkerLayerWithOptions({
+      workerId: "pending-terminalization-worker",
+      maxAttempts: 5,
+    }).pipe(Layer.provide(Layer.merge(outboxLayer, executorLayer)));
+
+    assert.isTrue(
+      yield* OrchestrationEffectWorkerV2.pipe(
+        Effect.flatMap((worker) => worker.runOnce),
+        Effect.provide(workerLayer),
+      ),
+    );
+    // The provider execution never re-runs; only the projection is retried.
+    assert.deepEqual(yield* Ref.get(events), [
+      "terminalize",
+      "outbox-fail:simulated transport failure",
+    ]);
   }),
 );
 

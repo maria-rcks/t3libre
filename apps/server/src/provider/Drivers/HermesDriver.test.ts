@@ -313,6 +313,7 @@ describe("HermesDriver", () => {
           );
           assert.equal(textGeneration._tag, "Failure");
           assert.isNull(instance.snapshot.maintenanceCapabilities.update);
+          assert.isUndefined(instance.hermesSessionCatalog);
         }),
       ).pipe(Effect.provide(TestLayer)),
   );
@@ -356,6 +357,7 @@ describe("HermesDriver", () => {
         assert.equal(configuredSnapshot.status, "warning");
         assert.equal(configuredSnapshot.auth.status, "unknown");
         assert.include(configuredSnapshot.message, "automatic startup is disabled");
+        assert.isDefined(configured.hermesSessionCatalog);
       }),
     ).pipe(Effect.provide(TestLayer)),
   );

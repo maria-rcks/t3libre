@@ -15,7 +15,10 @@ import {
   projectHermesCronCapabilities,
   projectHermesCronJob,
 } from "./HermesCron.ts";
-import { HermesGatewayConfigurationError } from "./HermesGatewayClient.ts";
+import {
+  HermesGatewayConfigurationError,
+  HermesGatewayDuplicateOperationIdError,
+} from "./HermesGatewayClient.ts";
 
 const decodeProviderInstanceConfigMap = Schema.decodeUnknownSync(ProviderInstanceConfigMap);
 
@@ -275,7 +278,7 @@ describe("HermesCron mutate", () => {
             manageCron: (_params, options) => {
               if (usedOperationIds.has(options.operationId)) {
                 return Promise.reject(
-                  new HermesGatewayConfigurationError(
+                  new HermesGatewayDuplicateOperationIdError(
                     `Hermes mutation operationId has already been used: ${options.operationId}`,
                   ),
                 );
@@ -303,6 +306,89 @@ describe("HermesCron mutate", () => {
       expect(failure.code).toBe("invalid_input");
       expect(factoryCalls).toBe(1);
       expect(executedMutations).toBe(1);
+    }).pipe(Effect.provide(settingsLayer)),
+  );
+
+  it.effect("closes and evicts the stale client when the connection identity changes", () =>
+    Effect.gen(function* () {
+      let factoryCalls = 0;
+      const closedTokens: Array<string> = [];
+      const cron = yield* makeHermesCron({
+        clientFactory: ({ authToken }) => {
+          factoryCalls += 1;
+          return {
+            compatibility,
+            connect: () => Promise.resolve(compatibility),
+            hasCapability: () => true,
+            listCronJobs: () =>
+              Promise.resolve({ success: true, jobs: [] } satisfies HermesGatewayCronListResult),
+            manageCron: () =>
+              Promise.resolve({
+                success: true,
+                job_id: "job-1",
+              } satisfies HermesGatewayCronMutationResult),
+            close: () => {
+              closedTokens.push(authToken);
+            },
+          };
+        },
+      });
+      const input = (operationId: string) =>
+        ({
+          providerInstanceId: "hermes_main",
+          operation: "run_now",
+          operationId,
+          jobIdentity: "job-1",
+        }) as const;
+      yield* cron.mutate(input("op-a"));
+      expect(factoryCalls).toBe(1);
+      expect(closedTokens).toEqual([]);
+
+      const settingsService = yield* ServerSettings.ServerSettingsService;
+      yield* settingsService.updateSettings({
+        providerInstances: decodeProviderInstanceConfigMap({
+          hermes_main: {
+            driver: "hermes",
+            displayName: "Hermes",
+            enabled: true,
+            environment: [{ name: "HERMES_GATEWAY_TOKEN", value: "token-2", sensitive: true }],
+            config: { enabled: true, endpoint: "ws://127.0.0.1:9119/api/ws", profileKey: "work" },
+          },
+        }),
+      });
+      yield* cron.mutate(input("op-b"));
+      expect(factoryCalls).toBe(2);
+      expect(closedTokens).toEqual(["token-1"]);
+    }).pipe(Effect.provide(settingsLayer)),
+  );
+
+  it.effect("maps non-duplicate configuration errors to a gateway diagnostic", () =>
+    Effect.gen(function* () {
+      const cron = yield* makeHermesCron({
+        clientFactory: () => ({
+          compatibility,
+          connect: () => Promise.resolve(compatibility),
+          hasCapability: () => true,
+          listCronJobs: () =>
+            Promise.resolve({ success: true, jobs: [] } satisfies HermesGatewayCronListResult),
+          manageCron: () =>
+            Promise.reject(
+              new HermesGatewayConfigurationError("Hermes remote access is not paired."),
+            ),
+          close: () => {},
+        }),
+      });
+      const failure = yield* cron
+        .mutate({
+          providerInstanceId: "hermes_main",
+          operation: "run_now",
+          operationId: "op-config",
+          jobIdentity: "job-1",
+        })
+        .pipe(Effect.flip);
+      expect(failure.code).toBe("gateway_error");
+      expect(failure.message).toContain("Hermes remote access is not paired.");
+      expect(failure.message).not.toContain("already used");
     }).pipe(Effect.provide(settingsLayer)),
   );
 

@@ -678,21 +678,31 @@ export function sanitizeHermesToolValue(
     if (seen.has(current)) return "[CIRCULAR]";
     seen.add(current);
     if (Array.isArray(current)) {
-      const values = current.slice(0, 100).map((entry) => visit(entry, depth + 1));
+      const values: Array<unknown> = [];
+      for (const entry of current.slice(0, 100)) {
+        if (remaining <= 0) {
+          values.push("[TRUNCATED]");
+          break;
+        }
+        values.push(visit(entry, depth + 1));
+      }
       if (current.length > values.length) values.push(`[${current.length - values.length} MORE]`);
       return values;
     }
     const entries = Object.entries(current).slice(0, 100);
-    const result = Object.fromEntries(
-      entries.map(([key, nested]) => {
-        const boundedKey =
-          key.length <= 256 ? key : `${key.slice(0, 256)}… [TRUNCATED ${key.length - 256} CHARS]`;
-        remaining -= boundedKey.length;
-        return [boundedKey, sensitiveToolKey(key) ? "[REDACTED]" : visit(nested, depth + 1)];
-      }),
-    );
-    if (Object.keys(current).length > entries.length) {
-      result["[TRUNCATED_KEYS]"] = Object.keys(current).length - entries.length;
+    const result: Record<string, unknown> = {};
+    let visited = 0;
+    for (const [key, nested] of entries) {
+      if (remaining <= 0) break;
+      const boundedKey =
+        key.length <= 256 ? key : `${key.slice(0, 256)}… [TRUNCATED ${key.length - 256} CHARS]`;
+      remaining -= boundedKey.length;
+      result[boundedKey] = sensitiveToolKey(key) ? "[REDACTED]" : visit(nested, depth + 1);
+      visited += 1;
+    }
+    const omittedKeys = Object.keys(current).length - visited;
+    if (omittedKeys > 0) {
+      result["[TRUNCATED_KEYS]"] = omittedKeys;
     }
     return result;
   };

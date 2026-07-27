@@ -9,7 +9,11 @@ import * as Schema from "effect/Schema";
 
 import { RunFinalizationService } from "./RunFinalizationService.ts";
 import { ResourceCleanupService } from "./ResourceCleanupService.ts";
-import { EffectOutboxV2, type OrchestrationEffectV2 } from "./EffectOutbox.ts";
+import {
+  EffectOutboxV2,
+  PENDING_TERMINALIZATION_MARKER,
+  type OrchestrationEffectV2,
+} from "./EffectOutbox.ts";
 import { CheckpointRollbackServiceV2 } from "./CheckpointRollbackService.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderTurnControlServiceV2 } from "./ProviderTurnControlService.ts";
@@ -388,47 +392,64 @@ export const layerWithOptions = (
           yield* outbox.clearCancellation(effect.id);
           return true;
         }
-        const execution = executor.execute(effect).pipe(Effect.as("executed" as const));
-        const cancellation = outbox
-          .awaitCancellation(effect.id)
-          .pipe(Effect.as("cancelled" as const));
-        const exit = yield* Effect.exit(Effect.raceFirst(execution, cancellation)).pipe(
-          Effect.ensuring(outbox.clearCancellation(effect.id)),
-        );
-        if (Exit.isSuccess(exit) && exit.value === "cancelled") {
-          return true;
-        }
-        if (Exit.isSuccess(exit)) {
-          const completed = yield* outbox.succeed({ effectId: effect.id, workerId });
-          if (!completed) {
-            if (yield* wasCancelled(effect.id)) return true;
-            return yield* new OrchestrationEffectWorkerError({
-              operation: "complete",
-              effectId: effect.id,
-              cause: "The worker no longer owns the effect lease.",
-            });
+        // A pending-terminalization marker means a previous attempt already
+        // failed permanently but its terminal projection did not commit.
+        // Only the projection may be retried; the side-effecting provider
+        // execution must never run again.
+        const pendingTerminalizationError =
+          effect.lastError !== null && effect.lastError.startsWith(PENDING_TERMINALIZATION_MARKER)
+            ? effect.lastError.slice(PENDING_TERMINALIZATION_MARKER.length)
+            : null;
+        let error: string;
+        let ignorableControlFailure = false;
+        let nonRetryableStartFailure = false;
+        if (pendingTerminalizationError === null) {
+          const execution = executor.execute(effect).pipe(Effect.as("executed" as const));
+          const cancellation = outbox
+            .awaitCancellation(effect.id)
+            .pipe(Effect.as("cancelled" as const));
+          const exit = yield* Effect.exit(Effect.raceFirst(execution, cancellation)).pipe(
+            Effect.ensuring(outbox.clearCancellation(effect.id)),
+          );
+          if (Exit.isSuccess(exit) && exit.value === "cancelled") {
+            return true;
           }
-          return true;
-        }
+          if (Exit.isSuccess(exit)) {
+            const completed = yield* outbox.succeed({ effectId: effect.id, workerId });
+            if (!completed) {
+              if (yield* wasCancelled(effect.id)) return true;
+              return yield* new OrchestrationEffectWorkerError({
+                operation: "complete",
+                effectId: effect.id,
+                cause: "The worker no longer owns the effect lease.",
+              });
+            }
+            return true;
+          }
 
-        const error = Cause.pretty(exit.cause);
-        const ignorableControlFailure = isNonRetryableProviderTurnControlFailure(
-          effect.request.type,
-          error,
-        );
-        const nonRetryableStartFailure = isNonRetryableProviderTurnStartPrerequisiteFailure(
-          effect.request.type,
-          error,
-        );
+          error = Cause.pretty(exit.cause);
+          ignorableControlFailure = isNonRetryableProviderTurnControlFailure(
+            effect.request.type,
+            error,
+          );
+          nonRetryableStartFailure = isNonRetryableProviderTurnStartPrerequisiteFailure(
+            effect.request.type,
+            error,
+          );
+          yield* Effect.logWarning("Orchestration effect execution failed", {
+            effectId: effect.id,
+            effectType: effect.request.type,
+            attemptCount: effect.attemptCount,
+            nonRetryable: ignorableControlFailure || nonRetryableStartFailure,
+            error,
+          });
+        } else {
+          yield* outbox.clearCancellation(effect.id);
+          error = pendingTerminalizationError;
+        }
         const exhausted = !ignorableControlFailure && effect.attemptCount >= maxAttempts;
-        const permanentFailure = nonRetryableStartFailure || exhausted;
-        yield* Effect.logWarning("Orchestration effect execution failed", {
-          effectId: effect.id,
-          effectType: effect.request.type,
-          attemptCount: effect.attemptCount,
-          nonRetryable: ignorableControlFailure || nonRetryableStartFailure,
-          error,
-        });
+        const permanentFailure =
+          pendingTerminalizationError !== null || nonRetryableStartFailure || exhausted;
         // Only the worker that still owns the lease may project the terminal
         // failure; a stale worker must not override another owner's attempt.
         let permanentProjectionFailed = false;
@@ -465,7 +486,10 @@ export const layerWithOptions = (
             : yield* outbox.retry({
                 effectId: effect.id,
                 workerId,
-                error,
+                error:
+                  permanentFailure && permanentProjectionFailed
+                    ? `${PENDING_TERMINALIZATION_MARKER}${error}`
+                    : error,
                 delayMs: Math.min(30_000, 100 * 2 ** Math.max(0, effect.attemptCount - 1)),
               });
         if (!updated) {

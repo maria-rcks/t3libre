@@ -636,18 +636,24 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
           streamChanges: Stream.empty,
         },
         orchestrationAdapter,
-        hermesSessionCatalog: makeHermesSessionCatalog({
-          providerInstanceId: instanceId,
-          endpoint: connectionRuntime.effectiveEndpoint,
-          authToken: gatewayToken,
-          remoteGloballyEnabled: enabled,
-          remoteInstanceEnabled: config.remoteAccessEnabled,
-          remotePairingToken,
-          remoteTlsCertificateSha256,
-          profileKey: config.profileKey,
-          importEnabled: config.importEnabled,
-          ensureReady: connectionRuntime.ensureReady,
-        }),
+        // A disabled instance must not expose session discovery or import;
+        // calling the catalog could otherwise start a managed Hermes process.
+        ...(enabled
+          ? {
+              hermesSessionCatalog: makeHermesSessionCatalog({
+                providerInstanceId: instanceId,
+                endpoint: connectionRuntime.effectiveEndpoint,
+                authToken: gatewayToken,
+                remoteGloballyEnabled: enabled,
+                remoteInstanceEnabled: config.remoteAccessEnabled,
+                remotePairingToken,
+                remoteTlsCertificateSha256,
+                profileKey: config.profileKey,
+                importEnabled: config.importEnabled,
+                ensureReady: connectionRuntime.ensureReady,
+              }),
+            }
+          : {}),
         textGeneration: unsupportedTextGeneration(),
       } satisfies ProviderInstance;
     }),

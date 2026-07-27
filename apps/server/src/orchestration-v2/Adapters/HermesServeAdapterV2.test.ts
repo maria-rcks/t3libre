@@ -2378,4 +2378,23 @@ describe("sanitizeHermesToolValue", () => {
     assert.equal(sanitized["after"], "kept");
     assert.isBelow(JSON.stringify(sanitized).length, 40_000);
   });
+
+  it("stops emitting object entries once the size budget is exhausted", () => {
+    const value = Object.fromEntries(
+      Array.from({ length: 100 }, (_, index) => [`key-${index}-${"x".repeat(200)}`, "v"]),
+    );
+    const sanitized = sanitizeHermesToolValue(value, { maxChars: 1_000 }) as Record<
+      string,
+      unknown
+    >;
+    assert.isBelow(JSON.stringify(sanitized).length, 2_000);
+    assert.isAbove(Number(sanitized["[TRUNCATED_KEYS]"]), 0);
+  });
+
+  it("stops emitting array entries once the size budget is exhausted", () => {
+    const value = Array.from({ length: 100 }, () => "y".repeat(200));
+    const sanitized = sanitizeHermesToolValue(value, { maxChars: 1_000 }) as Array<unknown>;
+    assert.isBelow(JSON.stringify(sanitized).length, 2_000);
+    assert.include(sanitized, "[TRUNCATED]");
+  });
 });

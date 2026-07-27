@@ -22,6 +22,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import {
   HermesGatewayClient,
   HermesGatewayConfigurationError,
+  HermesGatewayDuplicateOperationIdError,
   HermesGatewayMutationIndeterminateError,
   HermesGatewayMutationsBlockedError,
   type HermesGatewayMutationOptions,
@@ -318,14 +319,23 @@ export const makeHermesCron = Effect.fn("HermesCron.make")(function* (
     ((input: { readonly endpoint: string; readonly authToken: string }) =>
       new HermesGatewayClient(input));
   // Clients are shared per connection so mutation operationId fences survive
-  // across cron calls instead of dying with a per-call client.
-  const clients = new Map<string, HermesCronGatewayClient>();
+  // across cron calls instead of dying with a per-call client. The fence only
+  // has to survive for the same connection identity: when an instance's
+  // endpoint or token changes, the superseded client is closed and evicted so
+  // stale connections do not accumulate.
+  const clients = new Map<
+    string,
+    { readonly connectionKey: string; readonly client: HermesCronGatewayClient }
+  >();
   const sharedClient = (config: HermesCronProviderConfig): HermesCronGatewayClient => {
-    const key = `${config.providerInstanceId}\u0000${config.endpoint}\u0000${config.token}`;
-    const existing = clients.get(key);
-    if (existing !== undefined) return existing;
+    const connectionKey = `${config.endpoint}\u0000${config.token}`;
+    const existing = clients.get(config.providerInstanceId);
+    if (existing !== undefined && existing.connectionKey === connectionKey) {
+      return existing.client;
+    }
+    existing?.client.close();
     const client = clientFactory({ endpoint: config.endpoint, authToken: config.token });
-    clients.set(key, client);
+    clients.set(config.providerInstanceId, { connectionKey, client });
     return client;
   };
 
@@ -479,13 +489,21 @@ export const makeHermesCron = Effect.fn("HermesCron.make")(function* (
               "Hermes cron mutations are blocked until indeterminate operations are reconciled.",
           });
         }
-        if (cause instanceof HermesGatewayConfigurationError) {
+        if (cause instanceof HermesGatewayDuplicateOperationIdError) {
           return new HermesCronError({
             code: "invalid_input",
             providerInstanceId: input.providerInstanceId,
             operation: input.operation,
             message:
               "Hermes cron mutation operation id was already used; duplicate submissions are not replayed.",
+          });
+        }
+        if (cause instanceof HermesGatewayConfigurationError) {
+          return new HermesCronError({
+            code: "gateway_error",
+            providerInstanceId: input.providerInstanceId,
+            operation: input.operation,
+            message: `Hermes cron gateway is not configured correctly: ${cause.message}`,
           });
         }
         return new HermesCronError({

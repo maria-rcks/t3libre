@@ -251,7 +251,15 @@ interface ReadyWaiter {
 }
 
 export class HermesGatewayConfigurationError extends Error {
-  override readonly name = "HermesGatewayConfigurationError";
+  override readonly name: string = "HermesGatewayConfigurationError";
+}
+
+/**
+ * A mutation reused an operationId that this client already fenced. Callers
+ * can treat this as caller input error, unlike other configuration failures.
+ */
+export class HermesGatewayDuplicateOperationIdError extends HermesGatewayConfigurationError {
+  override readonly name: string = "HermesGatewayDuplicateOperationIdError";
 }
 
 export class HermesGatewayConnectionError extends Error {
@@ -567,7 +575,7 @@ export class HermesGatewayClient {
       existing.method === method &&
       existing.mutationId === options.mutationId;
     if (existing !== undefined && !retryingKnownUnsent) {
-      throw new HermesGatewayConfigurationError(
+      throw new HermesGatewayDuplicateOperationIdError(
         `Hermes mutation operationId has already been used: ${options.operationId}`,
       );
     }

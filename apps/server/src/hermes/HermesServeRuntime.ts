@@ -271,6 +271,11 @@ export const makeHermesServeRuntime = Effect.fn("makeHermesServeRuntime")(functi
         });
       }
 
+      // A previously owned process can survive with its TCP listener
+      // temporarily unreachable; always stop it before launching a
+      // replacement so the old child is never orphaned.
+      yield* stopOwnedProcess();
+
       const started = yield* Effect.result(
         start({ ...target, authToken }).pipe(
           Effect.mapError(
