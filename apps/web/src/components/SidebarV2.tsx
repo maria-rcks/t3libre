@@ -744,7 +744,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
       event.stopPropagation();
       // A clicked button keeps focus, and the hover-action cluster stays
       // visible via focus-within; drop focus so it fades with the pointer.
-      event.currentTarget.blur();
+      // Keyboard activation (detail === 0) keeps focus so the cluster stays
+      // reachable for Enter/Space users.
+      if (event.detail > 0) event.currentTarget.blur();
       onTogglePin(threadRef);
     },
     [onTogglePin, threadRef],
@@ -2016,7 +2018,12 @@ export default function SidebarV2() {
         return;
       }
       if (navigation.kind === "new-chat") {
-        if (nextWorkspace === "work" && openWorkComposer()) return;
+        if (nextWorkspace === "work") {
+          // The index route starts a Code draft; when the Work composer
+          // cannot open, staying put beats landing on a Code composer.
+          openWorkComposer();
+          return;
+        }
         void router.navigate({ to: "/" });
       }
     },

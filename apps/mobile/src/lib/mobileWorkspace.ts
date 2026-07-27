@@ -71,7 +71,8 @@ export function isMobileWorkspaceThread(
   if (thread.archivedAt !== null || thread.lineage.relationshipToParent === "subagent") {
     return false;
   }
-  return workspace === "code" || isHermesThread(thread, providerDrivers);
+  const isHermes = isHermesThread(thread, providerDrivers);
+  return workspace === "work" ? isHermes : !isHermes;
 }
 
 export interface HermesConversationTarget {

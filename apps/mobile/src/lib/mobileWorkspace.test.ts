@@ -80,7 +80,40 @@ describe("mobile workspace routing", () => {
 
     expect(drivers.get(mobileProviderInstanceKey(environmentId, hermesInstanceId))).toBe("hermes");
     expect(isMobileWorkspaceThread(thread, "work", drivers)).toBe(true);
-    expect(isMobileWorkspaceThread(thread, "code", drivers)).toBe(true);
+    expect(isMobileWorkspaceThread(thread, "code", drivers)).toBe(false);
+  });
+
+  it("splits Hermes and non-Hermes threads between Work and Code", () => {
+    const codexInstanceId = ProviderInstanceId.make("codex");
+    const config = serverConfig();
+    const configs = new Map([
+      [
+        environmentId,
+        {
+          ...config,
+          providers: [
+            ...config.providers,
+            { ...config.providers[0], instanceId: codexInstanceId, driver: "codex" },
+          ],
+        } as ServerConfig,
+      ],
+    ]);
+    const drivers = buildProviderDriverMap(configs);
+    const codeThread: Parameters<typeof isMobileWorkspaceThread>[0] = {
+      environmentId,
+      archivedAt: null,
+      lineage: {
+        parentThreadId: null,
+        relationshipToParent: null,
+        rootThreadId,
+      },
+      providerInstanceId: codexInstanceId,
+      modelSelection: { instanceId: codexInstanceId, model: "default" },
+      runtime: null,
+    };
+
+    expect(isMobileWorkspaceThread(codeThread, "code", drivers)).toBe(true);
+    expect(isMobileWorkspaceThread(codeThread, "work", drivers)).toBe(false);
   });
 
   it("excludes archived and subagent threads from both workspaces", () => {
