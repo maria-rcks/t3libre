@@ -1,53 +1,9 @@
 import React from "react";
 import { Img, staticFile } from "remotion";
 
-/** Screenshot geometry: captures are 1920x1080, shown at this stage size. */
+/** Full-app captures are 1920x1080, shown at this stage size. */
 export const STAGE_W = 1560;
 export const STAGE_H = 878;
-
-/** Fractional crop regions of the real app screenshots. */
-export const SLICES = {
-  sidebar: { x: 0, y: 0, w: 0.1084, h: 1 },
-  topbar: { x: 0.1084, y: 0, w: 0.8916, h: 0.048 },
-  contentUpper: { x: 0.1084, y: 0.048, w: 0.8916, h: 0.5 },
-  contentLower: { x: 0.1084, y: 0.548, w: 0.8916, h: 0.452 },
-} as const;
-
-export type SliceName = keyof typeof SLICES;
-
-export const Slice: React.FC<{
-  src: string;
-  name: SliceName;
-  style?: React.CSSProperties;
-  radius?: number;
-}> = ({ src, name, style, radius = 0 }) => {
-  const r = SLICES[name];
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: r.x * STAGE_W,
-        top: r.y * STAGE_H,
-        width: r.w * STAGE_W,
-        height: r.h * STAGE_H,
-        overflow: "hidden",
-        borderRadius: radius,
-        ...style,
-      }}
-    >
-      <Img
-        src={staticFile(src)}
-        style={{
-          position: "absolute",
-          left: -r.x * STAGE_W,
-          top: -r.y * STAGE_H,
-          width: STAGE_W,
-          height: STAGE_H,
-        }}
-      />
-    </div>
-  );
-};
 
 /** A full screenshot on a rounded card with an optional floor reflection. */
 export const Screen: React.FC<{
@@ -99,3 +55,48 @@ export const Screen: React.FC<{
     ) : null}
   </div>
 );
+
+/**
+ * A real captured UI element flying in from a 3D offset.
+ * progress 0 = fully offset/blurred, 1 = landed sharp at (x, y).
+ */
+export const Element: React.FC<{
+  src: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  progress: number;
+  from: { x: number; y: number; z: number; rx?: number; ry?: number };
+  glow?: number;
+  radius?: number;
+  revealY?: number; // 0..1 vertical wipe from the top (for "expanding" panels)
+}> = ({ src, x, y, w, h, progress, from, glow = 0, radius = 12, revealY = 1 }) => {
+  const p = progress;
+  const inv = 1 - p;
+  if (p <= 0.001) return null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: x,
+        top: y,
+        width: w,
+        height: h * revealY,
+        overflow: "hidden",
+        borderRadius: radius,
+        border: "1px solid rgba(255,255,255,0.10)",
+        background: "#0a0a0c",
+        transform: `translate3d(${from.x * inv}px, ${from.y * inv}px, ${from.z * inv}px) rotateX(${(from.rx ?? 0) * inv}deg) rotateY(${(from.ry ?? 0) * inv}deg)`,
+        opacity: Math.min(1, p * 1.6),
+        filter: inv > 0.02 ? `blur(${inv * 10}px)` : undefined,
+        boxShadow:
+          glow > 0.01
+            ? `0 24px 80px rgba(0,0,0,0.7), 0 0 ${44 * glow}px rgba(120,145,255,${0.3 * glow})`
+            : "0 24px 80px rgba(0,0,0,0.7)",
+      }}
+    >
+      <Img src={staticFile(src)} style={{ width: w, height: h, display: "block" }} />
+    </div>
+  );
+};

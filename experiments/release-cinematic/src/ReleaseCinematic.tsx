@@ -8,18 +8,21 @@ import {
   staticFile,
   useCurrentFrame,
 } from "remotion";
-import { Screen, Slice, SliceName, STAGE_H, STAGE_W } from "./UiStage";
+import { Element, Screen, STAGE_H, STAGE_W } from "./UiStage";
 
-export const TOTAL_FRAMES = 690; // 23s @ 30fps
+export const TOTAL_FRAMES = 720; // 24s @ 30fps
 
 // Timeline (30fps):
-//   0– 75  intro: real T3 logo on #000
-//  60–270  the old UI (real screenshots), slow angled presentation
-// 270–405  break-apart: real UI slices scatter in 3D, new slices assemble
-//          (music impact lands at frame 285)
-// 405–600  the new UI: dark #000 theme + Sidebar V2, slow angled drift
-// 600–690  outro
+//   0– 70  intro: real T3 logo on #000
+//  55–240  the old dark look (real captures, Sidebar V1), slow angles + DOF
+// 240–290  old UI recedes into the dark (music impact at frame 264)
+// 270–560  the new UI assembles element by element: topbar drops in,
+//          thread rows land one by one, the user message arrives, the
+//          work log expands, the response unfolds, the composer rises
+// 545–645  the assembled elements resolve into the full live app
+// 645–720  outro
 const ez = Easing.bezier(0.3, 0, 0.12, 1);
+const pop = Easing.bezier(0.18, 0.7, 0.16, 1);
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 
 const FONT = "'DM Sans', -apple-system, 'Segoe UI', sans-serif";
@@ -35,7 +38,7 @@ const Label: React.FC<{
     style={{
       position: "absolute",
       left: 90,
-      bottom: 60,
+      bottom: 56,
       opacity,
       transform: `translateY(${y}px)`,
       fontFamily: FONT,
@@ -68,77 +71,72 @@ const LogoCard: React.FC<{ size: number; glow: number }> = ({ size, glow }) => (
   </div>
 );
 
-// per-slice scatter targets for the break-apart (x, y, z, rx, ry)
-const SCATTER: Record<SliceName, [number, number, number, number, number]> = {
-  sidebar: [-620, -40, 420, 6, 38],
-  topbar: [180, -380, 260, 34, -6],
-  contentUpper: [420, -60, 140, 8, -24],
-  contentLower: [260, 420, 520, -30, -12],
-};
+const seg = (frame: number, start: number, dur: number) =>
+  interpolate(frame, [start, start + dur], [0, 1], { ...clamp, easing: pop });
 
 export const ReleaseCinematic: React.FC = () => {
   const frame = useCurrentFrame();
 
-  const intro = interpolate(frame, [0, 14, 52, 72], [0, 1, 1, 0], clamp);
-  const oldIn = interpolate(frame, [62, 110], [0, 1], { ...clamp, easing: ez });
-  const t = interpolate(frame, [270, 405], [0, 1], { ...clamp, easing: ez });
-  const scatterOut = interpolate(t, [0, 0.55], [0, 1], {
-    ...clamp,
-    easing: Easing.bezier(0.5, 0, 0.8, 1),
-  });
-  const assembleIn = interpolate(t, [0.35, 1], [0, 1], {
-    ...clamp,
-    easing: Easing.bezier(0.16, 0.6, 0.18, 1),
-  });
-  const newHold = interpolate(frame, [405, 600], [0, 1], clamp);
-  const outroIn = interpolate(frame, [600, 622], [0, 1], clamp);
-  const newOut = interpolate(frame, [585, 615], [1, 0], { ...clamp, easing: ez });
+  const intro = interpolate(frame, [0, 14, 50, 68], [0, 1, 1, 0], clamp);
 
-  // crossfades between the two real captures inside each act
-  const oldSwap = interpolate(frame, [178, 196], [0, 1], { ...clamp, easing: ez });
-  const newSwap = interpolate(frame, [498, 516], [0, 1], { ...clamp, easing: ez });
-
-  // ---- camera paths ----
-  // Old act: starts steeply angled and far, slowly straightens while pushing in.
-  const oldDrift = interpolate(frame, [62, 270], [0, 1], {
+  // old act
+  const oldIn = interpolate(frame, [55, 100], [0, 1], { ...clamp, easing: ez });
+  const oldSwap = interpolate(frame, [160, 178], [0, 1], { ...clamp, easing: ez });
+  const oldDrift = interpolate(frame, [55, 240], [0, 1], {
     ...clamp,
     easing: Easing.bezier(0.3, 0, 0.6, 1),
   });
-  const oldRotY = interpolate(oldDrift, [0, 1], [-26, -7]);
-  const oldRotX = interpolate(oldDrift, [0, 1], [9, 3]);
-  const oldScale =
-    interpolate(oldDrift, [0, 1], [0.86, 1.02]) * interpolate(scatterOut, [0, 1], [1, 1.06]);
-  const oldBlur = interpolate(oldDrift, [0, 0.35], [7, 0], clamp);
+  const oldOut = interpolate(frame, [240, 288], [0, 1], {
+    ...clamp,
+    easing: Easing.bezier(0.5, 0, 0.9, 1),
+  });
+  const oldRotY = interpolate(oldDrift, [0, 1], [-24, -6]) + oldOut * 18;
+  const oldRotX = interpolate(oldDrift, [0, 1], [8, 3]) - oldOut * 6;
+  const oldScale = interpolate(oldDrift, [0, 1], [0.88, 1.02]) * (1 - oldOut * 0.35);
+  const oldBlur = interpolate(oldDrift, [0, 0.3], [7, 0], clamp) + oldOut * 12;
+  const showOld = frame >= 55 && oldOut < 1;
 
-  // New act: sweeps in from the opposite angle, then a slow dolly.
-  const newRotY =
-    interpolate(assembleIn, [0, 1], [30, 10]) + interpolate(newHold, [0, 1], [0, -13]);
-  const newRotX = interpolate(assembleIn, [0, 1], [-10, 4]) + interpolate(newHold, [0, 1], [0, -2]);
-  const newScale =
-    interpolate(assembleIn, [0, 1], [0.8, 0.96]) + interpolate(newHold, [0, 1], [0, 0.1]);
-  const holdBlur = interpolate(assembleIn, [0.75, 1], [5, 0], clamp);
+  // element build-up
+  const pTopbar = seg(frame, 275, 34);
+  const rowStarts = [305, 319, 333, 347, 361];
+  const pUserMsg = seg(frame, 392, 32);
+  const pWorklog = seg(frame, 424, 30);
+  const responseReveal = interpolate(frame, [456, 502], [0, 1], { ...clamp, easing: ez });
+  const pComposer = seg(frame, 500, 38);
+  const composerGlow = interpolate(frame, [510, 540, 585], [0, 1, 0.3], clamp);
 
-  const showOld = frame >= 60 && scatterOut < 1;
-  const showNew = assembleIn > 0 && newOut > 0.01;
+  // camera drift during the build
+  const buildT = interpolate(frame, [270, 560], [0, 1], clamp);
+  const camRotY = interpolate(buildT, [0, 1], [-8, 7]);
+  const camRotX = interpolate(buildT, [0, 1], [4, -2]);
+  const camScale = interpolate(buildT, [0, 1], [0.92, 1.0]);
 
-  // streak sweeping during the switch
-  const streakX = interpolate(t, [0.2, 0.85], [-30, 130], clamp);
+  // resolve into the full app
+  const resolve = interpolate(frame, [545, 585], [0, 1], { ...clamp, easing: ez });
+  const finalHold = interpolate(frame, [585, 645], [0, 1], clamp);
+  const finalRotY = interpolate(resolve, [0, 1], [7, 3]) + finalHold * -8;
+  const finalScale = 1.0 + finalHold * 0.06;
+  const finalOut = interpolate(frame, [632, 656], [1, 0], { ...clamp, easing: ez });
+  const showBuild = frame >= 270 && resolve < 1;
+  const showFinal = resolve > 0 && finalOut > 0.01;
+  const outroIn = interpolate(frame, [648, 672], [0, 1], clamp);
+
+  const switchFlash = interpolate(frame, [258, 268, 292], [0, 0.5, 0], clamp);
 
   return (
     <AbsoluteFill style={{ background: "#000", overflow: "hidden", fontFamily: FONT }}>
       <Audio src={staticFile("music.mp3")} />
 
-      {/* faint ambient glow, stronger once the new theme lands */}
       <AbsoluteFill
         style={{
-          opacity: 0.5 + 0.5 * assembleIn,
+          opacity: 0.45 + 0.55 * interpolate(frame, [260, 320], [0, 1], clamp),
           background:
             "radial-gradient(1200px 750px at 68% 12%, rgba(99,102,241,0.10), transparent 62%), radial-gradient(1000px 650px at 22% 92%, rgba(56,189,248,0.05), transparent 60%)",
         }}
       />
 
       {/* intro */}
-      {frame < 75 ? (
+      {frame < 70 ? (
         <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", opacity: intro }}>
           <LogoCard size={110} glow={0.3 * intro} />
           <div
@@ -158,14 +156,14 @@ export const ReleaseCinematic: React.FC = () => {
         </AbsoluteFill>
       ) : null}
 
-      {/* OLD ACT — real screenshots of the previous UI */}
+      {/* OLD ACT — real captures of the previous dark UI (Sidebar V1) */}
       {showOld ? (
         <AbsoluteFill
           style={{
             alignItems: "center",
             justifyContent: "center",
             perspective: 2000,
-            opacity: oldIn,
+            opacity: oldIn * (1 - oldOut),
           }}
         >
           <div
@@ -177,115 +175,149 @@ export const ReleaseCinematic: React.FC = () => {
               filter: oldBlur > 0.2 ? `blur(${oldBlur}px)` : undefined,
             }}
           >
-            {scatterOut < 0.01 ? (
-              <>
-                <div style={{ position: "absolute", inset: 0, opacity: 1 - oldSwap }}>
-                  <Screen src="old_home.png" reflection={1} />
-                </div>
-                {oldSwap > 0 ? (
-                  <div style={{ position: "absolute", inset: 0, opacity: oldSwap }}>
-                    <Screen src="old_thread.png" reflection={1} />
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              // break-apart: the real UI slices scatter into 3D space
-              (Object.keys(SCATTER) as SliceName[]).map((name) => {
-                const [sx, sy, sz, rx, ry] = SCATTER[name];
-                const p = scatterOut;
-                return (
-                  <Slice
-                    key={name}
-                    src="old_thread.png"
-                    name={name}
-                    radius={10 * p}
-                    style={{
-                      transform: `translate3d(${sx * p}px, ${sy * p}px, ${sz * p}px) rotateX(${rx * p}deg) rotateY(${ry * p}deg)`,
-                      opacity: 1 - p * 0.98,
-                      filter: `blur(${p * 9}px)`,
-                      boxShadow: `0 ${26 * p}px ${70 * p}px rgba(0,0,0,0.6)`,
-                    }}
-                  />
-                );
-              })
-            )}
+            <div style={{ position: "absolute", inset: 0, opacity: 1 - oldSwap }}>
+              <Screen src="olddark_home.png" reflection={1} />
+            </div>
+            {oldSwap > 0 ? (
+              <div style={{ position: "absolute", inset: 0, opacity: oldSwap }}>
+                <Screen src="olddark_thread.png" reflection={1} />
+              </div>
+            ) : null}
           </div>
         </AbsoluteFill>
       ) : null}
 
-      {/* NEW ACT — real screenshots of the dark #000 theme + Sidebar V2 */}
-      {showNew ? (
+      {/* NEW ACT — the release assembles from real UI elements */}
+      {showBuild ? (
         <AbsoluteFill
           style={{
             alignItems: "center",
             justifyContent: "center",
-            perspective: 2000,
-            opacity: Math.min(1, assembleIn * 1.4) * newOut,
+            perspective: 1900,
+            opacity: (1 - resolve) * interpolate(frame, [270, 290], [0, 1], clamp),
           }}
         >
           <div
             style={{
               width: STAGE_W,
               height: STAGE_H,
-              transform: `rotateX(${newRotX}deg) rotateY(${newRotY}deg) scale(${newScale})`,
+              transform: `rotateX(${camRotX}deg) rotateY(${camRotY}deg) scale(${camScale})`,
               transformStyle: "preserve-3d",
-              filter: holdBlur > 0.2 ? `blur(${holdBlur}px)` : undefined,
             }}
           >
-            {assembleIn < 1 ? (
-              // slices assemble from mirrored scatter positions
-              (Object.keys(SCATTER) as SliceName[]).map((name) => {
-                const [sx, sy, sz, rx, ry] = SCATTER[name];
-                const p = 1 - assembleIn;
-                return (
-                  <Slice
-                    key={name}
-                    src="new_home.png"
-                    name={name}
-                    radius={10 * p}
-                    style={{
-                      transform: `translate3d(${-sx * p}px, ${-sy * p}px, ${(sz + 160) * p}px) rotateX(${-rx * p}deg) rotateY(${-ry * p}deg)`,
-                      opacity: 1 - p * 0.75,
-                      filter: `blur(${p * 7}px)`,
-                      boxShadow: `0 ${26 * p}px ${70 * p}px rgba(0,0,0,0.6)`,
-                    }}
-                  />
-                );
-              })
-            ) : (
-              <>
-                <div style={{ position: "absolute", inset: 0, opacity: 1 - newSwap }}>
-                  <Screen src="new_home.png" reflection={1} />
-                </div>
-                {newSwap > 0 ? (
-                  <div style={{ position: "absolute", inset: 0, opacity: newSwap }}>
-                    <Screen src="new_thread.png" reflection={1} />
-                  </div>
-                ) : null}
-                {/* glass sheen sweeping across the new UI */}
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    borderRadius: 14,
-                    overflow: "hidden",
-                    pointerEvents: "none",
-                    opacity: interpolate(newHold, [0.1, 0.35, 0.6], [0, 0.5, 0], clamp),
-                    background: `linear-gradient(115deg, transparent ${interpolate(newHold, [0.1, 0.6], [-25, 115], clamp)}%, rgba(190,205,255,0.14) ${interpolate(newHold, [0.1, 0.6], [-13, 127], clamp)}%, transparent ${interpolate(newHold, [0.1, 0.6], [-3, 137], clamp)}%)`,
-                  }}
-                />
-              </>
-            )}
+            {/* topbar drops in from above */}
+            <Element
+              src="el_topbar.png"
+              x={52}
+              y={16}
+              w={1456}
+              h={45}
+              progress={pTopbar}
+              from={{ x: 0, y: -280, z: 320, rx: 48 }}
+              radius={10}
+            />
+            {/* the new Sidebar V2 thread rows land one by one */}
+            {rowStarts.map((s, i) => (
+              <Element
+                key={i}
+                src={`el_row${i}.png`}
+                x={58}
+                y={112 + i * 124}
+                w={322}
+                h={108}
+                progress={seg(frame, s, 30)}
+                from={{ x: -520, y: -140 - i * 26, z: 400, ry: 48 }}
+                glow={interpolate(seg(frame, s, 30), [0.7, 1], [0.8, 0], clamp)}
+              />
+            ))}
+            {/* conversation: user message arrives */}
+            <Element
+              src="el_usermsg.png"
+              x={880}
+              y={112}
+              w={560}
+              h={72}
+              progress={pUserMsg}
+              from={{ x: 440, y: -40, z: 300, ry: -38 }}
+            />
+            {/* work log lands, then the response unfolds below it */}
+            <Element
+              src="el_worklog.png"
+              x={730}
+              y={224}
+              w={710}
+              h={109}
+              progress={pWorklog}
+              from={{ x: 120, y: 60, z: 380, rx: -18 }}
+            />
+            <Element
+              src="el_response.png"
+              x={730}
+              y={352}
+              w={710}
+              h={168}
+              progress={responseReveal > 0 ? 1 : 0}
+              from={{ x: 0, y: 0, z: 0 }}
+              revealY={responseReveal}
+            />
+            {/* the glass composer rises from the deep */}
+            <Element
+              src="el_composer.png"
+              x={700}
+              y={700}
+              w={724}
+              h={138}
+              progress={pComposer}
+              from={{ x: 0, y: 340, z: 460, rx: -42 }}
+              glow={composerGlow}
+              radius={16}
+            />
           </div>
         </AbsoluteFill>
       ) : null}
 
-      {/* light streak during the switch */}
-      {t > 0 && t < 1 ? (
+      {/* the elements resolve into the full live app */}
+      {showFinal ? (
         <AbsoluteFill
           style={{
-            opacity: Math.sin(Math.PI * t) * 0.55,
-            background: `linear-gradient(105deg, transparent ${streakX - 16}%, rgba(160,180,255,0.2) ${streakX}%, transparent ${streakX + 12}%)`,
+            alignItems: "center",
+            justifyContent: "center",
+            perspective: 2000,
+            opacity: resolve * finalOut,
+          }}
+        >
+          <div
+            style={{
+              width: STAGE_W,
+              height: STAGE_H,
+              transform: `rotateX(${2 - finalHold * 2}deg) rotateY(${finalRotY}deg) scale(${finalScale})`,
+              transformStyle: "preserve-3d",
+            }}
+          >
+            <Screen src="new_thread.png" reflection={1} />
+            {/* glass sheen sweeping across the new UI */}
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                borderRadius: 14,
+                overflow: "hidden",
+                pointerEvents: "none",
+                opacity: interpolate(finalHold, [0.05, 0.4, 0.75], [0, 0.5, 0], clamp),
+                background: `linear-gradient(115deg, transparent ${interpolate(finalHold, [0.05, 0.75], [-25, 115], clamp)}%, rgba(190,205,255,0.14) ${interpolate(finalHold, [0.05, 0.75], [-13, 127], clamp)}%, transparent ${interpolate(finalHold, [0.05, 0.75], [-3, 137], clamp)}%)`,
+              }}
+            />
+          </div>
+        </AbsoluteFill>
+      ) : null}
+
+      {/* flash at the switch */}
+      {switchFlash > 0.01 ? (
+        <AbsoluteFill
+          style={{
+            opacity: switchFlash,
+            background:
+              "radial-gradient(900px 600px at 50% 50%, rgba(150,170,255,0.35), transparent 70%)",
           }}
         />
       ) : null}
@@ -293,21 +325,21 @@ export const ReleaseCinematic: React.FC = () => {
       {/* labels */}
       <Label
         title="The old look"
-        sub="Previous latest — light chrome, grouped project sidebar"
+        sub="Previous latest — Sidebar V1, grouped projects"
         accent="#5f7ce8"
-        opacity={Math.min(oldIn, interpolate(t, [0, 0.2], [1, 0], clamp)) * (frame >= 60 ? 1 : 0)}
+        opacity={oldIn * (1 - oldOut)}
         y={(1 - oldIn) * 26}
       />
       <Label
         title="The new release"
-        sub="True-black dark theme · Sidebar V2 · glass surfaces"
+        sub="Sidebar V2 threads · live status · glass composer · true-black #000"
         accent="#7c93ff"
-        opacity={interpolate(t, [0.85, 1], [0, 1], clamp) * newOut}
-        y={interpolate(t, [0.85, 1], [26, 0], clamp)}
+        opacity={interpolate(frame, [300, 330], [0, 1], clamp) * finalOut}
+        y={interpolate(frame, [300, 330], [26, 0], clamp)}
       />
 
       {/* outro */}
-      {frame >= 600 ? (
+      {frame >= 648 ? (
         <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", opacity: outroIn }}>
           <LogoCard size={110} glow={outroIn} />
           <div

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const SR = 44100;
-const DUR = 23;
+const DUR = 24;
 const N = SR * DUR;
 const L = new Float64Array(N);
 const R = new Float64Array(N);
@@ -21,7 +21,7 @@ const CHORDS = [
   [55, 59, 62], // G
 ];
 const CHORD_LEN = DUR / 4 / 1.0; // 4 chords over the piece
-const SWITCH_T = 9.5; // the theme-switch moment
+const SWITCH_T = 8.8; // the theme-switch moment
 
 const softClip = (x) => Math.tanh(x);
 
@@ -99,6 +99,55 @@ for (let k = 0; k < PLUCK_NOTES.length * 3; k++) {
     R[i] += s * pan;
   }
 }
+
+// drums — 120bpm. Sparse pulse before the switch, full kit after.
+const BEAT = 0.5;
+const kick = (start, amp) => {
+  for (let i = Math.floor(start * SR); i < N; i++) {
+    const t = i / SR - start;
+    if (t > 0.35) break;
+    const s = Math.sin(TAU * (48 + 90 * Math.exp(-t * 26)) * t) * Math.exp(-t * 14) * amp;
+    L[i] += s;
+    R[i] += s;
+  }
+};
+const snare = (start, amp) => {
+  for (let i = Math.floor(start * SR); i < N; i++) {
+    const t = i / SR - start;
+    if (t > 0.22) break;
+    const body = Math.sin(TAU * 190 * t) * Math.exp(-t * 22) * 0.5;
+    const rattle = (Math.random() * 2 - 1) * Math.exp(-t * 24);
+    const s = (body + rattle * 0.7) * amp;
+    L[i] += s * 0.95;
+    R[i] += s;
+  }
+};
+const hat = (start, amp, open = false) => {
+  for (let i = Math.floor(start * SR); i < N; i++) {
+    const t = i / SR - start;
+    if (t > (open ? 0.3 : 0.06)) break;
+    const s = (Math.random() * 2 - 1) * Math.exp(-t * (open ? 14 : 70)) * amp;
+    L[i] += s * 0.8;
+    R[i] += s;
+  }
+};
+for (let b = 0; ; b++) {
+  const t0 = 1 + b * BEAT;
+  if (t0 > DUR - 1.2) break;
+  const beatInBar = b % 4;
+  if (t0 < SWITCH_T - 0.1) {
+    // sparse intro pulse
+    if (beatInBar === 0) kick(t0, 0.28);
+    hat(t0 + BEAT / 2, 0.05);
+  } else {
+    kick(t0, 0.42);
+    if (beatInBar === 1 || beatInBar === 3) snare(t0, 0.3);
+    hat(t0, 0.09);
+    hat(t0 + BEAT / 2, beatInBar === 3 ? 0.13 : 0.08, beatInBar === 3);
+  }
+}
+// snare fill into the switch
+for (let k = 0; k < 8; k++) snare(SWITCH_T - 1 + k * 0.125, 0.12 + k * 0.03);
 
 // simple stereo echo for space
 const delay = Math.floor(SR * 0.31);
