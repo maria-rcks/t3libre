@@ -25,6 +25,7 @@ import {
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
+import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
@@ -32,7 +33,14 @@ import * as Stream from "effect/Stream";
 import { Socket, SocketServer } from "effect/unstable/socket";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
-import { demoDescriptor, demoServerConfig, demoShellSnapshot } from "./fixtures";
+import {
+  demoAttachmentUrlById,
+  demoDescriptor,
+  demoProjectFaviconUrlByCwd,
+  demoServerConfig,
+  demoShellSnapshot,
+  demoThreadDetails,
+} from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // In-memory WebSocket pair
@@ -424,6 +432,7 @@ function shellStream(): Stream.Stream<OrchestrationShellStreamItem> {
 }
 
 function threadDetailSnapshot(thread: OrchestrationThreadShell): OrchestrationThreadDetailSnapshot {
+  const detail = demoThreadDetails[thread.id];
   return {
     snapshotSequence: 1,
     thread: {
@@ -442,10 +451,10 @@ function threadDetailSnapshot(thread: OrchestrationThreadShell): OrchestrationTh
       deletedAt: null,
       settledOverride: thread.settledOverride,
       settledAt: thread.settledAt,
-      messages: [],
+      messages: detail?.messages ?? [],
       proposedPlans: [],
-      activities: [],
-      checkpoints: [],
+      activities: detail?.activities ?? [],
+      checkpoints: detail?.checkpoints ?? [],
       session: thread.session,
     },
   };
@@ -465,6 +474,7 @@ const EMPTY_VCS_STATUS: VcsStatusStreamEvent = {
 };
 
 const demoStartedAtIso = new Date().toISOString();
+const demoAssetsExpireAt = Date.now() + 24 * 60 * 60 * 1000;
 
 const serverConfigSnapshot: ServerConfigStreamEvent = {
   version: 1,
@@ -568,7 +578,18 @@ const handlersLayer = WsRpcGroup.toLayer(
       [WS_METHODS.projectsWriteFile]: () => unsupported("projectsWriteFile"),
       [WS_METHODS.shellOpenInEditor]: () => unsupported("shellOpenInEditor"),
       [WS_METHODS.filesystemBrowse]: () => unsupported("filesystemBrowse"),
-      [WS_METHODS.assetsCreateUrl]: () => unsupported("assetsCreateUrl"),
+      [WS_METHODS.assetsCreateUrl]: (input) =>
+        Effect.sync(() => {
+          const expiresAt = demoAssetsExpireAt;
+          const resource = input.resource;
+          const relativeUrl =
+            resource._tag === "project-favicon"
+              ? (demoProjectFaviconUrlByCwd[resource.cwd] ?? `/${PROJECT_FAVICON_FALLBACK_MARKER}`)
+              : resource._tag === "attachment"
+                ? demoAttachmentUrlById[resource.attachmentId]
+                : undefined;
+          return { relativeUrl: relativeUrl ?? `/${PROJECT_FAVICON_FALLBACK_MARKER}`, expiresAt };
+        }),
       [WS_METHODS.vcsPull]: () => unsupported("vcsPull"),
       [WS_METHODS.vcsRefreshStatus]: () => unsupported("vcsRefreshStatus"),
       [WS_METHODS.gitRunStackedAction]: () => Stream.fail(unsupportedError("gitRunStackedAction")),
