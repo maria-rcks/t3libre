@@ -732,7 +732,8 @@ function makeHandlersLayer(backend: DemoBackend) {
         [WS_METHODS.previewResize]: () => unsupported("previewResize"),
         [WS_METHODS.previewRefresh]: () => unsupported("previewRefresh"),
         [WS_METHODS.previewClose]: () => unsupported("previewClose"),
-        [WS_METHODS.previewList]: () => Effect.succeed({ sessions: [] }),
+        [WS_METHODS.previewList]: () =>
+          Effect.succeed({ sessions: [], serverEpoch: "demo", revision: 0 }),
         [WS_METHODS.previewReportStatus]: () => unsupported("previewReportStatus"),
         [WS_METHODS.previewAutomationConnect]: () =>
           Stream.fail(unsupportedError("previewAutomationConnect")),
