@@ -36,7 +36,7 @@ export interface PrContentGenerationInput {
   commitSummary: string;
   diffSummary: string;
   diffPatch: string;
-  prTemplate?: string | undefined;
+  changeRequestTemplate?: string | undefined;
   policy?: TextGenerationPolicy | undefined;
   /** What model and provider to use for generation. */
   modelSelection: ModelSelection;
@@ -81,7 +81,7 @@ export interface TextGenerationService {
 }
 
 /**
- * TextGeneration - Service tag for commit and PR text generation.
+ * TextGeneration - Service tag for commit and change request text generation.
  */
 export class TextGeneration extends Context.Service<
   TextGeneration,
@@ -94,7 +94,7 @@ export class TextGeneration extends Context.Service<
     ) => Effect.Effect<CommitMessageGenerationResult, TextGenerationError>;
 
     /**
-     * Generate pull request title/body from branch and diff context.
+     * Generate change request title/body from branch and diff context.
      */
     readonly generatePrContent: (
       input: PrContentGenerationInput,

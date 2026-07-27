@@ -136,27 +136,27 @@ describe("ServerSettings worktree defaults", () => {
   });
 });
 
-describe("ServerSettings.textGenerationStyle", () => {
+describe("ServerSettings.sourceControlWritingStyle", () => {
   it("defaults all style settings for legacy configs", () => {
     const settings = decodeServerSettings({});
 
-    expect(settings.textGenerationStyle).toEqual({
+    expect(settings.sourceControlWritingStyle).toEqual({
       mode: "repo_conventions",
       customInstructions: "",
-      followPrTemplates: true,
+      followChangeRequestTemplates: true,
     });
-    expect(settings.gitWriterModelSelection).toBeNull();
+    expect(settings.sourceControlWriterModelSelection).toBeNull();
   });
 
   it("trims partial style updates", () => {
     const patch = decodeServerSettingsPatch({
-      textGenerationStyle: {
+      sourceControlWritingStyle: {
         mode: "custom",
         customInstructions: "  Prefer concise wording.  ",
       },
     });
 
-    expect(patch.textGenerationStyle).toEqual({
+    expect(patch.sourceControlWritingStyle).toEqual({
       mode: "custom",
       customInstructions: "Prefer concise wording.",
     });

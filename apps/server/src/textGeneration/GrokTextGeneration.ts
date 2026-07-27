@@ -193,7 +193,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
         diffSummary: input.diffSummary,
         diffPatch: input.diffPatch,
         policy: input.policy,
-        prTemplate: input.prTemplate,
+        changeRequestTemplate: input.changeRequestTemplate,
       });
 
       const generated = yield* runGrokJson({

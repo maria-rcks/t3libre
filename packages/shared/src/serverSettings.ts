@@ -1,7 +1,9 @@
 import {
   isProviderDriverKind,
+  isProviderAvailable,
   type ModelSelection,
   type ProviderDriverKind,
+  type ServerProvider,
   ServerSettings,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
@@ -37,9 +39,20 @@ export function isModelSelectionProviderEnabled(
   );
 }
 
-export function resolveGitWriterModelSelection(settings: ServerSettings): ModelSelection {
-  const selection = settings.gitWriterModelSelection;
-  return selection && isModelSelectionProviderEnabled(settings, selection)
+export function resolveSourceControlWriterModelSelection(
+  settings: ServerSettings,
+  providers?: ReadonlyArray<ServerProvider>,
+): ModelSelection {
+  const selection = settings.sourceControlWriterModelSelection;
+  if (!selection || !isModelSelectionProviderEnabled(settings, selection)) {
+    return settings.textGenerationModelSelection;
+  }
+  if (providers === undefined) {
+    return selection;
+  }
+
+  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+  return provider?.enabled === true && isProviderAvailable(provider)
     ? selection
     : settings.textGenerationModelSelection;
 }
@@ -114,8 +127,8 @@ export function applyServerSettingsPatch(
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
       : {}),
-    ...(patch.gitWriterModelSelection !== undefined
-      ? { gitWriterModelSelection: patch.gitWriterModelSelection }
+    ...(patch.sourceControlWriterModelSelection !== undefined
+      ? { sourceControlWriterModelSelection: patch.sourceControlWriterModelSelection }
       : {}),
     ...(automaticGitFetchInterval !== undefined ? { automaticGitFetchInterval } : {}),
   };

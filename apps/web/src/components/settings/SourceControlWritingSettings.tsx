@@ -1,9 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useRef } from "react";
-import type { TextGenerationStyleMode } from "@t3tools/contracts";
+import type { SourceControlWritingStyleMode } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
-import { isModelSelectionProviderEnabled } from "@t3tools/shared/serverSettings";
+import { resolveSourceControlWriterModelSelection } from "@t3tools/shared/serverSettings";
 
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import {
@@ -22,41 +22,44 @@ import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 
-const MODE_OPTIONS: Record<TextGenerationStyleMode, { label: string; description: string }> = {
-  repo_conventions: {
-    label: "Repository conventions",
-    description:
-      "In each project, matches recent commit messages for commits and pull request titles.",
-  },
-  conventional_commits: {
-    label: "Conventional Commits",
-    description:
-      "Uses Conventional Commit prefixes for commits; pull request titles and descriptions stay concise.",
-  },
-  custom: {
-    label: "Custom instructions",
-    description:
-      "Applies your instructions to commit messages and pull request titles and descriptions in every project.",
-  },
-};
+const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; description: string }> =
+  {
+    repo_conventions: {
+      label: "Repository conventions",
+      description: "In each project, matches recent change descriptions and change request titles.",
+    },
+    conventional_commits: {
+      label: "Conventional Commits",
+      description:
+        "Uses Conventional Commit prefixes for change descriptions; change request titles and descriptions stay concise.",
+    },
+    custom: {
+      label: "Custom instructions",
+      description:
+        "Applies your instructions to change descriptions and change request titles and descriptions in every project.",
+    },
+  };
 
-export function TextGenerationSettingsSection() {
+export function SourceControlWritingSettingsSection() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const customInstructionsRef = useRef<HTMLTextAreaElement>(null);
-  const style = settings.textGenerationStyle;
-  const defaults = DEFAULT_UNIFIED_SETTINGS.textGenerationStyle;
-  const isGitWritingStyleDirty =
+  const style = settings.sourceControlWritingStyle;
+  const defaults = DEFAULT_UNIFIED_SETTINGS.sourceControlWritingStyle;
+  const isSourceControlWritingStyleDirty =
     style.mode !== defaults.mode || style.customInstructions !== defaults.customInstructions;
 
   const defaultModelSelection = resolveAppModelSelectionState(settings, serverProviders);
-  const gitWriterSelection = settings.gitWriterModelSelection;
-  const usesDedicatedModel = gitWriterSelection !== null;
+  const usesDedicatedModel = settings.sourceControlWriterModelSelection !== null;
+  const resolvedSourceControlWriterSelection = resolveSourceControlWriterModelSelection(
+    settings,
+    serverProviders,
+  );
   const activeSelection =
-    gitWriterSelection && isModelSelectionProviderEnabled(settings, gitWriterSelection)
-      ? gitWriterSelection
-      : defaultModelSelection;
+    resolvedSourceControlWriterSelection === settings.textGenerationModelSelection
+      ? defaultModelSelection
+      : resolvedSourceControlWriterSelection;
   const instanceEntries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
   );
@@ -70,15 +73,15 @@ export function TextGenerationSettingsSection() {
   return (
     <SettingsSection title="Text generation">
       <SettingsRow
-        title="Git writing style"
+        title="Source control writing style"
         description={MODE_OPTIONS[style.mode].description}
         resetAction={
-          isGitWritingStyleDirty ? (
+          isSourceControlWritingStyleDirty ? (
             <SettingResetButton
-              label="text generation style"
+              label="source control writing style"
               onClick={() =>
                 updateSettings({
-                  textGenerationStyle: {
+                  sourceControlWritingStyle: {
                     mode: defaults.mode,
                     customInstructions: defaults.customInstructions,
                   },
@@ -93,18 +96,18 @@ export function TextGenerationSettingsSection() {
             onValueChange={(value) => {
               const customInstructions = customInstructionsRef.current?.value.trim();
               updateSettings({
-                textGenerationStyle: {
-                  mode: value as TextGenerationStyleMode,
+                sourceControlWritingStyle: {
+                  mode: value as SourceControlWritingStyleMode,
                   ...(customInstructions !== undefined ? { customInstructions } : {}),
                 },
               });
             }}
           >
-            <SelectTrigger className="w-full sm:w-56" aria-label="Git writing style">
+            <SelectTrigger className="w-full sm:w-56" aria-label="Source control writing style">
               <SelectValue>{MODE_OPTIONS[style.mode].label}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
-              {(Object.keys(MODE_OPTIONS) as TextGenerationStyleMode[]).map((mode) => (
+              {(Object.keys(MODE_OPTIONS) as SourceControlWritingStyleMode[]).map((mode) => (
                 <SelectItem key={mode} hideIndicator value={mode}>
                   {MODE_OPTIONS[mode].label}
                 </SelectItem>
@@ -122,27 +125,29 @@ export function TextGenerationSettingsSection() {
               onBlur={(event) => {
                 const customInstructions = event.target.value.trim();
                 if (customInstructions !== style.customInstructions) {
-                  updateSettings({ textGenerationStyle: { customInstructions } });
+                  updateSettings({ sourceControlWritingStyle: { customInstructions } });
                 }
               }}
               rows={4}
               placeholder="Keep titles concise. Use short bullet points in descriptions."
-              aria-label="Custom Git writing instructions"
+              aria-label="Custom source control writing instructions"
             />
           </div>
         ) : null}
       </SettingsRow>
 
       <SettingsRow
-        title="Follow pull request templates"
-        description="Structures pull request descriptions using the current repository's template when one is available."
+        title="Follow change request templates"
+        description="Structures change request descriptions using the current repository's template when one is available."
         resetAction={
-          style.followPrTemplates !== defaults.followPrTemplates ? (
+          style.followChangeRequestTemplates !== defaults.followChangeRequestTemplates ? (
             <SettingResetButton
-              label="pull request templates"
+              label="change request templates"
               onClick={() =>
                 updateSettings({
-                  textGenerationStyle: { followPrTemplates: defaults.followPrTemplates },
+                  sourceControlWritingStyle: {
+                    followChangeRequestTemplates: defaults.followChangeRequestTemplates,
+                  },
                 })
               }
             />
@@ -150,18 +155,22 @@ export function TextGenerationSettingsSection() {
         }
         control={
           <Switch
-            checked={style.followPrTemplates}
+            checked={style.followChangeRequestTemplates}
             onCheckedChange={(checked) =>
-              updateSettings({ textGenerationStyle: { followPrTemplates: Boolean(checked) } })
+              updateSettings({
+                sourceControlWritingStyle: {
+                  followChangeRequestTemplates: Boolean(checked),
+                },
+              })
             }
-            aria-label="Follow pull request templates"
+            aria-label="Follow change request templates"
           />
         }
       />
 
       <SettingsRow
-        title="Git writer model"
-        description="Optional model override for commit messages, pull request titles and descriptions, and branch names. Off uses the global text generation model."
+        title="Source control writer model"
+        description="Optional model override for change descriptions, change request titles and descriptions, and branch or bookmark names. Off uses the global text generation model."
         control={
           <div className="flex flex-wrap items-center justify-end gap-2">
             {usesDedicatedModel ? (
@@ -173,10 +182,10 @@ export function TextGenerationSettingsSection() {
                 modelOptionsByInstance={modelOptionsByInstance}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                triggerAriaLabel="Git writer model"
+                triggerAriaLabel="Source control writer model"
                 onInstanceModelChange={(instanceId, model) => {
                   updateSettings({
-                    gitWriterModelSelection: createModelSelection(instanceId, model),
+                    sourceControlWriterModelSelection: createModelSelection(instanceId, model),
                   });
                 }}
               />
@@ -185,7 +194,7 @@ export function TextGenerationSettingsSection() {
               checked={usesDedicatedModel}
               onCheckedChange={(checked) =>
                 updateSettings({
-                  gitWriterModelSelection: checked
+                  sourceControlWriterModelSelection: checked
                     ? createModelSelection(
                         defaultModelSelection.instanceId,
                         defaultModelSelection.model,
@@ -194,7 +203,7 @@ export function TextGenerationSettingsSection() {
                     : null,
                 })
               }
-              aria-label="Use a separate Git writer model"
+              aria-label="Use a separate source control writer model"
             />
           </div>
         }

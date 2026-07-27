@@ -558,7 +558,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
         diffSummary: input.diffSummary,
         diffPatch: input.diffPatch,
         policy: input.policy,
-        prTemplate: input.prTemplate,
+        changeRequestTemplate: input.changeRequestTemplate,
       });
       const generated = yield* runOpenCodeJson({
         operation: "generatePrContent",

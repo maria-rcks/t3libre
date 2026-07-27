@@ -11,8 +11,8 @@
  * @module ServerSettings
  */
 import {
-  DEFAULT_GIT_TEXT_GENERATION_MODEL,
-  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  DEFAULT_TEXT_GENERATION_MODEL,
+  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
@@ -52,7 +52,7 @@ import {
 } from "@t3tools/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 
-export { resolveGitWriterModelSelection } from "@t3tools/shared/serverSettings";
+export { resolveSourceControlWriterModelSelection } from "@t3tools/shared/serverSettings";
 
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
 const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
@@ -188,9 +188,9 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
     textGenerationModelSelection: {
       instanceId: ProviderInstanceId.make(fallback),
       model:
-        DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback] ??
+        DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback] ??
         DEFAULT_MODEL_BY_PROVIDER[fallback] ??
-        DEFAULT_GIT_TEXT_GENERATION_MODEL,
+        DEFAULT_TEXT_GENERATION_MODEL,
     } satisfies ModelSelection,
   };
 }
@@ -198,7 +198,7 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
 // Values under these keys are compared as a whole — never stripped field-by-field.
 const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "automaticGitFetchInterval",
-  "gitWriterModelSelection",
+  "sourceControlWriterModelSelection",
   "textGenerationModelSelection",
 ]);
 

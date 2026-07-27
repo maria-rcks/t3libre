@@ -76,7 +76,7 @@ export function buildCommitMessagePrompt(input: CommitMessagePromptInput) {
 }
 
 // ---------------------------------------------------------------------------
-// PR content
+// Change request content
 // ---------------------------------------------------------------------------
 
 export interface PrContentPromptInput {
@@ -85,15 +85,15 @@ export interface PrContentPromptInput {
   commitSummary: string;
   diffSummary: string;
   diffPatch: string;
-  prTemplate?: string | undefined;
+  changeRequestTemplate?: string | undefined;
   policy?: TextGenerationPolicy | undefined;
 }
 
 export function buildPrContentPrompt(input: PrContentPromptInput) {
-  const prTemplate = input.prTemplate?.trim();
-  const bodyRules = prTemplate
+  const changeRequestTemplate = input.changeRequestTemplate?.trim();
+  const bodyRules = changeRequestTemplate
     ? [
-        "- body must be markdown and follow the repository pull request template structure",
+        "- body must be markdown and follow the repository change request template structure",
         "- fill in the template sections appropriately for this change",
         "- drop HTML comments from the template in the generated body",
         "- keep the template's markdown structure",
@@ -104,14 +104,14 @@ export function buildPrContentPrompt(input: PrContentPromptInput) {
         "- under Testing, include bullet points with concrete checks or 'Not run' where appropriate",
       ];
   const prompt = [
-    "You write GitHub pull request content.",
+    "You write source control change request content.",
     "Return a JSON object with keys: title, body.",
     "Rules:",
     "- title should be concise and specific",
     ...bodyRules,
     ...policyInstruction(input.policy?.changeRequestInstructions),
-    ...(prTemplate
-      ? ["", "Repository pull request template:", limitSection(prTemplate, 8_000)]
+    ...(changeRequestTemplate
+      ? ["", "Repository change request template:", limitSection(changeRequestTemplate, 8_000)]
       : []),
     "",
     `Base branch: ${input.baseBranch}`,

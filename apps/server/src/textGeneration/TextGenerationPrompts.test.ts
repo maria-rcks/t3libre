@@ -96,7 +96,7 @@ describe("buildPrContentPrompt", () => {
       commitSummary: "feat: add login page",
       diffSummary: "3 files changed",
       diffPatch: "diff",
-      prTemplate: "<!-- remove me -->\n## What changed\n\n## Verification",
+      changeRequestTemplate: "<!-- remove me -->\n## What changed\n\n## Verification",
       policy: {
         kind: "custom",
         changeRequestInstructions: "Keep the title in sentence case.",
@@ -105,9 +105,9 @@ describe("buildPrContentPrompt", () => {
     });
 
     expect(result.prompt).toContain("Keep the title in sentence case.");
-    expect(result.prompt).toContain("follow the repository pull request template structure");
+    expect(result.prompt).toContain("follow the repository change request template structure");
     expect(result.prompt).toContain("drop HTML comments from the template");
-    expect(result.prompt).toContain("Repository pull request template:");
+    expect(result.prompt).toContain("Repository change request template:");
     expect(result.prompt).toContain("<!-- remove me -->\n## What changed\n\n## Verification");
     expect(result.prompt).not.toContain("include headings '## Summary' and '## Testing'");
   });

@@ -28,7 +28,7 @@ import {
   type VcsStatusRemoteResult,
   VcsStatusResult,
   ModelSelection,
-  type TextGenerationStyleSettings,
+  type SourceControlWritingStyleSettings,
 } from "@t3tools/contracts";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
@@ -51,6 +51,7 @@ import {
   repositoryConventionsTextGenerationPolicy,
 } from "../textGeneration/TextGenerationPresets.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
+import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import type { GitManagerServiceError } from "@t3tools/contracts";
@@ -68,9 +69,9 @@ export interface GitRunStackedActionOptions {
   readonly progressReporter?: GitActionProgressReporter;
 }
 
-interface GitTextGenerationSettings {
+interface SourceControlTextGenerationSettings {
   readonly modelSelection: ModelSelection;
-  readonly style: TextGenerationStyleSettings;
+  readonly style: SourceControlWritingStyleSettings;
 }
 
 export class GitManager extends Context.Service<
@@ -577,6 +578,7 @@ export const make = Effect.gen(function* () {
   const gitCore = yield* GitVcsDriver.GitVcsDriver;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const textGeneration = yield* TextGeneration.TextGeneration;
+  const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const crypto = yield* Crypto.Crypto;
 
@@ -600,7 +602,7 @@ export const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => []),
       );
 
-  const resolveStylePolicy = (cwd: string, style: TextGenerationStyleSettings) =>
+  const resolveStylePolicy = (cwd: string, style: SourceControlWritingStyleSettings) =>
     Effect.gen(function* () {
       switch (style.mode) {
         case "conventional_commits":
@@ -1388,7 +1390,7 @@ export const make = Effect.gen(function* () {
       /** When true, also produce a semantic feature branch name. */
       includeBranch?: boolean;
       filePaths?: readonly string[];
-      settings: GitTextGenerationSettings;
+      settings: SourceControlTextGenerationSettings;
     }) {
       const context = yield* gitCore.prepareCommitContext(input.cwd, input.filePaths);
       if (!context) {
@@ -1431,7 +1433,7 @@ export const make = Effect.gen(function* () {
   );
 
   const runCommitStep = Effect.fn("runCommitStep")(function* (
-    settings: GitTextGenerationSettings,
+    settings: SourceControlTextGenerationSettings,
     cwd: string,
     action: "commit" | "commit_push" | "commit_push_pr",
     branch: string | null,
@@ -1544,7 +1546,7 @@ export const make = Effect.gen(function* () {
   });
 
   const runPrStep = Effect.fn("runPrStep")(function* (
-    settings: GitTextGenerationSettings,
+    settings: SourceControlTextGenerationSettings,
     cwd: string,
     fallbackBranch: string | null,
     emit: GitActionProgressEmitter,
@@ -1594,8 +1596,8 @@ export const make = Effect.gen(function* () {
     const baseRangeRef = yield* resolveBaseRangeRef(cwd, baseBranch);
     const rangeContext = yield* gitCore.readRangeContext(cwd, baseRangeRef);
     const policy = yield* resolveStylePolicy(cwd, settings.style);
-    const prTemplate =
-      settings.style.followPrTemplates && provider.kind === "github"
+    const changeRequestTemplate =
+      settings.style.followChangeRequestTemplates && provider.kind === "github"
         ? Option.getOrUndefined(yield* detectPrTemplate(cwd, baseRangeRef, gitCore.execute))
         : undefined;
 
@@ -1606,7 +1608,7 @@ export const make = Effect.gen(function* () {
       commitSummary: limitContext(rangeContext.commitSummary, 20_000),
       diffSummary: limitContext(rangeContext.diffSummary, 20_000),
       diffPatch: limitContext(rangeContext.diffPatch, 60_000),
-      ...(prTemplate ? { prTemplate } : {}),
+      ...(changeRequestTemplate ? { changeRequestTemplate } : {}),
       ...(policy ? { policy } : {}),
       modelSelection: settings.modelSelection,
     });
@@ -1888,7 +1890,7 @@ export const make = Effect.gen(function* () {
   });
 
   const runFeatureBranchStep = Effect.fn("runFeatureBranchStep")(function* (
-    settings: GitTextGenerationSettings,
+    settings: SourceControlTextGenerationSettings,
     cwd: string,
     branch: string | null,
     commitMessage?: string,
@@ -1990,10 +1992,22 @@ export const make = Effect.gen(function* () {
         let preResolvedCommitSuggestion: CommitAndBranchSuggestion | undefined = undefined;
 
         const textGenerationSettings = yield* serverSettingsService.getSettings.pipe(
-          Effect.map((settings) => ({
-            modelSelection: ServerSettings.resolveGitWriterModelSelection(settings),
-            style: settings.textGenerationStyle,
-          })),
+          Effect.flatMap((settings) =>
+            settings.sourceControlWriterModelSelection === null
+              ? Effect.succeed({
+                  modelSelection: settings.textGenerationModelSelection,
+                  style: settings.sourceControlWritingStyle,
+                })
+              : providerRegistry.getProviders.pipe(
+                  Effect.map((providers) => ({
+                    modelSelection: ServerSettings.resolveSourceControlWriterModelSelection(
+                      settings,
+                      providers,
+                    ),
+                    style: settings.sourceControlWritingStyle,
+                  })),
+                ),
+          ),
           Effect.mapError(
             (cause) =>
               new GitManagerError({

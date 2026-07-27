@@ -334,7 +334,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         diffSummary: input.diffSummary,
         diffPatch: input.diffPatch,
         policy: input.policy,
-        prTemplate: input.prTemplate,
+        changeRequestTemplate: input.changeRequestTemplate,
       });
 
       const generated = yield* runCodexJson({

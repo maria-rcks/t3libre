@@ -19,7 +19,13 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 
-import { GitCommandError, TextGenerationError } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  GitCommandError,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  TextGenerationError,
+} from "@t3tools/contracts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -28,6 +34,7 @@ import * as GitHubSourceControlProvider from "../sourceControl/GitHubSourceContr
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
+import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitManager from "./GitManager.ts";
 
@@ -641,6 +648,9 @@ function makeManager(input?: {
 
   const managerLayer = Layer.mergeAll(
     Layer.succeed(TextGeneration.TextGeneration, textGeneration),
+    Layer.mock(ProviderRegistry.ProviderRegistry)({
+      getProviders: Effect.succeed([]),
+    }),
     Layer.succeed(
       ProjectSetupScriptRunner.ProjectSetupScriptRunner,
       input?.setupScriptRunner ?? {
@@ -1541,7 +1551,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         serverSettings: {
-          textGenerationStyle: {
+          sourceControlWritingStyle: {
             mode: "custom" as const,
             customInstructions: "Use a direct tone.",
           },
@@ -1591,7 +1601,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         serverSettings: {
-          textGenerationStyle: {
+          sourceControlWritingStyle: {
             mode: "custom" as const,
             customInstructions: "",
           },
@@ -1615,6 +1625,46 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect("falls back when the dedicated source control writer is unavailable", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nworld\n");
+      const missingInstanceId = ProviderInstanceId.make("missing_writer");
+      let generatedModelSelection:
+        | TextGeneration.CommitMessageGenerationInput["modelSelection"]
+        | undefined;
+
+      const { manager } = yield* makeManager({
+        serverSettings: {
+          providerInstances: {
+            [missingInstanceId]: {
+              driver: ProviderDriverKind.make("missing-driver"),
+              config: {},
+            },
+          },
+          sourceControlWriterModelSelection: {
+            instanceId: missingInstanceId,
+            model: "missing-model",
+          },
+        },
+        textGeneration: {
+          generateCommitMessage: (input) => {
+            generatedModelSelection = input.modelSelection;
+            return Effect.succeed({ subject: "Use the available writer", body: "" });
+          },
+        },
+      });
+
+      yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+      });
+
+      expect(generatedModelSelection).toEqual(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection);
+    }),
+  );
+
   it.effect("preserves repository conventions style when recent history is empty", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -1627,7 +1677,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         serverSettings: {
-          textGenerationStyle: {
+          sourceControlWritingStyle: {
             mode: "repo_conventions" as const,
           },
         },
@@ -2607,11 +2657,11 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       yield* runGit(repoDir, ["push", "-u", "origin", "feature-create-pr"]);
       yield* runGit(repoDir, ["config", "branch.feature-create-pr.gh-merge-base", "main"]);
       let generatedPolicy: TextGeneration.PrContentGenerationInput["policy"] = undefined;
-      let generatedPrTemplate: string | undefined;
+      let generatedChangeRequestTemplate: string | undefined;
 
       const { manager, ghCalls } = yield* makeManager({
         serverSettings: {
-          textGenerationStyle: {
+          sourceControlWritingStyle: {
             mode: "custom" as const,
             customInstructions: "Lead with user impact.",
           },
@@ -2619,7 +2669,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         textGeneration: {
           generatePrContent: (input) => {
             generatedPolicy = input.policy;
-            generatedPrTemplate = input.prTemplate;
+            generatedChangeRequestTemplate = input.changeRequestTemplate;
             return Effect.succeed({
               title: "Add stacked git actions",
               body: "## What changed?\nAdded stacked git actions.",
@@ -2653,7 +2703,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(generatedPolicy).toMatchObject({
         changeRequestInstructions: "Lead with user impact.",
       });
-      expect(generatedPrTemplate).toBe("## What changed?\n\n## Verification");
+      expect(generatedChangeRequestTemplate).toBe("## What changed?\n\n## Verification");
       expect(ghCalls.filter((call) => call.startsWith("pr list "))).toHaveLength(2);
       expect(
         ghCalls.some((call) => call.includes("pr create --base main --head feature-create-pr")),

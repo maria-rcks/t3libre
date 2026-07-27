@@ -3,7 +3,7 @@ import * as Duration from "effect/Duration";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
-import { DEFAULT_GIT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from "./model.ts";
+import { DEFAULT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from "./model.ts";
 import { ModelSelection } from "./orchestration.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
 
@@ -395,21 +395,23 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
-export const TextGenerationStyleMode = Schema.Literals([
+export const SourceControlWritingStyleMode = Schema.Literals([
   "repo_conventions",
   "conventional_commits",
   "custom",
 ]);
-export type TextGenerationStyleMode = typeof TextGenerationStyleMode.Type;
+export type SourceControlWritingStyleMode = typeof SourceControlWritingStyleMode.Type;
 
-export const TextGenerationStyleSettings = Schema.Struct({
-  mode: TextGenerationStyleMode.pipe(
+export const SourceControlWritingStyleSettings = Schema.Struct({
+  mode: SourceControlWritingStyleMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("repo_conventions" as const)),
   ),
   customInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
-  followPrTemplates: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  followChangeRequestTemplates: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
 });
-export type TextGenerationStyleSettings = typeof TextGenerationStyleSettings.Type;
+export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyleSettings.Type;
 
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 
@@ -432,14 +434,14 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(
       Effect.succeed({
         instanceId: ProviderInstanceId.make("codex"),
-        model: DEFAULT_GIT_TEXT_GENERATION_MODEL,
+        model: DEFAULT_TEXT_GENERATION_MODEL,
       }),
     ),
   ),
-  textGenerationStyle: TextGenerationStyleSettings.pipe(
+  sourceControlWritingStyle: SourceControlWritingStyleSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
-  gitWriterModelSelection: Schema.NullOr(ModelSelection).pipe(
+  sourceControlWriterModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
 
@@ -567,14 +569,14 @@ export const ServerSettingsPatch = Schema.Struct({
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
-  textGenerationStyle: Schema.optionalKey(
+  sourceControlWritingStyle: Schema.optionalKey(
     Schema.Struct({
-      mode: Schema.optionalKey(TextGenerationStyleMode),
+      mode: Schema.optionalKey(SourceControlWritingStyleMode),
       customInstructions: Schema.optionalKey(TrimmedString),
-      followPrTemplates: Schema.optionalKey(Schema.Boolean),
+      followChangeRequestTemplates: Schema.optionalKey(Schema.Boolean),
     }),
   ),
-  gitWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
