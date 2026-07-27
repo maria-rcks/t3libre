@@ -90,6 +90,49 @@ Checkout their getting started guide for more information: https://viteplus.dev/
 vp i
 ```
 
+### Nix
+
+With [Nix flakes](https://nix.dev/concepts/flakes.html) enabled, build or run the complete
+package:
+
+```bash
+nix build
+nix run
+```
+
+Install it into your profile with `nix profile install .`.
+
+For development, enter the pinned toolchain and install workspace dependencies:
+
+```bash
+nix develop
+pnpm install
+vp run dev
+```
+
+With `direnv` and `nix-direnv` installed, run `direnv allow` once to load the same flake
+automatically through the included `.envrc`.
+
+The flake builds the production server, bundled web client, runtime dependencies, native modules,
+and shell completions. It also provides Node.js 24, the exact `pnpm` version pinned in
+`package.json`, the native development toolchain, and the repository-local `vp` command on `PATH`.
+Package and development outputs support x86-64 and ARM64 Linux plus Apple Silicon macOS.
+
+Consumers can follow their own `nixpkgs` input, use `overlays.default`, or customize the exported
+package and shell constructors without forking:
+
+```nix
+packages.${system}.default = t3code.lib.mkPackage {
+  inherit system pkgs;
+};
+
+devShells.${system}.default = t3code.lib.mkDevShell {
+  inherit system pkgs;
+  extraPackages = [ pkgs.nil ];
+  extraShellHook = "export T3CODE_DEV_INSTANCE=nix";
+};
+```
+
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
 
 Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).

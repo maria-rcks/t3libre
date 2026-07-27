@@ -1,0 +1,57 @@
+name: Nix
+
+on:
+  pull_request:
+    paths:
+      - ".envrc"
+      - ".github/workflows/nix.yml"
+      - "flake.lock"
+      - "flake.nix"
+      - "nix/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".envrc"
+      - ".github/workflows/nix.yml"
+      - "flake.lock"
+      - "flake.nix"
+      - "nix/**"
+
+permissions:
+  contents: read
+
+jobs:
+  flake:
+    name: Flake (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-14
+          - ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Check flake
+        run: |
+          nix flake check --all-systems --no-build
+          nix flake check --print-build-logs
+
+      - name: Verify package and development toolchain
+        run: |
+          # The single-quoted script must expand inside the Nix shell, not in this runner shell.
+          # shellcheck disable=SC2016
+          nix develop --command bash -euo pipefail -c '
+            test "$(node --print "process.versions.node.split(\".\")[0]")" = "24"
+            expected_pnpm="$(node --print "require(\"./package.json\").packageManager.split(\"@\").pop()")"
+            test "$(pnpm --version)" = "$expected_pnpm"
+          '
+          expected_version="$(node --print '"t3 v" + require("./apps/server/package.json").version')"
+          test "$(nix run . -- --version)" = "$expected_version"
