@@ -16,6 +16,7 @@ import {
   type OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadShell,
   type OrchestrationThreadStreamItem,
+  EnvironmentAuthorizationError,
   ORCHESTRATION_WS_METHODS,
   OrchestrationGetSnapshotError,
   type ServerConfigStreamEvent,
@@ -395,8 +396,13 @@ const shellStore = new DemoShellStore(demoShellSnapshot);
 // RPC handlers
 // ---------------------------------------------------------------------------
 
-const unsupported = (method: string) =>
-  Effect.die(new Error(`RPC method not supported in the demo: ${method}`));
+const unsupportedError = (method: string) =>
+  new EnvironmentAuthorizationError({
+    message: `RPC method not supported in the demo: ${method}`,
+    requiredScope: "orchestration:operate",
+  });
+
+const unsupported = (method: string) => Effect.fail(unsupportedError(method));
 
 function shellStream(): Stream.Stream<OrchestrationShellStreamItem> {
   return Stream.unwrap(
@@ -545,7 +551,7 @@ const handlersLayer = WsRpcGroup.toLayer(
       [WS_METHODS.serverSignalProcess]: () => unsupported("serverSignalProcess"),
       [WS_METHODS.cloudGetRelayClientStatus]: () => unsupported("cloudGetRelayClientStatus"),
       [WS_METHODS.cloudInstallRelayClient]: () =>
-        Stream.die(new Error("not supported in the demo")),
+        Stream.fail(unsupportedError("cloudInstallRelayClient")),
       [WS_METHODS.sourceControlLookupRepository]: () =>
         unsupported("sourceControlLookupRepository"),
       [WS_METHODS.sourceControlCloneRepository]: () => unsupported("sourceControlCloneRepository"),
@@ -560,7 +566,7 @@ const handlersLayer = WsRpcGroup.toLayer(
       [WS_METHODS.assetsCreateUrl]: () => unsupported("assetsCreateUrl"),
       [WS_METHODS.vcsPull]: () => unsupported("vcsPull"),
       [WS_METHODS.vcsRefreshStatus]: () => unsupported("vcsRefreshStatus"),
-      [WS_METHODS.gitRunStackedAction]: () => Stream.die(new Error("not supported in the demo")),
+      [WS_METHODS.gitRunStackedAction]: () => Stream.fail(unsupportedError("gitRunStackedAction")),
       [WS_METHODS.gitResolvePullRequest]: () => unsupported("gitResolvePullRequest"),
       [WS_METHODS.gitPreparePullRequestThread]: () => unsupported("gitPreparePullRequestThread"),
       [WS_METHODS.vcsListRefs]: () =>
@@ -578,7 +584,7 @@ const handlersLayer = WsRpcGroup.toLayer(
       [WS_METHODS.vcsInit]: () => unsupported("vcsInit"),
       [WS_METHODS.reviewGetDiffPreview]: () => unsupported("reviewGetDiffPreview"),
       [WS_METHODS.terminalOpen]: () => unsupported("terminalOpen"),
-      [WS_METHODS.terminalAttach]: () => Stream.die(new Error("not supported in the demo")),
+      [WS_METHODS.terminalAttach]: () => Stream.fail(unsupportedError("terminalAttach")),
       [WS_METHODS.terminalWrite]: () => unsupported("terminalWrite"),
       [WS_METHODS.terminalResize]: () => unsupported("terminalResize"),
       [WS_METHODS.terminalClear]: () => unsupported("terminalClear"),
@@ -592,7 +598,7 @@ const handlersLayer = WsRpcGroup.toLayer(
       [WS_METHODS.previewList]: () => Effect.succeed({ sessions: [] }),
       [WS_METHODS.previewReportStatus]: () => unsupported("previewReportStatus"),
       [WS_METHODS.previewAutomationConnect]: () =>
-        Stream.die(new Error("not supported in the demo")),
+        Stream.fail(unsupportedError("previewAutomationConnect")),
       [WS_METHODS.previewAutomationRespond]: () => unsupported("previewAutomationRespond"),
       [WS_METHODS.previewAutomationFocusHost]: () => unsupported("previewAutomationFocusHost"),
     };
