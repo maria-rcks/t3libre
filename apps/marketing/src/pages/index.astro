@@ -225,6 +225,38 @@ const mobileEndorsementRows = [
     </div>
   </section>
 
+  <!-- ── Mobile ───────────────────────────────────────────────── -->
+  <section id="mobile" class="sec-mobile">
+    <div class="container mobile-inner">
+      <div class="mobile-copy">
+        <div class="section-head" style="margin-bottom:0">
+          <h2>Your agents, in your pocket.</h2>
+          <p>
+            The T3 Code mobile app keeps every thread with you. Kick off work,
+            approve commands, and review diffs from your phone — same projects,
+            same threads, same agents.
+          </p>
+          <ul class="checklist" style="margin-top:24px">
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Live thread status &amp; notifications</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Approve or decline commands on the go</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Connect to any of your machines via T3 Connect</li>
+          </ul>
+        </div>
+      </div>
+      <div class="mobile-visual">
+        <div class="phone-frame">
+          <img
+            src="/mobile-preview.webp"
+            alt="T3 Code mobile app showing the thread list with live agent status"
+            loading="lazy"
+            width="640"
+            height="960"
+          />
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ── Git ──────────────────────────────────────────────────── -->
   <section id="git" class="sec-git">
     <div class="container git-inner">
@@ -768,6 +800,36 @@ const mobileEndorsementRows = [
 
   /* ── Harnesses ─────────────────────────────────────────── */
   .sec-harness { background: #09090b; }
+
+  /* ── Mobile ────────────────────────────────────────────── */
+  .mobile-inner {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 64px;
+    align-items: center;
+  }
+
+  .mobile-visual { display: flex; justify-content: center; }
+
+  .phone-frame {
+    width: min(320px, 80vw);
+    border-radius: 44px;
+    border: 1px solid var(--border);
+    background: #0a0a0c;
+    padding: 12px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  }
+
+  .phone-frame img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 32px;
+  }
+
+  @media (max-width: 900px) {
+    .mobile-inner { grid-template-columns: 1fr; gap: 40px; }
+  }
 
   .harness-grid {
     display: grid;
