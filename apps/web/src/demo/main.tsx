@@ -11,6 +11,14 @@ import "../index.css";
 import { getRouter } from "../router";
 import { AppRoot } from "../AppRoot";
 import { startDemoServer } from "./server";
+import { readBrowserClientSettings, writeBrowserClientSettings } from "../clientPersistenceStorage";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+
+// The demo showcases the Sidebar v2 beta by default; visitors can still
+// toggle it in Settings, and their choice persists.
+if (readBrowserClientSettings() === null) {
+  writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, sidebarV2Enabled: true });
+}
 
 startDemoServer();
 
