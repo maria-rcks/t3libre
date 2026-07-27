@@ -69,16 +69,15 @@ const mobileEndorsementRows = [
       </div>
 
       <div class="hero-preview">
-        <figure class="hero-screenshot-frame">
-          <img
-            src="/updated-screenshot.webp"
-            alt="T3 Code app showing multiple coding agent threads in one workspace"
-            width="2508"
-            height="1682"
+        <div class="hero-demo-frame">
+          <iframe
+            src="/sidebar-demo/demo.html"
+            title="Interactive T3 Code demo — the real app UI running on sample data"
             loading="eager"
-            decoding="async"
-          />
-        </figure>
+            allow="clipboard-write"
+          ></iframe>
+          <span class="hero-demo-badge">Live demo &mdash; this is the real app UI. Click around.</span>
+        </div>
       </div>
     </div>
   </section>
@@ -750,27 +749,37 @@ const mobileEndorsementRows = [
     transform: perspective(2000px) rotateX(0deg);
   }
 
-  .hero-screenshot-frame {
+  .hero-demo-frame {
     position: relative;
     overflow: hidden;
     aspect-ratio: 2508 / 1682;
     border-radius: 14px;
     background: #0a0a0c;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: 0 28px 64px -28px rgba(0, 0, 0, 0.75);
   }
 
-  .hero-screenshot-frame picture {
+  .hero-demo-frame iframe {
     display: block;
     width: 100%;
     height: 100%;
+    border: 0;
+    background: #161616;
   }
 
-  .hero-screenshot-frame img {
-    width: calc(100% + 4px);
-    height: calc(100% + 4px);
-    margin: -2px;
-    object-fit: cover;
-    object-position: center top;
+  .hero-demo-badge {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(10, 10, 12, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 11.5px;
+    letter-spacing: 0.01em;
+    pointer-events: none;
+    backdrop-filter: blur(6px);
   }
 
   /* ── Harnesses ─────────────────────────────────────────── */

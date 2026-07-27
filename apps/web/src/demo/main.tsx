@@ -1,0 +1,24 @@
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { createHashHistory } from "@tanstack/react-router";
+
+import "@fontsource-variable/dm-sans/index.css";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+import "@xterm/xterm/css/xterm.css";
+import "../index.css";
+
+import { getRouter } from "../router";
+import { AppRoot } from "../AppRoot";
+import { startDemoServer } from "./server";
+
+startDemoServer();
+
+// Hash history keeps the demo self-contained on a single static page.
+const router = getRouter(createHashHistory());
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <AppRoot router={router} />
+  </React.StrictMode>,
+);
