@@ -26,6 +26,16 @@ const CATALOG_KEY = "document";
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 const RIGHT_PANEL_STORAGE_VERSION = 7;
 
+/**
+ * Identifies the fixture generation the visitor's persisted state was seeded
+ * from. When the fixtures change (new environments/threads), stale seeded
+ * state would reference machines that no longer exist, so it is re-seeded.
+ */
+const DEMO_SEED_VERSION_KEY = "t3code:demo-seed-version";
+const DEMO_SEED_VERSION = demoEnvironments
+  .map((environment) => environment.environmentId)
+  .join("|");
+
 const encodeCatalogDocument = Schema.encodeSync(Schema.fromJsonString(ConnectionCatalogDocument));
 
 function demoCatalogDocument(): string {
@@ -60,8 +70,8 @@ function demoCatalogDocument(): string {
   });
 }
 
-/** Registers the fake remote machines unless a catalog already exists. */
-function seedConnectionCatalog(): Promise<void> {
+/** Registers the fake remote machines unless a current catalog already exists. */
+function seedConnectionCatalog(force: boolean): Promise<void> {
   return new Promise((resolve) => {
     if (typeof indexedDB === "undefined") {
       resolve();
@@ -89,12 +99,18 @@ function seedConnectionCatalog(): Promise<void> {
         resolve();
       });
       read.addEventListener("success", () => {
-        if (typeof read.result === "string" && read.result.trim() !== "") {
+        if (!force && typeof read.result === "string" && read.result.trim() !== "") {
           database.close();
           resolve();
           return;
         }
-        const write = database.transaction(CATALOG_STORE_NAME, "readwrite");
+        const staleStores = ["shell", "thread", "server-config", "vcs-refs"].filter((store) =>
+          database.objectStoreNames.contains(store),
+        );
+        const write = database.transaction([CATALOG_STORE_NAME, ...staleStores], "readwrite");
+        for (const store of staleStores) {
+          write.objectStore(store).clear();
+        }
         write.objectStore(CATALOG_STORE_NAME).put(demoCatalogDocument(), CATALOG_KEY);
         write.addEventListener("complete", () => {
           database.close();
@@ -113,8 +129,8 @@ function seedConnectionCatalog(): Promise<void> {
  * Opens the right panel (on the diff surface — the browser preview needs the
  * desktop bridge) on the showcase threads for first-time visitors.
  */
-function seedRightPanelState(): void {
-  if (window.localStorage.getItem(RIGHT_PANEL_STORAGE_KEY) !== null) {
+function seedRightPanelState(force: boolean): void {
+  if (!force && window.localStorage.getItem(RIGHT_PANEL_STORAGE_KEY) !== null) {
     return;
   }
   const byThreadKey = Object.fromEntries(
@@ -139,6 +155,8 @@ export async function seedDemoClientState(): Promise<void> {
   if (readBrowserClientSettings() === null) {
     writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, sidebarV2Enabled: true });
   }
-  seedRightPanelState();
-  await seedConnectionCatalog();
+  const staleFixtures = window.localStorage.getItem(DEMO_SEED_VERSION_KEY) !== DEMO_SEED_VERSION;
+  seedRightPanelState(staleFixtures);
+  await seedConnectionCatalog(staleFixtures);
+  window.localStorage.setItem(DEMO_SEED_VERSION_KEY, DEMO_SEED_VERSION);
 }
