@@ -21,7 +21,9 @@ import * as Schema from "effect/Schema";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   HermesGatewayClient,
+  HermesGatewayConfigurationError,
   HermesGatewayMutationIndeterminateError,
+  HermesGatewayMutationsBlockedError,
   type HermesGatewayMutationOptions,
   type HermesGatewayReadOptions,
 } from "./HermesGatewayClient.ts";
@@ -197,6 +199,18 @@ function projectProvider(input: {
   readonly compatibility: HermesGatewayCompatibility;
   readonly result: HermesGatewayCronListResult;
 }): HermesCronProviderProjection {
+  if (!input.result.success) {
+    return {
+      providerInstanceId: input.config.providerInstanceId,
+      displayName: input.config.displayName,
+      profileKey: input.config.profileKey,
+      status: "error",
+      protocolClassification: input.compatibility.status,
+      capabilities: projectHermesCronCapabilities(input.compatibility),
+      jobs: [],
+      diagnostics: ["Hermes gateway reported an unsuccessful cron inventory response."],
+    };
+  }
   const diagnostics: string[] = [];
   const jobs = input.result.jobs.map((job, index) =>
     projectHermesCronJob(input.config.providerInstanceId, input.config.profileKey, job, index),
@@ -303,6 +317,17 @@ export const makeHermesCron = Effect.fn("HermesCron.make")(function* (
     options.clientFactory ??
     ((input: { readonly endpoint: string; readonly authToken: string }) =>
       new HermesGatewayClient(input));
+  // Clients are shared per connection so mutation operationId fences survive
+  // across cron calls instead of dying with a per-call client.
+  const clients = new Map<string, HermesCronGatewayClient>();
+  const sharedClient = (config: HermesCronProviderConfig): HermesCronGatewayClient => {
+    const key = `${config.providerInstanceId}\u0000${config.endpoint}\u0000${config.token}`;
+    const existing = clients.get(key);
+    if (existing !== undefined) return existing;
+    const client = clientFactory({ endpoint: config.endpoint, authToken: config.token });
+    clients.set(key, client);
+    return client;
+  };
 
   const configuredProviders = Effect.fn("HermesCron.configuredProviders")(function* () {
     const settings = yield* settingsService.getSettings.pipe(
@@ -333,23 +358,19 @@ export const makeHermesCron = Effect.fn("HermesCron.make")(function* (
   ) {
     return yield* Effect.tryPromise({
       try: async () => {
-        const client = clientFactory({ endpoint: config.endpoint, authToken: config.token });
-        try {
-          const compatibility = await client.connect();
-          const capabilities = projectHermesCronCapabilities(compatibility);
-          if (!capabilities.inventory) {
-            return unavailableProjection(
-              config.providerInstanceId,
-              config.displayName,
-              config.profileKey,
-              "Gateway does not advertise cron.read.",
-            );
-          }
-          const result = await client.listCronJobs();
-          return projectProvider({ config, compatibility, result });
-        } finally {
-          client.close();
+        const client = sharedClient(config);
+        const compatibility = await client.connect();
+        const capabilities = projectHermesCronCapabilities(compatibility);
+        if (!capabilities.inventory) {
+          return unavailableProjection(
+            config.providerInstanceId,
+            config.displayName,
+            config.profileKey,
+            "Gateway does not advertise cron.read.",
+          );
         }
+        const result = await client.listCronJobs();
+        return projectProvider({ config, compatibility, result });
       },
       catch: () =>
         new HermesCronError({
@@ -410,38 +431,34 @@ export const makeHermesCron = Effect.fn("HermesCron.make")(function* (
 
     return yield* Effect.tryPromise({
       try: async () => {
-        const client = clientFactory({ endpoint: config.endpoint, authToken: config.token });
-        try {
-          const compatibility = await client.connect();
-          const capabilities = projectHermesCronCapabilities(compatibility);
-          if (!mutationCapability(capabilities, input.operation)) {
-            throw new HermesCronError({
-              code: "unsupported_operation",
-              providerInstanceId: input.providerInstanceId,
-              operation: input.operation,
-              message: `Hermes gateway does not support cron ${input.operation}.`,
-            });
-          }
-          const result = await client.manageCron(mutationParams(input), {
-            operationId: input.operationId,
+        const client = sharedClient(config);
+        const compatibility = await client.connect();
+        const capabilities = projectHermesCronCapabilities(compatibility);
+        if (!mutationCapability(capabilities, input.operation)) {
+          throw new HermesCronError({
+            code: "unsupported_operation",
+            providerInstanceId: input.providerInstanceId,
+            operation: input.operation,
+            message: `Hermes gateway does not support cron ${input.operation}.`,
           });
-          const inventory = await client.listCronJobs().catch(() => null);
-          return {
-            provider: inventory
-              ? projectProvider({ config, compatibility, result: inventory })
-              : unavailableProjection(
-                  config.providerInstanceId,
-                  config.displayName,
-                  config.profileKey,
-                  "Cron mutation succeeded, but the follow-up cron inventory refresh failed.",
-                  "error",
-                ),
-            upstreamJobId: result.job_id ?? result.job?.id ?? null,
-            upstreamRunId: result.run_id ?? null,
-          };
-        } finally {
-          client.close();
         }
+        const result = await client.manageCron(mutationParams(input), {
+          operationId: input.operationId,
+        });
+        const inventory = await client.listCronJobs().catch(() => null);
+        return {
+          provider: inventory
+            ? projectProvider({ config, compatibility, result: inventory })
+            : unavailableProjection(
+                config.providerInstanceId,
+                config.displayName,
+                config.profileKey,
+                "Cron mutation succeeded, but the follow-up cron inventory refresh failed.",
+                "error",
+              ),
+          upstreamJobId: result.job_id ?? result.job?.id ?? null,
+          upstreamRunId: result.run_id ?? null,
+        };
       },
       catch: (cause) => {
         if (isHermesCronError(cause)) return cause;
@@ -451,6 +468,24 @@ export const makeHermesCron = Effect.fn("HermesCron.make")(function* (
             providerInstanceId: input.providerInstanceId,
             operation: input.operation,
             message: "Hermes cron mutation outcome is indeterminate; automatic replay is disabled.",
+          });
+        }
+        if (cause instanceof HermesGatewayMutationsBlockedError) {
+          return new HermesCronError({
+            code: "indeterminate",
+            providerInstanceId: input.providerInstanceId,
+            operation: input.operation,
+            message:
+              "Hermes cron mutations are blocked until indeterminate operations are reconciled.",
+          });
+        }
+        if (cause instanceof HermesGatewayConfigurationError) {
+          return new HermesCronError({
+            code: "invalid_input",
+            providerInstanceId: input.providerInstanceId,
+            operation: input.operation,
+            message:
+              "Hermes cron mutation operation id was already used; duplicate submissions are not replayed.",
           });
         }
         return new HermesCronError({

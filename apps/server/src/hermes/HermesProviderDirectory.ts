@@ -6,6 +6,12 @@ import {
 import * as Schema from "effect/Schema";
 
 import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
+import {
+  HERMES_REMOTE_PAIRING_TOKEN_ENV,
+  HERMES_REMOTE_TLS_CERT_SHA256_ENV,
+  assessHermesConnectionSecurity,
+} from "./HermesConnectionSecurity.ts";
+import { resolveHermesServeEndpoint } from "./HermesServeRuntime.ts";
 
 export interface HermesProviderConnection {
   readonly providerInstanceId: string;
@@ -29,19 +35,19 @@ export interface HermesProviderDirectory {
 
 const decodeHermesSettings = Schema.decodeUnknownSync(HermesSettings);
 
-const gatewayTokenFromEnvironment = (
-  environment: ReadonlyArray<{
-    readonly name: string;
-    readonly value: string;
-    readonly sensitive: boolean;
-  }>,
-) =>
+type SensitiveEnvironment = ReadonlyArray<{
+  readonly name: string;
+  readonly value: string;
+  readonly sensitive: boolean;
+}>;
+
+const sensitiveEnvironmentValue = (environment: SensitiveEnvironment, name: string) =>
   environment.find(
-    (variable) =>
-      variable.name === "HERMES_GATEWAY_TOKEN" &&
-      variable.sensitive &&
-      variable.value.trim().length > 0,
+    (variable) => variable.name === name && variable.sensitive && variable.value.trim().length > 0,
   )?.value;
+
+const gatewayTokenFromEnvironment = (environment: SensitiveEnvironment) =>
+  sensitiveEnvironmentValue(environment, "HERMES_GATEWAY_TOKEN");
 
 export function resolveHermesProviderConnections(
   settings: ServerSettings,
@@ -64,7 +70,8 @@ export function resolveHermesProviderConnections(
       continue;
     }
     const displayName = instance.displayName ?? providerInstanceId;
-    const token = gatewayTokenFromEnvironment(instance.environment ?? []);
+    const environment = instance.environment ?? [];
+    const token = gatewayTokenFromEnvironment(environment);
     if (instance.enabled !== true || !settings.enableHermes) {
       unavailable.push({
         providerInstanceId,
@@ -72,7 +79,7 @@ export function resolveHermesProviderConnections(
         profileKey: config.profileKey,
         diagnostic: "Hermes is disabled.",
       });
-    } else if (!config.endpoint || !token) {
+    } else if (!token) {
       unavailable.push({
         providerInstanceId,
         displayName,
@@ -80,13 +87,33 @@ export function resolveHermesProviderConnections(
         diagnostic: "Hermes gateway endpoint or sensitive token is not configured.",
       });
     } else {
-      ready.push({
-        providerInstanceId,
-        displayName,
-        profileKey: config.profileKey,
-        endpoint: config.endpoint,
-        token,
+      const security = assessHermesConnectionSecurity({
+        endpoint: resolveHermesServeEndpoint(config.endpoint),
+        gatewayToken: token,
+        remoteGloballyEnabled: settings.enableRemoteHermes,
+        remoteInstanceEnabled: config.remoteAccessEnabled,
+        remotePairingToken: sensitiveEnvironmentValue(environment, HERMES_REMOTE_PAIRING_TOKEN_ENV),
+        remoteTlsCertificateSha256: sensitiveEnvironmentValue(
+          environment,
+          HERMES_REMOTE_TLS_CERT_SHA256_ENV,
+        ),
       });
+      if (security.status === "ready") {
+        ready.push({
+          providerInstanceId,
+          displayName,
+          profileKey: config.profileKey,
+          endpoint: security.endpoint,
+          token: security.authToken,
+        });
+      } else {
+        unavailable.push({
+          providerInstanceId,
+          displayName,
+          profileKey: config.profileKey,
+          diagnostic: security.message,
+        });
+      }
     }
   }
   return { ready, unavailable };

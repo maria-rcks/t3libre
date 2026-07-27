@@ -1084,6 +1084,55 @@ describe("HermesGatewayClient recovery", () => {
     client.close();
   });
 
+  it("does not release the fence when reconciling an unrelated mutation id", async () => {
+    const factory = new FakeSocketFactory();
+    const { client, socket } = await openClient(factory, {}, stableMutationReady);
+    const prompt = client.submitPrompt(
+      { session_id: "session-1", text: "private" },
+      {
+        operationId: "prompt-fenced-operation",
+        mutationId: "prompt-fenced-mutation",
+      },
+    );
+    let frame = sentFrames(socket).at(-1)!;
+    socket.receive(
+      success(frame.id, {
+        mutation_id: "prompt-fenced-mutation",
+        mutation_status: "indeterminate",
+        run_id: "run-fenced",
+        replayed: true,
+      }),
+    );
+    await expect(prompt).rejects.toBeInstanceOf(HermesGatewayMutationIndeterminateError);
+
+    const reconciliation = client.reconcileMutation("prompt-fenced-operation", "other-mutation");
+    frame = sentFrames(socket).at(-1)!;
+    expect(frame).toMatchObject({
+      method: "mutation.status",
+      params: { mutation_id: "other-mutation" },
+    });
+    socket.receive(success(frame.id, { mutation_status: "completed" }));
+    await expect(reconciliation).resolves.toEqual({ mutation_status: "completed" });
+
+    expect(client.mutationRecord("prompt-fenced-operation")?.state).toBe("indeterminate");
+    expect(client.writesBlocked).toBe(true);
+    client.close();
+  });
+
+  it("rejects sent mutations as indeterminate when the client is closed", async () => {
+    const factory = new FakeSocketFactory();
+    const { client } = await openClient(factory, {}, stableMutationReady);
+    const prompt = client.submitPrompt(
+      { session_id: "session-1", text: "private" },
+      { operationId: "prompt-closed-operation" },
+    );
+    const read = client.readSessionStatus({ session_id: "session-1" });
+    client.close();
+    await expect(prompt).rejects.toBeInstanceOf(HermesGatewayMutationIndeterminateError);
+    await expect(read).rejects.toBeInstanceOf(HermesGatewayConnectionError);
+    expect(client.mutationRecord("prompt-closed-operation")?.state).toBe("indeterminate");
+  });
+
   it("does not resurrect a client closed while beforeConnect is pending", async () => {
     const factory = new FakeSocketFactory();
     let release!: () => void;

@@ -908,7 +908,8 @@ export class HermesGatewayClient {
     operationId: string,
     mutationId?: string,
   ): Promise<HermesGatewayMutationStatusResultType> {
-    const wireMutationId = mutationId ?? this.mutations.get(operationId)?.mutationId ?? operationId;
+    const trackedMutationId = this.mutations.get(operationId)?.mutationId ?? operationId;
+    const wireMutationId = mutationId ?? trackedMutationId;
     const result = await this.read(
       "mutation.status",
       { mutation_id: wireMutationId },
@@ -918,6 +919,7 @@ export class HermesGatewayClient {
       },
     );
     const outcome = decodeResult(HermesGatewayMutationStatusResult, result, "mutation.status");
+    if (wireMutationId !== trackedMutationId) return outcome;
     const existing = this.mutations.get(operationId);
     if (outcome.mutation_status === "indeterminate") {
       this.setMutation({
@@ -1055,10 +1057,13 @@ export class HermesGatewayClient {
     this.socket = undefined;
     socket?.close(1000, "client closed");
     for (const pending of this.pending.values()) {
+      const sentMutation = pending.operation === "mutation" && pending.sent;
       this.rejectPending(
         pending,
-        new HermesGatewayConnectionError("Hermes gateway client closed."),
-        pending.operation === "mutation" && pending.sent,
+        sentMutation && pending.operationId
+          ? new HermesGatewayMutationIndeterminateError(pending.operationId, pending.method)
+          : new HermesGatewayConnectionError("Hermes gateway client closed."),
+        sentMutation,
       );
     }
   }

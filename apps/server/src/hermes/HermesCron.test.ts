@@ -15,6 +15,7 @@ import {
   projectHermesCronCapabilities,
   projectHermesCronJob,
 } from "./HermesCron.ts";
+import { HermesGatewayConfigurationError } from "./HermesGatewayClient.ts";
 
 const decodeProviderInstanceConfigMap = Schema.decodeUnknownSync(ProviderInstanceConfigMap);
 
@@ -230,6 +231,78 @@ describe("HermesCron mutate", () => {
         capabilities: { inventory: false, create: false },
         jobs: [],
       });
+    }).pipe(Effect.provide(settingsLayer)),
+  );
+
+  it.effect("projects an unsuccessful cron inventory response as a provider error", () =>
+    Effect.gen(function* () {
+      const cron = yield* makeHermesCron({
+        clientFactory: () => ({
+          compatibility,
+          connect: () => Promise.resolve(compatibility),
+          hasCapability: () => true,
+          listCronJobs: () =>
+            Promise.resolve({ success: false, jobs: [] } satisfies HermesGatewayCronListResult),
+          manageCron: () => Promise.reject(new Error("unused")),
+          close: () => {},
+        }),
+      });
+      const result = yield* cron.list();
+      const main = result.providers.find(
+        (candidate) => candidate.providerInstanceId === "hermes_main",
+      );
+      expect(main).toMatchObject({ status: "error", jobs: [] });
+      expect(main?.diagnostics).toContain(
+        "Hermes gateway reported an unsuccessful cron inventory response.",
+      );
+    }).pipe(Effect.provide(settingsLayer)),
+  );
+
+  it.effect("reuses one gateway client so a repeated operation id cannot replay", () =>
+    Effect.gen(function* () {
+      let factoryCalls = 0;
+      let executedMutations = 0;
+      const usedOperationIds = new Set<string>();
+      const cron = yield* makeHermesCron({
+        clientFactory: () => {
+          factoryCalls += 1;
+          return {
+            compatibility,
+            connect: () => Promise.resolve(compatibility),
+            hasCapability: () => true,
+            listCronJobs: () =>
+              Promise.resolve({ success: true, jobs: [] } satisfies HermesGatewayCronListResult),
+            manageCron: (_params, options) => {
+              if (usedOperationIds.has(options.operationId)) {
+                return Promise.reject(
+                  new HermesGatewayConfigurationError(
+                    `Hermes mutation operationId has already been used: ${options.operationId}`,
+                  ),
+                );
+              }
+              usedOperationIds.add(options.operationId);
+              executedMutations += 1;
+              return Promise.resolve({
+                success: true,
+                job_id: "job-1",
+              } satisfies HermesGatewayCronMutationResult);
+            },
+            close: () => {},
+          };
+        },
+      });
+      const input = {
+        providerInstanceId: "hermes_main",
+        operation: "run_now",
+        operationId: "op-repeated",
+        jobIdentity: "job-1",
+      } as const;
+      const first = yield* cron.mutate(input);
+      expect(first.upstreamJobId).toBe("job-1");
+      const failure = yield* cron.mutate(input).pipe(Effect.flip);
+      expect(failure.code).toBe("invalid_input");
+      expect(factoryCalls).toBe(1);
+      expect(executedMutations).toBe(1);
     }).pipe(Effect.provide(settingsLayer)),
   );
 
