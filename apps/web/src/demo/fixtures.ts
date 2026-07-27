@@ -491,7 +491,6 @@ export const demoShellSnapshot = primaryShell;
 
 /** Threads that open with the browser (right side panel) already visible. */
 export const demoBrowserPanelThreadKeys: ReadonlyArray<string> = [
-  `${DEMO_ENVIRONMENT_ID}:thread-hero`,
   "demo-mac-studio:thread-composer",
   "demo-build-server:thread-metrics",
 ];
