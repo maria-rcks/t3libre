@@ -1,10 +1,15 @@
 /**
  * In-browser demo backend for the marketing sidebar demo.
  *
- * Serves the real `WsRpcGroup` RPC contract over an in-memory WebSocket pair,
+ * Serves the real `WsRpcGroup` RPC contract over in-memory WebSocket pairs,
  * so the unmodified web app (Sidebar V2 included) runs against fixture data
  * with no real server. Command dispatches mutate the in-memory shell store and
  * broadcast the same stream events a real server would.
+ *
+ * Multiple demo environments run side by side: the primary (same-origin)
+ * environment plus fake remote machines on made-up HTTPS origins, each with
+ * its own shell store and RPC server. The network interceptors route requests
+ * by origin, which is how the demo showcases T3 Connect-style remotes.
  */
 import {
   type AuthAccessStreamEvent,
@@ -34,11 +39,12 @@ import { Socket, SocketServer } from "effect/unstable/socket";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import {
+  type DemoEnvironmentFixture,
   demoAttachmentUrlById,
-  demoDescriptor,
+  demoEnvironments,
   demoProjectFaviconUrlByCwd,
-  demoServerConfig,
-  demoShellSnapshot,
+  demoReviewDiffPreview,
+  demoThreadDiff,
   demoThreadDetails,
 } from "./fixtures";
 
@@ -132,100 +138,31 @@ interface DemoConnectionListener {
   (serverEndpoint: DemoSocketEndpoint): void;
 }
 
-const pendingServerEndpoints: Array<DemoSocketEndpoint> = [];
-let connectionListener: DemoConnectionListener | null = null;
+class DemoConnectionAcceptor {
+  private pending: Array<DemoSocketEndpoint> = [];
+  private listener: DemoConnectionListener | null = null;
 
-function acceptDemoConnection(listener: DemoConnectionListener): void {
-  connectionListener = listener;
-  for (const endpoint of pendingServerEndpoints.splice(0)) {
-    listener(endpoint);
-  }
-}
-
-function connectDemoClient(): DemoSocketEndpoint {
-  const client = new DemoSocketEndpoint();
-  const server = new DemoSocketEndpoint();
-  client.peer = server;
-  server.peer = client;
-  server.open();
-  client.open();
-  if (connectionListener) {
-    connectionListener(server);
-  } else {
-    pendingServerEndpoints.push(server);
-  }
-  return client;
-}
-
-// ---------------------------------------------------------------------------
-// Global WebSocket + fetch interception
-// ---------------------------------------------------------------------------
-
-function isDemoBackendUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url, window.location.origin);
-    return parsed.pathname === "/ws" || parsed.pathname.endsWith("/ws");
-  } catch {
-    return false;
-  }
-}
-
-export function installDemoNetworkInterceptors(): void {
-  const NativeWebSocket = globalThis.WebSocket;
-  const DemoWebSocket = function (this: unknown, url: string | URL, protocols?: unknown) {
-    const urlString = String(url);
-    if (isDemoBackendUrl(urlString)) {
-      return connectDemoClient() as unknown as WebSocket;
+  accept(listener: DemoConnectionListener): void {
+    this.listener = listener;
+    for (const endpoint of this.pending.splice(0)) {
+      listener(endpoint);
     }
-    return new NativeWebSocket(urlString, protocols as string | Array<string> | undefined);
-  } as unknown as typeof WebSocket;
-  DemoWebSocket.prototype = NativeWebSocket.prototype;
-  Object.assign(DemoWebSocket, {
-    CONNECTING: NativeWebSocket.CONNECTING,
-    OPEN: NativeWebSocket.OPEN,
-    CLOSING: NativeWebSocket.CLOSING,
-    CLOSED: NativeWebSocket.CLOSED,
-  });
-  globalThis.WebSocket = DemoWebSocket;
+  }
 
-  const nativeFetch = globalThis.fetch.bind(globalThis);
-  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const urlString =
-      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    const parsed = new URL(urlString, window.location.origin);
-    if (parsed.origin === window.location.origin) {
-      if (parsed.pathname === "/.well-known/t3/environment") {
-        return Promise.resolve(jsonResponse(demoDescriptor));
-      }
-      if (parsed.pathname === "/api/auth/session") {
-        return Promise.resolve(
-          jsonResponse({
-            authenticated: true,
-            auth: demoServerConfig.auth,
-            scopes: [
-              "orchestration:read",
-              "orchestration:operate",
-              "terminal:operate",
-              "review:write",
-              "access:read",
-              "access:write",
-            ],
-          }),
-        );
-      }
-      if (parsed.pathname === "/api/orchestration/shell") {
-        return Promise.resolve(jsonResponse(shellStore.snapshot()));
-      }
+  connectClient(): DemoSocketEndpoint {
+    const client = new DemoSocketEndpoint();
+    const server = new DemoSocketEndpoint();
+    client.peer = server;
+    server.peer = client;
+    server.open();
+    client.open();
+    if (this.listener) {
+      this.listener(server);
+    } else {
+      this.pending.push(server);
     }
-    return nativeFetch(input, init);
-  };
-}
-
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
+    return client;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +278,54 @@ class DemoShellStore {
       case "thread.delete": {
         return this.removeThread(command.threadId);
       }
+      case "thread.settle": {
+        const thread = this.threads.get(command.threadId);
+        if (!thread) {
+          return this.sequence;
+        }
+        return this.upsertThread({
+          ...thread,
+          settledOverride: "settled",
+          settledAt: nowIso,
+          updatedAt: nowIso,
+        });
+      }
+      case "thread.unsettle": {
+        const thread = this.threads.get(command.threadId);
+        if (!thread) {
+          return this.sequence;
+        }
+        return this.upsertThread({
+          ...thread,
+          settledOverride: "active",
+          settledAt: nowIso,
+          updatedAt: nowIso,
+        });
+      }
+      case "thread.snooze": {
+        const thread = this.threads.get(command.threadId);
+        if (!thread) {
+          return this.sequence;
+        }
+        return this.upsertThread({
+          ...thread,
+          snoozedUntil: command.snoozedUntil,
+          snoozedAt: nowIso,
+          updatedAt: nowIso,
+        });
+      }
+      case "thread.unsnooze": {
+        const thread = this.threads.get(command.threadId);
+        if (!thread) {
+          return this.sequence;
+        }
+        return this.upsertThread({
+          ...thread,
+          snoozedUntil: null,
+          snoozedAt: null,
+          updatedAt: nowIso,
+        });
+      }
       case "thread.meta.update": {
         const thread = this.threads.get(command.threadId);
         if (!thread) {
@@ -400,7 +385,123 @@ class DemoShellStore {
   }
 }
 
-const shellStore = new DemoShellStore(demoShellSnapshot);
+// ---------------------------------------------------------------------------
+// Per-environment backend
+// ---------------------------------------------------------------------------
+
+interface DemoBackend {
+  readonly fixture: DemoEnvironmentFixture;
+  readonly store: DemoShellStore;
+  readonly acceptor: DemoConnectionAcceptor;
+}
+
+const demoBackends: ReadonlyArray<DemoBackend> = demoEnvironments.map((fixture) => ({
+  fixture,
+  store: new DemoShellStore(fixture.shellSnapshot),
+  acceptor: new DemoConnectionAcceptor(),
+}));
+
+function backendForOrigin(origin: string): DemoBackend | undefined {
+  return demoBackends.find(
+    (backend) => (backend.fixture.origin ?? window.location.origin) === origin,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Global WebSocket + fetch interception
+// ---------------------------------------------------------------------------
+
+export function installDemoNetworkInterceptors(): void {
+  const NativeWebSocket = globalThis.WebSocket;
+  const DemoWebSocket = function (this: unknown, url: string | URL, protocols?: unknown) {
+    const urlString = String(url);
+    try {
+      const parsed = new URL(urlString, window.location.origin);
+      if (parsed.pathname === "/ws" || parsed.pathname.endsWith("/ws")) {
+        const backend = backendForOrigin(parsed.origin.replace(/^ws(s?):/, "http$1:"));
+        if (backend) {
+          return backend.acceptor.connectClient() as unknown as WebSocket;
+        }
+      }
+    } catch {
+      // fall through to the native socket
+    }
+    return new NativeWebSocket(urlString, protocols as string | Array<string> | undefined);
+  } as unknown as typeof WebSocket;
+  DemoWebSocket.prototype = NativeWebSocket.prototype;
+  Object.assign(DemoWebSocket, {
+    CONNECTING: NativeWebSocket.CONNECTING,
+    OPEN: NativeWebSocket.OPEN,
+    CLOSING: NativeWebSocket.CLOSING,
+    CLOSED: NativeWebSocket.CLOSED,
+  });
+  globalThis.WebSocket = DemoWebSocket;
+
+  const nativeFetch = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const urlString =
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const parsed = new URL(urlString, window.location.origin);
+    const backend = backendForOrigin(parsed.origin);
+    if (backend) {
+      const response = demoHttpResponse(backend, parsed);
+      if (response) {
+        return Promise.resolve(response);
+      }
+      if (backend.fixture.origin !== null) {
+        // Never let requests to a fake remote origin hit the real network.
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }
+    }
+    return nativeFetch(input, init);
+  };
+}
+
+function demoHttpResponse(backend: DemoBackend, url: URL): Response | null {
+  const fixture = backend.fixture;
+  if (url.pathname === "/.well-known/t3/environment") {
+    return jsonResponse(fixture.descriptor);
+  }
+  if (url.pathname === "/api/auth/session") {
+    return jsonResponse({
+      authenticated: true,
+      auth: fixture.serverConfig.auth,
+      scopes: [
+        "orchestration:read",
+        "orchestration:operate",
+        "terminal:operate",
+        "review:write",
+        "access:read",
+        "access:write",
+      ],
+    });
+  }
+  if (url.pathname === "/api/auth/websocket-ticket") {
+    return jsonResponse({
+      ticket: `demo-ticket-${fixture.environmentId}`,
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+    });
+  }
+  if (url.pathname === "/api/orchestration/shell") {
+    return jsonResponse(backend.store.snapshot());
+  }
+  const threadMatch = url.pathname.match(/^\/api\/orchestration\/threads\/([^/]+)$/);
+  if (threadMatch) {
+    const thread = backend.store.thread(decodeURIComponent(threadMatch[1] ?? ""));
+    if (!thread) {
+      return new Response(null, { status: 404 });
+    }
+    return jsonResponse(threadDetailSnapshot(thread));
+  }
+  return null;
+}
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
 
 // ---------------------------------------------------------------------------
 // RPC handlers
@@ -414,13 +515,13 @@ const unsupportedError = (method: string) =>
 
 const unsupported = (method: string) => Effect.fail(unsupportedError(method));
 
-function shellStream(): Stream.Stream<OrchestrationShellStreamItem> {
+function shellStream(store: DemoShellStore): Stream.Stream<OrchestrationShellStreamItem> {
   return Stream.unwrap(
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<OrchestrationShellStreamItem>();
       yield* Effect.acquireRelease(
         Effect.sync(() =>
-          shellStore.subscribe((item) => {
+          store.subscribe((item) => {
             Queue.offerUnsafe(queue, item);
           }),
         ),
@@ -451,6 +552,8 @@ function threadDetailSnapshot(thread: OrchestrationThreadShell): OrchestrationTh
       deletedAt: null,
       settledOverride: thread.settledOverride,
       settledAt: thread.settledAt,
+      ...(thread.snoozedUntil !== undefined ? { snoozedUntil: thread.snoozedUntil } : {}),
+      ...(thread.snoozedAt !== undefined ? { snoozedAt: thread.snoozedAt } : {}),
       messages: detail?.messages ?? [],
       proposedPlans: [],
       activities: detail?.activities ?? [],
@@ -476,196 +579,208 @@ const EMPTY_VCS_STATUS: VcsStatusStreamEvent = {
 const demoStartedAtIso = new Date().toISOString();
 const demoAssetsExpireAt = Date.now() + 24 * 60 * 60 * 1000;
 
-const serverConfigSnapshot: ServerConfigStreamEvent = {
-  version: 1,
-  type: "snapshot",
-  config: demoServerConfig,
-};
-const lifecycleReady: ServerLifecycleStreamEvent = {
-  version: 1,
-  sequence: 1,
-  type: "ready",
-  payload: { at: demoStartedAtIso, environment: demoDescriptor },
-};
-const authAccessSnapshot: AuthAccessStreamEvent = {
-  version: 1,
-  revision: 1,
-  type: "snapshot",
-  payload: { pairingLinks: [], clientSessions: [] },
-};
-const noLocalServers: DiscoveredLocalServerList = {
-  servers: [],
-  scannedAt: demoStartedAtIso,
-};
+function makeHandlersLayer(backend: DemoBackend) {
+  const { fixture, store } = backend;
+  const serverConfigSnapshot: ServerConfigStreamEvent = {
+    version: 1,
+    type: "snapshot",
+    config: fixture.serverConfig,
+  };
+  const lifecycleReady: ServerLifecycleStreamEvent = {
+    version: 1,
+    sequence: 1,
+    type: "ready",
+    payload: { at: demoStartedAtIso, environment: fixture.descriptor },
+  };
+  const authAccessSnapshot: AuthAccessStreamEvent = {
+    version: 1,
+    revision: 1,
+    type: "snapshot",
+    payload: { pairingLinks: [], clientSessions: [] },
+  };
+  const noLocalServers: DiscoveredLocalServerList = {
+    servers: [],
+    scannedAt: demoStartedAtIso,
+  };
 
-const handlersLayer = WsRpcGroup.toLayer(
-  Effect.sync(() => {
-    return {
-      [WS_METHODS.serverProbe]: () => Effect.succeed({}),
-      [WS_METHODS.serverGetConfig]: () => Effect.succeed(demoServerConfig),
-      [WS_METHODS.serverGetSettings]: () => Effect.succeed(demoServerConfig.settings),
-      [WS_METHODS.serverUpdateSettings]: () => Effect.succeed(demoServerConfig.settings),
-      [WS_METHODS.serverRefreshProviders]: () =>
-        Effect.succeed({ providers: demoServerConfig.providers }),
-      [WS_METHODS.subscribeServerConfig]: () =>
-        Stream.concat(Stream.make(serverConfigSnapshot), Stream.never),
-      [WS_METHODS.subscribeServerLifecycle]: () =>
-        Stream.concat(Stream.make(lifecycleReady), Stream.never),
-      [WS_METHODS.subscribeAuthAccess]: () =>
-        Stream.concat(Stream.make(authAccessSnapshot), Stream.never),
-      [WS_METHODS.subscribeDiscoveredLocalServers]: () =>
-        Stream.concat(Stream.make(noLocalServers), Stream.never),
-      [WS_METHODS.subscribeTerminalEvents]: () => Stream.never,
-      [WS_METHODS.subscribeTerminalMetadata]: () => Stream.never,
-      [WS_METHODS.subscribePreviewEvents]: () => Stream.never,
-      [WS_METHODS.subscribeVcsStatus]: () =>
-        Stream.concat(Stream.make(EMPTY_VCS_STATUS), Stream.never),
-      [ORCHESTRATION_WS_METHODS.subscribeShell]: (input) => {
-        const live = shellStream();
-        if (input.afterSequence !== undefined) {
-          return live;
-        }
-        const snapshotItem: OrchestrationShellStreamItem = {
-          kind: "snapshot",
-          snapshot: shellStore.snapshot(),
-        };
-        return Stream.concat(Stream.make(snapshotItem), live);
-      },
-      [ORCHESTRATION_WS_METHODS.subscribeThread]: (input) =>
-        Stream.unwrap(
+  return WsRpcGroup.toLayer(
+    Effect.sync(() => {
+      return {
+        [WS_METHODS.serverProbe]: () => Effect.succeed({}),
+        [WS_METHODS.serverGetConfig]: () => Effect.succeed(fixture.serverConfig),
+        [WS_METHODS.serverGetSettings]: () => Effect.succeed(fixture.serverConfig.settings),
+        [WS_METHODS.serverUpdateSettings]: () => Effect.succeed(fixture.serverConfig.settings),
+        [WS_METHODS.serverRefreshProviders]: () =>
+          Effect.succeed({ providers: fixture.serverConfig.providers }),
+        [WS_METHODS.subscribeServerConfig]: () =>
+          Stream.concat(Stream.make(serverConfigSnapshot), Stream.never),
+        [WS_METHODS.subscribeServerLifecycle]: () =>
+          Stream.concat(Stream.make(lifecycleReady), Stream.never),
+        [WS_METHODS.subscribeAuthAccess]: () =>
+          Stream.concat(Stream.make(authAccessSnapshot), Stream.never),
+        [WS_METHODS.subscribeDiscoveredLocalServers]: () =>
+          Stream.concat(Stream.make(noLocalServers), Stream.never),
+        [WS_METHODS.subscribeTerminalEvents]: () => Stream.never,
+        [WS_METHODS.subscribeTerminalMetadata]: () => Stream.never,
+        [WS_METHODS.subscribePreviewEvents]: () => Stream.never,
+        [WS_METHODS.subscribeVcsStatus]: () =>
+          Stream.concat(Stream.make(EMPTY_VCS_STATUS), Stream.never),
+        [ORCHESTRATION_WS_METHODS.subscribeShell]: (input) => {
+          const live = shellStream(store);
+          if (input.afterSequence !== undefined) {
+            return live;
+          }
+          const snapshotItem: OrchestrationShellStreamItem = {
+            kind: "snapshot",
+            snapshot: store.snapshot(),
+          };
+          return Stream.concat(Stream.make(snapshotItem), live);
+        },
+        [ORCHESTRATION_WS_METHODS.subscribeThread]: (input) =>
+          Stream.unwrap(
+            Effect.sync(() => {
+              const thread = store.thread(input.threadId);
+              if (!thread) {
+                return Stream.fail(
+                  new OrchestrationGetSnapshotError({ message: "Thread not found" }),
+                );
+              }
+              const snapshotItem: OrchestrationThreadStreamItem = {
+                kind: "snapshot",
+                snapshot: threadDetailSnapshot(thread),
+              };
+              return Stream.concat(Stream.make(snapshotItem), Stream.never);
+            }),
+          ),
+        [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
+          Effect.sync(() => ({ sequence: store.dispatch(command) })),
+        [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: () =>
+          Effect.sync(() => store.snapshot()),
+        [ORCHESTRATION_WS_METHODS.getTurnDiff]: (input) =>
+          Effect.succeed(demoThreadDiff(input.threadId, input.fromTurnCount, input.toTurnCount)),
+        [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: (input) =>
+          Effect.succeed(demoThreadDiff(input.threadId, 0, input.toTurnCount)),
+        [ORCHESTRATION_WS_METHODS.replayEvents]: () => Effect.succeed([]),
+        [WS_METHODS.serverUpdateProvider]: () => unsupported("serverUpdateProvider"),
+        [WS_METHODS.serverUpdateServer]: () => unsupported("serverUpdateServer"),
+        [WS_METHODS.serverUpsertKeybinding]: () => unsupported("serverUpsertKeybinding"),
+        [WS_METHODS.serverRemoveKeybinding]: () => unsupported("serverRemoveKeybinding"),
+        [WS_METHODS.serverDiscoverSourceControl]: () => unsupported("serverDiscoverSourceControl"),
+        [WS_METHODS.serverGetTraceDiagnostics]: () => unsupported("serverGetTraceDiagnostics"),
+        [WS_METHODS.serverGetProcessDiagnostics]: () => unsupported("serverGetProcessDiagnostics"),
+        [WS_METHODS.serverGetProcessResourceHistory]: () =>
+          unsupported("serverGetProcessResourceHistory"),
+        [WS_METHODS.serverSignalProcess]: () => unsupported("serverSignalProcess"),
+        [WS_METHODS.cloudGetRelayClientStatus]: () => unsupported("cloudGetRelayClientStatus"),
+        [WS_METHODS.cloudInstallRelayClient]: () =>
+          Stream.fail(unsupportedError("cloudInstallRelayClient")),
+        [WS_METHODS.sourceControlLookupRepository]: () =>
+          unsupported("sourceControlLookupRepository"),
+        [WS_METHODS.sourceControlCloneRepository]: () =>
+          unsupported("sourceControlCloneRepository"),
+        [WS_METHODS.sourceControlPublishRepository]: () =>
+          unsupported("sourceControlPublishRepository"),
+        [WS_METHODS.projectsListEntries]: () => unsupported("projectsListEntries"),
+        [WS_METHODS.projectsReadFile]: () => unsupported("projectsReadFile"),
+        [WS_METHODS.projectsSearchEntries]: () => unsupported("projectsSearchEntries"),
+        [WS_METHODS.projectsWriteFile]: () => unsupported("projectsWriteFile"),
+        [WS_METHODS.shellOpenInEditor]: () => unsupported("shellOpenInEditor"),
+        [WS_METHODS.filesystemBrowse]: () => unsupported("filesystemBrowse"),
+        [WS_METHODS.assetsCreateUrl]: (input) =>
           Effect.sync(() => {
-            const thread = shellStore.thread(input.threadId);
-            if (!thread) {
-              return Stream.fail(
-                new OrchestrationGetSnapshotError({ message: "Thread not found" }),
-              );
-            }
-            const snapshotItem: OrchestrationThreadStreamItem = {
-              kind: "snapshot",
-              snapshot: threadDetailSnapshot(thread),
-            };
-            return Stream.concat(Stream.make(snapshotItem), Stream.never);
+            const expiresAt = demoAssetsExpireAt;
+            const resource = input.resource;
+            const relativeUrl =
+              resource._tag === "project-favicon"
+                ? (demoProjectFaviconUrlByCwd[resource.cwd] ??
+                  `/${PROJECT_FAVICON_FALLBACK_MARKER}`)
+                : resource._tag === "attachment"
+                  ? demoAttachmentUrlById[resource.attachmentId]
+                  : undefined;
+            return { relativeUrl: relativeUrl ?? `/${PROJECT_FAVICON_FALLBACK_MARKER}`, expiresAt };
           }),
-        ),
-      [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
-        Effect.sync(() => ({ sequence: shellStore.dispatch(command) })),
-      [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: () =>
-        Effect.sync(() => shellStore.snapshot()),
-      [ORCHESTRATION_WS_METHODS.getTurnDiff]: () => unsupported("getTurnDiff"),
-      [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: () => unsupported("getFullThreadDiff"),
-      [ORCHESTRATION_WS_METHODS.replayEvents]: () => Effect.succeed([]),
-      [WS_METHODS.serverUpdateProvider]: () => unsupported("serverUpdateProvider"),
-      [WS_METHODS.serverUpdateServer]: () => unsupported("serverUpdateServer"),
-      [WS_METHODS.serverUpsertKeybinding]: () => unsupported("serverUpsertKeybinding"),
-      [WS_METHODS.serverRemoveKeybinding]: () => unsupported("serverRemoveKeybinding"),
-      [WS_METHODS.serverDiscoverSourceControl]: () => unsupported("serverDiscoverSourceControl"),
-      [WS_METHODS.serverGetTraceDiagnostics]: () => unsupported("serverGetTraceDiagnostics"),
-      [WS_METHODS.serverGetProcessDiagnostics]: () => unsupported("serverGetProcessDiagnostics"),
-      [WS_METHODS.serverGetProcessResourceHistory]: () =>
-        unsupported("serverGetProcessResourceHistory"),
-      [WS_METHODS.serverSignalProcess]: () => unsupported("serverSignalProcess"),
-      [WS_METHODS.cloudGetRelayClientStatus]: () => unsupported("cloudGetRelayClientStatus"),
-      [WS_METHODS.cloudInstallRelayClient]: () =>
-        Stream.fail(unsupportedError("cloudInstallRelayClient")),
-      [WS_METHODS.sourceControlLookupRepository]: () =>
-        unsupported("sourceControlLookupRepository"),
-      [WS_METHODS.sourceControlCloneRepository]: () => unsupported("sourceControlCloneRepository"),
-      [WS_METHODS.sourceControlPublishRepository]: () =>
-        unsupported("sourceControlPublishRepository"),
-      [WS_METHODS.projectsListEntries]: () => unsupported("projectsListEntries"),
-      [WS_METHODS.projectsReadFile]: () => unsupported("projectsReadFile"),
-      [WS_METHODS.projectsSearchEntries]: () => unsupported("projectsSearchEntries"),
-      [WS_METHODS.projectsWriteFile]: () => unsupported("projectsWriteFile"),
-      [WS_METHODS.shellOpenInEditor]: () => unsupported("shellOpenInEditor"),
-      [WS_METHODS.filesystemBrowse]: () => unsupported("filesystemBrowse"),
-      [WS_METHODS.assetsCreateUrl]: (input) =>
-        Effect.sync(() => {
-          const expiresAt = demoAssetsExpireAt;
-          const resource = input.resource;
-          const relativeUrl =
-            resource._tag === "project-favicon"
-              ? (demoProjectFaviconUrlByCwd[resource.cwd] ?? `/${PROJECT_FAVICON_FALLBACK_MARKER}`)
-              : resource._tag === "attachment"
-                ? demoAttachmentUrlById[resource.attachmentId]
-                : undefined;
-          return { relativeUrl: relativeUrl ?? `/${PROJECT_FAVICON_FALLBACK_MARKER}`, expiresAt };
-        }),
-      [WS_METHODS.vcsPull]: () => unsupported("vcsPull"),
-      [WS_METHODS.vcsRefreshStatus]: () => unsupported("vcsRefreshStatus"),
-      [WS_METHODS.gitRunStackedAction]: () => Stream.fail(unsupportedError("gitRunStackedAction")),
-      [WS_METHODS.gitResolvePullRequest]: () => unsupported("gitResolvePullRequest"),
-      [WS_METHODS.gitPreparePullRequestThread]: () => unsupported("gitPreparePullRequestThread"),
-      [WS_METHODS.vcsListRefs]: () =>
-        Effect.succeed({
-          refs: [],
-          isRepo: true,
-          hasPrimaryRemote: false,
-          nextCursor: null,
-          totalCount: 0,
-        }),
-      [WS_METHODS.vcsCreateWorktree]: () => unsupported("vcsCreateWorktree"),
-      [WS_METHODS.vcsRemoveWorktree]: () => unsupported("vcsRemoveWorktree"),
-      [WS_METHODS.vcsCreateRef]: () => unsupported("vcsCreateRef"),
-      [WS_METHODS.vcsSwitchRef]: () => unsupported("vcsSwitchRef"),
-      [WS_METHODS.vcsInit]: () => unsupported("vcsInit"),
-      [WS_METHODS.reviewGetDiffPreview]: () => unsupported("reviewGetDiffPreview"),
-      [WS_METHODS.terminalOpen]: () => unsupported("terminalOpen"),
-      [WS_METHODS.terminalAttach]: () => Stream.fail(unsupportedError("terminalAttach")),
-      [WS_METHODS.terminalWrite]: () => unsupported("terminalWrite"),
-      [WS_METHODS.terminalResize]: () => unsupported("terminalResize"),
-      [WS_METHODS.terminalClear]: () => unsupported("terminalClear"),
-      [WS_METHODS.terminalRestart]: () => unsupported("terminalRestart"),
-      [WS_METHODS.terminalClose]: () => unsupported("terminalClose"),
-      [WS_METHODS.previewOpen]: () => unsupported("previewOpen"),
-      [WS_METHODS.previewNavigate]: () => unsupported("previewNavigate"),
-      [WS_METHODS.previewResize]: () => unsupported("previewResize"),
-      [WS_METHODS.previewRefresh]: () => unsupported("previewRefresh"),
-      [WS_METHODS.previewClose]: () => unsupported("previewClose"),
-      [WS_METHODS.previewList]: () => Effect.succeed({ sessions: [] }),
-      [WS_METHODS.previewReportStatus]: () => unsupported("previewReportStatus"),
-      [WS_METHODS.previewAutomationConnect]: () =>
-        Stream.fail(unsupportedError("previewAutomationConnect")),
-      [WS_METHODS.previewAutomationRespond]: () => unsupported("previewAutomationRespond"),
-      [WS_METHODS.previewAutomationFocusHost]: () => unsupported("previewAutomationFocusHost"),
-    };
-  }),
-);
+        [WS_METHODS.vcsPull]: () => unsupported("vcsPull"),
+        [WS_METHODS.vcsRefreshStatus]: () => unsupported("vcsRefreshStatus"),
+        [WS_METHODS.gitRunStackedAction]: () =>
+          Stream.fail(unsupportedError("gitRunStackedAction")),
+        [WS_METHODS.gitResolvePullRequest]: () => unsupported("gitResolvePullRequest"),
+        [WS_METHODS.gitPreparePullRequestThread]: () => unsupported("gitPreparePullRequestThread"),
+        [WS_METHODS.vcsListRefs]: () =>
+          Effect.succeed({
+            refs: [],
+            isRepo: true,
+            hasPrimaryRemote: false,
+            nextCursor: null,
+            totalCount: 0,
+          }),
+        [WS_METHODS.vcsCreateWorktree]: () => unsupported("vcsCreateWorktree"),
+        [WS_METHODS.vcsRemoveWorktree]: () => unsupported("vcsRemoveWorktree"),
+        [WS_METHODS.vcsCreateRef]: () => unsupported("vcsCreateRef"),
+        [WS_METHODS.vcsSwitchRef]: () => unsupported("vcsSwitchRef"),
+        [WS_METHODS.vcsInit]: () => unsupported("vcsInit"),
+        [WS_METHODS.reviewGetDiffPreview]: (input) =>
+          Effect.succeed(demoReviewDiffPreview(input.cwd)),
+        [WS_METHODS.terminalOpen]: () => unsupported("terminalOpen"),
+        [WS_METHODS.terminalAttach]: () => Stream.fail(unsupportedError("terminalAttach")),
+        [WS_METHODS.terminalWrite]: () => unsupported("terminalWrite"),
+        [WS_METHODS.terminalResize]: () => unsupported("terminalResize"),
+        [WS_METHODS.terminalClear]: () => unsupported("terminalClear"),
+        [WS_METHODS.terminalRestart]: () => unsupported("terminalRestart"),
+        [WS_METHODS.terminalClose]: () => unsupported("terminalClose"),
+        [WS_METHODS.previewOpen]: () => unsupported("previewOpen"),
+        [WS_METHODS.previewNavigate]: () => unsupported("previewNavigate"),
+        [WS_METHODS.previewResize]: () => unsupported("previewResize"),
+        [WS_METHODS.previewRefresh]: () => unsupported("previewRefresh"),
+        [WS_METHODS.previewClose]: () => unsupported("previewClose"),
+        [WS_METHODS.previewList]: () => Effect.succeed({ sessions: [] }),
+        [WS_METHODS.previewReportStatus]: () => unsupported("previewReportStatus"),
+        [WS_METHODS.previewAutomationConnect]: () =>
+          Stream.fail(unsupportedError("previewAutomationConnect")),
+        [WS_METHODS.previewAutomationRespond]: () => unsupported("previewAutomationRespond"),
+        [WS_METHODS.previewAutomationFocusHost]: () => unsupported("previewAutomationFocusHost"),
+      };
+    }),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // SocketServer wiring
 // ---------------------------------------------------------------------------
 
-const demoSocketServerLayer = Layer.succeed(
-  SocketServer.SocketServer,
-  SocketServer.SocketServer.of({
-    address: { _tag: "TcpAddress", hostname: "demo", port: 0 },
-    run: <R, E, _>(handler: (socket: Socket.Socket) => Effect.Effect<_, E, R>) =>
-      Effect.gen(function* () {
-        const queue = yield* Queue.unbounded<DemoSocketEndpoint>();
-        acceptDemoConnection((endpoint) => {
-          Queue.offerUnsafe(queue, endpoint);
-        });
-        return yield* Queue.take(queue).pipe(
-          Effect.flatMap((endpoint) =>
-            Socket.fromWebSocket(Effect.succeed(endpoint as unknown as globalThis.WebSocket)).pipe(
-              Effect.flatMap((socket) => Effect.forkChild(handler(socket))),
+function makeSocketServerLayer(backend: DemoBackend) {
+  return Layer.succeed(
+    SocketServer.SocketServer,
+    SocketServer.SocketServer.of({
+      address: { _tag: "TcpAddress", hostname: backend.fixture.environmentId, port: 0 },
+      run: <R, E, _>(handler: (socket: Socket.Socket) => Effect.Effect<_, E, R>) =>
+        Effect.gen(function* () {
+          const queue = yield* Queue.unbounded<DemoSocketEndpoint>();
+          backend.acceptor.accept((endpoint) => {
+            Queue.offerUnsafe(queue, endpoint);
+          });
+          return yield* Queue.take(queue).pipe(
+            Effect.flatMap((endpoint) =>
+              Socket.fromWebSocket(
+                Effect.succeed(endpoint as unknown as globalThis.WebSocket),
+              ).pipe(Effect.flatMap((socket) => Effect.forkChild(handler(socket)))),
             ),
-          ),
-          Effect.forever,
-        );
-      }),
-  }),
-);
+            Effect.forever,
+          );
+        }),
+    }),
+  );
+}
 
 export function startDemoServer(): void {
   installDemoNetworkInterceptors();
 
-  const serverLayer = RpcServer.layer(WsRpcGroup, { disableTracing: true }).pipe(
-    Layer.provide(handlersLayer),
-    Layer.provide(RpcServer.layerProtocolSocketServer),
-    Layer.provide(demoSocketServerLayer),
-    Layer.provide(RpcSerialization.layerJson),
-  );
-
-  Effect.runFork(Layer.launch(serverLayer));
+  for (const backend of demoBackends) {
+    const serverLayer = RpcServer.layer(WsRpcGroup, { disableTracing: true }).pipe(
+      Layer.provide(makeHandlersLayer(backend)),
+      Layer.provide(RpcServer.layerProtocolSocketServer),
+      Layer.provide(makeSocketServerLayer(backend)),
+      Layer.provide(RpcSerialization.layerJson),
+    );
+    Effect.runFork(Layer.launch(serverLayer));
+  }
 }
