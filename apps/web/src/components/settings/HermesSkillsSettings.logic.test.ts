@@ -5,6 +5,7 @@ import {
   formatSkillNames,
   formatSkillsReloadSummary,
   skillsBlockedDiagnostic,
+  skillsNegotiationFooter,
 } from "./HermesSkillsSettings.logic";
 
 const provider = (
@@ -56,5 +57,34 @@ describe("skillsBlockedDiagnostic", () => {
     expect(skillsBlockedDiagnostic(provider({ status: "error", diagnostics: [] }))).toBe(
       "Hermes skills are unavailable for this provider.",
     );
+  });
+});
+
+describe("skillsNegotiationFooter", () => {
+  it("returns no footer when a provider is ready or none are configured", () => {
+    expect(skillsNegotiationFooter([])).toBeNull();
+    expect(
+      skillsNegotiationFooter([
+        provider({ status: "ready" }),
+        provider({ status: "error", protocolClassification: null }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("shows the footer only for capability-blocked gateways", () => {
+    expect(
+      skillsNegotiationFooter([
+        provider({ status: "unavailable", protocolClassification: "legacy" }),
+      ]),
+    ).toBe("Skills access requires a gateway with a negotiated skills.manage capability.");
+  });
+
+  it("stays silent for unreachable or misconfigured providers", () => {
+    expect(
+      skillsNegotiationFooter([
+        provider({ status: "error", protocolClassification: null }),
+        provider({ status: "unavailable", protocolClassification: null }),
+      ]),
+    ).toBeNull();
   });
 });

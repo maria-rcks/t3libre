@@ -8,7 +8,10 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import * as ServerSettings from "../serverSettings.ts";
-import { HermesGatewayMutationsBlockedError } from "./HermesGatewayClient.ts";
+import {
+  HermesGatewayConnectionError,
+  HermesGatewayMutationsBlockedError,
+} from "./HermesGatewayClient.ts";
 import {
   flattenHermesGatewaySkillsList,
   makeHermesSkills,
@@ -296,6 +299,29 @@ describe("HermesSkills service", () => {
         .pipe(Effect.flip);
       expect(failure).toBeInstanceOf(HermesSkillsError);
       expect(failure.code).toBe("gateway_error");
+    }).pipe(Effect.provide(settingsLayer)),
+  );
+
+  it.effect("reports connection failures as unreachable instead of a capability problem", () =>
+    Effect.gen(function* () {
+      const skills = yield* makeHermesSkills({
+        clientFactory: () =>
+          makeClient(supportedCompatibility, {
+            connect: () => Promise.reject(new HermesGatewayConnectionError("socket closed")),
+          }),
+      });
+      const result = yield* skills.list();
+      const main = result.providers.find(
+        (candidate) => candidate.providerInstanceId === "hermes_main",
+      );
+      expect(main).toMatchObject({ status: "error" });
+      expect(main?.diagnostics).toContain("Could not connect to the Hermes gateway.");
+
+      const failure = yield* skills
+        .search({ providerInstanceId: "hermes_main", query: "hub" })
+        .pipe(Effect.flip);
+      expect(failure.code).toBe("gateway_error");
+      expect(failure.message).toBe("Could not connect to the Hermes gateway.");
     }).pipe(Effect.provide(settingsLayer)),
   );
 

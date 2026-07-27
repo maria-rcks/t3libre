@@ -24,6 +24,7 @@ import * as Schema from "effect/Schema";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   HermesGatewayClient,
+  HermesGatewayConnectionError,
   HermesGatewayMutationIndeterminateError,
   HermesGatewayMutationsBlockedError,
   type HermesGatewayMutationOptions,
@@ -140,6 +141,11 @@ export function projectHermesSkillEntry(value: unknown): HermesSkillEntry | null
   if (!name) return null;
   return { name, description: string(row.description) ?? null };
 }
+
+const gatewayUnreachableMessage = "Could not connect to the Hermes gateway.";
+
+const isGatewayConnectionFailure = (cause: unknown): boolean =>
+  cause instanceof HermesGatewayConnectionError;
 
 const blockedCapabilities: HermesSkillsCapabilities = {
   inventory: false,
@@ -263,11 +269,13 @@ export const makeHermesSkills = Effect.fn("HermesSkills.make")(function* (
           client.close();
         }
       },
-      catch: () =>
+      catch: (cause) =>
         new HermesSkillsError({
           code: "gateway_error",
           providerInstanceId: config.providerInstanceId,
-          message: "Could not read native Hermes skills inventory.",
+          message: isGatewayConnectionFailure(cause)
+            ? gatewayUnreachableMessage
+            : "Could not read native Hermes skills inventory.",
         }),
     }).pipe(
       Effect.catch((error) =>
@@ -354,7 +362,9 @@ export const makeHermesSkills = Effect.fn("HermesSkills.make")(function* (
           code: "gateway_error",
           providerInstanceId: config.providerInstanceId,
           operation,
-          message: "Hermes skills gateway operation failed.",
+          message: isGatewayConnectionFailure(cause)
+            ? gatewayUnreachableMessage
+            : "Hermes skills gateway operation failed.",
         });
       },
     });

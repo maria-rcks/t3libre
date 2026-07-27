@@ -35,6 +35,7 @@ import {
   formatSkillNames,
   formatSkillsReloadSummary,
   skillsBlockedDiagnostic,
+  skillsNegotiationFooter,
 } from "./HermesSkillsSettings.logic";
 
 function reportFailure(title: string, error: unknown) {
@@ -268,10 +269,7 @@ export function HermesSkillsSettings() {
   });
   const [reloading, setReloading] = useState(false);
   const providers = query.data?.providers ?? [];
-  const readyProviders = useMemo(
-    () => providers.filter((provider) => provider.status === "ready"),
-    [providers],
-  );
+  const negotiationFooter = useMemo(() => skillsNegotiationFooter(providers), [providers]);
 
   const reportReload = useCallback((value: HermesSkillsReloadResponse) => {
     const added = formatSkillNames(value.added);
@@ -340,10 +338,8 @@ export function HermesSkillsSettings() {
             ))}
           </div>
         )}
-        {readyProviders.length === 0 && providers.length > 0 ? (
-          <div className="px-5 py-3 text-xs text-muted-foreground">
-            Skills access requires a gateway with a negotiated skills.manage capability.
-          </div>
+        {negotiationFooter !== null ? (
+          <div className="px-5 py-3 text-xs text-muted-foreground">{negotiationFooter}</div>
         ) : null}
       </SettingsSection>
     </SettingsPageContainer>
