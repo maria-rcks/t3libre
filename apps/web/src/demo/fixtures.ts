@@ -12,14 +12,8 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
-import {
-  SHOWCASE_ENVIRONMENTS,
-  SHOWCASE_PROJECTS,
-  SHOWCASE_THREADS,
-} from "../../../../scripts/mobile-showcase-fixtures";
-
 export const DEMO_ENVIRONMENT_ID = "demo-environment";
-export const DEMO_ENVIRONMENT_LABEL = SHOWCASE_ENVIRONMENTS[0].label;
+export const DEMO_ENVIRONMENT_LABEL = "MacBook Pro";
 
 const now = Date.now();
 const minutesAgo = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
@@ -43,8 +37,8 @@ const demoProviders = [
     auth: { status: "authenticated", label: "ChatGPT" },
     checkedAt: minutesAgo(1),
     models: [
-      { slug: "gpt-5.4", name: "GPT-5.4", isCustom: false, capabilities: null },
-      { slug: "gpt-5.4-codex", name: "GPT-5.4 Codex", isCustom: false, capabilities: null },
+      { slug: "gpt-5.3-codex", name: "GPT-5.3 Codex", isCustom: false, capabilities: null },
+      { slug: "gpt-5.3", name: "GPT-5.3", isCustom: false, capabilities: null },
     ],
   },
   {
@@ -249,119 +243,76 @@ export interface DemoEnvironmentFixture {
   readonly shellSnapshot: OrchestrationShellSnapshot;
 }
 
-// ---------------------------------------------------------------------------
-// Showcase dataset mapping (single source of truth shared with the mobile
-// screenshot harness in scripts/mobile-showcase-fixtures.ts)
-// ---------------------------------------------------------------------------
-
-type ShowcaseThread = (typeof SHOWCASE_THREADS)[number];
-
-const showcaseState = (thread: ShowcaseThread): "working" | "approval" | "plan" | undefined =>
-  "state" in thread ? thread.state : undefined;
-
-/** Spread showcase threads across every provider so the multi-agent story shows. */
-const SHOWCASE_PROVIDER_OVERRIDES: Record<string, { instanceId: string; model: string }> = {
-  "remote-command-center": { instanceId: "codex", model: "gpt-5.4" },
-  "pocket-command-center": { instanceId: "claudeAgent", model: "claude-opus-5" },
-  "buttery-suspense": { instanceId: "claudeAgent", model: "claude-opus-5" },
-  "hydration-haikus": { instanceId: "grok", model: "grok-code-fast-2" },
-  "beautiful-boot": { instanceId: "opencode", model: "kimi-k2-thinking" },
-  "scheduler-breathe": { instanceId: "codex", model: "gpt-5.4" },
-};
-
-/** Completed showcase threads that recede into the settled shelf. */
-const SHOWCASE_SETTLED_MINUTES: Record<string, number> = {
-  "hydration-haikus": 20,
-  "scheduler-breathe": 45,
-};
-
-function showcaseSpec(thread: ShowcaseThread): DemoThreadSpec {
-  const state = showcaseState(thread);
-  const active = state === "working" || state === "approval";
-  const provider = SHOWCASE_PROVIDER_OVERRIDES[thread.id];
-  const settledMinutesAgo = SHOWCASE_SETTLED_MINUTES[thread.id];
-  return {
-    id: thread.id,
-    projectId: thread.projectId,
-    title: thread.title,
-    model: provider?.model ?? "gpt-5.4",
-    ...(provider ? { instanceId: provider.instanceId } : {}),
-    branch: thread.branch,
-    createdMinutesAgo: thread.minutesAgo + 120,
-    updatedMinutesAgo: thread.minutesAgo,
-    turn: {
-      state: active ? "running" : "completed",
-      startedMinutesAgo: thread.minutesAgo + 2,
-      completedMinutesAgo: thread.minutesAgo,
-    },
-    sessionStatus: active ? "running" : "ready",
-    hasPendingApprovals: state === "approval",
-    hasActionableProposedPlan: state === "plan",
-    ...(settledMinutesAgo !== undefined ? { settledMinutesAgo } : {}),
-  };
-}
-
-const showcaseThreadsFor = (projectId: string) =>
-  SHOWCASE_THREADS.filter((thread) => thread.projectId === projectId).map((thread) =>
-    demoThread(showcaseSpec(thread)),
-  );
-
-function showcaseProject(
-  projectId: string,
-  defaultModelSelection: { instanceId: string; model: string },
-) {
-  const project = SHOWCASE_PROJECTS.find((candidate) => candidate.id === projectId);
-  if (!project) throw new Error(`Unknown showcase project: ${projectId}`);
-  return {
-    id: project.id,
-    title: project.title,
-    workspaceRoot: `~/Code/${project.directory}`,
-    defaultModelSelection,
-    scripts: [],
-    createdAt: minutesAgo(60 * 24 * 30),
-    updatedAt: minutesAgo(3),
-  };
-}
-
-const [moonbaseEnvironment, suspenseEnvironment, kernelEnvironment] = SHOWCASE_ENVIRONMENTS;
-
 const primaryDescriptor = makeDescriptor({
   environmentId: DEMO_ENVIRONMENT_ID,
-  label: moonbaseEnvironment.label,
+  label: DEMO_ENVIRONMENT_LABEL,
   os: "darwin",
   arch: "arm64",
 });
 
-const suspenseDescriptor = makeDescriptor({
-  environmentId: suspenseEnvironment.id,
-  label: suspenseEnvironment.label,
+const macStudioDescriptor = makeDescriptor({
+  environmentId: "demo-mac-studio",
+  label: "Mac Studio",
   os: "darwin",
   arch: "arm64",
 });
 
-const kernelDescriptor = makeDescriptor({
-  environmentId: kernelEnvironment.id,
-  label: kernelEnvironment.label,
+const buildServerDescriptor = makeDescriptor({
+  environmentId: "demo-build-server",
+  label: "Build Server",
   os: "linux",
   arch: "x64",
 });
 
-const moonbaseShell = decodeShellSnapshot({
-  projects: [showcaseProject("t3code", { instanceId: "codex", model: "gpt-5.4" })],
+const primaryShell = decodeShellSnapshot({
+  projects: [
+    {
+      id: "project-marketing",
+      title: "marketing-site",
+      workspaceRoot: "~/code/marketing-site",
+      defaultModelSelection: { instanceId: "claudeAgent", model: "claude-opus-5" },
+      scripts: [],
+      createdAt: minutesAgo(60 * 24 * 12),
+      updatedAt: minutesAgo(4),
+    },
+  ],
   threads: [
-    ...showcaseThreadsFor("t3code"),
     demoThread({
-      id: "flaky-git-suite",
-      projectId: "t3code",
-      title: "Deflake the GitManager cross-repo suite",
-      model: "kimi-k2-thinking",
-      instanceId: "opencode",
-      branch: "fix/git-manager-test",
-      createdMinutesAgo: 60 * 24 * 6,
+      id: "thread-hero",
+      projectId: "project-marketing",
+      title: "Interactive hero demo",
+      model: "claude-opus-5",
+      instanceId: "claudeAgent",
+      branch: "feat/hero-demo",
+      createdMinutesAgo: 60 * 2,
+      updatedMinutesAgo: 4,
+      turn: { state: "running", startedMinutesAgo: 9 },
+      sessionStatus: "running",
+      hasPendingUserInput: true,
+    }),
+    demoThread({
+      id: "thread-pricing",
+      projectId: "project-marketing",
+      title: "Pricing page copy refresh",
+      model: "claude-sonnet-5",
+      instanceId: "claudeAgent",
+      branch: null,
+      createdMinutesAgo: 60 * 26,
+      updatedMinutesAgo: 60 * 5,
+      turn: { state: "completed", startedMinutesAgo: 60 * 6, completedMinutesAgo: 60 * 5 },
+      settledMinutesAgo: 60 * 4,
+    }),
+    demoThread({
+      id: "thread-blog",
+      projectId: "project-marketing",
+      title: "Changelog RSS feed",
+      model: "gpt-5.3-codex",
+      branch: "feat/changelog-rss",
+      createdMinutesAgo: 60 * 24 * 4,
       updatedMinutesAgo: 60 * 24 * 2,
       turn: {
         state: "completed",
-        startedMinutesAgo: 60 * 24 * 2 + 30,
+        startedMinutesAgo: 60 * 24 * 2 + 20,
         completedMinutesAgo: 60 * 24 * 2,
       },
       snoozedForever: true,
@@ -369,30 +320,136 @@ const moonbaseShell = decodeShellSnapshot({
   ],
 });
 
-const suspenseShell = decodeShellSnapshot({
-  projects: [showcaseProject("react", { instanceId: "claudeAgent", model: "claude-opus-5" })],
-  threads: showcaseThreadsFor("react"),
+const macStudioShell = decodeShellSnapshot({
+  projects: [
+    {
+      id: "project-t3code",
+      title: "t3code",
+      workspaceRoot: "~/code/t3code",
+      defaultModelSelection: { instanceId: "claudeAgent", model: "claude-opus-5" },
+      scripts: [],
+      createdAt: minutesAgo(60 * 24 * 30),
+      updatedAt: minutesAgo(1),
+    },
+  ],
+  threads: [
+    demoThread({
+      id: "thread-composer",
+      projectId: "project-t3code",
+      title: "Composer attachments + drag-drop overlay",
+      model: "gpt-5.3-codex",
+      branch: "feat/composer-attachments",
+      createdMinutesAgo: 60 * 3,
+      updatedMinutesAgo: 1,
+      turn: { state: "running", startedMinutesAgo: 6 },
+      sessionStatus: "running",
+    }),
+    demoThread({
+      id: "thread-sidebar",
+      projectId: "project-t3code",
+      title: "Sidebar v2 polish — settled sort + jump hints",
+      model: "grok-code-fast-2",
+      instanceId: "grok",
+      branch: "feat/sidebar-v2-polish",
+      createdMinutesAgo: 60 * 5,
+      updatedMinutesAgo: 12,
+      turn: { state: "running", startedMinutesAgo: 14 },
+      sessionStatus: "running",
+      hasPendingApprovals: true,
+    }),
+    demoThread({
+      id: "thread-flaky",
+      projectId: "project-t3code",
+      title: "Fix flaky GitManager cross-repo test",
+      model: "kimi-k2-thinking",
+      instanceId: "opencode",
+      branch: "fix/git-manager-test",
+      createdMinutesAgo: 60 * 8,
+      updatedMinutesAgo: 35,
+      turn: { state: "completed", startedMinutesAgo: 48, completedMinutesAgo: 35 },
+      sessionStatus: "ready",
+    }),
+    demoThread({
+      id: "thread-relay",
+      projectId: "project-t3code",
+      title: "Relay reconnect backoff jitter",
+      model: "claude-opus-5",
+      instanceId: "claudeAgent",
+      branch: "fix/relay-backoff",
+      createdMinutesAgo: 60 * 30,
+      updatedMinutesAgo: 60 * 9,
+      turn: { state: "completed", startedMinutesAgo: 60 * 10, completedMinutesAgo: 60 * 9 },
+      settledMinutesAgo: 60 * 8,
+    }),
+  ],
 });
 
-const kernelShell = decodeShellSnapshot({
-  projects: [showcaseProject("linux", { instanceId: "codex", model: "gpt-5.4" })],
+const buildServerShell = decodeShellSnapshot({
+  projects: [
+    {
+      id: "project-mobile",
+      title: "mobile-app",
+      workspaceRoot: "~/code/mobile-app",
+      defaultModelSelection: { instanceId: "grok", model: "grok-code-fast-2" },
+      scripts: [],
+      createdAt: minutesAgo(60 * 24 * 5),
+      updatedAt: minutesAgo(8),
+    },
+  ],
   threads: [
-    ...showcaseThreadsFor("linux"),
     demoThread({
-      id: "perf-soak",
-      projectId: "linux",
-      title: "Nightly perf soak keeps paging on-call",
-      model: "grok-5",
+      id: "thread-metrics",
+      projectId: "project-mobile",
+      title: "Crash-free sessions dashboard",
+      model: "claude-opus-5",
+      instanceId: "claudeAgent",
+      branch: "feat/crash-dashboard",
+      createdMinutesAgo: 60 * 6,
+      updatedMinutesAgo: 8,
+      turn: { state: "running", startedMinutesAgo: 11 },
+      sessionStatus: "running",
+    }),
+    demoThread({
+      id: "thread-push",
+      projectId: "project-mobile",
+      title: "Push notifications deep links",
+      model: "grok-code-fast-2",
       instanceId: "grok",
+      branch: "feat/push-deeplinks",
+      createdMinutesAgo: 60 * 30,
+      updatedMinutesAgo: 60 * 20,
+      turn: { state: "completed", startedMinutesAgo: 60 * 21, completedMinutesAgo: 60 * 20 },
+    }),
+    demoThread({
+      id: "thread-ci",
+      projectId: "project-mobile",
+      title: "Nightly EAS build keeps timing out",
+      model: "glm-5",
+      instanceId: "opencode",
       branch: null,
-      createdMinutesAgo: 60 * 24 * 9,
+      createdMinutesAgo: 60 * 24 * 6,
       updatedMinutesAgo: 60 * 24 * 3,
       turn: {
         state: "completed",
-        startedMinutesAgo: 60 * 24 * 3 + 40,
+        startedMinutesAgo: 60 * 24 * 3 + 30,
         completedMinutesAgo: 60 * 24 * 3,
       },
       snoozedForever: true,
+    }),
+    demoThread({
+      id: "thread-deploy",
+      projectId: "project-mobile",
+      title: "Blue/green deploy for the API",
+      model: "gpt-5.3-codex",
+      branch: "feat/blue-green",
+      createdMinutesAgo: 60 * 24 * 8,
+      updatedMinutesAgo: 60 * 24 * 1,
+      turn: {
+        state: "completed",
+        startedMinutesAgo: 60 * 25,
+        completedMinutesAgo: 60 * 24,
+      },
+      settledMinutesAgo: 60 * 22,
     }),
   ],
 });
@@ -400,73 +457,84 @@ const kernelShell = decodeShellSnapshot({
 export const demoEnvironments: ReadonlyArray<DemoEnvironmentFixture> = [
   {
     environmentId: DEMO_ENVIRONMENT_ID,
-    label: moonbaseEnvironment.label,
+    label: DEMO_ENVIRONMENT_LABEL,
     origin: null,
     bearerToken: null,
     descriptor: primaryDescriptor,
-    serverConfig: makeServerConfig(primaryDescriptor, "~/Code"),
-    shellSnapshot: moonbaseShell,
+    serverConfig: makeServerConfig(primaryDescriptor, "~/code"),
+    shellSnapshot: primaryShell,
   },
   {
-    environmentId: suspenseEnvironment.id,
-    label: suspenseEnvironment.label,
-    origin: "https://suspense-station.t3connect.demo",
-    bearerToken: "demo-suspense-station-token",
-    descriptor: suspenseDescriptor,
-    serverConfig: makeServerConfig(suspenseDescriptor, "~/Code"),
-    shellSnapshot: suspenseShell,
+    environmentId: "demo-mac-studio",
+    label: "Mac Studio",
+    origin: "https://mac-studio.t3connect.demo",
+    bearerToken: "demo-mac-studio-token",
+    descriptor: macStudioDescriptor,
+    serverConfig: makeServerConfig(macStudioDescriptor, "~/code"),
+    shellSnapshot: macStudioShell,
   },
   {
-    environmentId: kernelEnvironment.id,
-    label: kernelEnvironment.label,
-    origin: "https://kernel-cabin.t3connect.demo",
-    bearerToken: "demo-kernel-cabin-token",
-    descriptor: kernelDescriptor,
-    serverConfig: makeServerConfig(kernelDescriptor, "~/Code"),
-    shellSnapshot: kernelShell,
+    environmentId: "demo-build-server",
+    label: "Build Server",
+    origin: "https://build-server.t3connect.demo",
+    bearerToken: "demo-build-server-token",
+    descriptor: buildServerDescriptor,
+    serverConfig: makeServerConfig(buildServerDescriptor, "/home/deploy/code"),
+    shellSnapshot: buildServerShell,
   },
 ];
 
 /** Backwards-compatible aliases for the primary environment. */
 export const demoDescriptor = primaryDescriptor;
 export const demoServerConfig = demoEnvironments[0]!.serverConfig;
-export const demoShellSnapshot = moonbaseShell;
+export const demoShellSnapshot = primaryShell;
 
 /** Threads that open with the browser (right side panel) already visible. */
 export const demoBrowserPanelThreadKeys: ReadonlyArray<string> = [
-  `${DEMO_ENVIRONMENT_ID}:remote-command-center`,
-  `${suspenseEnvironment.id}:buttery-suspense`,
+  `${DEMO_ENVIRONMENT_ID}:thread-hero`,
+  "demo-mac-studio:thread-composer",
+  "demo-build-server:thread-metrics",
 ];
 
 // The browser preview surface needs the Electron desktop bridge, so the web
 // demo showcases the right panel with the diff surface instead.
-const DEMO_UNIFIED_DIFF = `diff --git a/apps/mobile/src/features/home/environmentPresence.ts b/apps/mobile/src/features/home/environmentPresence.ts
-index 4b1c9d2..8f27a51 100644
---- a/apps/mobile/src/features/home/environmentPresence.ts
-+++ b/apps/mobile/src/features/home/environmentPresence.ts
-@@ -1,3 +1,7 @@
--export function environmentLabel(count: number): string {
--  return \`\${count} environments\`;
-+const PULSE = ["✦", "✧", "·", "✧"] as const;
+const DEMO_UNIFIED_DIFF = `diff --git a/apps/web/src/components/chat/ChatComposer.tsx b/apps/web/src/components/chat/ChatComposer.tsx
+index 3f1c2aa..9e84b71 100644
+--- a/apps/web/src/components/chat/ChatComposer.tsx
++++ b/apps/web/src/components/chat/ChatComposer.tsx
+@@ -41,6 +41,9 @@ export function ChatComposer(props: ChatComposerProps) {
+   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
++  const dragDepthRef = useRef(0);
++  const [isDragOverComposer, setIsDragOverComposer] = useState(false);
 +
-+export function environmentLabel(connected: number, total: number, frame: number): string {
-+  const pulse = PULSE[frame % PULSE.length];
-+  return \`\${pulse} \${connected}/\${total} ready\`;
+   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+ 
+   const onSubmit = useCallback(() => {
+@@ -108,7 +111,16 @@ export function ChatComposer(props: ChatComposerProps) {
+-  return <form onSubmit={onSubmit}>{children}</form>;
++  return (
++    <form
++      onSubmit={onSubmit}
++      onDragEnter={onComposerDragEnter}
++      onDragLeave={onComposerDragLeave}
++      onDrop={onComposerDrop}
++    >
++      {isDragOverComposer ? <DropOverlay /> : null}
++      {children}
++    </form>
++  );
  }
-diff --git a/apps/mobile/src/features/home/RemoteHandoffCard.tsx b/apps/mobile/src/features/home/RemoteHandoffCard.tsx
+diff --git a/apps/web/src/components/chat/DropOverlay.tsx b/apps/web/src/components/chat/DropOverlay.tsx
 new file mode 100644
 index 0000000..b2d61c4
 --- /dev/null
-+++ b/apps/mobile/src/features/home/RemoteHandoffCard.tsx
-@@ -0,0 +1,10 @@
-+import { View, Text } from "react-native";
-+
-+export function RemoteHandoffCard(props: { machine: string; latencyMs: number }) {
++++ b/apps/web/src/components/chat/DropOverlay.tsx
+@@ -0,0 +1,11 @@
++export function DropOverlay() {
 +  return (
-+    <View className="rounded-2xl bg-surface-2 p-4">
-+      <Text className="font-semibold">Ready on {props.machine}</Text>
-+      <Text className="text-success">Handoff in {props.latencyMs}ms</Text>
-+    </View>
++    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-primary/60 bg-background/80 backdrop-blur-sm">
++      <p className="text-sm text-muted-foreground">Drop images to attach</p>
++    </div>
 +  );
 +}
 `;
@@ -484,7 +552,7 @@ export function demoReviewDiffPreview(cwd: string): ReviewDiffPreviewResult {
         kind: "branch-range",
         title: "Branch changes",
         baseRef: "main",
-        headRef: "feat/remote-command-center",
+        headRef: "feat/composer-attachments",
         diff: DEMO_UNIFIED_DIFF,
         diffHash: "demo-diff-hash",
         truncated: false,
@@ -547,267 +615,638 @@ function message(input: {
   };
 }
 
-// Base histories come straight from the showcase dataset (request/response per
-// thread); the records below layer the richer web-only elements on top —
-// extra turns, image attachments, tool/approval/question activities, and
-// checkpoint diff boxes.
-
-const EXTRA_LEAD_MESSAGES: Record<string, ReadonlyArray<unknown>> = {
-  "remote-command-center": [
-    message({
-      id: "msg-remote-command-center-u0",
-      role: "user",
-      text: "Here's the mock for the handoff card I want on the home screen when another machine is ready:",
-      turnId: "remote-command-center-turn-0",
-      minutesAgo: 55,
-      attachments: [
-        {
-          id: "att-remote-handoff",
-          name: "remote-handoff-card-mock.png",
-          mimeType: "image/png",
-          sizeBytes: 51284,
-        },
-      ],
-    }),
-    message({
-      id: "msg-remote-command-center-a0",
-      role: "assistant",
-      text: [
-        "Got it — `RemoteHandoffCard` will render the machine name plus live latency:",
-        "",
-        "```tsx",
-        "export function RemoteHandoffCard(props: { machine: string; latencyMs: number }) {",
-        "  return (",
-        '    <View className="rounded-2xl bg-surface-2 p-4">',
-        '      <Text className="font-semibold">Ready on {props.machine}</Text>',
-        '      <Text className="text-success">Handoff in {props.latencyMs}ms</Text>',
-        "    </View>",
-        "  );",
-        "}",
-        "```",
-      ].join("\n"),
-      turnId: "remote-command-center-turn-0",
-      minutesAgo: 48,
-    }),
-  ],
-};
-
-const EXTRA_ACTIVITIES: Record<string, ReadonlyArray<unknown>> = {
-  "remote-command-center": [
-    {
-      id: "act-remote-command-center-test",
-      tone: "tool",
-      kind: "tool.completed",
-      summary: "vp test run --changed — 612 tests passed · 3 environments online",
-      payload: {
-        status: "completed",
-        detail: "vp test run --changed",
-      },
-      turnId: "remote-command-center-turn-1",
-      sequence: 1,
-      createdAt: minutesAgo(5),
-    },
-  ],
-  "pocket-command-center": [
-    {
-      id: "act-pocket-command-center-approval",
-      tone: "approval",
-      kind: "approval.requested",
-      summary: "Approval requested to run a command",
-      payload: {
-        requestId: "req-pocket-motion",
-        requestKind: "command",
-        detail: "vp run mobile:handoff-motion --record",
-      },
-      turnId: "pocket-command-center-turn-1",
-      sequence: 3,
-      createdAt: minutesAgo(19),
-    },
-  ],
-  "beautiful-boot": [
-    {
-      id: "act-beautiful-boot-question",
-      tone: "info",
-      kind: "user-input.requested",
-      summary: "Waiting for your answer",
-      payload: {
-        requestId: "req-beautiful-boot-question",
-        questions: [
-          {
-            id: "q-beautiful-boot-grouping",
-            header: "Boot timeline",
-            question: "How should the timeline group kernel milestones?",
-            options: [
-              {
-                label: "By subsystem",
-                description: "Cluster init lines under mm / sched / drivers headings",
-              },
-              {
-                label: "Strictly chronological",
-                description: "Keep raw ordering and only add elapsed-time markers",
-              },
-            ],
-            multiSelect: false,
-          },
-        ],
-      },
-      turnId: "beautiful-boot-turn-1",
-      sequence: 2,
-      createdAt: minutesAgo(30),
-    },
-  ],
-};
-
-const EXTRA_CHECKPOINTS: Record<string, ReadonlyArray<unknown>> = {
-  "remote-command-center": [
-    {
-      turnId: "remote-command-center-turn-0",
-      checkpointTurnCount: 1,
-      checkpointRef: "refs/t3/checkpoints/remote-command-center/1",
-      status: "ready",
-      files: [
-        {
-          path: "apps/mobile/src/features/home/RemoteHandoffCard.tsx",
-          kind: "added",
-          additions: 10,
-          deletions: 0,
-        },
-      ],
-      assistantMessageId: "msg-remote-command-center-a0",
-      completedAt: minutesAgo(48),
-    },
-    {
-      turnId: "remote-command-center-turn-1",
-      checkpointTurnCount: 1,
-      checkpointRef: "refs/t3/checkpoints/remote-command-center/2",
-      status: "ready",
-      files: [
-        {
-          path: "apps/mobile/src/features/home/environmentPresence.ts",
-          kind: "modified",
-          additions: 6,
-          deletions: 2,
-        },
-        {
-          path: "packages/client-runtime/src/connection/supervisor.ts",
-          kind: "modified",
-          additions: 41,
-          deletions: 12,
-        },
-      ],
-      assistantMessageId: "msg-remote-command-center-a1",
-      completedAt: minutesAgo(3),
-    },
-  ],
-  "hydration-haikus": [
-    {
-      turnId: "hydration-haikus-turn-1",
-      checkpointTurnCount: 1,
-      checkpointRef: "refs/t3/checkpoints/hydration-haikus/1",
-      status: "ready",
-      files: [
-        {
-          path: "packages/react-dom/src/client/ReactDOMHydrationDiagnostics.js",
-          kind: "modified",
-          additions: 42,
-          deletions: 17,
-        },
-      ],
-      assistantMessageId: "msg-hydration-haikus-a1",
-      completedAt: minutesAgo(44),
-    },
-  ],
-  "scheduler-breathe": [
-    {
-      turnId: "scheduler-breathe-turn-1",
-      checkpointTurnCount: 1,
-      checkpointRef: "refs/t3/checkpoints/scheduler-breathe/1",
-      status: "ready",
-      files: [
-        {
-          path: "kernel/sched/fair.c",
-          kind: "modified",
-          additions: 58,
-          deletions: 33,
-        },
-      ],
-      assistantMessageId: "msg-scheduler-breathe-a1",
-      completedAt: minutesAgo(76),
-    },
-  ],
-};
-
-function showcaseDetail(thread: ShowcaseThread): DemoThreadDetail {
-  const turnId = `${thread.id}-turn-1`;
-  const baseMessages: Array<unknown> = [
-    ...(EXTRA_LEAD_MESSAGES[thread.id] ?? []),
-    message({
-      id: `msg-${thread.id}-u1`,
-      role: "user",
-      text: thread.request,
-      turnId,
-      minutesAgo: thread.minutesAgo + 1,
-    }),
-  ];
-  if (thread.response !== null) {
-    baseMessages.push(
-      message({
-        id: `msg-${thread.id}-a1`,
-        role: "assistant",
-        text: thread.response,
-        turnId,
-        minutesAgo: thread.minutesAgo,
-      }),
-    );
-  }
-  return {
-    messages: decodeMessages(baseMessages),
-    activities: decodeActivities(EXTRA_ACTIVITIES[thread.id] ?? []),
-    checkpoints: decodeCheckpoints(EXTRA_CHECKPOINTS[thread.id] ?? []),
-  };
-}
-
 export const demoThreadDetails: Record<string, DemoThreadDetail> = {
-  ...Object.fromEntries(SHOWCASE_THREADS.map((thread) => [thread.id, showcaseDetail(thread)])),
-  "flaky-git-suite": {
+  "thread-composer": {
     messages: decodeMessages([
       message({
-        id: "msg-flaky-git-suite-u1",
+        id: "msg-composer-u0",
         role: "user",
-        text: "GitManager cross-repo PR metadata test is flaky in CI — times out at 12s roughly one run in five. Not urgent, snoozing this after your first pass.",
-        turnId: "flaky-git-suite-turn-1",
-        minutesAgo: 60 * 24 * 2 + 30,
+        text: "Audit the composer for places where long pasted text breaks the layout.",
+        turnId: "thread-composer-turn-a",
+        minutesAgo: 60 * 3 - 5,
       }),
       message({
-        id: "msg-flaky-git-suite-a1",
+        id: "msg-composer-a0",
         role: "assistant",
-        text: "Found it — the test awaits two temp-repo fixtures sequentially, so the second `git fetch` occasionally starts after the 12s deadline. Fix is to provision both with `Promise.all` and only start the clock on the assertion. Parked until you unsnooze.",
-        turnId: "flaky-git-suite-turn-1",
-        minutesAgo: 60 * 24 * 2,
+        text: [
+          "Found two overflow bugs:",
+          "",
+          "- `ChatComposer.tsx` let unbroken strings push the send button off-screen — fixed with `overflow-wrap: anywhere` on the editable area",
+          "- The draft preview in the sidebar clipped multi-line drafts mid-glyph — now uses `line-clamp-2`",
+          "",
+          "Both have focused tests.",
+        ].join("\n"),
+        turnId: "thread-composer-turn-a",
+        minutesAgo: 60 * 3 - 25,
+      }),
+      message({
+        id: "msg-composer-u1",
+        role: "user",
+        text: "Add image attachments to the composer — drag & drop should show an overlay, and pasted screenshots should attach too. Here's the mock:",
+        turnId: "thread-composer-turn-0",
+        minutesAgo: 41,
+        attachments: [
+          {
+            id: "att-drag-overlay",
+            name: "drag-overlay-mock.png",
+            mimeType: "image/png",
+            sizeBytes: 48213,
+          },
+        ],
+      }),
+      message({
+        id: "msg-composer-a1",
+        role: "assistant",
+        text: [
+          "Done — the composer now accepts image attachments in three ways:",
+          "",
+          "1. **Drag & drop** anywhere over the composer (a dashed overlay appears while hovering)",
+          "2. **Paste** a screenshot straight from the clipboard",
+          "3. The **`+` attach button**, which opens the native file picker",
+          "",
+          "Key change in `ChatComposer.tsx`:",
+          "",
+          "```tsx",
+          "const dragDepthRef = useRef(0);",
+          "const onComposerDragEnter = (event: DragEvent) => {",
+          "  if (!hasImageFiles(event)) return;",
+          "  dragDepthRef.current += 1;",
+          "  setIsDragOverComposer(true);",
+          "};",
+          "```",
+          "",
+          "Attachments over 10 MB are rejected with an inline error instead of a toast, and drafts persist attachments across reloads via `composerDraftStore`.",
+        ].join("\n"),
+        turnId: "thread-composer-turn-0",
+        minutesAgo: 22,
+      }),
+      message({
+        id: "msg-composer-u2",
+        role: "user",
+        text: "Nice. Now make the drop overlay match the new dark theme and add a subtle backdrop blur — I opened the preview in the side panel to check it live.",
+        turnId: "thread-composer-turn-1",
+        minutesAgo: 6,
+      }),
+    ]),
+    activities: decodeActivities([
+      {
+        id: "act-composer-test",
+        tone: "tool",
+        kind: "tool.completed",
+        summary: "vp test run apps/web/src/components/chat/ChatComposer.test.tsx",
+        payload: {
+          status: "completed",
+          detail: "vp test run apps/web/src/components/chat/ChatComposer.test.tsx",
+        },
+        turnId: "thread-composer-turn-0",
+        sequence: 1,
+        createdAt: minutesAgo(24),
+      },
+    ]),
+    checkpoints: decodeCheckpoints([
+      {
+        turnId: "thread-composer-turn-a",
+        checkpointTurnCount: 1,
+        checkpointRef: "refs/t3/checkpoints/thread-composer/1",
+        status: "ready",
+        files: [
+          {
+            path: "apps/web/src/components/chat/ChatComposer.tsx",
+            kind: "modified",
+            additions: 21,
+            deletions: 8,
+          },
+        ],
+        assistantMessageId: "msg-composer-a0",
+        completedAt: minutesAgo(60 * 3 - 25),
+      },
+      {
+        turnId: "thread-composer-turn-0",
+        checkpointTurnCount: 1,
+        checkpointRef: "refs/t3/checkpoints/thread-composer/2",
+        status: "ready",
+        files: [
+          {
+            path: "apps/web/src/components/chat/ChatComposer.tsx",
+            kind: "modified",
+            additions: 182,
+            deletions: 24,
+          },
+          {
+            path: "apps/web/src/components/ChatView.tsx",
+            kind: "modified",
+            additions: 36,
+            deletions: 5,
+          },
+          {
+            path: "apps/web/src/composerDraftStore.ts",
+            kind: "modified",
+            additions: 54,
+            deletions: 9,
+          },
+        ],
+        assistantMessageId: "msg-composer-a1",
+        completedAt: minutesAgo(22),
+      },
+    ]),
+  },
+  "thread-hero": {
+    messages: decodeMessages([
+      message({
+        id: "msg-hero-u0",
+        role: "user",
+        text: "What does the marketing hero currently render? Summarize before we change anything.",
+        turnId: "thread-hero-turn-0",
+        minutesAgo: 118,
+      }),
+      message({
+        id: "msg-hero-a0",
+        role: "assistant",
+        text: [
+          "The hero is a static `<img>` of an old screenshot:",
+          "",
+          "- `apps/marketing/src/pages/index.astro` renders `hero-screenshot.png` (1.4 MB, six months old)",
+          "- No interactivity, and it drifts out of date every time the app UI changes",
+        ].join("\n"),
+        turnId: "thread-hero-turn-0",
+        minutesAgo: 114,
+      }),
+      message({
+        id: "msg-hero-u1",
+        role: "user",
+        text: "Replace the hero screenshot on the marketing site with a live demo of the actual app so visitors can click around.",
+        turnId: "thread-hero-turn-1",
+        minutesAgo: 110,
+      }),
+      message({
+        id: "msg-hero-a1",
+        role: "assistant",
+        text: [
+          "I can bundle the real app against fixture data — no duplicated markup, so the demo updates whenever the components do.",
+          "",
+          "### Plan",
+          "- Build a standalone Vite entry that renders the real `AppRoot`",
+          "- Mock only the transport boundary (WebSocket + `fetch`) with the production RPC contracts",
+          "- Embed the generated bundle in the hero via an `iframe`",
+          "",
+          "One decision before I wire it up:",
+        ].join("\n"),
+        turnId: "thread-hero-turn-1",
+        minutesAgo: 8,
+      }),
+    ]),
+    activities: decodeActivities([
+      {
+        id: "act-hero-question",
+        tone: "info",
+        kind: "user-input.requested",
+        summary: "Waiting for your answer",
+        payload: {
+          requestId: "req-hero-question",
+          questions: [
+            {
+              id: "q-hero-layout",
+              header: "Hero demo",
+              question: "Which sidebar should the hero demo default to?",
+              options: [
+                {
+                  label: "Sidebar v2 (flat list)",
+                  description: "Showcase the new beta sidebar with rich active cards",
+                },
+                {
+                  label: "Classic sidebar",
+                  description: "Project-grouped v1 layout everyone already knows",
+                },
+              ],
+              multiSelect: false,
+            },
+          ],
+        },
+        turnId: "thread-hero-turn-1",
+        sequence: 2,
+        createdAt: minutesAgo(4),
+      },
+    ]),
+    checkpoints: decodeCheckpoints([]),
+  },
+  "thread-flaky": {
+    messages: decodeMessages([
+      message({
+        id: "msg-flaky-u1",
+        role: "user",
+        text: "GitManager cross-repo PR metadata test is flaky in CI — times out at 12s roughly one run in five. Find it and fix it.",
+        turnId: "thread-flaky-turn-1",
+        minutesAgo: 60 * 7,
+      }),
+      message({
+        id: "msg-flaky-a1",
+        role: "assistant",
+        text: [
+          "Found it. The test raced the remote fetch against a fixed 12s timeout:",
+          "",
+          "- `GitManager.test.ts` spun up **two** temp repos but awaited their fixtures sequentially",
+          "- The second `git fetch` occasionally started after the assertion deadline",
+          "",
+          "Fix: await both fixtures with `Promise.all` and assert on the settled result instead of polling.",
+        ].join("\n"),
+        turnId: "thread-flaky-turn-1",
+        minutesAgo: 60 * 5,
+      }),
+      message({
+        id: "msg-flaky-u2",
+        role: "user",
+        text: "Can you prove it's actually fixed and not just faster?",
+        turnId: "thread-flaky-turn-2",
+        minutesAgo: 60 * 2,
+      }),
+      message({
+        id: "msg-flaky-a2",
+        role: "assistant",
+        text: [
+          "Yes — three lines of evidence:",
+          "",
+          "1. **200 consecutive local runs** pass, worst case `1.62s` (old p95 was `11.4s`)",
+          "2. The failure mode is structurally gone: both fixtures now resolve before the clock starts, so the deadline only covers the assertion itself",
+          "3. I added a regression guard — the test now fails fast with a clear message if either fixture takes longer than `5s` to provision:",
+          "",
+          "```ts",
+          "const [origin, fork] = await Promise.all([",
+          '  provisionRepo("origin"),',
+          '  provisionRepo("fork"),',
+          ']).withTimeout("5 seconds");',
+          "```",
+        ].join("\n"),
+        turnId: "thread-flaky-turn-2",
+        minutesAgo: 35,
       }),
     ]),
     activities: decodeActivities([]),
-    checkpoints: decodeCheckpoints([]),
+    checkpoints: decodeCheckpoints([
+      {
+        turnId: "thread-flaky-turn-1",
+        checkpointTurnCount: 1,
+        checkpointRef: "refs/t3/checkpoints/thread-flaky/1",
+        status: "ready",
+        files: [
+          {
+            path: "apps/server/src/git/GitManager.test.ts",
+            kind: "modified",
+            additions: 38,
+            deletions: 21,
+          },
+        ],
+        assistantMessageId: "msg-flaky-a1",
+        completedAt: minutesAgo(60 * 5),
+      },
+      {
+        turnId: "thread-flaky-turn-2",
+        checkpointTurnCount: 1,
+        checkpointRef: "refs/t3/checkpoints/thread-flaky/2",
+        status: "ready",
+        files: [
+          {
+            path: "apps/server/src/git/GitManager.test.ts",
+            kind: "modified",
+            additions: 14,
+            deletions: 2,
+          },
+        ],
+        assistantMessageId: "msg-flaky-a2",
+        completedAt: minutesAgo(35),
+      },
+    ]),
   },
-  "perf-soak": {
+  "thread-sidebar": {
     messages: decodeMessages([
       message({
-        id: "msg-perf-soak-u1",
+        id: "msg-sidebar-u1",
         role: "user",
-        text: "The nightly perf soak keeps paging on-call with false positives. Investigate when there's slack — snoozing.",
-        turnId: "perf-soak-turn-1",
+        text: "Polish sidebar v2: settled threads should sort by settle time, and add the little jump hints when the active thread is scrolled out of view.",
+        turnId: "thread-sidebar-turn-1",
+        minutesAgo: 60 * 4,
+      }),
+      message({
+        id: "msg-sidebar-a1",
+        role: "assistant",
+        text: [
+          "Settled sort is in — settled rows now order by `settledAt` descending. Working on the jump hints next; I need to run the focused test suite to confirm the sort change:",
+        ].join("\n"),
+        turnId: "thread-sidebar-turn-1",
+        minutesAgo: 16,
+      }),
+    ]),
+    activities: decodeActivities([
+      {
+        id: "act-sidebar-approval",
+        tone: "approval",
+        kind: "approval.requested",
+        summary: "Approval requested to run a command",
+        payload: {
+          requestId: "req-sidebar-test",
+          requestKind: "command",
+          detail: "vp test run apps/web/src/components/SidebarV2.test.tsx",
+        },
+        turnId: "thread-sidebar-turn-1",
+        sequence: 3,
+        createdAt: minutesAgo(14),
+      },
+    ]),
+    checkpoints: decodeCheckpoints([]),
+  },
+  "thread-metrics": {
+    messages: decodeMessages([
+      message({
+        id: "msg-metrics-u1",
+        role: "user",
+        text: "Build a crash-free sessions dashboard page — pull the numbers from the analytics API and chart the last 30 days.",
+        turnId: "thread-metrics-turn-1",
+        minutesAgo: 60 * 5,
+      }),
+      message({
+        id: "msg-metrics-a1",
+        role: "assistant",
+        text: [
+          "First cut is live on the dev server — I opened `localhost:3000/dashboard` in the browser panel so you can watch it update.",
+          "",
+          "- 30-day crash-free rate chart with a `99.5%` target line",
+          "- Worst five crash groups with device/OS breakdown",
+          "- Data refreshes every 60s via `useQuery` polling",
+        ].join("\n"),
+        turnId: "thread-metrics-turn-1",
+        minutesAgo: 44,
+      }),
+      message({
+        id: "msg-metrics-u2",
+        role: "user",
+        text: "Looks good. Add a release picker so we can compare crash rates across app versions.",
+        turnId: "thread-metrics-turn-2",
+        minutesAgo: 11,
+      }),
+    ]),
+    activities: decodeActivities([]),
+    checkpoints: decodeCheckpoints([
+      {
+        turnId: "thread-metrics-turn-1",
+        checkpointTurnCount: 1,
+        checkpointRef: "refs/t3/checkpoints/thread-metrics/1",
+        status: "ready",
+        files: [
+          {
+            path: "src/pages/dashboard.tsx",
+            kind: "added",
+            additions: 214,
+            deletions: 0,
+          },
+          {
+            path: "src/api/analytics.ts",
+            kind: "added",
+            additions: 88,
+            deletions: 0,
+          },
+        ],
+        assistantMessageId: "msg-metrics-a1",
+        completedAt: minutesAgo(44),
+      },
+    ]),
+  },
+  "thread-push": {
+    messages: decodeMessages([
+      message({
+        id: "msg-push-u1",
+        role: "user",
+        text: "Tapping a push notification should deep-link into the exact chat thread, not just open the app.",
+        turnId: "thread-push-turn-1",
+        minutesAgo: 60 * 21,
+      }),
+      message({
+        id: "msg-push-a1",
+        role: "assistant",
+        text: [
+          "Deep links are wired up end-to-end:",
+          "",
+          "- Notification payloads now carry a `t3code://thread/:id` URL",
+          "- Cold starts queue the link until the router is ready, warm starts navigate immediately",
+          "- Android needed an extra `intent-filter`; iOS goes through `onNotificationOpenedApp`",
+          "",
+          "Tested on both platforms with the app killed, backgrounded, and foregrounded.",
+        ].join("\n"),
+        turnId: "thread-push-turn-1",
+        minutesAgo: 60 * 20,
+      }),
+    ]),
+    activities: decodeActivities([]),
+    checkpoints: decodeCheckpoints([
+      {
+        turnId: "thread-push-turn-1",
+        checkpointTurnCount: 1,
+        checkpointRef: "refs/t3/checkpoints/thread-push/1",
+        status: "ready",
+        files: [
+          {
+            path: "src/notifications/deepLinks.ts",
+            kind: "added",
+            additions: 96,
+            deletions: 0,
+          },
+          {
+            path: "app.config.ts",
+            kind: "modified",
+            additions: 12,
+            deletions: 1,
+          },
+        ],
+        assistantMessageId: "msg-push-a1",
+        completedAt: minutesAgo(60 * 20),
+      },
+    ]),
+  },
+  "thread-pricing": {
+    messages: decodeMessages([
+      message({
+        id: "msg-pricing-u1",
+        role: "user",
+        text: "Refresh the pricing page copy — clearer tier names and a proper FAQ.",
+        turnId: "thread-pricing-turn-1",
+        minutesAgo: 60 * 6,
+      }),
+      message({
+        id: "msg-pricing-a1",
+        role: "assistant",
+        text: [
+          "Shipped. Tiers are now **Solo / Team / Enterprise** with one-line value props, and the FAQ answers the six questions support sees most. Copy deck is in the PR description for review.",
+        ].join("\n"),
+        turnId: "thread-pricing-turn-1",
+        minutesAgo: 60 * 5,
+      }),
+    ]),
+    activities: decodeActivities([]),
+    checkpoints: decodeCheckpoints([
+      {
+        turnId: "thread-pricing-turn-1",
+        checkpointTurnCount: 1,
+        checkpointRef: "refs/t3/checkpoints/thread-pricing/1",
+        status: "ready",
+        files: [
+          {
+            path: "src/pages/pricing.astro",
+            kind: "modified",
+            additions: 68,
+            deletions: 41,
+          },
+        ],
+        assistantMessageId: "msg-pricing-a1",
+        completedAt: minutesAgo(60 * 5),
+      },
+    ]),
+  },
+  "thread-relay": {
+    messages: decodeMessages([
+      message({
+        id: "msg-relay-u1",
+        role: "user",
+        text: "Relay reconnects stampede after a network blip — add jitter to the backoff.",
+        turnId: "thread-relay-turn-1",
+        minutesAgo: 60 * 10,
+      }),
+      message({
+        id: "msg-relay-a1",
+        role: "assistant",
+        text: [
+          "Added full jitter to the reconnect schedule (`base * 2^attempt * random(0.5, 1)` capped at 30s). A simulated 500-client blip now spreads reconnects across 14 seconds instead of all landing in the same 200ms window.",
+        ].join("\n"),
+        turnId: "thread-relay-turn-1",
+        minutesAgo: 60 * 9,
+      }),
+    ]),
+    activities: decodeActivities([]),
+    checkpoints: decodeCheckpoints([
+      {
+        turnId: "thread-relay-turn-1",
+        checkpointTurnCount: 1,
+        checkpointRef: "refs/t3/checkpoints/thread-relay/1",
+        status: "ready",
+        files: [
+          {
+            path: "packages/relay/src/reconnect.ts",
+            kind: "modified",
+            additions: 27,
+            deletions: 9,
+          },
+        ],
+        assistantMessageId: "msg-relay-a1",
+        completedAt: minutesAgo(60 * 9),
+      },
+    ]),
+  },
+  "thread-ci": {
+    messages: decodeMessages([
+      message({
+        id: "msg-ci-u1",
+        role: "user",
+        text: "The nightly EAS build keeps timing out. Investigate, but this is not urgent — snoozing it.",
+        turnId: "thread-ci-turn-1",
         minutesAgo: 60 * 24 * 3 + 40,
       }),
       message({
-        id: "msg-perf-soak-a1",
+        id: "msg-ci-a1",
         role: "assistant",
-        text: "Initial findings: the soak compares against a fixed baseline captured on older hardware, so every run on the new rig trips the threshold. Rebaselining per-machine should silence the pages — parked until you unsnooze.",
-        turnId: "perf-soak-turn-1",
+        text: [
+          "Initial findings: the timeout is in the native dependency compile step, which doubled after the RN 0.85 upgrade. Caching the NDK artifacts should cut it below the limit — parked until you unsnooze.",
+        ].join("\n"),
+        turnId: "thread-ci-turn-1",
         minutesAgo: 60 * 24 * 3,
       }),
     ]),
     activities: decodeActivities([]),
     checkpoints: decodeCheckpoints([]),
+  },
+  "thread-blog": {
+    messages: decodeMessages([
+      message({
+        id: "msg-blog-u1",
+        role: "user",
+        text: "Add an RSS feed for the changelog. Low priority — park it after the first pass.",
+        turnId: "thread-blog-turn-1",
+        minutesAgo: 60 * 24 * 2 + 30,
+      }),
+      message({
+        id: "msg-blog-a1",
+        role: "assistant",
+        text: [
+          'First pass done: `/changelog/rss.xml` renders the ten latest entries with correct `pubDate`s. Still todo when you pick this back up: full-content encoding and a `<link rel="alternate">` tag on the changelog page.',
+        ].join("\n"),
+        turnId: "thread-blog-turn-1",
+        minutesAgo: 60 * 24 * 2,
+      }),
+    ]),
+    activities: decodeActivities([]),
+    checkpoints: decodeCheckpoints([
+      {
+        turnId: "thread-blog-turn-1",
+        checkpointTurnCount: 1,
+        checkpointRef: "refs/t3/checkpoints/thread-blog/1",
+        status: "ready",
+        files: [
+          {
+            path: "src/pages/changelog/rss.xml.ts",
+            kind: "added",
+            additions: 52,
+            deletions: 0,
+          },
+        ],
+        assistantMessageId: "msg-blog-a1",
+        completedAt: minutesAgo(60 * 24 * 2),
+      },
+    ]),
+  },
+  "thread-deploy": {
+    messages: decodeMessages([
+      message({
+        id: "msg-deploy-u1",
+        role: "user",
+        text: "Set up blue/green deploys for the API so releases stop dropping requests.",
+        turnId: "thread-deploy-turn-1",
+        minutesAgo: 60 * 26,
+      }),
+      message({
+        id: "msg-deploy-a1",
+        role: "assistant",
+        text: [
+          "Blue/green is live:",
+          "",
+          "1. Deploys provision the idle color, run smoke tests, then swap the load balancer target group",
+          "2. Rollback is a single swap back — no rebuild",
+          "3. Yesterday's release shipped with **zero** dropped requests (previous deploys dropped ~120)",
+        ].join("\n"),
+        turnId: "thread-deploy-turn-1",
+        minutesAgo: 60 * 24,
+      }),
+    ]),
+    activities: decodeActivities([]),
+    checkpoints: decodeCheckpoints([
+      {
+        turnId: "thread-deploy-turn-1",
+        checkpointTurnCount: 1,
+        checkpointRef: "refs/t3/checkpoints/thread-deploy/1",
+        status: "ready",
+        files: [
+          {
+            path: "infra/deploy/blue-green.ts",
+            kind: "added",
+            additions: 143,
+            deletions: 0,
+          },
+          {
+            path: ".github/workflows/deploy.yml",
+            kind: "modified",
+            additions: 31,
+            deletions: 18,
+          },
+        ],
+        assistantMessageId: "msg-deploy-a1",
+        completedAt: minutesAgo(60 * 24),
+      },
+    ]),
   },
 };
 
@@ -815,24 +1254,22 @@ export const demoThreadDetails: Record<string, DemoThreadDetail> = {
 // Asset fixtures (project favicons + message attachments)
 // ---------------------------------------------------------------------------
 
-const faviconDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg)}`;
+export const demoProjectFaviconUrlByCwd: Record<string, string> = {
+  "~/code/t3code": "https://www.google.com/s2/favicons?domain=t3.gg&sz=64",
+  "~/code/marketing-site": "https://www.google.com/s2/favicons?domain=astro.build&sz=64",
+  "~/code/mobile-app": "https://www.google.com/s2/favicons?domain=expo.dev&sz=64",
+};
 
-export const demoProjectFaviconUrlByCwd: Record<string, string> = Object.fromEntries(
-  SHOWCASE_PROJECTS.map((project) => [
-    `~/Code/${project.directory}`,
-    faviconDataUrl(project.favicon),
-  ]),
-);
-
-const remoteHandoffMockSvg = [
+const dragOverlayMockSvg = [
   '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400">',
   '<rect width="640" height="400" fill="#101012"/>',
-  '<rect x="140" y="110" width="360" height="180" rx="20" fill="#18181b" stroke="#2e2e33" stroke-width="2"/>',
-  '<text x="320" y="185" fill="#e4e4e7" font-family="system-ui, sans-serif" font-size="20" font-weight="600" text-anchor="middle">Ready on Kernel Cabin</text>',
-  '<text x="320" y="220" fill="#4ade80" font-family="system-ui, sans-serif" font-size="15" text-anchor="middle">Handoff in 38ms</text>',
+  '<rect x="24" y="24" width="180" height="352" rx="12" fill="#18181b"/>',
+  '<rect x="228" y="24" width="388" height="352" rx="12" fill="#141417" stroke="#2e2e33" stroke-width="2" stroke-dasharray="8 6"/>',
+  '<text x="422" y="196" fill="#9b9ba4" font-family="system-ui, sans-serif" font-size="17" text-anchor="middle">Drop images to attach</text>',
+  '<text x="422" y="222" fill="#5c5c66" font-family="system-ui, sans-serif" font-size="13" text-anchor="middle">PNG, JPEG or WebP — up to 10 MB</text>',
   "</svg>",
 ].join("");
 
 export const demoAttachmentUrlById: Record<string, string> = {
-  "att-remote-handoff": `data:image/svg+xml,${encodeURIComponent(remoteHandoffMockSvg)}`,
+  "att-drag-overlay": `data:image/svg+xml,${encodeURIComponent(dragOverlayMockSvg)}`,
 };
