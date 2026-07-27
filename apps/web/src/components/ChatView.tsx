@@ -22,7 +22,7 @@ import {
   TerminalOpenInput,
 } from "@t3tools/contracts";
 import {
-  connectionStatusText,
+  connectionStatusTitle,
   type EnvironmentConnectionPresentation,
 } from "@t3tools/client-runtime/connection";
 import {
@@ -189,6 +189,7 @@ import { useEnvironmentQuery } from "../state/query";
 import {
   primaryServerAvailableEditorsAtom,
   primaryServerKeybindingsAtom,
+  primaryServerSettingsAtom,
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
@@ -213,7 +214,11 @@ import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayo
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
-import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
+import {
+  getProviderStatusBannerKey,
+  ProviderStatusBanner,
+  shouldShowProviderStatusBanner,
+} from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import {
@@ -1149,6 +1154,10 @@ function ChatViewContent(props: ChatViewProps) {
     (store) => store.threadLastVisitedAtById[routeThreadKey],
   );
   const settings = useEnvironmentSettings(environmentId);
+  // New-thread defaults live in the primary environment's settings.json (the
+  // settings UI never writes to remote environments), so read them from the
+  // primary server rather than the thread's environment.
+  const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -1808,7 +1817,7 @@ function ChatViewContent(props: ChatViewProps) {
         id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
         variant: connection.phase === "error" ? "error" : "warning",
         icon: <WifiOffIcon />,
-        title: `${activeEnvironmentUnavailableState.label}: ${connectionStatusText(connection)}`,
+        title: `${activeEnvironmentUnavailableState.label}: ${connectionStatusTitle(connection)}`,
         description:
           connection.error ??
           "Reconnect this environment before sending messages or running actions.",
@@ -2322,11 +2331,22 @@ function ChatViewContent(props: ChatViewProps) {
     const defaultInstanceId = defaultInstanceIdForDriver(selectedProvider);
     return providerStatuses.find((status) => status.instanceId === defaultInstanceId) ?? null;
   }, [activeProviderInstanceId, providerStatuses, selectedProvider]);
-  const hasTimelineTopBanner =
-    Boolean(threadError) ||
-    (activeProviderStatus !== null &&
-      activeProviderStatus.status !== "ready" &&
-      activeProviderStatus.status !== "disabled");
+  const providerStatusBannerKey = getProviderStatusBannerKey(activeProviderStatus);
+  const [dismissedProviderStatusBannerKey, setDismissedProviderStatusBannerKey] = useState<
+    string | null
+  >(null);
+  useEffect(() => {
+    if (providerStatusBannerKey === null && dismissedProviderStatusBannerKey !== null) {
+      setDismissedProviderStatusBannerKey(null);
+    }
+  }, [dismissedProviderStatusBannerKey, providerStatusBannerKey]);
+  const visibleProviderStatus = shouldShowProviderStatusBanner(
+    activeProviderStatus,
+    dismissedProviderStatusBannerKey,
+  )
+    ? activeProviderStatus
+    : null;
+  const hasTimelineTopBanner = Boolean(threadError) || visibleProviderStatus !== null;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
@@ -3772,7 +3792,7 @@ function ChatViewContent(props: ChatViewProps) {
     ? (draftThread?.startFromOrigin ?? false)
     : canOverrideServerThreadEnvMode
       ? (pendingServerThreadStartFromOriginByThreadId[activeThread?.id ?? ""] ??
-        settings.newWorktreesStartFromOrigin)
+        primaryServerSettings.newWorktreesStartFromOrigin)
       : false;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
@@ -5241,7 +5261,7 @@ function ChatViewContent(props: ChatViewProps) {
           envMode: mode,
           startFromOrigin: resolveNewDraftStartFromOrigin({
             envMode: mode,
-            newWorktreesStartFromOrigin: settings.newWorktreesStartFromOrigin,
+            newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
           }),
           ...(mode === "worktree" && draftThread?.worktreePath ? { worktreePath: null } : {}),
         });
@@ -5253,7 +5273,7 @@ function ChatViewContent(props: ChatViewProps) {
       composerDraftTarget,
       draftThread?.worktreePath,
       isLocalDraftThread,
-      settings.newWorktreesStartFromOrigin,
+      primaryServerSettings.newWorktreesStartFromOrigin,
       setPendingServerThreadEnvMode,
       scheduleComposerFocus,
       setDraftThreadContext,
@@ -5512,7 +5532,10 @@ function ChatViewContent(props: ChatViewProps) {
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             {/* Provider status overlays the timeline without changing its content height. */}
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
-              <ProviderStatusBanner status={activeProviderStatus} />
+              <ProviderStatusBanner
+                status={visibleProviderStatus}
+                onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
+              />
             </div>
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col">
@@ -5587,7 +5610,7 @@ function ChatViewContent(props: ChatViewProps) {
                 ref={attachDraftHeroTransitionGroupRef}
                 className="chat-composer-horizontal-inset w-full"
               >
-                <div className="pointer-events-auto relative z-10 isolate">
+                <div className="pointer-events-auto relative z-10">
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full z-0">
                       <div
@@ -5618,8 +5641,8 @@ function ChatViewContent(props: ChatViewProps) {
                         : undefined
                     }
                   >
-                    <div className="chat-composer-glass-host mx-auto w-full max-w-3xl overflow-hidden rounded-[22px]">
-                      <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10 isolate">
+                    <div className="chat-composer-glass-host relative z-10 mx-auto w-full max-w-3xl rounded-[22px]">
+                      <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                         <ChatComposer
                           composerRef={composerRef}
                           composerDraftTarget={composerDraftTarget}
@@ -5696,41 +5719,41 @@ function ChatViewContent(props: ChatViewProps) {
                           onExpandImage={onExpandTimelineImage}
                         />
                       </div>
-                      <div className="min-h-0">
-                        <div
-                          data-terminal-open={terminalUiState.terminalOpen ? "true" : undefined}
-                          className="relative z-0"
-                        >
-                          {isGitRepo && (
-                            <div className="pointer-events-auto">
-                              <BranchToolbar
-                                environmentId={activeThread.environmentId}
-                                threadId={activeThread.id}
-                                {...(routeKind === "draft" && draftId ? { draftId } : {})}
-                                onEnvModeChange={onEnvModeChange}
-                                startFromOrigin={startFromOrigin}
-                                onStartFromOriginChange={onStartFromOriginChange}
-                                {...(canOverrideServerThreadEnvMode
-                                  ? { effectiveEnvModeOverride: envMode }
-                                  : {})}
-                                {...(canOverrideServerThreadEnvMode
-                                  ? {
-                                      activeThreadBranchOverride: activeThreadBranch,
-                                      onActiveThreadBranchOverrideChange:
-                                        setPendingServerThreadBranch,
-                                    }
-                                  : {})}
-                                envLocked={envLocked}
-                                onComposerFocusRequest={scheduleComposerFocus}
-                                {...(canCheckoutPullRequestIntoThread
-                                  ? { onCheckoutPullRequestRequest: openPullRequestDialog }
-                                  : {})}
-                                {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
-                                availableEnvironments={logicalProjectEnvironments}
-                              />
-                            </div>
-                          )}
-                        </div>
+                    </div>
+                    <div className="min-h-0">
+                      <div
+                        data-terminal-open={terminalUiState.terminalOpen ? "true" : undefined}
+                        className="relative z-0"
+                      >
+                        {isGitRepo && (
+                          <div className="pointer-events-auto">
+                            <BranchToolbar
+                              environmentId={activeThread.environmentId}
+                              threadId={activeThread.id}
+                              {...(routeKind === "draft" && draftId ? { draftId } : {})}
+                              onEnvModeChange={onEnvModeChange}
+                              startFromOrigin={startFromOrigin}
+                              onStartFromOriginChange={onStartFromOriginChange}
+                              {...(canOverrideServerThreadEnvMode
+                                ? { effectiveEnvModeOverride: envMode }
+                                : {})}
+                              {...(canOverrideServerThreadEnvMode
+                                ? {
+                                    activeThreadBranchOverride: activeThreadBranch,
+                                    onActiveThreadBranchOverrideChange:
+                                      setPendingServerThreadBranch,
+                                  }
+                                : {})}
+                              envLocked={envLocked}
+                              onComposerFocusRequest={scheduleComposerFocus}
+                              {...(canCheckoutPullRequestIntoThread
+                                ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+                                : {})}
+                              {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+                              availableEnvironments={logicalProjectEnvironments}
+                            />
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div

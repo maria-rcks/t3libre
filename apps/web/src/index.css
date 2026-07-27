@@ -77,7 +77,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 :root {
   --app-scrollbar-width: 6px;
+  --glass-blur: 12px;
   --glass-opacity: 80%;
+  --glass-saturation: 1.14;
   --desktop-window-right-resize-inset: 0px;
   --workspace-topbar-height: 52px;
   --workspace-controls-top: 0px;
@@ -86,6 +88,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --workspace-native-controls-inset: 0px;
   --workspace-titlebar-control-size: 1.75rem;
   --workspace-titlebar-control-gap: 0.75rem;
+}
+
+.dark {
+  --glass-blur: 16px;
+  --glass-saturation: 1.08;
 }
 
 [data-slot="sidebar-wrapper"] {
@@ -108,6 +115,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 }
 
 @theme inline {
+  --color-zinc-25: oklch(99.2% 0 0);
   --animate-skeleton: skeleton 2s -1s infinite linear;
   /* Duty-cycled indicator animations: long holds with stepped ramps, so the
      compositor updates discrete frames instead of every vsync. */
@@ -305,8 +313,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
   /* Fade rows themselves as they pass beneath the top chrome. A mask remains
      visible even when the header and timeline share the same background. */
-  .chat-timeline-scroll-fade {
-    --timeline-top-fade-height: 2.5rem;
+  .chat-timeline-scroll-fade,
+  .settings-page-scroll-fade {
+    --topbar-scroll-fade-height: 2.5rem;
     -webkit-mask-image:
       linear-gradient(
         to bottom,
@@ -322,8 +331,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     -webkit-mask-position: top, bottom;
     -webkit-mask-repeat: no-repeat;
     -webkit-mask-size:
-      100% var(--timeline-top-fade-height),
-      100% calc(100% - var(--timeline-top-fade-height));
+      100% var(--topbar-scroll-fade-height),
+      100% calc(100% - var(--topbar-scroll-fade-height));
     mask-image:
       linear-gradient(
         to bottom,
@@ -339,8 +348,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     mask-position: top, bottom;
     mask-repeat: no-repeat;
     mask-size:
-      100% var(--timeline-top-fade-height),
-      100% calc(100% - var(--timeline-top-fade-height));
+      100% var(--topbar-scroll-fade-height),
+      100% calc(100% - var(--topbar-scroll-fade-height));
   }
 
   .workspace-titlebar-controls {
@@ -364,24 +373,110 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
   .chat-composer-glass {
     background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
-    -webkit-backdrop-filter: blur(16px);
-    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
   }
 
   .chat-composer-glass-host {
-    background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
+    --chat-composer-glass-surface: var(--card);
+
+    position: relative;
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 8%),
+      0 12px 28px -18px rgb(0 0 0 / 40%);
+  }
+
+  .chat-composer-glass-host::before {
+    pointer-events: none;
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    border-radius: inherit;
+    background: color-mix(
+      in srgb,
+      var(--chat-composer-glass-surface) var(--glass-opacity),
+      transparent
+    );
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    content: "";
+  }
+
+  .chat-composer-context-strip {
+    --chat-composer-context-surface: var(--card);
+
+    position: relative;
+    isolation: isolate;
+  }
+
+  .chat-composer-context-strip::before {
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    border-radius: 0 0 16px 16px;
+    background: color-mix(
+      in srgb,
+      var(--chat-composer-context-surface) var(--glass-opacity),
+      transparent
+    );
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0 1rem, black 1rem);
+    mask-image: linear-gradient(to bottom, transparent 0 1rem, black 1rem);
     box-shadow: 0 12px 28px -18px rgb(0 0 0 / 40%);
-    -webkit-backdrop-filter: blur(16px);
-    backdrop-filter: blur(16px);
+    content: "";
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  }
+
+  .dark .chat-composer-glass-host {
+    --chat-composer-glass-surface: color-mix(in srgb, var(--background) 96%, var(--color-white));
+
+    box-shadow: none;
+  }
+
+  .dark .chat-composer-context-strip::before {
+    box-shadow: 0 14px 32px -18px rgb(0 0 0 / 75%);
+  }
+
+  .alert-glass {
+    --alert-glass-tint: transparent;
+
+    background:
+      linear-gradient(
+        color-mix(in srgb, var(--alert-glass-tint) 4%, transparent),
+        color-mix(in srgb, var(--alert-glass-tint) 4%, transparent)
+      ),
+      color-mix(in srgb, var(--background) var(--glass-opacity), transparent) !important;
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  }
+
+  .alert-glass[data-variant="error"] {
+    --alert-glass-tint: var(--destructive);
+  }
+
+  .alert-glass[data-variant="info"] {
+    --alert-glass-tint: var(--info);
+  }
+
+  .alert-glass[data-variant="success"] {
+    --alert-glass-tint: var(--success);
+  }
+
+  .alert-glass[data-variant="warning"] {
+    --alert-glass-tint: var(--warning);
   }
 
   .dropdown-glass,
-  .dialog-glass,
-  .workflow-dialog-surface,
-  .command-palette-dialog-surface {
+  .dialog-glass {
     background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
-    -webkit-backdrop-filter: blur(16px);
-    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  }
+
+  .dialog-backdrop {
+    background: color-mix(in srgb, var(--background) 60%, transparent);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
   }
 
   .dropdown-glass {
@@ -389,80 +484,149 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     box-shadow: 0 16px 40px -18px rgb(0 0 0 / 55%);
   }
 
-  .command-palette-glass {
-    box-shadow: 0 24px 64px -24px rgb(0 0 0 / 65%);
-  }
-
-  .command-menu-surface {
-    background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
-    -webkit-backdrop-filter: blur(16px);
-    backdrop-filter: blur(16px);
-    box-shadow: 0 24px 64px -24px rgb(0 0 0 / 65%);
-  }
-
-  .workflow-dialog-surface {
+  .dialog-glass {
     border-color: color-mix(in srgb, var(--foreground) 10%, transparent);
     box-shadow: 0 24px 64px -24px rgb(0 0 0 / 65%);
   }
 
-  .command-palette-dialog-surface {
-    border-color: color-mix(in srgb, var(--foreground) 10%, transparent) !important;
-    background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent) !important;
-    box-shadow: 0 24px 64px -24px rgb(0 0 0 / 65%) !important;
-  }
-
-  .dark .dropdown-glass,
-  .dark .dialog-glass {
+  .dark .dropdown-glass {
     box-shadow: 0 18px 44px -18px rgb(0 0 0 / 80%);
   }
 
   .dark .model-picker-surface.model-picker-surface {
-    background: color-mix(in srgb, var(--background) 90%, transparent);
+    background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
   }
 
-  .dark .command-menu-surface,
-  .dark .command-palette-glass,
-  .dark .workflow-dialog-surface {
-    box-shadow: none;
+  .dark .dialog-glass {
+    border-color: color-mix(in srgb, var(--color-white) 8%, transparent);
+    box-shadow:
+      inset 0 1px rgb(255 255 255 / 4%),
+      0 24px 72px -20px rgb(0 0 0 / 90%);
   }
 
-  .dark .command-palette-dialog-surface {
-    box-shadow: none !important;
-  }
-
-  .dark
-    .command-palette-dialog-surface
-    :is([data-slot="input-control"], [data-slot="textarea-control"]) {
-    background: var(--secondary) !important;
-  }
-
-  .dark
-    .command-palette-dialog-surface
-    :is([data-slot="input-control"], [data-slot="textarea-control"]):not(:has(:focus-visible)) {
-    border-color: transparent !important;
-    box-shadow: none !important;
-  }
-
-  .dark
-    .command-palette-dialog-surface
-    :is([data-slot="input-control"], [data-slot="textarea-control"])::before {
-    box-shadow: none !important;
+  .dark .dialog-backdrop {
+    background: color-mix(in srgb, var(--background) 64%, transparent);
   }
 
   .glass-opacity-slider {
-    accent-color: var(--primary);
+    --glass-slider-progress: 0%;
+    --glass-slider-fill-offset: 0.5rem;
+    --glass-slider-fill-position: calc(
+      var(--glass-slider-progress) + var(--glass-slider-fill-offset)
+    );
+    appearance: none;
+    height: 1.5rem;
+    background: transparent;
     cursor: pointer;
   }
 
-  .glass-opacity-slider:focus-visible {
+  .glass-opacity-slider::-webkit-slider-runnable-track {
+    height: 0.375rem;
     border-radius: 9999px;
-    outline: 2px solid var(--ring);
-    outline-offset: 3px;
+    background: linear-gradient(
+      to right,
+      var(--primary) 0 var(--glass-slider-fill-position),
+      color-mix(in srgb, var(--muted-foreground) 22%, transparent) var(--glass-slider-fill-position)
+        100%
+    );
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 55%, transparent);
+  }
+
+  .glass-opacity-slider::-moz-range-track {
+    height: 0.375rem;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--muted-foreground) 22%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 55%, transparent);
+  }
+
+  .glass-opacity-slider::-moz-range-progress {
+    height: 0.375rem;
+    border-radius: 9999px;
+    background: var(--primary);
+  }
+
+  .glass-opacity-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 1rem;
+    height: 1rem;
+    margin-top: -0.3125rem;
+    border: 2px solid var(--primary);
+    border-radius: 9999px;
+    background: var(--background);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 12%, transparent);
+    transition:
+      transform 120ms ease,
+      box-shadow 120ms ease;
+  }
+
+  .glass-opacity-slider::-moz-range-thumb {
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid var(--primary);
+    border-radius: 9999px;
+    background: var(--background);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 12%, transparent);
+    transition:
+      transform 120ms ease,
+      box-shadow 120ms ease;
+  }
+
+  .glass-opacity-slider:hover::-webkit-slider-thumb {
+    transform: scale(1.08);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 20%, transparent);
+  }
+
+  .glass-opacity-slider:hover::-moz-range-thumb {
+    transform: scale(1.08);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 20%, transparent);
+  }
+
+  .glass-opacity-slider:active::-webkit-slider-thumb {
+    transform: scale(0.94);
+  }
+
+  .glass-opacity-slider:active::-moz-range-thumb {
+    transform: scale(0.94);
+  }
+
+  .glass-opacity-slider:focus-visible {
+    outline: none;
+  }
+
+  .glass-opacity-slider:focus-visible::-webkit-slider-thumb {
+    box-shadow:
+      0 0 0 3px var(--background),
+      0 0 0 5px var(--ring);
+  }
+
+  .glass-opacity-slider:focus-visible::-moz-range-thumb {
+    box-shadow:
+      0 0 0 3px var(--background),
+      0 0 0 5px var(--ring);
+  }
+
+  @media (forced-colors: active) {
+    .glass-opacity-slider {
+      appearance: auto;
+      accent-color: Highlight;
+    }
+
+    .glass-opacity-slider::-webkit-slider-runnable-track,
+    .glass-opacity-slider::-webkit-slider-thumb {
+      all: revert;
+    }
+
+    .glass-opacity-slider::-moz-range-track,
+    .glass-opacity-slider::-moz-range-progress,
+    .glass-opacity-slider::-moz-range-thumb {
+      all: revert;
+    }
   }
 
   @media (min-width: 40rem) {
-    .chat-timeline-scroll-fade {
-      --timeline-top-fade-height: 3rem;
+    .chat-timeline-scroll-fade,
+    .settings-page-scroll-fade {
+      --topbar-scroll-fade-height: 3rem;
     }
 
     .chat-composer-horizontal-inset {
@@ -473,16 +637,17 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
   @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
     .chat-composer-glass,
-    .chat-composer-glass-host {
-      background: var(--background);
+    .alert-glass {
+      background: var(--background) !important;
+    }
+
+    .chat-composer-glass-host::before {
+      background: var(--chat-composer-glass-surface);
     }
 
     .dialog-glass,
-    .dropdown-glass,
-    .command-menu-surface,
-    .command-palette-dialog-surface,
-    .workflow-dialog-surface {
-      background: var(--popover);
+    .dropdown-glass {
+      background: var(--popover) !important;
     }
   }
 }
@@ -524,25 +689,25 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 :root {
   color-scheme: light;
   --radius: 0.625rem;
-  --background: var(--color-white);
+  --background: var(--color-zinc-25);
   --app-chrome-background: var(--background);
-  --surface-raised: var(--secondary);
-  --foreground: var(--color-neutral-800);
+  --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
+  --foreground: var(--color-zinc-800);
   --card: var(--color-white);
-  --card-foreground: var(--color-neutral-800);
+  --card-foreground: var(--color-zinc-800);
   --popover: var(--color-white);
-  --popover-foreground: var(--color-neutral-800);
+  --popover-foreground: var(--color-zinc-800);
   --primary: oklch(0.488 0.217 264);
   --primary-foreground: var(--color-white);
-  --secondary: --alpha(var(--color-black) / 4%);
-  --secondary-foreground: var(--color-neutral-800);
-  --muted: --alpha(var(--color-black) / 4%);
-  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
-  --accent: --alpha(var(--color-black) / 4%);
-  --accent-foreground: var(--color-neutral-800);
+  --secondary: var(--color-zinc-50);
+  --secondary-foreground: var(--color-zinc-800);
+  --muted: var(--color-zinc-50);
+  --muted-foreground: var(--color-zinc-500);
+  --accent: var(--color-zinc-100);
+  --accent-foreground: var(--color-zinc-900);
   --destructive: var(--color-red-500);
-  --border: --alpha(var(--color-black) / 8%);
-  --input: --alpha(var(--color-black) / 10%);
+  --border: var(--color-zinc-200);
+  --input: var(--color-zinc-300);
   --ring: oklch(0.488 0.217 264);
   --destructive-foreground: var(--color-red-700);
   --info: var(--color-blue-500);
@@ -551,16 +716,17 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --success-foreground: var(--color-emerald-700);
   --warning: var(--color-amber-500);
   --warning-foreground: var(--color-amber-700);
-  /* Fallbacks for standalone sidebar primitives. App sidebars override these
-     roles on their own root so the surface hierarchy stays out of page content. */
-  --sidebar: var(--card);
+  /* Keep every sidebar primitive on the same light surface hierarchy, including
+     portaled mobile sheets and settings navigation outside the app sidebar. */
+  --sidebar: var(--color-zinc-50);
   --sidebar-foreground: var(--foreground);
   --sidebar-muted-foreground: var(--muted-foreground);
-  --sidebar-control-surface: var(--accent);
-  --sidebar-row-hover: var(--accent);
-  --sidebar-row-active: var(--accent);
-  --sidebar-row-selected: var(--muted);
+  --sidebar-control-surface: var(--color-zinc-100);
+  --sidebar-row-hover: var(--color-zinc-25);
+  --sidebar-row-active: var(--color-white);
+  --sidebar-row-selected: var(--color-white);
   --sidebar-border: var(--border);
+  --sidebar-stage-fade: var(--sidebar);
 
   @variant dark {
     color-scheme: dark;
@@ -593,34 +759,44 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --success-foreground: var(--color-emerald-400);
     --warning: var(--color-amber-500);
     --warning-foreground: var(--color-amber-400);
+    --sidebar: var(--card);
+    --sidebar-foreground: var(--foreground);
+    --sidebar-muted-foreground: var(--muted-foreground);
+    --sidebar-control-surface: var(--muted);
+    --sidebar-row-hover: var(--accent);
+    --sidebar-row-active: var(--accent);
+    --sidebar-row-selected: var(--muted);
+    --sidebar-border: var(--border);
+    --sidebar-stage-fade: var(--card);
   }
 }
 
-/* Give both navigation implementations the same cool graphite surface. The
-   version attribute remains useful for layout-specific styling, but color is
-   shared so switching the beta does not switch visual systems. */
+/* Keep both navigation implementations on the same quiet zinc hierarchy:
+   zinc-50 navigation, zinc-25 hover, and white selected/raised surfaces.
+   The version attribute remains useful for layout-specific styling without
+   changing the color system when the beta is toggled. */
 [data-sidebar-version="v1"],
 [data-sidebar-version="v2"] {
-  --background: oklch(0.965 0.009 265);
-  --foreground: oklch(0.27 0.025 265);
-  --card: oklch(0.945 0.014 265);
-  --card-foreground: var(--foreground);
-  --accent: oklch(0.875 0.008 265);
-  --accent-foreground: oklch(0.24 0.012 265);
-  --muted: oklch(0.9 0.018 265);
-  --muted-foreground: oklch(0.49 0.03 265);
-  --border: oklch(0.72 0.025 265 / 28%);
-  --input: oklch(0.62 0.03 265 / 28%);
-  --sidebar: var(--card);
-  --sidebar-foreground: var(--foreground);
-  --sidebar-muted-foreground: var(--muted-foreground);
-  --sidebar-control-surface: var(--muted);
-  --sidebar-row-hover: color-mix(in srgb, var(--foreground) 6%, transparent);
-  --sidebar-row-active: color-mix(in srgb, var(--foreground) 11%, transparent);
-  --sidebar-row-selected: color-mix(in srgb, var(--foreground) 7%, transparent);
-  --sidebar-border: var(--border);
+  --background: var(--color-zinc-25);
+  --foreground: var(--color-zinc-800);
+  --card: var(--color-white);
+  --card-foreground: var(--color-zinc-800);
+  --accent: var(--color-zinc-100);
+  --accent-foreground: var(--color-zinc-900);
+  --muted: var(--color-zinc-50);
+  --muted-foreground: var(--color-zinc-500);
+  --border: var(--color-zinc-200);
+  --input: var(--color-zinc-300);
+  --sidebar: var(--color-zinc-50);
+  --sidebar-foreground: var(--color-zinc-800);
+  --sidebar-muted-foreground: var(--color-zinc-500);
+  --sidebar-control-surface: var(--color-zinc-100);
+  --sidebar-row-hover: var(--color-zinc-25);
+  --sidebar-row-active: var(--color-white);
+  --sidebar-row-selected: var(--color-white);
+  --sidebar-border: var(--color-zinc-200);
   --sidebar-stage-fade: var(--sidebar);
-  background-color: var(--card);
+  background-color: var(--sidebar);
 }
 
 .dark [data-sidebar-version="v1"],
