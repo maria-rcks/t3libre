@@ -7,6 +7,7 @@ import {
   ReviewDiffPreviewResult,
   ServerConfig,
   ThreadTurnDiff,
+  VcsStatusStreamEvent,
 } from "@t3tools/contracts";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import * as DateTime from "effect/DateTime";
@@ -114,6 +115,8 @@ interface DemoThreadSpec {
   readonly settledMinutesAgo?: number;
   /** Snoozes the thread until the far-future sentinel ("permanently"). */
   readonly snoozedForever?: boolean;
+  /** Worktree checkout the thread's git status is read from. */
+  readonly worktreePath?: string;
 }
 
 function demoThread(spec: DemoThreadSpec) {
@@ -126,7 +129,7 @@ function demoThread(spec: DemoThreadSpec) {
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: spec.branch,
-    worktreePath: null,
+    worktreePath: spec.worktreePath ?? null,
     latestTurn: spec.turn
       ? {
           turnId: `${spec.id}-turn-1`,
@@ -339,6 +342,7 @@ const macStudioShell = decodeShellSnapshot({
       title: "Composer attachments + drag-drop overlay",
       model: "gpt-5.3-codex",
       branch: "feat/composer-attachments",
+      worktreePath: "~/code/t3code-worktrees/composer-attachments",
       createdMinutesAgo: 60 * 3,
       updatedMinutesAgo: 1,
       turn: { state: "running", startedMinutesAgo: 6 },
@@ -351,6 +355,7 @@ const macStudioShell = decodeShellSnapshot({
       model: "grok-code-fast-2",
       instanceId: "grok",
       branch: "feat/sidebar-v2-polish",
+      worktreePath: "~/code/t3code-worktrees/sidebar-v2-polish",
       createdMinutesAgo: 60 * 5,
       updatedMinutesAgo: 12,
       turn: { state: "running", startedMinutesAgo: 14 },
@@ -494,6 +499,99 @@ export const demoBrowserPanelThreadKeys: ReadonlyArray<string> = [
   "demo-mac-studio:thread-composer",
   "demo-build-server:thread-metrics",
 ];
+
+// ---------------------------------------------------------------------------
+// Git status per checkout, driving the real GitActionsControl in the header
+// ---------------------------------------------------------------------------
+
+const GITHUB_PROVIDER = {
+  kind: "github",
+  name: "GitHub",
+  baseUrl: "https://github.com",
+} as const;
+
+export const demoVcsStatusByCwd: Record<string, VcsStatusStreamEvent> = {
+  // Feature worktree with uncommitted changes: quick action is "Commit & push".
+  "~/code/t3code-worktrees/composer-attachments": {
+    _tag: "snapshot",
+    local: {
+      isRepo: true,
+      sourceControlProvider: GITHUB_PROVIDER,
+      hasPrimaryRemote: true,
+      isDefaultRef: false,
+      refName: "feat/composer-attachments",
+      hasWorkingTreeChanges: true,
+      workingTree: {
+        files: [
+          { path: "apps/web/src/components/chat/ChatComposer.tsx", insertions: 187, deletions: 36 },
+          { path: "apps/web/src/components/chat/DropOverlay.tsx", insertions: 11, deletions: 0 },
+          {
+            path: "apps/web/src/components/chat/ChatComposer.test.tsx",
+            insertions: 74,
+            deletions: 2,
+          },
+        ],
+        insertions: 272,
+        deletions: 38,
+      },
+    },
+    remote: { hasUpstream: true, aheadCount: 2, behindCount: 0, aheadOfDefaultCount: 5, pr: null },
+  },
+  // Clean feature worktree with an open PR.
+  "~/code/t3code-worktrees/sidebar-v2-polish": {
+    _tag: "snapshot",
+    local: {
+      isRepo: true,
+      sourceControlProvider: GITHUB_PROVIDER,
+      hasPrimaryRemote: true,
+      isDefaultRef: false,
+      refName: "feat/sidebar-v2-polish",
+      hasWorkingTreeChanges: false,
+      workingTree: { files: [], insertions: 0, deletions: 0 },
+    },
+    remote: {
+      hasUpstream: true,
+      aheadCount: 0,
+      behindCount: 0,
+      aheadOfDefaultCount: 3,
+      pr: {
+        number: 1287,
+        title: "Sidebar v2 polish — settled sort + jump hints",
+        url: "https://github.com/pingdotgg/t3code/pull/1287",
+        baseRef: "main",
+        headRef: "feat/sidebar-v2-polish",
+        state: "open",
+      },
+    },
+  },
+  // Clean default checkouts.
+  "~/code/t3code": {
+    _tag: "snapshot",
+    local: {
+      isRepo: true,
+      sourceControlProvider: GITHUB_PROVIDER,
+      hasPrimaryRemote: true,
+      isDefaultRef: true,
+      refName: "main",
+      hasWorkingTreeChanges: false,
+      workingTree: { files: [], insertions: 0, deletions: 0 },
+    },
+    remote: { hasUpstream: true, aheadCount: 0, behindCount: 0, pr: null },
+  },
+  "~/code/mobile-app": {
+    _tag: "snapshot",
+    local: {
+      isRepo: true,
+      sourceControlProvider: GITHUB_PROVIDER,
+      hasPrimaryRemote: true,
+      isDefaultRef: true,
+      refName: "main",
+      hasWorkingTreeChanges: false,
+      workingTree: { files: [], insertions: 0, deletions: 0 },
+    },
+    remote: { hasUpstream: true, aheadCount: 0, behindCount: 0, pr: null },
+  },
+};
 
 // The browser preview surface needs the Electron desktop bridge, so the web
 // demo showcases the right panel with the diff surface instead.

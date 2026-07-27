@@ -259,60 +259,74 @@ const mobileEndorsementRows = [
 
   <!-- ── Git ──────────────────────────────────────────────────── -->
   <section id="git" class="sec-git">
-    <div class="container git-inner">
-      <div class="git-visual">
-        <div class="pr-card tile">
-          <div class="pr-head">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 8v8M18 8v5a3 3 0 01-3 3h-3M13 13l-2 3 2 3"/></svg>
-            <span class="pr-title">Add marketing hero animation</span>
-            <span class="pr-status">Ready</span>
-          </div>
-          <div class="pr-meta">
-            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 8v8M6 12a6 6 0 006-6h6"/></svg> feat/marketing-hero → main</span>
-            <span>+142 −38</span>
-            <span>3 commits</span>
-          </div>
-          <div class="pr-files">
-            <div><code>apps/marketing/src/pages/index.astro</code> <span>+14 −2</span></div>
-            <div><code>apps/marketing/src/layouts/Layout.astro</code> <span>+8 −0</span></div>
-            <div><code>apps/marketing/public/hero.css</code> <span>+120 −36</span></div>
-          </div>
-          <div class="pr-foot">
-            <button class="btn btn-ghost" style="font-size:12px;padding:6px 10px">View diff</button>
-            <button class="btn btn-primary" style="font-size:12px;padding:6px 12px">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 007.86 10.93c.58.1.79-.25.79-.56v-2c-3.2.69-3.88-1.37-3.88-1.37-.52-1.33-1.27-1.69-1.27-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.76 2.68 1.25 3.33.96.1-.75.4-1.25.72-1.54-2.55-.29-5.24-1.27-5.24-5.67 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.45.11-3.02 0 0 .96-.31 3.15 1.18a10.96 10.96 0 015.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.57.23 2.73.11 3.02.74.8 1.18 1.83 1.18 3.08 0 4.41-2.7 5.38-5.27 5.66.41.36.78 1.06.78 2.13v3.16c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
-              Open pull request
-            </button>
-          </div>
-        </div>
-        <div class="pr-trail">
-          <div class="pr-trail-dot"></div>
-          <div class="pr-trail-line"></div>
-          <div class="pr-trail-dot"></div>
-        </div>
-        <div class="pr-button-shell">
-          <button class="pr-button">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 8v8M18 8v5a3 3 0 01-3 3h-3M13 13l-2 3 2 3"/></svg>
-            Commit &amp; push
-            <span id="pr-button-kbd" class="pr-button-kbd">⌘⏎</span>
-          </button>
-        </div>
+    <div class="container">
+      <div class="section-head">
+        <h2>One button to commit, push, and make a PR.</h2>
+        <p>
+          Every agent thread works on its own branch and worktree. When it's
+          good, the button in the header commits, pushes, and opens the PR —
+          no terminal dance required. This is the real app below: review the
+          diff, then hit <strong>Commit, push &amp; PR</strong>.
+        </p>
       </div>
 
-      <div class="git-copy">
-        <div class="section-head" style="margin-bottom:0">
-          <h2>One button to commit, push, and make a PR.</h2>
-          <p>
-            Every agent thread writes to its own branch. When it's good, one
-            button opens the PR on GitHub with a generated title, body and
-            changelog. No terminal dance required.
-          </p>
-          <ul class="checklist" style="margin-top:24px">
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Auto-generated PR titles &amp; bodies</li>
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Inline diff review before you push</li>
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Draft PRs, stack PRs, amend PRs</li>
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Works with your existing GitHub auth</li>
-          </ul>
+      <div class="git-demo-frame">
+        <iframe
+          src="/sidebar-demo/demo.html#/demo-mac-studio/thread-composer"
+          title="The real T3 Code git workflow — commit, push, and PR from the thread header"
+          loading="lazy"
+          allow="clipboard-write"
+        ></iframe>
+      </div>
+
+      <ul class="checklist git-checklist">
+        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Auto-generated commit messages &amp; PR bodies</li>
+        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Inline diff review before you push</li>
+        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Branches &amp; worktrees per thread</li>
+        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Works with your existing GitHub auth</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ── T3 Connect + recent features ─────────────────────────── -->
+  <section id="connect" class="sec-connect">
+    <div class="container">
+      <div class="section-head">
+        <div class="eyebrow">T3 Connect</div>
+        <h2>Every machine you own, one command center.</h2>
+        <p>
+          Pair your desktop, your Mac Studio at home, and the build server in
+          the closet. Their projects, threads, and agents all show up in the
+          same sidebar — the Mac Studio and Build Server in the demos above are
+          remote machines. Start work at your desk, approve a command from the
+          couch.
+        </p>
+      </div>
+
+      <div class="feature-grid">
+        <div class="tile feature-card">
+          <h3>Sidebar v2</h3>
+          <p>A flat, glanceable thread list: live status, pending approvals, and input requests surface across every project and machine.</p>
+        </div>
+        <div class="tile feature-card">
+          <h3>Snooze &amp; settle</h3>
+          <p>Done with a thread? Settle it. Not now? Snooze it until tomorrow — or forever. Your sidebar only shows what needs you.</p>
+        </div>
+        <div class="tile feature-card">
+          <h3>Checkpoints &amp; diffs</h3>
+          <p>Every turn gets a checkpoint with a reviewable diff. Open the side panel to read the changes before anything ships.</p>
+        </div>
+        <div class="tile feature-card">
+          <h3>Approvals &amp; questions</h3>
+          <p>Agents ask before running risky commands, and can ask you questions mid-task — answer from the desktop or your phone.</p>
+        </div>
+        <div class="tile feature-card">
+          <h3>Images in the composer</h3>
+          <p>Drag screenshots straight into the composer. Paste a broken UI, get a fix.</p>
+        </div>
+        <div class="tile feature-card">
+          <h3>Built-in terminal</h3>
+          <p>A real terminal in every thread, running on whichever machine the thread lives on.</p>
         </div>
       </div>
     </div>
@@ -443,14 +457,12 @@ const mobileEndorsementRows = [
     const label = document.getElementById("download-label");
     const ctaBtn = document.getElementById("cta-download-btn") as HTMLAnchorElement | null;
     const ctaLabel = document.getElementById("cta-download-label");
-    const kbd = document.getElementById("pr-button-kbd");
 
     const platform = detectPlatform();
     if (!platform) return;
     document.documentElement.dataset.platform = platform.os;
     if (label) label.textContent = platform.label;
     if (ctaLabel) ctaLabel.textContent = platform.label;
-    if (kbd && platform.os !== "mac") kbd.textContent = "Ctrl ⏎";
 
     try {
       const release = await fetchLatestRelease();
@@ -1026,78 +1038,47 @@ const mobileEndorsementRows = [
   }
 
   /* ── Git ──────────────────────────────────────────────── */
-  .git-inner {
-    display: grid;
-    grid-template-columns: 1.1fr 1fr;
-    gap: 64px; align-items: center;
-  }
-
-  .git-visual {
+  .git-demo-frame {
     position: relative;
-    display: flex; flex-direction: column;
-    align-items: stretch; gap: 20px;
+    overflow: hidden;
+    aspect-ratio: 2508 / 1682;
+    border-radius: 14px;
+    background: #0a0a0c;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 28px 64px -28px rgba(0, 0, 0, 0.75);
   }
 
-  .pr-card { padding: 20px; }
-  .pr-head {
-    display: flex; align-items: center; gap: 10px;
-    margin-bottom: 12px;
+  .git-demo-frame iframe {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #161616;
   }
-  .pr-head svg { color: var(--ok); }
-  .pr-title { font-weight: 500; font-size: 15px; flex: 1; }
-  .pr-status {
-    font-family: var(--font-mono); font-size: 10px;
-    color: var(--ok); padding: 2px 8px;
-    border: 1px solid var(--ok); border-radius: 999px;
-    letter-spacing: 0.08em; text-transform: uppercase;
+
+  .git-checklist {
+    display: flex; flex-wrap: wrap;
+    justify-content: center; gap: 12px 28px;
+    margin-top: 28px;
   }
-  .pr-meta {
-    display: flex; gap: 14px;
-    font-family: var(--font-mono); font-size: 11px;
-    color: var(--fg-dim); margin-bottom: 14px; flex-wrap: wrap;
+
+  /* ── T3 Connect + features ────────────────────────────── */
+  .sec-connect { background: #09090b; }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
   }
-  .pr-meta span { display: inline-flex; align-items: center; gap: 5px; }
-  .pr-files {
-    border: 1px solid var(--border); border-radius: 8px;
-    overflow: hidden; margin-bottom: 16px;
+
+  .feature-card { padding: 24px; }
+  .feature-card h3 {
+    font-size: 15px; font-weight: 600;
+    margin-bottom: 8px;
   }
-  .pr-files > div {
-    display: flex; justify-content: space-between;
-    padding: 8px 12px; font-family: var(--font-mono);
-    font-size: 11px; border-top: 1px solid var(--border);
+  .feature-card p {
+    font-size: 13.5px; line-height: 1.55;
     color: var(--fg-muted);
-  }
-  .pr-files > div:first-child { border-top: 0; }
-  .pr-files span { color: var(--fg-dim); }
-  .pr-foot { display: flex; justify-content: flex-end; gap: 8px; }
-
-  .pr-trail {
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    gap: 0; margin: -4px 0;
-  }
-  .pr-trail-dot {
-    width: 8px; height: 8px; border-radius: 999px;
-    background: var(--border-strong);
-  }
-  .pr-trail-line {
-    width: 1px; height: 28px;
-    background: linear-gradient(180deg, var(--border-strong), var(--accent));
-  }
-
-  .pr-button-shell { display: flex; justify-content: center; }
-  .pr-button {
-    display: inline-flex; align-items: center; gap: 10px;
-    padding: 12px 20px;
-    background: var(--fg); color: #09090b;
-    font-weight: 600; font-size: 13px;
-    border-radius: 10px;
-    box-shadow: 0 8px 24px -8px rgba(255, 255, 255, 0.2);
-  }
-  .pr-button-kbd {
-    font-family: var(--font-mono); font-size: 10px;
-    background: rgba(0, 0, 0, 0.1);
-    padding: 2px 6px; border-radius: 4px;
   }
 
   /* ── Open source ──────────────────────────────────────── */
@@ -1292,7 +1273,7 @@ const mobileEndorsementRows = [
       grid-column: 1 / -1;
       border-right: 0;
     }
-    .git-inner { grid-template-columns: 1fr; gap: 40px; }
+    .feature-grid { grid-template-columns: 1fr 1fr; }
     .open-grid { grid-template-columns: 1fr; }
   }
 
@@ -1301,6 +1282,8 @@ const mobileEndorsementRows = [
     .sec-cta { padding: 96px 0; }
     .container { padding-left: 20px; padding-right: 20px; }
     .hero-preview { display: none; }
+    .git-demo-frame { display: none; }
+    .feature-grid { grid-template-columns: 1fr; }
     .endorsements-head {
       margin-bottom: 40px;
     }

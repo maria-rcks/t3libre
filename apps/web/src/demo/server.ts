@@ -24,8 +24,12 @@ import {
   EnvironmentAuthorizationError,
   ORCHESTRATION_WS_METHODS,
   OrchestrationGetSnapshotError,
+  type GitActionProgressEvent,
+  type GitRunStackedActionInput,
+  type GitRunStackedActionResult,
   type ServerConfigStreamEvent,
   type ServerLifecycleStreamEvent,
+  type VcsStatusResult,
   type VcsStatusStreamEvent,
   WS_METHODS,
   WsRpcGroup,
@@ -46,6 +50,7 @@ import {
   demoReviewDiffPreview,
   demoThreadDiff,
   demoThreadDetails,
+  demoVcsStatusByCwd,
 } from "./fixtures";
 
 // ---------------------------------------------------------------------------
@@ -563,7 +568,7 @@ function threadDetailSnapshot(thread: OrchestrationThreadShell): OrchestrationTh
   };
 }
 
-const EMPTY_VCS_STATUS: VcsStatusStreamEvent = {
+const EMPTY_VCS_STATUS: VcsSnapshot = {
   _tag: "snapshot",
   local: {
     isRepo: true,
@@ -575,6 +580,166 @@ const EMPTY_VCS_STATUS: VcsStatusStreamEvent = {
   },
   remote: null,
 };
+
+type VcsSnapshot = Extract<VcsStatusStreamEvent, { _tag: "snapshot" }>;
+
+/**
+ * Per-checkout git status backing the real GitActionsControl. Statuses are
+ * mutable so the demo "Commit & push" button behaves like the real one: after
+ * an action the working tree becomes clean and subscribers are notified.
+ */
+class DemoVcsStore {
+  private statuses = new Map<string, VcsSnapshot>();
+  private listeners = new Map<string, Set<(event: VcsStatusStreamEvent) => void>>();
+
+  constructor() {
+    for (const [cwd, status] of Object.entries(demoVcsStatusByCwd)) {
+      if (status._tag === "snapshot") {
+        this.statuses.set(cwd, status);
+      }
+    }
+  }
+
+  snapshot(cwd: string): VcsSnapshot {
+    return this.statuses.get(cwd) ?? EMPTY_VCS_STATUS;
+  }
+
+  combined(cwd: string): VcsStatusResult {
+    const snapshot = this.snapshot(cwd);
+    return {
+      ...snapshot.local,
+      hasUpstream: snapshot.remote?.hasUpstream ?? false,
+      aheadCount: snapshot.remote?.aheadCount ?? 0,
+      behindCount: snapshot.remote?.behindCount ?? 0,
+      ...(snapshot.remote?.aheadOfDefaultCount !== undefined
+        ? { aheadOfDefaultCount: snapshot.remote.aheadOfDefaultCount }
+        : {}),
+      pr: snapshot.remote?.pr ?? null,
+    };
+  }
+
+  subscribe(cwd: string, listener: (event: VcsStatusStreamEvent) => void): () => void {
+    let set = this.listeners.get(cwd);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(cwd, set);
+    }
+    set.add(listener);
+    return () => {
+      set.delete(listener);
+    };
+  }
+
+  update(cwd: string, next: VcsSnapshot): void {
+    this.statuses.set(cwd, next);
+    for (const listener of this.listeners.get(cwd) ?? []) {
+      listener(next);
+    }
+  }
+}
+
+const demoVcsStore = new DemoVcsStore();
+
+const DEMO_COMMIT_SUBJECT = "Add drag-drop attachment overlay to the composer";
+
+function settleVcsAction(cwd: string, input: GitRunStackedActionInput): void {
+  const current = demoVcsStore.snapshot(cwd);
+  const includesPr = input.action === "create_pr" || input.action === "commit_push_pr";
+  const refName = current.local.refName ?? "main";
+  demoVcsStore.update(cwd, {
+    _tag: "snapshot",
+    local: {
+      ...current.local,
+      hasWorkingTreeChanges: input.action === "push" ? current.local.hasWorkingTreeChanges : false,
+      workingTree:
+        input.action === "push"
+          ? current.local.workingTree
+          : { files: [], insertions: 0, deletions: 0 },
+    },
+    remote: {
+      hasUpstream: true,
+      aheadCount: 0,
+      behindCount: 0,
+      aheadOfDefaultCount: current.remote?.aheadOfDefaultCount ?? 0,
+      pr: includesPr
+        ? {
+            number: 1338,
+            title: DEMO_COMMIT_SUBJECT,
+            url: "https://github.com/pingdotgg/t3code/pull/1338",
+            baseRef: "main",
+            headRef: refName,
+            state: "open",
+          }
+        : (current.remote?.pr ?? null),
+    },
+  });
+}
+
+function demoGitActionEvents(input: GitRunStackedActionInput): GitActionProgressEvent[] {
+  const base = { actionId: input.actionId, cwd: input.cwd, action: input.action };
+  const status = demoVcsStore.snapshot(input.cwd);
+  const refName = status.local.refName ?? "main";
+  const includesCommit = input.action !== "push" && input.action !== "create_pr";
+  const includesPush = input.action !== "commit" && input.action !== "create_pr";
+  const includesPr = input.action === "create_pr" || input.action === "commit_push_pr";
+  const subject = input.commitMessage?.split("\n")[0] ?? DEMO_COMMIT_SUBJECT;
+
+  const phases: Array<"commit" | "push" | "pr"> = [
+    ...(includesCommit ? (["commit"] as const) : []),
+    ...(includesPush ? (["push"] as const) : []),
+    ...(includesPr ? (["pr"] as const) : []),
+  ];
+
+  const result: GitRunStackedActionResult = {
+    action: input.action,
+    branch: { status: "skipped_not_requested" },
+    commit: includesCommit
+      ? { status: "created", commitSha: "9e84b71", subject }
+      : { status: "skipped_not_requested" },
+    push: includesPush
+      ? { status: "pushed", branch: refName, upstreamBranch: `origin/${refName}` }
+      : { status: "skipped_not_requested" },
+    pr: includesPr
+      ? {
+          status: "created",
+          url: "https://github.com/pingdotgg/t3code/pull/1338",
+          number: 1338,
+          baseBranch: "main",
+          headBranch: refName,
+          title: subject,
+        }
+      : { status: "skipped_not_requested" },
+    toast: {
+      title: includesPr ? "Pull request created" : "Pushed to GitHub",
+      description: includesPr ? subject : `${refName} → origin/${refName}`,
+      cta: includesPr
+        ? {
+            kind: "open_pr",
+            label: "Open pull request",
+            url: "https://github.com/pingdotgg/t3code/pull/1338",
+          }
+        : { kind: "none" },
+    },
+  };
+
+  return [
+    { ...base, kind: "action_started", phases },
+    ...phases.map(
+      (phase): GitActionProgressEvent => ({
+        ...base,
+        kind: "phase_started",
+        phase,
+        label:
+          phase === "commit"
+            ? "Committing..."
+            : phase === "push"
+              ? `Pushing to origin/${refName}...`
+              : "Creating pull request...",
+      }),
+    ),
+    { ...base, kind: "action_finished", result },
+  ];
+}
 
 const demoStartedAtIso = new Date().toISOString();
 const demoAssetsExpireAt = Date.now() + 24 * 60 * 60 * 1000;
@@ -623,8 +788,24 @@ function makeHandlersLayer(backend: DemoBackend) {
         [WS_METHODS.subscribeTerminalEvents]: () => Stream.never,
         [WS_METHODS.subscribeTerminalMetadata]: () => Stream.never,
         [WS_METHODS.subscribePreviewEvents]: () => Stream.never,
-        [WS_METHODS.subscribeVcsStatus]: () =>
-          Stream.concat(Stream.make(EMPTY_VCS_STATUS), Stream.never),
+        [WS_METHODS.subscribeVcsStatus]: (input) =>
+          Stream.unwrap(
+            Effect.gen(function* () {
+              const queue = yield* Queue.unbounded<VcsStatusStreamEvent>();
+              yield* Effect.acquireRelease(
+                Effect.sync(() =>
+                  demoVcsStore.subscribe(input.cwd, (event) => {
+                    Queue.offerUnsafe(queue, event);
+                  }),
+                ),
+                (unsubscribe) => Effect.sync(unsubscribe),
+              );
+              return Stream.concat(
+                Stream.make(demoVcsStore.snapshot(input.cwd) as VcsStatusStreamEvent),
+                Stream.fromQueue(queue),
+              );
+            }),
+          ),
         [ORCHESTRATION_WS_METHODS.subscribeShell]: (input) => {
           const live = shellStream(store);
           if (input.afterSequence !== undefined) {
@@ -700,9 +881,13 @@ function makeHandlersLayer(backend: DemoBackend) {
             return { relativeUrl: relativeUrl ?? `/${PROJECT_FAVICON_FALLBACK_MARKER}`, expiresAt };
           }),
         [WS_METHODS.vcsPull]: () => unsupported("vcsPull"),
-        [WS_METHODS.vcsRefreshStatus]: () => unsupported("vcsRefreshStatus"),
-        [WS_METHODS.gitRunStackedAction]: () =>
-          Stream.fail(unsupportedError("gitRunStackedAction")),
+        [WS_METHODS.vcsRefreshStatus]: (input) =>
+          Effect.sync(() => demoVcsStore.combined(input.cwd)),
+        [WS_METHODS.gitRunStackedAction]: (input) =>
+          Stream.fromIterable(demoGitActionEvents(input)).pipe(
+            Stream.mapEffect((event) => Effect.as(Effect.sleep("650 millis"), event)),
+            Stream.onEnd(Effect.sync(() => settleVcsAction(input.cwd, input))),
+          ),
         [WS_METHODS.gitResolvePullRequest]: () => unsupported("gitResolvePullRequest"),
         [WS_METHODS.gitPreparePullRequestThread]: () => unsupported("gitPreparePullRequestThread"),
         [WS_METHODS.vcsListRefs]: () =>
