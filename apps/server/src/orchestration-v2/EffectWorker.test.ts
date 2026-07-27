@@ -268,6 +268,7 @@ it.effect("projects permanent failure before failing an exhausted outbox effect"
     const effect = {
       ...restartEffect(now, { type: "detach" }),
       attemptCount: 5,
+      leaseOwner: "permanent-failure-worker",
     };
     const outboxLayer = Layer.mock(EffectOutboxV2)({
       claimNext: () => Effect.succeed(Option.some(effect)),
@@ -314,7 +315,10 @@ it.effect("terminalizes a non-retryable checkpoint prerequisite on its first att
     const now = yield* DateTime.now;
     const events = yield* Ref.make<ReadonlyArray<string>>([]);
     const record = (event: string) => Ref.update(events, (current) => [...current, event]);
-    const effect = restartEffect(now, { type: "detach" });
+    const effect = {
+      ...restartEffect(now, { type: "detach" }),
+      leaseOwner: "checkpoint-prerequisite-worker",
+    };
     const outboxLayer = Layer.mock(EffectOutboxV2)({
       claimNext: () => Effect.succeed(Option.some(effect)),
       get: () => Effect.succeed(Option.some(effect)),
@@ -348,5 +352,110 @@ it.effect("terminalizes a non-retryable checkpoint prerequisite on its first att
       ),
     );
     assert.deepEqual(yield* Ref.get(events), ["terminalize", "outbox-fail"]);
+  }),
+);
+
+it.effect("retries instead of failing the outbox effect when terminal projection fails", () =>
+  Effect.gen(function* () {
+    const now = yield* DateTime.now;
+    const events = yield* Ref.make<ReadonlyArray<string>>([]);
+    const record = (event: string) => Ref.update(events, (current) => [...current, event]);
+    const effect = {
+      ...restartEffect(now, { type: "detach" }),
+      attemptCount: 5,
+      leaseOwner: "projection-retry-worker",
+    };
+    const outboxLayer = Layer.mock(EffectOutboxV2)({
+      claimNext: () => Effect.succeed(Option.some(effect)),
+      get: () => Effect.succeed(Option.some(effect)),
+      awaitCancellation: () => Effect.never,
+      clearCancellation: () => Effect.void,
+      fail: () => record("outbox-fail").pipe(Effect.as(true)),
+      retry: () => record("outbox-retry").pipe(Effect.as(true)),
+    });
+    const executorLayer = Layer.succeed(
+      OrchestrationEffectExecutorV2,
+      OrchestrationEffectExecutorV2.of({
+        execute: () =>
+          Effect.fail(
+            new OrchestrationEffectExecutionError({
+              effectId: effect.id,
+              effectType: effect.request.type,
+              cause: "simulated transport failure",
+            }),
+          ),
+        handlePermanentFailure: () =>
+          record("terminalize").pipe(
+            Effect.andThen(
+              Effect.fail(
+                new OrchestrationEffectExecutionError({
+                  effectId: effect.id,
+                  effectType: effect.request.type,
+                  cause: "simulated projection store failure",
+                }),
+              ),
+            ),
+          ),
+      }),
+    );
+    const workerLayer = effectWorkerLayerWithOptions({
+      workerId: "projection-retry-worker",
+      maxAttempts: 5,
+    }).pipe(Layer.provide(Layer.merge(outboxLayer, executorLayer)));
+
+    assert.isTrue(
+      yield* OrchestrationEffectWorkerV2.pipe(
+        Effect.flatMap((worker) => worker.runOnce),
+        Effect.provide(workerLayer),
+      ),
+    );
+    assert.deepEqual(yield* Ref.get(events), ["terminalize", "outbox-retry"]);
+  }),
+);
+
+it.effect("does not project a permanent failure after losing the effect lease", () =>
+  Effect.gen(function* () {
+    const now = yield* DateTime.now;
+    const events = yield* Ref.make<ReadonlyArray<string>>([]);
+    const record = (event: string) => Ref.update(events, (current) => [...current, event]);
+    const claimed = {
+      ...restartEffect(now, { type: "detach" }),
+      attemptCount: 5,
+      leaseOwner: "stale-worker",
+    };
+    const reclaimed = { ...claimed, leaseOwner: "other-worker" };
+    const outboxLayer = Layer.mock(EffectOutboxV2)({
+      claimNext: () => Effect.succeed(Option.some(claimed)),
+      get: () => Effect.succeed(Option.some(reclaimed)),
+      awaitCancellation: () => Effect.never,
+      clearCancellation: () => Effect.void,
+      fail: () => record("outbox-fail").pipe(Effect.as(false)),
+    });
+    const executorLayer = Layer.succeed(
+      OrchestrationEffectExecutorV2,
+      OrchestrationEffectExecutorV2.of({
+        execute: () =>
+          Effect.fail(
+            new OrchestrationEffectExecutionError({
+              effectId: claimed.id,
+              effectType: claimed.request.type,
+              cause: "simulated transport failure",
+            }),
+          ),
+        handlePermanentFailure: () => record("terminalize"),
+      }),
+    );
+    const workerLayer = effectWorkerLayerWithOptions({
+      workerId: "stale-worker",
+      maxAttempts: 5,
+    }).pipe(Layer.provide(Layer.merge(outboxLayer, executorLayer)));
+
+    const result = yield* OrchestrationEffectWorkerV2.pipe(
+      Effect.flatMap((worker) => worker.runOnce),
+      Effect.provide(workerLayer),
+      Effect.exit,
+    );
+    assert.isTrue(Exit.isFailure(result));
+    assert.deepEqual(yield* Ref.get(events), ["outbox-fail"]);
   }),
 );

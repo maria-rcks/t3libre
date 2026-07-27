@@ -429,21 +429,38 @@ export const layerWithOptions = (
           nonRetryable: ignorableControlFailure || nonRetryableStartFailure,
           error,
         });
+        // Only the worker that still owns the lease may project the terminal
+        // failure; a stale worker must not override another owner's attempt.
+        let permanentProjectionFailed = false;
         if (permanentFailure && executor.handlePermanentFailure !== undefined) {
-          yield* executor.handlePermanentFailure(effect).pipe(
-            Effect.catchCause(() =>
-              Effect.logError("Failed to project permanent orchestration effect failure", {
-                effectId: effect.id,
-                effectType: effect.request.type,
+          const ownsLease = yield* outbox.get(effect.id).pipe(
+            Effect.map(
+              Option.match({
+                onNone: () => false,
+                onSome: (current) =>
+                  current.status === "running" && current.leaseOwner === workerId,
               }),
             ),
           );
+          if (ownsLease) {
+            const projection = yield* Effect.exit(executor.handlePermanentFailure(effect));
+            if (Exit.isFailure(projection)) {
+              permanentProjectionFailed = true;
+              yield* Effect.logError("Failed to project permanent orchestration effect failure", {
+                effectId: effect.id,
+                effectType: effect.request.type,
+                cause: projection.cause,
+              });
+            }
+          }
         }
         // Prefer succeed for terminal interrupt races so the outbox does not
         // keep a failed interrupt around; fail only when we must not retry.
+        // If the terminal projection itself failed, keep the effect retryable
+        // so a later attempt can still terminalize the run.
         const updated = ignorableControlFailure
           ? yield* outbox.succeed({ effectId: effect.id, workerId })
-          : permanentFailure
+          : permanentFailure && !permanentProjectionFailed
             ? yield* outbox.fail({ effectId: effect.id, workerId, error })
             : yield* outbox.retry({
                 effectId: effect.id,

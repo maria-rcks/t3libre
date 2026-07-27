@@ -263,9 +263,14 @@ export function hermesProviderModels(
             isDefault: true,
             capabilities: null,
             ...(() => {
-              const providerCapabilities = inventoryModels.find(
-                (model) => model.slug === effectiveModel,
-              )?.providerCapabilities;
+              const providers = inventory?.providers ?? [];
+              const preferred = providers.filter(
+                (provider) => provider.is_current === true || provider.slug === inventory?.provider,
+              );
+              const owner = [...preferred, ...providers].find((provider) =>
+                provider.models?.includes(effectiveModel),
+              );
+              const providerCapabilities = owner?.capabilities?.[effectiveModel];
               return providerCapabilities === undefined ? {} : { providerCapabilities };
             })(),
           },
@@ -641,6 +646,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
           remoteTlsCertificateSha256,
           profileKey: config.profileKey,
           importEnabled: config.importEnabled,
+          ensureReady: connectionRuntime.ensureReady,
         }),
         textGeneration: unsupportedTextGeneration(),
       } satisfies ProviderInstance;

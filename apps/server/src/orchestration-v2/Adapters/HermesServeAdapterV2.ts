@@ -634,13 +634,16 @@ function sensitiveToolKey(key: string): boolean {
 
 function redactToolString(value: string): string {
   return value
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, "Bearer [REDACTED]")
     .replace(
-      /([?&](?:access_token|api_key|apikey|password|secret|token)=)[^&#\s]*/giu,
+      /\b(Bearer|Basic|Digest|Negotiate|NTLM|AWS4-HMAC-SHA256)\s+[A-Za-z0-9._~+/=,-]+/giu,
+      "$1 [REDACTED]",
+    )
+    .replace(
+      /([?&](?:access_token|refresh_token|id_token|client_secret|client_assertion|api_key|apikey|password|secret|token)=)[^&#\s]*/giu,
       "$1[REDACTED]",
     )
     .replace(
-      /\b((?:api[_-]?key|access[_-]?token|password|secret|token)\s*[=:]\s*)([^\s,;]+)/giu,
+      /\b((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|client[_-]?assertion|password|secret|token)\s*[=:]\s*)([^\s,;]+)/giu,
       "$1[REDACTED]",
     );
 }
@@ -682,8 +685,10 @@ export function sanitizeHermesToolValue(
     const entries = Object.entries(current).slice(0, 100);
     const result = Object.fromEntries(
       entries.map(([key, nested]) => {
-        remaining -= key.length;
-        return [key, sensitiveToolKey(key) ? "[REDACTED]" : visit(nested, depth + 1)];
+        const boundedKey =
+          key.length <= 256 ? key : `${key.slice(0, 256)}… [TRUNCATED ${key.length - 256} CHARS]`;
+        remaining -= boundedKey.length;
+        return [boundedKey, sensitiveToolKey(key) ? "[REDACTED]" : visit(nested, depth + 1)];
       }),
     );
     if (Object.keys(current).length > entries.length) {

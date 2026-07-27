@@ -116,4 +116,53 @@ describe("HermesServeRuntime", () => {
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  it.effect("relaunches its own unhealthy managed process rather than reporting a conflict", () =>
+    Effect.gen(function* () {
+      let starts = 0;
+      let kills = 0;
+      let healthy = false;
+      let processListening = false;
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* makeHermesServeRuntime({
+            endpoint: "ws://127.0.0.1:19121/api/ws",
+            authToken: "managed-token",
+            managedServerEnabled: true,
+            processEnvironment: {},
+            startupPollInterval: "1 millis",
+            probe: async () => {
+              if (!healthy) throw new Error("not ready");
+            },
+            endpointReachable: async () => processListening,
+            start: () => {
+              starts += 1;
+              healthy = true;
+              processListening = true;
+              return Effect.succeed({
+                isRunning: Effect.succeed(true),
+                kill: () =>
+                  Effect.sync(() => {
+                    kills += 1;
+                    processListening = false;
+                  }),
+              });
+            },
+          });
+
+          const first = yield* runtime.ensureReady;
+          assert.equal(first.ownership, "t3_owned");
+          assert.equal(starts, 1);
+
+          // The managed child keeps its socket open but stops answering probes.
+          healthy = false;
+          const second = yield* runtime.ensureReady;
+          assert.equal(second.ownership, "t3_owned");
+          assert.equal(starts, 2);
+          assert.equal(kills, 1);
+        }),
+      );
+      assert.equal(kills, 2);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });

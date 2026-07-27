@@ -475,6 +475,30 @@ it.effect("does not put optional title generation on the provisioning critical p
   }),
 );
 
+it.effect("still generates a title for launches that skip workspace preparation", () =>
+  Effect.gen(function* () {
+    const harness = makeHarness();
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "command:launch:no-workspace-title",
+          thread: "thread:launch:no-workspace-title",
+          message: "Name this thread",
+          prepareWorkspace: false,
+        }),
+      );
+      assert.equal(harness.runSetup.mock.calls.length, 0);
+      yield* waitUntil(() =>
+        threads
+          .getThreadProjection(launched.threadId)
+          .pipe(Effect.map((projection) => projection.thread.title === "Generated title")),
+      );
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
 for (const failurePoint of ["worktree", "setup"] as const) {
   it.effect(
     `${failurePoint} failure keeps the thread and message visible and emits failure items`,

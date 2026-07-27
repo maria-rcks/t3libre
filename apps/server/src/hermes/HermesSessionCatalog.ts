@@ -9,6 +9,7 @@ import * as Schema from "effect/Schema";
 
 import { assessHermesConnectionSecurity } from "./HermesConnectionSecurity.ts";
 import { HermesGatewayClient } from "./HermesGatewayClient.ts";
+import type { HermesServeConnection, HermesServeRuntimeError } from "./HermesServeRuntime.ts";
 
 const HERMES_IMPORT_REQUIRED_CAPABILITIES = ["profile.import", "session.lifecycle"] as const;
 
@@ -58,6 +59,7 @@ export function makeHermesSessionCatalog(input: {
   readonly remoteTlsCertificateSha256: string | undefined;
   readonly profileKey: string;
   readonly importEnabled: boolean;
+  readonly ensureReady?: Effect.Effect<HermesServeConnection, HermesServeRuntimeError>;
   readonly clientFactory?: (options: {
     readonly endpoint: string;
     readonly authToken: string;
@@ -73,9 +75,27 @@ export function makeHermesSessionCatalog(input: {
           message: "Hermes session discovery requires a configured endpoint and gateway token.",
         });
       }
+      // Route discovery through the serve runtime so a managed local Hermes
+      // instance is started before the gateway is contacted.
+      const connection =
+        input.ensureReady === undefined
+          ? undefined
+          : yield* input.ensureReady.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new HermesSessionsError({
+                    code:
+                      cause.code === "authentication_required"
+                        ? "provider_not_configured"
+                        : "gateway_error",
+                    message: cause.message,
+                    cause,
+                  }),
+              ),
+            );
       const security = assessHermesConnectionSecurity({
-        endpoint: input.endpoint,
-        gatewayToken: input.authToken,
+        endpoint: connection?.endpoint ?? input.endpoint,
+        gatewayToken: connection?.authToken ?? input.authToken,
         remoteGloballyEnabled: input.remoteGloballyEnabled,
         remoteInstanceEnabled: input.remoteInstanceEnabled,
         remotePairingToken: input.remotePairingToken,

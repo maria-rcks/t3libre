@@ -96,6 +96,40 @@ describe("HermesDriver", () => {
     assert.strictEqual(models.find((model) => model.slug === "grok-4.5")?.subProvider, "xAI");
   });
 
+  it("resolves default-model capabilities from the active provider on duplicate slugs", () => {
+    const models = hermesProviderModels(
+      {
+        model: "grok-4.5",
+        provider: "xai",
+        providers: [
+          {
+            slug: "opencode",
+            name: "OpenCode",
+            models: ["grok-4.5"],
+            capabilities: { "grok-4.5": { fast: true, reasoning: false } },
+          },
+          {
+            slug: "xai",
+            name: "xAI",
+            is_current: true,
+            models: ["grok-4.5"],
+            capabilities: { "grok-4.5": { fast: false, reasoning: true } },
+          },
+        ],
+      },
+      { value: "medium", display: "show" },
+      { value: "normal" },
+      ["default"],
+    );
+
+    assert.deepEqual(
+      models
+        .find((model) => model.slug === "default")
+        ?.capabilities?.optionDescriptors?.map((option) => option.id),
+      ["reasoningEffort"],
+    );
+  });
+
   it("surfaces catalog aliases and falls back to official gateway commands", () => {
     const live = hermesSlashCommands({
       pairs: [["/background", "Run in background (usage: /background <prompt>)"]],

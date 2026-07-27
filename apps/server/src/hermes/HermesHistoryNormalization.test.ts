@@ -86,6 +86,33 @@ describe("Hermes imported history normalization", () => {
     });
   });
 
+  it("captures two MEDIA directives on one line separately", () => {
+    expect(
+      parseHermesHistoryText({
+        role: "assistant",
+        text: "Before MEDIA:/tmp/media one.png MEDIA:/tmp/media two.png after",
+      }),
+    ).toEqual({
+      text: "Before   after",
+      media: [
+        { kind: "image", path: "/tmp/media one.png" },
+        { kind: "image", path: "/tmp/media two.png" },
+      ],
+    });
+    expect(
+      parseHermesHistoryText({
+        role: "assistant",
+        text: "MEDIA:/tmp/no-extension MEDIA:/tmp/real.png",
+      }),
+    ).toEqual({
+      text: "",
+      media: [
+        { kind: "image", path: "/tmp/real.png" },
+        { kind: "file", path: "/tmp/no-extension" },
+      ],
+    });
+  });
+
   it("honors quoted MEDIA paths and preserves examples in protected prose", () => {
     const real = "/Users/maria/Downloads/rendered output/report.pdf";
     const text = [

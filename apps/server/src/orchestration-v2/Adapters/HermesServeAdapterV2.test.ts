@@ -54,6 +54,7 @@ import {
   HermesProviderCapabilitiesV2,
   hermesWireMutationId,
   makeHermesServeAdapterV2,
+  sanitizeHermesToolValue,
   type HermesGatewayClientLike,
 } from "./HermesServeAdapterV2.ts";
 
@@ -2184,4 +2185,36 @@ describe("HermesServeAdapterV2", () => {
       }),
     ).pipe(Effect.provide(TestLayer)),
   );
+});
+
+describe("sanitizeHermesToolValue", () => {
+  it("redacts Basic credentials and OAuth parameters", () => {
+    assert.deepEqual(
+      sanitizeHermesToolValue({
+        header: "Authorization: Basic dXNlcjpwYXNz",
+        digest: "Digest username=abc",
+        url: "https://example.test/cb?client_secret=abc&refresh_token=def&id_token=ghi",
+        body: "client_secret: s3cret refresh_token=r3fresh",
+      }),
+      {
+        header: "Authorization: Basic [REDACTED]",
+        digest: "Digest [REDACTED]",
+        url: "https://example.test/cb?client_secret=[REDACTED]",
+        body: "client_secret: [REDACTED] refresh_token=[REDACTED]",
+      },
+    );
+  });
+
+  it("bounds oversized property names against the sanitized size budget", () => {
+    const longKey = "k".repeat(100_000);
+    const sanitized = sanitizeHermesToolValue({ [longKey]: "value", after: "kept" }) as Record<
+      string,
+      unknown
+    >;
+    const keys = Object.keys(sanitized);
+    assert.isBelow(keys[0]?.length ?? 0, 300);
+    assert.isTrue(keys[0]?.endsWith("[TRUNCATED 99744 CHARS]"));
+    assert.equal(sanitized["after"], "kept");
+    assert.isBelow(JSON.stringify(sanitized).length, 40_000);
+  });
 });

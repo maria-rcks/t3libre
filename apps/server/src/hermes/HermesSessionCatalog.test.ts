@@ -8,6 +8,7 @@ import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
 import { makeHermesSessionCatalog } from "./HermesSessionCatalog.ts";
+import { HermesServeRuntimeError } from "./HermesServeRuntime.ts";
 
 const supportedCompatibility: HermesGatewayCompatibility = {
   status: "supported",
@@ -123,6 +124,51 @@ describe("HermesSessionCatalog", () => {
       expect(error.code).toBe("import_failed");
       expect(error.message).toContain("evidence-backed");
       expect(fake.calls).toEqual(["connect", "close"]);
+    }),
+  );
+
+  effectIt.effect("starts the managed serve runtime before discovery when provided", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeClient(supportedCompatibility);
+      const order: string[] = [];
+      const catalog = makeHermesSessionCatalog({
+        ...catalogInput,
+        ensureReady: Effect.sync(() => {
+          order.push("ensure-ready");
+          return {
+            endpoint: catalogInput.endpoint,
+            authToken: catalogInput.authToken,
+            ownership: "t3_owned" as const,
+          };
+        }),
+        clientFactory: (options) => {
+          order.push(`client:${options.endpoint}`);
+          return fake.client;
+        },
+      });
+      const snapshot = yield* catalog.list(10);
+      expect(snapshot.sessions).toEqual([]);
+      expect(order).toEqual(["ensure-ready", `client:${catalogInput.endpoint}/`]);
+    }),
+  );
+
+  effectIt.effect("surfaces managed startup failures as gateway errors", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeClient(supportedCompatibility);
+      const catalog = makeHermesSessionCatalog({
+        ...catalogInput,
+        ensureReady: Effect.fail(
+          new HermesServeRuntimeError({
+            code: "managed_start_failed",
+            message: "T3 could not launch `hermes serve`.",
+          }),
+        ),
+        clientFactory: () => fake.client,
+      });
+      const error = yield* Effect.flip(catalog.list(10));
+      expect(error.code).toBe("gateway_error");
+      expect(error.message).toContain("hermes serve");
+      expect(fake.calls).toEqual([]);
     }),
   );
 

@@ -90,7 +90,7 @@ const HERMES_MEDIA_TAG = new RegExp(
   [
     String.raw`["']?MEDIA:\s*(?<path>`,
     String.raw`\x60[^\x60\n]+\x60`,
-    String.raw`|"[^"\n]+"|'[^'\n]+'|(?:~\/|\/|[A-Za-z]:[/\\])\S+(?:[^\S\n]+\S+)*?\.(?:${HERMES_MEDIA_DELIVERY_EXTENSION_PATTERN}))(?=[\s\x60"',;:)\]}]|$)["']?`,
+    String.raw`|"[^"\n]+"|'[^'\n]+'|(?:~\/|\/|[A-Za-z]:[/\\])\S+(?:[^\S\n]+(?!["']?MEDIA:)\S+)*?\.(?:${HERMES_MEDIA_DELIVERY_EXTENSION_PATTERN}))(?=[\s\x60"',;:)\]}]|$)["']?`,
   ].join(""),
   "giu",
 );

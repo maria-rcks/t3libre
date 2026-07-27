@@ -239,11 +239,20 @@ export const makeHermesServeRuntime = Effect.fn("makeHermesServeRuntime")(functi
         endpointReachable(effectiveEndpoint).catch(() => false),
       );
       if (reachable) {
-        return yield* new HermesServeRuntimeError({
-          code: "endpoint_in_use",
-          message:
-            "A Hermes Serve instance is already running at this endpoint, but it rejected the configured gateway token or protocol handshake. Use the token from that Hermes instance, then refresh.",
-        });
+        // A listener that T3 itself launched is not a conflicting external
+        // instance; stop the unhealthy owned process and relaunch it below.
+        const ownedStillRunning =
+          ownedProcess === null
+            ? false
+            : yield* ownedProcess.isRunning.pipe(Effect.orElseSucceed(() => false));
+        if (!ownedStillRunning) {
+          return yield* new HermesServeRuntimeError({
+            code: "endpoint_in_use",
+            message:
+              "A Hermes Serve instance is already running at this endpoint, but it rejected the configured gateway token or protocol handshake. Use the token from that Hermes instance, then refresh.",
+          });
+        }
+        yield* stopOwnedProcess();
       }
 
       const target = localServeTarget(effectiveEndpoint);
