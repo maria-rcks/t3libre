@@ -312,6 +312,8 @@ class DemoShellStore {
           hasPendingApprovals: false,
           hasPendingUserInput: false,
           hasActionableProposedPlan: false,
+          settledOverride: null,
+          settledAt: null,
         });
       }
       case "thread.archive": {
@@ -438,6 +440,8 @@ function threadDetailSnapshot(thread: OrchestrationThreadShell): OrchestrationTh
       updatedAt: thread.updatedAt,
       archivedAt: thread.archivedAt,
       deletedAt: null,
+      settledOverride: thread.settledOverride,
+      settledAt: thread.settledAt,
       messages: [],
       proposedPlans: [],
       activities: [],
@@ -541,6 +545,7 @@ const handlersLayer = WsRpcGroup.toLayer(
       [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: () => unsupported("getFullThreadDiff"),
       [ORCHESTRATION_WS_METHODS.replayEvents]: () => Effect.succeed([]),
       [WS_METHODS.serverUpdateProvider]: () => unsupported("serverUpdateProvider"),
+      [WS_METHODS.serverUpdateServer]: () => unsupported("serverUpdateServer"),
       [WS_METHODS.serverUpsertKeybinding]: () => unsupported("serverUpsertKeybinding"),
       [WS_METHODS.serverRemoveKeybinding]: () => unsupported("serverRemoveKeybinding"),
       [WS_METHODS.serverDiscoverSourceControl]: () => unsupported("serverDiscoverSourceControl"),
