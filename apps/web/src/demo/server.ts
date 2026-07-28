@@ -51,7 +51,10 @@ import {
   demoThreadDiff,
   demoThreadDetails,
   demoVcsStatusByCwd,
+  stagedDescriptor,
+  stagedServerConfig,
 } from "./fixtures";
+import { onDemoStageChange } from "./stage";
 
 // ---------------------------------------------------------------------------
 // In-memory WebSocket pair
@@ -465,7 +468,7 @@ export function installDemoNetworkInterceptors(): void {
 function demoHttpResponse(backend: DemoBackend, url: URL): Response | null {
   const fixture = backend.fixture;
   if (url.pathname === "/.well-known/t3/environment") {
-    return jsonResponse(fixture.descriptor);
+    return jsonResponse(stagedDescriptor(fixture));
   }
   if (url.pathname === "/api/auth/session") {
     return jsonResponse({
@@ -756,11 +759,11 @@ const demoAssetsExpireAt = Date.now() + 24 * 60 * 60 * 1000;
 
 function makeHandlersLayer(backend: DemoBackend) {
   const { fixture, store } = backend;
-  const serverConfigSnapshot: ServerConfigStreamEvent = {
+  const serverConfigSnapshot = (): ServerConfigStreamEvent => ({
     version: 1,
     type: "snapshot",
-    config: fixture.serverConfig,
-  };
+    config: stagedServerConfig(fixture),
+  });
   const lifecycleReady: ServerLifecycleStreamEvent = {
     version: 1,
     sequence: 1,
@@ -782,13 +785,28 @@ function makeHandlersLayer(backend: DemoBackend) {
     Effect.sync(() => {
       return {
         [WS_METHODS.serverProbe]: () => Effect.succeed({}),
-        [WS_METHODS.serverGetConfig]: () => Effect.succeed(fixture.serverConfig),
+        [WS_METHODS.serverGetConfig]: () => Effect.sync(() => stagedServerConfig(fixture)),
         [WS_METHODS.serverGetSettings]: () => Effect.succeed(fixture.serverConfig.settings),
         [WS_METHODS.serverUpdateSettings]: () => Effect.succeed(fixture.serverConfig.settings),
         [WS_METHODS.serverRefreshProviders]: () =>
           Effect.succeed({ providers: fixture.serverConfig.providers }),
+        // Re-emits when the marketing page switches the previewed channel, so
+        // the app reacts to the version change live (stage art, branding).
         [WS_METHODS.subscribeServerConfig]: () =>
-          Stream.concat(Stream.make(serverConfigSnapshot), Stream.never),
+          Stream.unwrap(
+            Effect.gen(function* () {
+              const queue = yield* Queue.unbounded<ServerConfigStreamEvent>();
+              yield* Effect.acquireRelease(
+                Effect.sync(() =>
+                  onDemoStageChange(() => {
+                    Queue.offerUnsafe(queue, serverConfigSnapshot());
+                  }),
+                ),
+                (unsubscribe) => Effect.sync(unsubscribe),
+              );
+              return Stream.concat(Stream.make(serverConfigSnapshot()), Stream.fromQueue(queue));
+            }),
+          ),
         [WS_METHODS.subscribeServerLifecycle]: () =>
           Stream.concat(Stream.make(lifecycleReady), Stream.never),
         [WS_METHODS.subscribeAuthAccess]: () =>

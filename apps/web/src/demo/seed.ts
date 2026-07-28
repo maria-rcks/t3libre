@@ -23,7 +23,7 @@ import {
   resolveVersionMismatch,
 } from "../versionSkew";
 import { demoBrowserPanelThreadKeys, demoEnvironments } from "./fixtures";
-import { demoServerVersion } from "./stage";
+import { demoServerVersionFor, type DemoStage } from "./stage";
 
 const CONNECTION_DATABASE_NAME = "t3code:connection-runtime";
 const CONNECTION_DATABASE_VERSION = 4;
@@ -193,12 +193,15 @@ function seedDiffPanelSelection(force: boolean): void {
  * intentional demo fixture data, not something a visitor should resolve.
  */
 function seedVersionMismatchDismissals(): void {
-  const mismatch = resolveVersionMismatch(demoServerVersion(APP_VERSION));
-  if (!mismatch) return;
-  for (const environment of demoEnvironments) {
-    dismissVersionMismatch(
-      buildVersionMismatchDismissalKey(EnvironmentId.make(environment.environmentId), mismatch),
-    );
+  const stages: ReadonlyArray<DemoStage> = ["latest", "nightly", "dev"];
+  for (const stage of stages) {
+    const mismatch = resolveVersionMismatch(demoServerVersionFor(APP_VERSION, stage));
+    if (!mismatch) continue;
+    for (const environment of demoEnvironments) {
+      dismissVersionMismatch(
+        buildVersionMismatchDismissalKey(EnvironmentId.make(environment.environmentId), mismatch),
+      );
+    }
   }
 }
 

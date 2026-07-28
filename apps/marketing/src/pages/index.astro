@@ -32,7 +32,6 @@ const mobileEndorsementRows = [
       <div class="hero-copy">
         <h1 class="hero-title display">Your Agents,<br />Everywhere</h1>
 
-        <p class="hero-sub">The open-source control plane for coding agents.</p>
 
         <div class="hero-actions">
         <a
@@ -523,10 +522,9 @@ const mobileEndorsementRows = [
       if (artFrame.getAttribute("src") !== artSrc) artFrame.src = artSrc;
     }
 
-    if (demo) {
-      const demoSrc = stage === "latest" ? "/sidebar-demo/demo.html" : `/sidebar-demo/demo.html?stage=${stage}`;
-      if (demo.getAttribute("src") !== demoSrc) demo.src = demoSrc;
-    }
+    // Live channel switch: the demo listens for this message and makes its
+    // mock server report the stage's version — no iframe reload needed.
+    demo?.contentWindow?.postMessage({ type: "t3-demo-stage", stage }, "*");
 
     if (stage === "dev") {
       btn.href = "#";
@@ -736,27 +734,42 @@ const mobileEndorsementRows = [
 
   .ray {
     position: absolute;
-    top: -140px;
-    width: 160px;
-    height: 560px;
-    background: linear-gradient(to bottom, var(--ray-color, rgba(255, 255, 255, 0.1)), transparent 78%);
-    filter: blur(26px);
-    transform: skewX(-16deg);
+    top: -160px;
+    width: 170px;
+    height: 620px;
+    background: linear-gradient(
+      to bottom,
+      var(--ray-hot, rgba(255, 255, 255, 0.14)),
+      var(--ray-color, rgba(255, 255, 255, 0.07)) 34%,
+      transparent 82%
+    );
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 30%, #000 70%, transparent);
+    mask-image: linear-gradient(to right, transparent, #000 30%, #000 70%, transparent);
+    filter: blur(22px);
+    transform: skewX(-14deg);
     transform-origin: top center;
     opacity: 0;
     transition: opacity 0.9s ease, background 0.9s ease;
-    animation: ray-sway 9s ease-in-out infinite alternate;
+    animation:
+      ray-sway 11s ease-in-out infinite alternate,
+      ray-shimmer 7s ease-in-out infinite;
   }
 
-  .ray-1 { left: 6%; animation-delay: 0s; }
-  .ray-2 { left: 24%; width: 110px; animation-delay: -2.4s; }
-  .ray-3 { left: 46%; width: 200px; animation-delay: -4.6s; }
-  .ray-4 { left: 68%; width: 120px; animation-delay: -1.4s; }
-  .ray-5 { left: 86%; animation-delay: -6s; }
+  .ray-1 { left: 4%; animation-delay: 0s, -1.2s; }
+  .ray-2 { left: 22%; width: 120px; animation-delay: -2.4s, -3.5s; }
+  .ray-3 { left: 44%; width: 220px; animation-delay: -4.6s, -0.8s; }
+  .ray-4 { left: 67%; width: 130px; animation-delay: -1.4s, -5.2s; }
+  .ray-5 { left: 85%; animation-delay: -6s, -2.6s; }
 
   @keyframes ray-sway {
-    0% { transform: skewX(-16deg) translateX(-24px); }
-    100% { transform: skewX(-10deg) translateX(26px); }
+    0% { transform: skewX(-15deg) translateX(-28px); }
+    100% { transform: skewX(-9deg) translateX(30px); }
+  }
+
+  @keyframes ray-shimmer {
+    0%,
+    100% { filter: blur(22px) brightness(1); }
+    50% { filter: blur(26px) brightness(1.45); }
   }
 
   .sky-cloud {
@@ -765,7 +778,7 @@ const mobileEndorsementRows = [
     width: 480px;
     height: 240px;
     border-radius: 50%;
-    background: radial-gradient(closest-side, rgba(168, 91, 234, 0.28), rgba(81, 101, 216, 0.12) 60%, transparent);
+    background: radial-gradient(closest-side, rgba(168, 91, 234, 0.3), rgba(81, 101, 216, 0.14) 60%, transparent);
     filter: blur(46px);
     opacity: 0;
     transition: opacity 0.9s ease;
@@ -784,23 +797,47 @@ const mobileEndorsementRows = [
     position: absolute;
     inset: 0;
     background-image:
-      linear-gradient(rgba(101, 200, 255, 0.14) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(101, 200, 255, 0.14) 1px, transparent 1px);
-    background-size: 42px 42px;
+      linear-gradient(rgba(101, 200, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(101, 200, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(rgba(101, 200, 255, 0.12) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(101, 200, 255, 0.12) 1px, transparent 1px);
+    background-size:
+      28px 28px,
+      28px 28px,
+      140px 140px,
+      140px 140px;
     opacity: 0;
     transition: opacity 0.9s ease;
-    animation: blueprint-pan 22s linear infinite;
+    animation: blueprint-pan 30s linear infinite;
   }
 
   @keyframes blueprint-pan {
-    0% { background-position: 0 0, 0 0; }
-    100% { background-position: 84px 42px, 84px 42px; }
+    0% { background-position: 0 0, 0 0, 0 0, 0 0; }
+    100% { background-position: 140px 70px, 140px 70px, 140px 70px, 140px 70px; }
   }
 
-  .hero[data-stage="latest"] .ray { opacity: 1; --ray-color: rgba(255, 255, 255, 0.09); }
-  .hero[data-stage="nightly"] .ray { opacity: 1; --ray-color: rgba(168, 91, 234, 0.2); }
+  .hero[data-stage="latest"] .ray {
+    opacity: 1;
+    --ray-hot: rgba(255, 255, 255, 0.13);
+    --ray-color: rgba(255, 255, 255, 0.06);
+  }
+
+  /* Nightly: violet-to-indigo aurora beams under the clouds. */
+  .hero[data-stage="nightly"] .ray {
+    opacity: 1;
+    --ray-hot: rgba(196, 132, 252, 0.3);
+    --ray-color: rgba(112, 96, 232, 0.16);
+  }
+
   .hero[data-stage="nightly"] .sky-cloud { opacity: 1; }
-  .hero[data-stage="dev"] .ray { opacity: 0.9; --ray-color: rgba(101, 200, 255, 0.16); }
+
+  /* Dev: crisp celeste drafting-light beams over the blueprint grid. */
+  .hero[data-stage="dev"] .ray {
+    opacity: 0.95;
+    --ray-hot: rgba(140, 220, 255, 0.24);
+    --ray-color: rgba(80, 170, 255, 0.1);
+  }
+
   .hero[data-stage="dev"] .sky-blueprint { opacity: 1; }
 
   .hero-inner {
@@ -815,14 +852,6 @@ const mobileEndorsementRows = [
     font-size: clamp(38px, 4.2vw, 64px);
     margin: 0 0 18px;
     text-wrap: balance;
-  }
-
-  .hero-sub {
-    color: var(--fg-muted);
-    font-size: clamp(16px, 1.4vw, 18px);
-    margin: 0 0 32px;
-    letter-spacing: -0.005em;
-    line-height: 1.55;
   }
 
   .hero-actions {

@@ -10,7 +10,9 @@ import "../index.css";
 
 import { startDemoServer } from "./server";
 import { seedDemoClientState } from "./seed";
+import { installDemoStageBridge } from "./stage";
 
+installDemoStageBridge();
 startDemoServer();
 
 // First-visit state (Sidebar v2 on, remote machines registered, browser panel

@@ -221,8 +221,8 @@ const demoCapabilities = {
 function makeDescriptor(input: {
   environmentId: string;
   label: string;
-  os: "darwin" | "linux";
-  arch: "arm64" | "x64";
+  os: ExecutionEnvironmentDescriptor["platform"]["os"];
+  arch: ExecutionEnvironmentDescriptor["platform"]["arch"];
 }): ExecutionEnvironmentDescriptor {
   return Schema.decodeUnknownSync(ExecutionEnvironmentDescriptor)({
     environmentId: input.environmentId,
@@ -236,6 +236,24 @@ function makeDescriptor(input: {
 // ---------------------------------------------------------------------------
 // Environments: one local (primary) + two remote machines over T3 Connect
 // ---------------------------------------------------------------------------
+
+/**
+ * Rebuilds the fixture's descriptor/config for the currently previewed demo
+ * stage, so the mock server can report a live version change when the
+ * marketing page switches channels without reloading the iframe.
+ */
+export function stagedDescriptor(fixture: DemoEnvironmentFixture): ExecutionEnvironmentDescriptor {
+  return makeDescriptor({
+    environmentId: fixture.environmentId,
+    label: fixture.label,
+    os: fixture.descriptor.platform.os,
+    arch: fixture.descriptor.platform.arch,
+  });
+}
+
+export function stagedServerConfig(fixture: DemoEnvironmentFixture): ServerConfig {
+  return makeServerConfig(stagedDescriptor(fixture), fixture.serverConfig.cwd);
+}
 
 export interface DemoEnvironmentFixture {
   readonly environmentId: string;

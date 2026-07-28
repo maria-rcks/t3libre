@@ -280,15 +280,38 @@ const {
     overflow-x: clip;
   }
 
+  /* Progressive blur: strongest at the top of the bar, dissolving to fully
+     clear below it — no solid backdrop tint. */
   .nav {
     position: sticky;
     top: 0;
     z-index: 50;
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    background: color-mix(in srgb, var(--bg) 75%, transparent);
+    background: transparent;
     border-bottom: 1px solid transparent;
     transition: border-color 0.3s ease;
+  }
+
+  .nav::before,
+  .nav::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 -36px;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  .nav::before {
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
+    -webkit-mask-image: linear-gradient(to bottom, #000, #000 40%, transparent 78%);
+    mask-image: linear-gradient(to bottom, #000, #000 40%, transparent 78%);
+  }
+
+  .nav::after {
+    -webkit-backdrop-filter: blur(7px);
+    backdrop-filter: blur(7px);
+    -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent);
+    mask-image: linear-gradient(to bottom, #000 35%, transparent);
   }
 
   .nav.is-scrolled {
