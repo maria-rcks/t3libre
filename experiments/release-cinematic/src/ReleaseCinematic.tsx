@@ -15,26 +15,99 @@ export const TOTAL_FRAMES = 1860; // 62s @ 30fps
 // Synced to the supplied track (public/track.mp3, gitignored):
 // the drop lands at ~46.2s = frame 1386.
 // Old act captures: ool_home.png / ool_thread.png — the light-grey UI
-// from the pre-sidebar-art revision.
+// from the pre-dark-theme revision.
 const DROP = 1386;
 
 // Timeline (30fps):
-//    0–  90  logo intro on #000
-//   80– 600  old release home, slow angled push-in (fills the frame)
-//  600–1010  old release thread view, opposite angle
-// 1010–1260  slow zoom toward the old composer area
-// 1260–1386  pull back + blur + darken as the track builds
-// 1386       DROP — the new UI slams in full-frame
-// 1500–1620  glass composer showcase: flies in from the side, settles flat
-// 1620–1740  Sidebar V2 thread rows sweep in one by one, settle flat
-// 1740–1808  work log + response unfold
-// 1786–1860  full new UI, slow dolly + sheen, fade out
+//    0–  80  logo intro on #000 (brief)
+//   64– 660  SHOT A — old light-grey home: sweeps in steeply tilted,
+//            settles flat + sharp for a readable beat, leans away
+//  660–1030  SHOT B — old thread view from the opposite raked angle,
+//            settles flat, then a slow diagonal dolly
+// 1030–1270  SHOT C — steep low-angle zoom toward the old composer
+// 1270–1386  BUILD — camera pulls back and tips over, motion blur,
+//            darkens as the track tenses up
+// 1386       DROP — the new dark UI slams in full-frame
+// 1386–1500  new home holds nearly full-frame, slow settle
+// 1500–1626  glass composer flies in from the right, 3D-raked +
+//            motion-blurred, settles flat and huge front-center
+// 1614–1744  Sidebar V2 thread rows sweep in one by one
+// 1732–1810  work log lands, response unfolds below it
+// 1796–1860  full new UI, slow dolly + light sheen, fade out
 const ez = Easing.bezier(0.3, 0, 0.12, 1);
 const slam = Easing.bezier(0.1, 0.9, 0.14, 1);
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 
 const FONT = "'DM Sans', -apple-system, 'Segoe UI', sans-serif";
 const BEAT = (60 / 124) * 30; // ~14.5 frames per beat
+
+type Cam = { rx: number; ry: number; s: number; x: number; y: number; z: number };
+type CamKey = Cam & { f: number; e?: (t: number) => number };
+
+/** Piecewise keyframed camera; each segment eases with the *next* key's easing. */
+const camAt = (keys: CamKey[], frame: number): Cam => {
+  const first = keys[0];
+  const last = keys[keys.length - 1];
+  if (frame <= first.f) return first;
+  if (frame >= last.f) return last;
+  let i = 0;
+  while (frame > keys[i + 1].f) i++;
+  const a = keys[i];
+  const b = keys[i + 1];
+  const t = (b.e ?? ez)((frame - a.f) / (b.f - a.f));
+  const mix = (p: number, q: number) => p + (q - p) * t;
+  return {
+    rx: mix(a.rx, b.rx),
+    ry: mix(a.ry, b.ry),
+    s: mix(a.s, b.s),
+    x: mix(a.x, b.x),
+    y: mix(a.y, b.y),
+    z: mix(a.z, b.z),
+  };
+};
+
+/** Motion-blur amount from camera velocity between consecutive frames. */
+const camBlur = (keys: CamKey[], frame: number): number => {
+  const a = camAt(keys, frame - 1);
+  const b = camAt(keys, frame);
+  const v =
+    Math.abs(b.ry - a.ry) * 1.6 +
+    Math.abs(b.rx - a.rx) * 1.6 +
+    Math.abs(b.s - a.s) * 55 +
+    Math.abs(b.x - a.x) * 0.045 +
+    Math.abs(b.y - a.y) * 0.045 +
+    Math.abs(b.z - a.z) * 0.02;
+  return Math.max(0, v - 0.28) * 6;
+};
+
+// SHOT A — home screen sweeps in steeply raked, settles dead flat and
+// sharp (frames ~250–430 readable), then leans away into the cut.
+const CAM_A: CamKey[] = [
+  { f: 64, rx: 16, ry: -34, s: 1.9, x: 340, y: -90, z: -260 },
+  { f: 250, rx: 0, ry: 0, s: 1.34, x: 0, y: 0, z: 0 },
+  { f: 430, rx: 0, ry: 0, s: 1.38, x: 0, y: 0, z: 0, e: Easing.linear },
+  { f: 560, rx: -8, ry: 18, s: 1.5, x: -170, y: 60, z: -120 },
+  { f: 660, rx: -14, ry: 30, s: 1.7, x: -360, y: 120, z: -320 },
+];
+
+// SHOT B — thread view arrives from the opposite rake, settles flat
+// (~800–930 readable), then a slow diagonal dolly.
+const CAM_B: CamKey[] = [
+  { f: 660, rx: -12, ry: 32, s: 1.85, x: -340, y: 130, z: -300 },
+  { f: 800, rx: 0, ry: 0, s: 1.35, x: 0, y: 0, z: 0 },
+  { f: 930, rx: 0, ry: 0, s: 1.4, x: 0, y: 0, z: 0, e: Easing.linear },
+  { f: 1030, rx: 6, ry: -12, s: 1.52, x: 150, y: -60, z: -80 },
+];
+
+// SHOT C — steep low-angle push toward the composer area, then the
+// BUILD: pull back hard, tip over, ready for the drop.
+const CAM_C: CamKey[] = [
+  { f: 1030, rx: 6, ry: -12, s: 1.52, x: 150, y: -60, z: -80 },
+  { f: 1160, rx: 14, ry: -6, s: 1.9, x: 40, y: -360, z: 60 },
+  { f: 1270, rx: 18, ry: 4, s: 2.15, x: -120, y: -480, z: 120, e: Easing.linear },
+  { f: 1340, rx: 26, ry: 16, s: 1.55, x: 60, y: -160, z: -420 },
+  { f: DROP, rx: 34, ry: 30, s: 1.15, x: 260, y: 140, z: -900, e: Easing.bezier(0.5, 0, 0.9, 1) },
+];
 
 const LogoCard: React.FC<{ size: number; glow: number }> = ({ size, glow }) => (
   <div
@@ -62,14 +135,14 @@ const BlurBackdrop: React.FC<{ src: string; opacity: number }> = ({ src, opacity
         width: "100%",
         height: "100%",
         objectFit: "cover",
-        filter: "blur(26px) brightness(0.45) saturate(1.1)",
+        filter: "blur(26px) brightness(0.5) saturate(1.1)",
         transform: "scale(1.1)",
       }}
     />
   </AbsoluteFill>
 );
 
-/** One element showcase: flies in from the side in 3D, settles flat front-on. */
+/** One element showcase: flies in from the side in deep 3D, settles flat front-on. */
 const Showcase: React.FC<{
   src: string;
   w: number;
@@ -85,7 +158,7 @@ const Showcase: React.FC<{
   const inv = 1 - enter;
   const outP = exit;
   return (
-    <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", perspective: 1700 }}>
+    <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", perspective: 1500 }}>
       <div
         style={{
           width: w,
@@ -94,9 +167,9 @@ const Showcase: React.FC<{
           borderRadius: 18,
           overflow: "hidden",
           border: "1px solid rgba(255,255,255,0.14)",
-          transform: `translate3d(${dir * 1300 * inv - dir * 500 * outP}px, ${60 * inv}px, ${-700 * inv - 500 * outP}px) rotateY(${dir * -55 * inv + dir * 30 * outP}deg) rotateX(${8 * inv}deg)`,
+          transform: `translate3d(${dir * 1700 * inv - dir * 600 * outP}px, ${90 * inv}px, ${-950 * inv - 650 * outP}px) rotateY(${dir * -72 * inv + dir * 38 * outP}deg) rotateX(${14 * inv}deg)`,
           opacity: Math.min(1, enter * 1.5) * (1 - outP),
-          filter: inv > 0.02 || outP > 0.02 ? `blur(${(inv + outP) * 9}px)` : undefined,
+          filter: inv > 0.02 || outP > 0.02 ? `blur(${(inv + outP) * 11}px)` : undefined,
           boxShadow: `0 50px 140px rgba(0,0,0,0.8), 0 0 ${60 * glow}px rgba(120,145,255,${0.35 * glow})`,
           background: "#050507",
         }}
@@ -110,64 +183,36 @@ const Showcase: React.FC<{
 export const ReleaseCinematic: React.FC = () => {
   const frame = useCurrentFrame();
 
-  const intro = interpolate(frame, [0, 16, 66, 88], [0, 1, 1, 0], clamp);
+  const intro = interpolate(frame, [0, 14, 58, 80], [0, 1, 1, 0], clamp);
 
-  // ---- old act (fills the frame, slow motion) ----
-  const oldIn = interpolate(frame, [80, 150], [0, 1], { ...clamp, easing: ez });
-  const oldSwap = interpolate(frame, [580, 620], [0, 1], { ...clamp, easing: ez });
-  const act1 = interpolate(frame, [80, 620], [0, 1], clamp);
-  const act2 = interpolate(frame, [620, 1010], [0, 1], clamp);
-  const zoomAct = interpolate(frame, [1010, 1260], [0, 1], {
-    ...clamp,
-    easing: Easing.bezier(0.35, 0, 0.5, 1),
-  });
-  const buildOut = interpolate(frame, [1260, DROP - 6], [0, 1], {
+  // ---- old act: light-grey UI, keyframed 3D camera ----
+  const showOld = frame >= 64 && frame < DROP;
+  const oldKeys = frame < 660 ? CAM_A : frame < 1030 ? CAM_B : CAM_C;
+  const cam = camAt(oldKeys, frame);
+  const oldIn = interpolate(frame, [64, 120], [0, 1], { ...clamp, easing: ez });
+  const shotBMix = interpolate(frame, [648, 672], [0, 1], { ...clamp, easing: ez });
+  const buildDim = interpolate(frame, [1290, DROP - 4], [1, 0.3], {
     ...clamp,
     easing: Easing.bezier(0.6, 0, 0.9, 1),
   });
-  const showOld = frame >= 80 && frame < DROP;
-
-  // camera for old act: fills the screen (scale >= 1.25 of stage)
-  let oRotY = 0;
-  let oRotX = 0;
-  let oScale = 1.25;
-  let oX = 0;
-  let oY = 0;
-  if (frame < 620) {
-    oRotY = interpolate(act1, [0, 1], [-14, -4]);
-    oRotX = interpolate(act1, [0, 1], [5, 2]);
-    oScale = interpolate(act1, [0, 1], [1.28, 1.38]);
-    oX = interpolate(act1, [0, 1], [60, -40]);
-  } else if (frame < 1010) {
-    oRotY = interpolate(act2, [0, 1], [10, 3]);
-    oRotX = interpolate(act2, [0, 1], [-3, 1]);
-    oScale = interpolate(act2, [0, 1], [1.3, 1.42]);
-    oX = interpolate(act2, [0, 1], [-80, 40]);
-    oY = interpolate(act2, [0, 1], [-20, 30]);
-  } else {
-    // slow zoom toward the composer area (lower middle of the shot)
-    oRotY = interpolate(zoomAct, [0, 1], [3, -6]);
-    oRotX = interpolate(zoomAct, [0, 1], [1, 4]);
-    oScale = interpolate(zoomAct, [0, 1], [1.42, 2.05]);
-    oX = interpolate(zoomAct, [0, 1], [40, -120]);
-    oY = interpolate(zoomAct, [0, 1], [30, -420]);
-  }
-  // build: pull back hard + blur
-  oScale *= 1 - buildOut * 0.45;
-  const oBlur = interpolate(oldIn, [0, 0.4], [8, 0], clamp) + buildOut * 16;
-  const oDim = 1 - buildOut * 0.75;
+  const buildBlur = interpolate(frame, [1310, DROP - 4], [0, 14], {
+    ...clamp,
+    easing: Easing.bezier(0.6, 0, 0.9, 1),
+  });
+  const oBlur =
+    camBlur(oldKeys, frame) + interpolate(oldIn, [0, 0.5], [10, 0], clamp) + buildBlur;
 
   // ---- drop & new act ----
-  const dropImpact = interpolate(frame, [DROP, DROP + 26], [0, 1], { ...clamp, easing: slam });
+  const dropImpact = interpolate(frame, [DROP, DROP + 24], [0, 1], { ...clamp, easing: slam });
   const dropHold = interpolate(frame, [DROP, 1500], [0, 1], clamp);
-  const flash = interpolate(frame, [DROP - 2, DROP + 4, DROP + 22], [0, 0.85, 0], clamp);
+  const flash = interpolate(frame, [DROP - 2, DROP + 4, DROP + 22], [0, 0.9, 0], clamp);
   const showDropScreen = frame >= DROP && frame < 1512;
 
   // showcases (beat-aligned)
-  const composerEnter = interpolate(frame, [1500, 1530], [0, 1], { ...clamp, easing: slam });
-  const composerExit = interpolate(frame, [1608, 1626], [0, 1], { ...clamp, easing: ez });
+  const composerEnter = interpolate(frame, [1500, 1528], [0, 1], { ...clamp, easing: slam });
+  const composerExit = interpolate(frame, [1606, 1626], [0, 1], { ...clamp, easing: ez });
   const rowsEnter = (i: number) =>
-    interpolate(frame, [1614 + i * BEAT * 0.5, 1640 + i * BEAT * 0.5], [0, 1], {
+    interpolate(frame, [1614 + i * BEAT * 0.5, 1642 + i * BEAT * 0.5], [0, 1], {
       ...clamp,
       easing: slam,
     });
@@ -189,8 +234,8 @@ export const ReleaseCinematic: React.FC = () => {
     <AbsoluteFill style={{ background: "#000", overflow: "hidden", fontFamily: FONT }}>
       <Audio src={staticFile("track.mp3")} volume={audioVolume} />
 
-      {/* intro */}
-      {frame < 90 ? (
+      {/* intro — the only overlay text in the whole piece */}
+      {frame < 80 ? (
         <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", opacity: intro }}>
           <LogoCard size={120} glow={0.35 * intro} />
           <div
@@ -207,44 +252,44 @@ export const ReleaseCinematic: React.FC = () => {
         </AbsoluteFill>
       ) : null}
 
-      {/* OLD ACT — the previous release, real captures, frame-filling */}
+      {/* OLD ACT — the light-grey previous release, deep 3D camera */}
       {showOld ? (
         <AbsoluteFill
           style={{
             alignItems: "center",
             justifyContent: "center",
-            perspective: 2100,
-            opacity: oldIn * oDim,
+            perspective: 1600,
+            opacity: oldIn * buildDim,
           }}
         >
           <div
             style={{
               width: STAGE_W,
               height: STAGE_H,
-              transform: `translate(${oX}px, ${oY}px) rotateX(${oRotX}deg) rotateY(${oRotY}deg) scale(${oScale})`,
+              transform: `translate3d(${cam.x}px, ${cam.y}px, ${cam.z}px) rotateX(${cam.rx}deg) rotateY(${cam.ry}deg) scale(${cam.s})`,
               transformStyle: "preserve-3d",
-              filter: oBlur > 0.2 ? `blur(${oBlur}px)` : undefined,
+              filter: oBlur > 0.25 ? `blur(${oBlur}px)` : undefined,
             }}
           >
-            <div style={{ position: "absolute", inset: 0, opacity: 1 - oldSwap }}>
-              <Screen src="oo_home.png" />
+            <div style={{ position: "absolute", inset: 0, opacity: 1 - shotBMix }}>
+              <Screen src="ool_home.png" />
             </div>
-            {oldSwap > 0 ? (
-              <div style={{ position: "absolute", inset: 0, opacity: oldSwap }}>
-                <Screen src="oo_thread.png" />
+            {shotBMix > 0 ? (
+              <div style={{ position: "absolute", inset: 0, opacity: shotBMix }}>
+                <Screen src="ool_thread.png" />
               </div>
             ) : null}
           </div>
         </AbsoluteFill>
       ) : null}
 
-      {/* DROP — the new UI slams in full-frame */}
+      {/* DROP — the new dark UI slams in full-frame */}
       {showDropScreen ? (
         <AbsoluteFill
           style={{
             alignItems: "center",
             justifyContent: "center",
-            perspective: 2100,
+            perspective: 1700,
             opacity: Math.min(1, dropImpact * 2) * interpolate(frame, [1494, 1512], [1, 0], clamp),
           }}
         >
@@ -252,8 +297,8 @@ export const ReleaseCinematic: React.FC = () => {
             style={{
               width: STAGE_W,
               height: STAGE_H,
-              transform: `rotateY(${interpolate(dropHold, [0, 1], [-6, 4])}deg) rotateX(${interpolate(dropHold, [0, 1], [2, -1])}deg) scale(${interpolate(dropImpact, [0, 1], [1.75, 1.32]) + dropHold * 0.05})`,
-              filter: dropImpact < 1 ? `blur(${(1 - dropImpact) * 6}px)` : undefined,
+              transform: `rotateY(${interpolate(dropHold, [0, 1], [-9, 5])}deg) rotateX(${interpolate(dropHold, [0, 1], [3, -2])}deg) scale(${interpolate(dropImpact, [0, 1], [1.85, 1.34]) + dropHold * 0.05})`,
+              filter: dropImpact < 1 ? `blur(${(1 - dropImpact) * 8}px)` : undefined,
             }}
           >
             <Screen src="new_home.png" />
@@ -271,26 +316,26 @@ export const ReleaseCinematic: React.FC = () => {
               (1 - interpolate(frame, [1794, 1812], [0, 1], clamp))
             }
           />
-          {/* glass composer, big and front-on */}
+          {/* glass composer, big and front-on (776x148 capture at ~2x) */}
           <Showcase
             src="el_composer.png"
-            w={1240}
-            h={236}
+            w={1552}
+            h={296}
             enter={composerEnter}
             exit={composerExit}
             fromRight
-            glow={interpolate(frame, [1530, 1560, 1608], [1, 0.35, 0.6], clamp)}
+            glow={interpolate(frame, [1528, 1560, 1606], [1, 0.35, 0.6], clamp)}
           />
-          {/* Sidebar V2 thread rows, sweeping in one by one */}
+          {/* Sidebar V2 thread rows (233x78 captures at ~2.6x), one by one */}
           {rowsExit < 0.999 ? (
             <AbsoluteFill
-              style={{ alignItems: "center", justifyContent: "center", perspective: 1700 }}
+              style={{ alignItems: "center", justifyContent: "center", perspective: 1500 }}
             >
               <div
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: 18,
+                  gap: 20,
                   transformStyle: "preserve-3d",
                 }}
               >
@@ -302,16 +347,16 @@ export const ReleaseCinematic: React.FC = () => {
                     <div
                       key={i}
                       style={{
-                        width: 560,
-                        height: 187,
+                        width: 606,
+                        height: 203,
                         borderRadius: 16,
                         overflow: "hidden",
                         border: "1px solid rgba(255,255,255,0.14)",
-                        transform: `translate3d(${-1200 * inv + 500 * rowsExit}px, ${40 * inv}px, ${-600 * inv - 400 * rowsExit}px) rotateY(${50 * inv - 28 * rowsExit}deg)`,
+                        transform: `translate3d(${-1600 * inv + 600 * rowsExit}px, ${60 * inv}px, ${-800 * inv - 500 * rowsExit}px) rotateY(${66 * inv - 34 * rowsExit}deg) rotateX(${-8 * inv}deg)`,
                         opacity: Math.min(1, e * 1.5) * (1 - rowsExit),
                         filter:
                           inv > 0.02 || rowsExit > 0.02
-                            ? `blur(${(inv + rowsExit) * 8}px)`
+                            ? `blur(${(inv + rowsExit) * 10}px)`
                             : undefined,
                         boxShadow: "0 40px 110px rgba(0,0,0,0.8)",
                         background: "#050507",
@@ -319,7 +364,7 @@ export const ReleaseCinematic: React.FC = () => {
                     >
                       <Img
                         src={staticFile(`el_row${i}.png`)}
-                        style={{ width: 560, height: 187, display: "block" }}
+                        style={{ width: 606, height: 203, display: "block" }}
                       />
                     </div>
                   );
@@ -327,29 +372,29 @@ export const ReleaseCinematic: React.FC = () => {
               </div>
             </AbsoluteFill>
           ) : null}
-          {/* work log lands, response unfolds under it */}
+          {/* work log lands, response unfolds under it (790px captures at 2x) */}
           {worklogEnter > 0.001 && worklogExit < 0.999 ? (
             <AbsoluteFill
-              style={{ alignItems: "center", justifyContent: "center", perspective: 1700 }}
+              style={{ alignItems: "center", justifyContent: "center", perspective: 1500 }}
             >
               <div
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: 20,
+                  gap: 22,
                   transformStyle: "preserve-3d",
-                  transform: `translate3d(${900 * (1 - worklogEnter) - 400 * worklogExit}px, 0px, ${-500 * (1 - worklogEnter) - 400 * worklogExit}px) rotateY(${-45 * (1 - worklogEnter) + 24 * worklogExit}deg)`,
+                  transform: `translate3d(${1400 * (1 - worklogEnter) - 500 * worklogExit}px, 0px, ${-800 * (1 - worklogEnter) - 500 * worklogExit}px) rotateY(${-62 * (1 - worklogEnter) + 30 * worklogExit}deg) rotateX(${10 * (1 - worklogEnter)}deg)`,
                   opacity: Math.min(1, worklogEnter * 1.5) * (1 - worklogExit),
                   filter:
                     1 - worklogEnter > 0.02 || worklogExit > 0.02
-                      ? `blur(${(1 - worklogEnter + worklogExit) * 8}px)`
+                      ? `blur(${(1 - worklogEnter + worklogExit) * 10}px)`
                       : undefined,
                 }}
               >
                 <div
                   style={{
-                    width: 1050,
-                    height: 161,
+                    width: 1580,
+                    height: 242,
                     borderRadius: 16,
                     overflow: "hidden",
                     border: "1px solid rgba(255,255,255,0.14)",
@@ -359,13 +404,13 @@ export const ReleaseCinematic: React.FC = () => {
                 >
                   <Img
                     src={staticFile("el_worklog.png")}
-                    style={{ width: 1050, height: 161, display: "block" }}
+                    style={{ width: 1580, height: 242, display: "block" }}
                   />
                 </div>
                 <div
                   style={{
-                    width: 1050,
-                    height: 248 * responseReveal,
+                    width: 1580,
+                    height: 374 * responseReveal,
                     borderRadius: 16,
                     overflow: "hidden",
                     border: responseReveal > 0.02 ? "1px solid rgba(255,255,255,0.14)" : "none",
@@ -375,7 +420,7 @@ export const ReleaseCinematic: React.FC = () => {
                 >
                   <Img
                     src={staticFile("el_response.png")}
-                    style={{ width: 1050, height: 248, display: "block" }}
+                    style={{ width: 1580, height: 374, display: "block" }}
                   />
                 </div>
               </div>
@@ -398,7 +443,7 @@ export const ReleaseCinematic: React.FC = () => {
             style={{
               width: STAGE_W,
               height: STAGE_H,
-              transform: `rotateY(${interpolate(finalT, [0, 1], [5, -2])}deg) scale(${interpolate(finalT, [0, 1], [1.3, 1.38])})`,
+              transform: `rotateY(${interpolate(finalT, [0, 1], [7, -3])}deg) rotateX(${interpolate(finalT, [0, 1], [-2, 1])}deg) scale(${interpolate(finalT, [0, 1], [1.32, 1.4])})`,
             }}
           >
             <Screen src="new_thread.png" />
