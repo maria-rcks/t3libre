@@ -16,7 +16,14 @@ import { ConnectionCatalogDocument } from "@t3tools/client-runtime/platform";
 import * as Schema from "effect/Schema";
 
 import { readBrowserClientSettings, writeBrowserClientSettings } from "../clientPersistenceStorage";
+import { APP_VERSION } from "../branding";
+import {
+  buildVersionMismatchDismissalKey,
+  dismissVersionMismatch,
+  resolveVersionMismatch,
+} from "../versionSkew";
 import { demoBrowserPanelThreadKeys, demoEnvironments } from "./fixtures";
+import { demoServerVersion } from "./stage";
 
 const CONNECTION_DATABASE_NAME = "t3code:connection-runtime";
 const CONNECTION_DATABASE_VERSION = 4;
@@ -179,12 +186,29 @@ function seedDiffPanelSelection(force: boolean): void {
   );
 }
 
+/**
+ * The channel-preview builds (?stage=nightly/dev) report stage-suffixed server
+ * versions so the real branding + stage art react to them, which would also
+ * trip the client/server version-skew banner. Pre-dismiss it — the skew is
+ * intentional demo fixture data, not something a visitor should resolve.
+ */
+function seedVersionMismatchDismissals(): void {
+  const mismatch = resolveVersionMismatch(demoServerVersion(APP_VERSION));
+  if (!mismatch) return;
+  for (const environment of demoEnvironments) {
+    dismissVersionMismatch(
+      buildVersionMismatchDismissalKey(EnvironmentId.make(environment.environmentId), mismatch),
+    );
+  }
+}
+
 export async function seedDemoClientState(): Promise<void> {
   // The demo showcases the Sidebar v2 beta by default; visitors can still
   // toggle it in Settings, and their choice persists.
   if (readBrowserClientSettings() === null) {
     writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, sidebarV2Enabled: true });
   }
+  seedVersionMismatchDismissals();
   const staleFixtures = window.localStorage.getItem(DEMO_SEED_VERSION_KEY) !== DEMO_SEED_VERSION;
   seedRightPanelState(staleFixtures);
   seedDiffPanelSelection(staleFixtures);

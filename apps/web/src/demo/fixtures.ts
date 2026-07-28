@@ -13,6 +13,8 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
+import { demoServerVersion } from "./stage";
+
 export const DEMO_ENVIRONMENT_ID = "demo-environment";
 export const DEMO_ENVIRONMENT_LABEL = "MacBook Pro";
 
@@ -226,7 +228,7 @@ function makeDescriptor(input: {
     environmentId: input.environmentId,
     label: input.label,
     platform: { os: input.os, arch: input.arch },
-    serverVersion: import.meta.env.APP_VERSION || "0.0.0",
+    serverVersion: demoServerVersion(import.meta.env.APP_VERSION || "0.0.0"),
     capabilities: demoCapabilities,
   });
 }
