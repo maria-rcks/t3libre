@@ -8,51 +8,31 @@ import {
   staticFile,
   useCurrentFrame,
 } from "remotion";
-import { Element, Screen, STAGE_H, STAGE_W } from "./UiStage";
+import { Screen, STAGE_H, STAGE_W } from "./UiStage";
 
-export const TOTAL_FRAMES = 720; // 24s @ 30fps
+export const TOTAL_FRAMES = 1860; // 62s @ 30fps
+
+// Synced to the supplied track (public/track.mp3, gitignored):
+// the drop lands at ~46.2s = frame 1386.
+const DROP = 1386;
 
 // Timeline (30fps):
-//   0– 70  intro: real T3 logo on #000
-//  55–240  the old dark look (real captures, Sidebar V1), slow angles + DOF
-// 240–290  old UI recedes into the dark (music impact at frame 264)
-// 270–560  the new UI assembles element by element: topbar drops in,
-//          thread rows land one by one, the user message arrives, the
-//          work log expands, the response unfolds, the composer rises
-// 545–645  the assembled elements resolve into the full live app
-// 645–720  outro
+//    0–  90  logo intro on #000
+//   80– 600  old release home, slow angled push-in (fills the frame)
+//  600–1010  old release thread view, opposite angle
+// 1010–1260  slow zoom toward the old composer area
+// 1260–1386  pull back + blur + darken as the track builds
+// 1386       DROP — the new UI slams in full-frame
+// 1500–1620  glass composer showcase: flies in from the side, settles flat
+// 1620–1740  Sidebar V2 thread rows sweep in one by one, settle flat
+// 1740–1808  work log + response unfold
+// 1786–1860  full new UI, slow dolly + sheen, fade out
 const ez = Easing.bezier(0.3, 0, 0.12, 1);
-const pop = Easing.bezier(0.18, 0.7, 0.16, 1);
+const slam = Easing.bezier(0.1, 0.9, 0.14, 1);
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 
 const FONT = "'DM Sans', -apple-system, 'Segoe UI', sans-serif";
-
-const Label: React.FC<{
-  title: string;
-  sub: string;
-  accent: string;
-  opacity: number;
-  y: number;
-}> = ({ title, sub, accent, opacity, y }) => (
-  <div
-    style={{
-      position: "absolute",
-      left: 90,
-      bottom: 56,
-      opacity,
-      transform: `translateY(${y}px)`,
-      fontFamily: FONT,
-    }}
-  >
-    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-      <div style={{ width: 36, height: 3, borderRadius: 2, background: accent }} />
-      <div style={{ fontSize: 42, fontWeight: 800, color: "#f1f3f7", letterSpacing: -0.5 }}>
-        {title}
-      </div>
-    </div>
-    <div style={{ fontSize: 20, color: "#8f8f99", marginTop: 8, marginLeft: 50 }}>{sub}</div>
-  </div>
-);
+const BEAT = (60 / 124) * 30; // ~14.5 frames per beat
 
 const LogoCard: React.FC<{ size: number; glow: number }> = ({ size, glow }) => (
   <div
@@ -71,78 +51,150 @@ const LogoCard: React.FC<{ size: number; glow: number }> = ({ size, glow }) => (
   </div>
 );
 
-const seg = (frame: number, start: number, dur: number) =>
-  interpolate(frame, [start, start + dur], [0, 1], { ...clamp, easing: pop });
+/** Full-frame blurred app backdrop used behind element showcases. */
+const BlurBackdrop: React.FC<{ src: string; opacity: number }> = ({ src, opacity }) => (
+  <AbsoluteFill style={{ opacity }}>
+    <Img
+      src={staticFile(src)}
+      style={{
+        width: "100%",
+        height: "100%",
+        objectFit: "cover",
+        filter: "blur(26px) brightness(0.45) saturate(1.1)",
+        transform: "scale(1.1)",
+      }}
+    />
+  </AbsoluteFill>
+);
+
+/** One element showcase: flies in from the side in 3D, settles flat front-on. */
+const Showcase: React.FC<{
+  src: string;
+  w: number;
+  h: number;
+  enter: number; // 0..1 fly-in
+  exit: number; // 0..1 fly-out
+  fromRight?: boolean;
+  glow?: number;
+  y?: number;
+}> = ({ src, w, h, enter, exit, fromRight = false, glow = 0, y = 0 }) => {
+  if (enter <= 0.001 || exit >= 0.999) return null;
+  const dir = fromRight ? 1 : -1;
+  const inv = 1 - enter;
+  const outP = exit;
+  return (
+    <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", perspective: 1700 }}>
+      <div
+        style={{
+          width: w,
+          height: h,
+          marginTop: y,
+          borderRadius: 18,
+          overflow: "hidden",
+          border: "1px solid rgba(255,255,255,0.14)",
+          transform: `translate3d(${dir * 1300 * inv - dir * 500 * outP}px, ${60 * inv}px, ${-700 * inv - 500 * outP}px) rotateY(${dir * -55 * inv + dir * 30 * outP}deg) rotateX(${8 * inv}deg)`,
+          opacity: Math.min(1, enter * 1.5) * (1 - outP),
+          filter: inv > 0.02 || outP > 0.02 ? `blur(${(inv + outP) * 9}px)` : undefined,
+          boxShadow: `0 50px 140px rgba(0,0,0,0.8), 0 0 ${60 * glow}px rgba(120,145,255,${0.35 * glow})`,
+          background: "#050507",
+        }}
+      >
+        <Img src={staticFile(src)} style={{ width: w, height: h, display: "block" }} />
+      </div>
+    </AbsoluteFill>
+  );
+};
 
 export const ReleaseCinematic: React.FC = () => {
   const frame = useCurrentFrame();
 
-  const intro = interpolate(frame, [0, 14, 50, 68], [0, 1, 1, 0], clamp);
+  const intro = interpolate(frame, [0, 16, 66, 88], [0, 1, 1, 0], clamp);
 
-  // old act
-  const oldIn = interpolate(frame, [55, 100], [0, 1], { ...clamp, easing: ez });
-  const oldSwap = interpolate(frame, [160, 178], [0, 1], { ...clamp, easing: ez });
-  const oldDrift = interpolate(frame, [55, 240], [0, 1], {
+  // ---- old act (fills the frame, slow motion) ----
+  const oldIn = interpolate(frame, [80, 150], [0, 1], { ...clamp, easing: ez });
+  const oldSwap = interpolate(frame, [580, 620], [0, 1], { ...clamp, easing: ez });
+  const act1 = interpolate(frame, [80, 620], [0, 1], clamp);
+  const act2 = interpolate(frame, [620, 1010], [0, 1], clamp);
+  const zoomAct = interpolate(frame, [1010, 1260], [0, 1], {
     ...clamp,
-    easing: Easing.bezier(0.3, 0, 0.6, 1),
+    easing: Easing.bezier(0.35, 0, 0.5, 1),
   });
-  const oldOut = interpolate(frame, [240, 288], [0, 1], {
+  const buildOut = interpolate(frame, [1260, DROP - 6], [0, 1], {
     ...clamp,
-    easing: Easing.bezier(0.5, 0, 0.9, 1),
+    easing: Easing.bezier(0.6, 0, 0.9, 1),
   });
-  const oldRotY = interpolate(oldDrift, [0, 1], [-24, -6]) + oldOut * 18;
-  const oldRotX = interpolate(oldDrift, [0, 1], [8, 3]) - oldOut * 6;
-  const oldScale = interpolate(oldDrift, [0, 1], [0.88, 1.02]) * (1 - oldOut * 0.35);
-  const oldBlur = interpolate(oldDrift, [0, 0.3], [7, 0], clamp) + oldOut * 12;
-  const showOld = frame >= 55 && oldOut < 1;
+  const showOld = frame >= 80 && frame < DROP;
 
-  // element build-up
-  const pTopbar = seg(frame, 275, 34);
-  const rowStarts = [305, 319, 333, 347, 361];
-  const pUserMsg = seg(frame, 392, 32);
-  const pWorklog = seg(frame, 424, 30);
-  const responseReveal = interpolate(frame, [456, 502], [0, 1], { ...clamp, easing: ez });
-  const pComposer = seg(frame, 500, 38);
-  const composerGlow = interpolate(frame, [510, 540, 585], [0, 1, 0.3], clamp);
+  // camera for old act: fills the screen (scale >= 1.25 of stage)
+  let oRotY = 0;
+  let oRotX = 0;
+  let oScale = 1.25;
+  let oX = 0;
+  let oY = 0;
+  if (frame < 620) {
+    oRotY = interpolate(act1, [0, 1], [-14, -4]);
+    oRotX = interpolate(act1, [0, 1], [5, 2]);
+    oScale = interpolate(act1, [0, 1], [1.28, 1.38]);
+    oX = interpolate(act1, [0, 1], [60, -40]);
+  } else if (frame < 1010) {
+    oRotY = interpolate(act2, [0, 1], [10, 3]);
+    oRotX = interpolate(act2, [0, 1], [-3, 1]);
+    oScale = interpolate(act2, [0, 1], [1.3, 1.42]);
+    oX = interpolate(act2, [0, 1], [-80, 40]);
+    oY = interpolate(act2, [0, 1], [-20, 30]);
+  } else {
+    // slow zoom toward the composer area (lower middle of the shot)
+    oRotY = interpolate(zoomAct, [0, 1], [3, -6]);
+    oRotX = interpolate(zoomAct, [0, 1], [1, 4]);
+    oScale = interpolate(zoomAct, [0, 1], [1.42, 2.05]);
+    oX = interpolate(zoomAct, [0, 1], [40, -120]);
+    oY = interpolate(zoomAct, [0, 1], [30, -420]);
+  }
+  // build: pull back hard + blur
+  oScale *= 1 - buildOut * 0.45;
+  const oBlur = interpolate(oldIn, [0, 0.4], [8, 0], clamp) + buildOut * 16;
+  const oDim = 1 - buildOut * 0.75;
 
-  // camera drift during the build
-  const buildT = interpolate(frame, [270, 560], [0, 1], clamp);
-  const camRotY = interpolate(buildT, [0, 1], [-8, 7]);
-  const camRotX = interpolate(buildT, [0, 1], [4, -2]);
-  const camScale = interpolate(buildT, [0, 1], [0.92, 1.0]);
+  // ---- drop & new act ----
+  const dropImpact = interpolate(frame, [DROP, DROP + 26], [0, 1], { ...clamp, easing: slam });
+  const dropHold = interpolate(frame, [DROP, 1500], [0, 1], clamp);
+  const flash = interpolate(frame, [DROP - 2, DROP + 4, DROP + 22], [0, 0.85, 0], clamp);
+  const showDropScreen = frame >= DROP && frame < 1512;
 
-  // resolve into the full app
-  const resolve = interpolate(frame, [545, 585], [0, 1], { ...clamp, easing: ez });
-  const finalHold = interpolate(frame, [585, 645], [0, 1], clamp);
-  const finalRotY = interpolate(resolve, [0, 1], [7, 3]) + finalHold * -8;
-  const finalScale = 1.0 + finalHold * 0.06;
-  const finalOut = interpolate(frame, [632, 656], [1, 0], { ...clamp, easing: ez });
-  const showBuild = frame >= 270 && resolve < 1;
-  const showFinal = resolve > 0 && finalOut > 0.01;
-  const outroIn = interpolate(frame, [648, 672], [0, 1], clamp);
+  // showcases (beat-aligned)
+  const composerEnter = interpolate(frame, [1500, 1530], [0, 1], { ...clamp, easing: slam });
+  const composerExit = interpolate(frame, [1608, 1626], [0, 1], { ...clamp, easing: ez });
+  const rowsEnter = (i: number) =>
+    interpolate(frame, [1614 + i * BEAT * 0.5, 1640 + i * BEAT * 0.5], [0, 1], {
+      ...clamp,
+      easing: slam,
+    });
+  const rowsExit = interpolate(frame, [1726, 1744], [0, 1], { ...clamp, easing: ez });
+  const worklogEnter = interpolate(frame, [1732, 1758], [0, 1], { ...clamp, easing: slam });
+  const responseReveal = interpolate(frame, [1752, 1786], [0, 1], { ...clamp, easing: ez });
+  const worklogExit = interpolate(frame, [1792, 1810], [0, 1], { ...clamp, easing: ez });
+  const showcasePhase = frame >= 1500 && frame < 1812;
 
-  const switchFlash = interpolate(frame, [258, 268, 292], [0, 0.5, 0], clamp);
+  // final full app
+  const finalIn = interpolate(frame, [1796, 1820], [0, 1], { ...clamp, easing: ez });
+  const finalT = interpolate(frame, [1812, 1860], [0, 1], clamp);
+  const fadeOut = interpolate(frame, [1836, 1860], [1, 0], clamp);
+  const showFinal = frame >= 1796;
+
+  const audioVolume = interpolate(frame, [0, 30, 1800, 1856], [0.7, 1, 1, 0], clamp);
 
   return (
     <AbsoluteFill style={{ background: "#000", overflow: "hidden", fontFamily: FONT }}>
-      <Audio src={staticFile("music.mp3")} />
-
-      <AbsoluteFill
-        style={{
-          opacity: 0.45 + 0.55 * interpolate(frame, [260, 320], [0, 1], clamp),
-          background:
-            "radial-gradient(1200px 750px at 68% 12%, rgba(99,102,241,0.10), transparent 62%), radial-gradient(1000px 650px at 22% 92%, rgba(56,189,248,0.05), transparent 60%)",
-        }}
-      />
+      <Audio src={staticFile("track.mp3")} volume={audioVolume} />
 
       {/* intro */}
-      {frame < 70 ? (
+      {frame < 90 ? (
         <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", opacity: intro }}>
-          <LogoCard size={110} glow={0.3 * intro} />
+          <LogoCard size={120} glow={0.35 * intro} />
           <div
             style={{
               marginTop: 30,
-              fontSize: 58,
+              fontSize: 54,
               fontWeight: 800,
               color: "#f1f3f7",
               letterSpacing: -1,
@@ -150,152 +202,204 @@ export const ReleaseCinematic: React.FC = () => {
           >
             T3 Code
           </div>
-          <div style={{ marginTop: 12, fontSize: 22, color: "#8f8f99" }}>
-            previous latest → the new release
-          </div>
         </AbsoluteFill>
       ) : null}
 
-      {/* OLD ACT — real captures of the previous dark UI (Sidebar V1) */}
+      {/* OLD ACT — the previous release, real captures, frame-filling */}
       {showOld ? (
         <AbsoluteFill
           style={{
             alignItems: "center",
             justifyContent: "center",
-            perspective: 2000,
-            opacity: oldIn * (1 - oldOut),
+            perspective: 2100,
+            opacity: oldIn * oDim,
           }}
         >
           <div
             style={{
               width: STAGE_W,
               height: STAGE_H,
-              transform: `rotateX(${oldRotX}deg) rotateY(${oldRotY}deg) scale(${oldScale})`,
+              transform: `translate(${oX}px, ${oY}px) rotateX(${oRotX}deg) rotateY(${oRotY}deg) scale(${oScale})`,
               transformStyle: "preserve-3d",
-              filter: oldBlur > 0.2 ? `blur(${oldBlur}px)` : undefined,
+              filter: oBlur > 0.2 ? `blur(${oBlur}px)` : undefined,
             }}
           >
             <div style={{ position: "absolute", inset: 0, opacity: 1 - oldSwap }}>
-              <Screen src="olddark_home.png" reflection={1} />
+              <Screen src="oo_home.png" />
             </div>
             {oldSwap > 0 ? (
               <div style={{ position: "absolute", inset: 0, opacity: oldSwap }}>
-                <Screen src="olddark_thread.png" reflection={1} />
+                <Screen src="oo_thread.png" />
               </div>
             ) : null}
           </div>
         </AbsoluteFill>
       ) : null}
 
-      {/* NEW ACT — the release assembles from real UI elements */}
-      {showBuild ? (
+      {/* DROP — the new UI slams in full-frame */}
+      {showDropScreen ? (
         <AbsoluteFill
           style={{
             alignItems: "center",
             justifyContent: "center",
-            perspective: 1900,
-            opacity: (1 - resolve) * interpolate(frame, [270, 290], [0, 1], clamp),
+            perspective: 2100,
+            opacity: Math.min(1, dropImpact * 2) * interpolate(frame, [1494, 1512], [1, 0], clamp),
           }}
         >
           <div
             style={{
               width: STAGE_W,
               height: STAGE_H,
-              transform: `rotateX(${camRotX}deg) rotateY(${camRotY}deg) scale(${camScale})`,
-              transformStyle: "preserve-3d",
+              transform: `rotateY(${interpolate(dropHold, [0, 1], [-6, 4])}deg) rotateX(${interpolate(dropHold, [0, 1], [2, -1])}deg) scale(${interpolate(dropImpact, [0, 1], [1.75, 1.32]) + dropHold * 0.05})`,
+              filter: dropImpact < 1 ? `blur(${(1 - dropImpact) * 6}px)` : undefined,
             }}
           >
-            {/* topbar drops in from above */}
-            <Element
-              src="el_topbar.png"
-              x={52}
-              y={16}
-              w={1456}
-              h={45}
-              progress={pTopbar}
-              from={{ x: 0, y: -280, z: 320, rx: 48 }}
-              radius={10}
-            />
-            {/* the new Sidebar V2 thread rows land one by one */}
-            {rowStarts.map((s, i) => (
-              <Element
-                key={i}
-                src={`el_row${i}.png`}
-                x={58}
-                y={112 + i * 124}
-                w={322}
-                h={108}
-                progress={seg(frame, s, 30)}
-                from={{ x: -520, y: -140 - i * 26, z: 400, ry: 48 }}
-                glow={interpolate(seg(frame, s, 30), [0.7, 1], [0.8, 0], clamp)}
-              />
-            ))}
-            {/* conversation: user message arrives */}
-            <Element
-              src="el_usermsg.png"
-              x={880}
-              y={112}
-              w={560}
-              h={72}
-              progress={pUserMsg}
-              from={{ x: 440, y: -40, z: 300, ry: -38 }}
-            />
-            {/* work log lands, then the response unfolds below it */}
-            <Element
-              src="el_worklog.png"
-              x={730}
-              y={224}
-              w={710}
-              h={109}
-              progress={pWorklog}
-              from={{ x: 120, y: 60, z: 380, rx: -18 }}
-            />
-            <Element
-              src="el_response.png"
-              x={730}
-              y={352}
-              w={710}
-              h={168}
-              progress={responseReveal > 0 ? 1 : 0}
-              from={{ x: 0, y: 0, z: 0 }}
-              revealY={responseReveal}
-            />
-            {/* the glass composer rises from the deep */}
-            <Element
-              src="el_composer.png"
-              x={700}
-              y={700}
-              w={724}
-              h={138}
-              progress={pComposer}
-              from={{ x: 0, y: 340, z: 460, rx: -42 }}
-              glow={composerGlow}
-              radius={16}
-            />
+            <Screen src="new_home.png" />
           </div>
         </AbsoluteFill>
       ) : null}
 
-      {/* the elements resolve into the full live app */}
+      {/* ELEMENT SHOWCASES — blurred app behind, real element flat in front */}
+      {showcasePhase ? (
+        <>
+          <BlurBackdrop
+            src="new_thread.png"
+            opacity={
+              interpolate(frame, [1500, 1516], [0, 1], clamp) *
+              (1 - interpolate(frame, [1794, 1812], [0, 1], clamp))
+            }
+          />
+          {/* glass composer, big and front-on */}
+          <Showcase
+            src="el_composer.png"
+            w={1240}
+            h={236}
+            enter={composerEnter}
+            exit={composerExit}
+            fromRight
+            glow={interpolate(frame, [1530, 1560, 1608], [1, 0.35, 0.6], clamp)}
+          />
+          {/* Sidebar V2 thread rows, sweeping in one by one */}
+          {rowsExit < 0.999 ? (
+            <AbsoluteFill
+              style={{ alignItems: "center", justifyContent: "center", perspective: 1700 }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 18,
+                  transformStyle: "preserve-3d",
+                }}
+              >
+                {[0, 1, 2, 3].map((i) => {
+                  const e = rowsEnter(i);
+                  if (e <= 0.001) return null;
+                  const inv = 1 - e;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        width: 560,
+                        height: 187,
+                        borderRadius: 16,
+                        overflow: "hidden",
+                        border: "1px solid rgba(255,255,255,0.14)",
+                        transform: `translate3d(${-1200 * inv + 500 * rowsExit}px, ${40 * inv}px, ${-600 * inv - 400 * rowsExit}px) rotateY(${50 * inv - 28 * rowsExit}deg)`,
+                        opacity: Math.min(1, e * 1.5) * (1 - rowsExit),
+                        filter:
+                          inv > 0.02 || rowsExit > 0.02
+                            ? `blur(${(inv + rowsExit) * 8}px)`
+                            : undefined,
+                        boxShadow: "0 40px 110px rgba(0,0,0,0.8)",
+                        background: "#050507",
+                      }}
+                    >
+                      <Img
+                        src={staticFile(`el_row${i}.png`)}
+                        style={{ width: 560, height: 187, display: "block" }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </AbsoluteFill>
+          ) : null}
+          {/* work log lands, response unfolds under it */}
+          {worklogEnter > 0.001 && worklogExit < 0.999 ? (
+            <AbsoluteFill
+              style={{ alignItems: "center", justifyContent: "center", perspective: 1700 }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 20,
+                  transformStyle: "preserve-3d",
+                  transform: `translate3d(${900 * (1 - worklogEnter) - 400 * worklogExit}px, 0px, ${-500 * (1 - worklogEnter) - 400 * worklogExit}px) rotateY(${-45 * (1 - worklogEnter) + 24 * worklogExit}deg)`,
+                  opacity: Math.min(1, worklogEnter * 1.5) * (1 - worklogExit),
+                  filter:
+                    1 - worklogEnter > 0.02 || worklogExit > 0.02
+                      ? `blur(${(1 - worklogEnter + worklogExit) * 8}px)`
+                      : undefined,
+                }}
+              >
+                <div
+                  style={{
+                    width: 1050,
+                    height: 161,
+                    borderRadius: 16,
+                    overflow: "hidden",
+                    border: "1px solid rgba(255,255,255,0.14)",
+                    boxShadow: "0 40px 110px rgba(0,0,0,0.8)",
+                    background: "#050507",
+                  }}
+                >
+                  <Img
+                    src={staticFile("el_worklog.png")}
+                    style={{ width: 1050, height: 161, display: "block" }}
+                  />
+                </div>
+                <div
+                  style={{
+                    width: 1050,
+                    height: 248 * responseReveal,
+                    borderRadius: 16,
+                    overflow: "hidden",
+                    border: responseReveal > 0.02 ? "1px solid rgba(255,255,255,0.14)" : "none",
+                    boxShadow: "0 40px 110px rgba(0,0,0,0.8)",
+                    background: "#050507",
+                  }}
+                >
+                  <Img
+                    src={staticFile("el_response.png")}
+                    style={{ width: 1050, height: 248, display: "block" }}
+                  />
+                </div>
+              </div>
+            </AbsoluteFill>
+          ) : null}
+        </>
+      ) : null}
+
+      {/* FINAL — the full new release, frame-filling */}
       {showFinal ? (
         <AbsoluteFill
           style={{
             alignItems: "center",
             justifyContent: "center",
-            perspective: 2000,
-            opacity: resolve * finalOut,
+            perspective: 2100,
+            opacity: finalIn * fadeOut,
           }}
         >
           <div
             style={{
               width: STAGE_W,
               height: STAGE_H,
-              transform: `rotateX(${2 - finalHold * 2}deg) rotateY(${finalRotY}deg) scale(${finalScale})`,
-              transformStyle: "preserve-3d",
+              transform: `rotateY(${interpolate(finalT, [0, 1], [5, -2])}deg) scale(${interpolate(finalT, [0, 1], [1.3, 1.38])})`,
             }}
           >
-            <Screen src="new_thread.png" reflection={1} />
-            {/* glass sheen sweeping across the new UI */}
+            <Screen src="new_thread.png" />
             <div
               style={{
                 position: "absolute",
@@ -303,66 +407,29 @@ export const ReleaseCinematic: React.FC = () => {
                 borderRadius: 14,
                 overflow: "hidden",
                 pointerEvents: "none",
-                opacity: interpolate(finalHold, [0.05, 0.4, 0.75], [0, 0.5, 0], clamp),
-                background: `linear-gradient(115deg, transparent ${interpolate(finalHold, [0.05, 0.75], [-25, 115], clamp)}%, rgba(190,205,255,0.14) ${interpolate(finalHold, [0.05, 0.75], [-13, 127], clamp)}%, transparent ${interpolate(finalHold, [0.05, 0.75], [-3, 137], clamp)}%)`,
+                opacity: interpolate(finalT, [0.1, 0.5, 0.9], [0, 0.45, 0], clamp),
+                background: `linear-gradient(115deg, transparent ${interpolate(finalT, [0.1, 0.9], [-25, 115], clamp)}%, rgba(190,205,255,0.15) ${interpolate(finalT, [0.1, 0.9], [-13, 127], clamp)}%, transparent ${interpolate(finalT, [0.1, 0.9], [-3, 137], clamp)}%)`,
               }}
             />
           </div>
         </AbsoluteFill>
       ) : null}
 
-      {/* flash at the switch */}
-      {switchFlash > 0.01 ? (
+      {/* drop flash */}
+      {flash > 0.01 ? (
         <AbsoluteFill
           style={{
-            opacity: switchFlash,
+            opacity: flash,
             background:
-              "radial-gradient(900px 600px at 50% 50%, rgba(150,170,255,0.35), transparent 70%)",
+              "radial-gradient(1100px 700px at 50% 50%, rgba(175,190,255,0.5), transparent 72%)",
           }}
         />
-      ) : null}
-
-      {/* labels */}
-      <Label
-        title="The old look"
-        sub="Previous latest — Sidebar V1, grouped projects"
-        accent="#5f7ce8"
-        opacity={oldIn * (1 - oldOut)}
-        y={(1 - oldIn) * 26}
-      />
-      <Label
-        title="The new release"
-        sub="Sidebar V2 threads · live status · glass composer · true-black #000"
-        accent="#7c93ff"
-        opacity={interpolate(frame, [300, 330], [0, 1], clamp) * finalOut}
-        y={interpolate(frame, [300, 330], [26, 0], clamp)}
-      />
-
-      {/* outro */}
-      {frame >= 648 ? (
-        <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", opacity: outroIn }}>
-          <LogoCard size={110} glow={outroIn} />
-          <div
-            style={{
-              marginTop: 30,
-              fontSize: 58,
-              fontWeight: 800,
-              color: "#f1f3f7",
-              letterSpacing: -1,
-            }}
-          >
-            The new T3 Code
-          </div>
-          <div style={{ marginTop: 12, fontSize: 22, color: "#8f8f99" }}>
-            Dark theme · Sidebar V2 · glass everywhere
-          </div>
-        </AbsoluteFill>
       ) : null}
 
       {/* vignette */}
       <AbsoluteFill
         style={{
-          background: "radial-gradient(1250px 820px at 50% 45%, transparent 55%, rgba(0,0,0,0.5))",
+          background: "radial-gradient(1400px 900px at 50% 45%, transparent 60%, rgba(0,0,0,0.45))",
           pointerEvents: "none",
         }}
       />
