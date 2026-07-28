@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "npm run build:sidebar-demo && astro build",
+    "build:sidebar-demo": "npm run --prefix ../web build:sidebar-demo",
     "preview": "astro preview",
     "typecheck": "astro check"
   },

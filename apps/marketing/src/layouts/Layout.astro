@@ -92,7 +92,7 @@ const {
 
 <style is:global>
   :root {
-    --bg: #09090b;
+    --bg: #000;
     --bg-elev: #0c0c0e;
     --bg-card: #111113;
     --fg: #fafafa;
@@ -220,14 +220,12 @@ const {
 
   .btn-ghost {
     color: var(--fg-muted);
-    border: 1px solid var(--border);
     background: transparent;
   }
 
   .btn-ghost:hover {
     color: var(--fg);
-    border-color: var(--border-strong);
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(255, 255, 255, 0.05);
   }
 
   .btn-lg {
@@ -269,11 +267,6 @@ const {
     to { transform: rotate(360deg); }
   }
 
-  @keyframes floatDrift {
-    0%, 100% { translate: 0 0; }
-    50%      { translate: 0 -10px; }
-  }
-
   @keyframes blink {
     50% { opacity: 0; }
   }
@@ -287,15 +280,38 @@ const {
     overflow-x: clip;
   }
 
+  /* Progressive blur: strongest at the top of the bar, dissolving to fully
+     clear below it — no solid backdrop tint. */
   .nav {
     position: sticky;
     top: 0;
     z-index: 50;
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    background: color-mix(in srgb, var(--bg) 75%, transparent);
+    background: transparent;
     border-bottom: 1px solid transparent;
     transition: border-color 0.3s ease;
+  }
+
+  .nav::before,
+  .nav::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 -36px;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  .nav::before {
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
+    -webkit-mask-image: linear-gradient(to bottom, #000, #000 40%, transparent 78%);
+    mask-image: linear-gradient(to bottom, #000, #000 40%, transparent 78%);
+  }
+
+  .nav::after {
+    -webkit-backdrop-filter: blur(7px);
+    backdrop-filter: blur(7px);
+    -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent);
+    mask-image: linear-gradient(to bottom, #000 35%, transparent);
   }
 
   .nav.is-scrolled {
