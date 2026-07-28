@@ -269,7 +269,6 @@ const mobileEndorsementRows = [
             allow="clipboard-write"
           ></iframe>
         </div>
-        <div class="git-crop-hint">Live crop of the real app — click the button.</div>
       </div>
 
       <div class="git-copy">
@@ -496,7 +495,7 @@ const mobileEndorsementRows = [
   const gitCrop = document.querySelector<HTMLElement>(".git-crop");
   if (gitCrop) {
     const applyScale = () =>
-      gitCrop.style.setProperty("--git-crop-scale", String(gitCrop.clientWidth / 380));
+      gitCrop.style.setProperty("--git-crop-scale", String(gitCrop.clientWidth / 340));
     applyScale();
     new ResizeObserver(applyScale).observe(gitCrop);
 
@@ -1094,7 +1093,7 @@ const mobileEndorsementRows = [
     --git-crop-scale: 1;
     position: relative;
     overflow: hidden;
-    aspect-ratio: 380 / 340;
+    aspect-ratio: 340 / 165;
     border-radius: 14px;
     background: #0a0a0c;
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1109,17 +1108,8 @@ const mobileEndorsementRows = [
     height: 640px;
     border: 0;
     background: #161616;
-    transform: scale(var(--git-crop-scale)) translate(-700px, 0);
+    transform: scale(var(--git-crop-scale)) translate(-740px, -8px);
     transform-origin: top left;
-  }
-
-  .git-crop-hint {
-    margin-top: 12px;
-    text-align: center;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--fg-dim);
-    letter-spacing: 0.04em;
   }
 
   /* ── T3 Connect + features ────────────────────────────── */
