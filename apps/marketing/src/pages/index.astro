@@ -496,7 +496,7 @@ const mobileEndorsementRows = [
   const gitCrop = document.querySelector<HTMLElement>(".git-crop");
   if (gitCrop) {
     const applyScale = () =>
-      gitCrop.style.setProperty("--git-crop-scale", String(gitCrop.clientWidth / 824));
+      gitCrop.style.setProperty("--git-crop-scale", String(gitCrop.clientWidth / 520));
     applyScale();
     new ResizeObserver(applyScale).observe(gitCrop);
   }
@@ -1068,7 +1068,7 @@ const mobileEndorsementRows = [
     --git-crop-scale: 1;
     position: relative;
     overflow: hidden;
-    aspect-ratio: 824 / 640;
+    aspect-ratio: 520 / 430;
     border-radius: 14px;
     background: #0a0a0c;
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1083,7 +1083,7 @@ const mobileEndorsementRows = [
     height: 640px;
     border: 0;
     background: #161616;
-    transform: scale(var(--git-crop-scale)) translate(-256px, 0);
+    transform: scale(var(--git-crop-scale)) translate(-560px, 0);
     transform-origin: top left;
   }
 
