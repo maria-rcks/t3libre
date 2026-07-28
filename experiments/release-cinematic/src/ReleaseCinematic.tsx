@@ -14,6 +14,8 @@ export const TOTAL_FRAMES = 1860; // 62s @ 30fps
 
 // Synced to the supplied track (public/track.mp3, gitignored):
 // the drop lands at ~46.2s = frame 1386.
+// Old act captures: ool_home.png / ool_thread.png — the light-grey UI
+// from the pre-sidebar-art revision.
 const DROP = 1386;
 
 // Timeline (30fps):
