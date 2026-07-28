@@ -492,13 +492,39 @@ const mobileEndorsementRows = [
   init();
 
   // The git section shows the live demo app cropped to the thread header:
-  // scale the fixed-size iframe so a 640px-wide window of it fills the frame.
+  // scale the fixed-size iframe so a window of it fills the frame.
   const gitCrop = document.querySelector<HTMLElement>(".git-crop");
   if (gitCrop) {
     const applyScale = () =>
-      gitCrop.style.setProperty("--git-crop-scale", String(gitCrop.clientWidth / 520));
+      gitCrop.style.setProperty("--git-crop-scale", String(gitCrop.clientWidth / 380));
     applyScale();
     new ResizeObserver(applyScale).observe(gitCrop);
+
+    // Open the git action dropdown once the demo loads (same-origin iframe),
+    // so the full action list is visible without a first click.
+    const gitIframe = gitCrop.querySelector<HTMLIFrameElement>("iframe");
+    if (gitIframe) {
+      let opened = false;
+      const tryOpenMenu = () => {
+        if (opened) return;
+        const doc = gitIframe.contentDocument;
+        const trigger = doc?.querySelector<HTMLButtonElement>(
+          'button[aria-label="Git action options"]',
+        );
+        if (!trigger) return;
+        opened = true;
+        for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+          trigger.dispatchEvent(
+            new MouseEvent(type, { bubbles: true, cancelable: true, view: gitIframe.contentWindow }),
+          );
+        }
+      };
+      const menuPoll = setInterval(() => {
+        tryOpenMenu();
+        if (opened) clearInterval(menuPoll);
+      }, 500);
+      setTimeout(() => clearInterval(menuPoll), 30000);
+    }
   }
 </script>
 
@@ -1068,7 +1094,7 @@ const mobileEndorsementRows = [
     --git-crop-scale: 1;
     position: relative;
     overflow: hidden;
-    aspect-ratio: 520 / 430;
+    aspect-ratio: 380 / 340;
     border-radius: 14px;
     background: #0a0a0c;
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1083,7 +1109,7 @@ const mobileEndorsementRows = [
     height: 640px;
     border: 0;
     background: #161616;
-    transform: scale(var(--git-crop-scale)) translate(-560px, 0);
+    transform: scale(var(--git-crop-scale)) translate(-700px, 0);
     transform-origin: top left;
   }
 
