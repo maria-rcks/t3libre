@@ -1,0 +1,22 @@
+{
+  "name": "release-cinematic",
+  "private": true,
+  "description": "Cinematic Remotion preview: old T3 Code UI morphing into the new dark theme + Sidebar V2 release",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render ReleaseCinematic out/release-cinematic.mp4"
+  },
+  "dependencies": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "remotion": "4.0.245",
+    "@remotion/cli": "4.0.245"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.0",
+    "typescript": "5.8.3"
+  },
+  "allowScripts": {
+    "esbuild@0.24.0": true
+  }
+}
