@@ -369,6 +369,7 @@ const macStudioShell = decodeShellSnapshot({
       model: "kimi-k2-thinking",
       instanceId: "opencode",
       branch: "fix/git-manager-test",
+      worktreePath: "~/code/t3code-worktrees/git-manager-test",
       createdMinutesAgo: 60 * 8,
       updatedMinutesAgo: 35,
       turn: { state: "completed", startedMinutesAgo: 48, completedMinutesAgo: 35 },
@@ -536,6 +537,24 @@ export const demoVcsStatusByCwd: Record<string, VcsStatusStreamEvent> = {
       },
     },
     remote: { hasUpstream: true, aheadCount: 2, behindCount: 0, aheadOfDefaultCount: 5, pr: null },
+  },
+  // Feature worktree with uncommitted changes and no PR yet.
+  "~/code/t3code-worktrees/git-manager-test": {
+    _tag: "snapshot",
+    local: {
+      isRepo: true,
+      sourceControlProvider: GITHUB_PROVIDER,
+      hasPrimaryRemote: true,
+      isDefaultRef: false,
+      refName: "fix/git-manager-test",
+      hasWorkingTreeChanges: true,
+      workingTree: {
+        files: [{ path: "apps/server/src/git/GitManager.test.ts", insertions: 21, deletions: 8 }],
+        insertions: 21,
+        deletions: 8,
+      },
+    },
+    remote: { hasUpstream: true, aheadCount: 1, behindCount: 0, aheadOfDefaultCount: 2, pr: null },
   },
   // Clean feature worktree with an open PR.
   "~/code/t3code-worktrees/sidebar-v2-polish": {

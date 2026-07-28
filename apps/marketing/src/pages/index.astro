@@ -259,32 +259,36 @@ const mobileEndorsementRows = [
 
   <!-- ── Git ──────────────────────────────────────────────────── -->
   <section id="git" class="sec-git">
-    <div class="container">
-      <div class="section-head">
-        <h2>One button to commit, push, and make a PR.</h2>
-        <p>
-          Every agent thread works on its own branch and worktree. When it's
-          good, the button in the header commits, pushes, and opens the PR —
-          no terminal dance required. This is the real app below: review the
-          diff, then hit <strong>Commit, push &amp; PR</strong>.
-        </p>
+    <div class="container git-inner">
+      <div class="git-visual">
+        <div class="git-crop">
+          <iframe
+            src="/sidebar-demo/demo.html#/demo-mac-studio/thread-flaky"
+            title="The real T3 Code git control — commit, push, and PR from the thread header"
+            loading="lazy"
+            allow="clipboard-write"
+          ></iframe>
+        </div>
+        <div class="git-crop-hint">Live crop of the real app — click the button.</div>
       </div>
 
-      <div class="git-demo-frame">
-        <iframe
-          src="/sidebar-demo/demo.html#/demo-mac-studio/thread-composer"
-          title="The real T3 Code git workflow — commit, push, and PR from the thread header"
-          loading="lazy"
-          allow="clipboard-write"
-        ></iframe>
+      <div class="git-copy">
+        <div class="section-head" style="margin-bottom:0">
+          <h2>One button to commit, push, and make a PR.</h2>
+          <p>
+            Every agent thread works on its own branch and worktree. When it's
+            good, the button in the header commits, pushes, and opens the PR —
+            no terminal dance required. That's the real app on the left: hit
+            <strong>Commit, push &amp; PR</strong>.
+          </p>
+          <ul class="checklist" style="margin-top:24px">
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Auto-generated commit messages &amp; PR bodies</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Inline diff review before you push</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Branches &amp; worktrees per thread</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Works with your existing GitHub auth</li>
+          </ul>
+        </div>
       </div>
-
-      <ul class="checklist git-checklist">
-        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Auto-generated commit messages &amp; PR bodies</li>
-        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Inline diff review before you push</li>
-        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Branches &amp; worktrees per thread</li>
-        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Works with your existing GitHub auth</li>
-      </ul>
     </div>
   </section>
 
@@ -486,6 +490,16 @@ const mobileEndorsementRows = [
   }
 
   init();
+
+  // The git section shows the live demo app cropped to the thread header:
+  // scale the fixed-size iframe so a 640px-wide window of it fills the frame.
+  const gitCrop = document.querySelector<HTMLElement>(".git-crop");
+  if (gitCrop) {
+    const applyScale = () =>
+      gitCrop.style.setProperty("--git-crop-scale", String(gitCrop.clientWidth / 824));
+    applyScale();
+    new ResizeObserver(applyScale).observe(gitCrop);
+  }
 </script>
 
 <style>
@@ -1038,28 +1052,48 @@ const mobileEndorsementRows = [
   }
 
   /* ── Git ──────────────────────────────────────────────── */
-  .git-demo-frame {
+  .git-inner {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 64px; align-items: center;
+  }
+
+  /*
+   * An interactive "cropped screenshot": the live demo app runs at a fixed
+   * viewport inside an overflow-hidden window, shifted so only the thread
+   * header (with the real git button) and the checkpoint area are visible.
+   * Container-query units keep the crop scaled to the column width.
+   */
+  .git-crop {
+    --git-crop-scale: 1;
     position: relative;
     overflow: hidden;
-    aspect-ratio: 2508 / 1682;
+    aspect-ratio: 824 / 640;
     border-radius: 14px;
     background: #0a0a0c;
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: 0 28px 64px -28px rgba(0, 0, 0, 0.75);
   }
 
-  .git-demo-frame iframe {
-    display: block;
-    width: 100%;
-    height: 100%;
+  .git-crop iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1080px;
+    height: 640px;
     border: 0;
     background: #161616;
+    transform: scale(var(--git-crop-scale)) translate(-256px, 0);
+    transform-origin: top left;
   }
 
-  .git-checklist {
-    display: flex; flex-wrap: wrap;
-    justify-content: center; gap: 12px 28px;
-    margin-top: 28px;
+  .git-crop-hint {
+    margin-top: 12px;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-dim);
+    letter-spacing: 0.04em;
   }
 
   /* ── T3 Connect + features ────────────────────────────── */
@@ -1273,6 +1307,7 @@ const mobileEndorsementRows = [
       grid-column: 1 / -1;
       border-right: 0;
     }
+    .git-inner { grid-template-columns: 1fr; gap: 40px; }
     .feature-grid { grid-template-columns: 1fr 1fr; }
     .open-grid { grid-template-columns: 1fr; }
   }
@@ -1282,7 +1317,7 @@ const mobileEndorsementRows = [
     .sec-cta { padding: 96px 0; }
     .container { padding-left: 20px; padding-right: 20px; }
     .hero-preview { display: none; }
-    .git-demo-frame { display: none; }
+    .git-visual { display: none; }
     .feature-grid { grid-template-columns: 1fr; }
     .endorsements-head {
       margin-bottom: 40px;

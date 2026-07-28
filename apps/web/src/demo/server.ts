@@ -640,7 +640,17 @@ class DemoVcsStore {
 
 const demoVcsStore = new DemoVcsStore();
 
-const DEMO_COMMIT_SUBJECT = "Add drag-drop attachment overlay to the composer";
+const DEMO_COMMIT_SUBJECT_BY_CWD: Record<string, string> = {
+  "~/code/t3code-worktrees/composer-attachments":
+    "Add drag-drop attachment overlay to the composer",
+  "~/code/t3code-worktrees/git-manager-test": "Deflake GitManager cross-repo PR metadata test",
+};
+
+const DEMO_COMMIT_SUBJECT_FALLBACK = "Checkpoint demo changes";
+
+function demoCommitSubject(cwd: string): string {
+  return DEMO_COMMIT_SUBJECT_BY_CWD[cwd] ?? DEMO_COMMIT_SUBJECT_FALLBACK;
+}
 
 function settleVcsAction(cwd: string, input: GitRunStackedActionInput): void {
   const current = demoVcsStore.snapshot(cwd);
@@ -664,7 +674,7 @@ function settleVcsAction(cwd: string, input: GitRunStackedActionInput): void {
       pr: includesPr
         ? {
             number: 1338,
-            title: DEMO_COMMIT_SUBJECT,
+            title: demoCommitSubject(cwd),
             url: "https://github.com/pingdotgg/t3code/pull/1338",
             baseRef: "main",
             headRef: refName,
@@ -682,7 +692,7 @@ function demoGitActionEvents(input: GitRunStackedActionInput): GitActionProgress
   const includesCommit = input.action !== "push" && input.action !== "create_pr";
   const includesPush = input.action !== "commit" && input.action !== "create_pr";
   const includesPr = input.action === "create_pr" || input.action === "commit_push_pr";
-  const subject = input.commitMessage?.split("\n")[0] ?? DEMO_COMMIT_SUBJECT;
+  const subject = input.commitMessage?.split("\n")[0] ?? demoCommitSubject(input.cwd);
 
   const phases: Array<"commit" | "push" | "pr"> = [
     ...(includesCommit ? (["commit"] as const) : []),
