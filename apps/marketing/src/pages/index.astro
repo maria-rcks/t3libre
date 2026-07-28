@@ -261,7 +261,7 @@ const mobileEndorsementRows = [
   <section id="git" class="sec-git">
     <div class="container git-inner">
       <div class="git-visual">
-        <div class="git-crop">
+        <div class="app-crop git-crop" data-crop-w="340" data-crop-x="740" data-crop-y="8">
           <iframe
             src="/sidebar-demo/demo.html#/demo-mac-studio/thread-flaky"
             title="The real T3 Code git control — commit, push, and PR from the thread header"
@@ -275,17 +275,69 @@ const mobileEndorsementRows = [
         <div class="section-head" style="margin-bottom:0">
           <h2>One button to commit, push, and make a PR.</h2>
           <p>
-            Every agent thread works on its own branch and worktree. When it's
-            good, the button in the header commits, pushes, and opens the PR —
-            no terminal dance required. That's the real app on the left: hit
-            <strong>Commit, push &amp; PR</strong>.
+            Every thread gets its own branch and worktree. When it's good, one
+            click does the rest — that's the real app on the left.
           </p>
-          <ul class="checklist" style="margin-top:24px">
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Auto-generated commit messages &amp; PR bodies</li>
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Inline diff review before you push</li>
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Branches &amp; worktrees per thread</li>
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Works with your existing GitHub auth</li>
-          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Inbox-style threads ─────────────────────────────── -->
+  <section id="inbox" class="sec-inbox">
+    <div class="container git-inner inbox-inner">
+      <div class="git-copy">
+        <div class="section-head" style="margin-bottom:0">
+          <h2>Threads that work like an inbox.</h2>
+          <p>
+            Running, needs approval, waiting on you — every agent surfaces its
+            state in one list. Settle what's done, snooze the rest.
+          </p>
+        </div>
+      </div>
+
+      <div class="git-visual">
+        <div
+          class="app-crop inbox-crop"
+          data-crop-w="268"
+          data-crop-x="0"
+          data-crop-y="48"
+        >
+          <iframe
+            src="/sidebar-demo/demo.html"
+            title="The real T3 Code sidebar — inbox-style thread list"
+            loading="lazy"
+          ></iframe>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Diffs ─────────────────────────────────────────── -->
+  <section id="diffs" class="sec-diffs">
+    <div class="container git-inner">
+      <div class="git-visual">
+        <div
+          class="app-crop diff-crop"
+          data-crop-w="490"
+          data-crop-x="582"
+          data-crop-y="48"
+        >
+          <iframe
+            src="/sidebar-demo/demo.html#/demo-mac-studio/thread-composer"
+            title="The real T3 Code diff panel — review every change"
+            loading="lazy"
+          ></iframe>
+        </div>
+      </div>
+
+      <div class="git-copy">
+        <div class="section-head" style="margin-bottom:0">
+          <h2>Review every change before it ships.</h2>
+          <p>
+            Each turn gets a checkpoint with a reviewable diff, right in the
+            side panel.
+          </p>
         </div>
       </div>
     </div>
@@ -298,38 +350,27 @@ const mobileEndorsementRows = [
         <div class="eyebrow">T3 Connect</div>
         <h2>Every machine you own, one command center.</h2>
         <p>
-          Pair your desktop, your Mac Studio at home, and the build server in
-          the closet. Their projects, threads, and agents all show up in the
-          same sidebar — the Mac Studio and Build Server in the demos above are
-          remote machines. Start work at your desk, approve a command from the
-          couch.
+          Pair your desktop, your Mac Studio, the build server in the closet.
+          Every project and agent, one sidebar.
         </p>
       </div>
 
       <div class="feature-grid">
         <div class="tile feature-card">
-          <h3>Sidebar v2</h3>
-          <p>A flat, glanceable thread list: live status, pending approvals, and input requests surface across every project and machine.</p>
-        </div>
-        <div class="tile feature-card">
           <h3>Snooze &amp; settle</h3>
-          <p>Done with a thread? Settle it. Not now? Snooze it until tomorrow — or forever. Your sidebar only shows what needs you.</p>
-        </div>
-        <div class="tile feature-card">
-          <h3>Checkpoints &amp; diffs</h3>
-          <p>Every turn gets a checkpoint with a reviewable diff. Open the side panel to read the changes before anything ships.</p>
+          <p>Only see the threads that need you.</p>
         </div>
         <div class="tile feature-card">
           <h3>Approvals &amp; questions</h3>
-          <p>Agents ask before running risky commands, and can ask you questions mid-task — answer from the desktop or your phone.</p>
+          <p>Agents ask before running anything risky.</p>
         </div>
         <div class="tile feature-card">
           <h3>Images in the composer</h3>
-          <p>Drag screenshots straight into the composer. Paste a broken UI, get a fix.</p>
+          <p>Paste a broken UI, get a fix.</p>
         </div>
         <div class="tile feature-card">
           <h3>Built-in terminal</h3>
-          <p>A real terminal in every thread, running on whichever machine the thread lives on.</p>
+          <p>A real terminal in every thread, on any machine.</p>
         </div>
       </div>
     </div>
@@ -490,15 +531,25 @@ const mobileEndorsementRows = [
 
   init();
 
-  // The git section shows the live demo app cropped to the thread header:
-  // scale the fixed-size iframe so a window of it fills the frame.
+  // Feature sections show the live demo app cropped to a specific region:
+  // each .app-crop scales its fixed-size iframe so a data-crop-w-wide window
+  // starting at (data-crop-x, data-crop-y) fills the frame.
+  for (const crop of document.querySelectorAll<HTMLElement>(".app-crop")) {
+    const w = Number(crop.dataset.cropW ?? 340);
+    const x = Number(crop.dataset.cropX ?? 0);
+    const y = Number(crop.dataset.cropY ?? 0);
+    const iframe = crop.querySelector<HTMLIFrameElement>("iframe");
+    if (!iframe) continue;
+    const applyScale = () => {
+      const scale = crop.clientWidth / w;
+      iframe.style.transform = `scale(${scale}) translate(${-x}px, ${-y}px)`;
+    };
+    applyScale();
+    new ResizeObserver(applyScale).observe(crop);
+  }
+
   const gitCrop = document.querySelector<HTMLElement>(".git-crop");
   if (gitCrop) {
-    const applyScale = () =>
-      gitCrop.style.setProperty("--git-crop-scale", String(gitCrop.clientWidth / 340));
-    applyScale();
-    new ResizeObserver(applyScale).observe(gitCrop);
-
     // Open the git action dropdown once the demo loads (same-origin iframe),
     // so the full action list is visible without a first click.
     const gitIframe = gitCrop.querySelector<HTMLIFrameElement>("iframe");
@@ -1084,23 +1135,21 @@ const mobileEndorsementRows = [
   }
 
   /*
-   * An interactive "cropped screenshot": the live demo app runs at a fixed
-   * viewport inside an overflow-hidden window, shifted so only the thread
-   * header (with the real git button) and the checkpoint area are visible.
-   * Container-query units keep the crop scaled to the column width.
+   * Interactive "cropped screenshots": the live demo app runs at a fixed
+   * 1080x640 viewport inside an overflow-hidden window, scaled and shifted
+   * (see the data-crop-* attributes + page script) so only the relevant
+   * region of the real UI is visible.
    */
-  .git-crop {
-    --git-crop-scale: 1;
+  .app-crop {
     position: relative;
     overflow: hidden;
-    aspect-ratio: 340 / 165;
     border-radius: 14px;
     background: #0a0a0c;
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: 0 28px 64px -28px rgba(0, 0, 0, 0.75);
   }
 
-  .git-crop iframe {
+  .app-crop iframe {
     position: absolute;
     top: 0;
     left: 0;
@@ -1108,8 +1157,21 @@ const mobileEndorsementRows = [
     height: 640px;
     border: 0;
     background: #161616;
-    transform: scale(var(--git-crop-scale)) translate(-740px, -8px);
     transform-origin: top left;
+  }
+
+  .git-crop {
+    aspect-ratio: 340 / 165;
+  }
+
+  .inbox-crop {
+    aspect-ratio: 268 / 420;
+    max-width: 340px;
+    margin: 0 auto;
+  }
+
+  .diff-crop {
+    aspect-ratio: 490 / 500;
   }
 
   /* ── T3 Connect + features ────────────────────────────── */

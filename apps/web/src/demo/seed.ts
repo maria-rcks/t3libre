@@ -26,6 +26,9 @@ const CATALOG_KEY = "document";
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 const RIGHT_PANEL_STORAGE_VERSION = 7;
 
+const DIFF_PANEL_STORAGE_KEY = "t3code:diff-panel-state:v1";
+const DIFF_PANEL_STORAGE_VERSION = 1;
+
 /**
  * Identifies the fixture generation the visitor's persisted state was seeded
  * from. When the fixtures change (new environments/threads), stale seeded
@@ -149,6 +152,33 @@ function seedRightPanelState(force: boolean): void {
   );
 }
 
+/**
+ * Points the diff panel at the latest checkpoint on the showcase thread so the
+ * rendered diff (not an empty working-tree view) greets first-time visitors.
+ */
+function seedDiffPanelSelection(force: boolean): void {
+  if (!force && window.localStorage.getItem(DIFF_PANEL_STORAGE_KEY) !== null) {
+    return;
+  }
+  window.localStorage.setItem(
+    DIFF_PANEL_STORAGE_KEY,
+    JSON.stringify({
+      state: {
+        byThreadKey: {
+          "demo-mac-studio:thread-composer": {
+            kind: "turn",
+            turnId: "thread-composer-turn-0",
+            filePath: null,
+            revealRequestId: 1,
+          },
+        },
+        branchBaseRefByThreadKey: {},
+      },
+      version: DIFF_PANEL_STORAGE_VERSION,
+    }),
+  );
+}
+
 export async function seedDemoClientState(): Promise<void> {
   // The demo showcases the Sidebar v2 beta by default; visitors can still
   // toggle it in Settings, and their choice persists.
@@ -157,6 +187,7 @@ export async function seedDemoClientState(): Promise<void> {
   }
   const staleFixtures = window.localStorage.getItem(DEMO_SEED_VERSION_KEY) !== DEMO_SEED_VERSION;
   seedRightPanelState(staleFixtures);
+  seedDiffPanelSelection(staleFixtures);
   await seedConnectionCatalog(staleFixtures);
   window.localStorage.setItem(DEMO_SEED_VERSION_KEY, DEMO_SEED_VERSION);
 }
