@@ -588,8 +588,20 @@ const faqs = [
     performance.getEntriesByType("navigation")[0] instanceof PerformanceNavigationTiming &&
     (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming).type === "reload"
   ) {
+    const previousScrollRestoration = history.scrollRestoration;
     history.scrollRestoration = "manual";
     window.scrollTo(0, 0);
+    const finishReloadScrollReset = () => {
+      requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+        history.scrollRestoration = previousScrollRestoration;
+      });
+    };
+    if (document.readyState === "complete") {
+      finishReloadScrollReset();
+    } else {
+      window.addEventListener("load", finishReloadScrollReset, { once: true });
+    }
   }
 
   type Platform = { os: "mac" | "win" | "linux"; label: string; arch?: string };
@@ -726,15 +738,21 @@ const faqs = [
   function bindDevCopy(buttonId: string, labelId: string) {
     const button = document.getElementById(buttonId) as HTMLAnchorElement | null;
     const label = document.getElementById(labelId);
-    button?.addEventListener("click", (event) => {
+    button?.addEventListener("click", async (event) => {
       if (currentStage !== "dev") return;
       event.preventDefault();
-      void navigator.clipboard.writeText(`git clone ${REPO_URL}.git`).then(() => {
+      const command = `git clone ${REPO_URL}.git`;
+      try {
+        if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
+        await navigator.clipboard.writeText(command);
         if (label) label.textContent = "Copied. Go build.";
         setTimeout(() => {
           if (currentStage === "dev" && label) label.textContent = "Copy repo link";
         }, 1600);
-      });
+      } catch {
+        window.prompt("Copy this command:", command);
+        if (label) label.textContent = "Copy manually";
+      }
     });
   }
 

@@ -4,9 +4,11 @@ export const RELEASES_URL = `https://github.com/${REPO}/releases`;
 export const NIGHTLY_RELEASES_URL = `${RELEASES_URL}?q=nightly&expanded=true`;
 
 const LATEST_API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
-const RELEASES_API_URL = `https://api.github.com/repos/${REPO}/releases?per_page=20`;
+const RELEASES_API_URL = `https://api.github.com/repos/${REPO}/releases?per_page=100`;
 const LATEST_CACHE_KEY = "t3code-latest-release";
 const NIGHTLY_CACHE_KEY = "t3code-nightly-release";
+const RELEASE_CACHE_TTL_MS = 5 * 60 * 1_000;
+const NIGHTLY_TAG_PATTERN = /-nightly\.(\d{8})\.(\d+)$/;
 
 export interface ReleaseAsset {
   name: string;
@@ -21,18 +23,55 @@ export interface Release {
   prerelease?: boolean;
 }
 
+interface CachedRelease {
+  cachedAt: number;
+  release: Release;
+}
+
 function readCachedRelease(key: string): Release | null {
-  const cached = sessionStorage.getItem(key);
+  let cached: string | null;
+  try {
+    cached = sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
   if (!cached) return null;
 
   try {
-    const release: unknown = JSON.parse(cached);
-    if (isRelease(release)) return release;
-    sessionStorage.removeItem(key);
+    const value: unknown = JSON.parse(cached);
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      "cachedAt" in value &&
+      typeof value.cachedAt === "number" &&
+      "release" in value &&
+      isRelease(value.release) &&
+      Date.now() - value.cachedAt < RELEASE_CACHE_TTL_MS
+    ) {
+      return value.release;
+    }
+    removeCachedRelease(key);
     return null;
   } catch {
-    sessionStorage.removeItem(key);
+    removeCachedRelease(key);
     return null;
+  }
+}
+
+function writeCachedRelease(key: string, release: Release): void {
+  const cached: CachedRelease = { cachedAt: Date.now(), release };
+  try {
+    sessionStorage.setItem(key, JSON.stringify(cached));
+  } catch {
+    // Release loading still succeeds when storage is unavailable or full.
+  }
+}
+
+function removeCachedRelease(key: string): void {
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // An inaccessible cache is equivalent to a miss.
   }
 }
 
@@ -55,14 +94,28 @@ function isRelease(value: unknown): value is Release {
 }
 
 export function selectNightlyRelease(releases: readonly Release[]): Release | null {
-  return (
-    releases.find(
-      (release) =>
-        !release.draft &&
-        release.prerelease === true &&
-        /-nightly\.\d{8}\.\d+$/.test(release.tag_name),
-    ) ?? null
-  );
+  let selected: { release: Release; date: string; run: number } | null = null;
+
+  for (const release of releases) {
+    if (release.draft || release.prerelease !== true) continue;
+    const match = NIGHTLY_TAG_PATTERN.exec(release.tag_name);
+    if (!match) continue;
+
+    const candidate = {
+      release,
+      date: match[1]!,
+      run: Number(match[2]),
+    };
+    if (
+      selected === null ||
+      candidate.date > selected.date ||
+      (candidate.date === selected.date && candidate.run > selected.run)
+    ) {
+      selected = candidate;
+    }
+  }
+
+  return selected?.release ?? null;
 }
 
 export async function fetchLatestRelease(): Promise<Release> {
@@ -72,7 +125,7 @@ export async function fetchLatestRelease(): Promise<Release> {
   const data = await fetchJson(LATEST_API_URL);
   if (!isRelease(data)) throw new Error("GitHub returned an invalid latest release");
 
-  sessionStorage.setItem(LATEST_CACHE_KEY, JSON.stringify(data));
+  writeCachedRelease(LATEST_CACHE_KEY, data);
   return data;
 }
 
@@ -86,6 +139,6 @@ export async function fetchNightlyRelease(): Promise<Release> {
   const nightly = selectNightlyRelease(data.filter(isRelease));
   if (!nightly) throw new Error("No nightly release was found");
 
-  sessionStorage.setItem(NIGHTLY_CACHE_KEY, JSON.stringify(nightly));
+  writeCachedRelease(NIGHTLY_CACHE_KEY, nightly);
   return nightly;
 }
