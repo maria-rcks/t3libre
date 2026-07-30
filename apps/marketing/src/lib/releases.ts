@@ -15,12 +15,34 @@ export interface ReleaseAsset {
   browser_download_url: string;
 }
 
+export interface ReleasePlatform {
+  os: "mac" | "win" | "linux";
+  arch?: "arm64" | "x64";
+}
+
 export interface Release {
   tag_name: string;
   html_url: string;
   assets: ReleaseAsset[];
   draft?: boolean;
   prerelease?: boolean;
+}
+
+export function findReleaseAssetUrl(
+  assets: readonly ReleaseAsset[],
+  platform: ReleasePlatform,
+): string | null {
+  if (platform.os === "win") {
+    return assets.find((asset) => asset.name.endsWith("-x64.exe"))?.browser_download_url ?? null;
+  }
+  if (platform.os === "mac") {
+    if (!platform.arch) return null;
+    return (
+      assets.find((asset) => asset.name.endsWith(`-${platform.arch}.dmg`))?.browser_download_url ??
+      null
+    );
+  }
+  return assets.find((asset) => asset.name.endsWith(".AppImage"))?.browser_download_url ?? null;
 }
 
 interface CachedRelease {

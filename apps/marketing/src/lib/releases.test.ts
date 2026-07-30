@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { selectNightlyRelease, type Release } from "./releases";
+import { findReleaseAssetUrl, selectNightlyRelease, type Release } from "./releases";
 
 function release(
   tag_name: string,
@@ -45,5 +45,41 @@ describe("selectNightlyRelease", () => {
 
   it("ignores prereleases that are not nightly builds", () => {
     expect(selectNightlyRelease([release("v0.0.33-beta.1")])).toBeNull();
+  });
+});
+
+describe("findReleaseAssetUrl", () => {
+  const assets = [
+    {
+      name: "T3-Code-v1.2.3-arm64.dmg",
+      browser_download_url: "https://example.com/arm64.dmg",
+    },
+    {
+      name: "T3-Code-v1.2.3-x64.dmg",
+      browser_download_url: "https://example.com/x64.dmg",
+    },
+    {
+      name: "T3-Code-v1.2.3-x64.exe",
+      browser_download_url: "https://example.com/x64.exe",
+    },
+    {
+      name: "T3-Code-v1.2.3.AppImage",
+      browser_download_url: "https://example.com/appimage",
+    },
+  ];
+
+  it("does not guess a macOS architecture", () => {
+    expect(findReleaseAssetUrl(assets, { os: "mac" })).toBeNull();
+  });
+
+  it("selects a macOS asset when the architecture is known", () => {
+    expect(findReleaseAssetUrl(assets, { os: "mac", arch: "x64" })).toBe(
+      "https://example.com/x64.dmg",
+    );
+  });
+
+  it("selects platform-specific Windows and Linux assets", () => {
+    expect(findReleaseAssetUrl(assets, { os: "win" })).toBe("https://example.com/x64.exe");
+    expect(findReleaseAssetUrl(assets, { os: "linux" })).toBe("https://example.com/appimage");
   });
 });
