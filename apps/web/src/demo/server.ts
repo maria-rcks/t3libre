@@ -25,6 +25,7 @@ import {
   type ServerSettingsPatch,
   EnvironmentAuthorizationError,
   ORCHESTRATION_WS_METHODS,
+  OrchestrationDispatchCommandError,
   OrchestrationGetSnapshotError,
   type GitActionProgressEvent,
   type GitRunStackedActionInput,
@@ -182,6 +183,8 @@ class DemoConnectionAcceptor {
 // ---------------------------------------------------------------------------
 
 type ShellSubscriber = (item: OrchestrationShellStreamItem) => void;
+
+class DemoCommandInvariantError extends Error {}
 
 export class DemoShellStore {
   private sequence: number;
@@ -419,7 +422,9 @@ export class DemoShellStore {
         if (command.force !== true) {
           for (const thread of this.threads.values()) {
             if (thread.projectId === command.projectId) {
-              return this.sequence;
+              throw new DemoCommandInvariantError(
+                `Project '${command.projectId}' is not empty and cannot be deleted without force=true.`,
+              );
             }
           }
         }
@@ -435,6 +440,18 @@ export class DemoShellStore {
       }
     }
   }
+}
+
+export function dispatchDemoCommand(store: DemoShellStore, command: ClientOrchestrationCommand) {
+  return Effect.try({
+    try: () => ({ sequence: store.dispatch(command) }),
+    catch: (cause) =>
+      new OrchestrationDispatchCommandError({
+        message:
+          cause instanceof Error ? cause.message : "Failed to dispatch demo orchestration command.",
+        cause,
+      }),
+  });
 }
 
 export class DemoSettingsStore {
@@ -1005,7 +1022,7 @@ function makeHandlersLayer(backend: DemoBackend) {
             }),
           ),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
-          Effect.sync(() => ({ sequence: store.dispatch(command) })),
+          dispatchDemoCommand(store, command),
         [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: () =>
           Effect.sync(() => store.archivedSnapshot()),
         [ORCHESTRATION_WS_METHODS.getTurnDiff]: (input) =>

@@ -1,6 +1,7 @@
 import { ClientOrchestrationCommand, type GitRunStackedActionInput } from "@t3tools/contracts";
+import { describe, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { describe, expect, it } from "vite-plus/test";
 
 import { demoEnvironments, DEMO_METRICS_WORKTREE_PATH, demoVcsStatusByCwd } from "./fixtures";
 import {
@@ -8,6 +9,7 @@ import {
   demoGitActionEvents,
   DemoSettingsStore,
   DemoShellStore,
+  dispatchDemoCommand,
 } from "./server";
 
 const decodeCommand = Schema.decodeUnknownSync(ClientOrchestrationCommand);
@@ -88,42 +90,52 @@ describe("demo shell mutations", () => {
     expect(events.at(-1)?.kind).toBe("thread-upserted");
   });
 
-  it("requires force to delete a project with threads", () => {
-    const environment = demoEnvironments.find(
-      (candidate) => candidate.environmentId === "demo-mac-studio",
-    );
-    if (!environment) throw new Error("Missing Mac Studio demo environment");
+  it.effect("requires force to delete a project with threads", () =>
+    Effect.gen(function* () {
+      const environment = demoEnvironments.find(
+        (candidate) => candidate.environmentId === "demo-mac-studio",
+      );
+      if (!environment) throw new Error("Missing Mac Studio demo environment");
 
-    const store = new DemoShellStore(environment.shellSnapshot);
-    const thread = store.thread("thread-composer");
-    if (!thread) throw new Error("Missing composer demo thread");
-    const sequence = store.snapshot().snapshotSequence;
+      const store = new DemoShellStore(environment.shellSnapshot);
+      const thread = store.thread("thread-composer");
+      if (!thread) throw new Error("Missing composer demo thread");
+      const sequence = store.snapshot().snapshotSequence;
 
-    expect(
+      const blockedDelete = yield* Effect.flip(
+        dispatchDemoCommand(
+          store,
+          decodeCommand({
+            type: "project.delete",
+            commandId: "command-project-delete",
+            projectId: thread.projectId,
+          }),
+        ),
+      );
+      expect(blockedDelete).toMatchObject({
+        _tag: "OrchestrationDispatchCommandError",
+        message: `Project '${thread.projectId}' is not empty and cannot be deleted without force=true.`,
+      });
+      expect(store.snapshot().snapshotSequence).toBe(sequence);
+      expect(store.snapshot().projects.some((project) => project.id === thread.projectId)).toBe(
+        true,
+      );
+      expect(store.thread(thread.id)).toBeDefined();
+
       store.dispatch(
         decodeCommand({
           type: "project.delete",
-          commandId: "command-project-delete",
+          commandId: "command-project-force-delete",
           projectId: thread.projectId,
+          force: true,
         }),
-      ),
-    ).toBe(sequence);
-    expect(store.snapshot().projects.some((project) => project.id === thread.projectId)).toBe(true);
-    expect(store.thread(thread.id)).toBeDefined();
-
-    store.dispatch(
-      decodeCommand({
-        type: "project.delete",
-        commandId: "command-project-force-delete",
-        projectId: thread.projectId,
-        force: true,
-      }),
-    );
-    expect(store.snapshot().projects.some((project) => project.id === thread.projectId)).toBe(
-      false,
-    );
-    expect(store.thread(thread.id)).toBeUndefined();
-  });
+      );
+      expect(store.snapshot().projects.some((project) => project.id === thread.projectId)).toBe(
+        false,
+      );
+      expect(store.thread(thread.id)).toBeUndefined();
+    }),
+  );
 });
 
 describe("demo settings", () => {
