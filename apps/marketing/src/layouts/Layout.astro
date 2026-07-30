@@ -94,15 +94,17 @@ const socialImageUrl = new URL(socialImage, siteUrl);
             <span class="nav-brand-name">T3 Code</span>
           </a>
           <div class="nav-right">
-            <button
-              class="site-stage-trigger"
-              type="button"
-              aria-label="Release channel: Latest. Switch to Nightly"
-              data-site-stage-trigger
-            >
-              <img src={stableAppIcon} alt="" width="30" height="30" data-site-stage-icon />
-            </button>
-            <a class="nav-link" href="/download">Download</a>
+            <div class="nav-download">
+              <button
+                class="site-stage-trigger"
+                type="button"
+                aria-label="Release channel: Latest. Switch to Nightly"
+                data-site-stage-trigger
+              >
+                <img src={stableAppIcon} alt="" width="16" height="16" data-site-stage-icon />
+              </button>
+              <a class="nav-link" href="/download">Download</a>
+            </div>
             <a
               class="nav-stars"
               href={GITHUB_REPOSITORY_URL}
@@ -577,7 +579,12 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   .nav-right {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 20px;
+  }
+
+  .nav-download {
+    display: inline-flex;
+    align-items: center;
   }
 
   .nav-link {
@@ -592,7 +599,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
 
   .site-stage-trigger {
     display: inline-flex;
-    width: 36px;
+    width: 30px;
     height: 36px;
     align-items: center;
     justify-content: center;
@@ -610,7 +617,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
 
   .site-stage-trigger img {
     flex: 0 0 auto;
-    border-radius: 7px;
+    border-radius: 4px;
   }
 
   .nav-stars {

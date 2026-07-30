@@ -2,9 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   demoEnvironments,
+  DEMO_METRICS_WORKTREE_PATH,
   demoReviewDiffPreview,
   demoThreadDetails,
   demoThreadDiff,
+  demoVcsStatusByCwd,
 } from "./fixtures";
 
 function shellThread(threadId: string) {
@@ -34,6 +36,15 @@ describe("demo fixture turn state", () => {
       ),
     ).toEqual([1, 2]);
   });
+
+  it("uses a matching VCS checkout for the metrics thread", () => {
+    expect(shellThread("thread-metrics").worktreePath).toBe(DEMO_METRICS_WORKTREE_PATH);
+
+    const status = demoVcsStatusByCwd[DEMO_METRICS_WORKTREE_PATH];
+    expect(status?._tag).toBe("snapshot");
+    if (status?._tag !== "snapshot") throw new Error("Missing metrics VCS snapshot");
+    expect(status.local.refName).toBe("feat/crash-dashboard");
+  });
 });
 
 describe("demo diff fixtures", () => {
@@ -53,6 +64,10 @@ describe("demo diff fixtures", () => {
     const flaky = demoReviewDiffPreview("~/code/t3code-worktrees/git-manager-test");
     expect(flaky.sources[0]?.headRef).toBe("fix/git-manager-test");
     expect(flaky.sources[0]?.diff).toContain("GitManager.test.ts");
+
+    const metrics = demoReviewDiffPreview(DEMO_METRICS_WORKTREE_PATH);
+    expect(metrics.sources[0]?.headRef).toBe("feat/crash-dashboard");
+    expect(metrics.sources[0]?.diff).toContain("src/pages/dashboard.tsx");
 
     expect(demoReviewDiffPreview("~/code/mobile-app").sources).toEqual([]);
   });
