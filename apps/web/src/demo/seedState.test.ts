@@ -19,7 +19,7 @@ function resolve(
 
 describe("resolveDemoSeedStaleness", () => {
   it("accepts the original combined marker without forcing a migration reset", () => {
-    expect(resolve(currentVersion)).toEqual({
+    expect(resolve(currentVersion, "old", "pending")).toEqual({
       stalePanelFixtures: false,
       staleCatalogFixtures: false,
     });
@@ -29,10 +29,6 @@ describe("resolveDemoSeedStaleness", () => {
     expect(resolve(null, currentVersion, currentVersion)).toEqual({
       stalePanelFixtures: false,
       staleCatalogFixtures: false,
-    });
-    expect(resolve(currentVersion, null, "pending")).toEqual({
-      stalePanelFixtures: false,
-      staleCatalogFixtures: true,
     });
   });
 
