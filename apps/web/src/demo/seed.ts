@@ -48,6 +48,7 @@ const DEMO_FIXTURE_VERSION = 2;
  */
 const DEMO_PANEL_SEED_VERSION_KEY = "t3code:demo-seed-version";
 const DEMO_CATALOG_SEED_VERSION_KEY = "t3code:demo-catalog-seed-version";
+const DEMO_CATALOG_SEED_PENDING = "pending";
 const DEMO_SEED_VERSION = JSON.stringify({
   fixtureVersion: DEMO_FIXTURE_VERSION,
   environments: demoEnvironments.map((environment) => ({
@@ -282,15 +283,27 @@ export async function seedDemoClientState(): Promise<void> {
   // Panel state and IndexedDB use independent markers. A persistent IndexedDB
   // failure should keep retrying the catalog without resetting local panel
   // choices on every reload.
-  const stalePanelFixtures = readLocalStorage(DEMO_PANEL_SEED_VERSION_KEY) !== DEMO_SEED_VERSION;
+  const panelSeedVersion = readLocalStorage(DEMO_PANEL_SEED_VERSION_KEY);
+  const catalogSeedVersion = readLocalStorage(DEMO_CATALOG_SEED_VERSION_KEY);
+  const stalePanelFixtures = panelSeedVersion !== DEMO_SEED_VERSION;
+  const staleCatalogFixtures =
+    catalogSeedVersion === null ? stalePanelFixtures : catalogSeedVersion !== DEMO_SEED_VERSION;
+
+  // Before the catalog had its own marker, the panel marker was only written
+  // after IndexedDB succeeded. A current legacy marker therefore proves the
+  // catalog is current and must not trigger a destructive forced re-seed.
+  // Conversely, persist a pending marker before advancing the panel marker so
+  // a real fixture refresh keeps retrying if IndexedDB is temporarily blocked.
+  if (catalogSeedVersion === null && staleCatalogFixtures) {
+    writeLocalStorage(DEMO_CATALOG_SEED_VERSION_KEY, DEMO_CATALOG_SEED_PENDING);
+  }
+
   const rightPanelSeeded = seedRightPanelState(stalePanelFixtures);
   const diffPanelSeeded = seedDiffPanelSelection(stalePanelFixtures);
   if (rightPanelSeeded && diffPanelSeeded) {
     writeLocalStorage(DEMO_PANEL_SEED_VERSION_KEY, DEMO_SEED_VERSION);
   }
 
-  const staleCatalogFixtures =
-    readLocalStorage(DEMO_CATALOG_SEED_VERSION_KEY) !== DEMO_SEED_VERSION;
   const catalogSeeded = await seedConnectionCatalog(staleCatalogFixtures);
   if (catalogSeeded) {
     writeLocalStorage(DEMO_CATALOG_SEED_VERSION_KEY, DEMO_SEED_VERSION);
