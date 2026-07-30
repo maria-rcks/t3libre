@@ -27,6 +27,7 @@ import {
   demoDiffPanelSelectionByThreadKey,
   demoEnvironments,
 } from "./fixtures";
+import { makeDemoSeedMarker, resolveDemoSeedStaleness } from "./seedState";
 import { demoServerVersionFor, type DemoStage } from "./stage";
 
 const CONNECTION_DATABASE_NAME = "t3code:connection-runtime";
@@ -47,6 +48,8 @@ const DEMO_FIXTURE_VERSION = 2;
  * state would reference machines that no longer exist, so it is re-seeded.
  */
 const DEMO_SEED_VERSION_KEY = "t3code:demo-seed-version";
+const LEGACY_DEMO_PANEL_SEED_VERSION_KEY = "t3code:demo-panel-seed-version";
+const LEGACY_DEMO_CATALOG_SEED_VERSION_KEY = "t3code:demo-catalog-seed-version";
 const DEMO_SEED_VERSION = JSON.stringify({
   fixtureVersion: DEMO_FIXTURE_VERSION,
   environments: demoEnvironments.map((environment) => ({
@@ -57,8 +60,6 @@ const DEMO_SEED_VERSION = JSON.stringify({
   browserPanelThreadKeys: demoBrowserPanelThreadKeys,
   diffPanelSelections: demoDiffPanelSelectionByThreadKey,
 });
-const DEMO_PANEL_SEED_PENDING = `panels-pending:${DEMO_SEED_VERSION}`;
-const DEMO_CATALOG_SEED_PENDING = `catalog-pending:${DEMO_SEED_VERSION}`;
 
 const encodeCatalogDocument = Schema.encodeSync(Schema.fromJsonString(ConnectionCatalogDocument));
 
@@ -280,14 +281,15 @@ export async function seedDemoClientState(): Promise<void> {
     }
   }
   seedVersionMismatchDismissals();
-  // The original marker proved that both localStorage panels and IndexedDB
-  // were seeded. Pending variants keep the successful side current while the
-  // failed side retries, without making existing markers look stale.
-  const seedVersion = readLocalStorage(DEMO_SEED_VERSION_KEY);
-  const stalePanelFixtures =
-    seedVersion !== DEMO_SEED_VERSION && seedVersion !== DEMO_CATALOG_SEED_PENDING;
-  const staleCatalogFixtures =
-    seedVersion !== DEMO_SEED_VERSION && seedVersion !== DEMO_PANEL_SEED_PENDING;
+  // The original marker proved both storage surfaces were seeded. A short-lived
+  // split-marker implementation also wrote separate panel/catalog keys, so the
+  // unified state migration accepts both layouts without destructive re-seeds.
+  const { stalePanelFixtures, staleCatalogFixtures } = resolveDemoSeedStaleness({
+    seedVersion: readLocalStorage(DEMO_SEED_VERSION_KEY),
+    legacyPanelSeedVersion: readLocalStorage(LEGACY_DEMO_PANEL_SEED_VERSION_KEY),
+    legacyCatalogSeedVersion: readLocalStorage(LEGACY_DEMO_CATALOG_SEED_VERSION_KEY),
+    currentVersion: DEMO_SEED_VERSION,
+  });
 
   const rightPanelSeeded = seedRightPanelState(stalePanelFixtures);
   const diffPanelSeeded = seedDiffPanelSelection(stalePanelFixtures);
@@ -295,7 +297,7 @@ export async function seedDemoClientState(): Promise<void> {
   if (panelsSeeded) {
     writeLocalStorage(
       DEMO_SEED_VERSION_KEY,
-      staleCatalogFixtures ? DEMO_CATALOG_SEED_PENDING : DEMO_SEED_VERSION,
+      makeDemoSeedMarker(staleCatalogFixtures ? "catalog-pending" : "current", DEMO_SEED_VERSION),
     );
   }
 
@@ -303,7 +305,7 @@ export async function seedDemoClientState(): Promise<void> {
   if (catalogSeeded) {
     writeLocalStorage(
       DEMO_SEED_VERSION_KEY,
-      panelsSeeded ? DEMO_SEED_VERSION : DEMO_PANEL_SEED_PENDING,
+      makeDemoSeedMarker(panelsSeeded ? "current" : "panels-pending", DEMO_SEED_VERSION),
     );
   }
 }
