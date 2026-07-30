@@ -462,24 +462,26 @@ async function findChromium() {
 
   const playwrightCache = NodePath.join(NodeOS.homedir(), "Library", "Caches", "ms-playwright");
   if (await exists(playwrightCache)) {
-    const macChromeDirectory = process.arch === "arm64" ? "chrome-mac-arm64" : "chrome-mac-x64";
+    const macChromeDirectories = ["chrome-mac-arm64", "chrome-mac-x64"];
     const revisions = (await NodeFSP.readdir(playwrightCache, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory() && entry.name.startsWith("chromium-"))
       .map((entry) => entry.name)
       .sort()
       .toReversed();
     for (const revision of revisions) {
-      candidates.push(
-        NodePath.join(
-          playwrightCache,
-          revision,
-          macChromeDirectory,
-          "Google Chrome for Testing.app",
-          "Contents",
-          "MacOS",
-          "Google Chrome for Testing",
-        ),
-      );
+      for (const macChromeDirectory of macChromeDirectories) {
+        candidates.push(
+          NodePath.join(
+            playwrightCache,
+            revision,
+            macChromeDirectory,
+            "Google Chrome for Testing.app",
+            "Contents",
+            "MacOS",
+            "Google Chrome for Testing",
+          ),
+        );
+      }
     }
   }
 
