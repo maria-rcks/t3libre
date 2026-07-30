@@ -46,6 +46,7 @@ import {
   type DemoEnvironmentFixture,
   demoAttachmentUrlById,
   demoEnvironments,
+  DEMO_METRICS_WORKTREE_PATH,
   demoProjectFaviconUrlByCwd,
   demoReviewDiffPreview,
   demoThreadDiff,
@@ -179,7 +180,7 @@ class DemoConnectionAcceptor {
 
 type ShellSubscriber = (item: OrchestrationShellStreamItem) => void;
 
-class DemoShellStore {
+export class DemoShellStore {
   private sequence: number;
   private projects: Map<string, OrchestrationProjectShell>;
   private threads: Map<string, OrchestrationThreadShell>;
@@ -358,7 +359,7 @@ class DemoShellStore {
         return this.upsertThread({
           ...thread,
           runtimeMode: command.runtimeMode,
-          updatedAt: command.createdAt,
+          updatedAt: nowIso,
         });
       }
       case "thread.interaction-mode.set": {
@@ -369,7 +370,7 @@ class DemoShellStore {
         return this.upsertThread({
           ...thread,
           interactionMode: command.interactionMode,
-          updatedAt: command.createdAt,
+          updatedAt: nowIso,
         });
       }
       case "project.create": {
@@ -612,7 +613,7 @@ function threadDetailSnapshot(thread: OrchestrationThreadShell): OrchestrationTh
   };
 }
 
-const EMPTY_VCS_STATUS: VcsSnapshot = {
+const EMPTY_VCS_STATUS: DemoVcsSnapshot = {
   _tag: "snapshot",
   local: {
     isRepo: true,
@@ -625,7 +626,7 @@ const EMPTY_VCS_STATUS: VcsSnapshot = {
   remote: null,
 };
 
-type VcsSnapshot = Extract<VcsStatusStreamEvent, { _tag: "snapshot" }>;
+export type DemoVcsSnapshot = Extract<VcsStatusStreamEvent, { _tag: "snapshot" }>;
 
 /**
  * Per-checkout git status backing the real GitActionsControl. Statuses are
@@ -633,7 +634,7 @@ type VcsSnapshot = Extract<VcsStatusStreamEvent, { _tag: "snapshot" }>;
  * an action the working tree becomes clean and subscribers are notified.
  */
 class DemoVcsStore {
-  private statuses = new Map<string, VcsSnapshot>();
+  private statuses = new Map<string, DemoVcsSnapshot>();
   private listeners = new Map<string, Set<(event: VcsStatusStreamEvent) => void>>();
 
   constructor() {
@@ -644,7 +645,7 @@ class DemoVcsStore {
     }
   }
 
-  snapshot(cwd: string): VcsSnapshot {
+  snapshot(cwd: string): DemoVcsSnapshot {
     return this.statuses.get(cwd) ?? EMPTY_VCS_STATUS;
   }
 
@@ -674,7 +675,7 @@ class DemoVcsStore {
     };
   }
 
-  update(cwd: string, next: VcsSnapshot): void {
+  update(cwd: string, next: DemoVcsSnapshot): void {
     this.statuses.set(cwd, next);
     for (const listener of this.listeners.get(cwd) ?? []) {
       listener(next);
@@ -688,6 +689,7 @@ const DEMO_COMMIT_SUBJECT_BY_CWD: Record<string, string> = {
   "~/code/t3code-worktrees/composer-attachments":
     "Add drag-drop attachment overlay to the composer",
   "~/code/t3code-worktrees/git-manager-test": "Deflake GitManager cross-repo PR metadata test",
+  [DEMO_METRICS_WORKTREE_PATH]: "Add release picker to crash dashboard",
 };
 
 const DEMO_COMMIT_SUBJECT_FALLBACK = "Checkpoint demo changes";
@@ -696,11 +698,23 @@ function demoCommitSubject(cwd: string): string {
   return DEMO_COMMIT_SUBJECT_BY_CWD[cwd] ?? DEMO_COMMIT_SUBJECT_FALLBACK;
 }
 
-function demoGitActionPlan(status: VcsSnapshot, input: GitRunStackedActionInput) {
+function demoFeatureBranchName(input: GitRunStackedActionInput): string {
+  const subject = input.commitMessage?.split("\n")[0] ?? demoCommitSubject(input.cwd);
+  const slug = subject
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/g, "");
+  return `feat/${slug || "demo-changes"}`;
+}
+
+function demoGitActionPlan(status: DemoVcsSnapshot, input: GitRunStackedActionInput) {
   const includesCommit =
     input.action === "commit" ||
     input.action === "commit_push" ||
     input.action === "commit_push_pr";
+  const includesBranch = input.featureBranch === true && includesCommit;
   const includesPush =
     input.action === "push" ||
     input.action === "commit_push" ||
@@ -708,31 +722,45 @@ function demoGitActionPlan(status: VcsSnapshot, input: GitRunStackedActionInput)
     (input.action === "create_pr" &&
       (status.remote?.hasUpstream !== true || (status.remote?.aheadCount ?? 0) > 0));
   const includesPr = input.action === "create_pr" || input.action === "commit_push_pr";
-  return { includesCommit, includesPush, includesPr };
+  return { includesBranch, includesCommit, includesPush, includesPr };
 }
 
-function settleVcsAction(cwd: string, input: GitRunStackedActionInput): void {
-  const current = demoVcsStore.snapshot(cwd);
-  const { includesCommit, includesPush, includesPr } = demoGitActionPlan(current, input);
-  const refName = current.local.refName ?? "main";
-  demoVcsStore.update(cwd, {
+export function applyDemoGitActionToStatus(
+  current: DemoVcsSnapshot,
+  input: GitRunStackedActionInput,
+): DemoVcsSnapshot {
+  const { includesBranch, includesCommit, includesPush, includesPr } = demoGitActionPlan(
+    current,
+    input,
+  );
+  const refName = includesBranch ? demoFeatureBranchName(input) : (current.local.refName ?? "main");
+  const subject = input.commitMessage?.split("\n")[0] ?? demoCommitSubject(input.cwd);
+  return {
     _tag: "snapshot",
     local: {
       ...current.local,
+      ...(includesBranch ? { isDefaultRef: false, refName } : {}),
       hasWorkingTreeChanges: includesCommit ? false : current.local.hasWorkingTreeChanges,
       workingTree: includesCommit
         ? { files: [], insertions: 0, deletions: 0 }
         : current.local.workingTree,
     },
     remote: {
-      hasUpstream: includesPush ? true : (current.remote?.hasUpstream ?? false),
-      aheadCount: includesPush ? 0 : (current.remote?.aheadCount ?? 0) + (includesCommit ? 1 : 0),
+      hasUpstream: includesPush
+        ? true
+        : includesBranch
+          ? false
+          : (current.remote?.hasUpstream ?? false),
+      aheadCount:
+        includesPush || includesBranch
+          ? 0
+          : (current.remote?.aheadCount ?? 0) + (includesCommit ? 1 : 0),
       behindCount: current.remote?.behindCount ?? 0,
       aheadOfDefaultCount: (current.remote?.aheadOfDefaultCount ?? 0) + (includesCommit ? 1 : 0),
       pr: includesPr
         ? {
             number: 1338,
-            title: demoCommitSubject(cwd),
+            title: subject,
             url: "https://github.com/pingdotgg/t3code/pull/1338",
             baseRef: "main",
             headRef: refName,
@@ -740,17 +768,25 @@ function settleVcsAction(cwd: string, input: GitRunStackedActionInput): void {
           }
         : (current.remote?.pr ?? null),
     },
-  });
+  };
 }
 
-function demoGitActionEvents(input: GitRunStackedActionInput): GitActionProgressEvent[] {
+function settleVcsAction(cwd: string, input: GitRunStackedActionInput): void {
+  demoVcsStore.update(cwd, applyDemoGitActionToStatus(demoVcsStore.snapshot(cwd), input));
+}
+
+export function demoGitActionEvents(input: GitRunStackedActionInput): GitActionProgressEvent[] {
   const base = { actionId: input.actionId, cwd: input.cwd, action: input.action };
   const status = demoVcsStore.snapshot(input.cwd);
-  const refName = status.local.refName ?? "main";
-  const { includesCommit, includesPush, includesPr } = demoGitActionPlan(status, input);
+  const { includesBranch, includesCommit, includesPush, includesPr } = demoGitActionPlan(
+    status,
+    input,
+  );
+  const refName = includesBranch ? demoFeatureBranchName(input) : (status.local.refName ?? "main");
   const subject = input.commitMessage?.split("\n")[0] ?? demoCommitSubject(input.cwd);
 
-  const phases: Array<"commit" | "push" | "pr"> = [
+  const phases: Array<"branch" | "commit" | "push" | "pr"> = [
+    ...(includesBranch ? (["branch"] as const) : []),
     ...(includesCommit ? (["commit"] as const) : []),
     ...(includesPush ? (["push"] as const) : []),
     ...(includesPr ? (["pr"] as const) : []),
@@ -758,7 +794,9 @@ function demoGitActionEvents(input: GitRunStackedActionInput): GitActionProgress
 
   const result: GitRunStackedActionResult = {
     action: input.action,
-    branch: { status: "skipped_not_requested" },
+    branch: includesBranch
+      ? { status: "created", name: refName }
+      : { status: "skipped_not_requested" },
     commit: includesCommit
       ? { status: "created", commitSha: "9e84b71", subject }
       : { status: "skipped_not_requested" },
@@ -815,11 +853,13 @@ function demoGitActionEvents(input: GitRunStackedActionInput): GitActionProgress
         kind: "phase_started",
         phase,
         label:
-          phase === "commit"
-            ? "Committing..."
-            : phase === "push"
-              ? `Pushing to origin/${refName}...`
-              : "Creating pull request...",
+          phase === "branch"
+            ? "Preparing feature branch..."
+            : phase === "commit"
+              ? "Committing..."
+              : phase === "push"
+                ? `Pushing to origin/${refName}...`
+                : "Creating pull request...",
       }),
     ),
     { ...base, kind: "action_finished", result },

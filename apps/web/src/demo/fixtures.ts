@@ -17,6 +17,7 @@ import { demoServerVersion } from "./stage";
 
 export const DEMO_ENVIRONMENT_ID = "demo-environment";
 export const DEMO_ENVIRONMENT_LABEL = "MacBook Pro";
+export const DEMO_METRICS_WORKTREE_PATH = "~/code/mobile-app-worktrees/crash-dashboard";
 
 const now = Date.now();
 const minutesAgo = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
@@ -439,6 +440,7 @@ const buildServerShell = decodeShellSnapshot({
       model: "claude-opus-5",
       instanceId: "claudeAgent",
       branch: "feat/crash-dashboard",
+      worktreePath: DEMO_METRICS_WORKTREE_PATH,
       createdMinutesAgo: 60 * 6,
       updatedMinutesAgo: 8,
       turn: { id: "thread-metrics-turn-2", state: "running", startedMinutesAgo: 11 },
@@ -616,6 +618,26 @@ export const demoVcsStatusByCwd: Record<string, VcsStatusStreamEvent> = {
       },
     },
   },
+  [DEMO_METRICS_WORKTREE_PATH]: {
+    _tag: "snapshot",
+    local: {
+      isRepo: true,
+      sourceControlProvider: GITHUB_PROVIDER,
+      hasPrimaryRemote: true,
+      isDefaultRef: false,
+      refName: "feat/crash-dashboard",
+      hasWorkingTreeChanges: true,
+      workingTree: {
+        files: [
+          { path: "src/pages/dashboard.tsx", insertions: 42, deletions: 6 },
+          { path: "src/components/ReleasePicker.tsx", insertions: 86, deletions: 0 },
+        ],
+        insertions: 128,
+        deletions: 6,
+      },
+    },
+    remote: { hasUpstream: true, aheadCount: 1, behindCount: 0, aheadOfDefaultCount: 3, pr: null },
+  },
   // Clean default checkouts.
   "~/code/t3code": {
     _tag: "snapshot",
@@ -717,6 +739,10 @@ const demoReviewFixtureByCwd: Record<
   "~/code/t3code-worktrees/sidebar-v2-polish": {
     headRef: "feat/sidebar-v2-polish",
     diff: DEMO_SIDEBAR_REVIEW_DIFF,
+  },
+  [DEMO_METRICS_WORKTREE_PATH]: {
+    headRef: "feat/crash-dashboard",
+    threadId: "thread-metrics",
   },
 };
 
@@ -1473,6 +1499,7 @@ export const demoProjectFaviconUrlByCwd: Record<string, string> = {
   "~/code/t3code": "https://www.google.com/s2/favicons?domain=t3.gg&sz=64",
   "~/code/marketing-site": "https://www.google.com/s2/favicons?domain=astro.build&sz=64",
   "~/code/mobile-app": "https://www.google.com/s2/favicons?domain=expo.dev&sz=64",
+  [DEMO_METRICS_WORKTREE_PATH]: "https://www.google.com/s2/favicons?domain=expo.dev&sz=64",
 };
 
 const dragOverlayMockSvg = [

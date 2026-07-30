@@ -584,6 +584,7 @@ const faqs = [
 
   // A demo iframe focuses its composer as it boots. On a hard refresh browsers
   // can restore that nested focus and scroll the marketing page to a cutout.
+  let finishReloadScrollReset: (() => void) | null = null;
   if (
     performance.getEntriesByType("navigation")[0] instanceof PerformanceNavigationTiming &&
     (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming).type === "reload"
@@ -591,16 +592,22 @@ const faqs = [
     const previousScrollRestoration = history.scrollRestoration;
     history.scrollRestoration = "manual";
     window.scrollTo(0, 0);
-    const finishReloadScrollReset = () => {
+    let finished = false;
+    finishReloadScrollReset = () => {
+      if (finished) return;
+      finished = true;
       requestAnimationFrame(() => {
         window.scrollTo(0, 0);
         history.scrollRestoration = previousScrollRestoration;
       });
     };
+    const scheduleReloadScrollFallback = () => {
+      window.setTimeout(() => finishReloadScrollReset?.(), 1_500);
+    };
     if (document.readyState === "complete") {
-      finishReloadScrollReset();
+      scheduleReloadScrollFallback();
     } else {
-      window.addEventListener("load", finishReloadScrollReset, { once: true });
+      window.addEventListener("load", scheduleReloadScrollFallback, { once: true });
     }
   }
 
@@ -652,6 +659,13 @@ const faqs = [
     return stage === "latest" ? "Latest" : stage === "nightly" ? "Nightly" : "Dev";
   }
 
+  function syncDemoStage(demo: HTMLIFrameElement | null, stage: Stage) {
+    demo?.contentWindow?.postMessage(
+      { type: "t3-demo-stage", stage, transitionDurationMs: 900 },
+      "*",
+    );
+  }
+
   function updateDownloadAction(
     button: HTMLAnchorElement | null,
     label: HTMLElement | null,
@@ -692,10 +706,7 @@ const faqs = [
 
     // Live channel switch: the demo listens for this message and makes its
     // mock server report the stage's version without reloading the iframe.
-    demo?.contentWindow?.postMessage(
-      { type: "t3-demo-stage", stage, transitionDurationMs: 900 },
-      "*",
-    );
+    syncDemoStage(demo, stage);
 
     updateDownloadAction(
       document.getElementById("download-btn") as HTMLAnchorElement | null,
@@ -861,6 +872,7 @@ const faqs = [
 
         if (appIsReady || performance.now() - demoReadyStartedAt > 15_000) {
           heroDemoIsReady = true;
+          finishReloadScrollReset?.();
           revealHeroPreviewsTogether();
           heroRevealFallbackTimer = window.setTimeout(
             () => revealHeroPreviewsTogether(true),
@@ -900,9 +912,20 @@ const faqs = [
     applyHeroDemoScale();
     forwardDemoWheelToPage();
     revealHeroDemoWhenReady();
+    const finishReloadScrollAfterDemoFocus = () => finishReloadScrollReset?.();
+    heroDemoIframe.contentWindow?.addEventListener("focus", finishReloadScrollAfterDemoFocus, {
+      once: true,
+    });
     heroDemoIframe.addEventListener("load", () => {
       forwardDemoWheelToPage();
       revealHeroDemoWhenReady();
+      syncDemoStage(heroDemoIframe, currentStage);
+      heroDemoIframe.contentWindow?.addEventListener("focus", finishReloadScrollAfterDemoFocus, {
+        once: true,
+      });
+      if (document.activeElement === heroDemoIframe) {
+        finishReloadScrollAfterDemoFocus();
+      }
     });
     new ResizeObserver(applyHeroDemoScale).observe(heroDemoFrame);
   }

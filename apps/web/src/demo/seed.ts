@@ -39,6 +39,7 @@ const RIGHT_PANEL_STORAGE_VERSION = 7;
 
 const DIFF_PANEL_STORAGE_KEY = "t3code:diff-panel-state:v1";
 const DIFF_PANEL_STORAGE_VERSION = 1;
+const DEMO_FIXTURE_VERSION = 2;
 
 /**
  * Identifies the fixture generation the visitor's persisted state was seeded
@@ -47,6 +48,7 @@ const DIFF_PANEL_STORAGE_VERSION = 1;
  */
 const DEMO_SEED_VERSION_KEY = "t3code:demo-seed-version";
 const DEMO_SEED_VERSION = JSON.stringify({
+  fixtureVersion: DEMO_FIXTURE_VERSION,
   environments: demoEnvironments.map((environment) => ({
     environmentId: environment.environmentId,
     label: environment.label,
