@@ -34,6 +34,8 @@ jobs:
     if: inputs.platform == 'all' || inputs.platform == 'ios'
     runs-on: blacksmith-12vcpu-macos-26
     timeout-minutes: 60
+    outputs:
+      artifact_id: ${{ steps.upload_ios.outputs.artifact-id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -59,6 +61,7 @@ jobs:
         run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --validate-only
 
       - name: Upload iOS screenshots
+        id: upload_ios
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -66,6 +69,119 @@ jobs:
           path: artifacts/app-store/screenshots/apple/
           if-no-files-found: warn
           retention-days: 14
+
+  publish_marketing_preview:
+    name: Publish marketing mobile preview
+    if: |
+      always() &&
+      needs.ios.result == 'success' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      inputs.appearance != 'light'
+    needs: ios
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - id: app_token
+        name: Mint release app token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout default branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          token: ${{ steps.app_token.outputs.token }}
+          persist-credentials: true
+
+      - name: Download iOS screenshots
+        uses: actions/download-artifact@v8
+        with:
+          name: app-store-connect-screenshots
+          path: ${{ runner.temp }}/mobile-showcase
+
+      - id: app_bot
+        name: Resolve GitHub App bot identity
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+        run: |
+          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          echo "name=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
+          echo "email=${user_id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+
+      - id: preview
+        name: Update website preview asset
+        env:
+          ARTIFACT_ID: ${{ needs.ios.outputs.artifact_id }}
+          HEAD_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+        run: |
+          phone_source_path="$RUNNER_TEMP/mobile-showcase/iphone-6.9/dark/threads.png"
+          tablet_source_path="$RUNNER_TEMP/mobile-showcase/ipad-13/dark/threads.png"
+          output_directory="apps/marketing/public/mobile-states"
+          phone_output_path="$output_directory/threads.png"
+          tablet_output_path="$output_directory/ipad-threads.png"
+
+          if [[ ! -f "$phone_source_path" || ! -f "$tablet_source_path" ]]; then
+            echo "Missing expected website preview source." >&2
+            echo "Phone: $phone_source_path" >&2
+            echo "Tablet: $tablet_source_path" >&2
+            exit 1
+          fi
+
+          if [[ -f "$phone_output_path" && -f "$tablet_output_path" ]] &&
+            cmp --silent "$phone_source_path" "$phone_output_path" &&
+            cmp --silent "$tablet_source_path" "$tablet_output_path"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Website previews already match the generated screenshots."
+            exit 0
+          fi
+
+          mkdir -p "$output_directory"
+          cp "$phone_source_path" "$phone_output_path"
+          cp "$tablet_source_path" "$tablet_output_path"
+          node --input-type=module <<'NODE'
+          import { writeFile } from "node:fs/promises";
+
+          const metadata = {
+            artifactId: Number(process.env.ARTIFACT_ID),
+            artifactName: "app-store-connect-screenshots",
+            artifactCreatedAt: new Date().toISOString(),
+            runId: Number(process.env.RUN_ID),
+            runUrl: process.env.RUN_URL,
+            headSha: process.env.HEAD_SHA,
+            workflow: process.env.WORKFLOW_NAME,
+            devices: ["iphone-6.9", "ipad-13"],
+            appearance: "dark",
+          };
+
+          await writeFile(
+            "apps/marketing/public/mobile-states/source.json",
+            `${JSON.stringify(metadata, null, 2)}\n`,
+          );
+          NODE
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit website preview
+        if: steps.preview.outputs.changed == 'true'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "${{ steps.app_bot.outputs.name }}"
+          git config user.email "${{ steps.app_bot.outputs.email }}"
+          git add \
+            apps/marketing/public/mobile-states/source.json \
+            apps/marketing/public/mobile-states/threads.png \
+            apps/marketing/public/mobile-states/ipad-threads.png
+          git commit -m "chore(marketing): refresh mobile showcase screenshot"
+          git pull --rebase origin "$DEFAULT_BRANCH"
+          git push origin "HEAD:$DEFAULT_BRANCH"
 
   android:
     name: Android phone, 7-inch tablet, and 10-inch tablet

@@ -9,11 +9,11 @@
 - User guides
   - [Background service](./user/background-service.md)
   - [Remote access](./user/remote-access.md)
+  - [Mobile app](./user/mobile-app.md)
   - [Keeping T3 Code in sync](./user/server-updates.md)
   - [Keybindings](./user/keybindings.md)
 - [T3 Connect](./cloud/t3-connect-clerk.md)
 - [Integrations](./integrations/source-control-providers.md)
-- [Mobile](./mobile/app.md)
 - [Operations](./operations/ci.md)
 - [Providers](./providers/codex.md)
 - [Reference](./reference/encyclopedia.md)
