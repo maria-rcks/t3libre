@@ -17,15 +17,28 @@ function release(
 }
 
 describe("selectNightlyRelease", () => {
-  it("selects the first published nightly prerelease", () => {
+  it("selects the newest published nightly prerelease regardless of list order", () => {
     const nightly = release("v0.0.32-nightly.20260729.951");
 
     expect(
       selectNightlyRelease([
         release("v0.0.33-nightly.20260730.1", { draft: true, prerelease: true }),
+        release("v0.0.32-nightly.20260729.949"),
         release("v0.0.32"),
-        nightly,
         release("v0.0.32-nightly.20260728.912"),
+        nightly,
+      ]),
+    ).toBe(nightly);
+  });
+
+  it("uses the run number to order nightlies from the same date", () => {
+    const nightly = release("v0.0.32-nightly.20260729.1002");
+
+    expect(
+      selectNightlyRelease([
+        release("v0.0.32-nightly.20260729.999"),
+        nightly,
+        release("v0.0.33-nightly.20260729.1001"),
       ]),
     ).toBe(nightly);
   });

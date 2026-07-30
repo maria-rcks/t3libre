@@ -462,6 +462,7 @@ async function findChromium() {
 
   const playwrightCache = NodePath.join(NodeOS.homedir(), "Library", "Caches", "ms-playwright");
   if (await exists(playwrightCache)) {
+    const macChromeDirectory = process.arch === "arm64" ? "chrome-mac-arm64" : "chrome-mac-x64";
     const revisions = (await NodeFSP.readdir(playwrightCache, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory() && entry.name.startsWith("chromium-"))
       .map((entry) => entry.name)
@@ -472,7 +473,7 @@ async function findChromium() {
         NodePath.join(
           playwrightCache,
           revision,
-          "chrome-mac-arm64",
+          macChromeDirectory,
           "Google Chrome for Testing.app",
           "Contents",
           "MacOS",
@@ -497,7 +498,12 @@ function startStaticServer() {
         "",
       );
       let filePath = NodePath.resolve(publicRoot, relativePath);
-      if (!filePath.startsWith(`${publicRoot}/`) && filePath !== publicRoot) {
+      const pathFromPublicRoot = NodePath.relative(publicRoot, filePath);
+      if (
+        pathFromPublicRoot === ".." ||
+        pathFromPublicRoot.startsWith(`..${NodePath.sep}`) ||
+        NodePath.isAbsolute(pathFromPublicRoot)
+      ) {
         response.writeHead(403).end();
         return;
       }

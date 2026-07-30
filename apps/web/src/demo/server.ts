@@ -306,7 +306,7 @@ class DemoShellStore {
         return this.upsertThread({
           ...thread,
           settledOverride: "active",
-          settledAt: nowIso,
+          settledAt: null,
           updatedAt: nowIso,
         });
       }
@@ -350,6 +350,28 @@ class DemoShellStore {
           updatedAt: nowIso,
         });
       }
+      case "thread.runtime-mode.set": {
+        const thread = this.threads.get(command.threadId);
+        if (!thread) {
+          return this.sequence;
+        }
+        return this.upsertThread({
+          ...thread,
+          runtimeMode: command.runtimeMode,
+          updatedAt: command.createdAt,
+        });
+      }
+      case "thread.interaction-mode.set": {
+        const thread = this.threads.get(command.threadId);
+        if (!thread) {
+          return this.sequence;
+        }
+        return this.upsertThread({
+          ...thread,
+          interactionMode: command.interactionMode,
+          updatedAt: command.createdAt,
+        });
+      }
       case "project.create": {
         return this.upsertProject({
           id: command.projectId,
@@ -386,7 +408,6 @@ class DemoShellStore {
         return this.removeProject(command.projectId);
       }
       default: {
-        this.sequence += 1;
         return this.sequence;
       }
     }
@@ -532,7 +553,10 @@ const unsupportedError = (method: string) =>
 
 const unsupported = (method: string) => Effect.fail(unsupportedError(method));
 
-function shellStream(store: DemoShellStore): Stream.Stream<OrchestrationShellStreamItem> {
+function shellStream(
+  store: DemoShellStore,
+  options?: { readonly includeSnapshot?: boolean },
+): Stream.Stream<OrchestrationShellStreamItem> {
   return Stream.unwrap(
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<OrchestrationShellStreamItem>();
@@ -544,7 +568,15 @@ function shellStream(store: DemoShellStore): Stream.Stream<OrchestrationShellStr
         ),
         (unsubscribe) => Effect.sync(unsubscribe),
       );
-      return Stream.fromQueue(queue);
+      const live = Stream.fromQueue(queue);
+      if (options?.includeSnapshot !== true) {
+        return live;
+      }
+      const snapshotItem: OrchestrationShellStreamItem = {
+        kind: "snapshot",
+        snapshot: store.snapshot(),
+      };
+      return Stream.concat(Stream.make(snapshotItem), live);
     }),
   );
 }
@@ -664,25 +696,39 @@ function demoCommitSubject(cwd: string): string {
   return DEMO_COMMIT_SUBJECT_BY_CWD[cwd] ?? DEMO_COMMIT_SUBJECT_FALLBACK;
 }
 
+function demoGitActionPlan(status: VcsSnapshot, input: GitRunStackedActionInput) {
+  const includesCommit =
+    input.action === "commit" ||
+    input.action === "commit_push" ||
+    input.action === "commit_push_pr";
+  const includesPush =
+    input.action === "push" ||
+    input.action === "commit_push" ||
+    input.action === "commit_push_pr" ||
+    (input.action === "create_pr" &&
+      (status.remote?.hasUpstream !== true || (status.remote?.aheadCount ?? 0) > 0));
+  const includesPr = input.action === "create_pr" || input.action === "commit_push_pr";
+  return { includesCommit, includesPush, includesPr };
+}
+
 function settleVcsAction(cwd: string, input: GitRunStackedActionInput): void {
   const current = demoVcsStore.snapshot(cwd);
-  const includesPr = input.action === "create_pr" || input.action === "commit_push_pr";
+  const { includesCommit, includesPush, includesPr } = demoGitActionPlan(current, input);
   const refName = current.local.refName ?? "main";
   demoVcsStore.update(cwd, {
     _tag: "snapshot",
     local: {
       ...current.local,
-      hasWorkingTreeChanges: input.action === "push" ? current.local.hasWorkingTreeChanges : false,
-      workingTree:
-        input.action === "push"
-          ? current.local.workingTree
-          : { files: [], insertions: 0, deletions: 0 },
+      hasWorkingTreeChanges: includesCommit ? false : current.local.hasWorkingTreeChanges,
+      workingTree: includesCommit
+        ? { files: [], insertions: 0, deletions: 0 }
+        : current.local.workingTree,
     },
     remote: {
-      hasUpstream: true,
-      aheadCount: 0,
-      behindCount: 0,
-      aheadOfDefaultCount: current.remote?.aheadOfDefaultCount ?? 0,
+      hasUpstream: includesPush ? true : (current.remote?.hasUpstream ?? false),
+      aheadCount: includesPush ? 0 : (current.remote?.aheadCount ?? 0) + (includesCommit ? 1 : 0),
+      behindCount: current.remote?.behindCount ?? 0,
+      aheadOfDefaultCount: (current.remote?.aheadOfDefaultCount ?? 0) + (includesCommit ? 1 : 0),
       pr: includesPr
         ? {
             number: 1338,
@@ -701,9 +747,7 @@ function demoGitActionEvents(input: GitRunStackedActionInput): GitActionProgress
   const base = { actionId: input.actionId, cwd: input.cwd, action: input.action };
   const status = demoVcsStore.snapshot(input.cwd);
   const refName = status.local.refName ?? "main";
-  const includesCommit = input.action !== "push" && input.action !== "create_pr";
-  const includesPush = input.action !== "commit" && input.action !== "create_pr";
-  const includesPr = input.action === "create_pr" || input.action === "commit_push_pr";
+  const { includesCommit, includesPush, includesPr } = demoGitActionPlan(status, input);
   const subject = input.commitMessage?.split("\n")[0] ?? demoCommitSubject(input.cwd);
 
   const phases: Array<"commit" | "push" | "pr"> = [
@@ -731,17 +775,36 @@ function demoGitActionEvents(input: GitRunStackedActionInput): GitActionProgress
           title: subject,
         }
       : { status: "skipped_not_requested" },
-    toast: {
-      title: includesPr ? "Pull request created" : "Pushed to GitHub",
-      description: includesPr ? subject : `${refName} → origin/${refName}`,
-      cta: includesPr
-        ? {
+    toast: includesPr
+      ? {
+          title: "Created PR #1338",
+          description: subject,
+          cta: {
             kind: "open_pr",
             label: "Open pull request",
             url: "https://github.com/pingdotgg/t3code/pull/1338",
+          },
+        }
+      : includesPush
+        ? {
+            title: `Pushed${includesCommit ? " 9e84b71" : ""} to origin/${refName}`,
+            description: includesCommit ? subject : `${refName} → origin/${refName}`,
+            cta: { kind: "none" },
           }
-        : { kind: "none" },
-    },
+        : includesCommit
+          ? {
+              title: "Committed 9e84b71",
+              description: subject,
+              cta: {
+                kind: "run_action",
+                label: "Push",
+                action: { kind: "push" },
+              },
+            }
+          : {
+              title: "Done",
+              cta: { kind: "none" },
+            },
   };
 
   return [
@@ -845,17 +908,10 @@ function makeHandlersLayer(backend: DemoBackend) {
               );
             }),
           ),
-        [ORCHESTRATION_WS_METHODS.subscribeShell]: (input) => {
-          const live = shellStream(store);
-          if (input.afterSequence !== undefined) {
-            return live;
-          }
-          const snapshotItem: OrchestrationShellStreamItem = {
-            kind: "snapshot",
-            snapshot: store.snapshot(),
-          };
-          return Stream.concat(Stream.make(snapshotItem), live);
-        },
+        // The demo store is ephemeral and has no event replay. Always resync
+        // from a snapshot, including resume requests carrying afterSequence.
+        [ORCHESTRATION_WS_METHODS.subscribeShell]: () =>
+          shellStream(store, { includeSnapshot: true }),
         [ORCHESTRATION_WS_METHODS.subscribeThread]: (input) =>
           Stream.unwrap(
             Effect.sync(() => {
@@ -875,7 +931,13 @@ function makeHandlersLayer(backend: DemoBackend) {
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           Effect.sync(() => ({ sequence: store.dispatch(command) })),
         [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: () =>
-          Effect.sync(() => store.snapshot()),
+          Effect.sync(() => {
+            const snapshot = store.snapshot();
+            return {
+              ...snapshot,
+              threads: snapshot.threads.filter((thread) => thread.archivedAt !== null),
+            };
+          }),
         [ORCHESTRATION_WS_METHODS.getTurnDiff]: (input) =>
           Effect.succeed(demoThreadDiff(input.threadId, input.fromTurnCount, input.toTurnCount)),
         [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: (input) =>

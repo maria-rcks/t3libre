@@ -19,7 +19,13 @@ startDemoServer();
 // open on showcase threads) must land before the app boots and reads it, so
 // the app modules (whose stores rehydrate persisted state on import) are
 // loaded only after seeding completes.
-void seedDemoClientState().then(async () => {
+async function renderDemo(): Promise<void> {
+  try {
+    await seedDemoClientState();
+  } catch (error) {
+    console.warn("Could not seed the marketing demo; continuing with browser defaults.", error);
+  }
+
   const [{ getRouter }, { AppRoot }] = await Promise.all([
     import("../router"),
     import("../AppRoot"),
@@ -33,4 +39,6 @@ void seedDemoClientState().then(async () => {
       <AppRoot router={router} />
     </React.StrictMode>,
   );
-});
+}
+
+void renderDemo();

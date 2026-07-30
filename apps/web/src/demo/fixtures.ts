@@ -108,6 +108,7 @@ interface DemoThreadSpec {
   readonly createdMinutesAgo: number;
   readonly updatedMinutesAgo: number;
   readonly turn?: {
+    readonly id?: string;
     readonly state: "running" | "completed" | "interrupted" | "error";
     readonly startedMinutesAgo?: number;
     readonly completedMinutesAgo?: number;
@@ -126,6 +127,7 @@ interface DemoThreadSpec {
 
 function demoThread(spec: DemoThreadSpec) {
   const updatedAt = minutesAgo(spec.updatedMinutesAgo);
+  const turnId = spec.turn?.id ?? `${spec.id}-turn-1`;
   return {
     id: spec.id,
     projectId: spec.projectId,
@@ -137,7 +139,7 @@ function demoThread(spec: DemoThreadSpec) {
     worktreePath: spec.worktreePath ?? null,
     latestTurn: spec.turn
       ? {
-          turnId: `${spec.id}-turn-1`,
+          turnId,
           state: spec.turn.state,
           requestedAt: minutesAgo(spec.turn.startedMinutesAgo ?? spec.updatedMinutesAgo),
           startedAt: minutesAgo(spec.turn.startedMinutesAgo ?? spec.updatedMinutesAgo),
@@ -159,7 +161,7 @@ function demoThread(spec: DemoThreadSpec) {
           providerName: spec.instanceId ?? "codex",
           providerInstanceId: spec.instanceId ?? "codex",
           runtimeMode: "full-access",
-          activeTurnId: spec.turn?.state === "running" ? `${spec.id}-turn-1` : null,
+          activeTurnId: spec.turn?.state === "running" ? turnId : null,
           lastError: null,
           updatedAt,
         }
@@ -394,7 +396,12 @@ const macStudioShell = decodeShellSnapshot({
       worktreePath: "~/code/t3code-worktrees/git-manager-test",
       createdMinutesAgo: 60 * 8,
       updatedMinutesAgo: 35,
-      turn: { state: "completed", startedMinutesAgo: 48, completedMinutesAgo: 35 },
+      turn: {
+        id: "thread-flaky-turn-2",
+        state: "completed",
+        startedMinutesAgo: 48,
+        completedMinutesAgo: 35,
+      },
       sessionStatus: "ready",
     }),
     demoThread({
@@ -434,7 +441,7 @@ const buildServerShell = decodeShellSnapshot({
       branch: "feat/crash-dashboard",
       createdMinutesAgo: 60 * 6,
       updatedMinutesAgo: 8,
-      turn: { state: "running", startedMinutesAgo: 11 },
+      turn: { id: "thread-metrics-turn-2", state: "running", startedMinutesAgo: 11 },
       sessionStatus: "running",
     }),
     demoThread({
@@ -522,6 +529,10 @@ export const demoBrowserPanelThreadKeys: ReadonlyArray<string> = [
   "demo-mac-studio:thread-composer",
   "demo-build-server:thread-metrics",
 ];
+
+export const demoDiffPanelSelectionByThreadKey = {
+  "demo-mac-studio:thread-composer": "thread-composer-turn-0",
+} as const;
 
 // ---------------------------------------------------------------------------
 // Git status per checkout, driving the real GitActionsControl in the header
@@ -636,7 +647,7 @@ export const demoVcsStatusByCwd: Record<string, VcsStatusStreamEvent> = {
 
 // The browser preview surface needs the Electron desktop bridge, so the web
 // demo showcases the right panel with the diff surface instead.
-const DEMO_UNIFIED_DIFF = `diff --git a/apps/web/src/components/chat/ChatComposer.tsx b/apps/web/src/components/chat/ChatComposer.tsx
+const DEMO_COMPOSER_DIFF = `diff --git a/apps/web/src/components/chat/ChatComposer.tsx b/apps/web/src/components/chat/ChatComposer.tsx
 index 3f1c2aa..9e84b71 100644
 --- a/apps/web/src/components/chat/ChatComposer.tsx
 +++ b/apps/web/src/components/chat/ChatComposer.tsx
@@ -680,23 +691,90 @@ index 0000000..b2d61c4
 const decodeThreadTurnDiff = Schema.decodeUnknownSync(ThreadTurnDiff);
 const decodeReviewDiffPreview = Schema.decodeUnknownSync(ReviewDiffPreviewResult);
 
+const DEMO_SIDEBAR_REVIEW_DIFF = `diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
+index 7f42311..b98170a 100644
+--- a/apps/web/src/components/Sidebar.tsx
++++ b/apps/web/src/components/Sidebar.tsx
+@@ -418,6 +418,7 @@ export function Sidebar() {
+   const settledThreads = sortSettledThreads(threads);
++  const jumpHints = resolveActiveThreadJumpHints(threads, activeThreadId);
+   return <SidebarList threads={settledThreads} />;
+ }
+`;
+
+const demoReviewFixtureByCwd: Record<
+  string,
+  { readonly headRef: string; readonly threadId?: string; readonly diff?: string }
+> = {
+  "~/code/t3code-worktrees/composer-attachments": {
+    headRef: "feat/composer-attachments",
+    threadId: "thread-composer",
+  },
+  "~/code/t3code-worktrees/git-manager-test": {
+    headRef: "fix/git-manager-test",
+    threadId: "thread-flaky",
+  },
+  "~/code/t3code-worktrees/sidebar-v2-polish": {
+    headRef: "feat/sidebar-v2-polish",
+    diff: DEMO_SIDEBAR_REVIEW_DIFF,
+  },
+};
+
 export function demoReviewDiffPreview(cwd: string): ReviewDiffPreviewResult {
+  const fixture = demoReviewFixtureByCwd[cwd];
+  const diff =
+    fixture?.diff ??
+    (fixture?.threadId ? demoThreadDiff(fixture.threadId, 0, Number.MAX_SAFE_INTEGER).diff : "");
   return decodeReviewDiffPreview({
     cwd,
     generatedAt: DateTime.makeUnsafe(minutesAgo(2)),
-    sources: [
-      {
-        id: "branch-range",
-        kind: "branch-range",
-        title: "Branch changes",
-        baseRef: "main",
-        headRef: "feat/composer-attachments",
-        diff: DEMO_UNIFIED_DIFF,
-        diffHash: "demo-diff-hash",
-        truncated: false,
-      },
-    ],
+    sources:
+      fixture && diff
+        ? [
+            {
+              id: "branch-range",
+              kind: "branch-range",
+              title: "Branch changes",
+              baseRef: "main",
+              headRef: fixture.headRef,
+              diff,
+              diffHash: `demo-diff-${fixture.threadId ?? fixture.headRef}`,
+              truncated: false,
+            },
+          ]
+        : [],
   });
+}
+
+function demoUnifiedDiffForFile(file: { readonly path: string; readonly kind: string }): string {
+  if (file.kind === "added") {
+    return `diff --git a/${file.path} b/${file.path}
+new file mode 100644
+index 0000000..9e84b71
+--- /dev/null
++++ b/${file.path}
+@@ -0,0 +1 @@
++// Added in this demo checkpoint.
+`;
+  }
+  if (file.kind === "deleted") {
+    return `diff --git a/${file.path} b/${file.path}
+deleted file mode 100644
+index 9e84b71..0000000
+--- a/${file.path}
++++ /dev/null
+@@ -1 +0,0 @@
+-// Removed in this demo checkpoint.
+`;
+  }
+  return `diff --git a/${file.path} b/${file.path}
+index 3f1c2aa..9e84b71 100644
+--- a/${file.path}
++++ b/${file.path}
+@@ -1 +1 @@
+-// Previous demo implementation.
++// Updated in this demo checkpoint.
+`;
 }
 
 export function demoThreadDiff(
@@ -704,7 +782,21 @@ export function demoThreadDiff(
   fromTurnCount: number,
   toTurnCount: number,
 ): typeof ThreadTurnDiff.Type {
-  return decodeThreadTurnDiff({ threadId, fromTurnCount, toTurnCount, diff: DEMO_UNIFIED_DIFF });
+  const checkpoints =
+    demoThreadDetails[threadId]?.checkpoints.filter(
+      (checkpoint) =>
+        checkpoint.status === "ready" &&
+        checkpoint.checkpointTurnCount > fromTurnCount &&
+        checkpoint.checkpointTurnCount <= toTurnCount,
+    ) ?? [];
+  const filesByPath = new Map(
+    checkpoints.flatMap((checkpoint) => checkpoint.files).map((file) => [file.path, file]),
+  );
+  const diff =
+    threadId === "thread-composer" && fromTurnCount >= 1 && filesByPath.size > 0
+      ? DEMO_COMPOSER_DIFF
+      : [...filesByPath.values()].map(demoUnifiedDiffForFile).join("");
+  return decodeThreadTurnDiff({ threadId, fromTurnCount, toTurnCount, diff });
 }
 
 // ---------------------------------------------------------------------------
@@ -860,7 +952,7 @@ export const demoThreadDetails: Record<string, DemoThreadDetail> = {
       },
       {
         turnId: "thread-composer-turn-0",
-        checkpointTurnCount: 1,
+        checkpointTurnCount: 2,
         checkpointRef: "refs/t3/checkpoints/thread-composer/2",
         status: "ready",
         files: [
@@ -1038,7 +1130,7 @@ export const demoThreadDetails: Record<string, DemoThreadDetail> = {
       },
       {
         turnId: "thread-flaky-turn-2",
-        checkpointTurnCount: 1,
+        checkpointTurnCount: 2,
         checkpointRef: "refs/t3/checkpoints/thread-flaky/2",
         status: "ready",
         files: [

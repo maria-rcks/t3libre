@@ -22,7 +22,11 @@ import {
   dismissVersionMismatch,
   resolveVersionMismatch,
 } from "../versionSkew";
-import { demoBrowserPanelThreadKeys, demoEnvironments } from "./fixtures";
+import {
+  demoBrowserPanelThreadKeys,
+  demoDiffPanelSelectionByThreadKey,
+  demoEnvironments,
+} from "./fixtures";
 import { demoServerVersionFor, type DemoStage } from "./stage";
 
 const CONNECTION_DATABASE_NAME = "t3code:connection-runtime";
@@ -42,11 +46,34 @@ const DIFF_PANEL_STORAGE_VERSION = 1;
  * state would reference machines that no longer exist, so it is re-seeded.
  */
 const DEMO_SEED_VERSION_KEY = "t3code:demo-seed-version";
-const DEMO_SEED_VERSION = demoEnvironments
-  .map((environment) => environment.environmentId)
-  .join("|");
+const DEMO_SEED_VERSION = JSON.stringify({
+  environments: demoEnvironments.map((environment) => ({
+    environmentId: environment.environmentId,
+    label: environment.label,
+    origin: environment.origin,
+  })),
+  browserPanelThreadKeys: demoBrowserPanelThreadKeys,
+  diffPanelSelections: demoDiffPanelSelectionByThreadKey,
+});
 
 const encodeCatalogDocument = Schema.encodeSync(Schema.fromJsonString(ConnectionCatalogDocument));
+
+function readLocalStorage(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalStorage(key: string, value: string): boolean {
+  try {
+    window.localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function demoCatalogDocument(): string {
   const remotes = demoEnvironments.filter(
@@ -81,12 +108,18 @@ function demoCatalogDocument(): string {
 }
 
 /** Registers the fake remote machines unless a current catalog already exists. */
-function seedConnectionCatalog(force: boolean): Promise<void> {
+function seedConnectionCatalog(force: boolean): Promise<boolean> {
   return new Promise((resolve) => {
     if (typeof indexedDB === "undefined") {
-      resolve();
+      resolve(false);
       return;
     }
+    let settled = false;
+    const settle = (result: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
     const request = indexedDB.open(CONNECTION_DATABASE_NAME, CONNECTION_DATABASE_VERSION);
     request.addEventListener("upgradeneeded", () => {
       // Mirror the store set the app's connection storage creates, so the
@@ -97,38 +130,61 @@ function seedConnectionCatalog(force: boolean): Promise<void> {
         }
       }
     });
-    request.addEventListener("error", () => resolve());
+    request.addEventListener("blocked", () => settle(false));
+    request.addEventListener("error", () => settle(false));
     request.addEventListener("success", () => {
       const database = request.result;
-      const read = database
-        .transaction(CATALOG_STORE_NAME, "readonly")
-        .objectStore(CATALOG_STORE_NAME)
-        .get(CATALOG_KEY);
+      if (settled) {
+        database.close();
+        return;
+      }
+      let read: IDBRequest;
+      try {
+        read = database
+          .transaction(CATALOG_STORE_NAME, "readonly")
+          .objectStore(CATALOG_STORE_NAME)
+          .get(CATALOG_KEY);
+      } catch {
+        database.close();
+        settle(false);
+        return;
+      }
       read.addEventListener("error", () => {
         database.close();
-        resolve();
+        settle(false);
       });
       read.addEventListener("success", () => {
         if (!force && typeof read.result === "string" && read.result.trim() !== "") {
           database.close();
-          resolve();
+          settle(true);
           return;
         }
         const staleStores = ["shell", "thread", "server-config", "vcs-refs"].filter((store) =>
           database.objectStoreNames.contains(store),
         );
-        const write = database.transaction([CATALOG_STORE_NAME, ...staleStores], "readwrite");
+        let write: IDBTransaction;
+        try {
+          write = database.transaction([CATALOG_STORE_NAME, ...staleStores], "readwrite");
+        } catch {
+          database.close();
+          settle(false);
+          return;
+        }
         for (const store of staleStores) {
           write.objectStore(store).clear();
         }
         write.objectStore(CATALOG_STORE_NAME).put(demoCatalogDocument(), CATALOG_KEY);
         write.addEventListener("complete", () => {
           database.close();
-          resolve();
+          settle(true);
         });
         write.addEventListener("error", () => {
           database.close();
-          resolve();
+          settle(false);
+        });
+        write.addEventListener("abort", () => {
+          database.close();
+          settle(false);
         });
       });
     });
@@ -139,9 +195,9 @@ function seedConnectionCatalog(force: boolean): Promise<void> {
  * Opens the right panel (on the diff surface — the browser preview needs the
  * desktop bridge) on the showcase threads for first-time visitors.
  */
-function seedRightPanelState(force: boolean): void {
-  if (!force && window.localStorage.getItem(RIGHT_PANEL_STORAGE_KEY) !== null) {
-    return;
+function seedRightPanelState(force: boolean): boolean {
+  if (!force && readLocalStorage(RIGHT_PANEL_STORAGE_KEY) !== null) {
+    return true;
   }
   const byThreadKey = Object.fromEntries(
     demoBrowserPanelThreadKeys.map((threadKey) => [
@@ -153,7 +209,7 @@ function seedRightPanelState(force: boolean): void {
       },
     ]),
   );
-  window.localStorage.setItem(
+  return writeLocalStorage(
     RIGHT_PANEL_STORAGE_KEY,
     JSON.stringify({ state: { byThreadKey }, version: RIGHT_PANEL_STORAGE_VERSION }),
   );
@@ -163,22 +219,26 @@ function seedRightPanelState(force: boolean): void {
  * Points the diff panel at the latest checkpoint on the showcase thread so the
  * rendered diff (not an empty working-tree view) greets first-time visitors.
  */
-function seedDiffPanelSelection(force: boolean): void {
-  if (!force && window.localStorage.getItem(DIFF_PANEL_STORAGE_KEY) !== null) {
-    return;
+function seedDiffPanelSelection(force: boolean): boolean {
+  if (!force && readLocalStorage(DIFF_PANEL_STORAGE_KEY) !== null) {
+    return true;
   }
-  window.localStorage.setItem(
+  const byThreadKey = Object.fromEntries(
+    Object.entries(demoDiffPanelSelectionByThreadKey).map(([threadKey, turnId]) => [
+      threadKey,
+      {
+        kind: "turn",
+        turnId,
+        filePath: null,
+        revealRequestId: 1,
+      },
+    ]),
+  );
+  return writeLocalStorage(
     DIFF_PANEL_STORAGE_KEY,
     JSON.stringify({
       state: {
-        byThreadKey: {
-          "demo-mac-studio:thread-composer": {
-            kind: "turn",
-            turnId: "thread-composer-turn-0",
-            filePath: null,
-            revealRequestId: 1,
-          },
-        },
+        byThreadKey,
         branchBaseRefByThreadKey: {},
       },
       version: DIFF_PANEL_STORAGE_VERSION,
@@ -209,12 +269,18 @@ export async function seedDemoClientState(): Promise<void> {
   // The demo showcases the Sidebar v2 beta by default; visitors can still
   // toggle it in Settings, and their choice persists.
   if (readBrowserClientSettings() === null) {
-    writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, sidebarV2Enabled: true });
+    try {
+      writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, sidebarV2Enabled: true });
+    } catch {
+      // The demo remains usable when browser storage is blocked or full.
+    }
   }
   seedVersionMismatchDismissals();
-  const staleFixtures = window.localStorage.getItem(DEMO_SEED_VERSION_KEY) !== DEMO_SEED_VERSION;
-  seedRightPanelState(staleFixtures);
-  seedDiffPanelSelection(staleFixtures);
-  await seedConnectionCatalog(staleFixtures);
-  window.localStorage.setItem(DEMO_SEED_VERSION_KEY, DEMO_SEED_VERSION);
+  const staleFixtures = readLocalStorage(DEMO_SEED_VERSION_KEY) !== DEMO_SEED_VERSION;
+  const rightPanelSeeded = seedRightPanelState(staleFixtures);
+  const diffPanelSeeded = seedDiffPanelSelection(staleFixtures);
+  const catalogSeeded = await seedConnectionCatalog(staleFixtures);
+  if (rightPanelSeeded && diffPanelSeeded && catalogSeeded) {
+    writeLocalStorage(DEMO_SEED_VERSION_KEY, DEMO_SEED_VERSION);
+  }
 }
