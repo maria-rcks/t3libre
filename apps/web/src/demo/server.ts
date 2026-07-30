@@ -358,13 +358,19 @@ export class DemoShellStore {
         if (!thread) {
           return this.sequence;
         }
+        const branch =
+          command.branch !== undefined &&
+          command.expectedBranch !== undefined &&
+          thread.branch !== command.expectedBranch
+            ? thread.branch
+            : command.branch;
         return this.upsertThread({
           ...thread,
           ...(command.title !== undefined ? { title: command.title } : {}),
           ...(command.modelSelection !== undefined
             ? { modelSelection: command.modelSelection }
             : {}),
-          ...(command.branch !== undefined ? { branch: command.branch } : {}),
+          ...(branch !== undefined ? { branch } : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
           updatedAt: nowIso,
         });

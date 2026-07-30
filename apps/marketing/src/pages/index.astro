@@ -577,9 +577,11 @@ const faqs = [
 <script>
   import {
     fetchLatestRelease,
+    fetchNightlyRelease,
+    findReleaseAssetUrl,
     NIGHTLY_RELEASES_URL,
     RELEASES_URL,
-    type ReleaseAsset,
+    type ReleasePlatform,
   } from "../lib/releases";
 
   // A demo iframe focuses its composer as it boots. On a hard refresh browsers
@@ -611,30 +613,13 @@ const faqs = [
     }
   }
 
-  type Platform = { os: "mac" | "win" | "linux"; label: string; arch?: string };
+  type Platform = ReleasePlatform & { label: string };
 
   function detectPlatform(): Platform | null {
     const ua = navigator.userAgent;
     if (/Win/i.test(ua)) return { os: "win", label: "Download for Windows" };
-    if (/Mac/i.test(ua)) {
-      return { os: "mac", label: "Download for macOS", arch: "arm64" };
-    }
+    if (/Mac/i.test(ua)) return { os: "mac", label: "Download for macOS" };
     if (/Linux/i.test(ua)) return { os: "linux", label: "Download for Linux" };
-    return null;
-  }
-
-  function pickAsset(assets: ReleaseAsset[], platform: Platform): string | null {
-    if (platform.os === "win") {
-      return assets.find((a) => a.name.endsWith("-x64.exe"))?.browser_download_url ?? null;
-    }
-    if (platform.os === "mac") {
-      const preferred = assets.find((a) => a.name.endsWith(`-${platform.arch}.dmg`));
-      const fallback = assets.find((a) => a.name.endsWith(".dmg"));
-      return (preferred ?? fallback)?.browser_download_url ?? null;
-    }
-    if (platform.os === "linux") {
-      return assets.find((a) => a.name.endsWith(".AppImage"))?.browser_download_url ?? null;
-    }
     return null;
   }
 
@@ -652,7 +637,13 @@ const faqs = [
 
   const initialStage = document.documentElement.dataset.stage;
   let currentStage: Stage = isStage(initialStage) ? initialStage : "latest";
-  let downloadUrl = RELEASES_URL;
+  type DownloadStage = Exclude<Stage, "dev">;
+  const downloadUrlByStage: Record<DownloadStage, string> = {
+    latest: RELEASES_URL,
+    nightly: NIGHTLY_RELEASES_URL,
+  };
+  const downloadRequestByStage: Partial<Record<DownloadStage, Promise<void>>> = {};
+  let detectedPlatform: Platform | null = null;
   let downloadLabel = "Download for macOS";
 
   function stageLabel(stage: Stage) {
@@ -677,7 +668,7 @@ const faqs = [
       label.textContent = "Copy repo link";
       return;
     }
-    button.href = stage === "nightly" ? NIGHTLY_RELEASES_URL : downloadUrl;
+    button.href = downloadUrlByStage[stage];
     label.textContent = downloadLabel;
   }
 
@@ -718,6 +709,40 @@ const faqs = [
       document.getElementById("cta-download-label"),
       stage,
     );
+  }
+
+  function ensureDownloadUrl(stage: DownloadStage): Promise<void> {
+    const existingRequest = downloadRequestByStage[stage];
+    if (existingRequest) return existingRequest;
+
+    const fallbackUrl =
+      detectedPlatform?.os === "mac"
+        ? "/download"
+        : stage === "nightly"
+          ? NIGHTLY_RELEASES_URL
+          : RELEASES_URL;
+    downloadUrlByStage[stage] = fallbackUrl;
+    if (detectedPlatform?.os === "mac") {
+      const request = Promise.resolve();
+      downloadRequestByStage[stage] = request;
+      return request;
+    }
+
+    const request = (async () => {
+      try {
+        const release = await (stage === "nightly"
+          ? fetchNightlyRelease()
+          : fetchLatestRelease());
+        downloadUrlByStage[stage] = detectedPlatform
+          ? findReleaseAssetUrl(release.assets ?? [], detectedPlatform) ?? fallbackUrl
+          : release.html_url;
+      } catch {
+        downloadUrlByStage[stage] = fallbackUrl;
+      }
+      if (currentStage === stage) applyStage(stage);
+    })();
+    downloadRequestByStage[stage] = request;
+    return request;
   }
 
   function bindChannelPicker(buttonId: string, menuId: string) {
@@ -773,31 +798,26 @@ const faqs = [
     bindDevCopy("cta-download-btn", "cta-download-label");
   }
 
-  async function init() {
-    const platform = detectPlatform();
-    if (platform) {
-      document.documentElement.dataset.platform = platform.os;
-      downloadLabel = platform.label;
+  function init() {
+    detectedPlatform = detectPlatform();
+    if (detectedPlatform) {
+      document.documentElement.dataset.platform = detectedPlatform.os;
+      downloadLabel = detectedPlatform.label;
+      if (detectedPlatform.os === "mac") {
+        downloadUrlByStage.latest = "/download";
+        downloadUrlByStage.nightly = "/download";
+      }
     }
     applyStage(currentStage);
-
-    try {
-      const release = await fetchLatestRelease();
-      const url = platform ? pickAsset(release.assets ?? [], platform) : null;
-      if (url) {
-        downloadUrl = url;
-      }
-      applyStage(currentStage);
-    } catch {
-      downloadUrl = RELEASES_URL;
-      applyStage(currentStage);
-    }
+    if (currentStage !== "dev") void ensureDownloadUrl(currentStage);
   }
 
   initChannelPickers();
   document.addEventListener("t3-marketing-stage-change", (event) => {
     const stage = (event as CustomEvent<{ stage?: unknown }>).detail?.stage;
-    if (isStage(stage)) applyStage(stage);
+    if (!isStage(stage)) return;
+    applyStage(stage);
+    if (stage !== "dev") void ensureDownloadUrl(stage);
   });
   init();
 

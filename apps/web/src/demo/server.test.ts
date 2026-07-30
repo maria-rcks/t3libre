@@ -48,6 +48,33 @@ describe("demo shell mutations", () => {
     expect(Date.parse(thread?.updatedAt ?? "")).toBeGreaterThanOrEqual(appliedAfter);
   });
 
+  it("preserves a newer branch when metadata reconciliation is stale", () => {
+    const environment = demoEnvironments.find(
+      (candidate) => candidate.environmentId === "demo-mac-studio",
+    );
+    if (!environment) throw new Error("Missing Mac Studio demo environment");
+
+    const store = new DemoShellStore(environment.shellSnapshot);
+    const original = store.thread("thread-composer");
+    if (!original) throw new Error("Missing composer demo thread");
+
+    store.dispatch(
+      decodeCommand({
+        type: "thread.meta.update",
+        commandId: "command-stale-branch",
+        threadId: original.id,
+        title: "Updated title",
+        branch: "feature/stale-ref",
+        expectedBranch: "feature/previous-ref",
+      }),
+    );
+
+    expect(store.thread(original.id)).toMatchObject({
+      title: "Updated title",
+      branch: original.branch,
+    });
+  });
+
   it("moves archived threads out of the active shell stream and restores them on unarchive", () => {
     const environment = demoEnvironments.find(
       (candidate) => candidate.environmentId === "demo-mac-studio",

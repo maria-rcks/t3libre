@@ -46,7 +46,8 @@ const DEMO_FIXTURE_VERSION = 2;
  * from. When the fixtures change (new environments/threads), stale seeded
  * state would reference machines that no longer exist, so it is re-seeded.
  */
-const DEMO_SEED_VERSION_KEY = "t3code:demo-seed-version";
+const DEMO_PANEL_SEED_VERSION_KEY = "t3code:demo-seed-version";
+const DEMO_CATALOG_SEED_VERSION_KEY = "t3code:demo-catalog-seed-version";
 const DEMO_SEED_VERSION = JSON.stringify({
   fixtureVersion: DEMO_FIXTURE_VERSION,
   environments: demoEnvironments.map((environment) => ({
@@ -278,11 +279,20 @@ export async function seedDemoClientState(): Promise<void> {
     }
   }
   seedVersionMismatchDismissals();
-  const staleFixtures = readLocalStorage(DEMO_SEED_VERSION_KEY) !== DEMO_SEED_VERSION;
-  const rightPanelSeeded = seedRightPanelState(staleFixtures);
-  const diffPanelSeeded = seedDiffPanelSelection(staleFixtures);
-  const catalogSeeded = await seedConnectionCatalog(staleFixtures);
-  if (rightPanelSeeded && diffPanelSeeded && catalogSeeded) {
-    writeLocalStorage(DEMO_SEED_VERSION_KEY, DEMO_SEED_VERSION);
+  // Panel state and IndexedDB use independent markers. A persistent IndexedDB
+  // failure should keep retrying the catalog without resetting local panel
+  // choices on every reload.
+  const stalePanelFixtures = readLocalStorage(DEMO_PANEL_SEED_VERSION_KEY) !== DEMO_SEED_VERSION;
+  const rightPanelSeeded = seedRightPanelState(stalePanelFixtures);
+  const diffPanelSeeded = seedDiffPanelSelection(stalePanelFixtures);
+  if (rightPanelSeeded && diffPanelSeeded) {
+    writeLocalStorage(DEMO_PANEL_SEED_VERSION_KEY, DEMO_SEED_VERSION);
+  }
+
+  const staleCatalogFixtures =
+    readLocalStorage(DEMO_CATALOG_SEED_VERSION_KEY) !== DEMO_SEED_VERSION;
+  const catalogSeeded = await seedConnectionCatalog(staleCatalogFixtures);
+  if (catalogSeeded) {
+    writeLocalStorage(DEMO_CATALOG_SEED_VERSION_KEY, DEMO_SEED_VERSION);
   }
 }
