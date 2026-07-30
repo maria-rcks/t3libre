@@ -42,6 +42,7 @@ import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Socket, SocketServer } from "effect/unstable/socket";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -184,7 +185,19 @@ class DemoConnectionAcceptor {
 
 type ShellSubscriber = (item: OrchestrationShellStreamItem) => void;
 
-class DemoCommandInvariantError extends Error {}
+class DemoCommandInvariantError extends Schema.TaggedErrorClass<DemoCommandInvariantError>()(
+  "DemoCommandInvariantError",
+  {
+    commandType: Schema.String,
+    projectId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Project '${this.projectId}' is not empty and cannot be deleted without force=true.`;
+  }
+}
+
+const isDemoCommandInvariantError = Schema.is(DemoCommandInvariantError);
 
 export class DemoShellStore {
   private sequence: number;
@@ -428,9 +441,10 @@ export class DemoShellStore {
         if (command.force !== true) {
           for (const thread of this.threads.values()) {
             if (thread.projectId === command.projectId) {
-              throw new DemoCommandInvariantError(
-                `Project '${command.projectId}' is not empty and cannot be deleted without force=true.`,
-              );
+              throw new DemoCommandInvariantError({
+                commandType: command.type,
+                projectId: command.projectId,
+              });
             }
           }
         }
@@ -453,8 +467,9 @@ export function dispatchDemoCommand(store: DemoShellStore, command: ClientOrches
     try: () => ({ sequence: store.dispatch(command) }),
     catch: (cause) =>
       new OrchestrationDispatchCommandError({
-        message:
-          cause instanceof Error ? cause.message : "Failed to dispatch demo orchestration command.",
+        message: isDemoCommandInvariantError(cause)
+          ? cause.message
+          : "Failed to dispatch demo orchestration command.",
         cause,
       }),
   });
