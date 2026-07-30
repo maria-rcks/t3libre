@@ -163,6 +163,36 @@ describe("demo shell mutations", () => {
       expect(store.thread(thread.id)).toBeUndefined();
     }),
   );
+
+  it.effect("does not expose unexpected dispatch defect messages", () =>
+    Effect.gen(function* () {
+      const environment = demoEnvironments.find(
+        (candidate) => candidate.environmentId === "demo-mac-studio",
+      );
+      if (!environment) throw new Error("Missing Mac Studio demo environment");
+
+      const store = new DemoShellStore(environment.shellSnapshot);
+      store.dispatch = () => {
+        throw new Error("internal implementation detail");
+      };
+
+      const error = yield* Effect.flip(
+        dispatchDemoCommand(
+          store,
+          decodeCommand({
+            type: "project.delete",
+            commandId: "command-project-delete-defect",
+            projectId: "project-missing",
+          }),
+        ),
+      );
+
+      expect(error).toMatchObject({
+        _tag: "OrchestrationDispatchCommandError",
+        message: "Failed to dispatch demo orchestration command.",
+      });
+    }),
+  );
 });
 
 describe("demo settings", () => {

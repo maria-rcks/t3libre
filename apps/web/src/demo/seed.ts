@@ -46,9 +46,7 @@ const DEMO_FIXTURE_VERSION = 2;
  * from. When the fixtures change (new environments/threads), stale seeded
  * state would reference machines that no longer exist, so it is re-seeded.
  */
-const DEMO_PANEL_SEED_VERSION_KEY = "t3code:demo-seed-version";
-const DEMO_CATALOG_SEED_VERSION_KEY = "t3code:demo-catalog-seed-version";
-const DEMO_CATALOG_SEED_PENDING = "pending";
+const DEMO_SEED_VERSION_KEY = "t3code:demo-seed-version";
 const DEMO_SEED_VERSION = JSON.stringify({
   fixtureVersion: DEMO_FIXTURE_VERSION,
   environments: demoEnvironments.map((environment) => ({
@@ -59,6 +57,8 @@ const DEMO_SEED_VERSION = JSON.stringify({
   browserPanelThreadKeys: demoBrowserPanelThreadKeys,
   diffPanelSelections: demoDiffPanelSelectionByThreadKey,
 });
+const DEMO_PANEL_SEED_PENDING = `panels-pending:${DEMO_SEED_VERSION}`;
+const DEMO_CATALOG_SEED_PENDING = `catalog-pending:${DEMO_SEED_VERSION}`;
 
 const encodeCatalogDocument = Schema.encodeSync(Schema.fromJsonString(ConnectionCatalogDocument));
 
@@ -280,32 +280,30 @@ export async function seedDemoClientState(): Promise<void> {
     }
   }
   seedVersionMismatchDismissals();
-  // Panel state and IndexedDB use independent markers. A persistent IndexedDB
-  // failure should keep retrying the catalog without resetting local panel
-  // choices on every reload.
-  const panelSeedVersion = readLocalStorage(DEMO_PANEL_SEED_VERSION_KEY);
-  const catalogSeedVersion = readLocalStorage(DEMO_CATALOG_SEED_VERSION_KEY);
-  const stalePanelFixtures = panelSeedVersion !== DEMO_SEED_VERSION;
+  // The original marker proved that both localStorage panels and IndexedDB
+  // were seeded. Pending variants keep the successful side current while the
+  // failed side retries, without making existing markers look stale.
+  const seedVersion = readLocalStorage(DEMO_SEED_VERSION_KEY);
+  const stalePanelFixtures =
+    seedVersion !== DEMO_SEED_VERSION && seedVersion !== DEMO_CATALOG_SEED_PENDING;
   const staleCatalogFixtures =
-    catalogSeedVersion === null ? stalePanelFixtures : catalogSeedVersion !== DEMO_SEED_VERSION;
-
-  // Before the catalog had its own marker, the panel marker was only written
-  // after IndexedDB succeeded. A current legacy marker therefore proves the
-  // catalog is current and must not trigger a destructive forced re-seed.
-  // Conversely, persist a pending marker before advancing the panel marker so
-  // a real fixture refresh keeps retrying if IndexedDB is temporarily blocked.
-  if (catalogSeedVersion === null && staleCatalogFixtures) {
-    writeLocalStorage(DEMO_CATALOG_SEED_VERSION_KEY, DEMO_CATALOG_SEED_PENDING);
-  }
+    seedVersion !== DEMO_SEED_VERSION && seedVersion !== DEMO_PANEL_SEED_PENDING;
 
   const rightPanelSeeded = seedRightPanelState(stalePanelFixtures);
   const diffPanelSeeded = seedDiffPanelSelection(stalePanelFixtures);
-  if (rightPanelSeeded && diffPanelSeeded) {
-    writeLocalStorage(DEMO_PANEL_SEED_VERSION_KEY, DEMO_SEED_VERSION);
+  const panelsSeeded = rightPanelSeeded && diffPanelSeeded;
+  if (panelsSeeded) {
+    writeLocalStorage(
+      DEMO_SEED_VERSION_KEY,
+      staleCatalogFixtures ? DEMO_CATALOG_SEED_PENDING : DEMO_SEED_VERSION,
+    );
   }
 
   const catalogSeeded = await seedConnectionCatalog(staleCatalogFixtures);
   if (catalogSeeded) {
-    writeLocalStorage(DEMO_CATALOG_SEED_VERSION_KEY, DEMO_SEED_VERSION);
+    writeLocalStorage(
+      DEMO_SEED_VERSION_KEY,
+      panelsSeeded ? DEMO_SEED_VERSION : DEMO_PANEL_SEED_PENDING,
+    );
   }
 }
