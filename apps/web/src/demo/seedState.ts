@@ -21,6 +21,9 @@ export function resolveDemoSeedStaleness(input: {
   const panelsPendingMarker = makeDemoSeedMarker("panels-pending", input.currentVersion);
   const catalogPendingMarker = makeDemoSeedMarker("catalog-pending", input.currentVersion);
 
+  if (input.seedVersion === input.currentVersion) {
+    return { stalePanelFixtures: false, staleCatalogFixtures: false };
+  }
   if (input.seedVersion === currentMarker) {
     return { stalePanelFixtures: false, staleCatalogFixtures: false };
   }
