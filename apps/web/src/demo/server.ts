@@ -196,7 +196,16 @@ export class DemoShellStore {
     return {
       snapshotSequence: this.sequence,
       projects: [...this.projects.values()],
-      threads: [...this.threads.values()],
+      threads: [...this.threads.values()].filter((thread) => thread.archivedAt === null),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  archivedSnapshot(): OrchestrationShellSnapshot {
+    return {
+      snapshotSequence: this.sequence,
+      projects: [...this.projects.values()],
+      threads: [...this.threads.values()].filter((thread) => thread.archivedAt !== null),
       updatedAt: new Date().toISOString(),
     };
   }
@@ -275,7 +284,10 @@ export class DemoShellStore {
         if (!thread) {
           return this.sequence;
         }
-        return this.upsertThread({ ...thread, archivedAt: nowIso, updatedAt: nowIso });
+        this.sequence += 1;
+        this.threads.set(thread.id, { ...thread, archivedAt: nowIso, updatedAt: nowIso });
+        this.emit({ kind: "thread-removed", sequence: this.sequence, threadId: thread.id });
+        return this.sequence;
       }
       case "thread.unarchive": {
         const thread = this.threads.get(command.threadId);
@@ -751,10 +763,7 @@ export function applyDemoGitActionToStatus(
         : includesBranch
           ? false
           : (current.remote?.hasUpstream ?? false),
-      aheadCount:
-        includesPush || includesBranch
-          ? 0
-          : (current.remote?.aheadCount ?? 0) + (includesCommit ? 1 : 0),
+      aheadCount: includesPush ? 0 : (current.remote?.aheadCount ?? 0) + (includesCommit ? 1 : 0),
       behindCount: current.remote?.behindCount ?? 0,
       aheadOfDefaultCount: (current.remote?.aheadOfDefaultCount ?? 0) + (includesCommit ? 1 : 0),
       pr: includesPr
@@ -971,13 +980,7 @@ function makeHandlersLayer(backend: DemoBackend) {
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           Effect.sync(() => ({ sequence: store.dispatch(command) })),
         [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: () =>
-          Effect.sync(() => {
-            const snapshot = store.snapshot();
-            return {
-              ...snapshot,
-              threads: snapshot.threads.filter((thread) => thread.archivedAt !== null),
-            };
-          }),
+          Effect.sync(() => store.archivedSnapshot()),
         [ORCHESTRATION_WS_METHODS.getTurnDiff]: (input) =>
           Effect.succeed(demoThreadDiff(input.threadId, input.fromTurnCount, input.toTurnCount)),
         [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: (input) =>

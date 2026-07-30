@@ -40,6 +40,48 @@ describe("demo shell mutations", () => {
     expect(thread?.interactionMode).toBe("plan");
     expect(Date.parse(thread?.updatedAt ?? "")).toBeGreaterThanOrEqual(appliedAfter);
   });
+
+  it("moves archived threads out of the active shell stream and restores them on unarchive", () => {
+    const environment = demoEnvironments.find(
+      (candidate) => candidate.environmentId === "demo-mac-studio",
+    );
+    if (!environment) throw new Error("Missing Mac Studio demo environment");
+
+    const store = new DemoShellStore(environment.shellSnapshot);
+    const events: Array<{ kind: string }> = [];
+    store.subscribe((event) => events.push(event));
+
+    store.dispatch(
+      decodeCommand({
+        type: "thread.archive",
+        commandId: "command-archive",
+        threadId: "thread-composer",
+      }),
+    );
+
+    expect(store.snapshot().threads.some((thread) => thread.id === "thread-composer")).toBe(false);
+    expect(
+      store.archivedSnapshot().threads.find((thread) => thread.id === "thread-composer")
+        ?.archivedAt,
+    ).not.toBeNull();
+    expect(events.at(-1)?.kind).toBe("thread-removed");
+
+    store.dispatch(
+      decodeCommand({
+        type: "thread.unarchive",
+        commandId: "command-unarchive",
+        threadId: "thread-composer",
+      }),
+    );
+
+    expect(
+      store.snapshot().threads.find((thread) => thread.id === "thread-composer")?.archivedAt,
+    ).toBe(null);
+    expect(store.archivedSnapshot().threads.some((thread) => thread.id === "thread-composer")).toBe(
+      false,
+    );
+    expect(events.at(-1)?.kind).toBe("thread-upserted");
+  });
 });
 
 describe("demo git actions", () => {
@@ -78,6 +120,30 @@ describe("demo git actions", () => {
       hasUpstream: true,
       aheadCount: 0,
       pr: { headRef: "feat/add-release-filters" },
+    });
+  });
+
+  it("keeps a feature-branch commit ahead until it is pushed", () => {
+    const input = {
+      actionId: "demo-feature-branch-commit",
+      cwd: "~/code/t3code",
+      action: "commit",
+      commitMessage: "Add release filters",
+      featureBranch: true,
+    } satisfies GitRunStackedActionInput;
+    const current = demoVcsStatusByCwd[input.cwd];
+    if (current?._tag !== "snapshot") throw new Error("Missing default checkout VCS snapshot");
+
+    const next = applyDemoGitActionToStatus(current, input);
+
+    expect(next.local).toMatchObject({
+      isDefaultRef: false,
+      refName: "feat/add-release-filters",
+      hasWorkingTreeChanges: false,
+    });
+    expect(next.remote).toMatchObject({
+      hasUpstream: false,
+      aheadCount: 1,
     });
   });
 });
