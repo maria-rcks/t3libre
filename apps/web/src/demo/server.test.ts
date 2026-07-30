@@ -3,7 +3,12 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import { demoEnvironments, DEMO_METRICS_WORKTREE_PATH, demoVcsStatusByCwd } from "./fixtures";
-import { applyDemoGitActionToStatus, demoGitActionEvents, DemoShellStore } from "./server";
+import {
+  applyDemoGitActionToStatus,
+  demoGitActionEvents,
+  DemoSettingsStore,
+  DemoShellStore,
+} from "./server";
 
 const decodeCommand = Schema.decodeUnknownSync(ClientOrchestrationCommand);
 
@@ -82,6 +87,58 @@ describe("demo shell mutations", () => {
     );
     expect(events.at(-1)?.kind).toBe("thread-upserted");
   });
+
+  it("requires force to delete a project with threads", () => {
+    const environment = demoEnvironments.find(
+      (candidate) => candidate.environmentId === "demo-mac-studio",
+    );
+    if (!environment) throw new Error("Missing Mac Studio demo environment");
+
+    const store = new DemoShellStore(environment.shellSnapshot);
+    const thread = store.thread("thread-composer");
+    if (!thread) throw new Error("Missing composer demo thread");
+    const sequence = store.snapshot().snapshotSequence;
+
+    expect(
+      store.dispatch(
+        decodeCommand({
+          type: "project.delete",
+          commandId: "command-project-delete",
+          projectId: thread.projectId,
+        }),
+      ),
+    ).toBe(sequence);
+    expect(store.snapshot().projects.some((project) => project.id === thread.projectId)).toBe(true);
+    expect(store.thread(thread.id)).toBeDefined();
+
+    store.dispatch(
+      decodeCommand({
+        type: "project.delete",
+        commandId: "command-project-force-delete",
+        projectId: thread.projectId,
+        force: true,
+      }),
+    );
+    expect(store.snapshot().projects.some((project) => project.id === thread.projectId)).toBe(
+      false,
+    );
+    expect(store.thread(thread.id)).toBeUndefined();
+  });
+});
+
+describe("demo settings", () => {
+  it("persists settings patches", () => {
+    const environment = demoEnvironments.find(
+      (candidate) => candidate.environmentId === "demo-mac-studio",
+    );
+    if (!environment) throw new Error("Missing Mac Studio demo environment");
+
+    const store = new DemoSettingsStore(environment.serverConfig.settings);
+    const next = store.update({ enableAssistantStreaming: true });
+
+    expect(next.enableAssistantStreaming).toBe(true);
+    expect(store.snapshot().enableAssistantStreaming).toBe(true);
+  });
 });
 
 describe("demo git actions", () => {
@@ -144,6 +201,30 @@ describe("demo git actions", () => {
     expect(next.remote).toMatchObject({
       hasUpstream: false,
       aheadCount: 1,
+      aheadOfDefaultCount: 1,
+    });
+  });
+
+  it("does not report the default branch as ahead of itself", () => {
+    const input = {
+      actionId: "demo-default-branch-commit",
+      cwd: "~/code/t3code",
+      action: "commit",
+      commitMessage: "Update release filters",
+      featureBranch: false,
+    } satisfies GitRunStackedActionInput;
+    const current = demoVcsStatusByCwd[input.cwd];
+    if (current?._tag !== "snapshot") throw new Error("Missing default checkout VCS snapshot");
+
+    const next = applyDemoGitActionToStatus(current, input);
+
+    expect(next.local).toMatchObject({
+      isDefaultRef: true,
+      refName: "main",
+    });
+    expect(next.remote).toMatchObject({
+      aheadCount: 1,
+      aheadOfDefaultCount: 0,
     });
   });
 });

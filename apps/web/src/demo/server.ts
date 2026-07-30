@@ -21,6 +21,8 @@ import {
   type OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadShell,
   type OrchestrationThreadStreamItem,
+  type ServerSettings,
+  type ServerSettingsPatch,
   EnvironmentAuthorizationError,
   ORCHESTRATION_WS_METHODS,
   OrchestrationGetSnapshotError,
@@ -35,6 +37,7 @@ import {
   WsRpcGroup,
 } from "@t3tools/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
+import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
@@ -413,6 +416,13 @@ export class DemoShellStore {
         });
       }
       case "project.delete": {
+        if (command.force !== true) {
+          for (const thread of this.threads.values()) {
+            if (thread.projectId === command.projectId) {
+              return this.sequence;
+            }
+          }
+        }
         for (const thread of [...this.threads.values()]) {
           if (thread.projectId === command.projectId) {
             this.removeThread(thread.id);
@@ -427,6 +437,19 @@ export class DemoShellStore {
   }
 }
 
+export class DemoSettingsStore {
+  constructor(private current: ServerSettings) {}
+
+  snapshot(): ServerSettings {
+    return this.current;
+  }
+
+  update(patch: ServerSettingsPatch): ServerSettings {
+    this.current = applyServerSettingsPatch(this.current, patch);
+    return this.current;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Per-environment backend
 // ---------------------------------------------------------------------------
@@ -434,12 +457,14 @@ export class DemoShellStore {
 interface DemoBackend {
   readonly fixture: DemoEnvironmentFixture;
   readonly store: DemoShellStore;
+  readonly settings: DemoSettingsStore;
   readonly acceptor: DemoConnectionAcceptor;
 }
 
 const demoBackends: ReadonlyArray<DemoBackend> = demoEnvironments.map((fixture) => ({
   fixture,
   store: new DemoShellStore(fixture.shellSnapshot),
+  settings: new DemoSettingsStore(fixture.serverConfig.settings),
   acceptor: new DemoConnectionAcceptor(),
 }));
 
@@ -765,7 +790,9 @@ export function applyDemoGitActionToStatus(
           : (current.remote?.hasUpstream ?? false),
       aheadCount: includesPush ? 0 : (current.remote?.aheadCount ?? 0) + (includesCommit ? 1 : 0),
       behindCount: current.remote?.behindCount ?? 0,
-      aheadOfDefaultCount: (current.remote?.aheadOfDefaultCount ?? 0) + (includesCommit ? 1 : 0),
+      aheadOfDefaultCount:
+        (current.remote?.aheadOfDefaultCount ?? 0) +
+        (includesCommit && (includesBranch || !current.local.isDefaultRef) ? 1 : 0),
       pr: includesPr
         ? {
             number: 1338,
@@ -879,7 +906,7 @@ const demoStartedAtIso = new Date().toISOString();
 const demoAssetsExpireAt = Date.now() + 24 * 60 * 60 * 1000;
 
 function makeHandlersLayer(backend: DemoBackend) {
-  const { fixture, store } = backend;
+  const { fixture, settings, store } = backend;
   const serverConfigSnapshot = (): ServerConfigStreamEvent => ({
     version: 1,
     type: "snapshot",
@@ -907,8 +934,8 @@ function makeHandlersLayer(backend: DemoBackend) {
       return {
         [WS_METHODS.serverProbe]: () => Effect.succeed({}),
         [WS_METHODS.serverGetConfig]: () => Effect.sync(() => stagedServerConfig(fixture)),
-        [WS_METHODS.serverGetSettings]: () => Effect.succeed(fixture.serverConfig.settings),
-        [WS_METHODS.serverUpdateSettings]: () => Effect.succeed(fixture.serverConfig.settings),
+        [WS_METHODS.serverGetSettings]: () => Effect.sync(() => settings.snapshot()),
+        [WS_METHODS.serverUpdateSettings]: ({ patch }) => Effect.sync(() => settings.update(patch)),
         [WS_METHODS.serverRefreshProviders]: () =>
           Effect.succeed({ providers: fixture.serverConfig.providers }),
         // Re-emits when the marketing page switches the previewed channel, so
