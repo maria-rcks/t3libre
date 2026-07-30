@@ -1,0 +1,11 @@
+{
+  "artifactId": 8683082605,
+  "artifactName": "app-store-connect-screenshots",
+  "artifactCreatedAt": "2026-07-28T09:24:29Z",
+  "runId": 30345538492,
+  "runUrl": "https://github.com/pingdotgg/t3code/actions/runs/30345538492",
+  "headSha": "d25b15737a058614ab6632bbad23d2497e49b62c",
+  "workflow": "mobile-showcase-screenshots.yml",
+  "devices": ["iphone-6.9", "ipad-13"],
+  "appearance": "dark"
+}
