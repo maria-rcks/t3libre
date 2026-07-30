@@ -38,7 +38,7 @@ Tip: Use `npx t3@latest --help` for the full CLI reference.
 Control your T3 Code environments from your phone or tablet:
 
 - [Download for iPhone and iPad on the App Store](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824)
-- [Get the Android app on Google Play](https://play.google.com/store/apps/details?id=com.t3tools.t3code&pli=1)
+- [Get the Android app on Google Play](https://play.google.com/store/apps/details?id=com.t3tools.t3code)
 
 ### Desktop app
 
