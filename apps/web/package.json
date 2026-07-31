@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:ghostty-wasm": "bash scripts/build-libghostty-wasm.sh",
     "dev": "vp dev",
     "build": "vp build",
     "build:sidebar-demo": "vp build --config vite.demo.config.ts",
@@ -32,8 +33,6 @@
     "@t3tools/shared": "workspace:*",
     "@tanstack/react-pacer": "^0.19.4",
     "@tanstack/react-router": "^1.160.2",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "effect": "catalog:",
     "jose": "catalog:",
