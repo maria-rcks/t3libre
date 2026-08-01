@@ -71,7 +71,7 @@ export const UserMessageAttachments = memo(function UserMessageAttachments(
                 />
                 {isCollapsedTile ? (
                   <span
-                    className="absolute inset-0 flex items-center justify-center bg-black/55 text-lg font-medium text-white backdrop-blur-[1px]"
+                    className="absolute inset-0 flex items-center justify-center bg-black/55 text-lg font-medium text-white backdrop-blur-md"
                     aria-hidden="true"
                   >
                     +{collapsedImageCount}
