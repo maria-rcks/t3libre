@@ -3,6 +3,7 @@ import { createRef, type ReactNode, type Ref } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import type { LegendListRef } from "@legendapp/list/react";
+import { IMAGE_ONLY_BOOTSTRAP_PROMPT } from "~/lib/userMessage";
 
 vi.mock("@legendapp/list/react", async () => {
   const legendListTestId = "legend-list";
@@ -403,6 +404,33 @@ describe("MessagesTimeline", () => {
     expect(onAnchorReady).toHaveBeenCalledOnce();
     expect(onAnchorReady).toHaveBeenCalledWith(secondEntry.message.id, 1);
     expect(onAnchorSizeChanged).toHaveBeenCalledWith(secondEntry.message.id, 240);
+  });
+
+  it("renders an image-only message without its bootstrap prompt", () => {
+    const imageOnlyEntry = {
+      ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT),
+      message: {
+        ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT).message,
+        attachments: [
+          {
+            type: "image" as const,
+            id: "attachment-1",
+            name: "screenshot.png",
+            mimeType: "image/png",
+            sizeBytes: 1,
+            previewUrl: "data:image/png;base64,iVBORw0KGgo=",
+          },
+        ],
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[imageOnlyEntry]} />,
+    );
+
+    expect(markup).toContain('alt="screenshot.png"');
+    expect(markup).not.toContain("User attached one or more images");
+    expect(markup).not.toContain('data-user-message-body="true"');
+    expect(markup).not.toContain('aria-label="Copy link"');
   });
 
   it("renders collapse controls for long user messages", () => {
