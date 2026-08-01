@@ -428,9 +428,66 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain('alt="screenshot.png"');
+    expect(markup).toContain('data-user-message-attachments="true"');
     expect(markup).not.toContain("User attached one or more images");
+    expect(markup).not.toContain('data-user-message-content="true"');
     expect(markup).not.toContain('data-user-message-body="true"');
     expect(markup).not.toContain('aria-label="Copy link"');
+  });
+
+  it("renders attachments above a separate text bubble", () => {
+    const captionedImageEntry = {
+      ...buildUserTimelineEntry("Caption for the image."),
+      message: {
+        ...buildUserTimelineEntry("Caption for the image.").message,
+        attachments: [
+          {
+            type: "image" as const,
+            id: "attachment-captioned",
+            name: "captioned.png",
+            mimeType: "image/png",
+            sizeBytes: 1,
+            previewUrl: "data:image/png;base64,iVBORw0KGgo=",
+          },
+        ],
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[captionedImageEntry]} />,
+    );
+    const attachmentsIndex = markup.indexOf('data-user-message-attachments="true"');
+    const contentIndex = markup.indexOf('data-user-message-content="true"');
+
+    expect(attachmentsIndex).toBeGreaterThan(-1);
+    expect(contentIndex).toBeGreaterThan(attachmentsIndex);
+    expect(markup).toContain("Caption for the image.");
+    expect(markup).toContain("grid-cols-1");
+  });
+
+  it("collapses larger attachment sets into a four-tile mosaic", () => {
+    const mosaicEntry = {
+      ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT),
+      message: {
+        ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT).message,
+        attachments: Array.from({ length: 6 }, (_, index) => ({
+          type: "image" as const,
+          id: `attachment-${index + 1}`,
+          name: `image-${index + 1}.png`,
+          mimeType: "image/png",
+          sizeBytes: 1,
+          previewUrl: `data:image/png;base64,image-${index + 1}`,
+        })),
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[mosaicEntry]} />,
+    );
+
+    expect(markup).toContain('data-user-message-attachments-collapsed="true"');
+    expect(markup).toContain('alt="image-4.png"');
+    expect(markup).not.toContain('alt="image-5.png"');
+    expect(markup).toContain('aria-label="Preview image-4.png and 2 more images"');
+    expect(markup).toContain(">+2</span>");
   });
 
   it("renders collapse controls for long user messages", () => {
