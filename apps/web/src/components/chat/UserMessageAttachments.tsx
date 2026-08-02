@@ -1,10 +1,7 @@
 import { memo } from "react";
 import type { ChatAttachment } from "../../types";
 import { cn } from "~/lib/utils";
-import {
-  buildExpandedImagePreview,
-  type ExpandedImagePreview,
-} from "./ExpandedImagePreview";
+import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 
 interface UserMessageAttachmentsProps {
   images: ReadonlyArray<ChatAttachment>;
@@ -31,10 +28,8 @@ export const UserMessageAttachments = memo(function UserMessageAttachments(
         "grid w-full max-w-[420px] self-end overflow-hidden rounded-lg border border-border/80 bg-border/80",
         !isMosaic && "grid-cols-1",
         visibleImageCount === 2 && "aspect-[2/1] grid-cols-2 gap-px",
-        visibleImageCount === 3 &&
-          "aspect-[3/2] grid-cols-[2fr_1fr] grid-rows-2 gap-px",
-        visibleImageCount >= 4 &&
-          "aspect-square max-w-[360px] grid-cols-2 grid-rows-2 gap-px",
+        visibleImageCount === 3 && "aspect-[3/2] grid-cols-[2fr_1fr] grid-rows-2 gap-px",
+        visibleImageCount >= 4 && "aspect-square max-w-[360px] grid-cols-2 grid-rows-2 gap-px",
       )}
       data-user-message-attachments="true"
       data-user-message-attachments-collapsed={collapsedImageCount > 0 ? "true" : "false"}
