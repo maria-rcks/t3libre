@@ -487,12 +487,35 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('alt="image-4.png"');
     expect(markup).not.toContain('alt="image-5.png"');
     expect(markup).toContain('aria-label="Preview image-4.png and 2 more images"');
-    expect(markup).toContain("aspect-[3/2]");
-    expect(markup).toContain("grid-cols-[1.15fr_1fr_1fr]");
-    expect(markup).toContain("row-span-2");
-    expect(markup).toContain("col-span-2");
+    expect(markup).toContain("aspect-square");
+    expect(markup).toContain("max-w-[360px]");
+    expect(markup).toContain("grid-cols-2");
     expect(markup).toContain("backdrop-blur-md");
     expect(markup).toContain(">+2</span>");
+  });
+
+  it("uses one large square and two stacked squares for three attachments", () => {
+    const threeImageEntry = {
+      ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT),
+      message: {
+        ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT).message,
+        attachments: Array.from({ length: 3 }, (_, index) => ({
+          type: "image" as const,
+          id: `attachment-${index + 1}`,
+          name: `image-${index + 1}.png`,
+          mimeType: "image/png",
+          sizeBytes: 1,
+          previewUrl: `data:image/png;base64,image-${index + 1}`,
+        })),
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[threeImageEntry]} />,
+    );
+
+    expect(markup).toContain("aspect-[3/2]");
+    expect(markup).toContain("grid-cols-[2fr_1fr]");
+    expect(markup).toContain("row-span-2");
   });
 
   it("renders collapse controls for long user messages", () => {
