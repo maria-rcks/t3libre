@@ -21,12 +21,27 @@ const mobileEndorsementRows = [
 
 const featureShowcases = showcaseSpec.sections;
 const showcaseRender = showcaseSpec.render;
-const mobileShowcaseScenes = [
-  "threads",
-  "thread",
-  "terminal",
-  "review",
-  "environments",
+const heroProviders = [
+  {
+    icon: "/harnesses/openai_dark.svg",
+    averageColor: "#ffffff",
+  },
+  {
+    icon: "/harnesses/claude-ai-icon.svg",
+    averageColor: "#d97757",
+  },
+  {
+    icon: "/harnesses/cursor_light.svg",
+    averageColor: "#edecec",
+  },
+  {
+    icon: "/harnesses/grok-dark.svg",
+    averageColor: "#f5f5f5",
+  },
+  {
+    icon: "/harnesses/opencode-dark.svg",
+    averageColor: "#cec9c9",
+  },
 ] as const;
 
 const faqs = [
@@ -100,8 +115,36 @@ const faqs = [
     </div>
     <div class="container hero-inner">
       <div class="hero-copy">
-        <h1 class="hero-title display">Your Agents,<br />Everywhere</h1>
+        <h1
+          class="hero-title display"
+          aria-label="Your coding agent subscription, everywhere"
+        >
+          <span class="hero-title__first-line" aria-hidden="true">
+            <span>Your</span>
+            <span class="hero-provider-switch">
+              {
+                heroProviders.map((provider, index) => (
+                  <span
+                    class:list={["hero-provider", { "is-active": index === 0 }]}
+                    data-provider-color={provider.averageColor}
+                  >
+                    <img src={provider.icon} alt="" />
+                  </span>
+                ))
+              }
+            </span>
+            <span
+              class="hero-provider__label"
+              style={`--provider-color: ${heroProviders[0].averageColor}`}
+            >Sub</span>
+            <span class="hero-title__punctuation">,</span>
+          </span>
+          <span class="hero-title__second-line" aria-hidden="true">Everywhere</span>
+        </h1>
 
+        <p class="hero-lede">
+          Bring your own subscription.
+        </p>
 
         <div class="hero-actions">
         <a
@@ -153,81 +196,17 @@ const faqs = [
         </div>
       </div>
 
-      <div class="hero-mobile-showcase">
-        {
-          mobileShowcaseScenes.map((scene) => (
-            <span class="hero-mobile-showcase__screen">
-              <img
-                data-ios-src={
-                  scene === "threads"
-                    ? "/mobile-states/threads.png"
-                    : `/mobile-states/ios-${scene}.png`
-                }
-                data-android-src={`/mobile-states/android-${scene}.png`}
-                alt=""
-                decoding="async"
-              />
-            </span>
-          ))
-        }
-        <div
-          class="hero-mobile-showcase__pager"
-          role="region"
-          aria-label="Swipe through T3 Code mobile screens"
-          tabindex="0"
-        >
-          {
-            mobileShowcaseScenes.map(() => (
-              <span class="hero-mobile-showcase__page" aria-hidden="true"></span>
-            ))
-          }
-        </div>
-        <div class="hero-mobile-showcase__dots" aria-label="Mobile screen pages">
-          {
-            mobileShowcaseScenes.map((_, index) => (
-              <button
-                type="button"
-                aria-label={`Show mobile screen ${index + 1} of ${mobileShowcaseScenes.length}`}
-              ></button>
-            ))
-          }
-        </div>
+      <div class="hero-mobile-showcase" aria-hidden="true">
+        <span class="hero-mobile-showcase__screen">
+          <img
+            src="/mobile-states/threads.png"
+            alt=""
+            decoding="async"
+            width="1320"
+            height="2868"
+          />
+        </span>
       </div>
-    </div>
-
-    <div class="hero-mobile-store" aria-label="T3 Code on iPhone and iPad">
-      <a
-        class="hero-device-card hero-device-card--tablet"
-        href={IOS_APP_STORE_URL}
-        target="_blank"
-        rel="noreferrer"
-        aria-label="Download T3 Code for iPad from the App Store"
-      >
-        <img
-          src="/mobile-states/ipad-threads.png"
-          alt=""
-          loading="lazy"
-          width="2752"
-          height="2064"
-        />
-        <span aria-hidden="true">App Store ↗</span>
-      </a>
-      <a
-        class="hero-device-card hero-device-card--phone"
-        href={IOS_APP_STORE_URL}
-        target="_blank"
-        rel="noreferrer"
-        aria-label="Download T3 Code for iPhone from the App Store"
-      >
-        <img
-          src="/mobile-states/threads.png"
-          alt=""
-          loading="lazy"
-          width="1320"
-          height="2868"
-        />
-        <span aria-hidden="true">App Store ↗</span>
-      </a>
     </div>
   </section>
 
@@ -895,92 +874,41 @@ const faqs = [
     if (currentStage !== "dev") void ensureDownloadUrl(currentStage);
   }
 
-  function initMobileHeroShowcase() {
-    const showcase = document.querySelector<HTMLElement>(".hero-mobile-showcase");
-    const pager = showcase?.querySelector<HTMLElement>(
-      ".hero-mobile-showcase__pager",
+  function initHeroProviderSwitch() {
+    const providers = Array.from(
+      document.querySelectorAll<HTMLElement>(".hero-provider"),
     );
-    if (!showcase || !pager) return;
-
-    let hasLoaded = false;
-    let activePage = -1;
-    let pagerFrame: number | null = null;
-    const mobileHeroQuery = window.matchMedia("(max-width: 820px)");
-    const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const screens = Array.from(
-      showcase.querySelectorAll<HTMLElement>(".hero-mobile-showcase__screen"),
+    const providerLabel = document.querySelector<HTMLElement>(
+      ".hero-provider__label",
     );
-    const pageButtons = Array.from(
-      showcase.querySelectorAll<HTMLButtonElement>(".hero-mobile-showcase__dots button"),
-    );
+    if (
+      providers.length < 2 ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
 
-    const setActivePage = (nextPage: number) => {
-      const clampedPage = Math.max(0, Math.min(screens.length - 1, nextPage));
-      if (clampedPage === activePage) return;
-      activePage = clampedPage;
-      showcase.dataset.activePage = String(activePage);
-      screens.forEach((screen, index) => {
-        screen.classList.toggle("is-visible", index <= activePage);
-        screen.classList.toggle("is-current", index === activePage);
-      });
-      pageButtons.forEach((button, index) => {
-        if (index === activePage) {
-          button.setAttribute("aria-current", "page");
-        } else {
-          button.removeAttribute("aria-current");
-        }
-      });
-    };
+    let activeIndex = 0;
+    window.setInterval(() => {
+      if (document.hidden) return;
+      const outgoingProvider = providers[activeIndex];
+      activeIndex = (activeIndex + 1) % providers.length;
+      const incomingProvider = providers[activeIndex];
+      if (!outgoingProvider || !incomingProvider) return;
 
-    const updatePageFromPager = () => {
-      pagerFrame = null;
-      if (!mobileHeroQuery.matches || pager.clientWidth === 0) return;
-      setActivePage(Math.round(pager.scrollLeft / pager.clientWidth));
-    };
+      incomingProvider.classList.add("is-resetting");
+      incomingProvider.classList.remove("is-leaving", "is-active");
+      void incomingProvider.offsetHeight;
+      incomingProvider.classList.remove("is-resetting");
 
-    const schedulePagerUpdate = () => {
-      if (pagerFrame !== null) return;
-      pagerFrame = requestAnimationFrame(updatePageFromPager);
-    };
-
-    const loadImages = () => {
-      if (hasLoaded || !mobileHeroQuery.matches) return;
-      hasLoaded = true;
-
-      const mobilePlatform = detectedPlatform?.os === "android" ? "android" : "ios";
-      showcase.dataset.mobilePlatform = mobilePlatform;
-
-      const images = Array.from(showcase.querySelectorAll<HTMLImageElement>("img"));
-      for (const image of images) {
-        const source =
-          mobilePlatform === "android" ? image.dataset.androidSrc : image.dataset.iosSrc;
-        if (!source) continue;
-        image.src = source;
-        image.width = mobilePlatform === "android" ? 1080 : 1320;
-        image.height = mobilePlatform === "android" ? 1920 : 2868;
+      outgoingProvider.classList.remove("is-active");
+      outgoingProvider.classList.add("is-leaving");
+      incomingProvider.classList.add("is-active");
+      const incomingColor = incomingProvider.dataset.providerColor;
+      if (incomingColor) {
+        providerLabel?.style.setProperty("--provider-color", incomingColor);
       }
-
-      void Promise.all(images.map((image) => image.decode().catch(() => undefined))).then(() => {
-        setActivePage(0);
-        showcase.classList.add("is-loaded");
-      });
-    };
-
-    pager.addEventListener("scroll", schedulePagerUpdate, { passive: true });
-    pageButtons.forEach((button, index) => {
-      button.addEventListener("click", () => {
-        pager.scrollTo({
-          left: index * pager.clientWidth,
-          behavior: reducedMotionQuery.matches ? "instant" : "smooth",
-        });
-      });
-    });
-
-    loadImages();
-    mobileHeroQuery.addEventListener("change", () => {
-      loadImages();
-      if (mobileHeroQuery.matches) setActivePage(0);
-    });
+    }, 1800);
   }
 
   initChannelPickers();
@@ -991,81 +919,21 @@ const faqs = [
     if (stage !== "dev") void ensureDownloadUrl(stage);
   });
   init();
-  initMobileHeroShowcase();
+  initHeroProviderSwitch();
 
   const heroDemoFrame = document.querySelector<HTMLElement>(".hero-demo-frame");
   const heroDemoIframe = heroDemoFrame?.querySelector<HTMLIFrameElement>("iframe");
-  const heroMobileStore = document.querySelector<HTMLElement>(".hero-mobile-store");
-  const heroMobileImages = heroMobileStore
-    ? Array.from(heroMobileStore.querySelectorAll<HTMLImageElement>("img"))
-    : [];
   if (heroDemoFrame && heroDemoIframe) {
     let demoReadyTimer: number | undefined;
-    let heroRevealFallbackTimer: number | undefined;
     let demoReadyStartedAt = performance.now();
-    let heroDemoIsReady = false;
-    let heroRevealStarted = false;
-    const heroMobileImagesReady = () =>
-      heroMobileImages.every((image) => image.complete && image.naturalWidth > 0);
-    // Hidden store must not block the desktop demo reveal on narrow viewports,
-    // but is-loaded still waits for real image completion so a later resize
-    // into the visible range does not flash grayscale-off empty cards.
-    let heroMobileStoreIsReady =
-      !heroMobileStore ||
-      heroMobileImagesReady() ||
-      getComputedStyle(heroMobileStore).display === "none";
 
     const applyHeroDemoScale = () => {
       heroDemoIframe.style.transform = `scale(${heroDemoFrame.clientWidth / 1200})`;
     };
-    const applyHeroMobileStoreLoaded = () => {
-      if (!heroMobileStore || !heroMobileImagesReady()) return;
-      heroMobileStore.classList.add("is-loaded");
-    };
-    const revealHeroPreviewsTogether = (allowPhoneFallback = false) => {
-      if (
-        heroRevealStarted ||
-        !heroDemoIsReady ||
-        (!heroMobileStoreIsReady && !allowPhoneFallback)
-      ) {
-        return;
-      }
-      heroRevealStarted = true;
-      window.clearTimeout(heroRevealFallbackTimer);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          heroDemoFrame.classList.add("is-ready");
-          applyHeroMobileStoreLoaded();
-        });
-      });
-    };
-    const markHeroMobileStoreReady = () => {
-      if (!heroMobileImagesReady()) return;
-      heroMobileStoreIsReady = true;
-      if (heroRevealStarted) {
-        applyHeroMobileStoreLoaded();
-      } else {
-        revealHeroPreviewsTogether();
-      }
-    };
-    // Always wire loads when images are incomplete, including while the store
-    // is display:none. Lazy images often only start after the container is
-    // shown; those late loads still need to flip is-loaded.
-    if (heroMobileStore && !heroMobileImagesReady()) {
-      heroMobileImages
-        .filter((image) => !image.complete || image.naturalWidth === 0)
-        .forEach((image) =>
-          image.addEventListener("load", markHeroMobileStoreReady, { once: true }),
-        );
-    }
     const revealHeroDemoWhenReady = () => {
       window.clearTimeout(demoReadyTimer);
-      window.clearTimeout(heroRevealFallbackTimer);
       demoReadyStartedAt = performance.now();
-      heroDemoIsReady = false;
-      heroRevealStarted = false;
       heroDemoFrame.classList.remove("is-ready");
-      heroMobileStore?.classList.remove("is-loaded");
 
       const checkDemoReady = () => {
         let appIsReady = false;
@@ -1078,13 +946,10 @@ const faqs = [
         }
 
         if (appIsReady || performance.now() - demoReadyStartedAt > 15_000) {
-          heroDemoIsReady = true;
           finishReloadScrollReset?.();
-          revealHeroPreviewsTogether();
-          heroRevealFallbackTimer = window.setTimeout(
-            () => revealHeroPreviewsTogether(true),
-            500,
-          );
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => heroDemoFrame.classList.add("is-ready"));
+          });
           return;
         }
         demoReadyTimer = window.setTimeout(checkDemoReady, 100);
@@ -1208,8 +1073,98 @@ const faqs = [
 
   .hero-title {
     font-size: clamp(38px, 4.2vw, 64px);
-    margin: 0 0 18px;
+    margin: 0 0 10px;
     text-wrap: balance;
+  }
+
+  .hero-title__first-line {
+    display: flex;
+    width: max-content;
+    height: 1.05em;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .hero-title__second-line {
+    display: block;
+  }
+
+  .hero-provider-switch {
+    position: relative;
+    display: inline-block;
+    overflow: hidden;
+    width: 0.72em;
+    height: 1.3em;
+    margin-left: 0.22em;
+    margin-right: 0.14em;
+    flex: 0 0 auto;
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      #000 12%,
+      #000 88%,
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      #000 12%,
+      #000 88%,
+      transparent 100%
+    );
+  }
+
+  .hero-provider {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    transform: translateY(105%);
+    transition:
+      opacity 440ms ease,
+      transform 640ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .hero-provider.is-active {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .hero-provider.is-leaving {
+    opacity: 0;
+    transform: translateY(-105%);
+  }
+
+  .hero-provider.is-resetting {
+    transition: none;
+  }
+
+  .hero-provider img {
+    width: 0.65em;
+    height: 0.65em;
+    flex: 0 0 auto;
+    object-fit: contain;
+  }
+
+  .hero-provider__label {
+    color: var(--provider-color);
+    transition: color 520ms ease;
+  }
+
+  .hero-title__punctuation {
+    margin-left: -0.04em;
+  }
+
+  .hero-lede {
+    max-width: none;
+    margin: 0 0 16px;
+    color: var(--fg-muted);
+    font-size: 16px;
+    line-height: 1.55;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
   }
 
   .hero-actions {
@@ -1223,7 +1178,8 @@ const faqs = [
   .mobile-download-links {
     display: flex;
     flex-direction: row;
-    align-items: flex-start;
+    justify-content: flex-start;
+    align-items: center;
     gap: 16px;
     width: 100%;
   }
@@ -1482,118 +1438,8 @@ const faqs = [
     width: 100%;
   }
 
-  /* Store-linked iPhone and iPad cards riding the hero's right edge. */
-  .hero-mobile-store {
-    position: absolute;
-    right: 22px;
-    bottom: 38px;
-    width: 270px;
-    height: 300px;
-    z-index: 3;
-    filter: brightness(0) saturate(0);
-    opacity: 1;
-  }
-
-  .hero-mobile-store.is-loaded {
-    filter: brightness(1) saturate(1);
-    opacity: 1;
-    animation:
-      preview-frame-reveal
-      var(--preview-fade-duration)
-      var(--preview-fade-easing)
-      both;
-  }
-
   .hero-mobile-showcase {
     display: none;
-  }
-
-  .hero-device-card {
-    position: absolute;
-    display: block;
-    overflow: hidden;
-    padding: 5px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    color: #fff;
-    background: #0a0a0c;
-    box-shadow:
-      0 24px 60px rgba(0, 0, 0, 0.48),
-      inset 0 1px rgba(255, 255, 255, 0.08);
-    text-decoration: none;
-    transition:
-      transform 0.24s cubic-bezier(0.22, 1, 0.36, 1),
-      border-color 0.18s ease,
-      box-shadow 0.24s ease;
-  }
-
-  .hero-device-card img {
-    display: block;
-    width: 100%;
-    height: auto;
-    border-radius: inherit;
-  }
-
-  .hero-device-card span {
-    position: absolute;
-    right: 10px;
-    bottom: 10px;
-    padding: 5px 8px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 999px;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    background: rgba(4, 4, 5, 0.76);
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
-    backdrop-filter: blur(12px);
-    opacity: 0;
-    transform: translateY(4px);
-    transition:
-      opacity 0.18s ease,
-      transform 0.18s ease;
-  }
-
-  .hero-device-card--tablet {
-    top: 5px;
-    right: 0;
-    width: 202px;
-    border-radius: 21px;
-    transform: rotate(5deg);
-  }
-
-  .hero-device-card--phone {
-    bottom: 0;
-    left: 2px;
-    width: 128px;
-    border-radius: 23px;
-    transform: rotate(-5deg);
-  }
-
-  .hero-mobile-store:hover .hero-device-card--tablet,
-  .hero-mobile-store:focus-within .hero-device-card--tablet {
-    transform: translate(9px, -8px) rotate(7deg);
-  }
-
-  .hero-mobile-store:hover .hero-device-card--phone,
-  .hero-mobile-store:focus-within .hero-device-card--phone {
-    transform: translate(-7px, -10px) rotate(-7deg);
-  }
-
-  .hero-device-card:hover,
-  .hero-device-card:focus-visible {
-    z-index: 4;
-    border-color: rgba(255, 255, 255, 0.3);
-    box-shadow:
-      0 30px 72px rgba(0, 0, 0, 0.56),
-      inset 0 1px rgba(255, 255, 255, 0.12);
-    outline: none;
-  }
-
-  .hero-device-card:hover span,
-  .hero-device-card:focus-visible span {
-    opacity: 1;
-    transform: translateY(0);
   }
 
   /* ── Harnesses ─────────────────────────────────────────── */
@@ -1983,11 +1829,9 @@ const faqs = [
     .cta-app-icon,
     .faq-chevron,
     .hero-demo-frame,
-    .hero-mobile-store,
     .hero-mobile-showcase,
     .hero-mobile-showcase__screen,
-    .hero-mobile-showcase__dots button,
-    .hero-device-card,
+    .hero-provider,
     .mobile-download-links a,
     .endorsement-track {
       animation: none;
@@ -2667,14 +2511,12 @@ const faqs = [
       padding: 64px 24px;
     }
     .container { padding-left: 20px; padding-right: 20px; }
-    .hero-preview,
-    .hero-mobile-store {
+    .hero-preview {
       display: none;
     }
     .hero--layout-2 {
-      --mobile-stack-offset: 24px;
       display: flex;
-      min-height: 100svh;
+      min-height: max(100svh, 720px);
       padding-block: 0;
       overflow: clip;
       isolation: isolate;
@@ -2682,185 +2524,68 @@ const faqs = [
     .hero--layout-2 .hero-inner {
       position: relative;
       z-index: 2;
-      justify-content: center;
-      height: 100svh;
-      min-height: 100svh;
+      justify-content: flex-start;
+      height: max(100svh, 720px);
+      min-height: max(100svh, 720px);
+      padding-top: max(88px, 12svh);
       overflow: visible;
     }
     .hero--layout-2 .hero-copy {
       z-index: 3;
-      width: min(72vw, 280px);
-      text-shadow: 0 2px 24px #000, 0 1px 8px #000;
+      width: 100%;
+      max-width: 360px;
+      margin-inline: auto;
+      text-align: center;
+      text-shadow: none;
+    }
+    .hero-title__first-line {
+      margin-inline: auto;
+    }
+    .hero-lede {
+      max-width: 280px;
+      margin-inline: auto;
+      font-size: 15px;
     }
     .hero--layout-2 .hero-actions {
+      align-items: stretch;
+      margin-inline: auto;
       text-shadow: none;
+    }
+    .mobile-download-links {
+      justify-content: center;
     }
     .hero-mobile-showcase {
       position: absolute;
-      inset: 0;
+      top: max(44svh, 360px);
+      bottom: 0;
+      left: 50%;
       z-index: 1;
-      display: block;
-      visibility: hidden;
+      display: flex;
+      justify-content: center;
+      width: 100vw;
       pointer-events: none;
-    }
-    .hero-mobile-showcase.is-loaded {
-      visibility: visible;
-    }
-    .hero-mobile-showcase::after {
-      position: absolute;
-      inset: 0;
-      z-index: 6;
-      background: linear-gradient(
-        to right,
-        var(--bg) 0%,
-        var(--bg) 38%,
-        transparent 80%
-      );
-      content: "";
-      pointer-events: none;
+      transform: translateX(-50%);
     }
     .hero-mobile-showcase__screen {
-      position: absolute;
-      top: calc(var(--mobile-top) + var(--mobile-stack-offset));
-      right: var(--mobile-right);
-      z-index: var(--mobile-layer);
       display: block;
-      visibility: hidden;
       overflow: hidden;
-      width: var(--mobile-width);
-      aspect-ratio: 1320 / 2868;
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      border-radius: 24px;
+      width: min(calc(100vw - 36px), 420px);
+      height: 100%;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-bottom: 0;
+      border-radius: 28px 28px 0 0;
       background: #080808;
       box-shadow:
-        -18px 24px 70px rgba(0, 0, 0, 0.72),
+        0 -24px 80px rgba(0, 0, 0, 0.58),
+        0 0 0 1px rgba(255, 255, 255, 0.03),
         inset 0 1px rgba(255, 255, 255, 0.08);
-      transform: translate3d(52px, 72px, 0) scale(0.96);
-      transform-origin: right top;
-      transition:
-        transform 560ms var(--preview-fade-easing),
-        visibility 0s linear 560ms;
-    }
-    .hero-mobile-showcase__screen.is-visible {
-      visibility: visible;
-      transform: translate3d(0, 0, 0) scale(1);
-      transition-delay: 0s;
-    }
-    .hero-mobile-showcase__screen:nth-child(1) {
-      --mobile-layer: 1;
-      --mobile-right: -12vw;
-      --mobile-top: 12svh;
-      --mobile-width: min(72vw, 300px);
-    }
-    .hero-mobile-showcase__screen:nth-child(2) {
-      --mobile-layer: 2;
-      --mobile-right: -20vw;
-      --mobile-top: 10svh;
-      --mobile-width: min(76vw, 316px);
-    }
-    .hero-mobile-showcase__screen:nth-child(3) {
-      --mobile-layer: 3;
-      --mobile-right: -29vw;
-      --mobile-top: 8svh;
-      --mobile-width: min(80vw, 332px);
-    }
-    .hero-mobile-showcase__screen:nth-child(4) {
-      --mobile-layer: 4;
-      --mobile-right: -38vw;
-      --mobile-top: 6svh;
-      --mobile-width: min(84vw, 348px);
-    }
-    .hero-mobile-showcase__screen:nth-child(5) {
-      --mobile-layer: 5;
-      --mobile-right: -46vw;
-      --mobile-top: 4svh;
-      --mobile-width: min(88vw, 364px);
+      -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 78%, transparent 100%);
+      mask-image: linear-gradient(to bottom, #000 0%, #000 78%, transparent 100%);
     }
     .hero-mobile-showcase__screen img {
       display: block;
       width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-    .hero-mobile-showcase__pager {
-      position: absolute;
-      top: 7svh;
-      right: 0;
-      bottom: 7svh;
-      z-index: 7;
-      display: flex;
-      width: 62vw;
-      overflow-x: auto;
-      overscroll-behavior-x: contain;
-      pointer-events: auto;
-      scroll-snap-type: x mandatory;
-      scrollbar-width: none;
-      touch-action: pan-x pan-y;
-      -webkit-overflow-scrolling: touch;
-    }
-    .hero-mobile-showcase__pager::-webkit-scrollbar {
-      display: none;
-    }
-    .hero-mobile-showcase__page {
-      flex: 0 0 100%;
-      scroll-snap-align: start;
-      scroll-snap-stop: always;
-    }
-    .hero-mobile-showcase__dots {
-      position: absolute;
-      right: 20px;
-      bottom: 3svh;
-      z-index: 8;
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      pointer-events: auto;
-    }
-    .hero-mobile-showcase__dots button {
-      width: 6px;
-      height: 6px;
-      padding: 0;
-      border: 0;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.28);
-      cursor: pointer;
-      transition:
-        width 180ms ease,
-        background 180ms ease;
-    }
-    .hero-mobile-showcase__dots button[aria-current="page"] {
-      width: 18px;
-      background: rgba(255, 255, 255, 0.82);
-    }
-    .hero-mobile-showcase[data-mobile-platform="android"]
-      .hero-mobile-showcase__screen {
-      aspect-ratio: 1080 / 1920;
-      border-radius: 24px;
-    }
-    .hero-mobile-showcase[data-mobile-platform="android"]
-      .hero-mobile-showcase__screen:nth-child(1) {
-      --mobile-right: -30vw;
-      --mobile-width: min(90vw, 374px);
-    }
-    .hero-mobile-showcase[data-mobile-platform="android"]
-      .hero-mobile-showcase__screen:nth-child(2) {
-      --mobile-right: -40vw;
-      --mobile-width: min(96vw, 398px);
-    }
-    .hero-mobile-showcase[data-mobile-platform="android"]
-      .hero-mobile-showcase__screen:nth-child(3) {
-      --mobile-right: -51vw;
-      --mobile-width: min(102vw, 423px);
-    }
-    .hero-mobile-showcase[data-mobile-platform="android"]
-      .hero-mobile-showcase__screen:nth-child(4) {
-      --mobile-right: -62vw;
-      --mobile-width: min(108vw, 448px);
-    }
-    .hero-mobile-showcase[data-mobile-platform="android"]
-      .hero-mobile-showcase__screen:nth-child(5) {
-      --mobile-right: -72vw;
-      --mobile-width: min(113vw, 473px);
+      height: auto;
     }
     .git-visual { display: none; }
     .endorsements-head {
