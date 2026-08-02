@@ -487,6 +487,10 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('alt="image-4.png"');
     expect(markup).not.toContain('alt="image-5.png"');
     expect(markup).toContain('aria-label="Preview image-4.png and 2 more images"');
+    expect(markup).toContain("aspect-[3/2]");
+    expect(markup).toContain("grid-cols-[1.15fr_1fr_1fr]");
+    expect(markup).toContain("row-span-2");
+    expect(markup).toContain("col-span-2");
     expect(markup).toContain("backdrop-blur-md");
     expect(markup).toContain(">+2</span>");
   });

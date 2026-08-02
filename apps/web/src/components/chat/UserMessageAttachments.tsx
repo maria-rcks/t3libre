@@ -22,15 +22,19 @@ export const UserMessageAttachments = memo(function UserMessageAttachments(
 
   const visibleImages = props.images.slice(0, MAX_VISIBLE_IMAGES);
   const collapsedImageCount = props.images.length - visibleImages.length;
-  const isMosaic = props.images.length > 1;
+  const visibleImageCount = visibleImages.length;
+  const isMosaic = visibleImageCount > 1;
 
   return (
     <div
       className={cn(
         "grid w-full max-w-[420px] self-end overflow-hidden rounded-lg border border-border/80 bg-border/80",
         !isMosaic && "grid-cols-1",
-        isMosaic && "h-[220px] grid-cols-2 gap-px",
-        props.images.length >= 3 && "grid-rows-2",
+        visibleImageCount === 2 && "aspect-[8/5] grid-cols-2 gap-px",
+        visibleImageCount === 3 &&
+          "aspect-[3/2] grid-cols-[1.15fr_0.85fr] grid-rows-2 gap-px",
+        visibleImageCount >= 4 &&
+          "aspect-[3/2] grid-cols-[1.15fr_1fr_1fr] grid-rows-2 gap-px",
       )}
       data-user-message-attachments="true"
       data-user-message-attachments-collapsed={collapsedImageCount > 0 ? "true" : "false"}
@@ -42,7 +46,8 @@ export const UserMessageAttachments = memo(function UserMessageAttachments(
             key={image.id}
             className={cn(
               "relative min-h-0 overflow-hidden bg-background/70",
-              props.images.length === 3 && index === 0 && "row-span-2",
+              visibleImageCount >= 3 && index === 0 && "row-span-2",
+              visibleImageCount >= 4 && index === 1 && "col-span-2",
             )}
           >
             {image.previewUrl ? (
