@@ -196,7 +196,7 @@ function makeServerConfig(descriptor: ExecutionEnvironmentDescriptor, cwd: strin
   const base = Schema.decodeUnknownSync(ServerConfig)({
     environment: Schema.encodeSync(ExecutionEnvironmentDescriptor)(descriptor),
     auth: {
-      policy: "unsafe-no-auth",
+      policy: "remote-reachable",
       bootstrapMethods: [],
       sessionMethods: [],
       sessionCookieName: "t3-demo-session",
