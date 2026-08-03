@@ -1633,15 +1633,7 @@ const faqs = [
       background 0.72s cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  .hero[data-hero-variant="4"] {
-    --hero-concept-accent: #bcb5ff;
-    color: #f7f6ff;
-    background:
-      radial-gradient(circle at 72% 46%, rgba(99, 83, 190, 0.16), transparent 34%),
-      linear-gradient(145deg, #09090d 0%, #030304 72%);
-  }
-  .hero[data-hero-variant="1"] .hero-title,
-  .hero[data-hero-variant="4"] .hero-title {
+  .hero[data-hero-variant="1"] .hero-title {
     max-width: 430px;
     font-size: clamp(50px, 4.5vw, 66px);
   }
@@ -1704,53 +1696,12 @@ const faqs = [
       backwards;
   }
 
-  .hero[data-hero-variant="4"] .stage-sky {
-    opacity: 0.24;
-  }
-  .hero[data-hero-variant="4"] .hero-preview {
-    opacity: 1;
-    transform: perspective(1500px) translateX(8px) rotateY(-1deg) scale(0.96);
-    animation: app-arrive-4 0.82s 260ms cubic-bezier(0.22, 1, 0.36, 1)
-      backwards;
-  }
-  .hero[data-hero-variant="4"] .hero-preview::before {
-    animation: app-signal-line-4 0.55s 720ms cubic-bezier(0.22, 1, 0.36, 1)
-      backwards;
-  }
-  .hero[data-hero-variant="4"] .hero-preview::after {
-    animation: app-signal-dot-4 0.55s 720ms cubic-bezier(0.22, 1, 0.36, 1)
-      backwards;
-  }
-  .hero[data-hero-variant="4"] .hero-demo-frame.is-ready {
-    filter: saturate(0.92) contrast(1.04);
-    animation: none;
-  }
-  .hero[data-hero-variant="4"] #download-btn {
-    color: #09090b;
-    background: #f2f0ff;
-  }
-  .hero[data-hero-variant="4"] .mobile-download-links a {
-    color: rgba(255, 255, 255, 0.58);
-  }
-  .hero[data-hero-variant="4"] .mobile-download-links img {
-    filter: saturate(0.72) brightness(0.92);
-  }
-
   @keyframes app-arrive-1 {
     from {
       opacity: 0;
       filter: blur(8px);
       transform: perspective(1600px) translate3d(76px, 16px, 0)
         rotateY(-7deg) scale(0.92);
-    }
-  }
-
-  @keyframes app-arrive-4 {
-    from {
-      opacity: 0;
-      filter: blur(8px);
-      transform: perspective(1500px) translate3d(64px, 20px, 0)
-        rotateY(-5deg) scale(0.9);
     }
   }
 
@@ -1761,21 +1712,7 @@ const faqs = [
     }
   }
 
-  @keyframes app-signal-line-4 {
-    from {
-      opacity: 0;
-      transform: scaleX(0);
-    }
-  }
-
   @keyframes app-signal-dot-1 {
-    from {
-      opacity: 0;
-      transform: translateX(-52px) scale(0.5);
-    }
-  }
-
-  @keyframes app-signal-dot-4 {
     from {
       opacity: 0;
       transform: translateX(-52px) scale(0.5);
@@ -2016,11 +1953,6 @@ const faqs = [
     width: 100%;
   }
 
-  .hero[data-hero-variant="4"] .hero-inner {
-    grid-template-columns: minmax(370px, 430px) minmax(0, 1fr);
-    gap: 24px;
-  }
-
   .hero[data-hero-variant="1"] .hero-inner {
     grid-template-columns: minmax(370px, 430px) minmax(0, 1fr);
     gap: 24px;
@@ -2047,8 +1979,7 @@ const faqs = [
     filter: brightness(1) saturate(1);
   }
 
-  .hero[data-hero-variant="1"] .hero-mobile-store.is-loaded,
-  .hero[data-hero-variant="4"] .hero-mobile-store.is-loaded {
+  .hero[data-hero-variant="1"] .hero-mobile-store.is-loaded {
     opacity: 1;
     pointer-events: auto;
     transform: translate3d(0, 0, 0) scale(1);
@@ -2137,16 +2068,6 @@ const faqs = [
       backwards;
   }
 
-  .hero[data-hero-variant="4"] .hero-device-card--tablet {
-    animation: tablet-arrive-4 0.72s 580ms cubic-bezier(0.22, 1, 0.36, 1)
-      backwards;
-  }
-
-  .hero[data-hero-variant="4"] .hero-device-card--phone {
-    animation: phone-arrive-4 0.72s 700ms cubic-bezier(0.22, 1, 0.36, 1)
-      backwards;
-  }
-
   @keyframes tablet-arrive-1 {
     from {
       opacity: 0;
@@ -2158,20 +2079,6 @@ const faqs = [
     from {
       opacity: 0;
       transform: translate3d(54px, 64px, 0) rotate(7deg) scale(0.8);
-    }
-  }
-
-  @keyframes tablet-arrive-4 {
-    from {
-      opacity: 0;
-      transform: translate3d(82px, 46px, 0) rotate(12deg) scale(0.8);
-    }
-  }
-
-  @keyframes phone-arrive-4 {
-    from {
-      opacity: 0;
-      transform: translate3d(68px, 76px, 0) rotate(8deg) scale(0.76);
     }
   }
 
@@ -3654,9 +3561,6 @@ const faqs = [
       font-size: clamp(44px, 12vw, 58px);
       line-height: 1.08;
     }
-    .hero[data-hero-variant="4"] .hero-title {
-      font-size: clamp(40px, 10.8vw, 50px);
-    }
     .hero[data-hero-variant="1"] .hero-title {
       font-size: clamp(40px, 10.8vw, 50px);
     }
@@ -3672,22 +3576,6 @@ const faqs = [
     #hero-channel-btn {
       height: 46px;
       padding: 0 12px;
-    }
-    .hero[data-hero-variant="4"] .hero-copy {
-      text-shadow:
-        0 2px 24px #000,
-        0 1px 8px #000;
-    }
-    .hero[data-hero-variant="4"] .hero-mobile-showcase {
-      opacity: 0.34;
-    }
-    .hero[data-hero-variant="4"] .hero-mobile-showcase::after {
-      background: linear-gradient(
-        to right,
-        #050507 0%,
-        #050507 42%,
-        transparent 88%
-      );
     }
     .hero-mobile-showcase {
       position: absolute;
