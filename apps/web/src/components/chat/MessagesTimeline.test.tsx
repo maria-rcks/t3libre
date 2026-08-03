@@ -890,7 +890,6 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Claude Fable 5");
     expect(markup).not.toContain("Full conversation context");
     expect(markup).not.toContain("·");
-    expect(markup).toContain("--provider-icon-average-color-light:#d97757");
 
     // Items persisted before models were stamped recover them from the
     // projection runs: the handoff's run is the target, the newest earlier

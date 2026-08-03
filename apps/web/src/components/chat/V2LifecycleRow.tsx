@@ -22,11 +22,7 @@ import {
 
 import { getProviderInstanceEntry } from "../../providerInstances";
 import { formatShortTimestamp } from "../../timestampFormat";
-import {
-  PROVIDER_ICON_BY_PROVIDER,
-  getProviderIconAverageColorStyle,
-  getTriggerDisplayModelName,
-} from "./providerIconUtils";
+import { PROVIDER_ICON_BY_PROVIDER, getTriggerDisplayModelName } from "./providerIconUtils";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 
 const LIFECYCLE_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
@@ -342,8 +338,6 @@ function HandoffEndpoint(props: {
 }) {
   const entry = getProviderInstanceEntry(props.providers, props.instanceId);
   const Icon = entry === undefined ? null : (PROVIDER_ICON_BY_PROVIDER[entry.driverKind] ?? null);
-  const colorStyle =
-    entry === undefined ? undefined : getProviderIconAverageColorStyle(entry.driverKind);
   const model = props.model?.trim();
   const providerModel =
     model === undefined || model.length === 0
@@ -358,12 +352,7 @@ function HandoffEndpoint(props: {
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
       {Icon === null ? null : <Icon aria-hidden="true" className="size-3 shrink-0" />}
-      <span
-        className="max-w-40 truncate text-[var(--provider-icon-average-color-light)] dark:text-[var(--provider-icon-average-color-dark)]"
-        style={colorStyle}
-      >
-        {label}
-      </span>
+      <span className="max-w-40 truncate">{label}</span>
     </span>
   );
 }
