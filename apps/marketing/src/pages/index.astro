@@ -23,14 +23,6 @@ const mobileEndorsementRows = [
   tweets.filter((_, index) => index % 3 === 2),
 ];
 
-const heroProviders = [
-  { name: "Claude Code", icon: "/harnesses/claude-ai-icon.svg" },
-  { name: "Codex", icon: "/harnesses/openai_dark.svg" },
-  { name: "Cursor", icon: "/harnesses/cursor_light.svg" },
-  { name: "Grok Build", icon: "/harnesses/grok-dark.svg" },
-  { name: "OpenCode", icon: "/harnesses/opencode-dark.svg" },
-] as const;
-
 const heroRotatorProviders = [
   { name: "Claude", icon: "/harnesses/claude-ai-icon.svg", accent: "#d97757" },
   { name: "Cursor", icon: "/harnesses/cursor_light.svg", accent: "#e4e4e7" },
@@ -50,11 +42,27 @@ const mobileShowcaseScenes = [
   "environments",
 ] as const;
 
-const connectSurfaces = [
-  { id: "web", label: "Web", enter: 0.36 },
-  { id: "ipad", label: "iPad", enter: 0.43 },
-  { id: "iphone", label: "iPhone", enter: 0.5 },
-  { id: "android", label: "Android", enter: 0.57 },
+const connectDevices = [
+  {
+    id: "web",
+    name: "Web",
+    iconPath: "M3 5.5h18v11H3zM3 9h18M9 20.5h6M12 16.5v4",
+  },
+  {
+    id: "iphone",
+    name: "Theo’s iPhone",
+    iconPath: "M7.5 2.5h9a1.5 1.5 0 0 1 1.5 1.5v16a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 20V4a1.5 1.5 0 0 1 1.5-1.5ZM10.5 18.5h3",
+  },
+  {
+    id: "ipad",
+    name: "iPad",
+    iconPath: "M5 3.5h14A1.5 1.5 0 0 1 20.5 5v14a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V5A1.5 1.5 0 0 1 5 3.5ZM10 17.5h4",
+  },
+  {
+    id: "android",
+    name: "Pixel 9",
+    iconPath: "M7.5 2.5h9a1.5 1.5 0 0 1 1.5 1.5v16a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 20V4a1.5 1.5 0 0 1 1.5-1.5ZM11 5h2",
+  },
 ] as const;
 
 const faqs = [
@@ -337,133 +345,73 @@ const faqs = [
 
   </section>
 
-  <!-- ── One live thread, every screen ───────────────────────── -->
+  <!-- ── T3 Connect: one switch, every screen ─────────────────── -->
   <section
     id="connect"
     class="sec-connect"
-    aria-label="The same live T3 Code thread continuing from a local machine across web and mobile"
+    aria-label="T3 Connect pairs your other screens to the machine running T3 Code"
   >
     <div class="connect-sticky">
       <div class="connect-stage" data-connect-stage>
-        <h2 class="connect-statement">
-          <span>T3 Connect</span>
-        </h2>
+        <div class="connect-heading">
+          <h2 class="connect-statement">
+            <span>T3 Connect</span>
+          </h2>
+          <p class="connect-sub">Flip one switch. Every screen picks up the thread.</p>
+        </div>
 
-        <div class="connect-host" aria-label="Coding agents running on Theo's Mac Studio">
-          <span class="connect-host__status"></span>
-          <strong>Theo’s Mac Studio</strong>
-          <div class="connect-host__agents" aria-label="Connected coding agents">
-            {
-              heroProviders.map((provider) => (
-                <img
-                  src={provider.icon}
-                  alt={provider.name}
-                  width="24"
-                  height="24"
-                />
-              ))
-            }
+        <div class="connect-switch" data-connect-card>
+          <div class="connect-switch__source">
+            <span class="connect-host__status"></span>
+            <strong>Theo’s Mac Studio</strong>
+            <span class="connect-switch__path">Settings · Connections</span>
           </div>
-          <span class="connect-host__arrow" aria-hidden="true">→</span>
-          <img
-            class="connect-host__t3"
-            src={stableAppIcon}
-            alt="T3 Code"
-            width="42"
-            height="42"
-          />
+          <div class="connect-switch__row">
+            <div class="connect-switch__copy">
+              <strong>Network access</strong>
+              <p>Securely expose this environment to your other screens.</p>
+            </div>
+            <span class="connect-toggle" data-connect-toggle aria-hidden="true"
+              ><i></i></span
+            >
+          </div>
         </div>
 
         <svg
-          class="connect-routes"
-          viewBox="0 0 1440 820"
+          class="connect-drop"
+          viewBox="0 0 2 100"
           preserveAspectRatio="none"
           aria-hidden="true"
         >
-          <path pathLength="1" d="M662 410 C784 390 776 260 944 240" />
-          <path pathLength="1" d="M662 410 C802 430 796 626 952 648" />
-          <path pathLength="1" d="M662 410 C864 430 982 548 1062 620" />
-          <path pathLength="1" d="M662 410 C882 382 1128 398 1254 448" />
-          <path
-            class="connect-routes__pulse"
-            pathLength="1"
-            style="--pulse-delay: 0s"
-            d="M662 410 C784 390 776 260 944 240"
-          />
-          <path
-            class="connect-routes__pulse"
-            pathLength="1"
-            style="--pulse-delay: -0.7s"
-            d="M662 410 C802 430 796 626 952 648"
-          />
-          <path
-            class="connect-routes__pulse"
-            pathLength="1"
-            style="--pulse-delay: -1.4s"
-            d="M662 410 C864 430 982 548 1062 620"
-          />
-          <path
-            class="connect-routes__pulse"
-            pathLength="1"
-            style="--pulse-delay: -2.1s"
-            d="M662 410 C882 382 1128 398 1254 448"
-          />
+          <path pathLength="1" d="M1 0 V100" />
+          <path class="connect-drop__pulse" pathLength="1" d="M1 0 V100" />
         </svg>
 
-        <div
-          class="connect-frame connect-frame--desktop"
-          data-connect-frame
-          data-connect-enter="0"
-          aria-label="Live T3 Code desktop app on Theo's Mac Studio"
-        >
-          <div class="connect-frame__bar">
-            <span class="connect-frame__traffic" aria-hidden="true"
-              ><i></i><i></i><i></i></span
-            >
-            <span class="connect-frame__label"
-              ><i></i> Theo’s Mac Studio</span
-            >
-          </div>
-          <div class="connect-frame__viewport" data-connect-demo-frame>
-            <iframe
-              src="/sidebar-demo/demo.html#/settings/connections"
-              title="T3 Code connection settings with network access enabled"
-              loading="lazy"
-              tabindex="-1"
-              data-connect-demo
-            ></iframe>
-          </div>
-          <div class="connect-thread-event">
-            <span class="connect-thread-event__pulse"></span>
-            <span data-connect-sync></span>
-          </div>
-        </div>
-
-        {
-          connectSurfaces.map((surface) => (
-            <div
-              class={`connect-frame connect-frame--${surface.id}`}
-              data-connect-frame
-              data-connect-enter={surface.enter}
-              aria-label={`The same T3 Code thread on ${surface.label}`}
-            >
-              <div class="connect-frame__bar">
-                <span class="connect-frame__label">
-                  <i></i> {surface.label}
+        <ul class="connect-devices" aria-label="Screens paired through T3 Connect">
+          {
+            connectDevices.map((device, index) => (
+              <li data-connect-device style={`--device-index: ${index}`}>
+                <svg
+                  class="connect-device__icon"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path d={device.iconPath} />
+                </svg>
+                <span class="connect-device__name">{device.name}</span>
+                <span class="connect-device__status">
+                  <i />
+                  <b data-device-status>Connected</b>
                 </span>
-              </div>
-              <div class="connect-frame__ghost" aria-hidden="true">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-              <div class="connect-thread-event">
-                <span class="connect-thread-event__pulse"></span>
-                <span data-connect-sync></span>
-              </div>
-            </div>
-          ))
-        }
+              </li>
+            ))
+          }
+        </ul>
+
+        <div class="connect-thread-event" data-connect-event>
+          <span class="connect-thread-event__pulse"></span>
+          <span data-connect-sync></span>
+        </div>
       </div>
     </div>
   </section>
@@ -1270,31 +1218,20 @@ const faqs = [
   function initConnectConvergence() {
     const section = document.getElementById("connect");
     const stage = section?.querySelector<HTMLElement>("[data-connect-stage]");
-    const desktopFrame = section?.querySelector<HTMLElement>(
-      ".connect-frame--desktop",
+    const heading = section?.querySelector<HTMLElement>(".connect-heading");
+    const card = section?.querySelector<HTMLElement>("[data-connect-card]");
+    const devices = Array.from(
+      section?.querySelectorAll<HTMLElement>("[data-connect-device]") ?? [],
     );
-    const surfaceFrames = Array.from(
-      section?.querySelectorAll<HTMLElement>(
-        ".connect-frame[data-connect-enter]:not(.connect-frame--desktop)",
-      ) ?? [],
+    const syncEvent = section?.querySelector<HTMLElement>(
+      "[data-connect-event]",
     );
-    const statement = section?.querySelector<HTMLElement>(
-      ".connect-statement",
+    const syncNode = section?.querySelector<HTMLElement>(
+      "[data-connect-sync]",
     );
-    const host = section?.querySelector<HTMLElement>(".connect-host");
-    const demoFrame = section?.querySelector<HTMLElement>(
-      "[data-connect-demo-frame]",
-    );
-    const demo = section?.querySelector<HTMLIFrameElement>(
-      "[data-connect-demo]",
-    );
-    const syncNodes = Array.from(
-      section?.querySelectorAll<HTMLElement>("[data-connect-sync]") ?? [],
-    );
-    const syncEvents = Array.from(
-      section?.querySelectorAll<HTMLElement>(".connect-thread-event") ?? [],
-    );
-    if (!section || !stage || !desktopFrame || !statement || !host) return;
+    if (!section || !stage || !heading || !card || !syncEvent || !syncNode) {
+      return;
+    }
 
     const message = "Fix auth handoff without dropping the thread";
     const reducedMotionQuery = window.matchMedia(
@@ -1313,61 +1250,56 @@ const faqs = [
     let frameRequest = 0;
     let isListening = false;
 
-    const applyDemoScale = () => {
-      if (!demoFrame || !demo) return;
-      demo.style.transform = `scale(${demoFrame.clientWidth / 1200})`;
-    };
-
     const render = () => {
       frameRequest = 0;
-      const isCompact = compactLayoutQuery.matches;
-      const isStatic = reducedMotionQuery.matches || isCompact;
+      const isStatic =
+        reducedMotionQuery.matches || compactLayoutQuery.matches;
       const travel = Math.max(1, section.offsetHeight - window.innerHeight);
       const progress = isStatic
         ? 1
         : clamp(-section.getBoundingClientRect().top / travel);
-      const spread = smooth(clamp((progress - 0.08) / 0.4));
-      const routeProgress = smooth(clamp((progress - 0.25) / 0.34));
-      const copyProgress = smooth(clamp((progress - 0.76) / 0.16));
-      const hostProgress = smooth(clamp(progress / 0.36));
-      const hostOpacity = 1 - smooth(clamp((progress - 0.28) / 0.18));
-      const typingProgress = smooth(clamp((progress - 0.64) / 0.2));
+
+      const headingProgress = smooth(clamp(progress / 0.14));
+      const cardProgress = smooth(clamp((progress - 0.1) / 0.16));
+      const isLive = progress > 0.34;
+      const dropProgress = smooth(clamp((progress - 0.38) / 0.12));
+      const eventProgress = smooth(clamp((progress - 0.78) / 0.1));
+      const typingProgress = smooth(clamp((progress - 0.8) / 0.16));
       const characters = Math.floor(message.length * typingProgress);
 
+      heading.style.opacity = headingProgress.toFixed(4);
+      heading.style.transform = `translateY(${(1 - headingProgress) * 18}px)`;
+      card.style.opacity = cardProgress.toFixed(4);
+      card.style.transform = `translateY(${(1 - cardProgress) * 26}px) scale(${0.97 + cardProgress * 0.03})`;
+      card.style.filter = `blur(${((1 - cardProgress) * 6).toFixed(2)}px)`;
+      stage.classList.toggle("is-live", isLive);
       stage.style.setProperty(
         "--connect-route-progress",
-        routeProgress.toFixed(4),
+        dropProgress.toFixed(4),
       );
-      desktopFrame.style.transform = isCompact
-        ? "translate3d(-50%, -50%, 0) scale(0.56)"
-        : `translate3d(calc(-50% - ${spread * 276}px), -50%, 0) scale(${1 - spread * 0.16})`;
-      host.style.opacity = isCompact ? "1" : hostOpacity.toFixed(4);
-      host.style.transform = isCompact
-        ? "translate3d(-50%, 0, 0) scale(0.86)"
-        : `translate3d(-50%, ${hostProgress * 185}px, 0) scale(${1 - hostProgress * 0.22})`;
-      statement.style.opacity = copyProgress.toFixed(4);
-      statement.style.transform = `translate3d(-50%, ${(1 - copyProgress) * 24}px, 0) scale(${0.96 + copyProgress * 0.04})`;
-      statement.style.filter = `blur(${((1 - copyProgress) * 7).toFixed(2)}px)`;
 
-      surfaceFrames.forEach((frame) => {
-        const enter = Number(frame.dataset.connectEnter ?? 0.4);
-        const frameProgress = smooth(clamp((progress - enter) / 0.16));
-        const pop = settle(frameProgress);
-        frame.style.opacity = frameProgress.toFixed(4);
-        frame.style.transform = `translate3d(0, ${(1 - pop) * 54}px, 0) scale(${0.82 + pop * 0.18})`;
-        frame.style.filter = `blur(${((1 - frameProgress) * 9).toFixed(2)}px)`;
+      devices.forEach((device, index) => {
+        const enter = 0.5 + index * 0.07;
+        const deviceProgress = smooth(clamp((progress - enter) / 0.09));
+        const pop = settle(deviceProgress);
+        const isConnected = progress > enter + 0.1;
+        device.style.opacity = deviceProgress.toFixed(4);
+        device.style.transform = `translateY(${(1 - pop) * 22}px) scale(${0.9 + pop * 0.1})`;
+        device.style.filter = `blur(${((1 - deviceProgress) * 5).toFixed(2)}px)`;
+        device.classList.toggle("is-connected", isConnected);
+        const status = device.querySelector<HTMLElement>(
+          "[data-device-status]",
+        );
+        if (status) {
+          const label = isConnected ? "Connected" : "Pairing…";
+          if (status.textContent !== label) status.textContent = label;
+        }
       });
 
-      const eventProgress = smooth(clamp((progress - 0.6) / 0.1));
-      syncEvents.forEach((event) => {
-        event.style.opacity = eventProgress.toFixed(4);
-        event.style.transform = `translateY(${(1 - eventProgress) * 8}px)`;
-      });
+      syncEvent.style.opacity = eventProgress.toFixed(4);
+      syncEvent.style.transform = `translateY(${(1 - eventProgress) * 10}px)`;
       if (characters !== previousCharacters) {
-        const text = message.slice(0, characters);
-        syncNodes.forEach((node) => {
-          node.textContent = text;
-        });
+        syncNode.textContent = message.slice(0, characters);
         previousCharacters = characters;
       }
     };
@@ -1393,10 +1325,8 @@ const faqs = [
       ([entry]) => setListening(entry?.isIntersecting ?? false),
       { rootMargin: "120px 0px" },
     ).observe(section);
-    new ResizeObserver(applyDemoScale).observe(demoFrame ?? desktopFrame);
     reducedMotionQuery.addEventListener("change", scheduleRender);
     compactLayoutQuery.addEventListener("change", scheduleRender);
-    applyDemoScale();
     render();
   }
 
@@ -2309,7 +2239,7 @@ const faqs = [
     transform: translateY(0);
   }
 
-  /* ── One live thread, every screen ─────────────────────── */
+  /* ── T3 Connect: one switch, every screen ───────────────── */
   .sec-connect {
     height: 280svh;
     padding: 0;
@@ -2331,15 +2261,17 @@ const faqs = [
   .connect-stage {
     --connect-route-progress: 0;
     position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     width: min(100%, 1440px);
-    height: min(100svh, 820px);
-    overflow: hidden;
+    padding: 24px;
     isolation: isolate;
   }
 
   .connect-stage::before {
     position: absolute;
-    inset: 8% 8%;
+    inset: -24% 14%;
     z-index: -1;
     border-radius: 50%;
     background: rgba(116, 94, 235, 0.1);
@@ -2350,8 +2282,8 @@ const faqs = [
 
   .connect-stage::after {
     position: absolute;
-    inset: 0;
-    z-index: 0;
+    inset: -30% 0;
+    z-index: -1;
     background-image: radial-gradient(
       rgba(214, 208, 255, 0.2) 1px,
       transparent 1px
@@ -2359,7 +2291,7 @@ const faqs = [
     background-size: 26px 26px;
     content: "";
     mask-image: radial-gradient(
-      ellipse 58% 54% at 50% 46%,
+      ellipse 46% 54% at 50% 50%,
       #000 12%,
       transparent 68%
     );
@@ -2367,24 +2299,21 @@ const faqs = [
     pointer-events: none;
   }
 
+  .connect-heading {
+    margin-bottom: 44px;
+    text-align: center;
+  }
+
   .connect-statement {
-    position: absolute;
-    top: 5%;
-    left: 50%;
-    z-index: 8;
-    margin: 0;
+    margin: 0 0 14px;
     background: linear-gradient(180deg, #f6f4ff 6%, #b3a8ff 94%);
     background-clip: text;
     -webkit-background-clip: text;
     color: transparent;
-    font-size: clamp(40px, 5vw, 70px);
+    font-size: clamp(40px, 4.6vw, 62px);
     font-weight: 500;
     letter-spacing: -0.06em;
     line-height: 0.9;
-    text-align: center;
-    transform: translate3d(-50%, 24px, 0);
-    opacity: 0;
-    pointer-events: none;
   }
 
   .connect-statement span {
@@ -2392,29 +2321,118 @@ const faqs = [
     white-space: nowrap;
   }
 
-  .connect-host {
-    position: absolute;
-    top: 10%;
-    left: 50%;
-    z-index: 7;
-    display: flex;
-    min-height: 62px;
-    align-items: center;
-    gap: 11px;
-    padding: 9px 11px 9px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 15px;
-    color: rgba(255, 255, 255, 0.84);
-    background: rgba(10, 10, 13, 0.9);
+  .connect-sub {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 15px;
+  }
+
+  /* The one setting that matters, lifted straight out of the app. */
+  .connect-switch {
+    position: relative;
+    z-index: 2;
+    width: min(100%, 520px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 46%),
+      rgba(10, 10, 14, 0.86);
     box-shadow:
-      inset 0 1px rgba(255, 255, 255, 0.07),
-      0 24px 70px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(20px);
-    transform: translate3d(-50%, 0, 0);
+      inset 0 1px rgba(255, 255, 255, 0.08),
+      0 30px 80px rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(18px);
+    transition:
+      border-color 0.5s ease,
+      box-shadow 0.5s ease;
+  }
+
+  .is-live .connect-switch {
+    border-color: rgba(178, 165, 255, 0.3);
+    box-shadow:
+      inset 0 1px rgba(255, 255, 255, 0.08),
+      0 30px 80px rgba(0, 0, 0, 0.55),
+      0 0 70px rgba(133, 121, 255, 0.14);
+  }
+
+  .connect-switch__source {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.82);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .connect-switch__source strong {
+    font-weight: 600;
+  }
+
+  .connect-switch__path {
+    margin-left: auto;
+    color: rgba(255, 255, 255, 0.34);
+  }
+
+  .connect-switch__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 22px;
+    padding: 18px;
+  }
+
+  .connect-switch__copy strong {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .connect-switch__copy p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+
+  .connect-toggle {
+    position: relative;
+    display: block;
+    width: 46px;
+    height: 27px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+    transition: background 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .connect-toggle i {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 21px;
+    height: 21px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .is-live .connect-toggle {
+    background: #6d5ce6;
+    box-shadow:
+      inset 0 1px 2px rgba(0, 0, 0, 0.25),
+      0 0 22px rgba(109, 92, 230, 0.55);
+  }
+
+  .is-live .connect-toggle i {
+    transform: translateX(19px);
   }
 
   .connect-host__status,
-  .connect-frame__label i,
+  .connect-device__status i,
   .connect-thread-event__pulse {
     position: relative;
     width: 7px;
@@ -2447,6 +2465,147 @@ const faqs = [
     }
   }
 
+  /* Beam from the switch down to the paired screens. */
+  .connect-drop {
+    z-index: 1;
+    width: 2px;
+    height: 86px;
+    overflow: visible;
+  }
+
+  .connect-drop path {
+    fill: none;
+    stroke: rgba(171, 159, 255, 0.34);
+    stroke-dasharray: 1;
+    stroke-dashoffset: calc(1 - var(--connect-route-progress));
+    stroke-linecap: round;
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .connect-drop .connect-drop__pulse {
+    stroke: #ded8ff;
+    stroke-dasharray: 0.16 0.84;
+    stroke-width: 2;
+    opacity: var(--connect-route-progress);
+    filter: drop-shadow(0 0 6px rgba(203, 191, 255, 0.9));
+    animation: connect-route-pulse 1.5s linear infinite;
+  }
+
+  @keyframes connect-route-pulse {
+    from {
+      stroke-dashoffset: 1.16;
+    }
+
+    to {
+      stroke-dashoffset: 0.16;
+    }
+  }
+
+  .connect-devices {
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    padding: 0;
+    margin: 0 0 44px;
+    list-style: none;
+  }
+
+  .connect-devices li {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    gap: 9px;
+    padding: 10px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    border-radius: 12px;
+    background: rgba(9, 9, 12, 0.8);
+    box-shadow:
+      inset 0 1px rgba(255, 255, 255, 0.06),
+      0 16px 40px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(14px);
+    opacity: 0;
+  }
+
+  .connect-device__icon {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.7);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.5;
+  }
+
+  .connect-device__name {
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 12.5px;
+    font-weight: 550;
+    white-space: nowrap;
+  }
+
+  .connect-device__status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding-left: 10px;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .connect-device__status i {
+    background: rgba(255, 255, 255, 0.28);
+    box-shadow: none;
+    transition:
+      background 0.4s ease,
+      box-shadow 0.4s ease;
+  }
+
+  .connect-device__status b {
+    color: rgba(255, 255, 255, 0.42);
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    transition: color 0.4s ease;
+  }
+
+  .connect-devices li.is-connected .connect-device__status i {
+    background: #9fe88f;
+    box-shadow: 0 0 12px rgba(159, 232, 143, 0.7);
+  }
+
+  .connect-devices li.is-connected .connect-device__status b {
+    color: rgba(214, 245, 205, 0.85);
+  }
+
+  .connect-thread-event {
+    z-index: 2;
+    display: flex;
+    width: min(100%, 460px);
+    min-height: 38px;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    border: 1px solid rgba(190, 181, 255, 0.24);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.9);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.3;
+    background: rgba(13, 12, 19, 0.88);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(14px);
+    opacity: 0;
+  }
+
+  .connect-thread-event__pulse {
+    background: #b8aeff;
+    box-shadow: 0 0 14px rgba(184, 174, 255, 0.8);
+  }
+
   .connect-thread-event [data-connect-sync]::after {
     display: inline-block;
     width: 5px;
@@ -2465,331 +2624,15 @@ const faqs = [
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .connect-routes .connect-routes__pulse,
+    .connect-drop .connect-drop__pulse,
     .connect-host__status::after,
     .connect-thread-event [data-connect-sync]::after {
       animation: none;
     }
 
-    .connect-routes .connect-routes__pulse {
+    .connect-drop .connect-drop__pulse {
       opacity: 0;
     }
-  }
-
-  .connect-host strong {
-    font-size: 11px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
-  .connect-host__agents {
-    display: flex;
-    align-items: center;
-    padding-left: 8px;
-    border-left: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .connect-host__agents img {
-    width: 25px;
-    height: 25px;
-    padding: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    background: #111116;
-    object-fit: contain;
-  }
-
-  .connect-host__agents img + img {
-    margin-left: -4px;
-  }
-
-  .connect-host__arrow {
-    color: #a89cff;
-    font-size: 15px;
-  }
-
-  .connect-host__t3 {
-    width: 42px;
-    height: 42px;
-    border-radius: 10px;
-    box-shadow: 0 0 24px rgba(139, 120, 255, 0.22);
-  }
-
-  .connect-routes {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    width: 100%;
-    height: 100%;
-    overflow: visible;
-    pointer-events: none;
-  }
-
-  .connect-routes path {
-    fill: none;
-    stroke: rgba(171, 159, 255, 0.34);
-    stroke-dasharray: 1;
-    stroke-dashoffset: calc(1 - var(--connect-route-progress));
-    stroke-linecap: round;
-    stroke-width: 1.25;
-    vector-effect: non-scaling-stroke;
-    filter: drop-shadow(0 0 7px rgba(154, 137, 255, 0.3));
-  }
-
-  .connect-routes .connect-routes__pulse {
-    stroke: #ded8ff;
-    stroke-dasharray: 0.055 0.945;
-    stroke-width: 1.7;
-    opacity: var(--connect-route-progress);
-    filter: drop-shadow(0 0 6px rgba(203, 191, 255, 0.9));
-    animation: connect-route-pulse 2.8s linear var(--pulse-delay, 0s) infinite;
-  }
-
-  @keyframes connect-route-pulse {
-    from {
-      stroke-dashoffset: 1.055;
-    }
-
-    to {
-      stroke-dashoffset: 0.055;
-    }
-  }
-
-  .connect-frame {
-    position: absolute;
-    z-index: 3;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 16px;
-    color: #fff;
-    background: #08080a;
-    box-shadow:
-      inset 0 1px rgba(255, 255, 255, 0.075),
-      0 30px 90px rgba(0, 0, 0, 0.62);
-    opacity: 0;
-    transform: translate3d(0, 54px, 0) scale(0.82);
-    transform-origin: center;
-    will-change: transform, opacity;
-  }
-
-  .connect-frame--desktop {
-    top: 50%;
-    left: 50%;
-    z-index: 4;
-    width: clamp(640px, 56vw, 860px);
-    aspect-ratio: 1200 / 850;
-    opacity: 1;
-    transform: translate3d(-50%, -50%, 0) scale(1);
-  }
-
-  .connect-frame--web {
-    top: 22%;
-    right: 8.6%;
-    width: min(34%, 480px);
-    aspect-ratio: 2430 / 1475;
-  }
-
-  .connect-frame--ipad {
-    right: 12.6%;
-    bottom: 4%;
-    width: min(31%, 430px);
-    aspect-ratio: 4 / 3;
-  }
-
-  .connect-frame--iphone {
-    right: 33.6%;
-    bottom: 2%;
-    z-index: 5;
-    width: min(10.5%, 144px);
-    aspect-ratio: 1320 / 2868;
-    border-radius: 22px;
-  }
-
-  .connect-frame--android {
-    right: 6.1%;
-    bottom: 16%;
-    z-index: 5;
-    width: min(10.5%, 144px);
-    aspect-ratio: 1080 / 1920;
-    border-radius: 22px;
-  }
-
-  /* Companion screens stay minimal: a labeled glass frame with a faint UI
-     skeleton, so only the desktop app shows real product pixels. */
-  .connect-frame--web,
-  .connect-frame--ipad,
-  .connect-frame--iphone,
-  .connect-frame--android {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent 42%),
-      rgba(9, 9, 12, 0.72);
-    backdrop-filter: blur(10px);
-  }
-
-  .connect-frame__ghost {
-    position: absolute;
-    inset: 42px 14px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    pointer-events: none;
-  }
-
-  .connect-frame__ghost span {
-    height: 8px;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .connect-frame__ghost span:nth-child(1) {
-    width: 46%;
-  }
-
-  .connect-frame__ghost span:nth-child(2) {
-    width: 72%;
-  }
-
-  .connect-frame__ghost span:nth-child(3) {
-    width: 32%;
-  }
-
-  .connect-frame--iphone .connect-frame__ghost,
-  .connect-frame--android .connect-frame__ghost {
-    inset: 33px 9px 9px;
-    gap: 6px;
-  }
-
-  .connect-frame--iphone .connect-frame__ghost span,
-  .connect-frame--android .connect-frame__ghost span {
-    height: 5px;
-  }
-
-  .connect-frame__bar {
-    position: absolute;
-    top: 0;
-    right: 0;
-    left: 0;
-    z-index: 4;
-    display: flex;
-    height: 30px;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(8, 8, 11, 0.88);
-    backdrop-filter: blur(14px);
-  }
-
-  .connect-frame--iphone .connect-frame__bar,
-  .connect-frame--android .connect-frame__bar {
-    height: 23px;
-    justify-content: center;
-    padding: 0 5px;
-  }
-
-  .connect-frame--web .connect-frame__bar,
-  .connect-frame--ipad .connect-frame__bar,
-  .connect-frame--iphone .connect-frame__bar,
-  .connect-frame--android .connect-frame__bar {
-    border-bottom-color: rgba(255, 255, 255, 0.06);
-    background: transparent;
-    backdrop-filter: none;
-  }
-
-  .connect-frame__traffic {
-    display: flex;
-    gap: 4px;
-  }
-
-  .connect-frame__traffic i {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.2);
-  }
-
-  .connect-frame__label {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    color: rgba(255, 255, 255, 0.62);
-    font-family: var(--font-mono);
-    font-size: 8px;
-    line-height: 1;
-  }
-
-  .connect-frame__label i {
-    width: 5px;
-    height: 5px;
-  }
-
-  .connect-frame__viewport {
-    position: absolute;
-    top: 30px;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    overflow: hidden;
-    background: #000;
-  }
-
-  .connect-frame__viewport iframe {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 1200px;
-    height: 804px;
-    border: 0;
-    pointer-events: none;
-    transform-origin: top left;
-  }
-
-  .connect-thread-event {
-    position: absolute;
-    right: 10px;
-    bottom: 10px;
-    left: 10px;
-    z-index: 6;
-    display: flex;
-    min-height: 32px;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 10px;
-    border: 1px solid rgba(190, 181, 255, 0.24);
-    border-radius: 9px;
-    color: rgba(255, 255, 255, 0.9);
-    font-family: var(--font-mono);
-    font-size: 9px;
-    line-height: 1.3;
-    background: rgba(13, 12, 19, 0.88);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.42);
-    backdrop-filter: blur(14px);
-  }
-
-  .connect-frame--desktop .connect-thread-event {
-    right: 22px;
-    bottom: 22px;
-    left: auto;
-    width: min(360px, 52%);
-    min-height: 38px;
-    font-size: 10px;
-  }
-
-  .connect-frame--iphone .connect-thread-event,
-  .connect-frame--android .connect-thread-event {
-    right: 5px;
-    bottom: 6px;
-    left: 5px;
-    min-height: 24px;
-    gap: 4px;
-    padding: 5px;
-    border-radius: 6px;
-    font-size: 5px;
-  }
-
-  .connect-thread-event__pulse {
-    background: #b8aeff;
-    box-shadow: 0 0 14px rgba(184, 174, 255, 0.8);
   }
 
   /* ── Endorsements ─────────────────────────────────────── */
@@ -3896,61 +3739,33 @@ const faqs = [
     }
     .sec-connect {
       height: auto;
-      min-height: 980px;
     }
     .connect-sticky {
       position: relative;
       height: auto;
-      min-height: 980px;
+      padding: 84px 0;
     }
     .connect-stage {
       width: 100%;
-      height: 980px;
+      padding: 0 20px;
     }
     .connect-stage::before {
       inset: 14% -30%;
     }
     .connect-statement {
-      top: 36px;
-      width: 100%;
-      font-size: clamp(42px, 13vw, 60px);
+      font-size: clamp(42px, 12vw, 56px);
     }
-    .connect-host {
-      top: 165px;
-      max-width: calc(100% - 24px);
+    .connect-heading {
+      margin-bottom: 32px;
     }
-    .connect-host strong,
-    .connect-host__arrow {
-      display: none;
+    .connect-sub {
+      font-size: 13.5px;
     }
-    .connect-host__agents {
-      padding-left: 0;
-      border-left: 0;
+    .connect-drop {
+      height: 56px;
     }
-    .connect-frame--desktop {
-      top: 43%;
-      width: 640px;
-    }
-    .connect-frame--web,
-    .connect-frame--ipad {
-      display: none;
-    }
-    .connect-frame--iphone {
-      right: auto;
-      bottom: 30px;
-      left: 12%;
-      width: 150px;
-    }
-    .connect-frame--android {
-      right: 10%;
-      bottom: 52px;
-      width: 150px;
-    }
-    .connect-routes {
-      display: none;
-    }
-    .connect-thread-event {
-      font-size: 8px;
+    .connect-devices {
+      margin-bottom: 32px;
     }
     .hero-preview,
     .hero-mobile-store {
@@ -4217,9 +4032,8 @@ const faqs = [
   }
 
   @media (max-width: 560px) {
-    .connect-frame--iphone,
-    .connect-frame--android {
-      width: 132px;
+    .connect-device__status {
+      display: none;
     }
 
     .showcase-copy .section-head h2 {
