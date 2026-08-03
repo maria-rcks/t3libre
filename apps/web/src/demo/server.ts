@@ -12,7 +12,6 @@
  * by origin, which is how the demo showcases T3 Connect-style remotes.
  */
 import {
-  AuthAccessSnapshot,
   type AuthAccessStreamEvent,
   type ClientOrchestrationCommand,
   type DiscoveredLocalServerList,
@@ -40,7 +39,6 @@ import {
 } from "@t3tools/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
@@ -958,74 +956,11 @@ function makeHandlersLayer(backend: DemoBackend) {
     type: "ready",
     payload: { at: demoStartedAtIso, environment: fixture.descriptor },
   };
-  // The marketing site frames the settings page as the T3 Connect story, so
-  // the demo reports a remotely reachable backend with a few paired screens.
-  const demoClientScopes = [
-    "orchestration:read",
-    "orchestration:operate",
-    "terminal:operate",
-    "review:write",
-    "relay:read",
-  ];
-  const demoSessionTime = (offsetMinutes: number) =>
-    DateTime.makeUnsafe(Date.parse(demoStartedAtIso) + offsetMinutes * 60_000);
   const authAccessSnapshot: AuthAccessStreamEvent = {
     version: 1,
     revision: 1,
     type: "snapshot",
-    payload: Schema.decodeUnknownSync(AuthAccessSnapshot)({
-      pairingLinks: [],
-      clientSessions: [
-        {
-          sessionId: "demo-session-desktop",
-          subject: "theo",
-          scopes: demoClientScopes,
-          method: "browser-session-cookie",
-          client: { label: "This device", deviceType: "desktop", os: "macOS" },
-          issuedAt: demoSessionTime(-2880),
-          expiresAt: demoSessionTime(40320),
-          lastConnectedAt: demoSessionTime(0),
-          connected: true,
-          current: true,
-        },
-        {
-          sessionId: "demo-session-iphone",
-          subject: "theo",
-          scopes: demoClientScopes,
-          method: "dpop-access-token",
-          client: { label: "Theo’s iPhone", deviceType: "mobile", os: "iOS" },
-          issuedAt: demoSessionTime(-1440),
-          expiresAt: demoSessionTime(40320),
-          lastConnectedAt: demoSessionTime(-1),
-          connected: true,
-          current: false,
-        },
-        {
-          sessionId: "demo-session-ipad",
-          subject: "theo",
-          scopes: demoClientScopes,
-          method: "dpop-access-token",
-          client: { label: "Theo’s iPad", deviceType: "tablet", os: "iPadOS" },
-          issuedAt: demoSessionTime(-960),
-          expiresAt: demoSessionTime(40320),
-          lastConnectedAt: demoSessionTime(-12),
-          connected: true,
-          current: false,
-        },
-        {
-          sessionId: "demo-session-android",
-          subject: "theo",
-          scopes: demoClientScopes,
-          method: "dpop-access-token",
-          client: { label: "Pixel 9", deviceType: "mobile", os: "Android" },
-          issuedAt: demoSessionTime(-480),
-          expiresAt: demoSessionTime(40320),
-          lastConnectedAt: demoSessionTime(-38),
-          connected: false,
-          current: false,
-        },
-      ],
-    }),
+    payload: { pairingLinks: [], clientSessions: [] },
   };
   const noLocalServers: DiscoveredLocalServerList = {
     servers: [],
