@@ -2206,9 +2206,7 @@ const faqs = [
     height: 280svh;
     padding: 0;
     border-top: 0;
-    background:
-      radial-gradient(circle at 50% 48%, rgba(111, 92, 230, 0.12), transparent 40%),
-      #050506;
+    background: #050506;
   }
 
   .connect-sticky {
@@ -2229,17 +2227,6 @@ const faqs = [
     width: min(100%, 1440px);
     padding: 24px;
     isolation: isolate;
-  }
-
-  .connect-stage::before {
-    position: absolute;
-    inset: -24% 14%;
-    z-index: -1;
-    border-radius: 50%;
-    background: rgba(116, 94, 235, 0.1);
-    content: "";
-    filter: blur(120px);
-    pointer-events: none;
   }
 
   .connect-stage::after {
