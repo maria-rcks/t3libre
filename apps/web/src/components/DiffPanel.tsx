@@ -102,13 +102,25 @@ const DIFF_PANEL_UNSAFE_CSS = `
   --diffs-bg-separator-override: color-mix(in srgb, var(--background) 95%, var(--foreground));
   --diffs-bg-buffer-override: color-mix(in srgb, var(--background) 90%, var(--foreground));
 
-  --diffs-bg-addition-override: color-mix(in srgb, var(--background) 92%, var(--success));
-  --diffs-bg-addition-number-override: color-mix(in srgb, var(--background) 88%, var(--success));
+  --diffs-bg-addition-override: light-dark(
+    color-mix(in srgb, var(--background) 50%, var(--success)),
+    color-mix(in srgb, var(--background) 70%, var(--success))
+  );
+  --diffs-bg-addition-number-override: light-dark(
+    color-mix(in srgb, var(--background) 35%, var(--success)),
+    color-mix(in srgb, var(--background) 60%, var(--success))
+  );
   --diffs-bg-addition-hover-override: color-mix(in srgb, var(--background) 85%, var(--success));
   --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--background) 80%, var(--success));
 
-  --diffs-bg-deletion-override: color-mix(in srgb, var(--background) 92%, var(--destructive));
-  --diffs-bg-deletion-number-override: color-mix(in srgb, var(--background) 88%, var(--destructive));
+  --diffs-bg-deletion-override: light-dark(
+    color-mix(in srgb, var(--background) 50%, var(--destructive)),
+    color-mix(in srgb, var(--background) 70%, var(--destructive))
+  );
+  --diffs-bg-deletion-number-override: light-dark(
+    color-mix(in srgb, var(--background) 35%, var(--destructive)),
+    color-mix(in srgb, var(--background) 60%, var(--destructive))
+  );
   --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--background) 85%, var(--destructive));
   --diffs-bg-deletion-emphasis-override: color-mix(
     in srgb,
