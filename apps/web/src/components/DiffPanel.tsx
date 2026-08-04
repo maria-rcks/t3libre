@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import type { FileDiffContentsLoader } from "@pierre/diffs";
 import { useParams } from "@tanstack/react-router";
 import {
   isAtomCommandInterrupted,
@@ -68,6 +69,7 @@ import {
 } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useEnvironmentQuery } from "../state/query";
+import { useAtomCommand } from "../state/use-atom-command";
 import { serverEnvironment } from "../state/server";
 import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
@@ -177,12 +179,23 @@ const DIFF_PANEL_UNSAFE_CSS = `
   color: color-mix(in srgb, var(--foreground) 52%, var(--background)) !important;
   font-family: var(--font-sans) !important;
   font-size: 11px !important;
+  text-decoration: none !important;
 }
 
 :is([data-separator="line-info"], [data-separator="line-info-basic"])
-  [data-separator-content]::before,
+  [data-unmodified-lines] {
+  display: flex !important;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
 :is([data-separator="line-info"], [data-separator="line-info-basic"])
-  [data-separator-content]::after {
+  [data-unmodified-lines]::before,
+:is([data-separator="line-info"], [data-separator="line-info-basic"])
+  [data-unmodified-lines]::after {
   width: auto;
   height: 1px;
   flex: 1 1 auto;
@@ -190,15 +203,44 @@ const DIFF_PANEL_UNSAFE_CSS = `
   background-color: color-mix(in srgb, var(--background) 92%, var(--foreground));
 }
 
-:is([data-separator="line-info"], [data-separator="line-info-basic"])
-  [data-unmodified-lines] {
-  flex: 0 0 auto;
+:is([data-separator="line-info"], [data-separator="line-info-basic"])[data-expand-index]
+  [data-separator-wrapper] {
+  grid-template-columns: 0 minmax(0, 1fr) !important;
+}
+
+:is([data-separator="line-info"], [data-separator="line-info-basic"])[data-expand-index]
+  [data-separator-content] {
+  grid-column: 2 !important;
 }
 
 :is([data-separator="line-info"], [data-separator="line-info-basic"])
   [data-expand-button] {
-  background-color: transparent !important;
-  border-color: color-mix(in srgb, var(--background) 92%, var(--foreground)) !important;
+  display: none !important;
+}
+
+:is([data-separator="line-info"], [data-separator="line-info-basic"]):has(
+    [data-expand-button]
+  )
+  [data-separator-content] {
+  cursor: pointer;
+}
+
+:is([data-separator="line-info"], [data-separator="line-info-basic"]):has(
+    [data-expand-button]
+  ):hover
+  [data-separator-content] {
+  color: color-mix(in srgb, var(--foreground) 76%, var(--background)) !important;
+}
+
+:is([data-separator="line-info"], [data-separator="line-info-basic"]):has(
+    [data-expand-button]
+  ):hover
+  [data-unmodified-lines]::before,
+:is([data-separator="line-info"], [data-separator="line-info-basic"]):has(
+    [data-expand-button]
+  ):hover
+  [data-unmodified-lines]::after {
+  background-color: color-mix(in srgb, var(--background) 84%, var(--foreground));
 }
 
 [data-diffs-header] [data-header-content] {
@@ -296,6 +338,7 @@ export default function DiffPanel({
     activeThread?.environmentId ?? null,
     serverConfig?.availableEditors ?? [],
   );
+  const getDiffFileContents = useAtomCommand(reviewEnvironment.diffFileContents);
   const gitStatusQuery = useEnvironmentQuery(
     activeThread !== null && activeThread !== undefined && activeCwd != null
       ? vcsEnvironment.status({
@@ -462,6 +505,57 @@ export default function DiffPanel({
   const selectedGitSource = branchDiffPreview.data?.sources.find(
     (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
   );
+  const loadDiffFiles = useMemo<FileDiffContentsLoader | undefined>(() => {
+    const preview = branchDiffPreview.data;
+    if (selectedTurnId !== null || !activeThread || !preview || !selectedGitSource) {
+      return undefined;
+    }
+
+    const source = selectedGitSource;
+    return async (fileDiff) => {
+      const newPath = resolveFileDiffPath(fileDiff);
+      const oldPath = fileDiff.prevName
+        ? resolveFileDiffPath({ ...fileDiff, name: fileDiff.prevName })
+        : newPath;
+      const result = await getDiffFileContents({
+        environmentId: activeThread.environmentId,
+        input: {
+          cwd: preview.cwd,
+          sourceKind: source.kind,
+          baseRef: source.baseRef,
+          headRef: source.headRef,
+          oldPath,
+          newPath,
+        },
+      });
+      if (result._tag !== "Success") {
+        throw squashAtomCommandFailure(result);
+      }
+
+      const newFile = {
+        name: newPath,
+        contents: result.value.newContents,
+        cacheKey: `${source.diffHash}:new:${newPath}`,
+      };
+      if (fileDiff.type === "rename-pure") {
+        return { oldFile: null, newFile };
+      }
+      return {
+        oldFile: {
+          name: oldPath,
+          contents: result.value.oldContents,
+          cacheKey: `${source.diffHash}:old:${oldPath}`,
+        },
+        newFile,
+      };
+    };
+  }, [
+    activeThread,
+    branchDiffPreview.data,
+    getDiffFileContents,
+    selectedGitSource,
+    selectedTurnId,
+  ]);
   const localBranchRefs = useEnvironmentQuery(
     selectedTurnId === null &&
       selectedGitScope === "branch" &&
@@ -1044,6 +1138,7 @@ export default function DiffPanel({
                     themeType: resolvedTheme as DiffThemeType,
                     unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
                     stickyHeaders: true,
+                    ...(loadDiffFiles ? { loadDiffFiles } : {}),
                     itemMetrics: {
                       diffHeaderHeight: 32,
                       hunkSeparatorHeight: 24,
