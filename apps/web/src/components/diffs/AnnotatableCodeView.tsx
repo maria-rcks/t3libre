@@ -255,22 +255,27 @@ export function AnnotatableCodeView({
           ? renderHeaderPrefix(item.fileDiff, item.id, item.collapsed === true)
           : null
       }
-      renderAnnotation={(annotation) => (
-        <div className="py-1">
-          {annotation.metadata.entries.map((entry) => (
-            <LocalCommentAnnotation
-              key={entry.id}
-              kind={entry.kind}
-              rangeLabel={entry.rangeLabel}
-              text={entry.kind === "draft" ? draftText : entry.text}
-              onTextChange={setDraftText}
-              onCancel={() => removeEntry(entry.id)}
-              onComment={(text) => submitEntry(entry.id, text)}
-              onDelete={() => removeEntry(entry.id)}
-            />
-          ))}
-        </div>
-      )}
+      renderAnnotation={(annotation) => {
+        const hasDraft = annotation.metadata.entries.some((entry) => entry.kind === "draft");
+        return (
+          <div
+            className={hasDraft ? "py-1" : "divide-y divide-border/30 border-y border-border/30"}
+          >
+            {annotation.metadata.entries.map((entry) => (
+              <LocalCommentAnnotation
+                key={entry.id}
+                kind={entry.kind}
+                rangeLabel={entry.rangeLabel}
+                text={entry.kind === "draft" ? draftText : entry.text}
+                onTextChange={setDraftText}
+                onCancel={() => removeEntry(entry.id)}
+                onComment={(text) => submitEntry(entry.id, text)}
+                onDelete={() => removeEntry(entry.id)}
+              />
+            ))}
+          </div>
+        );
+      }}
     />
   );
 }

@@ -46,6 +46,9 @@ describe("LocalCommentAnnotation", () => {
     expect(markup).not.toContain("on +78");
     expect(markup).toContain("Please keep this branch explicit.");
     expect(markup).toContain('aria-label="Delete comment"');
+    expect(markup).toContain("border-s-2");
+    expect(markup).toContain("bg-primary/[0.045]");
+    expect(markup).toContain("lucide-message-circle");
   });
 
   it("renders draft text owned by the annotation wrapper", () => {
