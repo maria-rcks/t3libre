@@ -309,6 +309,7 @@ export default function DiffPanel({
     scopeKey: null,
     fileKeys: EMPTY_COLLAPSED_DIFF_FILE_KEYS,
   }));
+  const [codeViewRevision, setCodeViewRevision] = useState(0);
   const codeViewRef = useRef<AnnotatableCodeViewHandle>(null);
   const lastCompletedTurnRefreshRef = useRef<{
     readonly threadKey: string | null;
@@ -407,7 +408,7 @@ export default function DiffPanel({
   const collapseScopeKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
-  const codeViewMountKey = collapseScopeKey ?? reviewSectionId;
+  const codeViewMountKey = `${collapseScopeKey ?? reviewSectionId}:${codeViewRevision}`;
   const collapsedDiffFileKeys =
     collapsedDiffFiles.scopeKey === collapseScopeKey
       ? collapsedDiffFiles.fileKeys
@@ -632,10 +633,17 @@ export default function DiffPanel({
       }),
     );
   }, [renderablePatch]);
+  const renderableFileEntries = useMemo(
+    () =>
+      renderableFiles.map((fileDiff) => ({
+        fileDiff,
+        fileKey: buildFileDiffRenderKey(fileDiff),
+      })),
+    [renderableFiles],
+  );
   const codeViewFiles = useMemo(
     () =>
-      renderableFiles.map((fileDiff) => {
-        const fileKey = buildFileDiffRenderKey(fileDiff);
+      renderableFileEntries.map(({ fileDiff, fileKey }) => {
         return {
           fileDiff,
           filePath: resolveFileDiffPath(fileDiff),
@@ -643,7 +651,7 @@ export default function DiffPanel({
           collapsed: collapsedDiffFileKeys.has(fileKey),
         };
       }),
-    [collapsedDiffFileKeys, renderableFiles],
+    [collapsedDiffFileKeys, renderableFileEntries],
   );
   const diffFileKeys = useMemo(() => codeViewFiles.map((file) => file.fileKey), [codeViewFiles]);
   const allDiffFilesCollapsed = areAllDiffFilesCollapsed(diffFileKeys, collapsedDiffFileKeys);
@@ -700,6 +708,7 @@ export default function DiffPanel({
   );
 
   const toggleDiffFileCollapse = useCallback(() => {
+    setCodeViewRevision((current) => current + 1);
     setCollapsedDiffFiles((current) => {
       const currentKeys =
         current.scopeKey === collapseScopeKey ? current.fileKeys : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
