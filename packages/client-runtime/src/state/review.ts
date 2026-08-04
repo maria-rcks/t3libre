@@ -33,6 +33,7 @@ export function createReviewEnvironmentAtoms<R, E>(
             input.headRef,
             input.oldPath,
             input.newPath,
+            input.changeType,
           ]),
       },
     }),

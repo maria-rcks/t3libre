@@ -548,16 +548,16 @@ export default function DiffPanel({
       turnId: latestTurn?.turnId ?? null,
     };
     const previous = lastCompletedTurnRefreshRef.current;
-    lastCompletedTurnRefreshRef.current = current;
-    if (
-      !canRefreshGitDiff ||
-      previous === null ||
-      previous.threadKey !== current.threadKey ||
-      previous.turnId === current.turnId
-    ) {
+    if (!canRefreshGitDiff) {
       return;
     }
+    if (previous === null || previous.threadKey !== current.threadKey) {
+      lastCompletedTurnRefreshRef.current = current;
+      return;
+    }
+    if (previous.turnId === current.turnId) return;
     refreshBranchDiffPreview();
+    lastCompletedTurnRefreshRef.current = current;
   }, [activeThreadRefreshKey, canRefreshGitDiff, latestTurn?.turnId, refreshBranchDiffPreview]);
 
   const selectedGitSource = branchDiffPreview.data?.sources.find(
