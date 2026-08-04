@@ -241,7 +241,7 @@ export function AnnotatableCodeView({
         ...options,
         enableGutterUtility: !hasOpenComment,
         enableLineSelection: !hasOpenComment,
-        onLineSelectionEnd: beginComment,
+        onGutterUtilityClick: beginComment,
       }}
       renderHeaderPrefix={(item) =>
         item.type === "diff"
