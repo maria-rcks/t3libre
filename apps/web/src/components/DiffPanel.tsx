@@ -134,6 +134,63 @@ const DIFF_PANEL_UNSAFE_CSS = `
   background-color: var(--diffs-bg) !important;
 }
 
+:is(
+  [data-line],
+  [data-line-annotation],
+  [data-merge-conflict],
+  [data-merge-conflict-actions],
+  [data-no-newline]
+)[data-selected-line] {
+  --diffs-line-bg: light-dark(
+    color-mix(
+      in lab,
+      var(--background) 88%,
+      color-mix(in srgb, var(--background) 50%, var(--diffs-modified-base))
+    ),
+    color-mix(
+      in lab,
+      var(--background) 80%,
+      color-mix(in srgb, var(--background) 70%, var(--diffs-modified-base))
+    )
+  ) !important;
+}
+
+:is([data-gutter-buffer], [data-column-number])[data-selected-line] {
+  --diffs-line-bg: light-dark(
+    color-mix(
+      in lab,
+      var(--background) 91%,
+      color-mix(in srgb, var(--background) 35%, var(--diffs-modified-base))
+    ),
+    color-mix(
+      in lab,
+      var(--background) 85%,
+      color-mix(in srgb, var(--background) 60%, var(--diffs-modified-base))
+    )
+  ) !important;
+}
+
+[data-indicators="bars"]
+  :is([data-column-number], [data-gutter-buffer="annotation"])[data-selected-line] {
+  position: relative;
+}
+
+[data-indicators="bars"]
+  :is([data-column-number], [data-gutter-buffer="annotation"])[data-selected-line]::before {
+  position: absolute !important;
+  inset-block: 0 !important;
+  inset-inline-start: 0 !important;
+  display: block !important;
+  width: 4px !important;
+  min-width: 4px !important;
+  max-width: 4px !important;
+  height: auto !important;
+  padding: 0 !important;
+  content: "" !important;
+  background-color: var(--diffs-modified-base) !important;
+  background-image: none !important;
+}
+
 [data-file-info] {
   background-color: var(--background) !important;
   border-block-color: transparent !important;

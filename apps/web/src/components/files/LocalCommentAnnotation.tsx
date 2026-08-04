@@ -1,4 +1,4 @@
-import { MessageCircle, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -27,21 +27,20 @@ export function LocalCommentAnnotation({
     return (
       <div
         data-file-comment-annotation
-        className="mx-3 my-2 rounded-xl border border-border/70 bg-background p-3 shadow-sm"
+        className="group/comment flex min-w-0 items-start gap-2 px-3 py-2 font-sans text-foreground"
         contentEditable={false}
         onPointerDown={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center gap-2">
-          <MessageCircle className="size-4 text-muted-foreground" />
-          <span className="text-xs font-medium">Local comment</span>
-          <span className="ml-auto text-[11px] text-muted-foreground">{rangeLabel}</span>
-          <Button variant="ghost" size="icon-xs" aria-label="Delete comment" onClick={onDelete}>
-            <Trash2 className="size-3.5" />
-          </Button>
-        </div>
-        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-          {savedText}
-        </p>
+        <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm leading-5">{savedText}</p>
+        <Button
+          className="-my-1 -mr-1 shrink-0 text-muted-foreground"
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Delete comment"
+          onClick={onDelete}
+        >
+          <Trash2 className="size-3" />
+        </Button>
       </div>
     );
   }
@@ -49,23 +48,23 @@ export function LocalCommentAnnotation({
   return (
     <div
       data-file-comment-annotation
-      className="mx-3 my-2 rounded-xl border border-border/70 bg-background p-3 shadow-lg"
+      className="px-3 py-2 font-sans text-foreground"
       contentEditable={false}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="flex items-center gap-2">
-        <MessageCircle className="size-4 text-muted-foreground" />
-        <span className="text-sm font-medium">Local comment</span>
-      </div>
-      <div className="mt-1 text-xs text-muted-foreground">Comment on lines {rangeLabel}</div>
       <Textarea
         autoFocus
-        className="mt-3"
+        unstyled
+        className="relative inline-flex w-full rounded-md border border-border/50 bg-background/20 font-sans text-foreground transition-colors focus-within:border-border/70 [&_[data-slot=textarea]]:min-h-12 [&_[data-slot=textarea]]:cursor-text [&_[data-slot=textarea]]:px-2.5 [&_[data-slot=textarea]]:py-1.5 [&_[data-slot=textarea]]:font-sans [&_[data-slot=textarea]]:text-xs [&_[data-slot=textarea]]:leading-5 max-sm:[&_[data-slot=textarea]]:min-h-12"
         size="sm"
         value={text}
-        placeholder="Request change"
+        placeholder="Add a comment…"
         aria-label={`Comment on lines ${rangeLabel}`}
         onChange={(event) => setText(event.target.value)}
+        onFocus={(event) => {
+          const end = event.currentTarget.value.length;
+          event.currentTarget.setSelectionRange(end, end);
+        }}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
@@ -77,11 +76,17 @@ export function LocalCommentAnnotation({
           }
         }}
       />
-      <div className="mt-3 flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
+      <div className="mt-1.5 flex items-center gap-1">
+        <span className="mr-auto text-[10px] text-muted-foreground/70">⌘/Ctrl Enter to send</span>
+        <Button
+          className="text-muted-foreground hover:text-foreground"
+          variant="ghost"
+          size="xs"
+          onClick={onCancel}
+        >
           Cancel
         </Button>
-        <Button size="sm" disabled={!text.trim()} onClick={() => onComment(text.trim())}>
+        <Button size="xs" disabled={!text.trim()} onClick={() => onComment(text.trim())}>
           Comment
         </Button>
       </div>
