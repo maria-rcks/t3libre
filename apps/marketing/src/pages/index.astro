@@ -351,8 +351,8 @@ const faqs = [
     class="sec-connect"
     aria-label="T3 Connect pairs your other screens to the machine running T3 Code"
   >
-    <div class="connect-sticky">
-      <div class="connect-stage" data-connect-stage>
+    <div class="container">
+      <div class="connect-stage">
         <div class="connect-heading">
           <h2 class="connect-statement">
             <span>T3 Connect</span>
@@ -360,7 +360,7 @@ const faqs = [
           <p class="connect-sub">One click. Use from anywhere.</p>
         </div>
 
-        <div class="connect-switch" data-connect-card>
+        <div class="connect-switch">
           <div class="connect-switch__source">
             <span class="connect-host__status"></span>
             <strong>Theo’s Mac Studio</strong>
@@ -371,9 +371,7 @@ const faqs = [
               <strong>T3 Connect</strong>
               <p>Securely expose this environment to your other screens.</p>
             </div>
-            <span class="connect-toggle" data-connect-toggle aria-hidden="true"
-              ><i></i></span
-            >
+            <span class="connect-toggle" aria-hidden="true"><i></i></span>
           </div>
         </div>
 
@@ -391,8 +389,8 @@ const faqs = [
 
         <ul class="connect-devices" aria-label="Screens paired through T3 Connect">
           {
-            connectDevices.map((device, index) => (
-              <li data-connect-device style={`--device-index: ${index}`}>
+            connectDevices.map((device) => (
+              <li>
                 <svg
                   class="connect-device__icon"
                   viewBox="0 0 24 24"
@@ -403,7 +401,7 @@ const faqs = [
                 <span class="connect-device__name">{device.name}</span>
                 <span class="connect-device__status">
                   <i />
-                  <b data-device-status>Connected</b>
+                  <b>Connected</b>
                 </span>
               </li>
             ))
@@ -1195,103 +1193,6 @@ const faqs = [
     });
   }
 
-  function initConnectConvergence() {
-    const section = document.getElementById("connect");
-    const stage = section?.querySelector<HTMLElement>("[data-connect-stage]");
-    const heading = section?.querySelector<HTMLElement>(".connect-heading");
-    const card = section?.querySelector<HTMLElement>("[data-connect-card]");
-    const devices = Array.from(
-      section?.querySelectorAll<HTMLElement>("[data-connect-device]") ?? [],
-    );
-    if (!section || !stage || !heading || !card) {
-      return;
-    }
-
-    const reducedMotionQuery = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    );
-    const compactLayoutQuery = window.matchMedia("(max-width: 820px)");
-    const clamp = (value: number) => Math.max(0, Math.min(1, value));
-    const smooth = (value: number) => value * value * (3 - 2 * value);
-    const settle = (value: number) => {
-      const c1 = 1.70158;
-      const c3 = c1 + 1;
-      const t = value - 1;
-      return 1 + c3 * t * t * t + c1 * t * t;
-    };
-    let frameRequest = 0;
-    let isListening = false;
-
-    const render = () => {
-      frameRequest = 0;
-      const isStatic =
-        reducedMotionQuery.matches || compactLayoutQuery.matches;
-      const travel = Math.max(1, section.offsetHeight - window.innerHeight);
-      const progress = isStatic
-        ? 1
-        : clamp(-section.getBoundingClientRect().top / travel);
-
-      const headingProgress = smooth(clamp(progress / 0.14));
-      const cardProgress = smooth(clamp((progress - 0.1) / 0.16));
-      const isLive = progress > 0.34;
-      const dropProgress = smooth(clamp((progress - 0.38) / 0.12));
-
-      heading.style.opacity = headingProgress.toFixed(4);
-      heading.style.transform = `translateY(${(1 - headingProgress) * 18}px)`;
-      card.style.opacity = cardProgress.toFixed(4);
-      card.style.transform = `translateY(${(1 - cardProgress) * 26}px) scale(${0.97 + cardProgress * 0.03})`;
-      card.style.filter = `blur(${((1 - cardProgress) * 6).toFixed(2)}px)`;
-      stage.classList.toggle("is-live", isLive);
-      stage.style.setProperty(
-        "--connect-route-progress",
-        dropProgress.toFixed(4),
-      );
-
-      devices.forEach((device, index) => {
-        const enter = 0.5 + index * 0.07;
-        const deviceProgress = smooth(clamp((progress - enter) / 0.09));
-        const pop = settle(deviceProgress);
-        const isConnected = progress > enter + 0.1;
-        device.style.opacity = deviceProgress.toFixed(4);
-        device.style.transform = `translateY(${(1 - pop) * 22}px) scale(${0.9 + pop * 0.1})`;
-        device.style.filter = `blur(${((1 - deviceProgress) * 5).toFixed(2)}px)`;
-        device.classList.toggle("is-connected", isConnected);
-        const status = device.querySelector<HTMLElement>(
-          "[data-device-status]",
-        );
-        if (status) {
-          const label = isConnected ? "Connected" : "Pairing…";
-          if (status.textContent !== label) status.textContent = label;
-        }
-      });
-    };
-
-    const scheduleRender = () => {
-      if (frameRequest) return;
-      frameRequest = requestAnimationFrame(render);
-    };
-    const setListening = (nextListening: boolean) => {
-      if (nextListening === isListening) return;
-      isListening = nextListening;
-      if (isListening) {
-        window.addEventListener("scroll", scheduleRender, { passive: true });
-        window.addEventListener("resize", scheduleRender, { passive: true });
-        scheduleRender();
-      } else {
-        window.removeEventListener("scroll", scheduleRender);
-        window.removeEventListener("resize", scheduleRender);
-      }
-    };
-
-    new IntersectionObserver(
-      ([entry]) => setListening(entry?.isIntersecting ?? false),
-      { rootMargin: "120px 0px" },
-    ).observe(section);
-    reducedMotionQuery.addEventListener("change", scheduleRender);
-    compactLayoutQuery.addEventListener("change", scheduleRender);
-    render();
-  }
-
   initChannelPickers();
   document.addEventListener("t3-marketing-stage-change", (event) => {
     const stage = (event as CustomEvent<{ stage?: unknown }>).detail?.stage;
@@ -1301,7 +1202,6 @@ const faqs = [
   });
   init();
   initMobileHeroShowcase();
-  initConnectConvergence();
 
   const heroDemoFrame = document.querySelector<HTMLElement>(".hero-demo-frame");
   const heroDemoIframe =
@@ -2109,50 +2009,10 @@ const faqs = [
   }
 
   /* ── T3 Connect: one switch, every screen ───────────────── */
-  .sec-connect {
-    height: 280svh;
-    padding: 0;
-    border-top: 0;
-    background: #050506;
-  }
-
-  .connect-sticky {
-    position: sticky;
-    top: 0;
-    display: grid;
-    height: 100svh;
-    overflow: hidden;
-    place-items: center;
-  }
-
   .connect-stage {
-    --connect-route-progress: 0;
-    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: min(100%, 1440px);
-    padding: 24px;
-    isolation: isolate;
-  }
-
-  .connect-stage::after {
-    position: absolute;
-    inset: -30% 0;
-    z-index: -1;
-    background-image: radial-gradient(
-      rgba(214, 208, 255, 0.2) 1px,
-      transparent 1px
-    );
-    background-size: 26px 26px;
-    content: "";
-    mask-image: radial-gradient(
-      ellipse 46% 54% at 50% 50%,
-      #000 12%,
-      transparent 68%
-    );
-    opacity: 0.5;
-    pointer-events: none;
   }
 
   .connect-heading {
@@ -2188,7 +2048,7 @@ const faqs = [
     position: relative;
     z-index: 2;
     width: min(100%, 520px);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(178, 165, 255, 0.24);
     border-radius: 16px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 46%),
@@ -2196,18 +2056,6 @@ const faqs = [
     box-shadow:
       inset 0 1px rgba(255, 255, 255, 0.08),
       0 30px 80px rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(18px);
-    transition:
-      border-color 0.5s ease,
-      box-shadow 0.5s ease;
-  }
-
-  .is-live .connect-switch {
-    border-color: rgba(178, 165, 255, 0.3);
-    box-shadow:
-      inset 0 1px rgba(255, 255, 255, 0.08),
-      0 30px 80px rgba(0, 0, 0, 0.55),
-      0 0 70px rgba(133, 121, 255, 0.14);
   }
 
   .connect-switch__source {
@@ -2259,9 +2107,8 @@ const faqs = [
     height: 27px;
     flex: 0 0 auto;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.14);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
-    transition: background 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    background: #6d5ce6;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
   }
 
   .connect-toggle i {
@@ -2273,23 +2120,11 @@ const faqs = [
     border-radius: 50%;
     background: #fff;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-    transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
-  }
-
-  .is-live .connect-toggle {
-    background: #6d5ce6;
-    box-shadow:
-      inset 0 1px 2px rgba(0, 0, 0, 0.25),
-      0 0 22px rgba(109, 92, 230, 0.55);
-  }
-
-  .is-live .connect-toggle i {
     transform: translateX(19px);
   }
 
   .connect-host__status,
   .connect-device__status i {
-    position: relative;
     width: 7px;
     height: 7px;
     flex: 0 0 auto;
@@ -2298,13 +2133,12 @@ const faqs = [
     box-shadow: 0 0 14px rgba(159, 232, 143, 0.65);
   }
 
-  /* Beams from the switch to every paired screen; they only fade in. */
+  /* Beams from the switch to every paired screen. */
   .connect-drop {
     z-index: 1;
     width: min(100%, 780px);
     height: 88px;
     overflow: visible;
-    opacity: var(--connect-route-progress);
   }
 
   .connect-drop path {
@@ -2313,7 +2147,6 @@ const faqs = [
     stroke-linecap: round;
     stroke-width: 1.25;
     vector-effect: non-scaling-stroke;
-    filter: drop-shadow(0 0 6px rgba(154, 137, 255, 0.35));
   }
 
   .connect-devices {
@@ -2323,7 +2156,7 @@ const faqs = [
     justify-content: center;
     gap: 10px;
     padding: 0;
-    margin: 0 0 44px;
+    margin: 0;
     list-style: none;
   }
 
@@ -2339,8 +2172,6 @@ const faqs = [
     box-shadow:
       inset 0 1px rgba(255, 255, 255, 0.06),
       0 16px 40px rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(14px);
-    opacity: 0;
   }
 
   .connect-device__icon {
@@ -2369,32 +2200,13 @@ const faqs = [
     border-left: 1px solid rgba(255, 255, 255, 0.1);
   }
 
-  .connect-device__status i {
-    background: rgba(255, 255, 255, 0.28);
-    box-shadow: none;
-    transition:
-      background 0.4s ease,
-      box-shadow 0.4s ease;
-  }
-
   .connect-device__status b {
-    color: rgba(255, 255, 255, 0.42);
+    color: rgba(214, 245, 205, 0.85);
     font-family: var(--font-mono);
     font-size: 9.5px;
     font-weight: 500;
     letter-spacing: 0.04em;
-    transition: color 0.4s ease;
   }
-
-  .connect-devices li.is-connected .connect-device__status i {
-    background: #9fe88f;
-    box-shadow: 0 0 12px rgba(159, 232, 143, 0.7);
-  }
-
-  .connect-devices li.is-connected .connect-device__status b {
-    color: rgba(214, 245, 205, 0.85);
-  }
-
 
   /* ── Endorsements ─────────────────────────────────────── */
   .sec-endorsements {
@@ -3498,21 +3310,6 @@ const faqs = [
       padding-left: 20px;
       padding-right: 20px;
     }
-    .sec-connect {
-      height: auto;
-    }
-    .connect-sticky {
-      position: relative;
-      height: auto;
-      padding: 84px 0;
-    }
-    .connect-stage {
-      width: 100%;
-      padding: 0 20px;
-    }
-    .connect-stage::before {
-      inset: 14% -30%;
-    }
     .connect-statement {
       font-size: clamp(42px, 12vw, 56px);
     }
@@ -3524,9 +3321,6 @@ const faqs = [
     }
     .connect-drop {
       height: 56px;
-    }
-    .connect-devices {
-      margin-bottom: 32px;
     }
     .hero-preview,
     .hero-mobile-store {
