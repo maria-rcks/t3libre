@@ -2217,9 +2217,10 @@ const faqs = [
     opacity: 0;
   }
 
+  /* One pass down each line, then the beams and green dots say the rest. */
   .connect-visual.is-inview .connect-drop__signals path {
-    animation: connect-signal 3.6s linear
-      calc(1.05s + var(--signal-index, 0) * 0.9s) infinite;
+    animation: connect-signal 1.3s ease-out
+      calc(1.1s + var(--signal-index, 0) * 0.15s) both;
   }
 
   @keyframes connect-signal {
