@@ -351,7 +351,7 @@ const faqs = [
     class="sec-showcase"
     aria-label="T3 Connect pairs your other screens to the machine running T3 Code"
   >
-    <div class="container showcase-inner showcase-inner--image-left">
+    <div class="container showcase-inner">
       <div class="showcase-copy">
         <div class="section-head">
           <h2>T3 Connect</h2>
@@ -382,10 +382,34 @@ const faqs = [
             preserveAspectRatio="none"
             aria-hidden="true"
           >
-            <path d="M260 0 C260 46 48 34 48 90" />
-            <path d="M260 0 C260 54 192 44 192 90" />
-            <path d="M260 0 C260 54 332 44 332 90" />
-            <path d="M260 0 C260 46 457 34 457 90" />
+            <g class="connect-drop__beams">
+              <path d="M260 0 C260 46 48 34 48 90" />
+              <path d="M260 0 C260 54 192 44 192 90" />
+              <path d="M260 0 C260 54 332 44 332 90" />
+              <path d="M260 0 C260 46 457 34 457 90" />
+            </g>
+            <g class="connect-drop__signals">
+              <path
+                pathLength="1"
+                style="--signal-index: 0"
+                d="M260 0 C260 46 48 34 48 90"
+              />
+              <path
+                pathLength="1"
+                style="--signal-index: 1"
+                d="M260 0 C260 54 192 44 192 90"
+              />
+              <path
+                pathLength="1"
+                style="--signal-index: 2"
+                d="M260 0 C260 54 332 44 332 90"
+              />
+              <path
+                pathLength="1"
+                style="--signal-index: 3"
+                d="M260 0 C260 46 457 34 457 90"
+              />
+            </g>
           </svg>
 
           <ul
@@ -2035,6 +2059,16 @@ const faqs = [
     align-items: center;
   }
 
+  #connect .showcase-copy .section-head h2 {
+    font-size: clamp(52px, 5.2vw, 76px);
+    line-height: 0.98;
+  }
+
+  #connect .showcase-copy .section-head p {
+    font-size: clamp(22px, 2vw, 28px);
+    line-height: 1.25;
+  }
+
   /* The one setting that matters, lifted straight out of the app. */
   .connect-switch {
     position: relative;
@@ -2155,19 +2189,56 @@ const faqs = [
     overflow: visible;
   }
 
-  .connect-drop path {
+  .connect-drop__beams path,
+  .connect-drop__signals path {
     fill: none;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .connect-drop__beams path {
     stroke: rgba(171, 159, 255, 0.42);
     stroke-linecap: round;
     stroke-width: 1.25;
-    vector-effect: non-scaling-stroke;
     filter: drop-shadow(0 0 6px rgba(154, 137, 255, 0.35));
     opacity: 0;
     transition: opacity 0.7s ease 1.05s;
   }
 
-  .connect-visual.is-inview .connect-drop path {
+  .connect-visual.is-inview .connect-drop__beams path {
     opacity: 1;
+  }
+
+  .connect-drop__signals path {
+    stroke: rgba(226, 221, 255, 0.98);
+    stroke-dasharray: 0.1 1;
+    stroke-dashoffset: 1;
+    stroke-linecap: round;
+    stroke-width: 2.5;
+    filter: drop-shadow(0 0 5px rgba(172, 157, 255, 0.95));
+    opacity: 0;
+  }
+
+  .connect-visual.is-inview .connect-drop__signals path {
+    animation: connect-signal 2.4s linear
+      calc(1.05s + var(--signal-index, 0) * 0.6s) infinite;
+  }
+
+  @keyframes connect-signal {
+    0% {
+      stroke-dashoffset: 1;
+      opacity: 0;
+    }
+
+    10%,
+    62% {
+      opacity: 1;
+    }
+
+    72%,
+    100% {
+      stroke-dashoffset: -0.1;
+      opacity: 0;
+    }
   }
 
   .connect-devices {
@@ -2246,17 +2317,21 @@ const faqs = [
     .connect-switch,
     .connect-toggle,
     .connect-toggle i,
-    .connect-drop path,
+    .connect-drop__beams path,
     .connect-devices li,
     .connect-device__dot {
       transition: none;
     }
 
     .connect-switch,
-    .connect-drop path,
+    .connect-drop__beams path,
     .connect-devices li {
       opacity: 1;
       transform: none;
+    }
+
+    .connect-drop__signals {
+      display: none;
     }
 
     .connect-toggle {
@@ -3627,6 +3702,14 @@ const faqs = [
   }
 
   @media (max-width: 560px) {
+    #connect .showcase-copy .section-head h2 {
+      font-size: 42px;
+    }
+
+    #connect .showcase-copy .section-head p {
+      font-size: 19px;
+    }
+
     .showcase-copy .section-head h2 {
       font-size: 34px;
     }
