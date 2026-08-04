@@ -2383,8 +2383,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
       const [oldContents, newContents] = yield* Effect.all(
         [
-          readReviewFileAtRevision(input, input.baseRef ?? "HEAD", input.oldPath),
-          readWorkingTreeReviewFile(input, repositoryRoot),
+          input.changeType === "new"
+            ? Effect.succeed("")
+            : readReviewFileAtRevision(input, input.baseRef ?? "HEAD", input.oldPath),
+          input.changeType === "deleted"
+            ? Effect.succeed("")
+            : readWorkingTreeReviewFile(input, repositoryRoot),
         ],
         { concurrency: 2 },
       );
@@ -2407,8 +2411,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     const [oldContents, newContents] = yield* Effect.all(
       [
-        readReviewFileAtRevision(input, mergeBase, input.oldPath),
-        readReviewFileAtRevision(input, input.headRef, input.newPath),
+        input.changeType === "new"
+          ? Effect.succeed("")
+          : readReviewFileAtRevision(input, mergeBase, input.oldPath),
+        input.changeType === "deleted"
+          ? Effect.succeed("")
+          : readReviewFileAtRevision(input, input.headRef, input.newPath),
       ],
       { concurrency: 2 },
     );

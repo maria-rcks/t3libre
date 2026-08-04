@@ -5354,6 +5354,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           client[WS_METHODS.reviewGetDiffFileContents]({
             cwd: "/tmp/repo",
             sourceKind: "working-tree",
+            changeType: "change",
             baseRef: "HEAD",
             headRef: null,
             oldPath: "README.md",

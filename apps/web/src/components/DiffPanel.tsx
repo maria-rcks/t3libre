@@ -580,6 +580,7 @@ export default function DiffPanel({
         input: {
           cwd: preview.cwd,
           sourceKind: source.kind,
+          changeType: fileDiff.type,
           baseRef: source.baseRef,
           headRef: source.headRef,
           oldPath,

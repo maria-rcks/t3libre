@@ -28,6 +28,7 @@ export type ReviewDiffPreviewSource = typeof ReviewDiffPreviewSource.Type;
 export const ReviewDiffFileContentsInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   sourceKind: ReviewDiffPreviewSourceKind,
+  changeType: Schema.Literals(["change", "rename-pure", "rename-changed", "new", "deleted"]),
   baseRef: Schema.NullOr(TrimmedNonEmptyString),
   headRef: Schema.NullOr(TrimmedNonEmptyString),
   oldPath: TrimmedNonEmptyString,

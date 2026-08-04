@@ -816,6 +816,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         const contents = yield* driver.getReviewDiffFileContents({
           cwd: pathService.join(cwd, "nested"),
           sourceKind: "working-tree",
+          changeType: "change",
           baseRef: "HEAD",
           headRef: null,
           oldPath: "README.md",
@@ -824,6 +825,48 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
         assert.strictEqual(contents.oldContents, "# test\n");
         assert.strictEqual(contents.newContents, "# changed\nunchanged context\n");
+      }),
+    );
+
+    it.effect("loads new and deleted files without reading their missing side", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        yield* writeTextFile(cwd, "added.ts", "export const added = true;\n");
+        yield* fileSystem.remove(pathService.join(cwd, "README.md"));
+
+        const [added, deleted] = yield* Effect.all([
+          driver.getReviewDiffFileContents({
+            cwd,
+            sourceKind: "working-tree",
+            changeType: "new",
+            baseRef: "HEAD",
+            headRef: null,
+            oldPath: "added.ts",
+            newPath: "added.ts",
+          }),
+          driver.getReviewDiffFileContents({
+            cwd,
+            sourceKind: "working-tree",
+            changeType: "deleted",
+            baseRef: "HEAD",
+            headRef: null,
+            oldPath: "README.md",
+            newPath: "README.md",
+          }),
+        ]);
+
+        assert.deepStrictEqual(added, {
+          oldContents: "",
+          newContents: "export const added = true;\n",
+        });
+        assert.deepStrictEqual(deleted, {
+          oldContents: "# test\n",
+          newContents: "",
+        });
       }),
     );
 
@@ -840,6 +883,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         const contents = yield* driver.getReviewDiffFileContents({
           cwd,
           sourceKind: "branch-range",
+          changeType: "change",
           baseRef: initialBranch,
           headRef: "feature/context",
           oldPath: "README.md",
