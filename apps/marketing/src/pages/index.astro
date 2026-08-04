@@ -377,14 +377,14 @@ const faqs = [
 
         <svg
           class="connect-drop"
-          viewBox="0 0 780 90"
+          viewBox="0 0 1176 90"
           preserveAspectRatio="none"
           aria-hidden="true"
         >
-          <path d="M390 0 C390 46 84 38 84 90" />
-          <path d="M390 0 C390 52 295 46 295 90" />
-          <path d="M390 0 C390 52 502 46 502 90" />
-          <path d="M390 0 C390 46 689 38 689 90" />
+          <path d="M588 0 C588 46 85 34 85 90" />
+          <path d="M588 0 C588 54 424 44 424 90" />
+          <path d="M588 0 C588 54 761 44 761 90" />
+          <path d="M588 0 C588 46 1081 34 1081 90" />
         </svg>
 
         <ul class="connect-devices" aria-label="Screens paired through T3 Connect">
@@ -2136,7 +2136,7 @@ const faqs = [
   /* Beams from the switch to every paired screen. */
   .connect-drop {
     z-index: 1;
-    width: min(100%, 780px);
+    width: 100%;
     height: 88px;
     overflow: visible;
   }
@@ -2152,8 +2152,9 @@ const faqs = [
   .connect-devices {
     z-index: 2;
     display: flex;
+    width: 100%;
     flex-wrap: wrap;
-    justify-content: center;
+    justify-content: space-between;
     gap: 10px;
     padding: 0;
     margin: 0;
@@ -3321,6 +3322,9 @@ const faqs = [
     }
     .connect-drop {
       height: 56px;
+    }
+    .connect-devices {
+      justify-content: center;
     }
     .hero-preview,
     .hero-mobile-store {
