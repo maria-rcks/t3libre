@@ -152,10 +152,7 @@ export function resolveFileDiffPath(fileDiff: FileDiffMetadata): string {
 }
 
 export function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string {
-  const cacheKey = fileDiff.cacheKey;
-  if (!cacheKey) return `${fileDiff.prevName ?? "none"}:${fileDiff.name}`;
-
-  return cacheKey.endsWith(":hydrated") ? cacheKey.slice(0, -":hydrated".length) : cacheKey;
+  return fileDiff.cacheKey ?? `${fileDiff.prevName ?? "none"}:${fileDiff.name}`;
 }
 
 export function getDiffCollapseIconClassName(fileDiff: FileDiffMetadata): string {
