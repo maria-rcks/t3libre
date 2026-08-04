@@ -464,6 +464,33 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("grid-cols-1");
   });
 
+  it("preserves a user caption that matches the readable bootstrap instruction", () => {
+    const caption =
+      "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+    const captionedImageEntry = {
+      ...buildUserTimelineEntry(caption),
+      message: {
+        ...buildUserTimelineEntry(caption).message,
+        attachments: [
+          {
+            type: "image" as const,
+            id: "attachment-caption-collision",
+            name: "captioned.png",
+            mimeType: "image/png",
+            sizeBytes: 1,
+            previewUrl: "data:image/png;base64,iVBORw0KGgo=",
+          },
+        ],
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[captionedImageEntry]} />,
+    );
+
+    expect(markup).toContain("User attached one or more images without additional text");
+    expect(markup).toContain('data-user-message-content="true"');
+  });
+
   it("collapses larger attachment sets into a four-tile mosaic", () => {
     const mosaicEntry = {
       ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT),
@@ -501,9 +528,7 @@ describe("MessagesTimeline", () => {
       name: `image-${index + 1}.png`,
       mimeType: "image/png",
       sizeBytes: 1,
-      ...(index === 3
-        ? {}
-        : { previewUrl: `data:image/png;base64,image-${index + 1}` }),
+      ...(index === 3 ? {} : { previewUrl: `data:image/png;base64,image-${index + 1}` }),
     }));
     const mosaicEntry = {
       ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT),
@@ -519,6 +544,8 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('alt="image-5.png"');
     expect(markup).toContain('aria-label="Preview image-5.png and 2 more images"');
     expect(markup).toContain(">+2</span>");
+    expect(markup).toContain('data-user-message-attachments-without-previews="true"');
+    expect(markup).toContain("image-4.png");
   });
 
   it("shows the collapsed count when no attachments have previews", () => {
@@ -542,6 +569,8 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("image-4.png");
     expect(markup).toContain(">+2</span>");
+    expect(markup).toContain('data-user-message-attachments-without-previews="true"');
+    expect(markup).toContain("image-5.png, image-6.png");
   });
 
   it("uses one large square and two stacked squares for three attachments", () => {

@@ -1,5 +1,7 @@
-export const IMAGE_ONLY_BOOTSTRAP_PROMPT =
-  "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+const IMAGE_ONLY_BOOTSTRAP_MARKER = "\u2063t3:image-only:v1\u2063";
+
+export const IMAGE_ONLY_BOOTSTRAP_PROMPT = `${IMAGE_ONLY_BOOTSTRAP_MARKER}
+[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]`;
 
 const ULTRATHINK_PREFIX = "Ultrathink:\n";
 
