@@ -39,6 +39,7 @@ describe("AnnotatableCodeView", () => {
   it("opens comments from Pierre's gutter action without ending line selection", () => {
     renderToStaticMarkup(
       <AnnotatableCodeView
+        codeViewKey="test-view"
         files={[]}
         sectionId="working-tree"
         sectionTitle="Working tree"

@@ -1158,7 +1158,7 @@ export default function DiffPanel({
               >
                 <AnnotatableCodeView
                   viewerRef={codeViewRef}
-                  key={codeViewMountKey}
+                  codeViewKey={codeViewMountKey}
                   className="diff-render-surface h-full min-h-0 overflow-auto"
                   files={codeViewFiles}
                   sectionId={reviewSectionId}

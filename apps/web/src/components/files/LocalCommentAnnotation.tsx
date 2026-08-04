@@ -8,6 +8,7 @@ interface LocalCommentAnnotationProps {
   kind: "draft" | "comment";
   rangeLabel: string;
   text: string;
+  onTextChange?: (text: string) => void;
   onCancel: () => void;
   onComment: (text: string) => void;
   onDelete: () => void;
@@ -16,12 +17,14 @@ interface LocalCommentAnnotationProps {
 export function LocalCommentAnnotation({
   kind,
   rangeLabel,
-  text: savedText,
+  text,
+  onTextChange,
   onCancel,
   onComment,
   onDelete,
 }: LocalCommentAnnotationProps) {
-  const [text, setText] = useState("");
+  const [localDraftText, setLocalDraftText] = useState("");
+  const displayedText = kind === "draft" && !onTextChange ? localDraftText : text;
 
   if (kind === "comment") {
     return (
@@ -31,7 +34,7 @@ export function LocalCommentAnnotation({
         contentEditable={false}
         onPointerDown={(event) => event.stopPropagation()}
       >
-        <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm leading-5">{savedText}</p>
+        <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm leading-5">{displayedText}</p>
         <Button
           className="-my-1 -mr-1 shrink-0 text-muted-foreground"
           variant="ghost"
@@ -57,10 +60,10 @@ export function LocalCommentAnnotation({
         unstyled
         className="relative inline-flex w-full rounded-md border border-border/50 bg-background/20 font-sans text-foreground transition-colors focus-within:border-border/70 [&_[data-slot=textarea]]:min-h-12 [&_[data-slot=textarea]]:cursor-text [&_[data-slot=textarea]]:px-2.5 [&_[data-slot=textarea]]:py-1.5 [&_[data-slot=textarea]]:font-sans [&_[data-slot=textarea]]:text-xs [&_[data-slot=textarea]]:leading-5 max-sm:[&_[data-slot=textarea]]:min-h-12"
         size="sm"
-        value={text}
+        value={displayedText}
         placeholder="Add a comment…"
         aria-label={`Comment on lines ${rangeLabel}`}
-        onChange={(event) => setText(event.target.value)}
+        onChange={(event) => (onTextChange ?? setLocalDraftText)(event.target.value)}
         onFocus={(event) => {
           const end = event.currentTarget.value.length;
           event.currentTarget.setSelectionRange(end, end);
@@ -70,9 +73,9 @@ export function LocalCommentAnnotation({
             event.preventDefault();
             onCancel();
           }
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && text.trim()) {
+          if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && displayedText.trim()) {
             event.preventDefault();
-            onComment(text.trim());
+            onComment(displayedText.trim());
           }
         }}
       />
@@ -86,7 +89,11 @@ export function LocalCommentAnnotation({
         >
           Cancel
         </Button>
-        <Button size="xs" disabled={!text.trim()} onClick={() => onComment(text.trim())}>
+        <Button
+          size="xs"
+          disabled={!displayedText.trim()}
+          onClick={() => onComment(displayedText.trim())}
+        >
           Comment
         </Button>
       </div>

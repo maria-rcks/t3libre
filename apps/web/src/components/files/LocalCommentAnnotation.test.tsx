@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { LocalCommentAnnotation } from "./LocalCommentAnnotation";
 
 const callbacks = {
+  onTextChange: vi.fn(),
   onCancel: vi.fn(),
   onComment: vi.fn(),
   onDelete: vi.fn(),
@@ -45,5 +46,18 @@ describe("LocalCommentAnnotation", () => {
     expect(markup).not.toContain("on +78");
     expect(markup).toContain("Please keep this branch explicit.");
     expect(markup).toContain('aria-label="Delete comment"');
+  });
+
+  it("renders draft text owned by the annotation wrapper", () => {
+    const markup = renderToStaticMarkup(
+      <LocalCommentAnnotation
+        kind="draft"
+        rangeLabel="+78"
+        text="Keep this unsaved draft"
+        {...callbacks}
+      />,
+    );
+
+    expect(markup).toContain("Keep this unsaved draft");
   });
 });
