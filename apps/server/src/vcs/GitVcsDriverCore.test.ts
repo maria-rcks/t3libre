@@ -803,6 +803,53 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         );
       }),
     );
+
+    it.effect("loads full file contents for working-tree diff expansion", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const pathService = yield* Path.Path;
+        yield* writeTextFile(cwd, "nested/.keep", "");
+        yield* writeTextFile(cwd, "README.md", "# changed\nunchanged context\n");
+
+        const contents = yield* driver.getReviewDiffFileContents({
+          cwd: pathService.join(cwd, "nested"),
+          sourceKind: "working-tree",
+          baseRef: "HEAD",
+          headRef: null,
+          oldPath: "README.md",
+          newPath: "README.md",
+        });
+
+        assert.strictEqual(contents.oldContents, "# test\n");
+        assert.strictEqual(contents.newContents, "# changed\nunchanged context\n");
+      }),
+    );
+
+    it.effect("loads merge-base and head contents for branch diff expansion", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/context"]);
+        yield* writeTextFile(cwd, "README.md", "# branch change\nunchanged context\n");
+        yield* git(cwd, ["add", "README.md"]);
+        yield* git(cwd, ["commit", "-m", "change readme"]);
+
+        const contents = yield* driver.getReviewDiffFileContents({
+          cwd,
+          sourceKind: "branch-range",
+          baseRef: initialBranch,
+          headRef: "feature/context",
+          oldPath: "README.md",
+          newPath: "README.md",
+        });
+
+        assert.strictEqual(contents.oldContents, "# test\n");
+        assert.strictEqual(contents.newContents, "# branch change\nunchanged context\n");
+      }),
+    );
   });
 
   describe("repository status", () => {
