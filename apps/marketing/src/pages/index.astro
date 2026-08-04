@@ -2209,18 +2209,17 @@ const faqs = [
   }
 
   .connect-drop__signals path {
-    stroke: rgba(226, 221, 255, 0.98);
-    stroke-dasharray: 0.1 1;
+    stroke: rgba(216, 209, 255, 0.55);
+    stroke-dasharray: 0.06 1;
     stroke-dashoffset: 1;
     stroke-linecap: round;
-    stroke-width: 2.5;
-    filter: drop-shadow(0 0 5px rgba(172, 157, 255, 0.95));
+    stroke-width: 1.25;
     opacity: 0;
   }
 
   .connect-visual.is-inview .connect-drop__signals path {
-    animation: connect-signal 2.4s linear
-      calc(1.05s + var(--signal-index, 0) * 0.6s) infinite;
+    animation: connect-signal 3.6s linear
+      calc(1.05s + var(--signal-index, 0) * 0.9s) infinite;
   }
 
   @keyframes connect-signal {
@@ -2229,14 +2228,14 @@ const faqs = [
       opacity: 0;
     }
 
-    10%,
-    62% {
-      opacity: 1;
+    12%,
+    55% {
+      opacity: 0.7;
     }
 
-    72%,
+    68%,
     100% {
-      stroke-dashoffset: -0.1;
+      stroke-dashoffset: -0.06;
       opacity: 0;
     }
   }
