@@ -348,65 +348,67 @@ const faqs = [
   <!-- ── T3 Connect: one switch, every screen ─────────────────── -->
   <section
     id="connect"
-    class="sec-connect"
+    class="sec-showcase"
     aria-label="T3 Connect pairs your other screens to the machine running T3 Code"
   >
-    <div class="container">
-      <div class="connect-stage">
-        <div class="connect-heading">
-          <h2 class="connect-statement">
-            <span>T3 Connect</span>
-          </h2>
-          <p class="connect-sub">One click. Use from anywhere.</p>
+    <div class="container showcase-inner showcase-inner--image-left">
+      <div class="showcase-copy">
+        <div class="section-head">
+          <h2>T3 Connect</h2>
+          <p>One click. Use from anywhere.</p>
         </div>
+      </div>
 
-        <div class="connect-switch">
-          <div class="connect-switch__source">
-            <span class="connect-host__status"></span>
-            <strong>Theo’s Mac Studio</strong>
-            <span class="connect-switch__path">Settings · Connections</span>
-          </div>
-          <div class="connect-switch__row">
-            <div class="connect-switch__copy">
-              <strong>T3 Connect</strong>
-              <p>Securely expose this environment to your other screens.</p>
+      <div class="showcase-visual">
+        <div class="connect-visual" data-connect-visual>
+          <div class="connect-switch">
+            <div class="connect-switch__source">
+              <span class="connect-host__status"></span>
+              <strong>Theo’s Mac Studio</strong>
+              <span class="connect-switch__path">Settings · Connections</span>
             </div>
-            <span class="connect-toggle" aria-hidden="true"><i></i></span>
+            <div class="connect-switch__row">
+              <div class="connect-switch__copy">
+                <strong>T3 Connect</strong>
+                <p>Securely expose this environment to your other screens.</p>
+              </div>
+              <span class="connect-toggle" aria-hidden="true"><i></i></span>
+            </div>
           </div>
+
+          <svg
+            class="connect-drop"
+            viewBox="0 0 520 90"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <path d="M260 0 C260 46 48 34 48 90" />
+            <path d="M260 0 C260 54 192 44 192 90" />
+            <path d="M260 0 C260 54 332 44 332 90" />
+            <path d="M260 0 C260 46 457 34 457 90" />
+          </svg>
+
+          <ul
+            class="connect-devices"
+            aria-label="Screens paired through T3 Connect"
+          >
+            {
+              connectDevices.map((device, index) => (
+                <li style={`--device-index: ${index}`}>
+                  <svg
+                    class="connect-device__icon"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path d={device.iconPath} />
+                  </svg>
+                  <span class="connect-device__name">{device.name}</span>
+                  <i class="connect-device__dot" aria-hidden="true" />
+                </li>
+              ))
+            }
+          </ul>
         </div>
-
-        <svg
-          class="connect-drop"
-          viewBox="0 0 1176 90"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          <path d="M588 0 C588 46 85 34 85 90" />
-          <path d="M588 0 C588 54 424 44 424 90" />
-          <path d="M588 0 C588 54 761 44 761 90" />
-          <path d="M588 0 C588 46 1081 34 1081 90" />
-        </svg>
-
-        <ul class="connect-devices" aria-label="Screens paired through T3 Connect">
-          {
-            connectDevices.map((device) => (
-              <li>
-                <svg
-                  class="connect-device__icon"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path d={device.iconPath} />
-                </svg>
-                <span class="connect-device__name">{device.name}</span>
-                <span class="connect-device__status">
-                  <i />
-                  <b>Connected</b>
-                </span>
-              </li>
-            ))
-          }
-        </ul>
       </div>
     </div>
   </section>
@@ -1193,7 +1195,24 @@ const faqs = [
     });
   }
 
+  function initConnectReveal() {
+    const visual = document.querySelector<HTMLElement>(
+      "[data-connect-visual]",
+    );
+    if (!visual) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return;
+        visual.classList.add("is-inview");
+        observer.disconnect();
+      },
+      { threshold: 0.4 },
+    );
+    observer.observe(visual);
+  }
+
   initChannelPickers();
+  initConnectReveal();
   document.addEventListener("t3-marketing-stage-change", (event) => {
     const stage = (event as CustomEvent<{ stage?: unknown }>).detail?.stage;
     if (!isStage(stage)) return;
@@ -2009,45 +2028,18 @@ const faqs = [
   }
 
   /* ── T3 Connect: one switch, every screen ───────────────── */
-  .connect-stage {
+  .connect-visual {
     display: flex;
+    width: min(100%, 520px);
     flex-direction: column;
     align-items: center;
-  }
-
-  .connect-heading {
-    margin-bottom: 44px;
-    text-align: center;
-  }
-
-  .connect-statement {
-    margin: 0 0 14px;
-    background: linear-gradient(180deg, #f6f4ff 6%, #b3a8ff 94%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
-    font-size: clamp(40px, 4.6vw, 62px);
-    font-weight: 500;
-    letter-spacing: -0.06em;
-    line-height: 0.9;
-  }
-
-  .connect-statement span {
-    display: block;
-    white-space: nowrap;
-  }
-
-  .connect-sub {
-    margin: 0;
-    color: rgba(255, 255, 255, 0.55);
-    font-size: 15px;
   }
 
   /* The one setting that matters, lifted straight out of the app. */
   .connect-switch {
     position: relative;
     z-index: 2;
-    width: min(100%, 520px);
+    width: 100%;
     border: 1px solid rgba(178, 165, 255, 0.24);
     border-radius: 16px;
     background:
@@ -2056,6 +2048,16 @@ const faqs = [
     box-shadow:
       inset 0 1px rgba(255, 255, 255, 0.08),
       0 30px 80px rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    transform: translateY(14px);
+    transition:
+      opacity 0.6s ease,
+      transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .connect-visual.is-inview .connect-switch {
+    opacity: 1;
+    transform: none;
   }
 
   .connect-switch__source {
@@ -2100,6 +2102,7 @@ const faqs = [
     line-height: 1.45;
   }
 
+  /* The switch flips itself on once the visual scrolls into view. */
   .connect-toggle {
     position: relative;
     display: block;
@@ -2107,8 +2110,9 @@ const faqs = [
     height: 27px;
     flex: 0 0 auto;
     border-radius: 999px;
-    background: #6d5ce6;
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+    background: rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+    transition: background 0.45s ease 0.7s;
   }
 
   .connect-toggle i {
@@ -2120,11 +2124,21 @@ const faqs = [
     border-radius: 50%;
     background: #fff;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.7s;
+  }
+
+  .connect-visual.is-inview .connect-toggle {
+    background: #6d5ce6;
+    box-shadow:
+      inset 0 1px 2px rgba(0, 0, 0, 0.25),
+      0 0 22px rgba(109, 92, 230, 0.55);
+  }
+
+  .connect-visual.is-inview .connect-toggle i {
     transform: translateX(19px);
   }
 
-  .connect-host__status,
-  .connect-device__status i {
+  .connect-host__status {
     width: 7px;
     height: 7px;
     flex: 0 0 auto;
@@ -2147,6 +2161,13 @@ const faqs = [
     stroke-linecap: round;
     stroke-width: 1.25;
     vector-effect: non-scaling-stroke;
+    filter: drop-shadow(0 0 6px rgba(154, 137, 255, 0.35));
+    opacity: 0;
+    transition: opacity 0.7s ease 1.05s;
+  }
+
+  .connect-visual.is-inview .connect-drop path {
+    opacity: 1;
   }
 
   .connect-devices {
@@ -2163,21 +2184,33 @@ const faqs = [
 
   .connect-devices li {
     display: inline-flex;
-    min-height: 44px;
+    min-height: 38px;
     align-items: center;
-    gap: 9px;
-    padding: 10px 14px;
+    gap: 8px;
+    padding: 8px 12px;
     border: 1px solid rgba(255, 255, 255, 0.11);
-    border-radius: 12px;
+    border-radius: 11px;
     background: rgba(9, 9, 12, 0.8);
     box-shadow:
       inset 0 1px rgba(255, 255, 255, 0.06),
       0 16px 40px rgba(0, 0, 0, 0.4);
+    opacity: 0;
+    transform: translateY(14px) scale(0.95);
+    transition:
+      opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1)
+        calc(1.15s + var(--device-index, 0) * 0.12s),
+      transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)
+        calc(1.15s + var(--device-index, 0) * 0.12s);
+  }
+
+  .connect-visual.is-inview .connect-devices li {
+    opacity: 1;
+    transform: none;
   }
 
   .connect-device__icon {
-    width: 17px;
-    height: 17px;
+    width: 16px;
+    height: 16px;
     flex: 0 0 auto;
     fill: none;
     stroke: rgba(255, 255, 255, 0.7);
@@ -2188,25 +2221,56 @@ const faqs = [
 
   .connect-device__name {
     color: rgba(255, 255, 255, 0.88);
-    font-size: 12.5px;
+    font-size: 12px;
     font-weight: 550;
     white-space: nowrap;
   }
 
-  .connect-device__status {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding-left: 10px;
-    border-left: 1px solid rgba(255, 255, 255, 0.1);
+  .connect-device__dot {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.28);
+    transition:
+      background 0.35s ease calc(1.55s + var(--device-index, 0) * 0.12s),
+      box-shadow 0.35s ease calc(1.55s + var(--device-index, 0) * 0.12s);
   }
 
-  .connect-device__status b {
-    color: rgba(214, 245, 205, 0.85);
-    font-family: var(--font-mono);
-    font-size: 9.5px;
-    font-weight: 500;
-    letter-spacing: 0.04em;
+  .connect-visual.is-inview .connect-device__dot {
+    background: #9fe88f;
+    box-shadow: 0 0 12px rgba(159, 232, 143, 0.7);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .connect-switch,
+    .connect-toggle,
+    .connect-toggle i,
+    .connect-drop path,
+    .connect-devices li,
+    .connect-device__dot {
+      transition: none;
+    }
+
+    .connect-switch,
+    .connect-drop path,
+    .connect-devices li {
+      opacity: 1;
+      transform: none;
+    }
+
+    .connect-toggle {
+      background: #6d5ce6;
+    }
+
+    .connect-toggle i {
+      transform: translateX(19px);
+    }
+
+    .connect-device__dot {
+      background: #9fe88f;
+      box-shadow: 0 0 12px rgba(159, 232, 143, 0.7);
+    }
   }
 
   /* ── Endorsements ─────────────────────────────────────── */
@@ -3311,20 +3375,11 @@ const faqs = [
       padding-left: 20px;
       padding-right: 20px;
     }
-    .connect-statement {
-      font-size: clamp(42px, 12vw, 56px);
-    }
-    .connect-heading {
-      margin-bottom: 32px;
-    }
-    .connect-sub {
-      font-size: 13.5px;
+    .connect-visual {
+      margin: 0 auto;
     }
     .connect-drop {
       height: 56px;
-    }
-    .connect-devices {
-      justify-content: center;
     }
     .hero-preview,
     .hero-mobile-store {
@@ -3572,10 +3627,6 @@ const faqs = [
   }
 
   @media (max-width: 560px) {
-    .connect-device__status {
-      display: none;
-    }
-
     .showcase-copy .section-head h2 {
       font-size: 34px;
     }
