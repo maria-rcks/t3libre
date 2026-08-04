@@ -17,7 +17,15 @@ export const UserMessageAttachments = memo(function UserMessageAttachments(
     return null;
   }
 
-  const visibleImages = props.images.slice(0, MAX_VISIBLE_IMAGES);
+  const initialVisibleImages = props.images.slice(0, MAX_VISIBLE_IMAGES);
+  const collapsedPreview =
+    props.images.length > MAX_VISIBLE_IMAGES &&
+    !initialVisibleImages[MAX_VISIBLE_IMAGES - 1]?.previewUrl
+      ? props.images.slice(MAX_VISIBLE_IMAGES).find((image) => image.previewUrl)
+      : undefined;
+  const visibleImages = collapsedPreview
+    ? [...initialVisibleImages.slice(0, MAX_VISIBLE_IMAGES - 1), collapsedPreview]
+    : initialVisibleImages;
   const collapsedImageCount = props.images.length - visibleImages.length;
   const visibleImageCount = visibleImages.length;
   const isMosaic = visibleImageCount > 1;
@@ -85,6 +93,14 @@ export const UserMessageAttachments = memo(function UserMessageAttachments(
                 )}
               >
                 {image.name}
+                {isCollapsedTile ? (
+                  <span
+                    className="absolute inset-0 flex items-center justify-center bg-black/55 text-lg font-medium text-white backdrop-blur-md"
+                    aria-hidden="true"
+                  >
+                    +{collapsedImageCount}
+                  </span>
+                ) : null}
               </div>
             )}
           </div>

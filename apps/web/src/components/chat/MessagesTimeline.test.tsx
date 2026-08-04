@@ -494,6 +494,56 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain(">+2</span>");
   });
 
+  it("uses a previewable overflow attachment for the collapsed tile", () => {
+    const attachments = Array.from({ length: 6 }, (_, index) => ({
+      type: "image" as const,
+      id: `attachment-${index + 1}`,
+      name: `image-${index + 1}.png`,
+      mimeType: "image/png",
+      sizeBytes: 1,
+      ...(index === 3
+        ? {}
+        : { previewUrl: `data:image/png;base64,image-${index + 1}` }),
+    }));
+    const mosaicEntry = {
+      ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT),
+      message: {
+        ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT).message,
+        attachments,
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[mosaicEntry]} />,
+    );
+
+    expect(markup).toContain('alt="image-5.png"');
+    expect(markup).toContain('aria-label="Preview image-5.png and 2 more images"');
+    expect(markup).toContain(">+2</span>");
+  });
+
+  it("shows the collapsed count when no attachments have previews", () => {
+    const attachments = Array.from({ length: 6 }, (_, index) => ({
+      type: "image" as const,
+      id: `attachment-${index + 1}`,
+      name: `image-${index + 1}.png`,
+      mimeType: "image/png",
+      sizeBytes: 1,
+    }));
+    const mosaicEntry = {
+      ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT),
+      message: {
+        ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT).message,
+        attachments,
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[mosaicEntry]} />,
+    );
+
+    expect(markup).toContain("image-4.png");
+    expect(markup).toContain(">+2</span>");
+  });
+
   it("uses one large square and two stacked squares for three attachments", () => {
     const threeImageEntry = {
       ...buildUserTimelineEntry(IMAGE_ONLY_BOOTSTRAP_PROMPT),
