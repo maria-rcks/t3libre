@@ -161,6 +161,23 @@ import {
       GitHub releases page<span aria-hidden="true"> &#8599;</span>
     </a>
   </p>
+
+  <div class="design-lab" role="group" aria-label="Download page design concepts">
+    <div class="design-lab-group">
+      <span>Downloads</span>
+      <button type="button" data-download-concept="base" aria-pressed="true">Base</button>
+      <button type="button" data-download-concept="index" aria-pressed="false">Index</button>
+      <button type="button" data-download-concept="deck" aria-pressed="false">Deck</button>
+      <button type="button" data-download-concept="matrix" aria-pressed="false">Matrix</button>
+    </div>
+    <div class="design-lab-divider" aria-hidden="true"></div>
+    <div class="design-lab-group">
+      <span>Footer</span>
+      <button type="button" data-footer-concept="grid" aria-pressed="true">Grid</button>
+      <button type="button" data-footer-concept="ribbon" aria-pressed="false">Ribbon</button>
+      <button type="button" data-footer-concept="map" aria-pressed="false">Map</button>
+    </div>
+  </div>
   </div>
 </Layout>
 
@@ -177,9 +194,39 @@ import {
   import { GITHUB_REPOSITORY_URL } from "../lib/site";
 
   type Stage = "latest" | "nightly" | "dev";
+  type DownloadConcept = "base" | "index" | "deck" | "matrix";
+  type FooterConcept = "grid" | "ribbon" | "map";
 
   function isStage(value: unknown): value is Stage {
     return value === "latest" || value === "nightly" || value === "dev";
+  }
+
+  function isDownloadConcept(value: unknown): value is DownloadConcept {
+    return value === "base" || value === "index" || value === "deck" || value === "matrix";
+  }
+
+  function isFooterConcept(value: unknown): value is FooterConcept {
+    return value === "grid" || value === "ribbon" || value === "map";
+  }
+
+  function setConcepts(download: DownloadConcept, footer: FooterConcept, updateUrl: boolean) {
+    const downloadPage = document.querySelector<HTMLElement>(".download-page");
+    if (downloadPage) downloadPage.dataset.downloadConcept = download;
+    document.documentElement.dataset.footerLayout = footer;
+
+    for (const button of document.querySelectorAll<HTMLButtonElement>("[data-download-concept]")) {
+      button.setAttribute("aria-pressed", String(button.dataset.downloadConcept === download));
+    }
+    for (const button of document.querySelectorAll<HTMLButtonElement>("[data-footer-concept]")) {
+      button.setAttribute("aria-pressed", String(button.dataset.footerConcept === footer));
+    }
+
+    if (updateUrl) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("downloads", download);
+      url.searchParams.set("footer", footer);
+      window.history.replaceState(null, "", url);
+    }
   }
 
   const versionLabel = document.getElementById("version-label");
@@ -272,6 +319,27 @@ import {
     });
   }
 
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-download-concept]")) {
+    button.addEventListener("click", () => {
+      const download = button.dataset.downloadConcept;
+      const footer = document.documentElement.dataset.footerLayout;
+      if (isDownloadConcept(download)) {
+        setConcepts(download, isFooterConcept(footer) ? footer : "grid", true);
+      }
+    });
+  }
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-footer-concept]")) {
+    button.addEventListener("click", () => {
+      const footer = button.dataset.footerConcept;
+      const download = document.querySelector<HTMLElement>(".download-page")?.dataset
+        .downloadConcept;
+      if (isFooterConcept(footer)) {
+        setConcepts(isDownloadConcept(download) ? download : "base", footer, true);
+      }
+    });
+  }
+
   document.addEventListener("t3-marketing-stage-change", (event) => {
     const stage = (event as CustomEvent<{ stage?: unknown }>).detail?.stage;
     if (isStage(stage)) void applyStage(stage);
@@ -291,6 +359,15 @@ import {
         copyButton.textContent = "Copy failed";
       });
   });
+
+  const conceptParams = new URL(window.location.href).searchParams;
+  const initialDownloadConcept = conceptParams.get("downloads");
+  const initialFooterConcept = conceptParams.get("footer");
+  setConcepts(
+    isDownloadConcept(initialDownloadConcept) ? initialDownloadConcept : "base",
+    isFooterConcept(initialFooterConcept) ? initialFooterConcept : "grid",
+    false,
+  );
 
   const initialStage = document.documentElement.dataset.stage;
   void applyStage(isStage(initialStage) ? initialStage : "latest");
@@ -385,15 +462,13 @@ import {
   .changelog-link {
     color: var(--fg-muted);
     font-size: 0.8rem;
-    text-decoration: underline;
-    text-decoration-color: rgba(161, 161, 170, 0.4);
-    text-underline-offset: 3px;
-    transition: color 0.3s ease, text-decoration-color 0.3s ease;
+    text-decoration: none;
+    transition: color 0.2s ease;
   }
 
   .changelog-link:hover {
     color: var(--fg);
-    text-decoration-color: var(--fg);
+    text-decoration: none;
   }
 
   /* ── Platforms ── */
@@ -567,6 +642,185 @@ import {
     color: var(--fg);
   }
 
+  /* ── Download concept 02: release index ── */
+
+  .download-page[data-download-concept="index"] .platforms {
+    display: flex;
+    max-width: 940px;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .download-page[data-download-concept="index"] .platform-section {
+    display: grid;
+    grid-template-columns: 170px minmax(0, 1fr);
+    align-items: center;
+    gap: 28px;
+    padding: 1.1rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  }
+
+  .download-page[data-download-concept="index"] .platform-section:first-child:not([hidden]) {
+    border-top: 1px solid rgba(255, 255, 255, 0.065);
+  }
+
+  .download-page[data-download-concept="index"] .download-card {
+    min-height: 46px;
+    border-color: rgba(255, 255, 255, 0.055);
+    border-radius: 6px;
+    background: transparent;
+  }
+
+  .download-page[data-download-concept="index"] .download-card:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.035);
+  }
+
+  /* ── Download concept 03: asymmetric deck ── */
+
+  .download-page[data-download-concept="deck"] .platforms {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-template-rows: repeat(3, auto);
+    gap: 16px 20px;
+    max-width: 1040px;
+  }
+
+  .download-page[data-download-concept="deck"] [data-platform="source"] {
+    grid-column: 1 / -1;
+  }
+
+  .download-page[data-download-concept="deck"] [data-platform="macos"] {
+    grid-column: 1 / 8;
+    grid-row: 1 / 3;
+    justify-content: center;
+  }
+
+  .download-page[data-download-concept="deck"] [data-platform="windows"] {
+    grid-column: 8 / 13;
+    grid-row: 1;
+  }
+
+  .download-page[data-download-concept="deck"] [data-platform="linux"] {
+    grid-column: 8 / 13;
+    grid-row: 2;
+  }
+
+  .download-page[data-download-concept="deck"] [data-platform="mobile"] {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+
+  .download-page[data-download-concept="deck"] [data-platform="macos"] .download-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .download-page[data-download-concept="deck"] .platform-header {
+    padding-bottom: 0.3rem;
+  }
+
+  .download-page[data-download-concept="deck"] .download-card {
+    min-height: 58px;
+  }
+
+  /* ── Download concept 04: compact platform matrix ── */
+
+  .download-page[data-download-concept="matrix"] .platforms {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 18px;
+    max-width: 1080px;
+  }
+
+  .download-page[data-download-concept="matrix"] .platform-section,
+  .download-page[data-download-concept="matrix"] [data-platform] {
+    grid-column: auto;
+  }
+
+  .download-page[data-download-concept="matrix"] [data-platform="source"] {
+    grid-column: 1 / -1;
+  }
+
+  .download-page[data-download-concept="matrix"] .download-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .download-page[data-download-concept="matrix"] .platform-header {
+    min-height: 32px;
+  }
+
+  .download-page[data-download-concept="matrix"] .platform-icon {
+    width: 1.4rem;
+    height: 1.4rem;
+  }
+
+  /* ── Temporary concept controls ── */
+
+  .design-lab {
+    position: fixed;
+    z-index: 60;
+    bottom: 18px;
+    left: 50%;
+    display: flex;
+    max-width: calc(100vw - 24px);
+    align-items: center;
+    gap: 10px;
+    padding: 5px;
+    overflow-x: auto;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 12px;
+    background: rgba(8, 8, 9, 0.92);
+    box-shadow: 0 14px 50px rgba(0, 0, 0, 0.42);
+    transform: translateX(-50%);
+    backdrop-filter: blur(18px);
+  }
+
+  .design-lab-group {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .design-lab-group > span {
+    padding: 0 7px;
+    color: var(--fg-dim);
+    font-family: var(--font-mono);
+    font-size: 8px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .design-lab button {
+    padding: 7px 9px;
+    border-radius: 7px;
+    color: var(--fg-dim);
+    font-size: 10px;
+    font-weight: 500;
+    transition:
+      background 0.16s ease,
+      color 0.16s ease;
+  }
+
+  .design-lab button:hover {
+    color: var(--fg-muted);
+  }
+
+  .design-lab button:focus-visible {
+    outline: 1px solid var(--fg-muted);
+    outline-offset: 1px;
+  }
+
+  .design-lab button[aria-pressed="true"] {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--fg);
+  }
+
+  .design-lab-divider {
+    width: 1px;
+    height: 22px;
+    flex: 0 0 auto;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
   /* ── Releases link ── */
 
   .releases-link {
@@ -637,6 +891,36 @@ import {
 
     .source-actions {
       justify-content: space-between;
+    }
+
+    .download-page[data-download-concept="index"] .platform-section {
+      grid-template-columns: 1fr;
+      gap: 10px;
+      padding: 1rem 0;
+    }
+
+    .download-page[data-download-concept="deck"] .platforms {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto;
+    }
+
+    .download-page[data-download-concept="deck"] .platform-section,
+    .download-page[data-download-concept="deck"] [data-platform] {
+      grid-column: auto;
+      grid-row: auto;
+    }
+
+    .download-page[data-download-concept="matrix"] .platforms {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .download-page[data-download-concept="matrix"] [data-platform="source"] {
+      grid-column: 1 / -1;
+    }
+
+    .design-lab {
+      bottom: max(10px, env(safe-area-inset-bottom));
     }
 
   }
