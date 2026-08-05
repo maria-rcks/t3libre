@@ -147,10 +147,21 @@ const faqs = [
               {heroRotatorProviders.map((provider, providerIndex) => (
                 <span
                   class="hero-rotator-item"
-                  style={`--rotator-index: ${providerIndex}; --rotator-accent: ${provider.accent}; --rotator-icon: url("${provider.icon}")`}
+                  data-hero-rotator-item
+                  data-state={providerIndex === 0 ? "active" : "idle"}
+                  style={`--rotator-accent: ${provider.accent}; --rotator-icon: url("${provider.icon}")`}
                 >
                   <i class="hero-rotator-item__icon" aria-hidden="true" />
-                  {provider.name}
+                  <span class="hero-rotator-word">
+                    {provider.name.split("").map((letter, letterIndex) => (
+                      <span
+                        class="hero-rotator-letter"
+                        style={`--letter-delay: ${90 + letterIndex * 28}ms; --letter-exit-delay: ${(provider.name.length - letterIndex - 1) * 18}ms`}
+                      >
+                        {letter}
+                      </span>
+                    ))}
+                  </span>
                 </span>
               ))}
             </span>
@@ -823,6 +834,50 @@ const faqs = [
     type ReleasePlatform,
   } from "../lib/releases";
   import { GOOGLE_PLAY_STORE_URL, IOS_APP_STORE_URL } from "../lib/site";
+
+  const heroRotatorItems = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-hero-rotator-item]"),
+  );
+  const reduceHeroRotatorMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let heroRotatorIndex = 0;
+  let heroRotatorTimer: number | undefined;
+  let heroRotatorCleanupTimer: number | undefined;
+
+  const scheduleHeroRotation = () => {
+    window.clearTimeout(heroRotatorTimer);
+    heroRotatorTimer = window.setTimeout(rotateHeroProvider, 2800);
+  };
+
+  const rotateHeroProvider = () => {
+    if (document.hidden || reduceHeroRotatorMotion.matches || heroRotatorItems.length < 2) {
+      scheduleHeroRotation();
+      return;
+    }
+
+    const currentItem = heroRotatorItems[heroRotatorIndex];
+    heroRotatorIndex = (heroRotatorIndex + 1) % heroRotatorItems.length;
+    const nextItem = heroRotatorItems[heroRotatorIndex];
+    if (!currentItem || !nextItem) return;
+
+    currentItem.dataset.state = "exiting";
+    nextItem.dataset.state = "entering";
+
+    window.clearTimeout(heroRotatorCleanupTimer);
+    heroRotatorCleanupTimer = window.setTimeout(() => {
+      currentItem.dataset.state = "idle";
+      nextItem.dataset.state = "active";
+    }, 760);
+    scheduleHeroRotation();
+  };
+
+  if (!reduceHeroRotatorMotion.matches && heroRotatorItems.length > 1) {
+    scheduleHeroRotation();
+  }
+
+  window.addEventListener("pagehide", () => {
+    window.clearTimeout(heroRotatorTimer);
+    window.clearTimeout(heroRotatorCleanupTimer);
+  });
 
   // A demo iframe focuses its composer as it boots. On a hard refresh browsers
   // can restore that nested focus and scroll the marketing page to a cutout.
@@ -1505,6 +1560,10 @@ const faqs = [
   .hero-title .hero-title-rotator {
     display: grid;
     justify-items: start;
+    overflow: hidden;
+    height: 1.08em;
+    margin: -0.04em -0.08em;
+    padding: 0.04em 0.08em;
   }
 
   .hero-title .hero-rotator-item {
@@ -1515,7 +1574,18 @@ const faqs = [
     white-space: nowrap;
     color: var(--rotator-accent, currentColor);
     opacity: 0;
-    animation: hero-rotator-cycle 12s calc(var(--rotator-index) * 3s) infinite;
+    visibility: hidden;
+  }
+
+  .hero-rotator-item[data-state="active"],
+  .hero-rotator-item[data-state="entering"],
+  .hero-rotator-item[data-state="exiting"] {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .hero-title .hero-rotator-word {
+    display: inline-flex;
   }
 
   .hero-rotator-item__icon {
@@ -1528,32 +1598,79 @@ const faqs = [
     transform: translateY(-0.05em);
   }
 
-  @keyframes hero-rotator-cycle {
-    0% {
+  .hero-title .hero-rotator-letter {
+    display: inline-block;
+  }
+
+  .hero-rotator-item[data-state="entering"] .hero-rotator-item__icon {
+    animation: hero-rotator-icon-in 480ms 70ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .hero-rotator-item[data-state="entering"] .hero-rotator-letter {
+    animation: hero-rotator-letter-in 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: var(--letter-delay);
+  }
+
+  .hero-rotator-item[data-state="exiting"] .hero-rotator-item__icon {
+    animation: hero-rotator-icon-out 300ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+
+  .hero-rotator-item[data-state="exiting"] .hero-rotator-letter {
+    animation: hero-rotator-letter-out 300ms cubic-bezier(0.4, 0, 1, 1) both;
+    animation-delay: var(--letter-exit-delay);
+  }
+
+  @keyframes hero-rotator-letter-in {
+    from {
       opacity: 0;
-      transform: translateY(0.3em);
+      transform: translateY(105%);
     }
 
-    5%,
-    20% {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes hero-rotator-letter-out {
+    from {
       opacity: 1;
       transform: translateY(0);
     }
 
-    25%,
-    100% {
+    to {
       opacity: 0;
-      transform: translateY(-0.3em);
+      transform: translateY(-105%);
+    }
+  }
+
+  @keyframes hero-rotator-icon-in {
+    from {
+      opacity: 0;
+      transform: translateY(80%) scale(0.82);
+    }
+  }
+
+  @keyframes hero-rotator-icon-out {
+    to {
+      opacity: 0;
+      transform: translateY(-80%) scale(0.82);
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .hero-rotator-item {
+    .hero-rotator-item,
+    .hero-rotator-letter,
+    .hero-rotator-item__icon {
       animation: none;
     }
 
-    .hero-rotator-item:first-child {
+    .hero-rotator-item:first-child,
+    .hero-rotator-item:first-child .hero-rotator-letter,
+    .hero-rotator-item:first-child .hero-rotator-item__icon {
       opacity: 1;
+      visibility: visible;
+      transform: none;
     }
   }
 
