@@ -532,9 +532,9 @@ import {
   .source-card {
     display: grid;
     gap: 16px;
-    padding: 0;
-    border: 0;
-    background: transparent;
+    padding: 0.875rem;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
   }
 
   .source-copy {
@@ -575,12 +575,6 @@ import {
     font-size: 0.8125rem;
     line-height: 1.35;
     white-space: nowrap;
-    transition: border-color 0.18s ease;
-  }
-
-  .source-code:hover code,
-  .source-code:focus-within code {
-    border-color: rgba(255, 255, 255, 0.2);
   }
 
   .source-code button {
