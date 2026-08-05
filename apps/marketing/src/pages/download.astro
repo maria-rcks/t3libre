@@ -62,16 +62,18 @@ import "../styles/stage-sky.css";
         <h2 class="platform-name">Build from source</h2>
       </div>
       <div class="source-card">
-        <div>
+        <div class="source-copy">
           <strong>Run the current development code</strong>
           <p>Clone the repository and follow the contributor setup. Dev does not publish desktop binaries.</p>
-          <code>git clone https://github.com/pingdotgg/t3code.git</code>
         </div>
-        <div class="source-actions">
-          <button type="button" id="copy-clone-command">Copy command</button>
-          <a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer"
-            >Open GitHub <span aria-hidden="true">&#8599;</span></a
-          >
+        <div class="source-command-row">
+          <code>git clone https://github.com/pingdotgg/t3code.git</code>
+          <div class="source-actions">
+            <button type="button" id="copy-clone-command">Copy command</button>
+            <a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer"
+              >Open GitHub <span aria-hidden="true">&#8599;</span></a
+            >
+          </div>
         </div>
       </div>
     </section>
@@ -424,7 +426,7 @@ import "../styles/stage-sky.css";
 
   .platforms {
     width: 100%;
-    max-width: 760px;
+    max-width: 880px;
     display: flex;
     flex-direction: column;
     border-top: 1px solid var(--border);
@@ -434,10 +436,10 @@ import "../styles/stage-sky.css";
 
   .platform-section {
     display: grid;
-    grid-template-columns: 164px minmax(0, 1fr);
-    gap: clamp(24px, 5vw, 48px);
+    grid-template-columns: 172px minmax(0, 1fr);
+    gap: clamp(28px, 5vw, 56px);
     align-items: start;
-    padding: 1.35rem 0;
+    padding: 1.5rem 0;
     border-bottom: 1px solid var(--border);
   }
 
@@ -470,21 +472,30 @@ import "../styles/stage-sky.css";
   .download-cards {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 32px;
+    gap: 10px;
   }
 
   .download-card {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
     min-width: 0;
-    padding: 0.5rem 0;
+    min-height: 52px;
+    padding: 0.75rem 0.875rem;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.035);
     color: var(--fg-muted);
-    transition: color 0.18s ease;
+    transition:
+      border-color 0.18s ease,
+      background 0.18s ease,
+      color 0.18s ease;
   }
 
   .download-card:hover {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.06);
     color: var(--fg);
   }
 
@@ -494,11 +505,9 @@ import "../styles/stage-sky.css";
 
   .card-arch {
     min-width: 0;
-    overflow: hidden;
     font-weight: 500;
     font-size: 0.875rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.25;
   }
 
   .card-format {
@@ -510,15 +519,16 @@ import "../styles/stage-sky.css";
 
   .source-card {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: end;
-    gap: 32px;
-    padding: 0.35rem 0;
+    gap: 16px;
+    padding: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
   }
 
-  .source-card > div:first-child {
+  .source-copy {
     display: grid;
-    gap: 6px;
+    gap: 5px;
   }
 
   .source-card strong {
@@ -526,33 +536,43 @@ import "../styles/stage-sky.css";
   }
 
   .source-card p {
-    max-width: 460px;
+    max-width: 520px;
     color: var(--fg-dim);
     font-size: 0.8rem;
     line-height: 1.5;
   }
 
+  .source-command-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
   .source-card code {
-    width: fit-content;
-    margin-top: 3px;
-    padding: 5px 7px;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.055);
+    min-width: 0;
+    flex: 1;
+    overflow-x: auto;
+    padding: 9px 11px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.24);
     color: var(--fg-muted);
     font-family: var(--font-mono);
     font-size: 0.68rem;
+    line-height: 1.35;
+    white-space: nowrap;
   }
 
   .source-actions {
     display: flex;
     flex: 0 0 auto;
     align-items: center;
-    gap: 18px;
+    gap: 14px;
   }
 
   .source-actions button,
   .source-actions a {
-    padding: 3px 0;
+    padding: 7px 0;
     color: var(--fg-muted);
     font-size: 0.75rem;
     text-align: center;
@@ -625,17 +645,17 @@ import "../styles/stage-sky.css";
     }
 
     .download-card + .download-card {
-      border-top: 1px solid var(--border);
+      border-top-color: rgba(255, 255, 255, 0.07);
     }
 
-    .source-card {
+    .source-command-row {
       align-items: stretch;
-      grid-template-columns: 1fr;
+      flex-direction: column;
+      gap: 10px;
     }
 
     .source-actions {
-      flex-direction: row;
-      justify-content: flex-start;
+      justify-content: space-between;
     }
   }
 </style>
