@@ -686,68 +686,62 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   }
 
   .footer {
+    position: relative;
+    min-height: 320px;
     margin-top: auto;
-    padding: 76px 0 68px;
+    padding: 0;
+    overflow: hidden;
     border-top: 1px solid rgba(255, 255, 255, 0.065);
   }
 
   .footer-inner {
+    position: relative;
     display: grid;
+    height: 320px;
     max-width: 1240px;
     margin: 0 auto;
     padding: 0 32px;
-    grid-template-columns: minmax(0, 1.2fr) minmax(400px, 0.8fr);
-    align-items: end;
-    gap: clamp(56px, 7vw, 112px);
+    grid-template-columns: minmax(0, 1fr) minmax(440px, 0.72fr);
+    align-items: center;
   }
 
   .footer-wordmark {
+    position: absolute;
+    bottom: -78px;
+    left: 32px;
     display: flex;
     min-width: 0;
     align-items: center;
-    gap: clamp(10px, 1.2vw, 18px);
-    color: rgba(255, 255, 255, 0.16);
+    gap: clamp(16px, 1.6vw, 24px);
+    color: rgba(255, 255, 255, 0.075);
     text-decoration: none;
+    transition: color 0.25s ease;
   }
 
   .footer-wordmark svg {
-    width: clamp(124px, 12vw, 178px);
+    width: clamp(210px, 19vw, 285px);
     height: auto;
     flex: 0 0 auto;
     overflow: visible;
-    fill: transparent;
-    stroke: currentColor;
-    stroke-width: 1.1px;
-    stroke-linejoin: round;
-    transition:
-      fill 0.25s ease,
-      stroke 0.25s ease;
+    fill: currentColor;
   }
 
   .footer-wordmark span {
-    color: transparent;
-    font-size: clamp(74px, 7.7vw, 114px);
+    color: currentColor;
+    font-size: clamp(120px, 12vw, 180px);
     font-weight: 500;
     letter-spacing: -0.075em;
     line-height: 0.8;
-    -webkit-text-stroke: 1px currentColor;
-    -webkit-text-stroke-color: rgba(255, 255, 255, 0.16);
-    transition: -webkit-text-stroke-color 0.25s ease;
   }
 
-  .footer-wordmark:hover svg,
-  .footer-wordmark:focus-visible svg {
-    fill: rgba(255, 255, 255, 0.035);
-    stroke: rgba(255, 255, 255, 0.34);
-  }
-
-  .footer-wordmark:hover span,
-  .footer-wordmark:focus-visible span {
-    -webkit-text-stroke-color: rgba(255, 255, 255, 0.34);
+  .footer-wordmark:hover,
+  .footer-wordmark:focus-visible {
+    color: rgba(255, 255, 255, 0.13);
   }
 
   .footer-columns {
     display: grid;
+    grid-column: 2;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: clamp(24px, 3vw, 48px);
   }
@@ -794,22 +788,27 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     }
 
     .footer {
-      padding-top: 48px;
-      padding-bottom: max(48px, env(safe-area-inset-bottom));
+      min-height: 410px;
     }
 
     .footer-inner {
-      grid-template-columns: 1fr;
-      align-items: start;
-      gap: 48px;
+      display: block;
+      height: 410px;
+      padding-top: 48px;
+    }
+
+    .footer-wordmark {
+      bottom: -48px;
+      left: 20px;
+      gap: 12px;
     }
 
     .footer-wordmark svg {
-      width: clamp(104px, 24vw, 150px);
+      width: clamp(142px, 28vw, 190px);
     }
 
     .footer-wordmark span {
-      font-size: clamp(62px, 15vw, 96px);
+      font-size: clamp(84px, 18vw, 120px);
     }
 
     .footer-columns {
@@ -827,7 +826,11 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     }
 
     .footer {
-      padding-top: 48px;
+      min-height: 480px;
+    }
+
+    .footer-inner {
+      height: 480px;
     }
 
     .footer-columns {
@@ -835,16 +838,12 @@ const socialImageUrl = new URL(socialImage, siteUrl);
       gap: 32px 24px;
     }
 
-    .footer-wordmark {
-      gap: 8px;
-    }
-
     .footer-wordmark svg {
-      width: 88px;
+      width: 126px;
     }
 
     .footer-wordmark span {
-      font-size: 52px;
+      font-size: 76px;
     }
 
   }
