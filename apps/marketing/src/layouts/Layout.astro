@@ -707,7 +707,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     left: 32px;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     gap: clamp(12px, 1.5vw, 20px);
     color: rgba(255, 255, 255, 0.075);
     pointer-events: none;
@@ -735,8 +735,8 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   .footer-columns {
     position: absolute;
     z-index: 1;
-    top: 90px;
     right: 32px;
+    bottom: 30px;
     display: grid;
     width: min(560px, 48%);
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -796,6 +796,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     .footer-columns {
       top: 68px;
       right: 20px;
+      bottom: auto;
       width: calc(100% - 40px);
       gap: 32px 24px;
     }
