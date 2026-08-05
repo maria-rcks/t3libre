@@ -403,7 +403,7 @@ import {
     max-width: 980px;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 22px 20px;
     opacity: 0;
     animation: fade-in 1s ease-out 0.2s forwards;
   }
@@ -411,13 +411,9 @@ import {
   .platform-section {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 12px;
     min-width: 0;
-    padding: 1.15rem;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 16px;
-    background: rgba(10, 10, 11, 0.66);
-    box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+    padding: 0.5rem 0;
   }
 
   [data-platform="source"],
@@ -434,7 +430,7 @@ import {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0;
+    padding: 0 0.15rem;
   }
 
   .platform-icon {
@@ -620,8 +616,8 @@ import {
     .platform-section,
     [data-platform] {
       grid-column: auto;
-      gap: 14px;
-      padding: 1rem;
+      gap: 12px;
+      padding: 0.5rem 0;
     }
 
     .platform-header {
