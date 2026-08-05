@@ -423,20 +423,16 @@ import {
     grid-column: 1 / -1;
   }
 
-  [data-platform="source"] {
-    --platform-hover: #fb806c;
+  [data-platform="macos"] {
+    --platform-hover: #f5f5f7;
   }
 
   [data-platform="windows"] {
-    --platform-hover: #60a5fa;
+    --platform-hover: #00a4ef;
   }
 
   [data-platform="linux"] {
-    --platform-hover: #e7bd62;
-  }
-
-  [data-platform="mobile"] {
-    --platform-hover: #a78bfa;
+    --platform-hover: #fcc624;
   }
 
   .platform-section[hidden] {
@@ -467,10 +463,14 @@ import {
     transition: color 0.18s ease;
   }
 
-  .platform-section:hover .platform-icon,
-  .platform-section:hover .platform-name,
-  .platform-section:focus-within .platform-icon,
-  .platform-section:focus-within .platform-name {
+  .platform-section:is([data-platform="macos"], [data-platform="windows"], [data-platform="linux"]):hover
+    .platform-icon,
+  .platform-section:is(
+      [data-platform="macos"],
+      [data-platform="windows"],
+      [data-platform="linux"]
+    ):focus-within
+    .platform-icon {
     color: var(--platform-hover);
   }
 
@@ -575,6 +575,12 @@ import {
     font-size: 0.68rem;
     line-height: 1.35;
     white-space: nowrap;
+    transition: border-color 0.18s ease;
+  }
+
+  .source-code:hover code,
+  .source-code:focus-within code {
+    border-color: rgba(255, 255, 255, 0.2);
   }
 
   .source-code button {
