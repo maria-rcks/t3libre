@@ -137,12 +137,12 @@ const socialImageUrl = new URL(socialImage, siteUrl);
 
       <footer class="footer">
         <div class="footer-inner">
-          <a class="footer-wordmark" href="/" aria-label="T3 Code home">
+          <div class="footer-wordmark" aria-hidden="true">
             <svg viewBox="15.5309 37 94.3941 56.96" aria-hidden="true">
               <path d="M33.4509 93V47.56H15.5309V37H64.3309V47.56H46.4109V93H33.4509ZM86.7253 93.96C82.832 93.96 78.9653 93.4533 75.1253 92.44C71.2853 91.3733 68.032 89.88 65.3653 87.96L70.4053 78.04C72.5386 79.5867 75.0186 80.8133 77.8453 81.72C80.672 82.6267 83.5253 83.08 86.4053 83.08C89.6586 83.08 92.2186 82.44 94.0853 81.16C95.952 79.88 96.8853 78.12 96.8853 75.88C96.8853 73.7467 96.0586 72.0667 94.4053 70.84C92.752 69.6133 90.0853 69 86.4053 69H80.4853V60.44L96.0853 42.76L97.5253 47.4H68.1653V37H107.365V45.4L91.8453 63.08L85.2853 59.32H89.0453C95.9253 59.32 101.125 60.8667 104.645 63.96C108.165 67.0533 109.925 71.0267 109.925 75.88C109.925 79.0267 109.099 81.9867 107.445 84.76C105.792 87.48 103.259 89.6933 99.8453 91.4C96.432 93.1067 92.0586 93.96 86.7253 93.96Z"></path>
             </svg>
             <span>Code</span>
-          </a>
+          </div>
           <nav class="footer-columns" aria-label="Footer navigation">
             <div class="footer-column">
               <div class="footer-links">
@@ -692,30 +692,27 @@ const socialImageUrl = new URL(socialImage, siteUrl);
 
   .footer-inner {
     position: relative;
-    display: grid;
     height: 320px;
     max-width: 1240px;
     margin: 0 auto;
     padding: 0 32px;
-    grid-template-columns: minmax(0, 1fr) minmax(440px, 0.72fr);
-    align-items: start;
   }
 
   .footer-wordmark {
     position: absolute;
-    top: 72px;
+    top: 38px;
+    right: 32px;
     left: 32px;
     display: flex;
-    min-width: 0;
     align-items: center;
-    gap: clamp(16px, 1.6vw, 24px);
+    gap: clamp(18px, 2vw, 28px);
     color: rgba(255, 255, 255, 0.075);
-    text-decoration: none;
-    transition: color 0.25s ease;
+    pointer-events: none;
+    user-select: none;
   }
 
   .footer-wordmark svg {
-    width: clamp(260px, 23vw, 360px);
+    width: 31%;
     height: auto;
     flex: 0 0 auto;
     overflow: visible;
@@ -723,24 +720,24 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   }
 
   .footer-wordmark span {
+    min-width: 0;
+    flex: 1;
     color: currentColor;
-    font-size: clamp(154px, 14vw, 220px);
+    font-size: clamp(170px, 19vw, 280px);
     font-weight: 500;
     letter-spacing: -0.075em;
     line-height: 0.8;
   }
 
-  .footer-wordmark:hover,
-  .footer-wordmark:focus-visible {
-    color: rgba(255, 255, 255, 0.13);
-  }
-
   .footer-columns {
+    position: absolute;
+    z-index: 1;
+    top: 58px;
+    right: 32px;
     display: grid;
-    grid-column: 2;
+    width: min(560px, 48%);
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: clamp(24px, 3vw, 48px);
-    margin-top: 72px;
   }
 
   .footer-column {
@@ -782,29 +779,30 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     }
 
     .footer-inner {
-      display: block;
       height: 410px;
-      padding-top: 48px;
     }
 
     .footer-wordmark {
       top: auto;
-      bottom: -48px;
+      right: 20px;
+      bottom: -32px;
       left: 20px;
       gap: 12px;
     }
 
     .footer-wordmark svg {
-      width: clamp(142px, 28vw, 190px);
+      width: 32%;
     }
 
     .footer-wordmark span {
-      font-size: clamp(84px, 18vw, 120px);
+      font-size: clamp(100px, 24vw, 160px);
     }
 
     .footer-columns {
+      top: 48px;
+      right: 20px;
+      width: calc(100% - 40px);
       gap: 32px 24px;
-      margin-top: 0;
     }
   }
 
@@ -830,12 +828,8 @@ const socialImageUrl = new URL(socialImage, siteUrl);
       gap: 32px 24px;
     }
 
-    .footer-wordmark svg {
-      width: 126px;
-    }
-
     .footer-wordmark span {
-      font-size: 76px;
+      font-size: clamp(82px, 24vw, 112px);
     }
 
   }
