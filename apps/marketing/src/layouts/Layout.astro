@@ -700,7 +700,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   }
 
   .footer-wordmark {
-    --footer-wordmark-size: clamp(190px, 17vw, 210px);
+    --footer-wordmark-size: clamp(205px, 18vw, 230px);
     position: absolute;
     top: 186px;
     left: 32px;
@@ -737,9 +737,10 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     top: 186px;
     right: 32px;
     display: grid;
-    width: min(430px, 40%);
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: clamp(24px, 3vw, 48px);
+    width: min(360px, 36%);
+    grid-template-columns: repeat(3, max-content);
+    justify-content: space-between;
+    gap: 0;
   }
 
   .footer-column {
@@ -799,6 +800,8 @@ const socialImageUrl = new URL(socialImage, siteUrl);
       right: 20px;
       bottom: auto;
       width: calc(100% - 40px);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      justify-content: normal;
       gap: 32px 24px;
     }
   }
