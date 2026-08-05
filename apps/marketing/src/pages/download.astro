@@ -6,7 +6,6 @@ import {
   GOOGLE_PLAY_STORE_URL,
   IOS_APP_STORE_URL,
 } from "../lib/site";
-import "../styles/stage-sky.css";
 ---
 
 <Layout
@@ -14,18 +13,8 @@ import "../styles/stage-sky.css";
   description="Download T3 Code for iPhone, iPad, Android, macOS, Windows, or Linux."
   pageClass="marketing-downloads"
 >
-  <div class="download-page" data-download-layout="runway">
-  <div class="stage-sky" aria-hidden="true">
-    <span class="stage-sky__ray stage-sky__ray--1"></span>
-    <span class="stage-sky__ray stage-sky__ray--2"></span>
-    <span class="stage-sky__ray stage-sky__ray--3"></span>
-    <span class="stage-sky__ray stage-sky__ray--4"></span>
-    <span class="stage-sky__ray stage-sky__ray--5"></span>
-    <span class="stage-sky__cloud stage-sky__cloud--1"></span>
-    <span class="stage-sky__cloud stage-sky__cloud--2"></span>
-  </div>
+  <div class="download-page">
   <h1 class="heading">Download T3 Code</h1>
-  <p class="intro">Pick a desktop release channel. Mobile apps use the current store release.</p>
   <div class="download-stage-picker" aria-label="Desktop release channel">
     <button type="button" data-download-stage="latest" aria-pressed="true">
       <span>Latest</span>
@@ -41,24 +30,6 @@ import "../styles/stage-sky.css";
     <span id="version-label">Loading latest desktop release&hellip;</span>
     <a id="changelog-link" class="changelog-link" href="#" target="_blank" rel="noopener noreferrer" style="display:none">View changelog<span aria-hidden="true"> &#8599;</span></a>
   </p>
-
-  <div class="download-layout-study">
-    <span class="layout-study-label">Layout study</span>
-    <div class="download-layout-picker" aria-label="Download page layout">
-      <button type="button" data-download-layout-option="runway" aria-pressed="true">
-        <span>01</span> Runway
-      </button>
-      <button type="button" data-download-layout-option="manifest" aria-pressed="false">
-        <span>02</span> Manifest
-      </button>
-      <button type="button" data-download-layout-option="launchpad" aria-pressed="false">
-        <span>03</span> Launchpad
-      </button>
-    </div>
-    <p id="download-layout-description">
-      Calm, wide rows that make every platform easy to scan.
-    </p>
-  </div>
 
   <div class="platforms" id="platforms">
     <section class="platform-section dev-source" id="dev-source" data-platform="source" hidden>
@@ -206,39 +177,9 @@ import "../styles/stage-sky.css";
   import { GITHUB_REPOSITORY_URL } from "../lib/site";
 
   type Stage = "latest" | "nightly" | "dev";
-  type DownloadLayout = "runway" | "manifest" | "launchpad";
-
-  const downloadLayoutDescriptions: Record<DownloadLayout, string> = {
-    runway: "Calm, wide rows that make every platform easy to scan.",
-    manifest: "A compact release ledger for people who know what they need.",
-    launchpad: "A modular platform map with every destination in its own space.",
-  };
 
   function isStage(value: unknown): value is Stage {
     return value === "latest" || value === "nightly" || value === "dev";
-  }
-
-  function isDownloadLayout(value: unknown): value is DownloadLayout {
-    return value === "runway" || value === "manifest" || value === "launchpad";
-  }
-
-  function setDownloadLayout(layout: DownloadLayout, updateUrl: boolean) {
-    const downloadPage = document.querySelector<HTMLElement>(".download-page");
-    const description = document.getElementById("download-layout-description");
-    if (downloadPage) downloadPage.dataset.downloadLayout = layout;
-    if (description) description.textContent = downloadLayoutDescriptions[layout];
-
-    for (const button of document.querySelectorAll<HTMLButtonElement>(
-      "[data-download-layout-option]",
-    )) {
-      button.setAttribute("aria-pressed", String(button.dataset.downloadLayoutOption === layout));
-    }
-
-    if (updateUrl) {
-      const url = new URL(window.location.href);
-      url.searchParams.set("layout", layout);
-      window.history.replaceState(null, "", url);
-    }
   }
 
   const versionLabel = document.getElementById("version-label");
@@ -331,15 +272,6 @@ import "../styles/stage-sky.css";
     });
   }
 
-  for (const button of document.querySelectorAll<HTMLButtonElement>(
-    "[data-download-layout-option]",
-  )) {
-    button.addEventListener("click", () => {
-      const layout = button.dataset.downloadLayoutOption;
-      if (isDownloadLayout(layout)) setDownloadLayout(layout, true);
-    });
-  }
-
   document.addEventListener("t3-marketing-stage-change", (event) => {
     const stage = (event as CustomEvent<{ stage?: unknown }>).detail?.stage;
     if (isStage(stage)) void applyStage(stage);
@@ -360,29 +292,18 @@ import "../styles/stage-sky.css";
       });
   });
 
-  const initialLayout = new URL(window.location.href).searchParams.get("layout");
-  setDownloadLayout(isDownloadLayout(initialLayout) ? initialLayout : "runway", false);
-
   const initialStage = document.documentElement.dataset.stage;
   void applyStage(isStage(initialStage) ? initialStage : "latest");
 </script>
 
 <style>
   .download-page {
-    position: relative;
-    isolation: isolate;
     flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     min-height: 100vh;
     padding: calc(8vh + 60px) 1.5rem 4rem;
-    overflow: hidden;
-  }
-
-  .download-page > :not(.stage-sky) {
-    position: relative;
-    z-index: 1;
   }
 
   /* ── Heading ── */
@@ -396,15 +317,6 @@ import "../styles/stage-sky.css";
     margin-bottom: 0.75rem;
     opacity: 0;
     animation: fade-in 1s ease-out forwards;
-  }
-
-  .intro {
-    max-width: 520px;
-    color: var(--fg-muted);
-    font-size: 0.95rem;
-    text-align: center;
-    opacity: 0;
-    animation: fade-in 1s ease-out 0.05s forwards;
   }
 
   .download-stage-picker {
@@ -462,7 +374,7 @@ import "../styles/stage-sky.css";
     font-size: 0.9rem;
     color: var(--fg-dim);
     min-height: 1.35rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: 2.25rem;
     opacity: 0;
     animation: fade-in 1s ease-out 0.15s forwards;
     display: flex;
@@ -484,92 +396,34 @@ import "../styles/stage-sky.css";
     text-decoration-color: var(--fg);
   }
 
-  /* ── Layout study ── */
-
-  .download-layout-study {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.65rem;
-    margin-bottom: 2.25rem;
-    opacity: 0;
-    animation: fade-in 1s ease-out 0.18s forwards;
-  }
-
-  .layout-study-label {
-    color: var(--fg-dim);
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-  }
-
-  .download-layout-picker {
-    display: flex;
-    gap: 4px;
-    padding: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 12px;
-    background: rgba(10, 10, 11, 0.68);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
-  }
-
-  .download-layout-picker button {
-    padding: 7px 11px;
-    border-radius: 8px;
-    color: var(--fg-dim);
-    font-size: 0.72rem;
-    font-weight: 500;
-    transition:
-      background 0.18s ease,
-      color 0.18s ease;
-  }
-
-  .download-layout-picker button span {
-    margin-right: 5px;
-    color: color-mix(in srgb, currentColor 60%, transparent);
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-  }
-
-  .download-layout-picker button:hover {
-    color: var(--fg-muted);
-  }
-
-  .download-layout-picker button[aria-pressed="true"] {
-    background: rgba(255, 255, 255, 0.085);
-    color: var(--fg);
-  }
-
-  .download-layout-picker button:focus-visible {
-    outline: 1px solid var(--fg-muted);
-    outline-offset: 2px;
-  }
-
-  #download-layout-description {
-    min-height: 1rem;
-    color: var(--fg-dim);
-    font-size: 0.7rem;
-    text-align: center;
-  }
-
   /* ── Platforms ── */
 
   .platforms {
     width: 100%;
-    max-width: 880px;
-    display: flex;
-    flex-direction: column;
+    max-width: 980px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
     opacity: 0;
     animation: fade-in 1s ease-out 0.2s forwards;
   }
 
   .platform-section {
-    display: grid;
-    grid-template-columns: 172px minmax(0, 1fr);
-    gap: clamp(28px, 5vw, 56px);
-    align-items: start;
-    padding: 0.75rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    min-width: 0;
+    padding: 1.15rem;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 16px;
+    background: rgba(10, 10, 11, 0.66);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+  }
+
+  [data-platform="source"],
+  [data-platform="macos"],
+  [data-platform="mobile"] {
+    grid-column: 1 / -1;
   }
 
   .platform-section[hidden] {
@@ -580,7 +434,7 @@ import "../styles/stage-sky.css";
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.5rem 0;
+    padding: 0;
   }
 
   .platform-icon {
@@ -604,6 +458,11 @@ import "../styles/stage-sky.css";
     gap: 10px;
   }
 
+  [data-platform="windows"] .download-cards,
+  [data-platform="linux"] .download-cards {
+    grid-template-columns: 1fr;
+  }
+
   .download-card {
     display: flex;
     align-items: center;
@@ -612,9 +471,9 @@ import "../styles/stage-sky.css";
     min-width: 0;
     min-height: 52px;
     padding: 0.75rem 0.875rem;
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    border: 1px solid transparent;
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.035);
+    background: rgba(255, 255, 255, 0.04);
     color: var(--fg-muted);
     transition:
       border-color 0.18s ease,
@@ -623,8 +482,8 @@ import "../styles/stage-sky.css";
   }
 
   .download-card:hover {
-    border-color: rgba(255, 255, 255, 0.14);
-    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.065);
     color: var(--fg);
   }
 
@@ -649,10 +508,9 @@ import "../styles/stage-sky.css";
   .source-card {
     display: grid;
     gap: 16px;
-    padding: 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.03);
+    padding: 0;
+    border: 0;
+    background: transparent;
   }
 
   .source-copy {
@@ -713,149 +571,6 @@ import "../styles/stage-sky.css";
     color: var(--fg);
   }
 
-  /* ── Concept 02: Manifest ── */
-
-  .download-page[data-download-layout="manifest"] .platforms {
-    max-width: 920px;
-    gap: 6px;
-    padding: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 18px;
-    background: rgba(8, 8, 9, 0.64);
-    box-shadow:
-      0 28px 80px rgba(0, 0, 0, 0.24),
-      inset 0 1px rgba(255, 255, 255, 0.025);
-  }
-
-  .download-page[data-download-layout="manifest"] .platform-section {
-    grid-template-columns: 150px minmax(0, 1fr);
-    gap: 18px;
-    padding: 0.55rem 0.65rem;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.025);
-  }
-
-  .download-page[data-download-layout="manifest"] .platform-header {
-    padding: 0.6rem 0.4rem;
-  }
-
-  .download-page[data-download-layout="manifest"] .download-card {
-    min-height: 44px;
-    padding: 0.6rem 0.75rem;
-    border-color: transparent;
-    background: rgba(255, 255, 255, 0.03);
-  }
-
-  .download-page[data-download-layout="manifest"] .download-card:hover {
-    border-color: rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.055);
-  }
-
-  .download-page[data-download-layout="manifest"] [data-platform="windows"] .download-cards,
-  .download-page[data-download-layout="manifest"] [data-platform="linux"] .download-cards {
-    grid-template-columns: 1fr;
-  }
-
-  .download-page[data-download-layout="manifest"] .source-card {
-    gap: 10px;
-    padding: 0.65rem 0.75rem;
-    border-color: transparent;
-    background: rgba(255, 255, 255, 0.025);
-  }
-
-  /* ── Concept 03: Launchpad ── */
-
-  .download-page[data-download-layout="launchpad"] .platforms {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    max-width: 980px;
-  }
-
-  .download-page[data-download-layout="launchpad"] .platform-section {
-    --platform-accent: #a1a1aa;
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    min-width: 0;
-    padding: 1.15rem;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 16px;
-    background:
-      radial-gradient(
-        circle at 0 0,
-        color-mix(in srgb, var(--platform-accent) 8%, transparent),
-        transparent 42%
-      ),
-      rgba(10, 10, 11, 0.66);
-    box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
-  }
-
-  .download-page[data-download-layout="launchpad"] [data-platform="source"],
-  .download-page[data-download-layout="launchpad"] [data-platform="macos"],
-  .download-page[data-download-layout="launchpad"] [data-platform="mobile"] {
-    grid-column: 1 / -1;
-  }
-
-  .download-page[data-download-layout="launchpad"] [data-platform="source"] {
-    --platform-accent: #ff8066;
-  }
-
-  .download-page[data-download-layout="launchpad"] [data-platform="macos"] {
-    --platform-accent: #d4d4d8;
-  }
-
-  .download-page[data-download-layout="launchpad"] [data-platform="windows"] {
-    --platform-accent: #60a5fa;
-  }
-
-  .download-page[data-download-layout="launchpad"] [data-platform="linux"] {
-    --platform-accent: #f2c66d;
-  }
-
-  .download-page[data-download-layout="launchpad"] [data-platform="mobile"] {
-    --platform-accent: #b58cff;
-  }
-
-  .download-page[data-download-layout="launchpad"] .platform-header {
-    padding: 0;
-  }
-
-  .download-page[data-download-layout="launchpad"] .platform-icon {
-    color: var(--platform-accent);
-  }
-
-  .download-page[data-download-layout="launchpad"] .download-cards {
-    width: 100%;
-  }
-
-  .download-page[data-download-layout="launchpad"] [data-platform="windows"] .download-cards,
-  .download-page[data-download-layout="launchpad"] [data-platform="linux"] .download-cards {
-    grid-template-columns: 1fr;
-  }
-
-  .download-page[data-download-layout="launchpad"] .download-card {
-    border-color: transparent;
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .download-page[data-download-layout="launchpad"] .download-card:hover {
-    border-color: color-mix(in srgb, var(--platform-accent) 22%, transparent);
-    background: rgba(255, 255, 255, 0.065);
-  }
-
-  .download-page[data-download-layout="launchpad"] .source-card {
-    padding: 0;
-    border: 0;
-    background: transparent;
-  }
-
-  .download-page .platform-section[hidden] {
-    display: none;
-  }
-
   /* ── Releases link ── */
 
   .releases-link {
@@ -897,29 +612,16 @@ import "../styles/stage-sky.css";
       text-align: center;
     }
 
-    .download-layout-study {
-      width: 100%;
-      margin-bottom: 1.75rem;
-    }
-
-    .download-layout-picker {
-      width: 100%;
-      max-width: 360px;
-    }
-
-    .download-layout-picker button {
-      flex: 1;
-      padding-inline: 6px;
-    }
-
     .platforms {
+      grid-template-columns: 1fr;
       padding: 0 0.25rem;
     }
 
-    .platform-section {
-      grid-template-columns: 1fr;
-      gap: 0.65rem;
-      padding: 0.875rem 0;
+    .platform-section,
+    [data-platform] {
+      grid-column: auto;
+      gap: 14px;
+      padding: 1rem;
     }
 
     .platform-header {
@@ -928,11 +630,7 @@ import "../styles/stage-sky.css";
 
     .download-cards {
       grid-template-columns: 1fr;
-      gap: 0;
-    }
-
-    .download-card + .download-card {
-      border-top-color: rgba(255, 255, 255, 0.07);
+      gap: 8px;
     }
 
     .source-command-row {
@@ -945,32 +643,5 @@ import "../styles/stage-sky.css";
       justify-content: space-between;
     }
 
-    .download-page[data-download-layout="manifest"] .platforms {
-      gap: 4px;
-      padding: 4px;
-    }
-
-    .download-page[data-download-layout="manifest"] .platform-section {
-      grid-template-columns: 1fr;
-      gap: 0.5rem;
-      padding: 0.75rem;
-    }
-
-    .download-page[data-download-layout="manifest"] .platform-header {
-      padding: 0;
-    }
-
-    .download-page[data-download-layout="launchpad"] .platforms {
-      grid-template-columns: 1fr;
-    }
-
-    .download-page[data-download-layout="launchpad"] .platform-section,
-    .download-page[data-download-layout="launchpad"] [data-platform] {
-      grid-column: auto;
-    }
-
-    .download-page[data-download-layout="launchpad"] .download-cards {
-      grid-template-columns: 1fr;
-    }
   }
 </style>
