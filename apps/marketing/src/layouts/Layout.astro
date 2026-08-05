@@ -700,7 +700,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
 
   .footer-wordmark {
     position: absolute;
-    top: 38px;
+    bottom: 0;
     right: 32px;
     left: 32px;
     display: flex;
@@ -708,6 +708,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     gap: clamp(18px, 2vw, 28px);
     color: rgba(255, 255, 255, 0.075);
     pointer-events: none;
+    transform: translateY(50%);
     user-select: none;
   }
 
@@ -785,7 +786,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     .footer-wordmark {
       top: auto;
       right: 20px;
-      bottom: -32px;
+      bottom: 0;
       left: 20px;
       gap: 12px;
     }
