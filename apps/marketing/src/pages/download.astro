@@ -125,7 +125,7 @@ import "../styles/stage-sky.css";
     </section>
 
     <!-- Mobile -->
-    <section class="platform-section">
+    <section class="platform-section" data-mobile-platform>
       <div class="platform-header">
         <svg
           class="platform-icon"
@@ -198,6 +198,7 @@ import "../styles/stage-sky.css";
   const releasesLink = document.getElementById("releases-link") as HTMLAnchorElement | null;
   const devSource = document.getElementById("dev-source");
   const desktopSections = document.querySelectorAll<HTMLElement>("[data-desktop-platform]");
+  const mobileSection = document.querySelector<HTMLElement>("[data-mobile-platform]");
   const desktopCards =
     document.querySelectorAll<HTMLAnchorElement>(".download-card[data-asset]");
   let releaseRequest = 0;
@@ -233,6 +234,7 @@ import "../styles/stage-sky.css";
     const isDev = stage === "dev";
     devSource?.toggleAttribute("hidden", !isDev);
     desktopSections.forEach((section) => section.toggleAttribute("hidden", isDev));
+    mobileSection?.toggleAttribute("hidden", isDev);
 
     if (isDev) {
       if (versionLabel) versionLabel.textContent = "Dev tracks the current source on GitHub.";
@@ -429,7 +431,6 @@ import "../styles/stage-sky.css";
     max-width: 880px;
     display: flex;
     flex-direction: column;
-    border-top: 1px solid var(--border);
     opacity: 0;
     animation: fade-in 1s ease-out 0.2s forwards;
   }
@@ -440,7 +441,6 @@ import "../styles/stage-sky.css";
     gap: clamp(28px, 5vw, 56px);
     align-items: start;
     padding: 1.5rem 0;
-    border-bottom: 1px solid var(--border);
   }
 
   .platform-section[hidden] {
