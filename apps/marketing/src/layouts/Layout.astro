@@ -145,7 +145,6 @@ const socialImageUrl = new URL(socialImage, siteUrl);
           </a>
           <nav class="footer-columns" aria-label="Footer navigation">
             <div class="footer-column">
-              <p class="footer-column-title">Product</p>
               <div class="footer-links">
                 <a href="/download">Download</a>
                 <a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer"
@@ -159,7 +158,6 @@ const socialImageUrl = new URL(socialImage, siteUrl);
               </div>
             </div>
             <div class="footer-column">
-              <p class="footer-column-title">Community</p>
               <div class="footer-links">
                 <a
                   href="https://discord.gg/jn4EGJjrvv"
@@ -179,7 +177,6 @@ const socialImageUrl = new URL(socialImage, siteUrl);
               </div>
             </div>
             <div class="footer-column">
-              <p class="footer-column-title">Legal</p>
               <div class="footer-links">
                 <a href="/terms-of-service">Terms</a>
                 <a href="/privacy-policy">Privacy</a>
@@ -701,12 +698,12 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     margin: 0 auto;
     padding: 0 32px;
     grid-template-columns: minmax(0, 1fr) minmax(440px, 0.72fr);
-    align-items: center;
+    align-items: start;
   }
 
   .footer-wordmark {
     position: absolute;
-    bottom: -78px;
+    top: 72px;
     left: 32px;
     display: flex;
     min-width: 0;
@@ -718,7 +715,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   }
 
   .footer-wordmark svg {
-    width: clamp(210px, 19vw, 285px);
+    width: clamp(260px, 23vw, 360px);
     height: auto;
     flex: 0 0 auto;
     overflow: visible;
@@ -727,7 +724,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
 
   .footer-wordmark span {
     color: currentColor;
-    font-size: clamp(120px, 12vw, 180px);
+    font-size: clamp(154px, 14vw, 220px);
     font-weight: 500;
     letter-spacing: -0.075em;
     line-height: 0.8;
@@ -743,6 +740,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     grid-column: 2;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: clamp(24px, 3vw, 48px);
+    margin-top: 72px;
   }
 
   .footer-column {
@@ -751,13 +749,6 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     flex-direction: column;
     align-items: flex-start;
     gap: 14px;
-  }
-
-  .footer-column-title {
-    color: var(--fg-muted);
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 1.4;
   }
 
   .footer-links {
@@ -797,6 +788,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     }
 
     .footer-wordmark {
+      top: auto;
       bottom: -48px;
       left: 20px;
       gap: 12px;
@@ -812,6 +804,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
 
     .footer-columns {
       gap: 32px 24px;
+      margin-top: 0;
     }
   }
 
