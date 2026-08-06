@@ -764,6 +764,39 @@ layer("GitHubPullRequestCli.layer", (it) => {
     }),
   );
 
+  it.effect("bounds a sparse search-free fallback and reports the unread tail", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockImplementation((_input) => {
+        if (mockedExecute.mock.calls.length === 1) return Effect.succeed(output("[]"));
+        const args = callAt(mockedExecute.mock.calls.length - 1).args;
+        const limit = Number(args[args.indexOf("--limit") + 1]);
+        return Effect.succeed(
+          output(
+            pullRequests(limit, 1, () => ({
+              reviewRequests: [{ login: "somebody-else" }],
+            })),
+          ),
+        );
+      });
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const batch = yield* cli.listPullRequests({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        state: "open",
+        involvement: "reviewing",
+        viewer: "bilal",
+        limit: 2,
+      });
+
+      const finalArgs = callAt(mockedExecute.mock.calls.length - 1).args;
+      expect(finalArgs[finalArgs.indexOf("--limit") + 1]).toBe("1000");
+      assert.strictEqual(batch.items.length, 0);
+      assert.isTrue(batch.truncated);
+    }),
+  );
+
   it.effect("takes an empty slice for a repository that has run out, not one to read again", () =>
     Effect.gen(function* () {
       mockedExecute.mockReturnValue(Effect.succeed(output("[]")));

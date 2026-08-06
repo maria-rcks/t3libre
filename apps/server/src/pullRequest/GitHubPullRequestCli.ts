@@ -212,6 +212,9 @@ const DIFF_TIMEOUT_MS = 60_000;
 /** Pierre expansion is for source files, not blobs large enough to stall a review surface. */
 const DIFF_FILE_MAX_OUTPUT_BYTES = 1024 * 1024;
 
+/** A search-free fallback may scan older rows for local filters, but never the whole repository. */
+const PULL_REQUEST_FALLBACK_MAX_ROWS = 1_000;
+
 /** What the files API serves at most in one response, which is what one slice is made of. */
 const DIFF_FILES_PAGE_SIZE = 100;
 
@@ -890,6 +893,7 @@ export const make = Effect.gen(function* () {
       ),
 
     listPullRequests: (input) => {
+      const fallbackMaxRows = Math.max(input.limit + 1, PULL_REQUEST_FALLBACK_MAX_ROWS);
       const read = (
         continues: boolean,
         requestedRows = input.limit + 1,
@@ -925,9 +929,10 @@ export const make = Effect.gen(function* () {
                 if (
                   !continues &&
                   items.length < input.limit &&
-                  decoded.success.rawCount >= requestedRows
+                  decoded.success.rawCount >= requestedRows &&
+                  requestedRows < fallbackMaxRows
                 ) {
-                  const nextRows = Math.min(requestedRows * 2, Number.MAX_SAFE_INTEGER);
+                  const nextRows = Math.min(requestedRows * 2, fallbackMaxRows);
                   if (nextRows > requestedRows) return read(false, nextRows);
                 }
                 return Effect.succeed({
