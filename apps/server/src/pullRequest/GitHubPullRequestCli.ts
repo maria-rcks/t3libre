@@ -545,7 +545,8 @@ function matchesUnsortedListing(
     input.involvement === "all" ||
     (input.involvement === "authored"
       ? item.author?.login.toLowerCase() === viewer
-      : item.reviewRequestLogins.some((login) => login.toLowerCase() === viewer));
+      : item.hasTeamReviewRequest ||
+        item.reviewRequestLogins.some((login) => login.toLowerCase() === viewer));
   return matchesState && matchesInvolvement;
 }
 
@@ -852,7 +853,9 @@ export const make = Effect.gen(function* () {
             })
             .pipe(
               Effect.flatMap((result) =>
-                result.stdoutTruncated || result.stdout.includes("\0")
+                result.stdoutTruncated ||
+                result.stdout.includes("\0") ||
+                result.stdout.includes("\uFFFD")
                   ? Effect.fail(
                       new GitHubDiffFileContentsUnavailableError({
                         command: "gh",

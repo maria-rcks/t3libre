@@ -66,6 +66,7 @@ import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import {
   pullRequestSurfaceId,
   selectActiveRightPanelSurface,
+  selectSelectedRightPanelSurface,
   selectThreadRightPanelState,
   useRightPanelStore,
   type PullRequestSurface,
@@ -188,11 +189,12 @@ function PullRequestsRouteView() {
   const rightPanelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, rightPanelRef),
   );
-  const activeRightPanelSurface = useRightPanelStore((state) =>
-    selectActiveRightPanelSurface(state.byThreadKey, rightPanelRef),
+  const selectedRightPanelSurface = useRightPanelStore((state) =>
+    selectSelectedRightPanelSurface(state.byThreadKey, rightPanelRef),
   );
-  const activePullRequestSurface =
-    activeRightPanelSurface?.kind === "pull-request" ? activeRightPanelSurface : null;
+  const selectedPullRequestSurface =
+    selectedRightPanelSurface?.kind === "pull-request" ? selectedRightPanelSurface : null;
+  const activePullRequestSurface = rightPanelState.isOpen ? selectedPullRequestSurface : null;
   const [pullRequestTabStatuses, setPullRequestTabStatuses] = useState<
     Record<string, PullRequestTabStatus>
   >({});
@@ -674,9 +676,9 @@ function PullRequestsRouteView() {
       updateSearch(clearedSelection);
       return;
     }
-    if (activePullRequestSurface === null) return;
+    if (selectedPullRequestSurface === null) return;
     useRightPanelStore.getState().show(rightPanelRef);
-    selectSurfaceInUrl(activePullRequestSurface);
+    selectSurfaceInUrl(selectedPullRequestSurface);
   };
 
   // The provider list is the workspace's hosts, not the filtered ones, so switching to a host

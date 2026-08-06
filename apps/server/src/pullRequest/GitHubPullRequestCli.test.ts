@@ -702,7 +702,8 @@ layer("GitHubPullRequestCli.layer", (it) => {
             pullRequests(4, 1, (number) => ({
               state: number === 4 ? "OPEN" : "CLOSED",
               ...(number === 3 ? { mergedAt: "2026-07-03T00:00:00Z" } : {}),
-              reviewRequests: [{ login: number === 2 ? "somebody-else" : "bilal" }],
+              reviewRequests:
+                number === 2 ? [{ slug: "platform", name: "Platform" }] : [{ login: "bilal" }],
             })),
           ),
         ),
@@ -719,8 +720,9 @@ layer("GitHubPullRequestCli.layer", (it) => {
         limit: 10,
       });
 
-      // Only the closed, unmerged pull request asking this viewer for a review survives.
-      expect(batch.items.map((item) => item.number)).toEqual([1]);
+      // Individual requests for this viewer and team requests survive. The fallback cannot
+      // resolve team membership, so dropping team-routed reviews would hide legitimate work.
+      expect(batch.items.map((item) => item.number)).toEqual([1, 2]);
       expect(searchOfCall(1)).toBeUndefined();
       assert.isFalse(batch.continues);
     }),
@@ -1123,10 +1125,10 @@ layer("GitHubPullRequestCli.layer", (it) => {
     }),
   );
 
-  it.effect("reports a binary diff file with its path and reason", () =>
+  it.effect("reports undecodable diff file contents as binary", () =>
     Effect.gen(function* () {
       mockedExecute.mockReturnValueOnce(Effect.succeed(output("a1b2c3d\tb1c2d3e\n")));
-      mockedExecute.mockReturnValueOnce(Effect.succeed(output("binary\0contents")));
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("binary\uFFFDcontents")));
       const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
 
       const error = yield* Effect.flip(

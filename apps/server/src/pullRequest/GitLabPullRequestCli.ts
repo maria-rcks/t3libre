@@ -735,6 +735,7 @@ export const make = Effect.gen(function* () {
     readonly cwd: string;
     readonly repository: string;
     readonly commit: string;
+    readonly allowRoot: boolean;
   }): Effect.Effect<GitLabDiffRefs, GitLabPullRequestCliError> =>
     api({
       cwd: input.cwd,
@@ -753,13 +754,19 @@ export const make = Effect.gen(function* () {
           );
         }
         return decoded.success === null
-          ? Effect.fail(
-              new GitLabDiffCommitParentUnavailableError({
-                command: "glab",
-                cwd: input.cwd,
-                commit: input.commit,
-              }),
-            )
+          ? input.allowRoot
+            ? Effect.succeed({
+                baseSha: "",
+                headSha: input.commit,
+                startSha: "",
+              })
+            : Effect.fail(
+                new GitLabDiffCommitParentUnavailableError({
+                  command: "glab",
+                  cwd: input.cwd,
+                  commit: input.commit,
+                }),
+              )
           : Effect.succeed(decoded.success);
       }),
     );
@@ -902,6 +909,7 @@ export const make = Effect.gen(function* () {
               cwd: input.cwd,
               repository: input.repository,
               commit: input.commit,
+              allowRoot: input.changeType === "new",
             });
 
         const readFile = (revision: string, filePath: string) =>
@@ -914,7 +922,9 @@ export const make = Effect.gen(function* () {
             timeoutMs: DIFF_TIMEOUT_MS,
           }).pipe(
             Effect.flatMap((result) =>
-              result.stdoutTruncated || result.stdout.includes("\0")
+              result.stdoutTruncated ||
+              result.stdout.includes("\0") ||
+              result.stdout.includes("\uFFFD")
                 ? Effect.fail(
                     new GitLabDiffFileContentsUnavailableError({
                       command: "glab",

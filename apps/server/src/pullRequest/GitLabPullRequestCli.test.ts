@@ -558,6 +558,30 @@ layer("GitLabPullRequestCli.layer", (it) => {
     }),
   );
 
+  it.effect("expands a new file from a root commit without requiring a parent", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValueOnce(
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        Effect.succeed(output(JSON.stringify({ id: "a1b2c3d", parent_ids: [] }))),
+      );
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("first contents\n")));
+      const cli = yield* GitLabPullRequestCli.GitLabPullRequestCli;
+
+      const contents = yield* cli.getMergeRequestDiffFileContents({
+        cwd: "/w",
+        repository: "acme/web",
+        number: 7,
+        commit: "a1b2c3d",
+        changeType: "new",
+        oldPath: "src/first.ts",
+        newPath: "src/first.ts",
+      });
+
+      expect(contents).toEqual({ oldContents: "", newContents: "first contents\n" });
+      expect(argsOfCall(1)[1]).toContain("raw?ref=a1b2c3d");
+    }),
+  );
+
   it.effect("reports an oversized diff file with its path and reason", () =>
     Effect.gen(function* () {
       mockedExecute.mockReturnValueOnce(
@@ -596,7 +620,7 @@ layer("GitLabPullRequestCli.layer", (it) => {
     }),
   );
 
-  it.effect("reports a binary diff file with its path and reason", () =>
+  it.effect("reports undecodable diff file contents as binary", () =>
     Effect.gen(function* () {
       mockedExecute.mockReturnValueOnce(
         Effect.succeed(
@@ -612,7 +636,7 @@ layer("GitLabPullRequestCli.layer", (it) => {
           ),
         ),
       );
-      mockedExecute.mockReturnValueOnce(Effect.succeed(output("binary\0contents")));
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("binary\uFFFDcontents")));
       const cli = yield* GitLabPullRequestCli.GitLabPullRequestCli;
 
       const error = yield* Effect.flip(

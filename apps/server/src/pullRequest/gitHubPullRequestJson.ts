@@ -563,6 +563,8 @@ export interface GitHubPullRequestListItem {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly reviewRequestLogins: ReadonlyArray<string>;
+  /** At least one outstanding request targets a team rather than an individual login. */
+  readonly hasTeamReviewRequest: boolean;
   readonly labels: ReadonlyArray<PullRequestLabel>;
 }
 
@@ -645,9 +647,8 @@ function toLabels(
 }
 
 /**
- * User review requests only. A team request carries a slug, and the viewer check compares
- * these against a login, so keeping slugs here would let an unrelated team read as the
- * viewer. Team-routed requests need GitHub's review-requested search to resolve.
+ * User review requests only. Team requests are tracked separately because a slug cannot be
+ * compared with the viewer's login.
  */
 function toReviewRequestLogins(
   raw: ReadonlyArray<Schema.Schema.Type<typeof RawReviewRequestSchema>> | undefined,
@@ -656,6 +657,16 @@ function toReviewRequestLogins(
     const login = trimmed(request.login);
     return login === null ? [] : [login];
   });
+}
+
+function hasTeamReviewRequest(
+  raw: ReadonlyArray<Schema.Schema.Type<typeof RawReviewRequestSchema>> | undefined,
+): boolean {
+  return (raw ?? []).some(
+    (request) =>
+      trimmed(request.login) === null &&
+      (trimmed(request.slug) !== null || trimmed(request.name) !== null),
+  );
 }
 
 function toCheckStatus(raw: Schema.Schema.Type<typeof RawCheckSchema>): PullRequestCheckStatus {
@@ -779,6 +790,7 @@ function toListItem(raw: Schema.Schema.Type<typeof RawListItemSchema>): GitHubPu
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
     reviewRequestLogins: toReviewRequestLogins(raw.reviewRequests),
+    hasTeamReviewRequest: hasTeamReviewRequest(raw.reviewRequests),
     labels: toLabels(raw.labels),
   };
 }
