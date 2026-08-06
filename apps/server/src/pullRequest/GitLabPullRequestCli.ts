@@ -960,7 +960,7 @@ export const make = Effect.gen(function* () {
             Effect.flatMap((result) =>
               result.stdoutTruncated ||
               result.stdout.includes("\0") ||
-              result.stdout.includes("\uFFFD")
+              result.stdoutInvalidUtf8 === true
                 ? Effect.fail(
                     new GitLabDiffFileContentsUnavailableError({
                       command: "glab",

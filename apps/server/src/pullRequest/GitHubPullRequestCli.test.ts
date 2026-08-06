@@ -18,13 +18,14 @@ const layer = it.layer(
   ),
 );
 
-function output(stdout: string, stdoutTruncated = false) {
+function output(stdout: string, stdoutTruncated = false, stdoutInvalidUtf8 = false) {
   return {
     exitCode: ChildProcessSpawner.ExitCode(0),
     stdout,
     stderr: "",
     stdoutTruncated,
     stderrTruncated: false,
+    stdoutInvalidUtf8,
   };
 }
 
@@ -1163,7 +1164,9 @@ layer("GitHubPullRequestCli.layer", (it) => {
   it.effect("reports undecodable diff file contents as binary", () =>
     Effect.gen(function* () {
       mockedExecute.mockReturnValueOnce(Effect.succeed(output("a1b2c3d\tb1c2d3e\n")));
-      mockedExecute.mockReturnValueOnce(Effect.succeed(output("binary\uFFFDcontents")));
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(output("binary\uFFFDcontents", false, true)),
+      );
       const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
 
       const error = yield* Effect.flip(
@@ -1183,6 +1186,26 @@ layer("GitHubPullRequestCli.layer", (it) => {
         assert.strictEqual(error.path, "assets/logo.png");
         assert.strictEqual(error.reason, "binary");
       }
+    }),
+  );
+
+  it.effect("returns valid text containing a literal replacement character", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("a1b2c3d\tb1c2d3e\n")));
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("before\uFFFDafter")));
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const contents = yield* cli.getPullRequestDiffFileContents({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+        changeType: "deleted",
+        oldPath: "docs/encoding.md",
+        newPath: "docs/encoding.md",
+      });
+
+      assert.strictEqual(contents.oldContents, "before\uFFFDafter");
     }),
   );
 

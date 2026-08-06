@@ -18,13 +18,14 @@ const layer = it.layer(
   ),
 );
 
-function output(stdout: string, stdoutTruncated = false) {
+function output(stdout: string, stdoutTruncated = false, stdoutInvalidUtf8 = false) {
   return {
     exitCode: ChildProcessSpawner.ExitCode(0),
     stdout,
     stderr: "",
     stdoutTruncated,
     stderrTruncated: false,
+    stdoutInvalidUtf8,
   };
 }
 
@@ -665,7 +666,9 @@ layer("GitLabPullRequestCli.layer", (it) => {
           ),
         ),
       );
-      mockedExecute.mockReturnValueOnce(Effect.succeed(output("binary\uFFFDcontents")));
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(output("binary\uFFFDcontents", false, true)),
+      );
       const cli = yield* GitLabPullRequestCli.GitLabPullRequestCli;
 
       const error = yield* Effect.flip(
@@ -684,6 +687,38 @@ layer("GitLabPullRequestCli.layer", (it) => {
         assert.strictEqual(error.path, "assets/logo.png");
         assert.strictEqual(error.reason, "binary");
       }
+    }),
+  );
+
+  it.effect("returns valid text containing a literal replacement character", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify({
+              diff_refs: {
+                base_sha: "a1b2c3d",
+                head_sha: "b1c2d3e",
+                start_sha: "a1b2c3d",
+              },
+            }),
+          ),
+        ),
+      );
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("before\uFFFDafter")));
+      const cli = yield* GitLabPullRequestCli.GitLabPullRequestCli;
+
+      const contents = yield* cli.getMergeRequestDiffFileContents({
+        cwd: "/w",
+        repository: "acme/web",
+        number: 7,
+        changeType: "deleted",
+        oldPath: "docs/encoding.md",
+        newPath: "docs/encoding.md",
+      });
+
+      assert.strictEqual(contents.oldContents, "before\uFFFDafter");
     }),
   );
 
