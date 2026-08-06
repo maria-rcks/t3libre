@@ -892,6 +892,7 @@ export const make = Effect.gen(function* () {
     listPullRequests: (input) => {
       const read = (
         continues: boolean,
+        requestedRows = input.limit + 1,
       ): Effect.Effect<GitHubPullRequestListBatch, GitHubPullRequestCliError> =>
         github
           .execute({
@@ -905,7 +906,7 @@ export const make = Effect.gen(function* () {
               input.state,
               "--limit",
               // One extra row reveals that the repository has more than the page shows.
-              String(input.limit + 1),
+              String(requestedRows),
               "--json",
               PULL_REQUEST_LIST_JSON_FIELDS,
             ],
@@ -921,11 +922,21 @@ export const make = Effect.gen(function* () {
                 const items = continues
                   ? decoded.success.items
                   : decoded.success.items.filter((item) => matchesUnsortedListing(item, input));
+                if (
+                  !continues &&
+                  items.length < input.limit &&
+                  decoded.success.rawCount >= requestedRows
+                ) {
+                  const nextRows = Math.min(requestedRows * 2, Number.MAX_SAFE_INTEGER);
+                  if (nextRows > requestedRows) return read(false, nextRows);
+                }
                 return Effect.succeed({
                   items: items.slice(0, input.limit),
                   // One row over the page size is the probe for a next page, and it is
                   // counted before decoding: a skipped malformed row must not end paging.
-                  truncated: decoded.success.rawCount > input.limit,
+                  truncated: continues
+                    ? decoded.success.rawCount > input.limit
+                    : items.length > input.limit || decoded.success.rawCount >= requestedRows,
                   continues,
                 });
               }

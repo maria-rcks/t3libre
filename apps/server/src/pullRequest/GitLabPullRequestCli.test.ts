@@ -117,6 +117,7 @@ layer("GitLabPullRequestCli.layer", (it) => {
 
       assert.strictEqual(batch.items.length, 3);
       assert.isFalse(batch.truncated);
+      assert.strictEqual(batch.cursorAdvance, 3);
       const path = argsOfCall(0)[1] ?? "";
       expect(path).toContain("projects/acme%2Fweb/merge_requests");
       expect(path).toContain("per_page=11");
@@ -190,14 +191,16 @@ layer("GitLabPullRequestCli.layer", (it) => {
       const path = argsOfCall(0)[1] ?? "";
       expect(path).not.toContain("updated_before=");
       expect(path).toContain("order_by=updated_at");
-      expect(path).toContain("per_page=100");
+      expect(path).toContain("per_page=11");
       expect(path).toContain("page=1");
     }),
   );
 
   it.effect("advances beyond several pages sharing the cursor timestamp", () =>
     Effect.gen(function* () {
-      mockedExecute.mockReturnValueOnce(Effect.succeed(output(mergeRequests(100, 101))));
+      mockedExecute
+        .mockReturnValueOnce(Effect.succeed(output(mergeRequests(11, 144))))
+        .mockReturnValueOnce(Effect.succeed(output(mergeRequests(11, 155))));
       const cli = yield* GitLabPullRequestCli.GitLabPullRequestCli;
 
       const batch = yield* cli.listMergeRequests({
@@ -210,11 +213,37 @@ layer("GitLabPullRequestCli.layer", (it) => {
         cursor: { updatedBefore: "2026-07-02T00:00:00Z", delivered: 150 },
       });
 
-      expect(argsOfCall(0)[1]).toContain("per_page=100");
-      expect(argsOfCall(0)[1]).toContain("page=2");
+      expect(argsOfCall(0)[1]).toContain("per_page=11");
+      expect(argsOfCall(0)[1]).toContain("page=14");
+      expect(argsOfCall(1)[1]).toContain("page=15");
       expect(batch.items.map((item) => item.number)).toEqual([
         151, 152, 153, 154, 155, 156, 157, 158, 159, 160,
       ]);
+      assert.isTrue(batch.truncated);
+    }),
+  );
+
+  it.effect("advances the cursor through malformed raw rows", () =>
+    Effect.gen(function* () {
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const rows = JSON.parse(mergeRequests(2, 1)) as ReadonlyArray<unknown>;
+      mockedExecute.mockReturnValueOnce(
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        Effect.succeed(output(JSON.stringify([{ iid: "malformed" }, ...rows]))),
+      );
+      const cli = yield* GitLabPullRequestCli.GitLabPullRequestCli;
+
+      const batch = yield* cli.listMergeRequests({
+        cwd: "/w",
+        repository: "acme/web",
+        state: "open",
+        involvement: "all",
+        viewer: "bilal",
+        limit: 2,
+      });
+
+      expect(batch.items.map((item) => item.number)).toEqual([1, 2]);
+      assert.strictEqual(batch.cursorAdvance, 3);
       assert.isTrue(batch.truncated);
     }),
   );

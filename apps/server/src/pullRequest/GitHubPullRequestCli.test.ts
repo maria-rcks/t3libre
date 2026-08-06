@@ -728,6 +728,41 @@ layer("GitHubPullRequestCli.layer", (it) => {
     }),
   );
 
+  it.effect("grows the search-free fallback until it fills the filtered page", () =>
+    Effect.gen(function* () {
+      const unrelated = () => ({ reviewRequests: [{ login: "somebody-else" }] });
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("[]")));
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output(pullRequests(3, 1, unrelated))));
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(
+            pullRequests(4, 1, (number) =>
+              number === 4 ? { reviewRequests: [{ login: "bilal" }] } : unrelated(),
+            ),
+          ),
+        ),
+      );
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const batch = yield* cli.listPullRequests({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        state: "open",
+        involvement: "reviewing",
+        viewer: "bilal",
+        limit: 2,
+      });
+
+      expect(batch.items.map((item) => item.number)).toEqual([4]);
+      const firstFallbackArgs = callAt(1).args;
+      const secondFallbackArgs = callAt(2).args;
+      expect(firstFallbackArgs[firstFallbackArgs.indexOf("--limit") + 1]).toBe("3");
+      expect(secondFallbackArgs[secondFallbackArgs.indexOf("--limit") + 1]).toBe("6");
+      assert.isFalse(batch.truncated);
+    }),
+  );
+
   it.effect("takes an empty slice for a repository that has run out, not one to read again", () =>
     Effect.gen(function* () {
       mockedExecute.mockReturnValue(Effect.succeed(output("[]")));

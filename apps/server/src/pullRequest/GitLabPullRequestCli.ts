@@ -195,6 +195,8 @@ const DIFF_FILE_MAX_OUTPUT_BYTES = 1024 * 1024;
 export interface GitLabMergeRequestListBatch {
   readonly items: ReadonlyArray<GitLabMergeRequestListItem>;
   readonly truncated: boolean;
+  /** Raw GitLab rows consumed to produce this page, including malformed rows. */
+  readonly cursorAdvance: number;
 }
 
 export interface GitLabMergeRequestDiffSlice {
@@ -221,7 +223,7 @@ export class GitLabPullRequestCli extends Context.Service<
       readonly limit: number;
       /** Free text for GitLab's own `search`, which matches title and description. */
       readonly query?: string | undefined;
-      /** Where to carry on from, as GitLab's own `updated_before`. */
+      /** Where to carry on from in GitLab's stable update-ordered row set. */
       readonly cursor?: ProviderListCursor | undefined;
     }) => Effect.Effect<GitLabMergeRequestListBatch, GitLabPullRequestCliError>;
 
@@ -468,15 +470,18 @@ export const make = Effect.gen(function* () {
     readonly cursor?: ProviderListCursor | undefined;
     readonly page: number;
     readonly collected: ReadonlyArray<GitLabMergeRequestListItem>;
+    readonly cursorAdvance: number;
   }): Effect.Effect<GitLabMergeRequestListBatch, GitLabPullRequestCliError> => {
     // A continuation uses GitLab's offset pagination. Its timestamp filter is inclusive and has
     // no tie-breaker, so a page where many rows share the boundary would otherwise return the
     // same prefix forever. `delivered` is the stable offset the service has already handed over.
     const delivered = input.cursor?.delivered ?? 0;
-    const perPage =
-      input.cursor === undefined ? Math.min(input.limit + 1, MAX_PAGE_SIZE) : MAX_PAGE_SIZE;
+    const perPage = Math.min(input.limit + 1, MAX_PAGE_SIZE);
     const firstPage = Math.floor(delivered / perPage) + 1;
-    const skipOnFirstPage = delivered % perPage;
+    const skipOnFirstPage = input.page === firstPage ? delivered % perPage : 0;
+    // A page made entirely of malformed rows has no item from which the service can build a
+    // continuation. Bound the walk to the raw span this request asked for rather than recursing
+    // forever on a host that keeps returning full unusable pages.
     const lastPage = Math.floor((delivered + input.limit) / perPage) + 1;
     return api({
       cwd: input.cwd,
@@ -497,7 +502,11 @@ export const make = Effect.gen(function* () {
       Effect.flatMap((result) => {
         const raw = result.stdout.trim();
         if (raw.length === 0) {
-          return Effect.succeed({ items: input.collected, truncated: false });
+          return Effect.succeed({
+            items: input.collected,
+            truncated: false,
+            cursorAdvance: input.cursorAdvance,
+          });
         }
         const decoded = decodeMergeRequestListJson(raw);
         if (!Result.isSuccess(decoded)) {
@@ -510,22 +519,50 @@ export const make = Effect.gen(function* () {
             }),
           );
         }
-        const pageItems =
-          input.page === firstPage
-            ? decoded.success.items.slice(skipOnFirstPage)
-            : decoded.success.items;
-        const collected = [...input.collected, ...pageItems];
-        // Counted before decoding, so a skipped malformed row cannot end paging early.
-        const exhausted = decoded.success.rawCount < perPage;
-        if (exhausted || collected.length > input.limit || input.page >= lastPage) {
+        const pageItems: GitLabMergeRequestListItem[] = [];
+        const pageRawIndexes: number[] = [];
+        for (const [index, item] of decoded.success.items.entries()) {
+          const rawIndex = decoded.success.rawIndexes[index]!;
+          if (rawIndex < skipOnFirstPage) continue;
+          pageItems.push(item);
+          pageRawIndexes.push(rawIndex);
+        }
+        const remaining = input.limit - input.collected.length;
+        const lastItemRawIndex = pageRawIndexes[remaining - 1];
+        if (lastItemRawIndex !== undefined) {
+          const consumed = lastItemRawIndex + 1 - skipOnFirstPage;
           return Effect.succeed({
-            items: collected.slice(0, input.limit),
-            // Anything but a short final page means GitLab may still have rows, including the
-            // case where enough rows failed to decode to keep the collected count down.
-            truncated: !exhausted || collected.length > input.limit,
+            items: [...input.collected, ...pageItems.slice(0, remaining)],
+            truncated:
+              lastItemRawIndex + 1 < decoded.success.rawCount ||
+              decoded.success.rawCount === perPage,
+            cursorAdvance: input.cursorAdvance + consumed,
           });
         }
-        return listPage({ ...input, page: input.page + 1, collected });
+        const collected = [...input.collected, ...pageItems];
+        const consumed = Math.max(0, decoded.success.rawCount - skipOnFirstPage);
+        // Counted before decoding, so a skipped malformed row cannot end paging early.
+        const exhausted = decoded.success.rawCount < perPage;
+        if (exhausted) {
+          return Effect.succeed({
+            items: collected,
+            truncated: false,
+            cursorAdvance: input.cursorAdvance + consumed,
+          });
+        }
+        if (input.page >= lastPage) {
+          return Effect.succeed({
+            items: collected,
+            truncated: true,
+            cursorAdvance: input.cursorAdvance + consumed,
+          });
+        }
+        return listPage({
+          ...input,
+          page: input.page + 1,
+          collected,
+          cursorAdvance: input.cursorAdvance + consumed,
+        });
       }),
     );
   };
@@ -847,10 +884,9 @@ export const make = Effect.gen(function* () {
       ),
 
     listMergeRequests: (input) => {
-      const perPage =
-        input.cursor === undefined ? Math.min(input.limit + 1, MAX_PAGE_SIZE) : MAX_PAGE_SIZE;
+      const perPage = Math.min(input.limit + 1, MAX_PAGE_SIZE);
       const page = Math.floor((input.cursor?.delivered ?? 0) / perPage) + 1;
-      return listPage({ ...input, page, collected: [] });
+      return listPage({ ...input, page, collected: [], cursorAdvance: 0 });
     },
 
     getMergeRequestDetail: mergeRequestDetail,

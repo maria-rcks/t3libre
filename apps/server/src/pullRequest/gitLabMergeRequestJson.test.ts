@@ -128,6 +128,7 @@ describe("decodeMergeRequestListJson", () => {
     );
 
     expect(batch.items).toHaveLength(1);
+    expect(batch.rawIndexes).toEqual([1]);
     expect(batch.rawCount).toBe(2);
   });
 });

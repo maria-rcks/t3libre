@@ -365,6 +365,8 @@ export interface GitLabProjectUsers {
 
 export interface GitLabMergeRequestListBatch {
   readonly items: ReadonlyArray<GitLabMergeRequestListItem>;
+  /** Zero-based positions of the decoded items in GitLab's raw page. */
+  readonly rawIndexes: ReadonlyArray<number>;
   /** Rows GitLab returned, counted before decoding, so a skipped row cannot hide a next page. */
   readonly rawCount: number;
 }
@@ -379,13 +381,15 @@ export function decodeMergeRequestListJson(
     return Result.fail(decoded.failure);
   }
   const items: GitLabMergeRequestListItem[] = [];
-  for (const entry of decoded.success) {
+  const rawIndexes: number[] = [];
+  for (const [rawIndex, entry] of decoded.success.entries()) {
     const item = decodeMergeRequestEntry(entry);
     if (Exit.isSuccess(item)) {
       items.push(toListItem(item.value));
+      rawIndexes.push(rawIndex);
     }
   }
-  return Result.succeed({ items, rawCount: decoded.success.length });
+  return Result.succeed({ items, rawIndexes, rawCount: decoded.success.length });
 }
 
 export function decodeMergeRequestDetailJson(
@@ -605,9 +609,7 @@ export function decodeCommitDiffRefsJson(
   const baseSha = trimmed(decoded.success.parent_ids?.[0]);
   const headSha = trimmed(decoded.success.id);
   return Result.succeed(
-    baseSha === null || headSha === null
-      ? null
-      : { baseSha, headSha, startSha: baseSha },
+    baseSha === null || headSha === null ? null : { baseSha, headSha, startSha: baseSha },
   );
 }
 
