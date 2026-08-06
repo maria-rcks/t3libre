@@ -40,6 +40,10 @@ function page(count: number, firstNumber: number, next?: string): string {
   });
 }
 
+function valuePage(values: ReadonlyArray<unknown>, next?: string): string {
+  return JSON.stringify({ values, ...(next === undefined ? {} : { next }) });
+}
+
 /** Who opened the pull request, and two accounts that could review it. */
 const bilal = { uuid: "{bilal}", nickname: "bilal" };
 const octocat = { uuid: "{octocat}", nickname: "octocat" };
@@ -355,6 +359,93 @@ layer("BitbucketPullRequestApi.layer", (it) => {
 
       assert.strictEqual(error._tag, "BitbucketDiffCommitError");
       assert.strictEqual(mockedRequest.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("aggregates every diffstat page", () =>
+    Effect.gen(function* () {
+      const next = "https://api.bitbucket.org/2.0/diffstat?page=2";
+      mockedRequest
+        .mockReturnValueOnce(
+          Effect.succeed(
+            response(
+              valuePage(
+                [
+                  { lines_added: 9, lines_removed: 2 },
+                  { lines_added: 3, lines_removed: 1 },
+                ],
+                next,
+              ),
+            ),
+          ),
+        )
+        .mockReturnValueOnce(
+          Effect.succeed(response(valuePage([{ lines_added: 4, lines_removed: 7 }]))),
+        );
+      const api = yield* BitbucketPullRequestApi.BitbucketPullRequestApi;
+
+      const stat = yield* api.getDiffStat({ repository: "acme/web", number: 7 });
+
+      expect(stat).toEqual({ additions: 16, deletions: 10, changedFiles: 3 });
+      expect(callAt(1).url).toBe(next);
+    }),
+  );
+
+  it.effect("returns the complete commit timeline oldest first across pages", () =>
+    Effect.gen(function* () {
+      const next = "https://api.bitbucket.org/2.0/commits?page=2";
+      mockedRequest
+        .mockReturnValueOnce(
+          Effect.succeed(
+            response(
+              valuePage(
+                [
+                  { hash: "ddd", message: "fourth", date: "2026-07-04T00:00:00Z" },
+                  { hash: "ccc", message: "third", date: "2026-07-03T00:00:00Z" },
+                ],
+                next,
+              ),
+            ),
+          ),
+        )
+        .mockReturnValueOnce(
+          Effect.succeed(
+            response(
+              valuePage([
+                { hash: "bbb", message: "second", date: "2026-07-02T00:00:00Z" },
+                { hash: "aaa", message: "first", date: "2026-07-01T00:00:00Z" },
+              ]),
+            ),
+          ),
+        );
+      const api = yield* BitbucketPullRequestApi.BitbucketPullRequestApi;
+
+      const commits = yield* api.listCommits({ repository: "acme/web", number: 7 });
+
+      expect(commits.map((commit) => commit.oid)).toEqual(["aaa", "bbb", "ccc", "ddd"]);
+      expect(callAt(1).url).toBe(next);
+    }),
+  );
+
+  it.effect("returns build statuses from every page", () =>
+    Effect.gen(function* () {
+      const next = "https://api.bitbucket.org/2.0/statuses?page=2";
+      mockedRequest
+        .mockReturnValueOnce(
+          Effect.succeed(response(valuePage([{ name: "Build", state: "SUCCESSFUL" }], next))),
+        )
+        .mockReturnValueOnce(
+          Effect.succeed(response(valuePage([{ name: "Lint", state: "FAILED" }]))),
+        );
+      const api = yield* BitbucketPullRequestApi.BitbucketPullRequestApi;
+
+      const checks = yield* api.listChecks({ repository: "acme/web", number: 7 });
+
+      expect(checks.map((check) => [check.name, check.status])).toEqual([
+        ["Build", "success"],
+        ["Lint", "failure"],
+      ]);
+      expect(callAt(1).url).toBe(next);
     }),
   );
 

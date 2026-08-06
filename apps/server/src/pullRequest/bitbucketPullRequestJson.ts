@@ -502,7 +502,7 @@ export function decodeCommentsJson(raw: string): Result.Result<BitbucketComments
 
 export function decodeCommitsJson(
   raw: string,
-): Result.Result<ReadonlyArray<PullRequestCommit>, DecodeFailure> {
+): Result.Result<BitbucketPage<PullRequestCommit>, DecodeFailure> {
   const decoded = decodePage(raw);
   if (!Result.isSuccess(decoded)) {
     return Result.fail(decoded.failure);
@@ -521,12 +521,12 @@ export function decodeCommitsJson(
     });
   }
   // Bitbucket lists a pull request's commits newest first; the timeline reads oldest first.
-  return Result.succeed(commits.toReversed());
+  return Result.succeed({ items: commits.toReversed(), next: trimmed(decoded.success.next) });
 }
 
 export function decodeStatusesJson(
   raw: string,
-): Result.Result<ReadonlyArray<PullRequestCheck>, DecodeFailure> {
+): Result.Result<BitbucketPage<PullRequestCheck>, DecodeFailure> {
   const decoded = decodePage(raw);
   if (!Result.isSuccess(decoded)) {
     return Result.fail(decoded.failure);
@@ -545,7 +545,7 @@ export function decodeStatusesJson(
       url: trimmed(status.url),
     });
   }
-  return Result.succeed(checks);
+  return Result.succeed({ items: checks, next: trimmed(decoded.success.next) });
 }
 
 export interface BitbucketDiffStat {
@@ -554,8 +554,14 @@ export interface BitbucketDiffStat {
   readonly changedFiles: number;
 }
 
+export interface BitbucketDiffStatPage extends BitbucketDiffStat {
+  readonly next: string | null;
+}
+
 /** One entry per changed file, each carrying that file's line counts. */
-export function decodeDiffstatJson(raw: string): Result.Result<BitbucketDiffStat, DecodeFailure> {
+export function decodeDiffstatJson(
+  raw: string,
+): Result.Result<BitbucketDiffStatPage, DecodeFailure> {
   const decoded = decodePage(raw);
   if (!Result.isSuccess(decoded)) {
     return Result.fail(decoded.failure);
@@ -570,7 +576,12 @@ export function decodeDiffstatJson(raw: string): Result.Result<BitbucketDiffStat
     deletions += decodedStat.value.lines_removed ?? 0;
     changedFiles += 1;
   }
-  return Result.succeed({ additions, deletions, changedFiles });
+  return Result.succeed({
+    additions,
+    deletions,
+    changedFiles,
+    next: trimmed(decoded.success.next),
+  });
 }
 
 /**

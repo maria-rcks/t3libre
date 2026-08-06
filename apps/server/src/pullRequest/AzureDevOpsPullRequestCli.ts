@@ -132,7 +132,12 @@ export class AzureDevOpsPullRequestCli extends Context.Service<
        */
       readonly cursor?: ProviderListCursor | undefined;
     }) => Effect.Effect<
-      { readonly items: ReadonlyArray<AzureDevOpsPullRequest>; readonly truncated: boolean },
+      {
+        readonly items: ReadonlyArray<AzureDevOpsPullRequest>;
+        readonly truncated: boolean;
+        /** Raw Azure rows consumed to produce this page, including malformed rows. */
+        readonly cursorAdvance: number;
+      },
       AzureDevOpsPullRequestCliError
     >;
 
@@ -242,6 +247,98 @@ export const make = Effect.gen(function* () {
       args: [...input.args, "--only-show-errors", "--output", "json"],
     });
 
+  /**
+   * Azure pages by raw offset. Keep reading when malformed rows leave the decoded page short, and
+   * retain the raw count so the next public cursor skips every row this walk consumed.
+   */
+  const listPullRequestPage = (input: {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly state: PullRequestListState;
+    readonly involvement: PullRequestInvolvement;
+    readonly viewer: string;
+    readonly limit: number;
+    readonly skip: number;
+    readonly cursorAdvance: number;
+    readonly items: ReadonlyArray<AzureDevOpsPullRequest>;
+  }): Effect.Effect<
+    {
+      readonly items: ReadonlyArray<AzureDevOpsPullRequest>;
+      readonly truncated: boolean;
+      readonly cursorAdvance: number;
+    },
+    AzureDevOpsPullRequestCliError
+  > => {
+    const remaining = input.limit - input.items.length;
+    const top = remaining + 1;
+    return executeJson({
+      cwd: input.cwd,
+      args: [
+        "repos",
+        "pr",
+        "list",
+        ...detectArgs,
+        "--repository",
+        input.repository,
+        ...statusArgs(input.state),
+        ...involvementArgs(input),
+        // A web link per row, which is the only url that needs no assembling.
+        "--include-links",
+        ...(input.skip === 0 ? [] : ["--skip", String(input.skip)]),
+        "--top",
+        String(top),
+      ],
+    }).pipe(
+      Effect.flatMap((result) => {
+        const raw = result.stdout.trim();
+        if (raw.length === 0) {
+          return Effect.succeed({
+            items: input.items,
+            truncated: false,
+            cursorAdvance: input.cursorAdvance,
+          });
+        }
+        const decoded = decodePullRequestListJson(raw);
+        if (!Result.isSuccess(decoded)) {
+          return Effect.fail(
+            new AzureDevOpsPullRequestReadError({
+              command: "az",
+              cwd: input.cwd,
+              operation: "listPullRequests",
+              cause: decoded.failure,
+            }),
+          );
+        }
+
+        const lastItemIndex = decoded.success.rawIndexes[remaining - 1];
+        if (lastItemIndex !== undefined) {
+          const consumed = lastItemIndex + 1;
+          return Effect.succeed({
+            items: [...input.items, ...decoded.success.items.slice(0, remaining)],
+            // A full raw response may have more rows even when malformed entries used the probe.
+            truncated: consumed < decoded.success.rawCount || decoded.success.rawCount === top,
+            cursorAdvance: input.cursorAdvance + consumed,
+          });
+        }
+
+        const items = [...input.items, ...decoded.success.items];
+        if (decoded.success.rawCount < top) {
+          return Effect.succeed({
+            items,
+            truncated: false,
+            cursorAdvance: input.cursorAdvance + decoded.success.rawCount,
+          });
+        }
+        return listPullRequestPage({
+          ...input,
+          skip: input.skip + decoded.success.rawCount,
+          cursorAdvance: input.cursorAdvance + decoded.success.rawCount,
+          items,
+        });
+      }),
+    );
+  };
+
   return AzureDevOpsPullRequestCli.of({
     getViewer: (input) =>
       executeJson({ cwd: input.cwd, args: ["account", "show", "--query", "user"] }).pipe(
@@ -266,51 +363,21 @@ export const make = Effect.gen(function* () {
       ),
 
     listPullRequests: (input) =>
-      executeJson({
+      listPullRequestPage({
         cwd: input.cwd,
-        args: [
-          "repos",
-          "pr",
-          "list",
-          ...detectArgs,
-          "--repository",
-          input.repository,
-          ...statusArgs(input.state),
-          ...involvementArgs(input),
-          // A web link per row, which is the only url that needs no assembling.
-          "--include-links",
-          // Azure counts rather than filters, so a slice carries on by stepping over what has
-          // already been handed over. That is an offset into a list that can shift underneath
-          // it: a pull request opened between two slices moves everything down one, and the row
-          // on the seam is the one that pays for it.
-          ...(input.cursor === undefined ? [] : ["--skip", String(input.cursor.delivered)]),
-          "--top",
-          // One row over the page reveals that the repository has more than the page shows.
-          String(input.limit + 1),
-        ],
-      }).pipe(
-        Effect.flatMap((result) => {
-          const raw = result.stdout.trim();
-          if (raw.length === 0) {
-            return Effect.succeed({ items: [], truncated: false });
-          }
-          const decoded = decodePullRequestListJson(raw);
-          return Result.isSuccess(decoded)
-            ? Effect.succeed({
-                items: decoded.success.items.slice(0, input.limit),
-                // Counted before decoding, so a skipped malformed row cannot end paging early.
-                truncated: decoded.success.rawCount > input.limit,
-              })
-            : Effect.fail(
-                new AzureDevOpsPullRequestReadError({
-                  command: "az",
-                  cwd: input.cwd,
-                  operation: "listPullRequests",
-                  cause: decoded.failure,
-                }),
-              );
-        }),
-      ),
+        repository: input.repository,
+        state: input.state,
+        involvement: input.involvement,
+        viewer: input.viewer,
+        limit: input.limit,
+        // Azure counts rather than filters, so a slice carries on by stepping over every raw row
+        // the prior slice consumed. That is an offset into a list that can shift underneath it:
+        // a pull request opened between two slices moves everything down one, and the row on the
+        // seam is the one that pays for it.
+        skip: input.cursor?.delivered ?? 0,
+        cursorAdvance: 0,
+        items: [],
+      }),
 
     getPullRequest: (input) =>
       executeJson({

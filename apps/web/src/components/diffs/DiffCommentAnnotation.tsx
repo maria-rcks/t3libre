@@ -4,6 +4,8 @@ import { useState, type ReactNode } from "react";
 import { Button } from "~/components/ui/button";
 import { Textarea } from "~/components/ui/textarea";
 
+import { isCommentSubmitShortcut } from "./commentSubmitShortcut";
+
 interface DiffCommentSecondaryAction {
   readonly label: string;
   readonly icon?: ReactNode;
@@ -93,7 +95,7 @@ export function DiffCommentAnnotation({
             event.preventDefault();
             onCancel();
           }
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && trimmedText) {
+          if (isCommentSubmitShortcut(event, trimmedText, pending)) {
             event.preventDefault();
             onComment(trimmedText);
           }

@@ -252,6 +252,8 @@ function nextListCursor(
   fetched: ReadonlyArray<ProviderChangeRequest>,
   /** What is being sent on, which is what the count of delivered rows is about. */
   delivered: ReadonlyArray<ProviderChangeRequest>,
+  /** A provider may consume malformed offset-paged rows that never appear in `delivered`. */
+  cursorAdvance = delivered.length,
 ): string | null {
   // The host had nothing at all, so there is no row to carry on from — and repeating the cursor
   // that produced the empty slice would ask the same question forever.
@@ -261,7 +263,7 @@ function nextListCursor(
   // repository's boring afternoon — and reading "nothing new" as "nothing left" would end the
   // walk on the instant it was stuck on, with everything older unreachable for good.
   const oldest = fetched.reduce((left, right) => (right.updatedAt < left.updatedAt ? right : left));
-  return listCursorAt(previous, oldest.updatedAt, fetched, delivered.length);
+  return listCursorAt(previous, oldest.updatedAt, fetched, cursorAdvance);
 }
 
 /**
@@ -668,7 +670,7 @@ export const make = Effect.gen(function* () {
                   truncated: page.truncated,
                   nextCursor:
                     page.continues && page.truncated
-                      ? nextListCursor(cursor, page.items, items)
+                      ? nextListCursor(cursor, page.items, items, page.cursorAdvance)
                       : null,
                 };
               }),

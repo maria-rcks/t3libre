@@ -28,7 +28,11 @@ function output(stdout: string, stdoutTruncated = false) {
   };
 }
 
-function pullRequests(count: number, firstNumber: number): string {
+function pullRequests(
+  count: number,
+  firstNumber: number,
+  overrides: (number: number) => Readonly<Record<string, unknown>> = () => ({}),
+): string {
   return JSON.stringify(
     Array.from({ length: count }, (_, index) => ({
       number: firstNumber + index,
@@ -38,6 +42,7 @@ function pullRequests(count: number, firstNumber: number): string {
       baseRefName: "main",
       createdAt: "2026-07-01T00:00:00Z",
       updatedAt: "2026-07-02T00:00:00Z",
+      ...overrides(firstNumber + index),
     })),
   );
 }
@@ -665,7 +670,9 @@ layer("GitHubPullRequestCli.layer", (it) => {
     Effect.gen(function* () {
       // GitHub answers for a repository outside its search index with no rows and no error.
       mockedExecute.mockReturnValueOnce(Effect.succeed(output("[]")));
-      mockedExecute.mockReturnValueOnce(Effect.succeed(output(pullRequests(3, 1))));
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(output(pullRequests(3, 1, () => ({ state: "CLOSED" })))),
+      );
       const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
 
       const batch = yield* cli.listPullRequests({
@@ -679,9 +686,41 @@ layer("GitHubPullRequestCli.layer", (it) => {
       });
 
       assert.strictEqual(batch.items.length, 3);
-      // Nothing of the search survives the fallback, not even the tab's own qualifier: this read
-      // happens precisely because search answered nothing here, and `is:unmerged` is a search
-      // too. Those rows arrive in gh's own order, so nothing can carry on from them.
+      // The fallback itself uses no search, then narrows the decoded rows locally. They still
+      // arrive in gh's own order, so nothing can carry on from them.
+      expect(searchOfCall(1)).toBeUndefined();
+      assert.isFalse(batch.continues);
+    }),
+  );
+
+  it.effect("keeps state and involvement filters on the search-free fallback", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("[]")));
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(
+            pullRequests(4, 1, (number) => ({
+              state: number === 4 ? "OPEN" : "CLOSED",
+              ...(number === 3 ? { mergedAt: "2026-07-03T00:00:00Z" } : {}),
+              reviewRequests: [{ login: number === 2 ? "somebody-else" : "bilal" }],
+            })),
+          ),
+        ),
+      );
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const batch = yield* cli.listPullRequests({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        state: "closed",
+        involvement: "reviewing",
+        viewer: "bilal",
+        limit: 10,
+      });
+
+      // Only the closed, unmerged pull request asking this viewer for a review survives.
+      expect(batch.items.map((item) => item.number)).toEqual([1]);
       expect(searchOfCall(1)).toBeUndefined();
       assert.isFalse(batch.continues);
     }),
@@ -1006,6 +1045,107 @@ layer("GitHubPullRequestCli.layer", (it) => {
 
       assert.strictEqual(error._tag, "GitHubDiffCommitError");
       assert.strictEqual(mockedExecute.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("expands a new file from a root commit without requiring a parent", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("\ta1b2c3d\n")));
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("root contents\n")));
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const contents = yield* cli.getPullRequestDiffFileContents({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+        commit: "a1b2c3d",
+        changeType: "new",
+        oldPath: "src/root.ts",
+        newPath: "src/root.ts",
+      });
+
+      expect(contents).toEqual({ oldContents: "", newContents: "root contents\n" });
+      assert.strictEqual(mockedExecute.mock.calls.length, 2);
+      expect(callAt(1).args.join(" ")).toContain("contents/src/root.ts?ref=a1b2c3d");
+    }),
+  );
+
+  it.effect("reports unusable diff revisions as a structured error", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("not-a-sha\tstill-not-a-sha\n")));
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const error = yield* Effect.flip(
+        cli.getPullRequestDiffFileContents({
+          cwd: "/w",
+          repository: "acme/web",
+          host: "github.com",
+          number: 7,
+          commit: "a1b2c3d",
+          changeType: "change",
+          oldPath: "src/a.ts",
+          newPath: "src/a.ts",
+        }),
+      );
+
+      assert.strictEqual(error._tag, "GitHubDiffRevisionsUnavailableError");
+      if (error._tag === "GitHubDiffRevisionsUnavailableError") {
+        assert.strictEqual(error.number, 7);
+        assert.strictEqual(error.commit, "a1b2c3d");
+      }
+    }),
+  );
+
+  it.effect("reports an oversized diff file with its path and reason", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("a1b2c3d\tb1c2d3e\n")));
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("partial", true)));
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const error = yield* Effect.flip(
+        cli.getPullRequestDiffFileContents({
+          cwd: "/w",
+          repository: "acme/web",
+          host: "github.com",
+          number: 7,
+          changeType: "deleted",
+          oldPath: "src/large.ts",
+          newPath: "src/large.ts",
+        }),
+      );
+
+      assert.strictEqual(error._tag, "GitHubDiffFileContentsUnavailableError");
+      if (error._tag === "GitHubDiffFileContentsUnavailableError") {
+        assert.strictEqual(error.path, "src/large.ts");
+        assert.strictEqual(error.reason, "oversized");
+      }
+    }),
+  );
+
+  it.effect("reports a binary diff file with its path and reason", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("a1b2c3d\tb1c2d3e\n")));
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output("binary\0contents")));
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const error = yield* Effect.flip(
+        cli.getPullRequestDiffFileContents({
+          cwd: "/w",
+          repository: "acme/web",
+          host: "github.com",
+          number: 7,
+          changeType: "deleted",
+          oldPath: "assets/logo.png",
+          newPath: "assets/logo.png",
+        }),
+      );
+
+      assert.strictEqual(error._tag, "GitHubDiffFileContentsUnavailableError");
+      if (error._tag === "GitHubDiffFileContentsUnavailableError") {
+        assert.strictEqual(error.path, "assets/logo.png");
+        assert.strictEqual(error.reason, "binary");
+      }
     }),
   );
 

@@ -129,11 +129,52 @@ export class GitLabDiffCommitError extends Schema.TaggedErrorClass<GitLabDiffCom
   }
 }
 
+/** The commit exists and decoded, but it has no parent to use as the old revision. */
+export class GitLabDiffCommitParentUnavailableError extends Schema.TaggedErrorClass<GitLabDiffCommitParentUnavailableError>()(
+  "GitLabDiffCommitParentUnavailableError",
+  {
+    command: Schema.Literal("glab"),
+    cwd: Schema.String,
+    commit: Schema.String,
+  },
+) {
+  get detail(): string {
+    return `Commit ${this.commit} reported no parent revision.`;
+  }
+
+  override get message(): string {
+    return `GitLab CLI failed in getMergeRequestDiffFileContents: ${this.detail}`;
+  }
+}
+
+/** A blob exists, but expanding it would be unsafe or would not produce text. */
+export class GitLabDiffFileContentsUnavailableError extends Schema.TaggedErrorClass<GitLabDiffFileContentsUnavailableError>()(
+  "GitLabDiffFileContentsUnavailableError",
+  {
+    command: Schema.Literal("glab"),
+    cwd: Schema.String,
+    path: Schema.String,
+    reason: Schema.Literals(["oversized", "binary"]),
+  },
+) {
+  get detail(): string {
+    return this.reason === "oversized"
+      ? `The diff file '${this.path}' exceeds the 1 MB expansion limit.`
+      : `The diff file '${this.path}' is binary.`;
+  }
+
+  override get message(): string {
+    return `GitLab CLI failed in getMergeRequestDiffFileContents: ${this.detail}`;
+  }
+}
+
 export type GitLabPullRequestCliError =
   | GitLabCli.GitLabCliError
   | GitLabMergeRequestReadError
   | GitLabDiffCursorError
   | GitLabDiffCommitError
+  | GitLabDiffCommitParentUnavailableError
+  | GitLabDiffFileContentsUnavailableError
   | GitLabDiffRefsUnavailableError
   | GitLabViewerUnavailableError;
 
@@ -428,10 +469,15 @@ export const make = Effect.gen(function* () {
     readonly page: number;
     readonly collected: ReadonlyArray<GitLabMergeRequestListItem>;
   }): Effect.Effect<GitLabMergeRequestListBatch, GitLabPullRequestCliError> => {
-    // Fixed across the walk: GitLab pages by offset, so a page size that changed between
-    // requests would skip or repeat rows. One row over the limit probes for a next page.
-    const perPage = Math.min(input.limit + 1, MAX_PAGE_SIZE);
-    const lastPage = Math.ceil((input.limit + 1) / perPage);
+    // A continuation uses GitLab's offset pagination. Its timestamp filter is inclusive and has
+    // no tie-breaker, so a page where many rows share the boundary would otherwise return the
+    // same prefix forever. `delivered` is the stable offset the service has already handed over.
+    const delivered = input.cursor?.delivered ?? 0;
+    const perPage =
+      input.cursor === undefined ? Math.min(input.limit + 1, MAX_PAGE_SIZE) : MAX_PAGE_SIZE;
+    const firstPage = Math.floor(delivered / perPage) + 1;
+    const skipOnFirstPage = delivered % perPage;
+    const lastPage = Math.floor((delivered + input.limit) / perPage) + 1;
     return api({
       cwd: input.cwd,
       path: `projects/${projectPath(input.repository)}/merge_requests?${query([
@@ -442,12 +488,6 @@ export const make = Effect.gen(function* () {
         // matches title and description, and travels URL-encoded like every other value here,
         // so no text in it can become a parameter of its own.
         ...searchParams(input.query),
-        // The instant the last slice ended on, which GitLab reads inclusively — so the rows
-        // already sent at it come back and the caller drops them, rather than the ones beside
-        // them being lost to a strictly-older read.
-        ...(input.cursor === undefined
-          ? []
-          : [["updated_before", input.cursor.updatedBefore] as const]),
         ["order_by", "updated_at"],
         ["sort", "desc"],
         ["per_page", String(perPage)],
@@ -470,7 +510,11 @@ export const make = Effect.gen(function* () {
             }),
           );
         }
-        const collected = [...input.collected, ...decoded.success.items];
+        const pageItems =
+          input.page === firstPage
+            ? decoded.success.items.slice(skipOnFirstPage)
+            : decoded.success.items;
+        const collected = [...input.collected, ...pageItems];
         // Counted before decoding, so a skipped malformed row cannot end paging early.
         const exhausted = decoded.success.rawCount < perPage;
         if (exhausted || collected.length > input.limit || input.page >= lastPage) {
@@ -696,7 +740,7 @@ export const make = Effect.gen(function* () {
       cwd: input.cwd,
       path: `projects/${projectPath(input.repository)}/repository/commits/${input.commit}`,
     }).pipe(
-      Effect.flatMap((result) => {
+      Effect.flatMap((result): Effect.Effect<GitLabDiffRefs, GitLabPullRequestCliError> => {
         const decoded = decodeCommitDiffRefsJson(result.stdout.trim());
         if (!Result.isSuccess(decoded)) {
           return Effect.fail(
@@ -710,11 +754,10 @@ export const make = Effect.gen(function* () {
         }
         return decoded.success === null
           ? Effect.fail(
-              new GitLabMergeRequestReadError({
+              new GitLabDiffCommitParentUnavailableError({
                 command: "glab",
                 cwd: input.cwd,
-                operation: "getMergeRequestDiffFileContents",
-                cause: new Error("GitLab returned no usable parent for the commit."),
+                commit: input.commit,
               }),
             )
           : Effect.succeed(decoded.success);
@@ -796,7 +839,12 @@ export const make = Effect.gen(function* () {
         }),
       ),
 
-    listMergeRequests: (input) => listPage({ ...input, page: 1, collected: [] }),
+    listMergeRequests: (input) => {
+      const perPage =
+        input.cursor === undefined ? Math.min(input.limit + 1, MAX_PAGE_SIZE) : MAX_PAGE_SIZE;
+      const page = Math.floor((input.cursor?.delivered ?? 0) / perPage) + 1;
+      return listPage({ ...input, page, collected: [] });
+    },
 
     getMergeRequestDetail: mergeRequestDetail,
 
@@ -846,9 +894,7 @@ export const make = Effect.gen(function* () {
     getMergeRequestDiffFileContents: (input) =>
       Effect.gen(function* () {
         if (input.commit !== undefined && !isCommitSha(input.commit)) {
-          return yield* Effect.fail(
-            new GitLabDiffCommitError({ command: "glab", cwd: input.cwd }),
-          );
+          return yield* Effect.fail(new GitLabDiffCommitError({ command: "glab", cwd: input.cwd }));
         }
         const refs = yield* input.commit === undefined
           ? getDiffRefs(input)
@@ -870,15 +916,11 @@ export const make = Effect.gen(function* () {
             Effect.flatMap((result) =>
               result.stdoutTruncated || result.stdout.includes("\0")
                 ? Effect.fail(
-                    new GitLabMergeRequestReadError({
+                    new GitLabDiffFileContentsUnavailableError({
                       command: "glab",
                       cwd: input.cwd,
-                      operation: "getMergeRequestDiffFileContents",
-                      cause: new Error(
-                        result.stdoutTruncated
-                          ? `The diff file '${filePath}' exceeds the 1 MB expansion limit.`
-                          : `The diff file '${filePath}' is binary.`,
-                      ),
+                      path: filePath,
+                      reason: result.stdoutTruncated ? "oversized" : "binary",
                     }),
                   )
                 : Effect.succeed(result.stdout),
@@ -887,9 +929,7 @@ export const make = Effect.gen(function* () {
 
         const [oldContents, newContents] = yield* Effect.all(
           [
-            input.changeType === "new"
-              ? Effect.succeed("")
-              : readFile(refs.baseSha, input.oldPath),
+            input.changeType === "new" ? Effect.succeed("") : readFile(refs.baseSha, input.oldPath),
             input.changeType === "deleted"
               ? Effect.succeed("")
               : readFile(refs.headSha, input.newPath),

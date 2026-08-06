@@ -22,14 +22,17 @@ function TimelineBody({ body, markdown, cwd }: { body: string; markdown: boolean
    * Measured rather than guessed from the text. A body's height depends on the width it is
    * given and on what the markdown turned into: a screenshot or a recording is a handful of
    * characters and half a screen tall, and a length heuristic would fold it away behind no
-   * control at all. Latched, because once expanded the content is no longer taller than its box.
+   * control at all. The body can change without this component unmounting, so both pieces of
+   * presentation state are recalculated for the new content.
    */
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (content === null) return;
     const measure = () => {
-      if (content.getBoundingClientRect().height > COLLAPSED_BODY_HEIGHT) setOverflows(true);
+      setOverflows(content.getBoundingClientRect().height > COLLAPSED_BODY_HEIGHT);
     };
+    setExpanded(false);
+    setOverflows(false);
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(content);

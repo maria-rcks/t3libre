@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 
-import { gitHubViewerPermissions, loginAvatarUrl } from "./GitHubPullRequestProvider.ts";
+import * as GitHubPullRequestCli from "./GitHubPullRequestCli.ts";
+import { gitHubViewerPermissions, loginAvatarUrl, make } from "./GitHubPullRequestProvider.ts";
 
 describe("gitHubViewerPermissions", () => {
   it("offers everything to a viewer who can write to the repository", () => {
@@ -39,6 +42,71 @@ describe("gitHubViewerPermissions", () => {
       requestReviewers: false,
     });
   });
+
+  it.effect("does not assume authorship when the review-thread read fails", () =>
+    Effect.gen(function* () {
+      const provider = yield* make;
+      const detail = yield* provider.getChangeRequest({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+      });
+
+      expect(detail.viewerPermissions).toEqual({
+        actions: ["ready", "draft", "close", "reopen"],
+        comment: true,
+        resolve: false,
+        verdicts: ["comment", "approve", "request-changes"],
+        requestReviewers: false,
+      });
+    }).pipe(
+      Effect.provide(
+        Layer.mock(GitHubPullRequestCli.GitHubPullRequestCli)({
+          getPullRequestDetail: () =>
+            Effect.succeed({
+              authorId: null,
+              number: 7,
+              title: "Pull request 7",
+              url: "https://github.com/acme/web/pull/7",
+              author: null,
+              headBranch: "feat/page",
+              baseBranch: "main",
+              state: "open",
+              isDraft: false,
+              mergeability: "mergeable",
+              additions: 1,
+              deletions: 1,
+              createdAt: "2026-07-01T00:00:00Z",
+              updatedAt: "2026-07-02T00:00:00Z",
+              reviewRequestLogins: [],
+              labels: [],
+              body: "",
+              changedFiles: 1,
+              mergedAt: null,
+              closedAt: null,
+              checks: [],
+              comments: [],
+              commits: [],
+            }),
+          getRepositoryAccess: () =>
+            Effect.succeed({
+              canWrite: false,
+              mergeCapabilities: { merge: true, squash: true, rebase: true },
+            }),
+          listReviewThreadComments: () =>
+            Effect.fail(
+              new GitHubPullRequestCli.GitHubPullRequestReadError({
+                command: "gh",
+                cwd: "/w",
+                operation: "listReviewThreadComments",
+                cause: new Error("transient GraphQL failure"),
+              }),
+            ),
+        }),
+      ),
+    ),
+  );
 });
 
 describe("loginAvatarUrl", () => {

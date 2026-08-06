@@ -131,6 +131,7 @@ export const make = Effect.gen(function* () {
           Effect.map((batch) => ({
             items: batch.items.map(toChangeRequest),
             truncated: batch.truncated,
+            cursorAdvance: batch.cursorAdvance,
             // Azure answers in one order whether or not it is being carried on from, so a slice
             // can always be stepped past — by counting, which is all Azure offers.
             continues: true,

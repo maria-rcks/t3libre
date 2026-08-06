@@ -367,7 +367,12 @@ export function PullRequestSummaryTab({
         )}
         {/* A host that cannot post a comment gets no composer, rather than one that fails. */}
         {detail.capabilities.comment && detail.viewerPermissions.comment ? (
-          <CommentComposer environmentId={environmentId} detail={detail} onCommented={onRefresh} />
+          <CommentComposer
+            key={`${environmentId}:${detail.projectId}/${detail.repository}#${detail.number}`}
+            environmentId={environmentId}
+            detail={detail}
+            onCommented={onRefresh}
+          />
         ) : null}
       </Section>
     </div>

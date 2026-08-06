@@ -53,7 +53,9 @@ export function PullRequestFilterPills<Value extends string>({
           key={option.value}
           type="button"
           aria-pressed={option.value === value}
-          onClick={() => onChange(option.value)}
+          onClick={() => {
+            if (option.value !== value) onChange(option.value);
+          }}
           className={filterOptionClass(option.value === value)}
         >
           <option.Icon aria-hidden className="size-3.5" />
@@ -141,7 +143,9 @@ export function PullRequestProviderFilter({
       <button
         type="button"
         aria-pressed={value === undefined}
-        onClick={() => onChange(undefined)}
+        onClick={() => {
+          if (value !== undefined) onChange(undefined);
+        }}
         className={filterOptionClass(value === undefined)}
       >
         All
@@ -159,7 +163,9 @@ export function PullRequestProviderFilter({
             // The host itself when it reads as a provider name, so a switcher showing "GitHub"
             // still says which install it means.
             title={provider.configured ? provider.host : (provider.detail ?? undefined)}
-            onClick={() => onChange(provider.host)}
+            onClick={() => {
+              if (!active) onChange(provider.host);
+            }}
             // Opacity rather than a muted colour: the icons are brand-coloured, so text colour
             // alone would leave a disabled host looking active.
             className={filterOptionClass(active, !provider.configured)}
@@ -254,9 +260,10 @@ export function PullRequestProjectFilter({
       <MenuPopup align="end" side="bottom" className="min-w-56">
         <MenuRadioGroup
           value={value ?? ALL_PROJECTS_VALUE}
-          onValueChange={(next) =>
-            onChange(next === ALL_PROJECTS_VALUE ? undefined : (next as ProjectId))
-          }
+          onValueChange={(next) => {
+            const projectId = next === ALL_PROJECTS_VALUE ? undefined : (next as ProjectId);
+            if (projectId !== value) onChange(projectId);
+          }}
         >
           <MenuRadioItem value={ALL_PROJECTS_VALUE}>All projects</MenuRadioItem>
           {/* The ones that can be chosen first: a list that opens with three disabled rows reads

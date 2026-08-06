@@ -296,6 +296,40 @@ it.effect("offers no continuation for a host that cannot be carried on from", ()
   }),
 );
 
+it.effect("uses a provider's raw cursor advance when it consumed malformed rows", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      projects: [
+        project({
+          id: "p1",
+          title: "web",
+          workspaceRoot: "/a",
+          repository: "acme/web",
+          provider: "azure-devops",
+          host: "dev.azure.com",
+        }),
+      ],
+      providers: [
+        fakeProvider("azure-devops", {
+          listChangeRequests: () =>
+            Effect.succeed({
+              items: [changeRequest(7, "2026-07-02T00:00:00Z")],
+              truncated: true,
+              cursorAdvance: 4,
+              continues: true,
+            }),
+        }),
+      ],
+    });
+
+    const result = yield* service.list({ state: "open" });
+
+    assert.deepStrictEqual(result.nextCursors, {
+      "dev.azure.com acme/web": "2026-07-02T00:00:00Z|4|7",
+    });
+  }),
+);
+
 it.effect("reads only the repositories it was asked to carry on with", () =>
   Effect.gen(function* () {
     const listed: string[] = [];

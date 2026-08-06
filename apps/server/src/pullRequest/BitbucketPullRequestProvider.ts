@@ -54,12 +54,12 @@ export function bitbucketViewerPermissions(input: {
 }
 
 /** The failures that mean the credentials are the problem, rather than one request. */
-function reasonFor(
+export function bitbucketErrorReason(
   error: BitbucketPullRequestApi.BitbucketPullRequestApiError,
 ): PullRequestProviderError["reason"] {
   // Bitbucket is read over HTTP with credentials from the environment, so there is no tool to be
   // missing: unusable always means the credentials are absent or refused.
-  if (error._tag === "BitbucketResponseError" && (error.status === 401 || error.status === 403)) {
+  if (error._tag === "BitbucketResponseError" && error.status === 401) {
     return "unauthenticated";
   }
   return "failed";
@@ -95,7 +95,7 @@ export const make = Effect.gen(function* () {
       new PullRequestProviderError({
         provider: "bitbucket",
         operation,
-        reason: reasonFor(error),
+        reason: bitbucketErrorReason(error),
         // Every Bitbucket failure states its own fact; this names the operation around it, so
         // the two do not stack into "failed in x: failed in y: ...".
         detail: error.detail,

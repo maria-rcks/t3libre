@@ -245,8 +245,9 @@ describe("decodeCommitsJson", () => {
       ),
     );
 
-    expect(decoded.map((commit) => commit.oid)).toEqual(["aaa", "bbb"]);
-    expect(decoded[1]?.messageHeadline).toBe("second");
+    expect(decoded.items.map((commit) => commit.oid)).toEqual(["aaa", "bbb"]);
+    expect(decoded.items[1]?.messageHeadline).toBe("second");
+    expect(decoded.next).toBeNull();
   });
 });
 
@@ -266,14 +267,17 @@ describe("decodeStatusesJson", () => {
       ),
     );
 
-    expect(decoded).toEqual([
-      {
-        name: "Pipeline - custom: check-version-and-pr",
-        status: "success",
-        description: null,
-        url: "https://bitbucket.org/acme/web/pipelines/results/8126",
-      },
-    ]);
+    expect(decoded).toEqual({
+      items: [
+        {
+          name: "Pipeline - custom: check-version-and-pr",
+          status: "success",
+          description: null,
+          url: "https://bitbucket.org/acme/web/pipelines/results/8126",
+        },
+      ],
+      next: null,
+    });
   });
 
   it.each([
@@ -285,7 +289,7 @@ describe("decodeStatusesJson", () => {
   ])("reads the %s build state as %s", (state, expected) => {
     const decoded = expectSuccess(decodeStatusesJson(page([{ name: "Pipeline", state }])));
 
-    expect(decoded[0]?.status).toBe(expected);
+    expect(decoded.items[0]?.status).toBe(expected);
   });
 });
 
@@ -300,7 +304,7 @@ describe("decodeDiffstatJson", () => {
       ),
     );
 
-    expect(decoded).toEqual({ additions: 41, deletions: 16, changedFiles: 2 });
+    expect(decoded).toEqual({ additions: 41, deletions: 16, changedFiles: 2, next: null });
   });
 });
 

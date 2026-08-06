@@ -131,6 +131,48 @@ export class GitHubDiffCommitError extends Schema.TaggedErrorClass<GitHubDiffCom
   }
 }
 
+/** The revisions read successfully, but cannot name both sides this file needs. */
+export class GitHubDiffRevisionsUnavailableError extends Schema.TaggedErrorClass<GitHubDiffRevisionsUnavailableError>()(
+  "GitHubDiffRevisionsUnavailableError",
+  {
+    command: Schema.Literal("gh"),
+    cwd: Schema.String,
+    number: Schema.Int,
+    commit: Schema.optional(Schema.String),
+  },
+) {
+  get detail(): string {
+    return this.commit === undefined
+      ? `Pull request #${this.number} reported no usable base and head revisions.`
+      : `Commit ${this.commit} reported no usable revisions for this file.`;
+  }
+
+  override get message(): string {
+    return `GitHub CLI failed in getPullRequestDiffFileContents: ${this.detail}`;
+  }
+}
+
+/** A blob exists, but expanding it would be unsafe or would not produce text. */
+export class GitHubDiffFileContentsUnavailableError extends Schema.TaggedErrorClass<GitHubDiffFileContentsUnavailableError>()(
+  "GitHubDiffFileContentsUnavailableError",
+  {
+    command: Schema.Literal("gh"),
+    cwd: Schema.String,
+    path: Schema.String,
+    reason: Schema.Literals(["oversized", "binary"]),
+  },
+) {
+  get detail(): string {
+    return this.reason === "oversized"
+      ? `The diff file '${this.path}' exceeds the 1 MB expansion limit.`
+      : `The diff file '${this.path}' is binary.`;
+  }
+
+  override get message(): string {
+    return `GitHub CLI failed in getPullRequestDiffFileContents: ${this.detail}`;
+  }
+}
+
 /**
  * Not a decode failure: a repository was named that cannot go into a search or into a GraphQL
  * document as itself. Every qualifier and every alias below is composed from `owner/name`, so a
@@ -159,6 +201,8 @@ export type GitHubPullRequestCliError =
   | GitHubPullRequestReadError
   | GitHubDiffCursorError
   | GitHubDiffCommitError
+  | GitHubDiffRevisionsUnavailableError
+  | GitHubDiffFileContentsUnavailableError
   | GitHubRepositorySelectorError
   | GitHubViewerLoginUnavailableError;
 
@@ -462,8 +506,8 @@ function involvementArgs(input: {
   // takes one `--search`, so the reader's text joins the qualifiers rather than replacing them.
   const query = input.query?.trim() ?? "";
   // The fallback read exists because this repository's search index answered nothing, so it goes
-  // nowhere near search: no order, no cursor, and no qualifiers either, since `review-requested:`
-  // and `is:unmerged` are searches too and would come back just as empty.
+  // nowhere near search: no order, cursor or qualifiers. Its decoded rows are narrowed by state
+  // and involvement below, since widening either would put unrelated pull requests on the page.
   const searchTerms = !input.sorted
     ? []
     : [
@@ -484,6 +528,25 @@ function involvementArgs(input: {
     ...(input.involvement === "authored" ? ["--author", input.viewer] : []),
     ...(searchTerms.length > 0 ? ["--search", searchTerms.join(" ")] : []),
   ];
+}
+
+/** The search-free fallback is wider than the request, so narrow its decoded rows locally. */
+function matchesUnsortedListing(
+  item: GitHubPullRequestListItem,
+  input: {
+    readonly state: PullRequestListState;
+    readonly involvement: PullRequestInvolvement;
+    readonly viewer: string;
+  },
+): boolean {
+  const matchesState = input.state === "all" || item.state === input.state;
+  const viewer = input.viewer.toLowerCase();
+  const matchesInvolvement =
+    input.involvement === "all" ||
+    (input.involvement === "authored"
+      ? item.author?.login.toLowerCase() === viewer
+      : item.reviewRequestLogins.some((login) => login.toLowerCase() === viewer));
+  return matchesState && matchesInvolvement;
 }
 
 /** What a repository selector may hold before it goes into a search as itself. */
@@ -748,20 +811,24 @@ export const make = Effect.gen(function* () {
           maxOutputBytes: 1024,
           timeoutMs: DIFF_TIMEOUT_MS,
         });
-        const [baseRef, headRef, ...extraRefs] = refsResult.stdout.trim().split("\t");
+        // Keep a leading tab: a root commit has no parent, and jq represents that absent old
+        // revision as the empty field before the tab. Every file in it is new, so that is a
+        // usable answer whenever the caller does not need the old side.
+        const [baseRef, headRef, ...extraRefs] = refsResult.stdout.trimEnd().split("\t");
+        const rootCommitNewFile =
+          input.commit !== undefined && input.changeType === "new" && baseRef === "";
         if (
           refsResult.stdoutTruncated ||
-          !baseRef ||
           !headRef ||
           extraRefs.length > 0 ||
-          !isCommitSha(baseRef) ||
+          (!rootCommitNewFile && (baseRef === undefined || !isCommitSha(baseRef))) ||
           !isCommitSha(headRef)
         ) {
-          return yield* new GitHubPullRequestReadError({
+          return yield* new GitHubDiffRevisionsUnavailableError({
             command: "gh",
             cwd: input.cwd,
-            operation: "getPullRequestDiffFileContents",
-            cause: new Error("GitHub returned no usable base and head revisions."),
+            number: input.number,
+            ...(input.commit === undefined ? {} : { commit: input.commit }),
           });
         }
 
@@ -787,15 +854,11 @@ export const make = Effect.gen(function* () {
               Effect.flatMap((result) =>
                 result.stdoutTruncated || result.stdout.includes("\0")
                   ? Effect.fail(
-                      new GitHubPullRequestReadError({
+                      new GitHubDiffFileContentsUnavailableError({
                         command: "gh",
                         cwd: input.cwd,
-                        operation: "getPullRequestDiffFileContents",
-                        cause: new Error(
-                          result.stdoutTruncated
-                            ? `The diff file '${filePath}' exceeds the 1 MB expansion limit.`
-                            : `The diff file '${filePath}' is binary.`,
-                        ),
+                        path: filePath,
+                        reason: result.stdoutTruncated ? "oversized" : "binary",
                       }),
                     )
                   : Effect.succeed(result.stdout),
@@ -804,12 +867,8 @@ export const make = Effect.gen(function* () {
 
         const [oldContents, newContents] = yield* Effect.all(
           [
-            input.changeType === "new"
-              ? Effect.succeed("")
-              : readFile(baseRef, input.oldPath),
-            input.changeType === "deleted"
-              ? Effect.succeed("")
-              : readFile(headRef, input.newPath),
+            input.changeType === "new" ? Effect.succeed("") : readFile(baseRef, input.oldPath),
+            input.changeType === "deleted" ? Effect.succeed("") : readFile(headRef, input.newPath),
           ],
           { concurrency: 2 },
         );
@@ -855,22 +914,26 @@ export const make = Effect.gen(function* () {
                 return Effect.succeed({ items: [], truncated: false, continues });
               }
               const decoded = decodePullRequestListJson(raw);
-              return Result.isSuccess(decoded)
-                ? Effect.succeed({
-                    items: decoded.success.items.slice(0, input.limit),
-                    // One row over the page size is the probe for a next page, and it is
-                    // counted before decoding: a skipped malformed row must not end paging.
-                    truncated: decoded.success.rawCount > input.limit,
-                    continues,
-                  })
-                : Effect.fail(
-                    new GitHubPullRequestReadError({
-                      command: "gh",
-                      cwd: input.cwd,
-                      operation: "listPullRequests",
-                      cause: decoded.failure,
-                    }),
-                  );
+              if (Result.isSuccess(decoded)) {
+                const items = continues
+                  ? decoded.success.items
+                  : decoded.success.items.filter((item) => matchesUnsortedListing(item, input));
+                return Effect.succeed({
+                  items: items.slice(0, input.limit),
+                  // One row over the page size is the probe for a next page, and it is
+                  // counted before decoding: a skipped malformed row must not end paging.
+                  truncated: decoded.success.rawCount > input.limit,
+                  continues,
+                });
+              }
+              return Effect.fail(
+                new GitHubPullRequestReadError({
+                  command: "gh",
+                  cwd: input.cwd,
+                  operation: "listPullRequests",
+                  cause: decoded.failure,
+                }),
+              );
             }),
           );
       // GitHub does not index every repository for search, and one it will not search answers
@@ -1098,7 +1161,7 @@ export const make = Effect.gen(function* () {
         const entries: GitHubReviewThreadEntry[] = [];
         const avatarsByLogin = new Map<string, string>();
         let reviewers: ReadonlyArray<PullRequestActor> = [];
-        let viewer: GitHubReviewThreadPage["viewer"] = { canUpdate: true, didAuthor: true };
+        let viewer: GitHubReviewThreadPage["viewer"] = { canUpdate: true, didAuthor: false };
         let cursor: string | null = null;
         let page = 0;
         do {

@@ -10,13 +10,14 @@ import {
   MessageSquareIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { cn } from "~/lib/utils";
 
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
+import { isCommentSubmitShortcut } from "../diffs/commentSubmitShortcut";
 import { PullRequestActorLabel } from "./pullRequestPresentation";
 import { PullRequestMarkdown } from "./PullRequestMarkdown";
 import type { PendingReviewComment } from "./pullRequestReviewStore";
@@ -27,6 +28,7 @@ const CARD_CLASS =
 /** Sends a reply on ⌘/Ctrl+Enter and abandons it on Escape. */
 function submitKeys(input: {
   readonly value: string;
+  readonly pending: boolean;
   readonly onSubmit: () => void;
   readonly onCancel?: (() => void) | undefined;
 }) {
@@ -35,7 +37,7 @@ function submitKeys(input: {
       event.preventDefault();
       input.onCancel();
     }
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && input.value.trim()) {
+    if (isCommentSubmitShortcut(event, input.value, input.pending)) {
       event.preventDefault();
       input.onSubmit();
     }
@@ -103,15 +105,21 @@ export function ReviewThreadCard({
   const [expanded, setExpanded] = useState(!thread.isResolved);
   const [replying, setReplying] = useState(false);
   const [reply, setReply] = useState("");
+  const sendingRef = useRef(false);
 
   const send = async () => {
     const trimmed = reply.trim();
-    if (trimmed.length === 0) return;
+    if (trimmed.length === 0 || pending || sendingRef.current) return;
+    sendingRef.current = true;
     // Cleared only once the host has it. Otherwise a failed reply leaves an error toast and an
     // empty box, and the words have to be written again.
-    if (await onReply(trimmed)) {
-      setReply("");
-      setReplying(false);
+    try {
+      if (await onReply(trimmed)) {
+        setReply("");
+        setReplying(false);
+      }
+    } finally {
+      sendingRef.current = false;
     }
   };
 
@@ -192,6 +200,7 @@ export function ReviewThreadCard({
                   onChange={(event) => setReply(event.target.value)}
                   onKeyDown={submitKeys({
                     value: reply,
+                    pending,
                     onSubmit: () => void send(),
                     onCancel: () => setReplying(false),
                   })}

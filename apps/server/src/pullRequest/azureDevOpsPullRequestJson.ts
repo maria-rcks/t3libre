@@ -237,6 +237,8 @@ type DecodeFailure = Cause.Cause<Schema.SchemaError>;
 
 export interface AzureDevOpsPullRequestBatch {
   readonly items: ReadonlyArray<AzureDevOpsPullRequest>;
+  /** Zero-based positions of the decoded items in Azure's raw page. */
+  readonly rawIndexes: ReadonlyArray<number>;
   /** Rows Azure returned, counted before decoding, so a skipped row cannot hide a next page. */
   readonly rawCount: number;
 }
@@ -250,13 +252,17 @@ export function decodePullRequestListJson(
     return Result.fail(decoded.failure);
   }
   const items: AzureDevOpsPullRequest[] = [];
-  for (const entry of decoded.success) {
+  const rawIndexes: number[] = [];
+  for (const [rawIndex, entry] of decoded.success.entries()) {
     const item = decodePullRequestEntry(entry);
     if (Exit.isFailure(item)) continue;
     const pullRequest = toPullRequest(item.value);
-    if (pullRequest !== null) items.push(pullRequest);
+    if (pullRequest !== null) {
+      items.push(pullRequest);
+      rawIndexes.push(rawIndex);
+    }
   }
-  return Result.succeed({ items, rawCount: decoded.success.length });
+  return Result.succeed({ items, rawIndexes, rawCount: decoded.success.length });
 }
 
 /** Null carries "Azure answered, but with too little to use", which the caller reports. */

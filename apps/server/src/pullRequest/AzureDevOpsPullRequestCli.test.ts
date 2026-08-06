@@ -29,19 +29,24 @@ function output(stdout: string) {
   };
 }
 
+function pullRequestRows(
+  count: number,
+  firstNumber: number,
+): ReadonlyArray<Record<string, unknown>> {
+  return Array.from({ length: count }, (_, index) => ({
+    pullRequestId: firstNumber + index,
+    title: `Pull request ${firstNumber + index}`,
+    status: "active",
+    sourceRefName: "refs/heads/feat/page",
+    targetRefName: "refs/heads/main",
+    creationDate: "2026-07-01T00:00:00Z",
+    repository: { name: "web", project: { name: "platform" } },
+    url: `https://dev.azure.com/acme/_apis/git/repositories/web/pullRequests/${firstNumber + index}`,
+  }));
+}
+
 function pullRequests(count: number, firstNumber: number): string {
-  return JSON.stringify(
-    Array.from({ length: count }, (_, index) => ({
-      pullRequestId: firstNumber + index,
-      title: `Pull request ${firstNumber + index}`,
-      status: "active",
-      sourceRefName: "refs/heads/feat/page",
-      targetRefName: "refs/heads/main",
-      creationDate: "2026-07-01T00:00:00Z",
-      repository: { name: "web", project: { name: "platform" } },
-      url: `https://dev.azure.com/acme/_apis/git/repositories/web/pullRequests/${firstNumber + index}`,
-    })),
-  );
+  return JSON.stringify(pullRequestRows(count, firstNumber));
 }
 
 /** The arguments of the nth az invocation. */
@@ -172,6 +177,44 @@ layer("AzureDevOpsPullRequestCli.layer", (it) => {
 
       assert.strictEqual(batch.items.length, 10);
       assert.isTrue(batch.truncated);
+      assert.strictEqual(batch.cursorAdvance, 10);
+    }),
+  );
+
+  it.effect("advances by malformed raw rows and keeps reading until the page is full", () =>
+    Effect.gen(function* () {
+      mockedExecute
+        .mockReturnValueOnce(
+          Effect.succeed(
+            output(
+              // @effect-diagnostics-next-line preferSchemaOverJson:off
+              JSON.stringify([
+                { pullRequestId: "malformed" },
+                pullRequestRows(1, 1)[0],
+                { pullRequestId: "also malformed" },
+              ]),
+            ),
+          ),
+        )
+        .mockReturnValueOnce(Effect.succeed(output(pullRequests(2, 2))));
+      const cli = yield* AzureDevOpsPullRequestCli.AzureDevOpsPullRequestCli;
+
+      const batch = yield* cli.listPullRequests({
+        cwd: "/w",
+        repository: "web",
+        state: "open",
+        involvement: "all",
+        viewer: "bilal@acme.dev",
+        limit: 2,
+      });
+
+      expect(batch.items.map((item) => item.number)).toEqual([1, 2]);
+      assert.isTrue(batch.truncated);
+      // Three raw rows from the first request and one from the second produced this page.
+      assert.strictEqual(batch.cursorAdvance, 4);
+      const secondArgs = argsOfCall(1);
+      assert.strictEqual(secondArgs[secondArgs.indexOf("--skip") + 1], "3");
+      assert.strictEqual(secondArgs[secondArgs.indexOf("--top") + 1], "2");
     }),
   );
 

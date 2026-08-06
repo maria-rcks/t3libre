@@ -114,7 +114,7 @@ export type BitbucketPullRequestApiError =
 const MAX_PAGE_SIZE = 50;
 /** Pages to walk before a listing is reported as truncated. */
 const MAX_LIST_PAGES = 10;
-/** Commits and checks are read one page deep; the conversation is walked to its end. */
+/** The page size for pull request conversations, commits, and checks. */
 const CONVERSATION_PAGE_SIZE = 50;
 /**
  * Pages of the conversation to follow before it is reported as truncated. Bitbucket serves
@@ -446,6 +446,46 @@ export const make = Effect.gen(function* () {
       }),
     );
 
+  /** Walks a Bitbucket cursor to its end and combines every decoded item. */
+  const itemPages = <A>(input: {
+    readonly operation: string;
+    readonly url: string;
+    readonly decode: (
+      body: string,
+    ) => Result.Result<{ readonly items: ReadonlyArray<A>; readonly next: string | null }, unknown>;
+    readonly items: ReadonlyArray<A>;
+    /** Commit pages are individually oldest-first, so older pages are prepended. */
+    readonly prepend: boolean;
+  }): Effect.Effect<ReadonlyArray<A>, BitbucketPullRequestApiError> =>
+    readPage({ operation: input.operation, url: input.url, decode: input.decode }).pipe(
+      Effect.flatMap((page) => {
+        const items = input.prepend
+          ? [...page.items, ...input.items]
+          : [...input.items, ...page.items];
+        return page.next === null
+          ? Effect.succeed(items)
+          : itemPages({ ...input, url: page.next, items });
+      }),
+    );
+
+  /** Diffstat has one aggregate per page, so its totals are folded while following `next`. */
+  const diffStatPages = (input: {
+    readonly url: string;
+    readonly totals: BitbucketDiffStat;
+  }): Effect.Effect<BitbucketDiffStat, BitbucketPullRequestApiError> =>
+    readPage({ operation: "getDiffStat", url: input.url, decode: decodeDiffstatJson }).pipe(
+      Effect.flatMap((page) => {
+        const totals = {
+          additions: input.totals.additions + page.additions,
+          deletions: input.totals.deletions + page.deletions,
+          changedFiles: input.totals.changedFiles + page.changedFiles,
+        };
+        return page.next === null
+          ? Effect.succeed(totals)
+          : diffStatPages({ url: page.next, totals });
+      }),
+    );
+
   return BitbucketPullRequestApi.of({
     getViewer: () =>
       bitbucket.request({ method: "GET", url: "/user" }).pipe(
@@ -533,10 +573,9 @@ export const make = Effect.gen(function* () {
 
     getDiffStat: (input) =>
       withRepository(input.repository, (path) =>
-        readPage({
-          operation: "getDiffStat",
+        diffStatPages({
           url: `${path}/pullrequests/${input.number}/diffstat?pagelen=${MAX_PAGE_SIZE}`,
-          decode: decodeDiffstatJson,
+          totals: { additions: 0, deletions: 0, changedFiles: 0 },
         }),
       ),
 
@@ -561,19 +600,23 @@ export const make = Effect.gen(function* () {
 
     listCommits: (input) =>
       withRepository(input.repository, (path) =>
-        readPage({
+        itemPages({
           operation: "listCommits",
           url: `${path}/pullrequests/${input.number}/commits?pagelen=${CONVERSATION_PAGE_SIZE}`,
           decode: decodeCommitsJson,
+          items: [],
+          prepend: true,
         }),
       ),
 
     listChecks: (input) =>
       withRepository(input.repository, (path) =>
-        readPage({
+        itemPages({
           operation: "listChecks",
           url: `${path}/pullrequests/${input.number}/statuses?pagelen=${CONVERSATION_PAGE_SIZE}`,
           decode: decodeStatusesJson,
+          items: [],
+          prepend: false,
         }),
       ),
 
