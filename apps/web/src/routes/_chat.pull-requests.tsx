@@ -240,7 +240,8 @@ function PullRequestsRouteView() {
     [Key in keyof PullRequestsSearch]?: PullRequestsSearch[Key] | undefined;
   }) => {
     if (rightPanelRef !== null) {
-      useRightPanelStore.getState().closeAllSurfaces(rightPanelRef);
+      // Hide the old selection while retaining peer PR tabs for parallel reviews.
+      useRightPanelStore.getState().close(rightPanelRef);
     }
     updateSearch({ ...patch, ...clearedSelection });
   };
