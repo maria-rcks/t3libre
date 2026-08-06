@@ -764,7 +764,7 @@ function PullRequestsRouteView() {
       onChange={(projectId) => updateListScope({ projectId })}
     />
   );
-  const rightPanelControl = (
+  const panelToggleControls = (
     <PanelLayoutControls
       showTerminalControl={false}
       terminalAvailable={false}
@@ -776,6 +776,11 @@ function PullRequestsRouteView() {
       onToggleTerminal={() => undefined}
       onToggleRightPanel={toggleRightPanel}
     />
+  );
+  const openPanelControls = (
+    <div className="workspace-titlebar-controls right-2 z-50 gap-1 [-webkit-app-region:no-drag] wco:right-[var(--workspace-controls-right)]">
+      {panelToggleControls}
+    </div>
   );
   // The rows carried over from the last filters can also narrow to nothing one step further on,
   // where involvement is applied against the viewers of the answer they came from. "Nothing under
@@ -909,7 +914,7 @@ function PullRequestsRouteView() {
     providerFilter,
     searchInput,
     projectFilter,
-    rightPanelControl,
+    rightPanelControl: rightPanelState.isOpen ? null : panelToggleControls,
     listBody,
   };
 
@@ -949,7 +954,8 @@ function PullRequestsRouteView() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
+        {rightPanelState.isOpen ? openPanelControls : null}
         <PullRequestsColumn {...columnProps} />
 
         {rightPanelState.isOpen && activePullRequestSurface && environmentId !== null ? (
