@@ -15,7 +15,7 @@ import * as OtlpResource from "effect/unstable/observability/OtlpResource";
 import * as OtlpSerialization from "effect/unstable/observability/OtlpSerialization";
 import type * as OtlpTracer from "effect/unstable/observability/OtlpTracer";
 
-import { ServerSettingsService } from "../serverSettings.ts";
+import * as ServerSettings from "../serverSettings.ts";
 
 type TurnCompletionState = "completed" | "failed" | "interrupted" | "cancelled";
 type SpanAttributeValue = string | number | boolean;
@@ -81,6 +81,13 @@ interface MakeOptions {
   readonly isExportEnabled: Effect.Effect<boolean>;
   readonly exportSpan: (span: SentryAgentTurnSpan) => Effect.Effect<void>;
 }
+
+export class SentryAgentMonitoring extends Context.Service<
+  SentryAgentMonitoring,
+  {
+    readonly record: (event: SentryAgentMonitoringEvent) => Effect.Effect<void>;
+  }
+>()("t3/observability/SentryAgentMonitoring") {}
 
 const MAX_TRACKED_TURNS = 10_000;
 
@@ -226,28 +233,19 @@ export const make = ({ isExportEnabled, exportSpan }: MakeOptions) =>
         });
       });
 
-    return { record } satisfies SentryAgentMonitoringShape;
+    return { record } satisfies SentryAgentMonitoring["Service"];
   });
-
-export interface SentryAgentMonitoringShape {
-  readonly record: (event: SentryAgentMonitoringEvent) => Effect.Effect<void>;
-}
-
-export class SentryAgentMonitoring extends Context.Service<
-  SentryAgentMonitoring,
-  SentryAgentMonitoringShape
->()("t3/observability/SentryAgentMonitoring") {}
 
 export const layerTest = (options: MakeOptions) =>
   Layer.effect(SentryAgentMonitoring, make(options));
 
-const noop: SentryAgentMonitoringShape = {
+const noop: SentryAgentMonitoring["Service"] = {
   record: () => Effect.void,
 };
 
 export const layerNoop = Layer.succeed(SentryAgentMonitoring, noop);
 
-function disabled(): SentryAgentMonitoringShape {
+function disabled(): SentryAgentMonitoring["Service"] {
   return noop;
 }
 
@@ -284,7 +282,7 @@ function toOtlpSpan(span: SentryAgentTurnSpan): OtlpSpan {
 }
 
 const makeLive = Effect.gen(function* () {
-  const serverSettings = yield* ServerSettingsService;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
   const startupSettings = yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null));
   if (startupSettings === null) return disabled();
 
