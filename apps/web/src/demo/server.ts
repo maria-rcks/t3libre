@@ -34,6 +34,7 @@ import {
   type ServerLifecycleStreamEvent,
   type VcsStatusResult,
   type VcsStatusStreamEvent,
+  USAGE_CONTRACT_VERSION,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -115,7 +116,7 @@ class DemoSocketEndpoint {
       }
       return;
     }
-    for (const listener of [...set]) {
+    for (const listener of set) {
       (listener as (event: unknown) => void)(event);
     }
   }
@@ -239,7 +240,7 @@ export class DemoShellStore {
   }
 
   private emit(item: OrchestrationShellStreamItem): void {
-    for (const subscriber of [...this.subscribers]) {
+    for (const subscriber of this.subscribers) {
       subscriber(item);
     }
   }
@@ -448,7 +449,7 @@ export class DemoShellStore {
             }
           }
         }
-        for (const thread of [...this.threads.values()]) {
+        for (const thread of this.threads.values()) {
           if (thread.projectId === command.projectId) {
             this.removeThread(thread.id);
           }
@@ -1044,6 +1045,8 @@ function makeHandlersLayer(backend: DemoBackend) {
           ),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           dispatchDemoCommand(store, command),
+        [ORCHESTRATION_WS_METHODS.getWorkflowScript]: () =>
+          unsupported("orchestrationGetWorkflowScript"),
         [ORCHESTRATION_WS_METHODS.searchThreads]: () => Effect.succeed({ matches: [] }),
         [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: () =>
           Effect.sync(() => store.archivedSnapshot()),
@@ -1064,6 +1067,23 @@ function makeHandlersLayer(backend: DemoBackend) {
           unsupported("serverGetProcessResourceHistory"),
         [WS_METHODS.serverGetResourceTelemetryHistory]: () =>
           unsupported("serverGetResourceTelemetryHistory"),
+        [WS_METHODS.serverGetUsageSummary]: (input) =>
+          Effect.succeed({
+            contractVersion: USAGE_CONTRACT_VERSION,
+            readAt: demoStartedAtIso,
+            timeZone: input.timeZone,
+            sinceDay: input.sinceDay,
+            untilDay: input.untilDay,
+            buckets: [],
+            sources: [],
+            pricing: {
+              status: "unavailable",
+              source: "marketing-demo",
+              fetchedAt: null,
+              knownModels: 0,
+            },
+            scanDurationMs: 0,
+          }),
         [WS_METHODS.serverRetryResourceTelemetry]: () =>
           unsupported("serverRetryResourceTelemetry"),
         [WS_METHODS.serverReportClientActivity]: () => Effect.void,
@@ -1073,6 +1093,26 @@ function makeHandlersLayer(backend: DemoBackend) {
         [WS_METHODS.cloudGetRelayClientStatus]: () => unsupported("cloudGetRelayClientStatus"),
         [WS_METHODS.cloudInstallRelayClient]: () =>
           Stream.fail(unsupportedError("cloudInstallRelayClient")),
+        [WS_METHODS.pullRequestsList]: () => unsupported("pullRequestsList"),
+        [WS_METHODS.pullRequestsListStats]: () => unsupported("pullRequestsListStats"),
+        [WS_METHODS.pullRequestsDetail]: () => unsupported("pullRequestsDetail"),
+        [WS_METHODS.pullRequestsActivity]: () => unsupported("pullRequestsActivity"),
+        [WS_METHODS.pullRequestsDiffFileContents]: () =>
+          unsupported("pullRequestsDiffFileContents"),
+        [WS_METHODS.pullRequestsRunAction]: () => unsupported("pullRequestsRunAction"),
+        [WS_METHODS.pullRequestsUpdate]: () => unsupported("pullRequestsUpdate"),
+        [WS_METHODS.pullRequestsComment]: () => unsupported("pullRequestsComment"),
+        [WS_METHODS.pullRequestsUpdateComment]: () => unsupported("pullRequestsUpdateComment"),
+        [WS_METHODS.pullRequestsSubmitReview]: () => unsupported("pullRequestsSubmitReview"),
+        [WS_METHODS.pullRequestsReplyToThread]: () => unsupported("pullRequestsReplyToThread"),
+        [WS_METHODS.pullRequestsSetThreadResolution]: () =>
+          unsupported("pullRequestsSetThreadResolution"),
+        [WS_METHODS.pullRequestsSetReaction]: () => unsupported("pullRequestsSetReaction"),
+        [WS_METHODS.pullRequestsInvalidate]: () => unsupported("pullRequestsInvalidate"),
+        [WS_METHODS.pullRequestsReviewerCandidates]: () =>
+          unsupported("pullRequestsReviewerCandidates"),
+        [WS_METHODS.pullRequestsRequestReviewers]: () =>
+          unsupported("pullRequestsRequestReviewers"),
         [WS_METHODS.sourceControlLookupRepository]: () =>
           unsupported("sourceControlLookupRepository"),
         [WS_METHODS.sourceControlCloneRepository]: () =>
@@ -1125,6 +1165,15 @@ function makeHandlersLayer(backend: DemoBackend) {
         [WS_METHODS.vcsInit]: () => unsupported("vcsInit"),
         [WS_METHODS.reviewGetDiffPreview]: (input) =>
           Effect.succeed(demoReviewDiffPreview(input.cwd)),
+        [WS_METHODS.reviewGetDiffFileContents]: (input) =>
+          Effect.succeed({
+            oldContents:
+              input.changeType === "new" ? "" : `// Previous demo contents for ${input.oldPath}\n`,
+            newContents:
+              input.changeType === "deleted"
+                ? ""
+                : `// Current demo contents for ${input.newPath}\n`,
+          }),
         [WS_METHODS.terminalOpen]: () => unsupported("terminalOpen"),
         [WS_METHODS.terminalAttach]: () => Stream.fail(unsupportedError("terminalAttach")),
         [WS_METHODS.terminalWrite]: () => unsupported("terminalWrite"),
@@ -1158,7 +1207,7 @@ function makeSocketServerLayer(backend: DemoBackend) {
     SocketServer.SocketServer,
     SocketServer.SocketServer.of({
       address: { _tag: "TcpAddress", hostname: backend.fixture.environmentId, port: 0 },
-      run: <R, E, _>(handler: (socket: Socket.Socket) => Effect.Effect<_, E, R>) =>
+      run: <R, E, A>(handler: (socket: Socket.Socket) => Effect.Effect<A, E, R>) =>
         Effect.gen(function* () {
           const queue = yield* Queue.unbounded<DemoSocketEndpoint>();
           backend.acceptor.accept((endpoint) => {

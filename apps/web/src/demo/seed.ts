@@ -40,7 +40,14 @@ const RIGHT_PANEL_STORAGE_VERSION = 7;
 
 const DIFF_PANEL_STORAGE_KEY = "t3code:diff-panel-state:v1";
 const DIFF_PANEL_STORAGE_VERSION = 1;
-const DEMO_FIXTURE_VERSION = 2;
+const UI_STATE_STORAGE_KEY = "t3code:ui-state:v1";
+const THREAD_CHANGED_FILES_EXPANSION_VERSION = 1;
+const DEMO_FIXTURE_VERSION = 3;
+const DEMO_COLLAPSED_CHANGED_FILES_BY_THREAD_KEY = {
+  "demo-mac-studio:thread-flaky": {
+    "thread-flaky-turn-2": false,
+  },
+} as const;
 
 /**
  * Identifies the fixture generation the visitor's persisted state was seeded
@@ -251,6 +258,53 @@ function seedDiffPanelSelection(force: boolean): boolean {
   );
 }
 
+/** Keeps the opening history compact while preserving the rest of the
+ * visitor's demo preferences. The change summary remains available on click. */
+function seedTimelineState(force: boolean): boolean {
+  if (!force) {
+    return true;
+  }
+
+  let persisted: Record<string, unknown> = {};
+  const raw = readLocalStorage(UI_STATE_STORAGE_KEY);
+  if (raw !== null) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        persisted = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Replace malformed demo-only state with a valid compact-history seed.
+    }
+  }
+
+  const previousExpansion =
+    persisted.threadChangedFilesExpandedById &&
+    typeof persisted.threadChangedFilesExpandedById === "object" &&
+    !Array.isArray(persisted.threadChangedFilesExpandedById)
+      ? (persisted.threadChangedFilesExpandedById as Record<string, unknown>)
+      : {};
+  const nextExpansion = { ...previousExpansion };
+  for (const [threadKey, turns] of Object.entries(DEMO_COLLAPSED_CHANGED_FILES_BY_THREAD_KEY)) {
+    const previousTurns =
+      previousExpansion[threadKey] &&
+      typeof previousExpansion[threadKey] === "object" &&
+      !Array.isArray(previousExpansion[threadKey])
+        ? (previousExpansion[threadKey] as Record<string, unknown>)
+        : {};
+    nextExpansion[threadKey] = { ...previousTurns, ...turns };
+  }
+
+  return writeLocalStorage(
+    UI_STATE_STORAGE_KEY,
+    JSON.stringify({
+      ...persisted,
+      threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
+      threadChangedFilesExpandedById: nextExpansion,
+    }),
+  );
+}
+
 /**
  * The channel-preview builds (?stage=nightly/dev) report stage-suffixed server
  * versions so the real branding + stage art react to them, which would also
@@ -271,11 +325,11 @@ function seedVersionMismatchDismissals(): void {
 }
 
 export async function seedDemoClientState(): Promise<void> {
-  // The demo showcases the Sidebar v2 beta by default; visitors can still
-  // toggle it in Settings, and their choice persists.
+  // Seed a complete settings snapshot once; current defaults already select
+  // the production sidebar experience.
   if (readBrowserClientSettings() === null) {
     try {
-      writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, sidebarV2Enabled: true });
+      writeBrowserClientSettings(DEFAULT_CLIENT_SETTINGS);
     } catch {
       // The demo remains usable when browser storage is blocked or full.
     }
@@ -293,7 +347,8 @@ export async function seedDemoClientState(): Promise<void> {
 
   const rightPanelSeeded = seedRightPanelState(stalePanelFixtures);
   const diffPanelSeeded = seedDiffPanelSelection(stalePanelFixtures);
-  const panelsSeeded = rightPanelSeeded && diffPanelSeeded;
+  const timelineSeeded = seedTimelineState(stalePanelFixtures);
+  const panelsSeeded = rightPanelSeeded && diffPanelSeeded && timelineSeeded;
   if (panelsSeeded) {
     writeLocalStorage(
       DEMO_SEED_VERSION_KEY,

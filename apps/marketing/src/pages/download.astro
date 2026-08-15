@@ -410,7 +410,7 @@ import "../styles/stage-sky.css";
     color: var(--fg-muted);
     font-size: 0.8rem;
     text-decoration: underline;
-    text-decoration-color: rgba(161, 161, 170, 0.4);
+    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
     text-underline-offset: 3px;
     transition: color 0.3s ease, text-decoration-color 0.3s ease;
   }
@@ -537,7 +537,7 @@ import "../styles/stage-sky.css";
     margin-top: 3px;
     padding: 5px 7px;
     border-radius: 6px;
-    background: rgba(255, 255, 255, 0.055);
+    background: var(--surface-hover);
     color: var(--fg-muted);
     font-family: var(--font-mono);
     font-size: 0.68rem;
@@ -577,7 +577,7 @@ import "../styles/stage-sky.css";
   .releases-link a {
     color: var(--fg-muted);
     text-decoration: underline;
-    text-decoration-color: rgba(161, 161, 170, 0.4);
+    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
     text-underline-offset: 3px;
     transition: color 0.3s ease, text-decoration-color 0.3s ease;
   }

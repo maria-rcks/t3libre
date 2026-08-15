@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   demoEnvironments,
   DEMO_METRICS_WORKTREE_PATH,
+  demoProjectFaviconUrlByCwd,
   demoReviewDiffPreview,
   demoThreadDetails,
   demoThreadDiff,
@@ -44,6 +45,16 @@ describe("demo fixture turn state", () => {
     expect(status?._tag).toBe("snapshot");
     if (status?._tag !== "snapshot") throw new Error("Missing metrics VCS snapshot");
     expect(status.local.refName).toBe("feat/crash-dashboard");
+  });
+});
+
+describe("demo project artwork", () => {
+  it("uses the bundled T3 Code icon instead of a remote favicon lookup", () => {
+    const faviconUrl = demoProjectFaviconUrlByCwd["~/code/t3code"];
+
+    expect(faviconUrl).toBeDefined();
+    expect(new URL(faviconUrl ?? "", "https://demo.test").pathname).toBe("/favicon-32x32.png");
+    expect(faviconUrl).not.toContain("google.com");
   });
 });
 

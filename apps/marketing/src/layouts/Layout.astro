@@ -31,6 +31,8 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
     <meta name="description" content={description} />
     <link rel="canonical" href={canonicalUrl} />
     <meta property="og:type" content="website" />
@@ -74,6 +76,28 @@ const socialImageUrl = new URL(socialImage, siteUrl);
         } catch {
           // Storage can be unavailable in privacy-restricted browsing contexts.
         }
+
+        const preview = new URLSearchParams(window.location.search).get("platform-preview");
+        if (preview) document.documentElement.dataset.stage = "latest";
+        const userAgent = navigator.userAgent;
+        let platform;
+        if (preview && preview !== "auto") {
+          platform = preview === "android" ? "android" : "ios";
+        } else if (/Android/i.test(userAgent)) {
+          platform = "android";
+        } else if (
+          /iPad|iPhone|iPod/i.test(userAgent) ||
+          (/Mac/i.test(userAgent) && navigator.maxTouchPoints > 1)
+        ) {
+          platform = "ios";
+        } else if (/Win/i.test(userAgent)) {
+          platform = "win";
+        } else if (/Mac/i.test(userAgent)) {
+          platform = "mac";
+        } else if (/Linux/i.test(userAgent)) {
+          platform = "linux";
+        }
+        if (platform) document.documentElement.dataset.platform = platform;
       })();
     </script>
   </head>
@@ -176,9 +200,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
           </nav>
 
           <div class="footer-credit">
-            <a href="/" class="footer-credit-brand" aria-label="T3 Code home">
-              <span>T3 Code</span>
-            </a>
+            <a href="/" class="footer-credit-brand" aria-label="T3 Code home">T3 Code</a>
             <span class="footer-credit-separator" aria-hidden="true"></span>
             <span>&copy; {new Date().getFullYear()} T3 Tools Inc</span>
             <span class="footer-credit-separator" aria-hidden="true"></span>
@@ -260,6 +282,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
         const nextStage = stageOrder[(currentIndex + 1) % stageOrder.length] ?? "latest";
         setSiteStage(nextStage, true, true);
       });
+
       document.addEventListener("t3-marketing-stage-request", (event) => {
         const stage = (event as CustomEvent<{ stage?: unknown }>).detail?.stage;
         if (isStage(stage)) setSiteStage(stage, true, true);
@@ -287,6 +310,15 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     --accent-dim: oklch(0.68 0.17 var(--accent-h) / 0.15);
     --ok: oklch(0.72 0.16 150);
     --warn: oklch(0.76 0.15 75);
+    --button-bg: var(--fg);
+    --button-fg: #09090b;
+    --button-hover: #fff;
+    --surface-subtle: rgba(255, 255, 255, 0.025);
+    --surface-hover: rgba(255, 255, 255, 0.05);
+    --tile-highlight: rgba(255, 255, 255, 0.015);
+    --nav-scrim-start: rgba(0, 0, 0, 0.5);
+    --nav-scrim-mid: rgba(0, 0, 0, 0.12);
+    --noise-opacity: 0.035;
     --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
     --radius: 12px;
@@ -314,6 +346,37 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     --accent-h: 240;
   }
 
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fafafa;
+      --bg-elev: #fff;
+      --bg-card: #f1f1f3;
+      --fg: #18181b;
+      --fg-muted: #52525b;
+      --fg-dim: #71717a;
+      --fg-faint: #a1a1aa;
+      --border: rgba(24, 24, 27, 0.09);
+      --border-strong: rgba(24, 24, 27, 0.16);
+      --accent: oklch(0.56 0.19 var(--accent-h));
+      --accent-dim: oklch(0.56 0.19 var(--accent-h) / 0.11);
+      --ok: oklch(0.52 0.15 150);
+      --warn: oklch(0.56 0.15 75);
+      --button-bg: #18181b;
+      --button-fg: #fff;
+      --button-hover: #27272a;
+      --surface-subtle: rgba(24, 24, 27, 0.025);
+      --surface-hover: rgba(24, 24, 27, 0.055);
+      --tile-highlight: rgba(255, 255, 255, 0.72);
+      --nav-scrim-start: rgba(250, 250, 250, 0.82);
+      --nav-scrim-mid: rgba(250, 250, 250, 0.34);
+      --noise-opacity: 0.018;
+    }
+
+    html {
+      color-scheme: light;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     html {
       scroll-behavior: auto;
@@ -338,7 +401,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     position: fixed;
     inset: 0;
     pointer-events: none;
-    opacity: 0.035;
+    opacity: var(--noise-opacity);
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     background-repeat: repeat;
     background-size: 256px 256px;
@@ -401,14 +464,14 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   }
 
   .btn-primary {
-    background: var(--fg);
-    color: #09090b;
+    background: var(--button-bg);
+    color: var(--button-fg);
     font-weight: 600;
   }
 
   .btn-primary:hover {
     transform: translateY(-1px);
-    background: #fff;
+    background: var(--button-hover);
   }
 
   .btn-primary:active {
@@ -422,7 +485,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
 
   .btn-ghost:hover {
     color: var(--fg);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-hover);
   }
 
   .btn-lg {
@@ -435,7 +498,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     position: relative;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0));
+    background: linear-gradient(180deg, var(--tile-highlight), transparent);
     overflow: hidden;
   }
 
@@ -464,9 +527,6 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     to { transform: rotate(360deg); }
   }
 
-  @keyframes blink {
-    50% { opacity: 0; }
-  }
 </style>
 
 <style>
@@ -507,7 +567,12 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     content: "";
     position: absolute;
     inset: 0;
-    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.12) 52%, transparent);
+    background: linear-gradient(
+      to bottom,
+      var(--nav-scrim-start),
+      var(--nav-scrim-mid) 52%,
+      transparent
+    );
   }
 
   .nav-blur-layer {
@@ -585,7 +650,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   }
 
   .nav-brand:hover {
-    color: #fff;
+    color: var(--fg);
   }
 
   .nav-brand-mark {
@@ -605,7 +670,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   }
 
   .nav-brand:hover .nav-brand-name {
-    color: #fff;
+    color: var(--fg);
   }
 
   .nav-right {
@@ -617,16 +682,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   .nav-download {
     display: inline-flex;
     align-items: center;
-  }
-
-  .nav-link {
-    color: var(--fg-muted);
-    font-size: 13px;
-    transition: color 0.18s ease;
-  }
-
-  .nav-link:hover {
-    color: var(--fg);
+    white-space: nowrap;
   }
 
   .site-stage-trigger {
@@ -650,6 +706,16 @@ const socialImageUrl = new URL(socialImage, siteUrl);
   .site-stage-trigger img {
     flex: 0 0 auto;
     border-radius: 4px;
+  }
+
+  .nav-link {
+    color: var(--fg-muted);
+    font-size: 13px;
+    transition: color 0.18s ease;
+  }
+
+  .nav-link:hover {
+    color: var(--fg);
   }
 
   .nav-stars {
@@ -712,6 +778,28 @@ const socialImageUrl = new URL(socialImage, siteUrl);
     --footer-hover: rgb(159, 202, 255);
     --footer-ambient-primary: rgba(105, 180, 255, 0.34);
     --footer-ambient-secondary: rgba(43, 105, 225, 0.18);
+  }
+
+  @media (prefers-color-scheme: light) {
+    .footer {
+      --footer-accent: rgba(63, 63, 70, 0.3);
+      --footer-ambient-primary: rgba(113, 113, 122, 0.1);
+      --footer-ambient-secondary: rgba(161, 161, 170, 0.07);
+    }
+
+    html[data-stage="nightly"] .footer {
+      --footer-accent: rgba(112, 82, 174, 0.42);
+      --footer-hover: rgb(93, 59, 160);
+      --footer-ambient-primary: rgba(174, 126, 234, 0.2);
+      --footer-ambient-secondary: rgba(123, 104, 207, 0.11);
+    }
+
+    html[data-stage="dev"] .footer {
+      --footer-accent: rgba(54, 115, 181, 0.42);
+      --footer-hover: rgb(42, 99, 164);
+      --footer-ambient-primary: rgba(102, 174, 231, 0.2);
+      --footer-ambient-secondary: rgba(69, 126, 202, 0.11);
+    }
   }
 
   .footer-ambient {
@@ -878,6 +966,7 @@ const socialImageUrl = new URL(socialImage, siteUrl);
       max-width: 290px;
       gap: 8px;
     }
+
   }
 
   @media (max-width: 420px) {

@@ -8,11 +8,15 @@
     />
     <meta name="robots" content="noindex" />
     <script>
-      // The marketing demo always renders in dark mode to match the site hero.
-      document.documentElement.classList.add("dark");
-      document.documentElement.style.backgroundColor = "#161616";
+      // The marketing demo follows the visitor's OS appearance. Apply it
+      // before the app loads so the iframe never flashes the opposite theme.
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.classList.toggle("dark", prefersDark);
+      document.documentElement.style.backgroundColor = prefersDark ? "#161616" : "#ffffff";
       try {
-        window.localStorage.setItem("t3code:theme", "dark");
+        window.localStorage.setItem("t3code:theme", "system");
+        window.localStorage.setItem("t3code:theme-appearance-mode", "system");
+        window.localStorage.removeItem("t3code:theme-halves:v1");
       } catch {}
     </script>
     <style>
@@ -25,8 +29,8 @@
       }
 
       body {
-        background: #161616;
-        color: #f5f5f5;
+        background: #ffffff;
+        color: #262626;
         font-family:
           "DM Sans Variable",
           "DM Sans",
@@ -35,6 +39,11 @@
           "Segoe UI",
           system-ui,
           sans-serif;
+      }
+
+      html.dark body {
+        background: #161616;
+        color: #f5f5f5;
       }
     </style>
     <title>T3 Code demo</title>

@@ -24,6 +24,10 @@ const minutesAgo = (minutes: number) => new Date(now - minutes * 60_000).toISOSt
 
 /** Sentinel wake time for "permanently" snoozed demo threads. */
 const SNOOZE_FOREVER = "2099-01-01T09:00:00.000Z";
+const decodeShellSnapshotValue = Schema.decodeUnknownSync(OrchestrationShellSnapshot);
+const decodeServerConfigValue = Schema.decodeUnknownSync(ServerConfig);
+const decodeEnvironmentDescriptorValue = Schema.decodeUnknownSync(ExecutionEnvironmentDescriptor);
+const encodeEnvironmentDescriptorValue = Schema.encodeSync(ExecutionEnvironmentDescriptor);
 
 // ---------------------------------------------------------------------------
 // Providers (shared across demo environments)
@@ -184,7 +188,7 @@ function decodeShellSnapshot(input: {
   projects: ReadonlyArray<unknown>;
   threads: ReadonlyArray<unknown>;
 }): OrchestrationShellSnapshot {
-  return Schema.decodeUnknownSync(OrchestrationShellSnapshot)({
+  return decodeShellSnapshotValue({
     snapshotSequence: 1,
     projects: input.projects,
     threads: input.threads,
@@ -193,8 +197,8 @@ function decodeShellSnapshot(input: {
 }
 
 function makeServerConfig(descriptor: ExecutionEnvironmentDescriptor, cwd: string): ServerConfig {
-  const base = Schema.decodeUnknownSync(ServerConfig)({
-    environment: Schema.encodeSync(ExecutionEnvironmentDescriptor)(descriptor),
+  const base = decodeServerConfigValue({
+    environment: encodeEnvironmentDescriptorValue(descriptor),
     auth: {
       policy: "unsafe-no-auth",
       bootstrapMethods: [],
@@ -230,7 +234,7 @@ function makeDescriptor(input: {
   os: ExecutionEnvironmentDescriptor["platform"]["os"];
   arch: ExecutionEnvironmentDescriptor["platform"]["arch"];
 }): ExecutionEnvironmentDescriptor {
-  return Schema.decodeUnknownSync(ExecutionEnvironmentDescriptor)({
+  return decodeEnvironmentDescriptorValue({
     environmentId: input.environmentId,
     label: input.label,
     platform: { os: input.os, arch: input.arch },
@@ -1088,6 +1092,98 @@ export const demoThreadDetails: Record<string, DemoThreadDetail> = {
   "thread-flaky": {
     messages: decodeMessages([
       message({
+        id: "msg-flaky-u-pre-1",
+        role: "user",
+        text: "The cross-repo GitManager suite has become our slowest CI shard. Before changing anything, can you map where the time is going?",
+        turnId: "thread-flaky-turn-pre-1",
+        minutesAgo: 60 * 15,
+      }),
+      message({
+        id: "msg-flaky-a-pre-1",
+        role: "assistant",
+        text: [
+          "I profiled 40 runs on Linux and macOS. The test body is cheap; repository setup owns almost all of the variance:",
+          "",
+          "| Phase | median | p95 |",
+          "| --- | ---: | ---: |",
+          "| create temp repos | 180ms | 310ms |",
+          "| seed remotes | 640ms | 4.8s |",
+          "| fetch metadata | 220ms | 6.1s |",
+          "| assertions | 14ms | 19ms |",
+          "",
+          "The long tail begins when the two fixture repositories are provisioned one after another.",
+        ].join("\n"),
+        turnId: "thread-flaky-turn-pre-1",
+        minutesAgo: 60 * 14,
+      }),
+      message({
+        id: "msg-flaky-u-pre-2",
+        role: "user",
+        text: "Could filesystem contention explain it? The failures seem more common on the shared Linux runners.",
+        turnId: "thread-flaky-turn-pre-2",
+        minutesAgo: 60 * 13,
+      }),
+      message({
+        id: "msg-flaky-a-pre-2",
+        role: "assistant",
+        text: [
+          "Partly, but it is exposing a test bug rather than a production bug.",
+          "",
+          "I forced I/O contention and reproduced the timeout locally. Both repository fixtures are independent, but the test awaits them serially and starts its 12-second deadline before the second fetch begins. A slow first remote leaves almost no budget for the second.",
+          "",
+          "I also checked the production path: it already resolves the remotes concurrently.",
+        ].join("\n"),
+        turnId: "thread-flaky-turn-pre-2",
+        minutesAgo: 60 * 12,
+      }),
+      message({
+        id: "msg-flaky-u-pre-3",
+        role: "user",
+        text: "Good. Please don't just raise the timeout. First isolate the race so we have a failing regression case.",
+        turnId: "thread-flaky-turn-pre-3",
+        minutesAgo: 60 * 11,
+      }),
+      message({
+        id: "msg-flaky-a-pre-3",
+        role: "assistant",
+        text: [
+          "I added a deterministic slow-remote fixture and ran only the affected test:",
+          "",
+          "```text",
+          "GitManager cross-repository metadata",
+          "  ✗ resolves fork metadata before deadline (12018ms)",
+          "",
+          "1 failed, 18 passed",
+          "```",
+          "",
+          "The failure now reproduces every time without sleeping or polling. The assertion clock starts while `fork` is still provisioning.",
+        ].join("\n"),
+        turnId: "thread-flaky-turn-pre-3",
+        minutesAgo: 60 * 10,
+      }),
+      message({
+        id: "msg-flaky-u-pre-4",
+        role: "user",
+        text: "Does the same race affect pull request discovery, or only this test helper?",
+        turnId: "thread-flaky-turn-pre-4",
+        minutesAgo: 60 * 9,
+      }),
+      message({
+        id: "msg-flaky-a-pre-4",
+        role: "assistant",
+        text: [
+          "Only the test helper. I traced both call paths:",
+          "",
+          "- Production uses `Promise.all([origin, fork])` before metadata resolution",
+          "- The test helper provisions `origin`, starts the deadline, then provisions `fork`",
+          "- No runtime code shares the helper",
+          "",
+          "So this is safe to fix narrowly, and the regression test can mirror the production ordering.",
+        ].join("\n"),
+        turnId: "thread-flaky-turn-pre-4",
+        minutesAgo: 60 * 8,
+      }),
+      message({
         id: "msg-flaky-u1",
         role: "user",
         text: "GitManager cross-repo PR metadata test is flaky in CI — times out at 12s roughly one run in five. Find it and fix it.",
@@ -1495,8 +1591,13 @@ export const demoThreadDetails: Record<string, DemoThreadDetail> = {
 // Asset fixtures (project favicons + message attachments)
 // ---------------------------------------------------------------------------
 
+function demoSiteAssetUrl(pathname: string): string {
+  if (typeof window === "undefined") return pathname;
+  return new URL(pathname, window.location.origin).toString();
+}
+
 export const demoProjectFaviconUrlByCwd: Record<string, string> = {
-  "~/code/t3code": "https://www.google.com/s2/favicons?domain=t3.gg&sz=64",
+  "~/code/t3code": demoSiteAssetUrl("/favicon-32x32.png"),
   "~/code/marketing-site": "https://www.google.com/s2/favicons?domain=astro.build&sz=64",
   "~/code/mobile-app": "https://www.google.com/s2/favicons?domain=expo.dev&sz=64",
   [DEMO_METRICS_WORKTREE_PATH]: "https://www.google.com/s2/favicons?domain=expo.dev&sz=64",

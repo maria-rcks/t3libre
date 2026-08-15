@@ -5,8 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex" />
     <script>
-      // Match the app's dark stage-art palette.
-      document.documentElement.classList.add("dark");
+      // Keep the real app artwork in the same appearance as the page that
+      // embeds it, including live OS theme changes.
+      const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+      const applyColorScheme = () => {
+        document.documentElement.classList.toggle("dark", colorScheme.matches);
+      };
+      applyColorScheme();
+      colorScheme.addEventListener("change", applyColorScheme);
     </script>
     <style>
       html,
