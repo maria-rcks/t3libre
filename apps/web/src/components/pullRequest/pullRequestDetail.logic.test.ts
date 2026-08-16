@@ -16,6 +16,7 @@ import {
   groupPullRequestTimelineConversations,
   handoffPrompt,
   handoffReviewComments,
+  isStackedPullRequestBase,
   isThreadOwnPullRequest,
   orderPullRequestComments,
   pullRequestActionMenuHasGroup,
@@ -98,6 +99,25 @@ describe("pull request composer target", () => {
 
     expect(pullRequestComposerTarget("page", target)).toBeNull();
     expect(pullRequestComposerTarget("thread", target)).toBe(target);
+  });
+});
+
+describe("stacked pull request classification", () => {
+  it("requires a known default branch", () => {
+    expect(isStackedPullRequestBase("main", [{ name: "main", isDefault: false }])).toBe(false);
+  });
+
+  it("recognizes local and remote forms of the default branch", () => {
+    expect(isStackedPullRequestBase("main", [{ name: "main", isDefault: true }])).toBe(false);
+    expect(isStackedPullRequestBase("main", [{ name: "origin/main", isDefault: true }])).toBe(
+      false,
+    );
+  });
+
+  it("classifies a non-default base as stacked once the default is known", () => {
+    expect(
+      isStackedPullRequestBase("feature-base", [{ name: "origin/main", isDefault: true }]),
+    ).toBe(true);
   });
 });
 
