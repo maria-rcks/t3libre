@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   migratePersistedTerminalUiStateStoreState,
+  selectThreadTerminalCustomLabels,
   selectThreadTerminalUiState,
   useTerminalUiStateStore,
 } from "./terminalUiStateStore";
@@ -18,6 +19,7 @@ describe("terminalUiStateStore actions", () => {
     useTerminalUiStateStore.persist.clearStorage();
     useTerminalUiStateStore.setState({
       terminalUiStateByThreadKey: {},
+      terminalCustomLabelsByThreadKey: {},
       suppressedTerminalIdsByThreadKey: {},
     });
   });
@@ -212,9 +214,53 @@ describe("terminalUiStateStore actions", () => {
     });
   });
 
+  it("normalizes persisted terminal labels", () => {
+    const migrated = migratePersistedTerminalUiStateStoreState(
+      {
+        terminalCustomLabelsByThreadKey: {
+          [scopedThreadKey(THREAD_REF)]: {
+            " term-1 ": " API server ",
+            empty: "   ",
+            invalid: 42,
+          },
+          "legacy-thread-id": { "term-2": "Ignored" },
+        },
+      },
+      4,
+    );
+
+    expect(migrated).toEqual({
+      terminalUiStateByThreadKey: {},
+      terminalCustomLabelsByThreadKey: {
+        [scopedThreadKey(THREAD_REF)]: { "term-1": "API server" },
+      },
+    });
+  });
+
+  it("sets and clears a terminal label", () => {
+    const store = useTerminalUiStateStore.getState();
+    store.setTerminalCustomLabel(THREAD_REF, "term-1", " API server ");
+
+    expect(
+      selectThreadTerminalCustomLabels(
+        useTerminalUiStateStore.getState().terminalCustomLabelsByThreadKey,
+        THREAD_REF,
+      ),
+    ).toEqual({ "term-1": "API server" });
+
+    store.setTerminalCustomLabel(THREAD_REF, "term-1", null);
+    expect(
+      selectThreadTerminalCustomLabels(
+        useTerminalUiStateStore.getState().terminalCustomLabelsByThreadKey,
+        THREAD_REF,
+      ),
+    ).toEqual({});
+  });
+
   it("resets to default and clears persisted entry when closing the last terminal", () => {
     const store = useTerminalUiStateStore.getState();
     store.newTerminal(THREAD_REF, "terminal-only");
+    store.setTerminalCustomLabel(THREAD_REF, "terminal-only", "Build");
     store.closeTerminal(THREAD_REF, "terminal-only");
 
     expect(
@@ -226,6 +272,12 @@ describe("terminalUiStateStore actions", () => {
         THREAD_REF,
       ).terminalIds,
     ).toEqual([]);
+    expect(
+      selectThreadTerminalCustomLabels(
+        useTerminalUiStateStore.getState().terminalCustomLabelsByThreadKey,
+        THREAD_REF,
+      ),
+    ).toEqual({});
   });
 
   it("keeps a valid active terminal after closing an active split terminal", () => {
@@ -248,6 +300,8 @@ describe("terminalUiStateStore actions", () => {
   it("reconciles terminal ids from an external ordered list", () => {
     const store = useTerminalUiStateStore.getState();
     store.setTerminalOpen(THREAD_REF, true);
+    store.setTerminalCustomLabel(THREAD_REF, "term-a", "API server");
+    store.setTerminalCustomLabel(THREAD_REF, "stale-term", "Old task");
     store.reconcileTerminalIds(THREAD_REF, ["term-a", "term-b"]);
 
     const terminalUiState = selectThreadTerminalUiState(
@@ -260,6 +314,11 @@ describe("terminalUiStateStore actions", () => {
       { id: "group-term-a", terminalIds: ["term-a"] },
       { id: "group-term-b", terminalIds: ["term-b"] },
     ]);
+    expect(
+      useTerminalUiStateStore.getState().terminalCustomLabelsByThreadKey[
+        scopedThreadKey(THREAD_REF)
+      ],
+    ).toEqual({ "term-a": "API server" });
   });
 
   it("does not import a closed panel terminal from stale metadata", () => {

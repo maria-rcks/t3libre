@@ -4,9 +4,18 @@ import {
   resolveTerminalSelectionActionPosition,
   shouldHandleTerminalExit,
   shouldHandleTerminalSelectionMouseUp,
+  shouldShowTerminalSidebar,
   terminalSelectionActionDelayForClickCount,
   terminalSelectionLineRange,
 } from "./ThreadTerminalDrawer";
+
+describe("shouldShowTerminalSidebar", () => {
+  it("shows the sidebar only when there is more than one terminal", () => {
+    expect(shouldShowTerminalSidebar(0)).toBe(false);
+    expect(shouldShowTerminalSidebar(1)).toBe(false);
+    expect(shouldShowTerminalSidebar(2)).toBe(true);
+  });
+});
 
 describe("resolveTerminalSelectionActionPosition", () => {
   it("prefers the selection rect over the last pointer position", () => {
