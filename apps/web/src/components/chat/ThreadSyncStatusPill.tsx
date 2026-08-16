@@ -8,7 +8,8 @@ export function ThreadSyncStatusPill({ phase }: { readonly phase: ThreadSyncPhas
   return (
     <div
       aria-label={label}
-      className="pointer-events-none mx-auto mb-2 flex w-fit max-w-full items-center gap-2 rounded-full border border-border/60 bg-card/95 px-3 py-1.5 text-foreground text-xs font-medium shadow-sm"
+      className="chat-composer-drawer-surface chat-composer-drawer-attached pointer-events-none mx-auto mb-[calc(-1rem-1px)] flex w-[calc(100%-2.75rem)] max-w-[calc(48rem-2.75rem)] items-center gap-2 px-3 pt-2 pb-6 text-foreground text-xs font-medium"
+      data-thread-sync-drawer="true"
       role="status"
     >
       <LoaderCircleIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />

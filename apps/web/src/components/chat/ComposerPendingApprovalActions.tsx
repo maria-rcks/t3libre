@@ -5,6 +5,7 @@ import { Button } from "../ui/button";
 interface ComposerPendingApprovalActionsProps {
   requestId: ApprovalRequestId;
   isResponding: boolean;
+  showCancel?: boolean;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
@@ -14,41 +15,48 @@ interface ComposerPendingApprovalActionsProps {
 export const ComposerPendingApprovalActions = memo(function ComposerPendingApprovalActions({
   requestId,
   isResponding,
+  showCancel = true,
   onRespondToApproval,
 }: ComposerPendingApprovalActionsProps) {
   return (
     <>
+      {showCancel ? (
+        <Button
+          size="xs"
+          variant="ghost-muted"
+          className="h-5 px-1.5 text-[11px] font-normal"
+          disabled={isResponding}
+          onClick={() => void onRespondToApproval(requestId, "cancel")}
+        >
+          Cancel
+        </Button>
+      ) : null}
       <Button
-        size="sm"
-        variant="ghost"
-        disabled={isResponding}
-        onClick={() => void onRespondToApproval(requestId, "cancel")}
-      >
-        Cancel turn
-      </Button>
-      <Button
-        size="sm"
-        variant="destructive-outline"
+        size="xs"
+        variant="ghost-muted"
+        className="h-5 px-1.5 text-[11px] font-normal text-destructive-foreground hover:text-destructive-foreground"
         disabled={isResponding}
         onClick={() => void onRespondToApproval(requestId, "decline")}
       >
         Decline
       </Button>
       <Button
-        size="sm"
-        variant="outline"
+        size="xs"
+        variant="ghost-muted"
+        className="h-5 px-1.5 text-[11px] font-normal"
         disabled={isResponding}
         onClick={() => void onRespondToApproval(requestId, "acceptForSession")}
       >
         Always allow this session
       </Button>
       <Button
-        size="sm"
-        variant="default"
+        size="xs"
+        variant="ghost-muted"
+        className="h-5 px-1.5 text-[11px] font-normal text-foreground"
         disabled={isResponding}
         onClick={() => void onRespondToApproval(requestId, "accept")}
       >
-        Approve once
+        Approve
       </Button>
     </>
   );

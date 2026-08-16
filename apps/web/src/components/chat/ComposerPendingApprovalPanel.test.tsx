@@ -5,7 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 
 describe("ComposerPendingApprovalPanel", () => {
-  it("renders complete multiline command details without hover or truncation", () => {
+  it("keeps the complete command readable in the compact row", () => {
     const detail = `bun run release -- ${"x".repeat(500)}\nsecond line`;
     const markup = renderToStaticMarkup(
       <ComposerPendingApprovalPanel
@@ -22,10 +22,11 @@ describe("ComposerPendingApprovalPanel", () => {
     expect(markup).toContain('data-approval-detail="complete"');
     expect(markup).toContain('aria-label="Command"');
     expect(markup).toContain(detail);
+    expect(markup).toContain("overflow-x-auto");
+    expect(markup).toContain("whitespace-pre");
     expect(markup).not.toContain("truncate");
     expect(markup).not.toContain("line-clamp");
     expect(markup).toContain("min-w-0");
-    expect(markup).toContain("max-w-full");
-    expect(markup).toContain("[overflow-wrap:anywhere]");
+    expect(markup).not.toContain("Command approval requested");
   });
 });

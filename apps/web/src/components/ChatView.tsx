@@ -4457,19 +4457,21 @@ function ChatViewContent(props: ChatViewProps) {
       ),
       title: working
         ? liveCount > 0
-          ? `${liveCount} ${liveCount === 1 ? "agent" : "agents"} working in the background`
-          : "Background work running"
-        : "Monitoring in the background",
+          ? `${liveCount} ${liveCount === 1 ? "agent" : "agents"} working`
+          : "Background work"
+        : "Monitoring",
       actions: (
         <Button
           size="xs"
-          variant="outline"
+          variant="ghost-muted"
+          className="h-5 px-1.5 text-[11px]"
           disabled={isStoppingBackgroundWork}
           onClick={() => void handleStopBackgroundWork()}
         >
           {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
         </Button>
       ),
+      className: "px-3 pt-1.5 pb-[1.375rem] text-xs",
     };
   }, [
     activeBackgroundLiveness,

@@ -11,6 +11,9 @@ describe("ThreadSyncStatusPill", () => {
     const markup = renderToStaticMarkup(<ThreadSyncStatusPill phase={phase} />);
 
     expect(markup).toContain('role="status"');
+    expect(markup).toContain('data-thread-sync-drawer="true"');
+    expect(markup).toContain("chat-composer-drawer-surface");
+    expect(markup).toContain("chat-composer-drawer-attached");
     expect(markup).toContain(label);
     expect(markup).not.toContain("animate-");
   });
