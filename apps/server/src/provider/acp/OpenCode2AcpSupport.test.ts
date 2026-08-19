@@ -8,6 +8,7 @@ import {
   applyOpenCode2AcpModelSelection,
   buildOpenCode2AcpSpawnInput,
   isOpenCode2ActivePromptError,
+  OpenCode2ReloadError,
   promptOpenCode2Acp,
 } from "./OpenCode2AcpSupport.ts";
 
@@ -186,6 +187,32 @@ describe("OpenCode2AcpSupport", () => {
 
       expect(result).toEqual({ stopReason: "cancelled" });
       expect(attempts).toBe(1);
+    }),
+  );
+
+  it.effect("returns a typed error when session reload fails", () =>
+    Effect.gen(function* () {
+      const activePromptError = new EffectAcpErrors.AcpRequestError({
+        code: -32603,
+        errorMessage: "Session already has an active ACP prompt",
+        method: "session/prompt",
+      });
+      const reloadError = new EffectAcpErrors.AcpTransportError({
+        method: "session/load",
+        detail: "reload failed",
+        cause: new Error("reload failed"),
+      });
+
+      const error = yield* promptOpenCode2Acp(
+        {
+          reload: Effect.fail(reloadError),
+          prompt: () => Effect.fail(activePromptError),
+        },
+        { prompt: [{ type: "text", text: "follow up" }] },
+      ).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(OpenCode2ReloadError);
+      if (error._tag === "OpenCode2ReloadError") expect(error.cause).toBe(reloadError);
     }),
   );
 

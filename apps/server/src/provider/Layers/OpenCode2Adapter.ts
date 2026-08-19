@@ -55,7 +55,6 @@ import {
 import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
 import {
   applyOpenCode2AcpModelSelection,
-  isOpenCode2ReloadError,
   makeOpenCode2AcpRuntime,
   promptOpenCode2Acp,
 } from "../acp/OpenCode2AcpSupport.ts";
@@ -830,8 +829,24 @@ export function makeOpenCode2Adapter(
                   }),
                 },
               ).pipe(
+                Effect.catchTag("OpenCode2ReloadError", (cause) =>
+                  stopInternal(ctx).pipe(
+                    Effect.andThen(
+                      Effect.fail(
+                        new ProviderAdapterRequestError({
+                          provider: PROVIDER,
+                          method: cause.method,
+                          detail: cause.message,
+                          cause: cause.cause,
+                        }),
+                      ),
+                    ),
+                  ),
+                ),
                 Effect.mapError((cause) =>
-                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", cause),
+                  cause._tag === "ProviderAdapterRequestError"
+                    ? cause
+                    : mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", cause),
                 ),
               );
             }),
@@ -887,9 +902,7 @@ export function makeOpenCode2Adapter(
               !ctx.stopped && ctx.activeTurnId === turnId && ctx.promptsInFlight === 1
                 ? abortActiveTurn(error.message)
                 : Effect.void;
-            return isOpenCode2ReloadError(error.cause)
-              ? abortTurn.pipe(Effect.andThen(stopInternal(ctx)))
-              : abortTurn;
+            return abortTurn;
           }),
           Effect.ensuring(
             Effect.gen(function* () {

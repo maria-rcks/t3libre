@@ -66,11 +66,17 @@ export interface OpenCode2AcpSelectionErrorContext {
 }
 
 const isAcpRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
-const isAcpTransportError = Schema.is(EffectAcpErrors.AcpTransportError);
-const RELOAD_FAILURE_DETAIL = "OpenCode 2.0 ACP session reload failed";
 
-export function isOpenCode2ReloadError(error: unknown): boolean {
-  return isAcpTransportError(error) && error.detail === RELOAD_FAILURE_DETAIL;
+export class OpenCode2ReloadError extends Schema.TaggedErrorClass<OpenCode2ReloadError>()(
+  "OpenCode2ReloadError",
+  {
+    method: Schema.Literal("session/load"),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "OpenCode 2.0 ACP session reload failed";
+  }
 }
 
 export function isOpenCode2ActivePromptError(error: unknown): boolean {
@@ -88,7 +94,7 @@ export function promptOpenCode2Acp(
     readonly beforeRetry?: Effect.Effect<void, EffectAcpErrors.AcpError>;
     readonly shouldRetry?: () => boolean;
   },
-): Effect.Effect<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError> {
+): Effect.Effect<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError | OpenCode2ReloadError> {
   const cancelled = Effect.succeed({ stopReason: "cancelled" as const });
   const retry = Effect.suspend(() =>
     recovery?.shouldRetry?.() === false
@@ -108,9 +114,8 @@ export function promptOpenCode2Acp(
           ? runtime.reload.pipe(
               Effect.mapError(
                 (cause) =>
-                  new EffectAcpErrors.AcpTransportError({
+                  new OpenCode2ReloadError({
                     method: "session/load",
-                    detail: RELOAD_FAILURE_DETAIL,
                     cause,
                   }),
               ),
