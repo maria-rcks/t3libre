@@ -147,9 +147,10 @@ export function applyOpenCode2AcpModelSelection<E>(input: {
 
     yield* applySelect("effort", getProviderOptionSelectionValue(input.selections, "effort"));
     const selectedAgent = getProviderOptionSelectionValue(input.selections, "agent");
-    yield* applySelect(
-      "mode",
-      input.interactionMode === "plan" ? "plan" : (selectedAgent ?? "build"),
-    );
+    const requestedMode =
+      input.interactionMode === "plan"
+        ? "plan"
+        : (selectedAgent ?? (input.interactionMode === "default" ? "build" : undefined));
+    yield* applySelect("mode", requestedMode);
   });
 }

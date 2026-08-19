@@ -214,6 +214,55 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
     ),
   );
 
+  it.effect("cancels invalid required numeric elicitations", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "opencode2-number-elicitation-")),
+          ),
+          (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+        );
+        const responseLogPath = NodePath.join(directory, "responses.ndjson");
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({
+            T3_ACP_ELICIT_NUMBER_DURING_CREATE_SESSION: "1",
+            T3_ACP_ELICITATION_RESPONSE_LOG_PATH: responseLogPath,
+          }),
+        );
+        const threadId = ThreadId.make("opencode2-number-elicitation");
+        const requested =
+          yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "user-input.requested" }>>();
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            event.type === "user-input.requested"
+              ? Deferred.succeed(requested, event)
+              : Effect.void,
+          ),
+          Effect.forkChild,
+        );
+        const startFiber = yield* adapter
+          .startSession({
+            threadId,
+            cwd: process.cwd(),
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.forkChild);
+
+        const event = yield* Deferred.await(requested);
+        yield* adapter.respondToUserInput(threadId, ApprovalRequestId.make(event.requestId ?? ""), {
+          count: ["not-a-number"],
+        });
+        assert.strictEqual((yield* Fiber.join(startFiber)).status, "ready");
+        assert.strictEqual(
+          (yield* Effect.promise(() => NodeFSP.readFile(responseLogPath, "utf8"))).trim(),
+          "cancel",
+        );
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
   it.effect("uses array item choices and omits optional elicitation fields", () =>
     Effect.scoped(
       Effect.gen(function* () {

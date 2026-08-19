@@ -44,11 +44,14 @@ const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const elicitDuringCreateSession = process.env.T3_ACP_ELICIT_DURING_CREATE_SESSION === "1";
 const elicitBooleanDuringCreateSession =
   process.env.T3_ACP_ELICIT_BOOLEAN_DURING_CREATE_SESSION === "1";
+const elicitNumberDuringCreateSession =
+  process.env.T3_ACP_ELICIT_NUMBER_DURING_CREATE_SESSION === "1";
 const elicitUrlDuringCreateSession = process.env.T3_ACP_ELICIT_URL_DURING_CREATE_SESSION === "1";
 const elicitComplexDuringCreateSession =
   process.env.T3_ACP_ELICIT_COMPLEX_DURING_CREATE_SESSION === "1";
 const elicitDuringPrompt = process.env.T3_ACP_ELICIT_DURING_PROMPT === "1";
 const elicitationResponseLogPath = process.env.T3_ACP_ELICITATION_RESPONSE_LOG_PATH;
+const emitPendingToolCall = process.env.T3_ACP_EMIT_PENDING_TOOL_CALL === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
 const promptDelayMs = Number(process.env.T3_ACP_PROMPT_DELAY_MS ?? "0");
@@ -355,6 +358,26 @@ const program = Effect.gen(function* () {
           },
         });
       }
+      if (elicitNumberDuringCreateSession) {
+        const response = yield* agent.client.elicit({
+          sessionId,
+          message: "Choose a worker count.",
+          mode: "form",
+          requestedSchema: {
+            type: "object",
+            title: "Worker count",
+            properties: {
+              count: { type: "number", title: "Count" },
+            },
+            required: ["count"],
+          },
+        });
+        if (elicitationResponseLogPath) {
+          yield* Effect.sync(() => {
+            NodeFS.appendFileSync(elicitationResponseLogPath, `${response.action.action}\n`);
+          });
+        }
+      }
       if (elicitUrlDuringCreateSession) {
         yield* agent.client.elicit({
           sessionId,
@@ -583,6 +606,21 @@ const program = Effect.gen(function* () {
               ? "cancelled"
               : "end_turn",
         };
+      }
+
+      if (emitPendingToolCall) {
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "pending-tool-call-1",
+            title: "Pending tool",
+            kind: "other",
+            status: "pending",
+            rawInput: {},
+          },
+        });
+        return { stopReason: "end_turn" };
       }
 
       if (emitStaleXAiPromptCompleteBeforeSecondHang && promptCount === 1) {

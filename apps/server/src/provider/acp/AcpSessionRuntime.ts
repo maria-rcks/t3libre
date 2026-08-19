@@ -784,7 +784,14 @@ export const make = (
           );
           yield* Ref.set(modeStateRef, parseSessionModeState(sessionSetupResult));
           yield* Ref.set(configOptionsRef, sessionConfigOptionsFromSetup(sessionSetupResult));
-          yield* Ref.set(toolCallsRef, new Map());
+          const orphanedToolCalls = yield* Ref.getAndSet(toolCallsRef, new Map());
+          for (const toolCall of orphanedToolCalls.values()) {
+            yield* Queue.offer(eventQueue, {
+              _tag: "ToolCallUpdated",
+              toolCall: { ...toolCall, status: "failed" },
+              rawPayload: { source: "session/reload" },
+            });
+          }
           yield* closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef });
           yield* Ref.set(startStateRef, {
             _tag: "Started",

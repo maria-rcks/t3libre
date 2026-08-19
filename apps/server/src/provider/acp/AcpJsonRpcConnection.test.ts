@@ -328,6 +328,39 @@ describe("AcpSessionRuntime", () => {
     );
   });
 
+  it.effect("fails open tool calls when reloading a persistent session", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+      yield* runtime.prompt({
+        prompt: [{ type: "text", text: "start a tool" }],
+      });
+
+      yield* runtime.reload;
+      const failed = yield* Stream.runHead(runtime.getEvents());
+      expect(Option.getOrUndefined(failed)).toMatchObject({
+        _tag: "ToolCallUpdated",
+        toolCall: { toolCallId: "pending-tool-call-1", status: "failed" },
+        rawPayload: { source: "session/reload" },
+      });
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: { T3_ACP_EMIT_PENDING_TOOL_CALL: "1" },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
   it.effect("keeps a failed reload terminal instead of restarting the ACP child", () => {
     const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
     return Effect.gen(function* () {

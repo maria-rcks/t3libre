@@ -537,7 +537,11 @@ export interface ChatComposerProps {
     isLastQuestion: boolean;
     canAdvance: boolean;
     customAnswer: string;
-    activeQuestion: { id: string; multiSelect?: boolean | undefined } | null;
+    activeQuestion: {
+      id: string;
+      multiSelect?: boolean | undefined;
+      options: ReadonlyArray<{ label: string; description: string }>;
+    } | null;
   } | null;
   activePendingResolvedAnswers: Record<string, unknown> | null;
   activePendingIsResponding: boolean;
@@ -2850,7 +2854,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               >
                 {activePendingProgress
                   ? activePendingProgress.customAnswer ||
-                    (activePendingProgress.activeQuestion.options.length === 0
+                    (activePendingProgress.activeQuestion?.options.length === 0
                       ? "Type your answer"
                       : "Type your own answer, or leave this blank to use the selected option")
                   : prompt.trim() ||
@@ -3074,7 +3078,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   isComposerApprovalState
                     ? (activePendingApproval?.detail ?? "Resolve this approval request to continue")
                     : activePendingProgress
-                      ? activePendingProgress.activeQuestion.options.length === 0
+                      ? activePendingProgress.activeQuestion?.options.length === 0
                         ? "Type your answer"
                         : "Type your own answer, or leave this blank to use the selected option"
                       : showPlanFollowUpPrompt && activeProposedPlan

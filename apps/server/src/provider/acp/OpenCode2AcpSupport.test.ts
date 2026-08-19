@@ -83,6 +83,46 @@ describe("OpenCode2AcpSupport", () => {
     );
   });
 
+  it.effect("preserves the resumed ACP mode when no mode is requested", () => {
+    const calls: Array<readonly [string, string | boolean]> = [];
+    return applyOpenCode2AcpModelSelection({
+      runtime: {
+        getConfigOptions: Effect.succeed([
+          {
+            id: "mode",
+            name: "Session Mode",
+            category: "mode",
+            type: "select",
+            currentValue: "plan",
+            options: [
+              { value: "build", name: "Build" },
+              { value: "plan", name: "Plan" },
+            ],
+          },
+        ]),
+        setModel: (model) =>
+          Effect.sync(() => {
+            calls.push(["model", model]);
+          }),
+        setConfigOption: (id, value) =>
+          Effect.sync(() => {
+            calls.push([id, value]);
+            return { configOptions: [] };
+          }),
+      },
+      model: undefined,
+      selections: undefined,
+      interactionMode: undefined,
+      mapError: (cause) => cause,
+    }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(calls).toEqual([]);
+        }),
+      ),
+    );
+  });
+
   it.effect("reloads OpenCode2 after an active-prompt rejection", () =>
     Effect.gen(function* () {
       let attempts = 0;

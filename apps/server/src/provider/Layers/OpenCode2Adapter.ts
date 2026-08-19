@@ -190,8 +190,9 @@ function firstAnswerValue(value: unknown): unknown {
 function elicitationContent(
   request: EffectAcpSchema.ElicitationRequest,
   answers: ProviderUserInputAnswers,
-): Record<string, EffectAcpSchema.ElicitationContentValue> {
+): Record<string, EffectAcpSchema.ElicitationContentValue> | undefined {
   if (request.mode !== "form") return {};
+  const required = new Set(request.requestedSchema.required ?? []);
   const content: Record<string, EffectAcpSchema.ElicitationContentValue> = {};
   for (const [id, property] of Object.entries(request.requestedSchema.properties ?? {})) {
     const answer = answers[id];
@@ -211,7 +212,11 @@ function elicitationContent(
       content[id] = typeof value === "boolean" ? value : String(value).toLowerCase() === "true";
     } else if (record.type === "number" || record.type === "integer") {
       const number = Number(value);
-      if (Number.isFinite(number)) content[id] = number;
+      if (!Number.isFinite(number)) {
+        if (required.has(id)) return undefined;
+        continue;
+      }
+      content[id] = number;
     } else if (
       typeof value === "string" ||
       typeof value === "number" ||
@@ -542,10 +547,14 @@ export function makeOpenCode2Adapter(
                 if (resolved.action === "cancel") {
                   return { action: { action: "cancel" as const } };
                 }
+                const content = elicitationContent(request, resolved.answers);
+                if (content === undefined) {
+                  return { action: { action: "cancel" as const } };
+                }
                 return {
                   action: {
                     action: "accept" as const,
-                    content: elicitationContent(request, resolved.answers),
+                    content,
                   },
                 };
               }).pipe(
