@@ -41,6 +41,7 @@ const failPrompt = process.env.T3_ACP_FAIL_PROMPT === "1";
 const failPromptNumber = Number(process.env.T3_ACP_FAIL_PROMPT_NUMBER ?? "0");
 const activePromptErrorNumber = Number(process.env.T3_ACP_ACTIVE_PROMPT_ERROR_NUMBER ?? "0");
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
+const failSetConfigOptionNumber = Number(process.env.T3_ACP_FAIL_SET_CONFIG_OPTION_NUMBER ?? "0");
 const elicitDuringCreateSession = process.env.T3_ACP_ELICIT_DURING_CREATE_SESSION === "1";
 const elicitBooleanDuringCreateSession =
   process.env.T3_ACP_ELICIT_BOOLEAN_DURING_CREATE_SESSION === "1";
@@ -71,6 +72,7 @@ let currentContext = "272k";
 let currentFast = false;
 let promptCount = 0;
 let loadSessionCount = 0;
+let setConfigOptionCount = 0;
 let overlappingFirstPromptId: string | undefined;
 const cancelledSessions = new Set<string>();
 
@@ -520,12 +522,16 @@ const program = Effect.gen(function* () {
 
   yield* agent.handleSetSessionConfigOption((request) =>
     Effect.gen(function* () {
+      setConfigOptionCount += 1;
       if (exitOnSetConfigOption) {
         return yield* Effect.sync(() => {
           process.exit(7);
         });
       }
-      if (failSetConfigOption) {
+      if (
+        failSetConfigOption ||
+        (failSetConfigOptionNumber > 0 && setConfigOptionCount === failSetConfigOptionNumber)
+      ) {
         return yield* AcpError.AcpRequestError.invalidParams(
           "Mock invalid params for session/set_config_option",
           {

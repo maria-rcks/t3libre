@@ -413,6 +413,56 @@ describe("AcpSessionRuntime", () => {
     ),
   );
 
+  it.effect("waits for reload before writing session configuration", () => {
+    const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const loadElicitation = yield* Deferred.make<void>();
+      const continueLoad = yield* Deferred.make<void>();
+      yield* runtime.handleElicitation(() =>
+        Deferred.succeed(loadElicitation, undefined).pipe(
+          Effect.andThen(Deferred.await(continueLoad)),
+          Effect.as({ action: { action: "cancel" as const } }),
+        ),
+      );
+      yield* runtime.start();
+
+      const reloadFiber = yield* runtime.reload.pipe(Effect.forkChild);
+      yield* Deferred.await(loadElicitation);
+      const configFiber = yield* runtime.setModel("composer-2").pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      expect(configFiber.pollUnsafe()).toBeUndefined();
+
+      yield* Deferred.succeed(continueLoad, undefined);
+      yield* Fiber.join(reloadFiber);
+      yield* Fiber.join(configFiber);
+      const methods = requestEvents.map((event) => `${event.method}:${event.status}`);
+      expect(methods.indexOf("session/load:succeeded")).toBeLessThan(
+        methods.indexOf("session/set_config_option:started"),
+      );
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: { T3_ACP_ELICIT_DURING_LOAD_SESSION: "1" },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+          clientCapabilities: { elicitation: { form: {} } },
+          requestLogger: (event) =>
+            Effect.sync(() => {
+              requestEvents.push(event);
+            }),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    );
+  });
+
   it.effect("keeps a failed reload terminal instead of restarting the ACP child", () => {
     const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
     return Effect.gen(function* () {

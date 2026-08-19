@@ -500,7 +500,7 @@ export const make = (
         current ? { ...current, currentModeId: modeId } : current,
       );
 
-    const setConfigOption = (
+    const setConfigOptionUnserialized = (
       configId: string,
       value: string | boolean,
     ): Effect.Effect<EffectAcpSchema.SetSessionConfigOptionResponse, EffectAcpErrors.AcpError> =>
@@ -537,6 +537,8 @@ export const make = (
           ),
         ),
       );
+    const setConfigOption = (configId: string, value: string | boolean) =>
+      promptSerializationSemaphore.withPermit(setConfigOptionUnserialized(configId, value));
 
     const loadSession = (
       sessionId: string,
@@ -839,36 +841,44 @@ export const make = (
         ),
       ),
       setMode: (modeId) =>
-        Ref.get(modeStateRef).pipe(
-          Effect.flatMap((modeState) => {
-            if (modeState?.currentModeId === modeId) {
-              return Effect.succeed({} satisfies EffectAcpSchema.SetSessionModeResponse);
-            }
-            return setConfigOption("mode", modeId).pipe(
-              Effect.tap(() => updateCurrentModeId(modeId)),
-              Effect.as({} satisfies EffectAcpSchema.SetSessionModeResponse),
-            );
-          }),
+        promptSerializationSemaphore.withPermit(
+          Ref.get(modeStateRef).pipe(
+            Effect.flatMap((modeState) => {
+              if (modeState?.currentModeId === modeId) {
+                return Effect.succeed({} satisfies EffectAcpSchema.SetSessionModeResponse);
+              }
+              return setConfigOptionUnserialized("mode", modeId).pipe(
+                Effect.tap(() => updateCurrentModeId(modeId)),
+                Effect.as({} satisfies EffectAcpSchema.SetSessionModeResponse),
+              );
+            }),
+          ),
         ),
       setConfigOption,
       setModel: (model) =>
-        getStartedState.pipe(
-          Effect.flatMap((started) => setConfigOption(started.modelConfigId ?? "model", model)),
-          Effect.asVoid,
+        promptSerializationSemaphore.withPermit(
+          getStartedState.pipe(
+            Effect.flatMap((started) =>
+              setConfigOptionUnserialized(started.modelConfigId ?? "model", model),
+            ),
+            Effect.asVoid,
+          ),
         ),
       setSessionModel: (modelId) =>
-        getStartedState.pipe(
-          Effect.flatMap((started) => {
-            const requestPayload = {
-              sessionId: started.sessionId,
-              modelId,
-            } satisfies EffectAcpSchema.SetSessionModelRequest;
-            return runLoggedRequest(
-              "session/set_model",
-              requestPayload,
-              acp.agent.setSessionModel(requestPayload),
-            );
-          }),
+        promptSerializationSemaphore.withPermit(
+          getStartedState.pipe(
+            Effect.flatMap((started) => {
+              const requestPayload = {
+                sessionId: started.sessionId,
+                modelId,
+              } satisfies EffectAcpSchema.SetSessionModelRequest;
+              return runLoggedRequest(
+                "session/set_model",
+                requestPayload,
+                acp.agent.setSessionModel(requestPayload),
+              );
+            }),
+          ),
         ),
       request: (method, payload) =>
         runLoggedRequest(method, payload, acp.raw.request(method, payload)),

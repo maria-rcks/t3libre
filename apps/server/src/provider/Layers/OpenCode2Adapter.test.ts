@@ -429,9 +429,9 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
           })
           .pipe(Effect.forkChild);
 
-        yield* Deferred.await(configured);
         yield* adapter.respondToUserInput(threadId, requestId, { mode: ["build"] });
         yield* Fiber.join(first);
+        yield* Deferred.await(configured);
         const secondExit = yield* Fiber.await(second);
 
         assert.strictEqual(secondExit._tag, "Failure");
@@ -525,28 +525,32 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
     Effect.scoped(
       Effect.gen(function* () {
         const adapter = yield* makeTestAdapter(
-          yield* makeMockWrapper({ T3_ACP_FAIL_SET_CONFIG_OPTION: "1" }),
+          yield* makeMockWrapper({ T3_ACP_FAIL_SET_CONFIG_OPTION_NUMBER: "2" }),
         );
         const threadId = ThreadId.make("opencode2-model-selection-failure");
         yield* adapter.startSession({
           threadId,
           cwd: process.cwd(),
           runtimeMode: "full-access",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("opencode"),
+            model: "composer-2",
+          },
         });
 
         const failed = yield* Effect.exit(
           adapter.sendTurn({
             threadId,
-            input: "use composer",
+            input: "use gpt",
             modelSelection: {
               instanceId: ProviderInstanceId.make("opencode"),
-              model: "composer-2",
+              model: "gpt-5.4",
             },
           }),
         );
 
         assert.strictEqual(failed._tag, "Failure");
-        assert.isUndefined((yield* adapter.listSessions())[0]?.model);
+        assert.strictEqual((yield* adapter.listSessions())[0]?.model, "composer-2");
         const recovered = yield* adapter.sendTurn({ threadId, input: "use the prior model" });
         assert.strictEqual(recovered.threadId, threadId);
       }),

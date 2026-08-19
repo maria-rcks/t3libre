@@ -92,6 +92,7 @@ interface OpenCode2SessionContext {
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
+  readonly turnSemaphore: Semaphore.Semaphore;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
   interruptedTurnId: TurnId | undefined;
@@ -421,6 +422,7 @@ export function makeOpenCode2Adapter(
           );
 
           const now = yield* nowIso;
+          const turnSemaphore = yield* Semaphore.make(1);
           const ctx: OpenCode2SessionContext = {
             threadId: input.threadId,
             session: {
@@ -441,6 +443,7 @@ export function makeOpenCode2Adapter(
             pendingApprovals,
             pendingUserInputs,
             turns: [],
+            turnSemaphore,
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
             interruptedTurnId: undefined,
@@ -799,30 +802,37 @@ export function makeOpenCode2Adapter(
             });
           }
 
-          yield* configureSession({
-            ctx,
-            model,
-            options: selection?.options,
-            interactionMode: input.interactionMode,
-          });
-          ctx.session = { ...ctx.session, model };
-          const result = yield* promptOpenCode2Acp(
-            ctx.acp,
-            { prompt },
-            {
-              shouldRetry: () => ctx.interruptedTurnId !== turnId,
-              beforeRetry: applyOpenCode2AcpModelSelection({
-                runtime: ctx.acp,
+          const result = yield* ctx.turnSemaphore.withPermit(
+            Effect.gen(function* () {
+              if (ctx.interruptedTurnId === turnId) {
+                return { stopReason: "cancelled" as const };
+              }
+              yield* configureSession({
+                ctx,
                 model,
-                selections: selection?.options,
+                options: selection?.options,
                 interactionMode: input.interactionMode,
-                mapError: ({ cause }) => cause,
-              }),
-            },
-          ).pipe(
-            Effect.mapError((cause) =>
-              mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", cause),
-            ),
+              });
+              ctx.session = { ...ctx.session, model };
+              return yield* promptOpenCode2Acp(
+                ctx.acp,
+                { prompt },
+                {
+                  shouldRetry: () => ctx.interruptedTurnId !== turnId,
+                  beforeRetry: applyOpenCode2AcpModelSelection({
+                    runtime: ctx.acp,
+                    model,
+                    selections: selection?.options,
+                    interactionMode: input.interactionMode,
+                    mapError: ({ cause }) => cause,
+                  }),
+                },
+              ).pipe(
+                Effect.mapError((cause) =>
+                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", cause),
+                ),
+              );
+            }),
           );
           let attachmentIndex = 0;
           const recordedPrompt = prompt.map((block) => {
