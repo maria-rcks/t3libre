@@ -850,7 +850,7 @@ export function makeOpenCode2Adapter(
                         detail: "OpenCode 2.0 ACP session reload failed.",
                         cause: error,
                       });
-                    }),
+                    }).pipe(Effect.uninterruptible),
                 }),
                 Effect.mapError((cause) =>
                   cause._tag === "ProviderAdapterRequestError"
