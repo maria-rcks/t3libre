@@ -322,7 +322,7 @@ export function makeOpenCode2Adapter(
           threadId: ctx.threadId,
           payload: { exitKind: "graceful" },
         });
-      });
+      }).pipe(Effect.uninterruptible);
 
     const configureSession = (input: {
       readonly ctx: OpenCode2SessionContext;
