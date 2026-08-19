@@ -51,6 +51,7 @@ const elicitUrlDuringCreateSession = process.env.T3_ACP_ELICIT_URL_DURING_CREATE
 const elicitComplexDuringCreateSession =
   process.env.T3_ACP_ELICIT_COMPLEX_DURING_CREATE_SESSION === "1";
 const elicitDuringPrompt = process.env.T3_ACP_ELICIT_DURING_PROMPT === "1";
+const elicitFirstPrompt = process.env.T3_ACP_ELICIT_FIRST_PROMPT === "1";
 const elicitDuringLoadSession = process.env.T3_ACP_ELICIT_DURING_LOAD_SESSION === "1";
 const elicitationResponseLogPath = process.env.T3_ACP_ELICITATION_RESPONSE_LOG_PATH;
 const emitPendingToolCall = process.env.T3_ACP_EMIT_PENDING_TOOL_CALL === "1";
@@ -603,7 +604,7 @@ const program = Effect.gen(function* () {
         return yield* AcpError.AcpRequestError.internalError("Mock prompt failure");
       }
 
-      if (elicitDuringPrompt) {
+      if (elicitDuringPrompt || (elicitFirstPrompt && promptCount === 1)) {
         const response = yield* agent.client.elicit({
           sessionId: requestedSessionId,
           message: "Choose a workspace mode.",

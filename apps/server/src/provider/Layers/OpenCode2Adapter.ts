@@ -743,7 +743,7 @@ export function makeOpenCode2Adapter(
           });
         return yield* Effect.gen(function* () {
           const selection = input.modelSelection;
-          const model = selection?.model ?? ctx.session.model;
+          const requestedModel = selection?.model;
 
           if (!steeringTurnId) ctx.lastPlanFingerprint = undefined;
           ctx.session = {
@@ -759,7 +759,7 @@ export function makeOpenCode2Adapter(
               provider: PROVIDER,
               threadId: input.threadId,
               turnId,
-              payload: { model: model ?? "default" },
+              payload: { model: requestedModel ?? ctx.session.model ?? "default" },
             });
           }
 
@@ -807,6 +807,7 @@ export function makeOpenCode2Adapter(
               if (ctx.interruptedTurnId === turnId) {
                 return { stopReason: "cancelled" as const };
               }
+              const model = requestedModel ?? ctx.session.model;
               yield* configureSession({
                 ctx,
                 model,

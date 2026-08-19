@@ -490,6 +490,52 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
     ),
   );
 
+  it.effect("uses the latest model for a queued send without a selection", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({ T3_ACP_ELICIT_FIRST_PROMPT: "1" }),
+        );
+        const threadId = ThreadId.make("opencode2-queued-model");
+        const inputRequested = yield* Deferred.make<ApprovalRequestId>();
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            event.type === "user-input.requested" && event.requestId
+              ? Deferred.succeed(inputRequested, ApprovalRequestId.make(event.requestId))
+              : Effect.void,
+          ),
+          Effect.forkChild,
+        );
+        yield* adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+        const first = yield* adapter
+          .sendTurn({
+            threadId,
+            input: "switch model",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("opencode"),
+              model: "composer-2",
+            },
+          })
+          .pipe(Effect.forkChild);
+        const requestId = yield* Deferred.await(inputRequested);
+        const second = yield* adapter
+          .sendTurn({ threadId, input: "use the current model" })
+          .pipe(Effect.forkChild);
+
+        yield* adapter.respondToUserInput(threadId, requestId, { mode: ["build"] });
+        yield* Fiber.join(first);
+        yield* Fiber.join(second);
+
+        assert.strictEqual((yield* adapter.listSessions())[0]?.model, "composer-2");
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
   it.effect("aborts a failed turn and leaves the session usable", () =>
     Effect.scoped(
       Effect.gen(function* () {
