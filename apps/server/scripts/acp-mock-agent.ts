@@ -333,19 +333,26 @@ const program = Effect.gen(function* () {
   yield* agent.handleCreateSession(() =>
     Effect.gen(function* () {
       if (elicitDuringCreateSession) {
-        yield* agent.client.elicit({
+        const response = yield* agent.client.elicit({
           sessionId,
-          message: "Choose a workspace mode.",
+          message: "Describe the desired workspace.",
           mode: "form",
           requestedSchema: {
             type: "object",
-            title: "Workspace mode",
-            properties: {
-              mode: { type: "string", title: "Mode", enum: ["build", "plan"] },
-            },
-            required: ["mode"],
+            title: "Workspace request",
+            properties: {},
           },
         });
+        if (elicitationResponseLogPath) {
+          yield* Effect.sync(() => {
+            const content =
+              response.action.action === "accept" ? response.action.content?.response : undefined;
+            NodeFS.appendFileSync(
+              elicitationResponseLogPath,
+              `${response.action.action}\t${String(content ?? "")}\n`,
+            );
+          });
+        }
       }
       if (elicitBooleanDuringCreateSession) {
         yield* agent.client.elicit({

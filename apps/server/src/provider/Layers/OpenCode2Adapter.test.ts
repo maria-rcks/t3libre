@@ -146,15 +146,26 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
   it.effect("answers elicitation while the session is starting", () =>
     Effect.scoped(
       Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "opencode2-startup-elicitation-")),
+          ),
+          (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+        );
+        const responseLogPath = NodePath.join(directory, "responses.ndjson");
         const adapter = yield* makeTestAdapter(
-          yield* makeMockWrapper({ T3_ACP_ELICIT_DURING_CREATE_SESSION: "1" }),
+          yield* makeMockWrapper({
+            T3_ACP_ELICIT_DURING_CREATE_SESSION: "1",
+            T3_ACP_ELICITATION_RESPONSE_LOG_PATH: responseLogPath,
+          }),
         );
         const threadId = ThreadId.make("opencode2-startup-elicitation");
-        const requestId = yield* Deferred.make<ApprovalRequestId>();
+        const requested =
+          yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "user-input.requested" }>>();
         const eventFiber = yield* adapter.streamEvents.pipe(
           Stream.runForEach((event) =>
-            event.type === "user-input.requested" && event.requestId
-              ? Deferred.succeed(requestId, ApprovalRequestId.make(event.requestId))
+            event.type === "user-input.requested"
+              ? Deferred.succeed(requested, event)
               : Effect.void,
           ),
           Effect.forkChild,
@@ -167,12 +178,18 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
           })
           .pipe(Effect.forkChild);
 
-        yield* adapter.respondToUserInput(threadId, yield* Deferred.await(requestId), {
-          mode: ["plan"],
+        const event = yield* Deferred.await(requested);
+        assert.strictEqual(event.payload.questions[0]?.id, "response");
+        yield* adapter.respondToUserInput(threadId, ApprovalRequestId.make(event.requestId ?? ""), {
+          response: ["Use the staging workspace"],
         });
         const session = yield* Fiber.join(startFiber);
 
         assert.strictEqual(session.status, "ready");
+        assert.strictEqual(
+          (yield* Effect.promise(() => NodeFSP.readFile(responseLogPath, "utf8"))).trim(),
+          "accept\tUse the staging workspace",
+        );
         yield* Fiber.interrupt(eventFiber);
       }),
     ),

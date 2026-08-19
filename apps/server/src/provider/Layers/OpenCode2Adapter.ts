@@ -195,6 +195,16 @@ function elicitationContent(
   if (request.mode !== "form") return {};
   const required = new Set(request.requestedSchema.required ?? []);
   const content: Record<string, EffectAcpSchema.ElicitationContentValue> = {};
+  if (required.size === 0) {
+    const response = firstAnswerValue(answers.response);
+    if (
+      typeof response === "string" ||
+      typeof response === "number" ||
+      typeof response === "boolean"
+    ) {
+      content.response = String(response);
+    }
+  }
   for (const [id, property] of Object.entries(request.requestedSchema.properties ?? {})) {
     const answer = answers[id];
     if (answer === undefined || answer === null) continue;
