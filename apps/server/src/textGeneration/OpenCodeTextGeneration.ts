@@ -381,12 +381,13 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     });
 
     const runAgainstServer = Effect.fn("runOpenCodeJson.runAgainstServer")(
-      function* (server: Pick<OpenCodeRuntime.OpenCodeServerConnection, "url">) {
+      function* (server: Pick<OpenCodeRuntime.OpenCodeServerConnection, "url" | "serverPassword">) {
         const client = openCodeRuntime.createOpenCodeSdkClient({
           baseUrl: server.url,
           directory: input.cwd,
-          ...(openCodeSettings.serverUrl.length > 0 && openCodeSettings.serverPassword
-            ? { serverPassword: openCodeSettings.serverPassword }
+          ...(server.serverPassword ||
+          (openCodeSettings.serverUrl.length > 0 && openCodeSettings.serverPassword)
+            ? { serverPassword: server.serverPassword ?? openCodeSettings.serverPassword }
             : {}),
         });
         const session = yield* Effect.tryPromise({

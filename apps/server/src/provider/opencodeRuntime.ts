@@ -1,6 +1,11 @@
 import * as NodeURL from "node:url";
 
-import type { ChatAttachment, ProviderApprovalDecision, RuntimeMode } from "@t3tools/contracts";
+import type {
+  ChatAttachment,
+  OpenCodeSettings,
+  ProviderApprovalDecision,
+  RuntimeMode,
+} from "@t3tools/contracts";
 import {
   createOpencodeClient,
   type Agent,
@@ -49,15 +54,30 @@ export function resolveOpenCodeConfigContent(
 }
 
 const OPENCODE_SERVER_READY_PREFIX = "opencode server listening";
+const OPENCODE2_SERVER_READY_PREFIX = "server listening";
+const OPENCODE2_SERVER_PASSWORD_PREFIX = "server password ";
 const DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 30_000;
 const DEFAULT_HOSTNAME = "127.0.0.1";
+
+export function isOpenCode2BinaryPath(binaryPath: string): boolean {
+  return /(?:^|[\\/])opencode2(?:\.exe)?$/i.test(binaryPath.trim());
+}
+
+export function shouldUseOpenCode2Acp(
+  settings: Pick<OpenCodeSettings, "binaryPath" | "serverUrl">,
+): boolean {
+  return isOpenCode2BinaryPath(settings.binaryPath) && !settings.serverUrl?.trim();
+}
+
 export interface OpenCodeServerProcess {
   readonly url: string;
+  readonly serverPassword?: string;
   readonly exitCode: Effect.Effect<number, never>;
 }
 
 export interface OpenCodeServerConnection {
   readonly url: string;
+  readonly serverPassword?: string;
   readonly exitCode: Effect.Effect<number, never> | null;
   readonly external: boolean;
 }
@@ -185,19 +205,47 @@ export interface OpenCodeRuntimeShape {
   }) => Effect.Effect<OpenCodeInventory, OpenCodeRuntimeError>;
 }
 
-function parseServerUrlFromOutput(output: string): string | null {
+export function parseOpenCodeServerReadyOutput(
+  output: string,
+  isOpenCode2: boolean,
+): { readonly url: string; readonly serverPassword?: string } | null {
+  let url: string | undefined;
+  let serverPassword: string | undefined;
   for (const line of output.split("\n")) {
-    if (!line.startsWith(OPENCODE_SERVER_READY_PREFIX)) {
-      continue;
+    const readyPrefix = isOpenCode2 ? OPENCODE2_SERVER_READY_PREFIX : OPENCODE_SERVER_READY_PREFIX;
+    if (line.startsWith(readyPrefix)) {
+      url = line.match(/on\s+(https?:\/\/[^\s]+)/)?.[1];
     }
-    const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
-    return match?.[1] ?? null;
+    if (isOpenCode2 && line.startsWith(OPENCODE2_SERVER_PASSWORD_PREFIX)) {
+      serverPassword = line.slice(OPENCODE2_SERVER_PASSWORD_PREFIX.length).trim() || undefined;
+    }
   }
-  return null;
+  if (!url || (isOpenCode2 && !serverPassword)) return null;
+  return { url, ...(serverPassword ? { serverPassword } : {}) };
 }
 
 const SLUG_LINE_RE = /^(\S+\/\S+)\s*$/;
 const AGENT_HEADER_RE = /^(.+)\s+\((\S+)\)\s*$/;
+const OPENCODE_SLUG_LABELS: Readonly<Record<string, string>> = {
+  deepseek: "DeepSeek",
+  glm: "GLM",
+  gpt: "GPT",
+  minimax: "MiniMax",
+  mimo: "MiMo",
+  opencode: "OpenCode",
+};
+
+export function formatOpenCodeSlugLabel(value: string): string {
+  return value
+    .split(/[-_/]+/)
+    .filter(Boolean)
+    .map(
+      (segment) =>
+        OPENCODE_SLUG_LABELS[segment.toLowerCase()] ??
+        segment.charAt(0).toUpperCase() + segment.slice(1),
+    )
+    .join(" ");
+}
 
 // Agents that are always hidden in OpenCode but the CLI "agent list" command
 // does not expose the hidden flag. Keep in sync with OpenCode agent
@@ -266,6 +314,64 @@ export function parseModelsCliOutput(stdout: string): {
   return { providers, connected: [...providers.keys()] };
 }
 
+function openCode2ModelFromSlug(slug: ParsedOpenCodeModelSlug): Model {
+  return {
+    id: slug.modelID,
+    providerID: slug.providerID,
+    api: { id: slug.modelID, url: "", npm: "" },
+    name: formatOpenCodeSlugLabel(slug.modelID),
+    capabilities: {
+      temperature: false,
+      reasoning: false,
+      attachment: false,
+      toolcall: true,
+      input: { text: true, audio: false, image: false, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: 0, output: 0 },
+    status: "active",
+    options: {},
+    headers: {},
+    release_date: "",
+  };
+}
+
+/** @internal */
+export function parseOpenCode2ModelsCliOutput(stdout: string): {
+  readonly providers: ReadonlyMap<
+    string,
+    { readonly id: string; readonly name: string; readonly models: { [key: string]: Model } }
+  >;
+  readonly connected: ReadonlyArray<string>;
+} {
+  const providers = new Map<
+    string,
+    { id: string; name: string; models: { [key: string]: Model } }
+  >();
+
+  for (const line of stdout.split(/\r?\n/)) {
+    const match = SLUG_LINE_RE.exec(line);
+    const slug = parseOpenCodeModelSlug(match?.[1]);
+    if (!slug) {
+      continue;
+    }
+    let provider = providers.get(slug.providerID);
+    if (!provider) {
+      provider = {
+        id: slug.providerID,
+        name: formatOpenCodeSlugLabel(slug.providerID),
+        models: {},
+      };
+      providers.set(slug.providerID, provider);
+    }
+    provider.models[slug.modelID] = openCode2ModelFromSlug(slug);
+  }
+
+  return { providers, connected: [...providers.keys()] };
+}
+
 /** @internal */
 export function parseAgentListCliOutput(stdout: string): ReadonlyArray<Agent> {
   const agents: Array<Agent> = [];
@@ -305,6 +411,74 @@ export function parseAgentListCliOutput(stdout: string): ReadonlyArray<Agent> {
     }
   }
   flushAgent();
+
+  return agents;
+}
+
+/** @internal */
+export function parseOpenCode2AgentsCliOutput(stdout: string): ReadonlyArray<Agent> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  const agents: Array<Agent> = [];
+  for (const value of parsed) {
+    if (!value || typeof value !== "object") {
+      continue;
+    }
+    const record = value as Record<string, unknown>;
+    const name = typeof record.id === "string" ? record.id.trim() : "";
+    const mode = record.mode;
+    if (name.length === 0 || (mode !== "primary" && mode !== "subagent" && mode !== "all")) {
+      continue;
+    }
+
+    const permission = Array.isArray(record.permissions)
+      ? record.permissions.flatMap((candidate) => {
+          if (!candidate || typeof candidate !== "object") {
+            return [];
+          }
+          const rule = candidate as Record<string, unknown>;
+          if (
+            typeof rule.action !== "string" ||
+            typeof rule.resource !== "string" ||
+            (rule.effect !== "allow" && rule.effect !== "deny" && rule.effect !== "ask")
+          ) {
+            return [];
+          }
+          return [
+            {
+              permission: rule.action,
+              pattern: rule.resource,
+              action: rule.effect,
+            } satisfies PermissionRuleset[number],
+          ];
+        })
+      : [];
+    const request =
+      record.request && typeof record.request === "object"
+        ? (record.request as Record<string, unknown>)
+        : undefined;
+    const options =
+      request?.settings && typeof request.settings === "object"
+        ? (request.settings as Record<string, unknown>)
+        : {};
+
+    agents.push({
+      name,
+      mode,
+      hidden: record.hidden === true,
+      permission,
+      options,
+      ...(typeof record.description === "string" ? { description: record.description } : {}),
+    });
+  }
 
   return agents;
 }
@@ -495,6 +669,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
           ),
         ));
       const timeoutMs = input.timeoutMs ?? DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
+      const isOpenCode2 = isOpenCode2BinaryPath(input.binaryPath);
       const args = ["serve", `--hostname=${hostname}`, `--port=${port}`];
       const spawnCommand = yield* resolveCommand(input.binaryPath, args, input.environment);
 
@@ -550,12 +725,15 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
 
       const stdoutRef = yield* Ref.make("");
       const stderrRef = yield* Ref.make("");
-      const readyDeferred = yield* Deferred.make<string, OpenCodeRuntimeError>();
+      const readyDeferred = yield* Deferred.make<
+        { readonly url: string; readonly serverPassword?: string },
+        OpenCodeRuntimeError
+      >();
 
       const setReadyFromStdoutChunk = (chunk: string) =>
         Ref.updateAndGet(stdoutRef, (stdout) => `${stdout}${chunk}`).pipe(
           Effect.flatMap((nextStdout) => {
-            const parsed = parseServerUrlFromOutput(nextStdout);
+            const parsed = parseOpenCodeServerReadyOutput(nextStdout, isOpenCode2);
             return parsed
               ? Deferred.succeed(readyDeferred, parsed).pipe(Effect.ignore)
               : Effect.void;
@@ -631,7 +809,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       }
 
       return {
-        url: readyOption.value,
+        ...readyOption.value,
         exitCode: child.exitCode.pipe(
           Effect.map(Number),
           Effect.orElseSucceed(() => 0),
@@ -659,6 +837,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
     }).pipe(
       Effect.map((server) => ({
         url: server.url,
+        ...(server.serverPassword ? { serverPassword: server.serverPassword } : {}),
         exitCode: server.exitCode,
         external: false,
       })),
@@ -715,25 +894,30 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
     Effect.gen(function* () {
       const env = input.environment !== undefined ? { environment: input.environment } : ({} as {});
       const commandContext = { cwd: input.cwd, ...env };
+      const isOpenCode2 = isOpenCode2BinaryPath(input.binaryPath);
 
       const runModelsCli = () =>
         runOpenCodeCommand({
           binaryPath: input.binaryPath,
-          args: ["models", "--verbose"],
+          args: isOpenCode2 ? ["models"] : ["models", "--verbose"],
           ...commandContext,
         }).pipe(Effect.exit);
       const runAgentsCli = () =>
         runOpenCodeCommand({
           binaryPath: input.binaryPath,
-          args: ["agent", "list"],
+          args: isOpenCode2 ? ["debug", "agents"] : ["agent", "list"],
           ...commandContext,
         }).pipe(Effect.exit);
       const runSkillsCli = () =>
-        runOpenCodeCommand({
-          binaryPath: input.binaryPath,
-          args: ["debug", "skill"],
-          ...commandContext,
-        }).pipe(Effect.exit);
+        isOpenCode2
+          ? Effect.succeed(
+              Exit.succeed({ stdout: "", stderr: "", code: 0 } satisfies OpenCodeCommandResult),
+            )
+          : runOpenCodeCommand({
+              binaryPath: input.binaryPath,
+              args: ["debug", "skill"],
+              ...commandContext,
+            }).pipe(Effect.exit);
 
       // First attempt — run all inventory commands in parallel.
       const [initialModelsResult, initialAgentsResult, initialSkillsResult] = yield* Effect.all(
@@ -778,7 +962,9 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
         });
       }
 
-      const parsed = parseModelsCliOutput(modelsResult.value.stdout);
+      const parsed = isOpenCode2
+        ? parseOpenCode2ModelsCliOutput(modelsResult.value.stdout)
+        : parseModelsCliOutput(modelsResult.value.stdout);
       const connected = [...parsed.connected];
       const allProviders: ProviderListResponse["all"] = [...parsed.providers.values()].map(
         (provider) => ({
@@ -795,7 +981,9 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       // for an authoritative model inventory, so either may degrade to an empty list.
       let agents: ReadonlyArray<Agent> = [];
       if (agentsResult._tag === "Success" && agentsResult.value.code === 0) {
-        agents = parseAgentListCliOutput(agentsResult.value.stdout);
+        agents = isOpenCode2
+          ? parseOpenCode2AgentsCliOutput(agentsResult.value.stdout)
+          : parseAgentListCliOutput(agentsResult.value.stdout);
       }
       let skills: ReadonlyArray<OpenCodeSkill> = [];
       if (skillsResult._tag === "Success" && skillsResult.value.code === 0) {

@@ -3,10 +3,130 @@ import * as NodeAssert from "node:assert/strict";
 import { describe, it } from "vite-plus/test";
 
 import {
+  isOpenCode2BinaryPath,
   parseAgentListCliOutput,
   parseModelsCliOutput,
+  parseOpenCode2AgentsCliOutput,
+  parseOpenCode2ModelsCliOutput,
+  parseOpenCodeServerReadyOutput,
   parseSkillsCliOutput,
+  shouldUseOpenCode2Acp,
 } from "./opencodeRuntime.ts";
+
+describe("OpenCode CLI family detection", () => {
+  it("recognizes opencode2 basenames across supported path styles", () => {
+    NodeAssert.equal(isOpenCode2BinaryPath("opencode2"), true);
+    NodeAssert.equal(isOpenCode2BinaryPath("/usr/local/bin/opencode2"), true);
+    NodeAssert.equal(isOpenCode2BinaryPath("C:\\Tools\\opencode2.exe"), true);
+    NodeAssert.equal(isOpenCode2BinaryPath("/usr/local/bin/opencode"), false);
+    NodeAssert.equal(isOpenCode2BinaryPath("opencode2-preview"), false);
+  });
+
+  it("keeps explicit server URLs on the HTTP adapter", () => {
+    NodeAssert.equal(
+      shouldUseOpenCode2Acp({ binaryPath: "opencode2", serverUrl: "http://127.0.0.1:4096" }),
+      false,
+    );
+    NodeAssert.equal(shouldUseOpenCode2Acp({ binaryPath: "opencode2", serverUrl: "" }), true);
+  });
+});
+
+describe("parseOpenCodeServerReadyOutput", () => {
+  it("parses stable startup output without a password", () => {
+    NodeAssert.deepEqual(
+      parseOpenCodeServerReadyOutput("opencode server listening on http://127.0.0.1:4096\n", false),
+      { url: "http://127.0.0.1:4096" },
+    );
+  });
+
+  it("waits for the OpenCode 2.0 preview password", () => {
+    NodeAssert.equal(
+      parseOpenCodeServerReadyOutput("server listening on http://127.0.0.1:4096\n", true),
+      null,
+    );
+    NodeAssert.deepEqual(
+      parseOpenCodeServerReadyOutput(
+        "server listening on http://127.0.0.1:4096\nserver password secret\n",
+        true,
+      ),
+      { url: "http://127.0.0.1:4096", serverPassword: "secret" },
+    );
+  });
+});
+
+describe("parseOpenCode2ModelsCliOutput", () => {
+  it("parses one model slug per line", () => {
+    const result = parseOpenCode2ModelsCliOutput(
+      "opencode-go/gpt-5.6-luna\nopencode/big-pickle\nopencode/hy3-free\n",
+    );
+
+    NodeAssert.deepEqual(result.connected, ["opencode-go", "opencode"]);
+    NodeAssert.deepEqual(Object.keys(result.providers.get("opencode-go")!.models), [
+      "gpt-5.6-luna",
+    ]);
+    NodeAssert.deepEqual(Object.keys(result.providers.get("opencode")!.models), [
+      "big-pickle",
+      "hy3-free",
+    ]);
+    NodeAssert.equal(result.providers.get("opencode-go")!.name, "OpenCode Go");
+    NodeAssert.equal(
+      result.providers.get("opencode-go")!.models["gpt-5.6-luna"]!.name,
+      "GPT 5.6 Luna",
+    );
+  });
+
+  it("ignores non-slug lines", () => {
+    const result = parseOpenCode2ModelsCliOutput(
+      "loading models\ninvalid\n/provider\nprovider/\nprovider/model extra\n",
+    );
+    NodeAssert.equal(result.providers.size, 0);
+  });
+});
+
+describe("parseOpenCode2AgentsCliOutput", () => {
+  it("maps debug agents JSON to SDK agent inventory", () => {
+    const result = parseOpenCode2AgentsCliOutput(
+      JSON.stringify([
+        {
+          id: "build",
+          name: "Build",
+          description: "The default agent.",
+          mode: "primary",
+          hidden: false,
+          request: { settings: { temperature: 0.2 } },
+          permissions: [
+            { action: "*", resource: "*", effect: "allow" },
+            { action: "read", resource: "*.env", effect: "ask" },
+          ],
+        },
+        {
+          id: "compaction",
+          name: "Compaction",
+          mode: "primary",
+          hidden: true,
+          permissions: [],
+        },
+      ]),
+    );
+
+    NodeAssert.equal(result.length, 2);
+    NodeAssert.equal(result[0]!.name, "build");
+    NodeAssert.equal(result[0]!.mode, "primary");
+    NodeAssert.equal(result[0]!.description, "The default agent.");
+    NodeAssert.deepEqual(result[0]!.options, { temperature: 0.2 });
+    NodeAssert.deepEqual(result[0]!.permission[1], {
+      permission: "read",
+      pattern: "*.env",
+      action: "ask",
+    });
+    NodeAssert.equal(result[1]!.hidden, true);
+  });
+
+  it("returns an empty inventory for invalid debug output", () => {
+    NodeAssert.deepEqual(parseOpenCode2AgentsCliOutput("not json"), []);
+    NodeAssert.deepEqual(parseOpenCode2AgentsCliOutput("{}"), []);
+  });
+});
 
 describe("parseModelsCliOutput", () => {
   it("parses a single model from a single provider", () => {

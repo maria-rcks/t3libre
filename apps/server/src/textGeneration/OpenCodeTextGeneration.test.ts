@@ -54,6 +54,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
       );
       return {
         url,
+        ...(binaryPath === "opencode2" ? { serverPassword: "generated-preview-password" } : {}),
         exitCode: Effect.never,
       };
     }),
@@ -160,6 +161,9 @@ const OpenCodeTextGenerationExistingServerTestLayer = Layer.succeed(
 const DEFAULT_OPENCODE_SETTINGS = Schema.decodeSync(OpenCodeSettings)({
   binaryPath: "fake-opencode",
 });
+const OPENCODE2_TEXT_GENERATION_SETTINGS = Schema.decodeSync(OpenCodeSettings)({
+  binaryPath: "opencode2",
+});
 const EXISTING_SERVER_OPENCODE_SETTINGS = Schema.decodeSync(OpenCodeSettings)({
   binaryPath: "fake-opencode",
   serverUrl: "http://127.0.0.1:9999",
@@ -187,6 +191,18 @@ const advanceIdleClock = Effect.gen(function* () {
 });
 
 it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
+  it.effect("authenticates to a local OpenCode 2.0 preview server", () =>
+    withOpenCodeTextGeneration(OPENCODE2_TEXT_GENERATION_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        yield* textGeneration.generateCommitMessage(DEFAULT_COMMIT_MESSAGE_INPUT);
+
+        expect(runtimeMock.state.authHeaders).toEqual([
+          `Basic ${btoa("opencode:generated-preview-password")}`,
+        ]);
+      }),
+    ),
+  );
+
   it.effect("reuses a warm server across back-to-back requests and closes it after idling", () =>
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {

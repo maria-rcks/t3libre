@@ -194,11 +194,15 @@ export class AcpSessionRuntime extends Context.Service<
     readonly prompt: (
       payload: Omit<EffectAcpSchema.PromptRequest, "sessionId">,
     ) => Effect.Effect<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError>;
+    /** Closes and reloads the active persistent ACP session. */
+    readonly reload: Effect.Effect<void, EffectAcpErrors.AcpError>;
     /**
      * Sends a real ACP `session/cancel` notification for the active session.
      * @see https://agentclientprotocol.com/protocol/schema#session/cancel
      */
     readonly cancel: Effect.Effect<void, EffectAcpErrors.AcpError>;
+    /** Waits briefly for the active prompt to acknowledge cancellation. */
+    readonly cancelAndWait: Effect.Effect<void, EffectAcpErrors.AcpError>;
     /**
      * Selects the active mode through the negotiated `mode` configuration option.
      * This is a no-op when the requested mode is already active.
@@ -528,6 +532,58 @@ export const make = (
         ),
       );
 
+    const loadSession = (
+      sessionId: string,
+      initializeResult: EffectAcpSchema.InitializeResponse,
+    ) => {
+      const payload = {
+        sessionId,
+        cwd: options.cwd,
+        mcpServers: options.mcpServers ?? [],
+      } satisfies EffectAcpSchema.LoadSessionRequest;
+      const timeout = Duration.fromInputUnsafe(
+        options.sessionLoadTimeout ?? defaultSessionLoadTimeout,
+      );
+      const idleGap = Duration.fromInputUnsafe(
+        options.sessionLoadReplayIdleGap ?? defaultSessionLoadReplayIdleGap,
+      );
+
+      return Effect.gen(function* () {
+        yield* Ref.set(
+          sessionLoadGateRef,
+          Option.some({ active: true, lastActivityAtMillis: undefined, idleGap, initializeResult }),
+        );
+        yield* logRequest({ method: "session/load", payload, status: "started" });
+        const idleFiber = yield* waitForSessionLoadReplayIdle({
+          gateRef: sessionLoadGateRef,
+        }).pipe(Effect.forkIn(runtimeScope));
+        return yield* Effect.raceFirst(acp.agent.loadSession(payload), Fiber.join(idleFiber)).pipe(
+          Effect.ensuring(Fiber.interrupt(idleFiber).pipe(Effect.ignore)),
+          Effect.timeoutOption(timeout),
+          Effect.flatMap((result) =>
+            Option.match(result, {
+              onNone: () =>
+                Effect.fail(
+                  new EffectAcpErrors.AcpTransportError({
+                    operation: "call-rpc",
+                    method: "session/load",
+                    detail: "session/load timed out waiting for RPC response or replay idle gap",
+                    cause: undefined,
+                  }),
+                ),
+              onSome: Effect.succeed,
+            }),
+          ),
+          Effect.tap((result) =>
+            logRequest({ method: "session/load", payload, status: "succeeded", result }),
+          ),
+          Effect.onError((cause) =>
+            logRequest({ method: "session/load", payload, status: "failed", cause }),
+          ),
+        );
+      }).pipe(Effect.ensuring(Ref.set(sessionLoadGateRef, Option.none())));
+    };
+
     const startOnce = Effect.gen(function* () {
       const initializePayload = {
         protocolVersion: 1,
@@ -557,79 +613,8 @@ export const make = (
         | EffectAcpSchema.NewSessionResponse
         | EffectAcpSchema.ResumeSessionResponse;
       if (options.resumeSessionId) {
-        const loadPayload = {
-          sessionId: options.resumeSessionId,
-          cwd: options.cwd,
-          mcpServers: options.mcpServers ?? [],
-        } satisfies EffectAcpSchema.LoadSessionRequest;
-        const sessionLoadTimeout = Duration.fromInputUnsafe(
-          options.sessionLoadTimeout ?? defaultSessionLoadTimeout,
-        );
-        const sessionLoadReplayIdleGap = Duration.fromInputUnsafe(
-          options.sessionLoadReplayIdleGap ?? defaultSessionLoadReplayIdleGap,
-        );
-
-        yield* Ref.set(
-          sessionLoadGateRef,
-          Option.some({
-            active: true,
-            lastActivityAtMillis: undefined,
-            idleGap: sessionLoadReplayIdleGap,
-            initializeResult,
-          }),
-        );
-
         sessionId = options.resumeSessionId;
-        sessionSetupResult = yield* Effect.gen(function* () {
-          yield* logRequest({
-            method: "session/load",
-            payload: loadPayload,
-            status: "started",
-          });
-
-          const idleFiber = yield* waitForSessionLoadReplayIdle({
-            gateRef: sessionLoadGateRef,
-          }).pipe(Effect.forkIn(runtimeScope));
-          const loaded = yield* Effect.raceFirst(
-            acp.agent.loadSession(loadPayload),
-            Fiber.join(idleFiber),
-          ).pipe(
-            Effect.ensuring(Fiber.interrupt(idleFiber).pipe(Effect.ignore)),
-            Effect.timeoutOption(sessionLoadTimeout),
-            Effect.flatMap((result) =>
-              Option.match(result, {
-                onNone: () =>
-                  Effect.fail(
-                    new EffectAcpErrors.AcpTransportError({
-                      operation: "call-rpc",
-                      method: "session/load",
-                      detail: "session/load timed out waiting for RPC response or replay idle gap",
-                      cause: undefined,
-                    }),
-                  ),
-                onSome: Effect.succeed,
-              }),
-            ),
-            Effect.tap((result) =>
-              logRequest({
-                method: "session/load",
-                payload: loadPayload,
-                status: "succeeded",
-                result,
-              }),
-            ),
-            Effect.onError((cause) =>
-              logRequest({
-                method: "session/load",
-                payload: loadPayload,
-                status: "failed",
-                cause,
-              }),
-            ),
-          );
-
-          return loaded;
-        }).pipe(Effect.ensuring(Ref.set(sessionLoadGateRef, Option.none())));
+        sessionSetupResult = yield* loadSession(sessionId, initializeResult);
       } else {
         const createPayload = {
           cwd: options.cwd,
@@ -758,6 +743,47 @@ export const make = (
             );
           }),
         ),
+      reload: promptSerializationSemaphore.withPermit(
+        Effect.gen(function* () {
+          const started = yield* getStartedState;
+          const agentCapabilities = started.initializeResult.agentCapabilities;
+          if (
+            agentCapabilities?.loadSession !== true ||
+            agentCapabilities.sessionCapabilities?.close == null
+          ) {
+            return yield* new EffectAcpErrors.AcpRequestError({
+              code: -32601,
+              errorMessage: "ACP agent does not support closing and reloading sessions",
+              method: "session/close",
+            });
+          }
+          const closePayload = {
+            sessionId: started.sessionId,
+          } satisfies EffectAcpSchema.CloseSessionRequest;
+          yield* runLoggedRequest(
+            "session/close",
+            closePayload,
+            acp.agent.closeSession(closePayload),
+          );
+          yield* Ref.set(startStateRef, { _tag: "NotStarted" });
+          const sessionSetupResult = yield* loadSession(
+            started.sessionId,
+            started.initializeResult,
+          );
+          yield* Ref.set(modeStateRef, parseSessionModeState(sessionSetupResult));
+          yield* Ref.set(configOptionsRef, sessionConfigOptionsFromSetup(sessionSetupResult));
+          yield* Ref.set(toolCallsRef, new Map());
+          yield* closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef });
+          yield* Ref.set(startStateRef, {
+            _tag: "Started",
+            result: {
+              ...started,
+              sessionSetupResult,
+              modelConfigId: extractModelConfigId(sessionSetupResult),
+            },
+          });
+        }),
+      ),
       cancel: getStartedState.pipe(
         Effect.flatMap((started) =>
           Effect.gen(function* () {
@@ -768,6 +794,21 @@ export const make = (
             yield* acp.agent
               .cancel({ sessionId: started.sessionId })
               .pipe(Effect.ignore, Effect.forkIn(runtimeScope));
+          }),
+        ),
+      ),
+      cancelAndWait: getStartedState.pipe(
+        Effect.flatMap((started) =>
+          Effect.gen(function* () {
+            const activePromptFiber = yield* Ref.get(activePromptFiberRef);
+            yield* acp.agent.cancel({ sessionId: started.sessionId }).pipe(Effect.ignore);
+            if (Option.isNone(activePromptFiber)) return;
+            const settled = yield* Fiber.await(activePromptFiber.value).pipe(
+              Effect.timeoutOption("2 seconds"),
+            );
+            if (Option.isNone(settled)) {
+              yield* Fiber.interrupt(activePromptFiber.value).pipe(Effect.ignore);
+            }
           }),
         ),
       ),

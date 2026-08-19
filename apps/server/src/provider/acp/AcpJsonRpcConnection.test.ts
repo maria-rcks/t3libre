@@ -228,8 +228,10 @@ describe("AcpSessionRuntime", () => {
     ),
   );
 
-  it.effect("releases a fully silent prompt when session/cancel is requested", () =>
-    Effect.gen(function* () {
+  it.effect("waits for a fully silent prompt to acknowledge session/cancel", () => {
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "acp-cancel-order-"));
+    const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+    return Effect.gen(function* () {
       const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
       yield* runtime.start();
 
@@ -240,7 +242,7 @@ describe("AcpSessionRuntime", () => {
         .pipe(Effect.forkChild({ startImmediately: true }));
 
       yield* TestClock.adjust("500 millis");
-      yield* runtime.cancel;
+      yield* runtime.cancelAndWait;
 
       const firstPromptResult = yield* Fiber.join(promptFiber);
       expect(firstPromptResult).toMatchObject({ stopReason: "cancelled" });
@@ -249,6 +251,19 @@ describe("AcpSessionRuntime", () => {
         prompt: [{ type: "text", text: "second" }],
       });
       expect(secondPromptResult).toMatchObject({ stopReason: "end_turn" });
+
+      const promptAndCancelMethods = NodeFS.readFileSync(requestLogPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as { method?: string })
+        .map((message) => message.method)
+        .filter((method) => method === "session/prompt" || method === "session/cancel");
+      expect(promptAndCancelMethods).toEqual([
+        "session/prompt",
+        "session/cancel",
+        "session/prompt",
+      ]);
     }).pipe(
       Effect.provide(
         AcpSessionRuntime.layer({
@@ -257,6 +272,7 @@ describe("AcpSessionRuntime", () => {
             args: mockAgentArgs,
             env: {
               T3_ACP_HANG_FIRST_PROMPT_FOREVER: "1",
+              T3_ACP_REQUEST_LOG_PATH: requestLogPath,
             },
           },
           cwd: process.cwd(),
@@ -266,8 +282,51 @@ describe("AcpSessionRuntime", () => {
       ),
       Effect.scoped,
       Effect.provide(NodeServices.layer),
-    ),
-  );
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
+    );
+  });
+
+  it.effect("closes and reloads a persistent session before the next prompt", () => {
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "acp-reload-order-"));
+    const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+      yield* runtime.reload;
+      const result = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "after reload" }],
+      });
+
+      expect(result).toMatchObject({ stopReason: "end_turn" });
+      const methods = NodeFS.readFileSync(requestLogPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as { method?: string })
+        .map((message) => message.method)
+        .filter(
+          (method) =>
+            method === "session/close" || method === "session/load" || method === "session/prompt",
+        );
+      expect(methods).toEqual(["session/close", "session/load", "session/prompt"]);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: { T3_ACP_REQUEST_LOG_PATH: requestLogPath },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
+    );
+  });
 
   it.effect("segments assistant text around ACP tool calls", () =>
     Effect.gen(function* () {

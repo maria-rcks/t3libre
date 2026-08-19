@@ -2,6 +2,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -37,6 +38,7 @@ const emitOverlappingXAiPromptCompleteOutOfOrder =
   process.env.T3_ACP_EMIT_OVERLAPPING_XAI_PROMPT_COMPLETE_OUT_OF_ORDER === "1";
 const failPrompt = process.env.T3_ACP_FAIL_PROMPT === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
+const elicitDuringCreateSession = process.env.T3_ACP_ELICIT_DURING_CREATE_SESSION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
 const promptDelayMs = Number(process.env.T3_ACP_PROMPT_DELAY_MS ?? "0");
@@ -295,6 +297,7 @@ function modelState(): AcpSchema.SessionModelState {
 
 const program = Effect.gen(function* () {
   const agent = yield* EffectAcpAgent.AcpAgent;
+  const promptCancellations = new Map<string, Deferred.Deferred<void>>();
 
   yield* agent.handleInitialize((request) =>
     Effect.sync(() => {
@@ -302,7 +305,7 @@ const program = Effect.gen(function* () {
         request.clientCapabilities?._meta?.parameterizedModelPicker === true;
       return {
         protocolVersion: 1,
-        agentCapabilities: { loadSession: true },
+        agentCapabilities: { loadSession: true, sessionCapabilities: { close: {} } },
       };
     }),
   );
@@ -310,11 +313,28 @@ const program = Effect.gen(function* () {
   yield* agent.handleAuthenticate(() => Effect.succeed({}));
 
   yield* agent.handleCreateSession(() =>
-    Effect.succeed({
-      sessionId,
-      modes: modeState(),
-      models: modelState(),
-      configOptions: configOptions(),
+    Effect.gen(function* () {
+      if (elicitDuringCreateSession) {
+        yield* agent.client.elicit({
+          sessionId,
+          message: "Choose a workspace mode.",
+          mode: "form",
+          requestedSchema: {
+            type: "object",
+            title: "Workspace mode",
+            properties: {
+              mode: { type: "string", title: "Mode", enum: ["build", "plan"] },
+            },
+            required: ["mode"],
+          },
+        });
+      }
+      return {
+        sessionId,
+        modes: modeState(),
+        models: modelState(),
+        configOptions: configOptions(),
+      };
     }),
   );
 
@@ -380,6 +400,8 @@ const program = Effect.gen(function* () {
     }),
   );
 
+  yield* agent.handleCloseSession(() => Effect.succeed({}));
+
   yield* agent.handleSetSessionModel((request) =>
     Effect.gen(function* () {
       if (!grokAcpModels.some((model) => model.modelId === request.modelId)) {
@@ -437,6 +459,10 @@ const program = Effect.gen(function* () {
     Effect.gen(function* () {
       const cancelledSessionId = String(sessionId ?? "mock-session-1");
       cancelledSessions.add(cancelledSessionId);
+      const cancellation = promptCancellations.get(cancelledSessionId);
+      if (cancellation) {
+        yield* Deferred.succeed(cancellation, undefined);
+      }
       if (emitLateUpdateAfterCancel) {
         yield* Effect.sleep("50 millis");
         yield* Effect.sync(() => {
@@ -518,8 +544,18 @@ const program = Effect.gen(function* () {
         return yield* Effect.never;
       }
 
-      if (hangPromptForever || (hangFirstPromptForever && promptCount === 1)) {
+      if (hangPromptForever) {
         return yield* Effect.never;
+      }
+      if (hangFirstPromptForever && promptCount === 1) {
+        const cancellation = yield* Deferred.make<void>();
+        promptCancellations.set(requestedSessionId, cancellation);
+        if (!cancelledSessions.delete(requestedSessionId)) {
+          yield* Deferred.await(cancellation);
+        }
+        promptCancellations.delete(requestedSessionId);
+        cancelledSessions.delete(requestedSessionId);
+        return { stopReason: "cancelled" };
       }
 
       if (emitXAiPromptCompleteThenHang) {

@@ -19,7 +19,9 @@ import {
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
 import {
+  formatOpenCodeSlugLabel,
   OpenCodeRuntime,
+  isOpenCode2BinaryPath,
   openCodeRuntimeErrorDetail,
   type OpenCodeInventory,
 } from "../opencodeRuntime.ts";
@@ -135,16 +137,6 @@ function formatOpenCodeProbeError(input: {
   };
 }
 
-function titleCaseSlug(value: string): string {
-  const segments: Array<string> = [];
-  for (const segment of value.split(/[-_/]+/)) {
-    if (segment.length > 0) {
-      segments.push(segment.charAt(0).toUpperCase() + segment.slice(1));
-    }
-  }
-  return segments.join(" ");
-}
-
 function inferDefaultVariant(
   providerID: string,
   variants: ReadonlyArray<string>,
@@ -178,8 +170,8 @@ function openCodeCapabilitiesForModel(input: {
   const defaultVariant = inferDefaultVariant(input.providerID, variantValues);
   const variantOptions = variantValues.map((value) =>
     defaultVariant === value
-      ? { id: value, label: titleCaseSlug(value), isDefault: true as const }
-      : { id: value, label: titleCaseSlug(value) },
+      ? { id: value, label: formatOpenCodeSlugLabel(value), isDefault: true as const }
+      : { id: value, label: formatOpenCodeSlugLabel(value) },
   );
   const primaryAgents = input.agents.filter(
     (agent) => !agent.hidden && (agent.mode === "primary" || agent.mode === "all"),
@@ -187,8 +179,8 @@ function openCodeCapabilitiesForModel(input: {
   const defaultAgent = inferDefaultAgent(primaryAgents);
   const agentOptions = primaryAgents.map((agent) =>
     defaultAgent === agent.name
-      ? { id: agent.name, label: titleCaseSlug(agent.name), isDefault: true as const }
-      : { id: agent.name, label: titleCaseSlug(agent.name) },
+      ? { id: agent.name, label: formatOpenCodeSlugLabel(agent.name), isDefault: true as const }
+      : { id: agent.name, label: formatOpenCodeSlugLabel(agent.name) },
   );
   return createModelCapabilities({
     optionDescriptors: [
@@ -374,6 +366,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
 
   let version: string | null = null;
   if (!isExternalServer) {
+    const isOpenCode2 = isOpenCode2BinaryPath(openCodeSettings.binaryPath);
     const versionExit = yield* Effect.exit(
       openCodeRuntime
         .runOpenCodeCommand({
@@ -390,17 +383,22 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     if (versionExit._tag === "Failure") {
       return fallback(Cause.squash(versionExit.cause));
     }
-    version = parseGenericCliVersion(versionExit.value.stdout) ?? null;
+    const previewVersion = isOpenCode2
+      ? versionExit.value.stdout.match(/v?(\d+\.\d+\.\d+-beta(?:-[0-9A-Za-z.-]+)?)/)?.[1]
+      : undefined;
+    version = previewVersion ?? parseGenericCliVersion(versionExit.value.stdout) ?? null;
 
     if (!version) {
       return fallback(
         new Error(
-          `Unable to determine OpenCode version from \`opencode --version\` output. T3 Code requires OpenCode v${MINIMUM_OPENCODE_VERSION} or newer.`,
+          isOpenCode2
+            ? "Unable to determine the OpenCode 2.0 preview version from `opencode2 --version` output."
+            : `Unable to determine OpenCode version from \`opencode --version\` output. T3 Code requires OpenCode v${MINIMUM_OPENCODE_VERSION} or newer.`,
         ),
         null,
       );
     }
-    if (compareSemverVersions(version, MINIMUM_OPENCODE_VERSION) < 0) {
+    if (!isOpenCode2 && compareSemverVersions(version, MINIMUM_OPENCODE_VERSION) < 0) {
       return buildServerProvider({
         presentation: OPENCODE_PRESENTATION,
         enabled: openCodeSettings.enabled,

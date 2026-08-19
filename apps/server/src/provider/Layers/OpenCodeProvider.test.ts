@@ -292,6 +292,57 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
     }),
   );
 
+  it.effect("accepts the opencode2 beta banner as a v2 preview", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.versionStdout = "opencode2 v0.0.0-beta-17595\n";
+
+      const snapshot = yield* checkOpenCodeProviderStatus(
+        makeOpenCodeSettings({ binaryPath: "/Users/test/.opencode/bin/opencode2" }),
+        process.cwd(),
+      );
+
+      NodeAssert.equal(snapshot.status, "warning");
+      NodeAssert.equal(snapshot.installed, true);
+      NodeAssert.equal(snapshot.version, "0.0.0-beta-17595");
+      NodeAssert.equal(
+        snapshot.message,
+        "OpenCode is available, but it did not report any connected upstream providers.",
+      );
+    }),
+  );
+
+  it.effect("still rejects the same pre-minimum version from stable opencode", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.versionStdout = "opencode 0.0.0\n";
+
+      const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd());
+
+      NodeAssert.equal(snapshot.status, "error");
+      NodeAssert.equal(snapshot.installed, true);
+      NodeAssert.equal(
+        snapshot.message,
+        "OpenCode v0.0.0 is too old. Upgrade to v1.14.19 or newer.",
+      );
+    }),
+  );
+
+  it.effect("reports an invalid opencode2 version without stable upgrade advice", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.versionStdout = "OpenCode preview\n";
+
+      const snapshot = yield* checkOpenCodeProviderStatus(
+        makeOpenCodeSettings({ binaryPath: "/Users/test/.opencode/bin/opencode2" }),
+        process.cwd(),
+      );
+
+      NodeAssert.equal(snapshot.status, "error");
+      NodeAssert.equal(
+        snapshot.message,
+        "Failed to execute OpenCode CLI health check: Unable to determine the OpenCode 2.0 preview version from `opencode2 --version` output.",
+      );
+    }),
+  );
+
   it.effect("reports local model inventory failures without treating them as empty", () =>
     Effect.gen(function* () {
       runtimeMock.state.inventoryError = new Error("opencode models failed");
