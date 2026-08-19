@@ -829,20 +829,21 @@ export function makeOpenCode2Adapter(
                   }),
                 },
               ).pipe(
-                Effect.catchTag("OpenCode2ReloadError", (cause) =>
-                  stopInternal(ctx).pipe(
-                    Effect.andThen(
-                      Effect.fail(
-                        new ProviderAdapterRequestError({
-                          provider: PROVIDER,
-                          method: cause.method,
-                          detail: cause.message,
-                          cause: cause.cause,
-                        }),
+                Effect.catchTags({
+                  OpenCode2ReloadError: (error) =>
+                    stopInternal(ctx).pipe(
+                      Effect.andThen(
+                        Effect.fail(
+                          new ProviderAdapterRequestError({
+                            provider: PROVIDER,
+                            method: error.method,
+                            detail: "OpenCode 2.0 ACP session reload failed.",
+                            cause: error,
+                          }),
+                        ),
                       ),
                     ),
-                  ),
-                ),
+                }),
                 Effect.mapError((cause) =>
                   cause._tag === "ProviderAdapterRequestError"
                     ? cause
