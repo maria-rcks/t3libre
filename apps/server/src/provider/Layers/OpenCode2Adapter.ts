@@ -311,6 +311,7 @@ export function makeOpenCode2Adapter(
         if (ctx.stopped) return;
         ctx.stopped = true;
         yield* settlePending(ctx);
+        yield* ctx.acp.cancelAndWait.pipe(Effect.ignore);
         if (ctx.notificationFiber) yield* Fiber.interrupt(ctx.notificationFiber);
         yield* Effect.ignore(Scope.close(ctx.scope, Exit.void));
         sessions.delete(ctx.threadId);
@@ -835,49 +836,55 @@ export function makeOpenCode2Adapter(
               );
             }),
           );
-          yield* ctx.acp.drainEvents;
-          let attachmentIndex = 0;
-          const recordedPrompt = prompt.map((block) => {
-            if (block.type !== "image") return block;
-            const attachment = input.attachments?.[attachmentIndex++];
-            return {
-              type: "image",
-              mimeType: block.mimeType,
-              ...(attachment ? { attachmentId: attachment.id } : {}),
-            };
-          });
-          const turn = ctx.turns.find((candidate) => candidate.id === turnId);
-          if (turn) turn.items.push({ prompt: recordedPrompt, result });
-          else ctx.turns.push({ id: turnId, items: [{ prompt: recordedPrompt, result }] });
-          if (ctx.promptsInFlight === 1) {
-            const {
-              activeTurnId: _activeTurnId,
-              lastError: _lastError,
-              ...readySession
-            } = ctx.session;
-            ctx.activeTurnId = undefined;
-            ctx.session = {
-              ...readySession,
-              status: "ready",
-              updatedAt: yield* nowIso,
-            };
-            yield* emit({
-              type: "turn.completed",
-              ...(yield* stamp()),
-              provider: PROVIDER,
-              threadId: input.threadId,
-              turnId,
-              payload: {
-                state: result.stopReason === "cancelled" ? "cancelled" : "completed",
-                stopReason: result.stopReason ?? null,
-              },
-            });
-          }
-          return { threadId: input.threadId, turnId, resumeCursor: ctx.session.resumeCursor };
+          return yield* withLock(
+            input.threadId,
+            Effect.gen(function* () {
+              yield* requireSession(input.threadId);
+              yield* ctx.acp.drainEvents;
+              let attachmentIndex = 0;
+              const recordedPrompt = prompt.map((block) => {
+                if (block.type !== "image") return block;
+                const attachment = input.attachments?.[attachmentIndex++];
+                return {
+                  type: "image",
+                  mimeType: block.mimeType,
+                  ...(attachment ? { attachmentId: attachment.id } : {}),
+                };
+              });
+              const turn = ctx.turns.find((candidate) => candidate.id === turnId);
+              if (turn) turn.items.push({ prompt: recordedPrompt, result });
+              else ctx.turns.push({ id: turnId, items: [{ prompt: recordedPrompt, result }] });
+              if (ctx.promptsInFlight === 1) {
+                const {
+                  activeTurnId: _activeTurnId,
+                  lastError: _lastError,
+                  ...readySession
+                } = ctx.session;
+                ctx.activeTurnId = undefined;
+                ctx.session = {
+                  ...readySession,
+                  status: "ready",
+                  updatedAt: yield* nowIso,
+                };
+                yield* emit({
+                  type: "turn.completed",
+                  ...(yield* stamp()),
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  turnId,
+                  payload: {
+                    state: result.stopReason === "cancelled" ? "cancelled" : "completed",
+                    stopReason: result.stopReason ?? null,
+                  },
+                });
+              }
+              return { threadId: input.threadId, turnId, resumeCursor: ctx.session.resumeCursor };
+            }),
+          );
         }).pipe(
           Effect.tapError((error) => {
             const abortTurn =
-              ctx.activeTurnId === turnId && ctx.promptsInFlight === 1
+              !ctx.stopped && ctx.activeTurnId === turnId && ctx.promptsInFlight === 1
                 ? abortActiveTurn(error.message)
                 : Effect.void;
             return isOpenCode2ReloadError(error.cause)
@@ -887,7 +894,7 @@ export function makeOpenCode2Adapter(
           Effect.ensuring(
             Effect.gen(function* () {
               ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);
-              if (ctx.promptsInFlight === 0 && ctx.activeTurnId === turnId) {
+              if (!ctx.stopped && ctx.promptsInFlight === 0 && ctx.activeTurnId === turnId) {
                 yield* ctx.acp.cancelAndWait.pipe(Effect.ignore);
                 yield* abortActiveTurn("Turn interrupted").pipe(Effect.ignore);
               }
@@ -982,10 +989,14 @@ export function makeOpenCode2Adapter(
         return ctx !== undefined && !ctx.stopped;
       });
     const stopAll: OpenCodeAdapterShape["stopAll"] = () =>
-      Effect.forEach(sessions.values(), stopInternal, { discard: true });
+      Effect.forEach(
+        Array.from(sessions.values()),
+        (ctx) => withLock(ctx.threadId, stopInternal(ctx)),
+        { discard: true },
+      );
 
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(sessions.values(), stopInternal, { discard: true }).pipe(
+      stopAll().pipe(
         Effect.catch((cause) =>
           Effect.logError("Failed to stop OpenCode2 ACP sessions.", { cause }),
         ),

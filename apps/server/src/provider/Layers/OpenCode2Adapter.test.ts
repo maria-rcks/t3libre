@@ -663,6 +663,40 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
     ),
   );
 
+  it.effect("stops while a prompt is settling without hanging", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({ T3_ACP_ELICIT_DURING_PROMPT: "1" }),
+        );
+        const threadId = ThreadId.make("opencode2-stop-in-flight");
+        const requested = yield* Deferred.make<void>();
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            event.type === "user-input.requested"
+              ? Deferred.succeed(requested, undefined)
+              : Effect.void,
+          ),
+          Effect.forkChild,
+        );
+        yield* adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+        const sendFiber = yield* adapter
+          .sendTurn({ threadId, input: "ask me" })
+          .pipe(Effect.forkChild);
+
+        yield* Deferred.await(requested).pipe(Effect.timeout("2 seconds"));
+        yield* adapter.stopSession(threadId).pipe(Effect.timeout("5 seconds"));
+        yield* Fiber.join(sendFiber).pipe(Effect.flip, Effect.timeout("5 seconds"));
+        assert.isFalse(yield* adapter.hasSession(threadId));
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
   it.effect("removes a session when active-prompt recovery cannot reload it", () =>
     Effect.scoped(
       Effect.gen(function* () {
