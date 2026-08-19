@@ -553,6 +553,61 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
     ),
   );
 
+  it.effect("cleans up a turn when its send fiber is interrupted", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({ T3_ACP_HANG_FIRST_PROMPT_FOREVER: "1" }),
+        );
+        const threadId = ThreadId.make("opencode2-interrupted-send");
+        const started = yield* Deferred.make<void>();
+        const aborted = yield* Deferred.make<void>();
+        const completed = yield* Deferred.make<void>();
+        const events: ProviderRuntimeEvent[] = [];
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => events.push(event)).pipe(
+              Effect.andThen(
+                event.type === "turn.started"
+                  ? Deferred.succeed(started, undefined)
+                  : event.type === "turn.aborted"
+                    ? Deferred.succeed(aborted, undefined)
+                    : event.type === "turn.completed"
+                      ? Deferred.succeed(completed, undefined)
+                      : Effect.void,
+              ),
+            ),
+          ),
+          Effect.forkChild,
+        );
+        yield* adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+        const sendFiber = yield* adapter
+          .sendTurn({ threadId, input: "interrupt me" })
+          .pipe(Effect.forkChild);
+
+        yield* Deferred.await(started);
+        yield* Fiber.interrupt(sendFiber);
+        yield* Deferred.await(aborted);
+
+        const [session] = yield* adapter.listSessions();
+        assert.strictEqual(session?.status, "ready");
+        assert.isUndefined(session?.activeTurnId);
+        yield* adapter.sendTurn({ threadId, input: "start fresh" });
+        yield* Deferred.await(completed);
+        const startedTurnIds = events.flatMap((event) =>
+          event.type === "turn.started" ? [event.turnId] : [],
+        );
+        assert.strictEqual(startedTurnIds.length, 2);
+        assert.notStrictEqual(startedTurnIds[0], startedTurnIds[1]);
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
   it.effect("removes a session when active-prompt recovery cannot reload it", () =>
     Effect.scoped(
       Effect.gen(function* () {

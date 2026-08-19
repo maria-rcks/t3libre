@@ -719,6 +719,25 @@ export function makeOpenCode2Adapter(
             return { ctx, steeringTurnId, turnId };
           }),
         );
+        const abortActiveTurn = (reason: string) =>
+          Effect.gen(function* () {
+            const { activeTurnId: _activeTurnId, ...readySession } = ctx.session;
+            ctx.activeTurnId = undefined;
+            ctx.session = {
+              ...readySession,
+              status: "ready",
+              updatedAt: yield* nowIso,
+              lastError: reason,
+            };
+            yield* emit({
+              type: "turn.aborted",
+              ...(yield* stamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              turnId,
+              payload: { reason },
+            });
+          });
         return yield* Effect.gen(function* () {
           const selection = input.modelSelection;
           const model = selection?.model ?? ctx.session.model;
@@ -847,32 +866,19 @@ export function makeOpenCode2Adapter(
           Effect.tapError((error) => {
             const abortTurn =
               ctx.activeTurnId === turnId && ctx.promptsInFlight === 1
-                ? Effect.gen(function* () {
-                    const { activeTurnId: _activeTurnId, ...readySession } = ctx.session;
-                    ctx.activeTurnId = undefined;
-                    ctx.session = {
-                      ...readySession,
-                      status: "ready",
-                      updatedAt: yield* nowIso,
-                      lastError: error.message,
-                    };
-                    yield* emit({
-                      type: "turn.aborted",
-                      ...(yield* stamp()),
-                      provider: PROVIDER,
-                      threadId: input.threadId,
-                      turnId,
-                      payload: { reason: error.message },
-                    });
-                  })
+                ? abortActiveTurn(error.message)
                 : Effect.void;
             return isOpenCode2ReloadError(error.cause)
               ? abortTurn.pipe(Effect.andThen(stopInternal(ctx)))
               : abortTurn;
           }),
           Effect.ensuring(
-            Effect.sync(() => {
+            Effect.gen(function* () {
               ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);
+              if (ctx.promptsInFlight === 0 && ctx.activeTurnId === turnId) {
+                yield* ctx.acp.cancelAndWait.pipe(Effect.ignore);
+                yield* abortActiveTurn("Turn interrupted").pipe(Effect.ignore);
+              }
             }),
           ),
         );
