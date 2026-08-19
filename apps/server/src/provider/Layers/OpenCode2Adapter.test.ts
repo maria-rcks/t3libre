@@ -521,6 +521,38 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
     ),
   );
 
+  it.effect("keeps the last configured model after a selection fails", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({ T3_ACP_FAIL_SET_CONFIG_OPTION: "1" }),
+        );
+        const threadId = ThreadId.make("opencode2-model-selection-failure");
+        yield* adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+
+        const failed = yield* Effect.exit(
+          adapter.sendTurn({
+            threadId,
+            input: "use composer",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("opencode"),
+              model: "composer-2",
+            },
+          }),
+        );
+
+        assert.strictEqual(failed._tag, "Failure");
+        assert.isUndefined((yield* adapter.listSessions())[0]?.model);
+        const recovered = yield* adapter.sendTurn({ threadId, input: "use the prior model" });
+        assert.strictEqual(recovered.threadId, threadId);
+      }),
+    ),
+  );
+
   it.effect("removes a session when active-prompt recovery cannot reload it", () =>
     Effect.scoped(
       Effect.gen(function* () {

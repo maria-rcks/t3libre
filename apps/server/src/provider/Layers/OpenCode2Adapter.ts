@@ -728,7 +728,6 @@ export function makeOpenCode2Adapter(
             ...ctx.session,
             status: "running",
             activeTurnId: turnId,
-            model,
             updatedAt: yield* nowIso,
           };
           if (!steeringTurnId) {
@@ -787,6 +786,7 @@ export function makeOpenCode2Adapter(
             options: selection?.options,
             interactionMode: input.interactionMode,
           });
+          ctx.session = { ...ctx.session, model };
           const result = yield* promptOpenCode2Acp(
             ctx.acp,
             { prompt },
