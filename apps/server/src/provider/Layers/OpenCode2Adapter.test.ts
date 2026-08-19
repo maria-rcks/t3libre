@@ -17,6 +17,7 @@ import {
   ApprovalRequestId,
   OpenCodeSettings,
   ProviderDriverKind,
+  ProviderInstanceId,
   ThreadId,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
@@ -132,6 +133,189 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
     ),
   );
 
+  it.effect("offers explicit boolean elicitation choices", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({ T3_ACP_ELICIT_BOOLEAN_DURING_CREATE_SESSION: "1" }),
+        );
+        const threadId = ThreadId.make("opencode2-boolean-elicitation");
+        const requested =
+          yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "user-input.requested" }>>();
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            event.type === "user-input.requested"
+              ? Deferred.succeed(requested, event)
+              : Effect.void,
+          ),
+          Effect.forkChild,
+        );
+        const startFiber = yield* adapter
+          .startSession({
+            threadId,
+            cwd: process.cwd(),
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.forkChild);
+
+        const event = yield* Deferred.await(requested);
+        assert.deepStrictEqual(
+          event.payload.questions[0]?.options.map((option) => option.label),
+          ["true", "false"],
+        );
+        yield* adapter.respondToUserInput(threadId, ApprovalRequestId.make(event.requestId ?? ""), {
+          enabled: ["true"],
+        });
+        const session = yield* Fiber.join(startFiber);
+
+        assert.strictEqual(session.status, "ready");
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
+  it.effect("cancels unsupported URL elicitations without blocking startup", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({ T3_ACP_ELICIT_URL_DURING_CREATE_SESSION: "1" }),
+        );
+        const session = yield* adapter.startSession({
+          threadId: ThreadId.make("opencode2-url-elicitation"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+
+        assert.strictEqual(session.status, "ready");
+      }),
+    ),
+  );
+
+  it.effect("cancels pending elicitation when a turn is interrupted", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "opencode2-elicitation-response-")),
+          ),
+          (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+        );
+        const responseLogPath = NodePath.join(directory, "responses.ndjson");
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({
+            T3_ACP_ELICIT_DURING_PROMPT: "1",
+            T3_ACP_ELICITATION_RESPONSE_LOG_PATH: responseLogPath,
+          }),
+        );
+        const threadId = ThreadId.make("opencode2-interrupt-elicitation");
+        const requested = yield* Deferred.make<void>();
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            event.type === "user-input.requested"
+              ? Deferred.succeed(requested, undefined)
+              : Effect.void,
+          ),
+          Effect.forkChild,
+        );
+        yield* adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+        const turnFiber = yield* adapter
+          .sendTurn({ threadId, input: "ask first" })
+          .pipe(Effect.forkChild);
+
+        yield* Deferred.await(requested);
+        yield* adapter.interruptTurn(threadId);
+        yield* Fiber.join(turnFiber);
+
+        const response = yield* Effect.promise(() => NodeFSP.readFile(responseLogPath, "utf8"));
+        assert.strictEqual(response.trim(), "cancel");
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
+  it.effect("aborts a turn when its queued follow-up fails", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const configured = yield* Deferred.make<void>();
+        const adapter = yield* makeOpenCode2Adapter(
+          decodeOpenCodeSettings({
+            binaryPath: yield* makeMockWrapper({
+              T3_ACP_ELICIT_DURING_PROMPT: "1",
+              T3_ACP_FAIL_PROMPT_NUMBER: "2",
+            }),
+          }),
+          {
+            nativeEventLogger: {
+              filePath: "memory://native-events",
+              close: () => Effect.void,
+              write: (record) => {
+                const value = record as {
+                  event?: { kind?: string; payload?: { method?: string; status?: string } };
+                };
+                return value.event?.kind === "request" &&
+                  value.event.payload?.method === "session/set_config_option" &&
+                  value.event.payload.status === "succeeded"
+                  ? Deferred.succeed(configured, undefined)
+                  : Effect.void;
+              },
+            },
+          },
+        ).pipe(Effect.orDie);
+        const threadId = ThreadId.make("opencode2-failed-follow-up");
+        const inputRequested = yield* Deferred.make<ApprovalRequestId>();
+        const events: ProviderRuntimeEvent[] = [];
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => events.push(event)).pipe(
+              Effect.andThen(
+                event.type === "user-input.requested" && event.requestId
+                  ? Deferred.succeed(inputRequested, ApprovalRequestId.make(event.requestId))
+                  : Effect.void,
+              ),
+            ),
+          ),
+          Effect.forkChild,
+        );
+        yield* adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+        const first = yield* adapter.sendTurn({ threadId, input: "first" }).pipe(Effect.forkChild);
+        const requestId = yield* Deferred.await(inputRequested);
+        const second = yield* adapter
+          .sendTurn({
+            threadId,
+            input: "follow up",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("opencode"),
+              model: "composer-2",
+            },
+          })
+          .pipe(Effect.forkChild);
+
+        yield* Deferred.await(configured);
+        yield* adapter.respondToUserInput(threadId, requestId, { mode: ["build"] });
+        yield* Fiber.join(first);
+        const secondExit = yield* Fiber.await(second);
+
+        assert.strictEqual(secondExit._tag, "Failure");
+        assert.strictEqual(events.filter((event) => event.type === "turn.started").length, 1);
+        assert.strictEqual(events.filter((event) => event.type === "turn.completed").length, 0);
+        assert.strictEqual(events.filter((event) => event.type === "turn.aborted").length, 1);
+        const [session] = yield* adapter.listSessions();
+        assert.strictEqual(session?.status, "ready");
+        assert.isUndefined(session?.activeTurnId);
+        assert.isString(session?.lastError);
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
   it.effect("aborts a failed turn and leaves the session usable", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -158,6 +342,40 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
         assert.strictEqual(session?.status, "ready");
         assert.isUndefined(session?.activeTurnId);
         assert.isString(session?.lastError);
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
+  it.effect("removes a session when active-prompt recovery cannot reload it", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({
+            T3_ACP_ACTIVE_PROMPT_ERROR_NUMBER: "1",
+            T3_ACP_FAIL_FIRST_LOAD_SESSION: "1",
+          }),
+        );
+        const threadId = ThreadId.make("opencode2-reload-failure");
+        const exited = yield* Deferred.make<void>();
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            event.type === "session.exited" ? Deferred.succeed(exited, undefined) : Effect.void,
+          ),
+          Effect.forkChild,
+        );
+        yield* adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+
+        const result = yield* Effect.exit(adapter.sendTurn({ threadId, input: "recover" }));
+
+        assert.strictEqual(result._tag, "Failure");
+        yield* Deferred.await(exited);
+        assert.isFalse(yield* adapter.hasSession(threadId));
+        assert.deepStrictEqual(yield* adapter.listSessions(), []);
         yield* Fiber.interrupt(eventFiber);
       }),
     ),

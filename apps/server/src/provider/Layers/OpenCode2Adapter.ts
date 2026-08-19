@@ -55,6 +55,7 @@ import {
 import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
 import {
   applyOpenCode2AcpModelSelection,
+  isOpenCode2ReloadError,
   makeOpenCode2AcpRuntime,
   promptOpenCode2Acp,
 } from "../acp/OpenCode2AcpSupport.ts";
@@ -76,8 +77,10 @@ interface PendingApproval {
 }
 
 interface PendingUserInput {
-  readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
-  readonly request: EffectAcpSchema.ElicitationRequest;
+  readonly resolution: Deferred.Deferred<
+    | { readonly action: "accept"; readonly answers: ProviderUserInputAnswers }
+    | { readonly action: "cancel" }
+  >;
 }
 
 interface OpenCode2SessionContext {
@@ -152,7 +155,9 @@ function elicitationQuestions(
               ? (entry as { readonly const?: unknown }).const
               : undefined,
           )
-        : [];
+        : record.type === "boolean"
+          ? [true, false]
+          : [];
     const options = rawOptions.flatMap((entry) =>
       typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean"
         ? [{ label: String(entry), description: String(entry) }]
@@ -162,10 +167,7 @@ function elicitationQuestions(
       id,
       header: title,
       question: description,
-      options:
-        options.length > 0
-          ? options
-          : [{ label: "Enter a response", description: "Provide a custom response" }],
+      options: options.length > 0 ? options : [],
       ...(record.type === "array" ? { multiSelect: true } : {}),
     } satisfies UserInputQuestion;
   });
@@ -220,7 +222,7 @@ function settlePending(ctx: OpenCode2SessionContext): Effect.Effect<void> {
     );
     yield* Effect.forEach(
       ctx.pendingUserInputs.values(),
-      (pending) => Deferred.succeed(pending.answers, {}).pipe(Effect.ignore),
+      (pending) => Deferred.succeed(pending.resolution, { action: "cancel" }).pipe(Effect.ignore),
       { discard: true },
     );
   });
@@ -396,7 +398,7 @@ export function makeOpenCode2Adapter(
                 new ProviderAdapterProcessError({
                   provider: PROVIDER,
                   threadId: input.threadId,
-                  detail: cause.message,
+                  detail: "Failed to start the OpenCode 2.0 ACP session.",
                   cause,
                 }),
             ),
@@ -494,10 +496,16 @@ export function makeOpenCode2Adapter(
             );
             yield* acp.handleElicitation((request) =>
               Effect.gen(function* () {
+                if (request.mode === "url") {
+                  return { action: { action: "cancel" as const } };
+                }
                 const requestId = ApprovalRequestId.make(yield* randomUUID);
                 const runtimeRequestId = RuntimeRequestId.make(requestId);
-                const answers = yield* Deferred.make<ProviderUserInputAnswers>();
-                pendingUserInputs.set(requestId, { answers, request });
+                const resolution = yield* Deferred.make<
+                  | { readonly action: "accept"; readonly answers: ProviderUserInputAnswers }
+                  | { readonly action: "cancel" }
+                >();
+                pendingUserInputs.set(requestId, { resolution });
                 yield* emit({
                   type: "user-input.requested",
                   ...(yield* stamp()),
@@ -508,7 +516,7 @@ export function makeOpenCode2Adapter(
                   payload: { questions: elicitationQuestions(request) },
                   raw: { source: "acp.jsonrpc", method: "session/elicitation", payload: request },
                 });
-                const resolved = yield* Deferred.await(answers);
+                const resolved = yield* Deferred.await(resolution);
                 pendingUserInputs.delete(requestId);
                 yield* emit({
                   type: "user-input.resolved",
@@ -517,12 +525,17 @@ export function makeOpenCode2Adapter(
                   threadId: input.threadId,
                   turnId: ctx.activeTurnId,
                   requestId: runtimeRequestId,
-                  payload: { answers: resolved },
+                  payload: {
+                    answers: resolved.action === "accept" ? resolved.answers : {},
+                  },
                 });
+                if (resolved.action === "cancel") {
+                  return { action: { action: "cancel" as const } };
+                }
                 return {
                   action: {
                     action: "accept" as const,
-                    content: elicitationContent(request, resolved),
+                    content: elicitationContent(request, resolved.answers),
                   },
                 };
               }).pipe(
@@ -701,7 +714,7 @@ export function makeOpenCode2Adapter(
                   new ProviderAdapterRequestError({
                     provider: PROVIDER,
                     method: "session/prompt",
-                    detail: cause.message,
+                    detail: `Failed to read attachment '${attachment.id}'.`,
                     cause,
                   }),
               ),
@@ -779,28 +792,32 @@ export function makeOpenCode2Adapter(
           }
           return { threadId: input.threadId, turnId, resumeCursor: ctx.session.resumeCursor };
         }).pipe(
-          Effect.tapError((error) =>
-            steeringTurnId === undefined && ctx.activeTurnId === turnId && ctx.promptsInFlight === 1
-              ? Effect.gen(function* () {
-                  const { activeTurnId: _activeTurnId, ...readySession } = ctx.session;
-                  ctx.activeTurnId = undefined;
-                  ctx.session = {
-                    ...readySession,
-                    status: "ready",
-                    updatedAt: yield* nowIso,
-                    lastError: error.message,
-                  };
-                  yield* emit({
-                    type: "turn.aborted",
-                    ...(yield* stamp()),
-                    provider: PROVIDER,
-                    threadId: input.threadId,
-                    turnId,
-                    payload: { reason: error.message },
-                  });
-                })
-              : Effect.void,
-          ),
+          Effect.tapError((error) => {
+            const abortTurn =
+              ctx.activeTurnId === turnId && ctx.promptsInFlight === 1
+                ? Effect.gen(function* () {
+                    const { activeTurnId: _activeTurnId, ...readySession } = ctx.session;
+                    ctx.activeTurnId = undefined;
+                    ctx.session = {
+                      ...readySession,
+                      status: "ready",
+                      updatedAt: yield* nowIso,
+                      lastError: error.message,
+                    };
+                    yield* emit({
+                      type: "turn.aborted",
+                      ...(yield* stamp()),
+                      provider: PROVIDER,
+                      threadId: input.threadId,
+                      turnId,
+                      payload: { reason: error.message },
+                    });
+                  })
+                : Effect.void;
+            return isOpenCode2ReloadError(error.cause)
+              ? abortTurn.pipe(Effect.andThen(stopInternal(ctx)))
+              : abortTurn;
+          }),
           Effect.ensuring(
             Effect.sync(() => {
               ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);
@@ -855,7 +872,7 @@ export function makeOpenCode2Adapter(
             detail: `Unknown pending user-input request: ${requestId}`,
           });
         }
-        yield* Deferred.succeed(pending.answers, answers);
+        yield* Deferred.succeed(pending.resolution, { action: "accept", answers });
       });
 
     const readThread: OpenCodeAdapterShape["readThread"] = (threadId) =>

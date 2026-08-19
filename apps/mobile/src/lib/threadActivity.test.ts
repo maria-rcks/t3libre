@@ -14,6 +14,7 @@ import {
 import {
   buildPendingUserInputAnswers,
   buildThreadFeed,
+  derivePendingUserInputs,
   deriveThreadFeedPresentation,
   isPendingUserInputOptionSelected,
   setPendingUserInputCustomAnswer,
@@ -45,6 +46,30 @@ const multiSelectQuestion = {
 } as const;
 
 describe("pending user input answers", () => {
+  it("keeps free-form questions with no preset options", () => {
+    const pending = derivePendingUserInputs([
+      makeActivity({
+        id: EventId.make("user-input-free-form"),
+        kind: "user-input.requested",
+        summary: "User input requested",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        payload: {
+          requestId: "req-user-input-free-form",
+          questions: [
+            {
+              id: "name",
+              header: "Name",
+              question: "What should this be called?",
+              options: [],
+            },
+          ],
+        },
+      }),
+    ]);
+
+    expect(pending[0]?.questions[0]?.options).toEqual([]);
+  });
+
   it("replaces single-select options and toggles multi-select options", () => {
     expect(
       togglePendingUserInputOptionSelection(

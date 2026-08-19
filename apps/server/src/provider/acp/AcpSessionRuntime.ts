@@ -254,6 +254,7 @@ interface AcpStartedState extends AcpSessionRuntimeStartResult {}
 
 type AcpStartState =
   | { readonly _tag: "NotStarted" }
+  | { readonly _tag: "Closed" }
   | {
       readonly _tag: "Starting";
       readonly deferred: Deferred.Deferred<AcpSessionRuntimeStartResult, EffectAcpErrors.AcpError>;
@@ -426,9 +427,13 @@ export const make = (
       if (state._tag === "Started") {
         return state.result;
       }
+      const detail =
+        state._tag === "Closed"
+          ? "ACP session runtime is closed after a failed reload"
+          : "ACP session runtime has not been started";
       return yield* new EffectAcpErrors.AcpTransportError({
-        detail: "ACP session runtime has not been started",
-        cause: "ACP session runtime has not been started",
+        detail,
+        cause: detail,
       });
     });
 
@@ -652,6 +657,13 @@ export const make = (
             return [Effect.succeed(state.result), state] as const;
           case "Starting":
             return [Deferred.await(state.deferred), state] as const;
+          case "Closed": {
+            const detail = "ACP session runtime is closed after a failed reload";
+            return [
+              Effect.fail(new EffectAcpErrors.AcpTransportError({ detail, cause: detail })),
+              state,
+            ] as const;
+          }
           case "NotStarted":
             return [
               startOnce.pipe(
@@ -765,7 +777,7 @@ export const make = (
             closePayload,
             acp.agent.closeSession(closePayload),
           );
-          yield* Ref.set(startStateRef, { _tag: "NotStarted" });
+          yield* Ref.set(startStateRef, { _tag: "Closed" });
           const sessionSetupResult = yield* loadSession(
             started.sessionId,
             started.initializeResult,

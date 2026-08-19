@@ -28,6 +28,7 @@ const emitLateUpdateAfterCancel = process.env.T3_ACP_EMIT_LATE_UPDATE_AFTER_CANC
 const omitXAiPromptCompleteStopReason =
   process.env.T3_ACP_OMIT_XAI_PROMPT_COMPLETE_STOP_REASON === "1";
 const failLoadSession = process.env.T3_ACP_FAIL_LOAD_SESSION === "1";
+const failFirstLoadSession = process.env.T3_ACP_FAIL_FIRST_LOAD_SESSION === "1";
 const emitLoadReplay = process.env.T3_ACP_EMIT_LOAD_REPLAY === "1";
 const hangLoadSessionAfterReplay = process.env.T3_ACP_HANG_LOAD_SESSION_AFTER_REPLAY === "1";
 const delayLoadSessionAfterReplay = process.env.T3_ACP_DELAY_LOAD_SESSION_AFTER_REPLAY === "1";
@@ -37,8 +38,15 @@ const emitStaleXAiPromptCompleteBeforeSecondHang =
 const emitOverlappingXAiPromptCompleteOutOfOrder =
   process.env.T3_ACP_EMIT_OVERLAPPING_XAI_PROMPT_COMPLETE_OUT_OF_ORDER === "1";
 const failPrompt = process.env.T3_ACP_FAIL_PROMPT === "1";
+const failPromptNumber = Number(process.env.T3_ACP_FAIL_PROMPT_NUMBER ?? "0");
+const activePromptErrorNumber = Number(process.env.T3_ACP_ACTIVE_PROMPT_ERROR_NUMBER ?? "0");
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const elicitDuringCreateSession = process.env.T3_ACP_ELICIT_DURING_CREATE_SESSION === "1";
+const elicitBooleanDuringCreateSession =
+  process.env.T3_ACP_ELICIT_BOOLEAN_DURING_CREATE_SESSION === "1";
+const elicitUrlDuringCreateSession = process.env.T3_ACP_ELICIT_URL_DURING_CREATE_SESSION === "1";
+const elicitDuringPrompt = process.env.T3_ACP_ELICIT_DURING_PROMPT === "1";
+const elicitationResponseLogPath = process.env.T3_ACP_ELICITATION_RESPONSE_LOG_PATH;
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
 const promptDelayMs = Number(process.env.T3_ACP_PROMPT_DELAY_MS ?? "0");
@@ -56,6 +64,7 @@ let currentReasoning = "medium";
 let currentContext = "272k";
 let currentFast = false;
 let promptCount = 0;
+let loadSessionCount = 0;
 let overlappingFirstPromptId: string | undefined;
 const cancelledSessions = new Set<string>();
 
@@ -329,6 +338,30 @@ const program = Effect.gen(function* () {
           },
         });
       }
+      if (elicitBooleanDuringCreateSession) {
+        yield* agent.client.elicit({
+          sessionId,
+          message: "Enable fast mode?",
+          mode: "form",
+          requestedSchema: {
+            type: "object",
+            title: "Fast mode",
+            properties: {
+              enabled: { type: "boolean", title: "Enabled" },
+            },
+            required: ["enabled"],
+          },
+        });
+      }
+      if (elicitUrlDuringCreateSession) {
+        yield* agent.client.elicit({
+          sessionId,
+          message: "Authorize OpenCode in your browser.",
+          mode: "url",
+          elicitationId: "mock-url-elicitation",
+          url: "https://example.com/opencode/authorize",
+        });
+      }
       return {
         sessionId,
         modes: modeState(),
@@ -363,7 +396,8 @@ const program = Effect.gen(function* () {
   yield* agent.handleLoadSession((request) =>
     Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
-      if (failLoadSession) {
+      loadSessionCount += 1;
+      if (failLoadSession || (failFirstLoadSession && loadSessionCount === 1)) {
         return yield* AcpError.AcpRequestError.internalError("Mock load session failure");
       }
       if (hangLoadSessionAfterReplay || delayLoadSessionAfterReplay) {
@@ -487,8 +521,41 @@ const program = Effect.gen(function* () {
         yield* Effect.sleep(`${promptDelayMs} millis`);
       }
 
-      if (failPrompt) {
+      if (activePromptErrorNumber > 0 && promptCount === activePromptErrorNumber) {
+        return yield* AcpError.AcpRequestError.internalError(
+          "Session already has an active ACP prompt",
+        );
+      }
+
+      if (failPrompt || (failPromptNumber > 0 && promptCount === failPromptNumber)) {
         return yield* AcpError.AcpRequestError.internalError("Mock prompt failure");
+      }
+
+      if (elicitDuringPrompt) {
+        const response = yield* agent.client.elicit({
+          sessionId: requestedSessionId,
+          message: "Choose a workspace mode.",
+          mode: "form",
+          requestedSchema: {
+            type: "object",
+            title: "Workspace mode",
+            properties: {
+              mode: { type: "string", title: "Mode", enum: ["build", "plan"] },
+            },
+            required: ["mode"],
+          },
+        });
+        if (elicitationResponseLogPath) {
+          yield* Effect.sync(() => {
+            NodeFS.appendFileSync(elicitationResponseLogPath, `${response.action.action}\n`);
+          });
+        }
+        return {
+          stopReason:
+            response.action.action === "cancel" || cancelledSessions.delete(requestedSessionId)
+              ? "cancelled"
+              : "end_turn",
+        };
       }
 
       if (emitStaleXAiPromptCompleteBeforeSecondHang && promptCount === 1) {

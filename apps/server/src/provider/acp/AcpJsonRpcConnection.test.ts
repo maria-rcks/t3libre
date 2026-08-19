@@ -328,6 +328,55 @@ describe("AcpSessionRuntime", () => {
     );
   });
 
+  it.effect("keeps a failed reload terminal instead of restarting the ACP child", () => {
+    const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const reloadExit = yield* Effect.exit(runtime.reload);
+      const promptExit = yield* Effect.exit(
+        runtime.prompt({ prompt: [{ type: "text", text: "after failed reload" }] }),
+      );
+      const restartExit = yield* Effect.exit(runtime.start());
+
+      expect(reloadExit._tag).toBe("Failure");
+      expect(promptExit._tag).toBe("Failure");
+      expect(restartExit._tag).toBe("Failure");
+      expect(requestEvents.map((event) => `${event.method}:${event.status}`)).toEqual([
+        "initialize:started",
+        "initialize:succeeded",
+        "authenticate:started",
+        "authenticate:succeeded",
+        "session/new:started",
+        "session/new:succeeded",
+        "session/close:started",
+        "session/close:succeeded",
+        "session/load:started",
+        "session/load:failed",
+      ]);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: { T3_ACP_FAIL_FIRST_LOAD_SESSION: "1" },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+          requestLogger: (event) =>
+            Effect.sync(() => {
+              requestEvents.push(event);
+            }),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    );
+  });
+
   it.effect("segments assistant text around ACP tool calls", () =>
     Effect.gen(function* () {
       const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;

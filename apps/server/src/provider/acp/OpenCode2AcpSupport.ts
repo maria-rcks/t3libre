@@ -66,6 +66,12 @@ export interface OpenCode2AcpSelectionErrorContext {
 }
 
 const isAcpRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
+const isAcpTransportError = Schema.is(EffectAcpErrors.AcpTransportError);
+const RELOAD_FAILURE_DETAIL = "OpenCode 2.0 ACP session reload failed";
+
+export function isOpenCode2ReloadError(error: unknown): boolean {
+  return isAcpTransportError(error) && error.detail === RELOAD_FAILURE_DETAIL;
+}
 
 export function isOpenCode2ActivePromptError(error: unknown): boolean {
   return (
@@ -79,15 +85,24 @@ export function promptOpenCode2Acp(
   runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "prompt" | "reload">,
   payload: Omit<EffectAcpSchema.PromptRequest, "sessionId">,
 ): Effect.Effect<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError> {
-  return runtime
-    .prompt(payload)
-    .pipe(
-      Effect.catchTag("AcpRequestError", (error) =>
+  return runtime.prompt(payload).pipe(
+    Effect.catchTags({
+      AcpRequestError: (error) =>
         isOpenCode2ActivePromptError(error)
-          ? runtime.reload.pipe(Effect.andThen(runtime.prompt(payload)))
+          ? runtime.reload.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new EffectAcpErrors.AcpTransportError({
+                    method: "session/load",
+                    detail: RELOAD_FAILURE_DETAIL,
+                    cause,
+                  }),
+              ),
+              Effect.andThen(runtime.prompt(payload)),
+            )
           : Effect.fail(error),
-      ),
-    );
+    }),
+  );
 }
 
 export function applyOpenCode2AcpModelSelection<E>(input: {
