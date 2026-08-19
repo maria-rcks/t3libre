@@ -6,6 +6,7 @@ import * as NodeFS from "node:fs";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
@@ -332,17 +333,34 @@ describe("AcpSessionRuntime", () => {
     Effect.gen(function* () {
       const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
       yield* runtime.start();
+      const failedToolCall =
+        yield* Deferred.make<
+          Extract<AcpSessionRuntime.AcpSessionRuntimeEvent, { readonly _tag: "ToolCallUpdated" }>
+        >();
+      const eventFiber = yield* runtime.getEvents().pipe(
+        Stream.runForEach((event) => {
+          const rawPayload = event._tag === "ToolCallUpdated" ? event.rawPayload : undefined;
+          return event._tag === "ToolCallUpdated" &&
+            typeof rawPayload === "object" &&
+            rawPayload !== null &&
+            "source" in rawPayload &&
+            rawPayload.source === "session/reload"
+            ? Deferred.succeed(failedToolCall, event)
+            : Effect.void;
+        }),
+        Effect.forkChild,
+      );
       yield* runtime.prompt({
         prompt: [{ type: "text", text: "start a tool" }],
       });
 
       yield* runtime.reload;
-      const failed = yield* Stream.runHead(runtime.getEvents());
-      expect(Option.getOrUndefined(failed)).toMatchObject({
+      expect(yield* Deferred.await(failedToolCall)).toMatchObject({
         _tag: "ToolCallUpdated",
         toolCall: { toolCallId: "pending-tool-call-1", status: "failed" },
         rawPayload: { source: "session/reload" },
       });
+      yield* Fiber.interrupt(eventFiber);
     }).pipe(
       Effect.provide(
         AcpSessionRuntime.layer({
