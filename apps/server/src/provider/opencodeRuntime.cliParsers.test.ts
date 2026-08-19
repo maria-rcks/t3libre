@@ -9,6 +9,7 @@ import {
   parseOpenCode2AgentsCliOutput,
   parseOpenCode2ModelsCliOutput,
   parseOpenCodeServerReadyOutput,
+  redactOpenCodeServerOutput,
   parseSkillsCliOutput,
   shouldUseOpenCode2Acp,
 } from "./opencodeRuntime.ts";
@@ -51,6 +52,16 @@ describe("parseOpenCodeServerReadyOutput", () => {
       ),
       { url: "http://127.0.0.1:4096", serverPassword: "secret" },
     );
+  });
+
+  it("redacts preview passwords from startup diagnostics", () => {
+    const output = redactOpenCodeServerOutput(
+      "server listening on http://127.0.0.1:4096\nserver password secret-value\nfailed\n",
+    );
+
+    NodeAssert.equal(output.includes("secret-value"), false);
+    NodeAssert.equal(output.includes("server password [redacted]"), true);
+    NodeAssert.equal(output.includes("failed"), true);
   });
 });
 

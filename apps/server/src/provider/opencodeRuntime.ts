@@ -224,6 +224,18 @@ export function parseOpenCodeServerReadyOutput(
   return { url, ...(serverPassword ? { serverPassword } : {}) };
 }
 
+/** @internal */
+export function redactOpenCodeServerOutput(output: string): string {
+  return output
+    .split("\n")
+    .map((line) =>
+      line.startsWith(OPENCODE2_SERVER_PASSWORD_PREFIX)
+        ? `${OPENCODE2_SERVER_PASSWORD_PREFIX}[redacted]`
+        : line,
+    )
+    .join("\n");
+}
+
 const SLUG_LINE_RE = /^(\S+\/\S+)\s*$/;
 const AGENT_HEADER_RE = /^(.+)\s+\((\S+)\)\s*$/;
 const OPENCODE_SLUG_LABELS: Readonly<Record<string, string>> = {
@@ -758,6 +770,8 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
           Effect.gen(function* () {
             const stdout = yield* Ref.get(stdoutRef);
             const stderr = yield* Ref.get(stderrRef);
+            const diagnosticStdout = redactOpenCodeServerOutput(stdout);
+            const diagnosticStderr = redactOpenCodeServerOutput(stderr);
             const exitCode = Number(code);
             yield* Deferred.fail(
               readyDeferred,
@@ -765,12 +779,12 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
                 operation: "startOpenCodeServerProcess",
                 detail: [
                   `OpenCode server exited before startup completed (code: ${String(exitCode)}).`,
-                  stdout.trim() ? `stdout:\n${stdout.trim()}` : null,
-                  stderr.trim() ? `stderr:\n${stderr.trim()}` : null,
+                  diagnosticStdout.trim() ? `stdout:\n${diagnosticStdout.trim()}` : null,
+                  diagnosticStderr.trim() ? `stderr:\n${diagnosticStderr.trim()}` : null,
                 ]
                   .filter(Boolean)
                   .join("\n\n"),
-                cause: { exitCode, stdout, stderr },
+                cause: { exitCode, stdout: diagnosticStdout, stderr: diagnosticStderr },
               }),
             ).pipe(Effect.ignore);
           }),

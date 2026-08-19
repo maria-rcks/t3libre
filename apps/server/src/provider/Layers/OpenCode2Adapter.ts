@@ -763,9 +763,19 @@ export function makeOpenCode2Adapter(
               mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", cause),
             ),
           );
+          let attachmentIndex = 0;
+          const recordedPrompt = prompt.map((block) => {
+            if (block.type !== "image") return block;
+            const attachment = input.attachments?.[attachmentIndex++];
+            return {
+              type: "image",
+              mimeType: block.mimeType,
+              ...(attachment ? { attachmentId: attachment.id } : {}),
+            };
+          });
           const turn = ctx.turns.find((candidate) => candidate.id === turnId);
-          if (turn) turn.items.push({ prompt, result });
-          else ctx.turns.push({ id: turnId, items: [{ prompt, result }] });
+          if (turn) turn.items.push({ prompt: recordedPrompt, result });
+          else ctx.turns.push({ id: turnId, items: [{ prompt: recordedPrompt, result }] });
           if (ctx.promptsInFlight === 1) {
             const {
               activeTurnId: _activeTurnId,

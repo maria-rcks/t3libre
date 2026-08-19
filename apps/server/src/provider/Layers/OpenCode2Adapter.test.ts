@@ -23,6 +23,7 @@ import {
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../../config.ts";
+import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { makeOpenCode2Adapter } from "./OpenCode2Adapter.ts";
 
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
@@ -94,6 +95,45 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
         assert.isTrue(events.some((event) => event.type === "turn.started"));
         assert.isTrue(events.some((event) => event.type === "turn.completed"));
         yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
+  it.effect("keeps attachment references without retaining encoded image data", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* makeTestAdapter(yield* makeMockWrapper());
+        const { attachmentsDir } = yield* ServerConfig;
+        const threadId = ThreadId.make("opencode2-attachment");
+        const attachment = {
+          type: "image" as const,
+          id: "opencode2-attachment-12345678-1234-1234-1234-123456789abc",
+          name: "diagram.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+        };
+        const attachmentPath = NodePath.join(attachmentsDir, attachmentRelativePath(attachment));
+        yield* Effect.promise(() =>
+          NodeFSP.mkdir(NodePath.dirname(attachmentPath), { recursive: true }),
+        );
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(attachmentPath, Uint8Array.from([1, 2, 3, 4])),
+        );
+        yield* adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+
+        yield* adapter.sendTurn({ threadId, input: "inspect", attachments: [attachment] });
+        const history = yield* adapter.readThread(threadId);
+        const item = history.turns[0]?.items[0] as
+          | { prompt?: Array<{ type?: string; data?: string; attachmentId?: string }> }
+          | undefined;
+        const image = item?.prompt?.find((block) => block.type === "image");
+
+        assert.strictEqual(image?.attachmentId, attachment.id);
+        assert.isUndefined(image?.data);
       }),
     ),
   );
