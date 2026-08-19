@@ -45,6 +45,8 @@ const elicitDuringCreateSession = process.env.T3_ACP_ELICIT_DURING_CREATE_SESSIO
 const elicitBooleanDuringCreateSession =
   process.env.T3_ACP_ELICIT_BOOLEAN_DURING_CREATE_SESSION === "1";
 const elicitUrlDuringCreateSession = process.env.T3_ACP_ELICIT_URL_DURING_CREATE_SESSION === "1";
+const elicitComplexDuringCreateSession =
+  process.env.T3_ACP_ELICIT_COMPLEX_DURING_CREATE_SESSION === "1";
 const elicitDuringPrompt = process.env.T3_ACP_ELICIT_DURING_PROMPT === "1";
 const elicitationResponseLogPath = process.env.T3_ACP_ELICITATION_RESPONSE_LOG_PATH;
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
@@ -360,6 +362,31 @@ const program = Effect.gen(function* () {
           mode: "url",
           elicitationId: "mock-url-elicitation",
           url: "https://example.com/opencode/authorize",
+        });
+      }
+      if (elicitComplexDuringCreateSession) {
+        yield* agent.client.elicit({
+          sessionId,
+          message: "Choose deployment targets.",
+          mode: "form",
+          requestedSchema: {
+            type: "object",
+            title: "Deployment",
+            properties: {
+              targets: {
+                type: "array",
+                title: "Targets",
+                items: {
+                  anyOf: [
+                    { const: "web", title: "Web" },
+                    { const: "mobile", title: "Mobile" },
+                  ],
+                },
+              },
+              note: { type: "string", title: "Optional note" },
+            },
+            required: ["targets"],
+          },
         });
       }
       return {

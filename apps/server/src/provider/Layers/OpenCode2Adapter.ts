@@ -128,7 +128,8 @@ function elicitationQuestions(
 ): Array<UserInputQuestion> {
   if (request.mode !== "form") return [];
   const properties = request.requestedSchema.properties ?? {};
-  const entries = Object.entries(properties);
+  const required = new Set(request.requestedSchema.required ?? []);
+  const entries = Object.entries(properties).filter(([id]) => required.has(id));
   if (entries.length === 0) {
     return [
       {
@@ -147,15 +148,24 @@ function elicitationQuestions(
       typeof record.description === "string" && record.description.trim()
         ? record.description.trim()
         : request.message;
-    const rawOptions = Array.isArray(record.enum)
-      ? record.enum
-      : Array.isArray(record.oneOf)
-        ? record.oneOf.map((entry) =>
+    const optionSchema =
+      record.type === "array" && typeof record.items === "object" && record.items !== null
+        ? (record.items as Record<string, unknown>)
+        : record;
+    const choices: ReadonlyArray<unknown> = Array.isArray(optionSchema.oneOf)
+      ? optionSchema.oneOf
+      : Array.isArray(optionSchema.anyOf)
+        ? optionSchema.anyOf
+        : [];
+    const rawOptions: ReadonlyArray<unknown> = Array.isArray(optionSchema.enum)
+      ? optionSchema.enum
+      : choices.length > 0
+        ? choices.map((entry) =>
             typeof entry === "object" && entry !== null && "const" in entry
               ? (entry as { readonly const?: unknown }).const
               : undefined,
           )
-        : record.type === "boolean"
+        : optionSchema.type === "boolean"
           ? [true, false]
           : [];
     const options = rawOptions.flatMap((entry) =>
@@ -679,20 +689,46 @@ export function makeOpenCode2Adapter(
 
     const sendTurn: OpenCodeAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
-        const ctx = yield* requireSession(input.threadId);
-        if (input.modelSelection && input.modelSelection.instanceId !== boundInstanceId) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "sendTurn",
-            issue: `Model selection belongs to provider instance '${input.modelSelection.instanceId}', not '${boundInstanceId}'.`,
-          });
-        }
-        const steeringTurnId = ctx.promptsInFlight > 0 ? ctx.activeTurnId : undefined;
-        const turnId = steeringTurnId ?? TurnId.make(yield* randomUUID);
-        ctx.promptsInFlight += 1;
+        const { ctx, steeringTurnId, turnId } = yield* withLock(
+          input.threadId,
+          Effect.gen(function* () {
+            const ctx = yield* requireSession(input.threadId);
+            if (input.modelSelection && input.modelSelection.instanceId !== boundInstanceId) {
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "sendTurn",
+                issue: `Model selection belongs to provider instance '${input.modelSelection.instanceId}', not '${boundInstanceId}'.`,
+              });
+            }
+            const steeringTurnId = ctx.activeTurnId;
+            const turnId = steeringTurnId ?? TurnId.make(yield* randomUUID);
+            ctx.promptsInFlight += 1;
+            ctx.activeTurnId = turnId;
+            return { ctx, steeringTurnId, turnId };
+          }),
+        );
         return yield* Effect.gen(function* () {
           const selection = input.modelSelection;
           const model = selection?.model ?? ctx.session.model;
+
+          if (!steeringTurnId) ctx.lastPlanFingerprint = undefined;
+          ctx.session = {
+            ...ctx.session,
+            status: "running",
+            activeTurnId: turnId,
+            model,
+            updatedAt: yield* nowIso,
+          };
+          if (!steeringTurnId) {
+            yield* emit({
+              type: "turn.started",
+              ...(yield* stamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              turnId,
+              payload: { model: model ?? "default" },
+            });
+          }
 
           const prompt: Array<EffectAcpSchema.ContentBlock> = [];
           if (input.input?.trim()) prompt.push({ type: "text", text: input.input.trim() });
@@ -739,25 +775,6 @@ export function makeOpenCode2Adapter(
             options: selection?.options,
             interactionMode: input.interactionMode,
           });
-          ctx.activeTurnId = turnId;
-          if (!steeringTurnId) ctx.lastPlanFingerprint = undefined;
-          ctx.session = {
-            ...ctx.session,
-            status: "running",
-            activeTurnId: turnId,
-            model,
-            updatedAt: yield* nowIso,
-          };
-          if (!steeringTurnId) {
-            yield* emit({
-              type: "turn.started",
-              ...(yield* stamp()),
-              provider: PROVIDER,
-              threadId: input.threadId,
-              turnId,
-              payload: { model: model ?? "default" },
-            });
-          }
           const result = yield* promptOpenCode2Acp(ctx.acp, { prompt }).pipe(
             Effect.mapError((cause) =>
               mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", cause),

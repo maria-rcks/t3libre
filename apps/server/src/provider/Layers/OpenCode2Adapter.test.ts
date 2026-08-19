@@ -214,6 +214,48 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
     ),
   );
 
+  it.effect("uses array item choices and omits optional elicitation fields", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({ T3_ACP_ELICIT_COMPLEX_DURING_CREATE_SESSION: "1" }),
+        );
+        const threadId = ThreadId.make("opencode2-complex-elicitation");
+        const requested =
+          yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "user-input.requested" }>>();
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            event.type === "user-input.requested"
+              ? Deferred.succeed(requested, event)
+              : Effect.void,
+          ),
+          Effect.forkChild,
+        );
+        const startFiber = yield* adapter
+          .startSession({
+            threadId,
+            cwd: process.cwd(),
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.forkChild);
+
+        const event = yield* Deferred.await(requested);
+        assert.strictEqual(event.payload.questions.length, 1);
+        assert.strictEqual(event.payload.questions[0]?.id, "targets");
+        assert.isTrue(event.payload.questions[0]?.multiSelect);
+        assert.deepStrictEqual(
+          event.payload.questions[0]?.options.map((option) => option.label),
+          ["web", "mobile"],
+        );
+        yield* adapter.respondToUserInput(threadId, ApprovalRequestId.make(event.requestId ?? ""), {
+          targets: ["web", "mobile"],
+        });
+        assert.strictEqual((yield* Fiber.join(startFiber)).status, "ready");
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
   it.effect("cancels unsupported URL elicitations without blocking startup", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -351,6 +393,39 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
         assert.strictEqual(session?.status, "ready");
         assert.isUndefined(session?.activeTurnId);
         assert.isString(session?.lastError);
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
+  it.effect("merges concurrent sends into one active turn", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* makeTestAdapter(yield* makeMockWrapper());
+        const threadId = ThreadId.make("opencode2-concurrent-turn");
+        const events: ProviderRuntimeEvent[] = [];
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Effect.forkChild,
+        );
+        yield* adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+
+        const [first, second] = yield* Effect.all(
+          [
+            adapter.sendTurn({ threadId, input: "first" }),
+            adapter.sendTurn({ threadId, input: "second" }),
+          ],
+          { concurrency: "unbounded" },
+        );
+
+        assert.strictEqual(first.turnId, second.turnId);
+        assert.strictEqual(events.filter((event) => event.type === "turn.started").length, 1);
+        assert.strictEqual(events.filter((event) => event.type === "turn.completed").length, 1);
+        assert.strictEqual((yield* adapter.readThread(threadId)).turns.length, 1);
         yield* Fiber.interrupt(eventFiber);
       }),
     ),
