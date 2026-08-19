@@ -249,6 +249,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
       >
         {props.pendingUserInput.questions.map((question) => {
           const draft = props.drafts[question.id];
+          const hasOptions = question.options.length > 0;
           return (
             <View key={question.id} className="gap-2 pt-1">
               <Text className="font-t3-bold text-xs uppercase tracking-[1px] text-neutral-500 dark:text-neutral-500">
@@ -257,49 +258,51 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
               <Text className="font-sans text-base leading-snug text-neutral-950 dark:text-neutral-50">
                 {question.question}
               </Text>
-              <View className="gap-2">
-                {question.options.map((option) => {
-                  const selected = isPendingUserInputOptionSelected(draft, option.label);
-                  const description =
-                    option.description !== option.label ? option.description : undefined;
-                  return (
-                    <Pressable
-                      key={option.label}
-                      className={cn(
-                        "min-h-12 w-full rounded-2xl border px-3.5 py-3",
-                        selected
-                          ? "border-blue-300/50 bg-blue-50 dark:border-blue-400/28 dark:bg-blue-400/14"
-                          : "border-neutral-200 bg-white dark:border-white/6 dark:bg-neutral-950/70",
-                      )}
-                      onPress={() =>
-                        props.onSelectOption(
-                          props.pendingUserInput.requestId,
-                          question,
-                          option.label,
-                        )
-                      }
-                    >
-                      <View className="min-w-0 flex-1 gap-0.5">
-                        <Text
-                          className={cn(
-                            "font-t3-bold text-sm",
-                            selected
-                              ? "text-sky-700 dark:text-sky-300"
-                              : "text-neutral-700 dark:text-neutral-200",
-                          )}
-                        >
-                          {option.label}
-                        </Text>
-                        {description ? (
-                          <Text className="font-sans text-sm leading-5 text-neutral-500 dark:text-neutral-400">
-                            {description}
+              {hasOptions ? (
+                <View className="gap-2">
+                  {question.options.map((option) => {
+                    const selected = isPendingUserInputOptionSelected(draft, option.label);
+                    const description =
+                      option.description !== option.label ? option.description : undefined;
+                    return (
+                      <Pressable
+                        key={option.label}
+                        className={cn(
+                          "min-h-12 w-full rounded-2xl border px-3.5 py-3",
+                          selected
+                            ? "border-blue-300/50 bg-blue-50 dark:border-blue-400/28 dark:bg-blue-400/14"
+                            : "border-neutral-200 bg-white dark:border-white/6 dark:bg-neutral-950/70",
+                        )}
+                        onPress={() =>
+                          props.onSelectOption(
+                            props.pendingUserInput.requestId,
+                            question,
+                            option.label,
+                          )
+                        }
+                      >
+                        <View className="min-w-0 flex-1 gap-0.5">
+                          <Text
+                            className={cn(
+                              "font-t3-bold text-sm",
+                              selected
+                                ? "text-sky-700 dark:text-sky-300"
+                                : "text-neutral-700 dark:text-neutral-200",
+                            )}
+                          >
+                            {option.label}
                           </Text>
-                        ) : null}
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
+                          {description ? (
+                            <Text className="font-sans text-sm leading-5 text-neutral-500 dark:text-neutral-400">
+                              {description}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
               <TextInput
                 value={draft?.customAnswer ?? ""}
                 onChangeText={(value) =>
@@ -307,7 +310,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                 }
                 onFocus={() => props.onInputFocusChange?.(true)}
                 onBlur={() => props.onInputFocusChange?.(false)}
-                placeholder="Or type a custom answer"
+                placeholder={hasOptions ? "Or type a custom answer" : "Type your answer"}
                 className="min-h-[54px] rounded-2xl border border-neutral-200 bg-white px-3.5 py-3 font-sans text-base text-neutral-950 dark:border-white/8 dark:bg-neutral-950/70 dark:text-neutral-50"
               />
             </View>

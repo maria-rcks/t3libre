@@ -164,6 +164,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }
 
   const customAnswerActive = progress.customAnswer.trim().length > 0;
+  const hasOptions = activeQuestion.options.length > 0;
+  const disclosureTitle = hasOptions ? "the question and its options" : "the question";
 
   return (
     <Collapsible
@@ -181,9 +183,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           taller hit area from pushing the panel down. */}
       <div className="px-1.5 sm:px-2.5">
         <CollapsibleTrigger
-          title={
-            isCollapsed ? "Show the question and its options" : "Hide the question and its options"
-          }
+          title={`${isCollapsed ? "Show" : "Hide"} ${disclosureTitle}`}
           data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
           className="group -my-1 flex w-full items-center gap-3 rounded-md px-2.5 py-1.5 text-left outline-none transition-colors duration-150 hover:bg-muted/40 focus-visible:ring-1 focus-visible:ring-primary/25"
         >
@@ -220,63 +220,69 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       <CollapsiblePanel className="px-4 sm:px-5">
         <div className="pt-2 pb-0.5">
           <p className="text-sm text-foreground/90">{activeQuestion.question}</p>
-          {activeQuestion.multiSelect ? (
+          {hasOptions && activeQuestion.multiSelect ? (
             <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
+          ) : !hasOptions ? (
+            <p className="mt-1 text-secondary-label text-xs">
+              Type your answer in the composer below.
+            </p>
           ) : null}
-          <div className="mt-3 space-y-1.5">
-            {activeQuestion.options.map((option, index) => {
-              const isOptimisticallySelected =
-                optimisticSingleSelect?.questionId === activeQuestion.id &&
-                optimisticSingleSelect.optionLabel === option.label;
-              const isSelected =
-                isOptimisticallySelected ||
-                (!customAnswerActive && progress.selectedOptionLabels.includes(option.label));
-              const shortcutKey = index < 9 ? index + 1 : null;
-              const className = cn(
-                "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25",
-                isSelected
-                  ? "border-primary/30 bg-primary/8 text-foreground"
-                  : "border-transparent bg-muted/22 text-foreground/85 hover:border-border/45 hover:bg-muted/34",
-                isResponding && "opacity-50 cursor-not-allowed",
-                !isResponding && "cursor-pointer",
-              );
-              const content = (
-                <>
-                  <div className="min-w-0 flex-1 flex flex-col gap-0.5">
-                    <span className="text-sm font-medium">{option.label}</span>
-                    {option.description && option.description !== option.label ? (
-                      <span className="text-secondary-label text-xs">{option.description}</span>
+          {hasOptions ? (
+            <div className="mt-3 space-y-1.5">
+              {activeQuestion.options.map((option, index) => {
+                const isOptimisticallySelected =
+                  optimisticSingleSelect?.questionId === activeQuestion.id &&
+                  optimisticSingleSelect.optionLabel === option.label;
+                const isSelected =
+                  isOptimisticallySelected ||
+                  (!customAnswerActive && progress.selectedOptionLabels.includes(option.label));
+                const shortcutKey = index < 9 ? index + 1 : null;
+                const className = cn(
+                  "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25",
+                  isSelected
+                    ? "border-primary/30 bg-primary/8 text-foreground"
+                    : "border-transparent bg-muted/22 text-foreground/85 hover:border-border/45 hover:bg-muted/34",
+                  isResponding && "opacity-50 cursor-not-allowed",
+                  !isResponding && "cursor-pointer",
+                );
+                const content = (
+                  <>
+                    <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                      <span className="text-sm font-medium">{option.label}</span>
+                      {option.description && option.description !== option.label ? (
+                        <span className="text-secondary-label text-xs">{option.description}</span>
+                      ) : null}
+                    </div>
+                    {isSelected ? (
+                      <CheckIcon className="size-3.5 shrink-0 text-primary" />
+                    ) : shortcutKey !== null ? (
+                      <kbd
+                        className={cn(
+                          "flex size-5 shrink-0 items-center justify-center rounded border border-border/50 text-[11px] font-medium tabular-nums transition-colors duration-150",
+                          "bg-background/35 text-secondary-label group-hover:border-border/70 group-hover:text-foreground",
+                        )}
+                      >
+                        {shortcutKey}
+                      </kbd>
                     ) : null}
-                  </div>
-                  {isSelected ? (
-                    <CheckIcon className="size-3.5 shrink-0 text-primary" />
-                  ) : shortcutKey !== null ? (
-                    <kbd
-                      className={cn(
-                        "flex size-5 shrink-0 items-center justify-center rounded border border-border/50 text-[11px] font-medium tabular-nums transition-colors duration-150",
-                        "bg-background/35 text-secondary-label group-hover:border-border/70 group-hover:text-foreground",
-                      )}
-                    >
-                      {shortcutKey}
-                    </kbd>
-                  ) : null}
-                </>
-              );
-              return (
-                <button
-                  key={`${activeQuestion.id}:${option.label}`}
-                  type="button"
-                  disabled={isResponding}
-                  onClick={() => {
-                    handleOptionSelection(activeQuestion.id, option.label);
-                  }}
-                  className={className}
-                >
-                  {content}
-                </button>
-              );
-            })}
-          </div>
+                  </>
+                );
+                return (
+                  <button
+                    key={`${activeQuestion.id}:${option.label}`}
+                    type="button"
+                    disabled={isResponding}
+                    onClick={() => {
+                      handleOptionSelection(activeQuestion.id, option.label);
+                    }}
+                    className={className}
+                  >
+                    {content}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
       </CollapsiblePanel>
     </Collapsible>

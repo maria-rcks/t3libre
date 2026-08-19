@@ -22,10 +22,10 @@ const prompt: PendingUserInput = {
   ],
 };
 
-function renderPanel() {
+function renderPanel(value = prompt) {
   return renderToStaticMarkup(
     <ComposerPendingUserInputPanel
-      pendingUserInputs={[prompt]}
+      pendingUserInputs={[value]}
       respondingRequestIds={[]}
       answers={{}}
       questionIndex={0}
@@ -57,5 +57,16 @@ describe("ComposerPendingUserInputPanel", () => {
     expect(markup).toContain("Which approach should the migration take?");
     expect(markup).toContain("Incremental");
     expect(markup).toContain("Big bang");
+  });
+
+  it("points free-form questions to the composer without option copy", () => {
+    const markup = renderPanel({
+      ...prompt,
+      questions: [{ ...prompt.questions[0]!, options: [], multiSelect: false }],
+    });
+
+    expect(markup).toContain("Type your answer in the composer below.");
+    expect(markup).not.toContain("Select one or more options.");
+    expect(markup).not.toContain("Incremental");
   });
 });

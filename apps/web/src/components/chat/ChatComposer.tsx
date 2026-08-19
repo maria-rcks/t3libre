@@ -2850,7 +2850,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               >
                 {activePendingProgress
                   ? activePendingProgress.customAnswer ||
-                    "Type your own answer, or leave this blank to use the selected option"
+                    (activePendingProgress.activeQuestion.options.length === 0
+                      ? "Type your answer"
+                      : "Type your own answer, or leave this blank to use the selected option")
                   : prompt.trim() ||
                     (noProviderAvailable ? "Enable a provider in Settings" : "Ask anything...")}
               </button>
@@ -3072,7 +3074,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   isComposerApprovalState
                     ? (activePendingApproval?.detail ?? "Resolve this approval request to continue")
                     : activePendingProgress
-                      ? "Type your own answer, or leave this blank to use the selected option"
+                      ? activePendingProgress.activeQuestion.options.length === 0
+                        ? "Type your answer"
+                        : "Type your own answer, or leave this blank to use the selected option"
                       : showPlanFollowUpPrompt && activeProposedPlan
                         ? "Add feedback to refine the plan, or leave this blank to implement it"
                         : projectSelectionRequired
