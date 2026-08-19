@@ -831,18 +831,16 @@ export function makeOpenCode2Adapter(
               ).pipe(
                 Effect.catchTags({
                   OpenCode2ReloadError: (error) =>
-                    stopInternal(ctx).pipe(
-                      Effect.andThen(
-                        Effect.fail(
-                          new ProviderAdapterRequestError({
-                            provider: PROVIDER,
-                            method: error.method,
-                            detail: "OpenCode 2.0 ACP session reload failed.",
-                            cause: error,
-                          }),
-                        ),
-                      ),
-                    ),
+                    Effect.gen(function* () {
+                      yield* abortActiveTurn(error.message);
+                      yield* stopInternal(ctx);
+                      return yield* new ProviderAdapterRequestError({
+                        provider: PROVIDER,
+                        method: error.method,
+                        detail: "OpenCode 2.0 ACP session reload failed.",
+                        cause: error,
+                      });
+                    }),
                 }),
                 Effect.mapError((cause) =>
                   cause._tag === "ProviderAdapterRequestError"

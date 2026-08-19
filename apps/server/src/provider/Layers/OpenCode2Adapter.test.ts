@@ -708,9 +708,14 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
         );
         const threadId = ThreadId.make("opencode2-reload-failure");
         const exited = yield* Deferred.make<void>();
+        const events: ProviderRuntimeEvent[] = [];
         const eventFiber = yield* adapter.streamEvents.pipe(
           Stream.runForEach((event) =>
-            event.type === "session.exited" ? Deferred.succeed(exited, undefined) : Effect.void,
+            Effect.sync(() => events.push(event)).pipe(
+              Effect.andThen(
+                event.type === "session.exited" ? Deferred.succeed(exited, undefined) : Effect.void,
+              ),
+            ),
           ),
           Effect.forkChild,
         );
@@ -724,6 +729,12 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
 
         assert.strictEqual(result._tag, "Failure");
         yield* Deferred.await(exited);
+        const startedIndex = events.findIndex((event) => event.type === "turn.started");
+        const abortedIndex = events.findIndex((event) => event.type === "turn.aborted");
+        const exitedIndex = events.findIndex((event) => event.type === "session.exited");
+        assert.isAtLeast(startedIndex, 0);
+        assert.isBelow(startedIndex, abortedIndex);
+        assert.isBelow(abortedIndex, exitedIndex);
         assert.isFalse(yield* adapter.hasSession(threadId));
         assert.deepStrictEqual(yield* adapter.listSessions(), []);
         yield* Fiber.interrupt(eventFiber);
