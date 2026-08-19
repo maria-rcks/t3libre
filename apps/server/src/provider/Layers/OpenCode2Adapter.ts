@@ -94,6 +94,7 @@ interface OpenCode2SessionContext {
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
+  interruptedTurnId: TurnId | undefined;
   promptsInFlight: number;
   stopped: boolean;
 }
@@ -442,6 +443,7 @@ export function makeOpenCode2Adapter(
             turns: [],
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
+            interruptedTurnId: undefined,
             promptsInFlight: 0,
             stopped: false,
           };
@@ -711,6 +713,7 @@ export function makeOpenCode2Adapter(
             }
             const steeringTurnId = ctx.activeTurnId;
             const turnId = steeringTurnId ?? TurnId.make(yield* randomUUID);
+            if (!steeringTurnId) ctx.interruptedTurnId = undefined;
             ctx.promptsInFlight += 1;
             ctx.activeTurnId = turnId;
             return { ctx, steeringTurnId, turnId };
@@ -784,7 +787,20 @@ export function makeOpenCode2Adapter(
             options: selection?.options,
             interactionMode: input.interactionMode,
           });
-          const result = yield* promptOpenCode2Acp(ctx.acp, { prompt }).pipe(
+          const result = yield* promptOpenCode2Acp(
+            ctx.acp,
+            { prompt },
+            {
+              shouldRetry: () => ctx.interruptedTurnId !== turnId,
+              beforeRetry: applyOpenCode2AcpModelSelection({
+                runtime: ctx.acp,
+                model,
+                selections: selection?.options,
+                interactionMode: input.interactionMode,
+                mapError: ({ cause }) => cause,
+              }),
+            },
+          ).pipe(
             Effect.mapError((cause) =>
               mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", cause),
             ),
@@ -865,6 +881,7 @@ export function makeOpenCode2Adapter(
     const interruptTurn: OpenCodeAdapterShape["interruptTurn"] = (threadId) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
+        ctx.interruptedTurnId = ctx.activeTurnId;
         yield* settlePending(ctx);
         yield* Effect.ignore(
           ctx.acp.cancelAndWait.pipe(

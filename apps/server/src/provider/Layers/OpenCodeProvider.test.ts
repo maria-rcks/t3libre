@@ -295,19 +295,41 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
   it.effect("accepts the opencode2 beta banner as a v2 preview", () =>
     Effect.gen(function* () {
       runtimeMock.state.versionStdout = "opencode2 v0.0.0-beta-17595\n";
+      runtimeMock.state.inventory = {
+        providerList: {
+          connected: ["openai"],
+          all: [
+            {
+              id: "openai",
+              name: "OpenAI",
+              models: {
+                "gpt-5.4": { id: "gpt-5.4", name: "GPT-5.4", variants: {} },
+              },
+            },
+          ],
+          default: {},
+        },
+        agents: [],
+        skills: [],
+      };
 
       const snapshot = yield* checkOpenCodeProviderStatus(
         makeOpenCodeSettings({ binaryPath: "/Users/test/.opencode/bin/opencode2" }),
         process.cwd(),
       );
 
-      NodeAssert.equal(snapshot.status, "warning");
+      NodeAssert.equal(snapshot.status, "ready");
       NodeAssert.equal(snapshot.installed, true);
       NodeAssert.equal(snapshot.version, "0.0.0-beta-17595");
-      NodeAssert.equal(
-        snapshot.message,
-        "OpenCode is available, but it did not report any connected upstream providers.",
+      const effort = snapshot.models[0]?.capabilities?.optionDescriptors?.find(
+        (descriptor) => descriptor.id === "effort" && descriptor.type === "select",
       );
+      NodeAssert.ok(effort && effort.type === "select");
+      NodeAssert.deepEqual(
+        effort.options.map((option) => option.label),
+        ["Low", "Medium", "High"],
+      );
+      NodeAssert.equal(effort.options.find((option) => option.isDefault)?.id, "medium");
     }),
   );
 

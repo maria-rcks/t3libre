@@ -127,6 +127,7 @@ describe("OpenCode2AcpSupport", () => {
     Effect.gen(function* () {
       let attempts = 0;
       let reloads = 0;
+      let reconfigurations = 0;
       const activePromptError = new EffectAcpErrors.AcpRequestError({
         code: -32603,
         errorMessage: "Internal error: Session already has an active ACP prompt: test-session",
@@ -148,11 +149,43 @@ describe("OpenCode2AcpSupport", () => {
             }),
         },
         { prompt: [{ type: "text", text: "follow up" }] },
+        {
+          beforeRetry: Effect.sync(() => {
+            reconfigurations += 1;
+          }),
+        },
       );
 
       expect(result).toEqual({ stopReason: "end_turn" });
       expect(attempts).toBe(2);
       expect(reloads).toBe(1);
+      expect(reconfigurations).toBe(1);
+    }),
+  );
+
+  it.effect("does not retry after an interrupted reload", () =>
+    Effect.gen(function* () {
+      let attempts = 0;
+      const result = yield* promptOpenCode2Acp(
+        {
+          reload: Effect.void,
+          prompt: () => {
+            attempts += 1;
+            return Effect.fail(
+              new EffectAcpErrors.AcpRequestError({
+                code: -32603,
+                errorMessage: "Session already has an active ACP prompt",
+                method: "session/prompt",
+              }),
+            );
+          },
+        },
+        { prompt: [{ type: "text", text: "follow up" }] },
+        { shouldRetry: () => false },
+      );
+
+      expect(result).toEqual({ stopReason: "cancelled" });
+      expect(attempts).toBe(1);
     }),
   );
 

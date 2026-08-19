@@ -50,6 +50,7 @@ const elicitUrlDuringCreateSession = process.env.T3_ACP_ELICIT_URL_DURING_CREATE
 const elicitComplexDuringCreateSession =
   process.env.T3_ACP_ELICIT_COMPLEX_DURING_CREATE_SESSION === "1";
 const elicitDuringPrompt = process.env.T3_ACP_ELICIT_DURING_PROMPT === "1";
+const elicitDuringLoadSession = process.env.T3_ACP_ELICIT_DURING_LOAD_SESSION === "1";
 const elicitationResponseLogPath = process.env.T3_ACP_ELICITATION_RESPONSE_LOG_PATH;
 const emitPendingToolCall = process.env.T3_ACP_EMIT_PENDING_TOOL_CALL === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
@@ -449,6 +450,21 @@ const program = Effect.gen(function* () {
       loadSessionCount += 1;
       if (failLoadSession || (failFirstLoadSession && loadSessionCount === 1)) {
         return yield* AcpError.AcpRequestError.internalError("Mock load session failure");
+      }
+      if (elicitDuringLoadSession) {
+        yield* agent.client.elicit({
+          sessionId: requestedSessionId,
+          message: "Continue loading the session?",
+          mode: "form",
+          requestedSchema: {
+            type: "object",
+            title: "Continue loading",
+            properties: {
+              proceed: { type: "boolean", title: "Proceed" },
+            },
+            required: ["proceed"],
+          },
+        });
       }
       if (hangLoadSessionAfterReplay || delayLoadSessionAfterReplay) {
         emitLoadReplayNotifications(requestedSessionId);

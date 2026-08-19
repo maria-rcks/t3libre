@@ -84,7 +84,23 @@ export function isOpenCode2ActivePromptError(error: unknown): boolean {
 export function promptOpenCode2Acp(
   runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "prompt" | "reload">,
   payload: Omit<EffectAcpSchema.PromptRequest, "sessionId">,
+  recovery?: {
+    readonly beforeRetry?: Effect.Effect<void, EffectAcpErrors.AcpError>;
+    readonly shouldRetry?: () => boolean;
+  },
 ): Effect.Effect<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError> {
+  const cancelled = Effect.succeed({ stopReason: "cancelled" as const });
+  const retry = Effect.suspend(() =>
+    recovery?.shouldRetry?.() === false
+      ? cancelled
+      : (recovery?.beforeRetry ?? Effect.void).pipe(
+          Effect.andThen(
+            Effect.suspend(() =>
+              recovery?.shouldRetry?.() === false ? cancelled : runtime.prompt(payload),
+            ),
+          ),
+        ),
+  );
   return runtime.prompt(payload).pipe(
     Effect.catchTags({
       AcpRequestError: (error) =>
@@ -98,7 +114,7 @@ export function promptOpenCode2Acp(
                     cause,
                   }),
               ),
-              Effect.andThen(runtime.prompt(payload)),
+              Effect.andThen(retry),
             )
           : Effect.fail(error),
     }),

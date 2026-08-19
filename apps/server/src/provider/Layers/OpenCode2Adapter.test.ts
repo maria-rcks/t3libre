@@ -545,6 +545,58 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
     ),
   );
 
+  it.effect("does not retry an interrupted active-prompt recovery", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "opencode2-reload-interrupt-")),
+          ),
+          (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+        );
+        const requestLogPath = NodePath.join(directory, "requests.ndjson");
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({
+            T3_ACP_ACTIVE_PROMPT_ERROR_NUMBER: "1",
+            T3_ACP_ELICIT_DURING_LOAD_SESSION: "1",
+            T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+          }),
+        );
+        const threadId = ThreadId.make("opencode2-reload-interrupt");
+        const loadPrompt = yield* Deferred.make<void>();
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            event.type === "user-input.requested"
+              ? Deferred.succeed(loadPrompt, undefined)
+              : Effect.void,
+          ),
+          Effect.forkChild,
+        );
+        yield* adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+        const turnFiber = yield* adapter
+          .sendTurn({ threadId, input: "recover then stop" })
+          .pipe(Effect.forkChild);
+
+        yield* Deferred.await(loadPrompt);
+        yield* adapter.interruptTurn(threadId);
+        yield* Fiber.join(turnFiber);
+
+        const promptCount = (yield* Effect.promise(() => NodeFSP.readFile(requestLogPath, "utf8")))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line) as { method?: string })
+          .filter((message) => message.method === "session/prompt").length;
+        assert.strictEqual(promptCount, 1);
+        assert.strictEqual((yield* adapter.listSessions())[0]?.status, "ready");
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
   it.effect("rejects rollback that ACP cannot apply", () =>
     Effect.scoped(
       Effect.gen(function* () {
