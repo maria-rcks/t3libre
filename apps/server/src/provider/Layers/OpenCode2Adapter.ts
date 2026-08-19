@@ -835,6 +835,7 @@ export function makeOpenCode2Adapter(
               );
             }),
           );
+          yield* ctx.acp.drainEvents;
           let attachmentIndex = 0;
           const recordedPrompt = prompt.map((block) => {
             if (block.type !== "image") return block;

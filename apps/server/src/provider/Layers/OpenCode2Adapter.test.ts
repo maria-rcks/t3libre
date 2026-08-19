@@ -86,7 +86,7 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
         });
         assert.strictEqual(started.status, "ready");
 
-        yield* adapter.sendTurn({ threadId, input: "hello" });
+        const result = yield* adapter.sendTurn({ threadId, input: "hello" });
         yield* Deferred.await(completed);
 
         const [session] = yield* adapter.listSessions();
@@ -94,6 +94,11 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
         assert.isUndefined(session?.activeTurnId);
         assert.isTrue(events.some((event) => event.type === "turn.started"));
         assert.isTrue(events.some((event) => event.type === "turn.completed"));
+        const contentIndex = events.findIndex((event) => event.type === "content.delta");
+        const completedIndex = events.findIndex((event) => event.type === "turn.completed");
+        assert.isAtLeast(contentIndex, 0);
+        assert.isBelow(contentIndex, completedIndex);
+        assert.strictEqual(events[contentIndex]?.turnId, result.turnId);
         yield* Fiber.interrupt(eventFiber);
       }),
     ),
