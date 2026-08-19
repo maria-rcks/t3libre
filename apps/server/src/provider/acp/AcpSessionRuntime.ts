@@ -259,6 +259,7 @@ type AcpStartState =
       readonly _tag: "Starting";
       readonly deferred: Deferred.Deferred<AcpSessionRuntimeStartResult, EffectAcpErrors.AcpError>;
     }
+  | { readonly _tag: "Reloading"; readonly result: AcpStartedState }
   | { readonly _tag: "Started"; readonly result: AcpStartedState };
 
 interface AcpAssistantSegmentState {
@@ -393,7 +394,7 @@ export const make = (
         // One runtime projects one root ACP session. Child-session updates need
         // explicit lineage routing and must never be flattened into this stream.
         if (
-          startState._tag !== "Started" ||
+          (startState._tag !== "Started" && startState._tag !== "Reloading") ||
           notification.sessionId !== startState.result.sessionId
         ) {
           return;
@@ -424,7 +425,7 @@ export const make = (
 
     const getStartedState = Effect.gen(function* () {
       const state = yield* Ref.get(startStateRef);
-      if (state._tag === "Started") {
+      if (state._tag === "Started" || state._tag === "Reloading") {
         return state.result;
       }
       const detail =
@@ -654,6 +655,7 @@ export const make = (
       const effect = yield* Ref.modify(startStateRef, (state) => {
         switch (state._tag) {
           case "Started":
+          case "Reloading":
             return [Effect.succeed(state.result), state] as const;
           case "Starting":
             return [Deferred.await(state.deferred), state] as const;
@@ -777,13 +779,6 @@ export const make = (
             closePayload,
             acp.agent.closeSession(closePayload),
           );
-          yield* Ref.set(startStateRef, { _tag: "Closed" });
-          const sessionSetupResult = yield* loadSession(
-            started.sessionId,
-            started.initializeResult,
-          );
-          yield* Ref.set(modeStateRef, parseSessionModeState(sessionSetupResult));
-          yield* Ref.set(configOptionsRef, sessionConfigOptionsFromSetup(sessionSetupResult));
           const orphanedToolCalls = yield* Ref.getAndSet(toolCallsRef, new Map());
           for (const toolCall of orphanedToolCalls.values()) {
             yield* Queue.offer(eventQueue, {
@@ -793,12 +788,24 @@ export const make = (
             });
           }
           yield* closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef });
+          yield* Ref.set(startStateRef, { _tag: "Reloading", result: started });
+          const sessionSetupResult = yield* loadSession(
+            started.sessionId,
+            started.initializeResult,
+          ).pipe(Effect.onError(() => Ref.set(startStateRef, { _tag: "Closed" })));
+          const modeState = parseSessionModeState(sessionSetupResult);
+          if (modeState !== undefined) {
+            yield* Ref.set(modeStateRef, modeState);
+          }
+          if (sessionSetupResult.configOptions != null) {
+            yield* Ref.set(configOptionsRef, sessionSetupResult.configOptions);
+          }
           yield* Ref.set(startStateRef, {
             _tag: "Started",
             result: {
               ...started,
               sessionSetupResult,
-              modelConfigId: extractModelConfigId(sessionSetupResult),
+              modelConfigId: extractModelConfigId(sessionSetupResult) ?? started.modelConfigId,
             },
           });
         }),

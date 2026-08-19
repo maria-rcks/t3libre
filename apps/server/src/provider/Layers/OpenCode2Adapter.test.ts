@@ -453,8 +453,17 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
         const adapter = yield* makeTestAdapter(yield* makeMockWrapper());
         const threadId = ThreadId.make("opencode2-concurrent-turn");
         const events: ProviderRuntimeEvent[] = [];
+        const completed = yield* Deferred.make<void>();
         const eventFiber = yield* adapter.streamEvents.pipe(
-          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Stream.runForEach((event) =>
+            Effect.sync(() => events.push(event)).pipe(
+              Effect.andThen(
+                event.type === "turn.completed"
+                  ? Deferred.succeed(completed, undefined)
+                  : Effect.void,
+              ),
+            ),
+          ),
           Effect.forkChild,
         );
         yield* adapter.startSession({
@@ -472,6 +481,7 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
         );
 
         assert.strictEqual(first.turnId, second.turnId);
+        yield* Deferred.await(completed);
         assert.strictEqual(events.filter((event) => event.type === "turn.started").length, 1);
         assert.strictEqual(events.filter((event) => event.type === "turn.completed").length, 1);
         assert.strictEqual((yield* adapter.readThread(threadId)).turns.length, 1);
