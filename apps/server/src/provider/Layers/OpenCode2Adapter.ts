@@ -318,15 +318,37 @@ export function makeOpenCode2Adapter(
     const stopInternal = (ctx: OpenCode2SessionContext) =>
       Effect.gen(function* () {
         if (ctx.stopped) return;
+        const updatedAt = yield* nowIso;
+        const stoppedStamp = ctx.activeTurnId ? yield* stamp() : undefined;
+        const exitedStamp = yield* stamp();
         ctx.stopped = true;
+        const stoppedTurnId = ctx.activeTurnId;
+        if (stoppedTurnId) {
+          const { activeTurnId: _activeTurnId, ...stoppedSession } = ctx.session;
+          ctx.activeTurnId = undefined;
+          ctx.session = {
+            ...stoppedSession,
+            status: "ready",
+            updatedAt,
+            lastError: "Session stopped",
+          };
+          yield* emit({
+            type: "turn.aborted",
+            ...stoppedStamp!,
+            provider: PROVIDER,
+            threadId: ctx.threadId,
+            turnId: stoppedTurnId,
+            payload: { reason: "Session stopped" },
+          });
+        }
         yield* settlePending(ctx);
         yield* ctx.acp.cancelAndWait.pipe(Effect.ignore);
         if (ctx.notificationFiber) yield* Fiber.interrupt(ctx.notificationFiber);
         yield* Effect.ignore(Scope.close(ctx.scope, Exit.void));
-        sessions.delete(ctx.threadId);
+        if (sessions.get(ctx.threadId) === ctx) sessions.delete(ctx.threadId);
         yield* emit({
           type: "session.exited",
-          ...(yield* stamp()),
+          ...exitedStamp,
           provider: PROVIDER,
           threadId: ctx.threadId,
           payload: { exitKind: "graceful" },
@@ -354,576 +376,633 @@ export function makeOpenCode2Adapter(
       });
 
     const startSession: OpenCodeAdapterShape["startSession"] = (input) =>
-      withLock(
-        input.threadId,
-        Effect.gen(function* () {
-          if (input.provider !== undefined && input.provider !== PROVIDER) {
-            return yield* new ProviderAdapterValidationError({
-              provider: PROVIDER,
-              operation: "startSession",
-              issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
-            });
-          }
-          if (input.modelSelection && input.modelSelection.instanceId !== boundInstanceId) {
-            return yield* new ProviderAdapterValidationError({
-              provider: PROVIDER,
-              operation: "startSession",
-              issue: `Model selection belongs to provider instance '${input.modelSelection.instanceId}', not '${boundInstanceId}'.`,
-            });
-          }
-          if (!input.cwd?.trim()) {
-            return yield* new ProviderAdapterValidationError({
-              provider: PROVIDER,
-              operation: "startSession",
-              issue: "cwd is required and must be non-empty.",
-            });
-          }
-          const cwd = path.resolve(input.cwd.trim());
-          const modelSelection = input.modelSelection;
-          const existing = sessions.get(input.threadId);
-          if (existing && !existing.stopped) yield* stopInternal(existing);
-
-          const sessionScope = yield* Scope.make("sequential");
-          let transferred = false;
-          yield* Effect.addFinalizer(() =>
-            transferred ? Effect.void : Scope.close(sessionScope, Exit.void),
-          );
-          const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
-          const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
-          const resumeSessionId = parseResume(input.resumeCursor)?.sessionId;
-          const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
-          const acpNativeLoggers = makeAcpNativeLoggers({
-            nativeEventLogger,
-            provider: PROVIDER,
-            threadId: input.threadId,
-          });
-          const acp = yield* makeOpenCode2AcpRuntime({
-            settings,
-            childProcessSpawner,
-            cwd,
-            ...(options?.environment ? { environment: options.environment } : {}),
-            ...(resumeSessionId ? { resumeSessionId } : {}),
-            clientInfo: { name: "t3-code", version: "0.0.0" },
-            ...(mcpSession
-              ? {
-                  mcpServers: [
-                    {
-                      type: "http" as const,
-                      name: "t3-code",
-                      url: mcpSession.endpoint,
-                      headers: [{ name: "Authorization", value: mcpSession.authorizationHeader }],
-                    },
-                  ],
-                }
-              : {}),
-            ...acpNativeLoggers,
-          }).pipe(
-            Effect.provideService(Crypto.Crypto, crypto),
-            Effect.provideService(Scope.Scope, sessionScope),
-            Effect.mapError(
-              (cause) =>
-                new ProviderAdapterProcessError({
-                  provider: PROVIDER,
-                  threadId: input.threadId,
-                  detail: "Failed to start the OpenCode 2.0 ACP session.",
-                  cause,
-                }),
-            ),
-          );
-
-          const now = yield* nowIso;
-          const turnSemaphore = yield* Semaphore.make(1);
-          const ctx: OpenCode2SessionContext = {
-            threadId: input.threadId,
-            session: {
-              provider: PROVIDER,
-              providerInstanceId: boundInstanceId,
-              status: "connecting",
-              runtimeMode: input.runtimeMode,
-              cwd,
-              model: modelSelection?.model,
-              threadId: input.threadId,
-              ...(resumeSessionId ? { resumeCursor: input.resumeCursor } : {}),
-              createdAt: now,
-              updatedAt: now,
-            },
-            scope: sessionScope,
-            acp,
-            notificationFiber: undefined,
-            pendingApprovals,
-            pendingUserInputs,
-            turns: [],
-            turnSemaphore,
-            lastPlanFingerprint: undefined,
-            activeTurnId: undefined,
-            interruptedTurnId: undefined,
-            promptsInFlight: 0,
-            stopped: false,
-          };
-          sessions.set(input.threadId, ctx);
-          yield* Effect.addFinalizer(() =>
-            !transferred && sessions.get(input.threadId) === ctx
-              ? Effect.sync(() => sessions.delete(input.threadId))
-              : Effect.void,
-          );
-
-          const started = yield* Effect.gen(function* () {
-            yield* acp.handleRequestPermission((request) =>
-              Effect.gen(function* () {
-                if (input.runtimeMode === "full-access") {
-                  const optionId = autoApproveOptionId(request);
-                  if (optionId) {
-                    return { outcome: { outcome: "selected" as const, optionId } };
-                  }
-                }
-                const permissionRequest = parsePermissionRequest(request);
-                const requestId = ApprovalRequestId.make(yield* randomUUID);
-                const runtimeRequestId = RuntimeRequestId.make(requestId);
-                const decision = yield* Deferred.make<ProviderApprovalDecision>();
-                pendingApprovals.set(requestId, { decision });
-                yield* emit(
-                  makeAcpRequestOpenedEvent({
-                    stamp: yield* stamp(),
-                    provider: PROVIDER,
-                    threadId: input.threadId,
-                    turnId: ctx.activeTurnId,
-                    requestId: runtimeRequestId,
-                    permissionRequest,
-                    detail: permissionRequest.detail ?? "OpenCode requested permission.",
-                    args: request,
-                    source: "acp.jsonrpc",
-                    method: "session/request_permission",
-                    rawPayload: request,
-                  }),
-                );
-                const resolved = yield* Deferred.await(decision);
-                pendingApprovals.delete(requestId);
-                yield* emit(
-                  makeAcpRequestResolvedEvent({
-                    stamp: yield* stamp(),
-                    provider: PROVIDER,
-                    threadId: input.threadId,
-                    turnId: ctx.activeTurnId,
-                    requestId: runtimeRequestId,
-                    permissionRequest,
-                    decision: resolved,
-                  }),
-                );
-                if (resolved === "cancel") return { outcome: { outcome: "cancelled" as const } };
-                const optionId = permissionOptionId(request, resolved);
-                return optionId
-                  ? { outcome: { outcome: "selected" as const, optionId } }
-                  : { outcome: { outcome: "cancelled" as const } };
-              }).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new EffectAcpErrors.AcpTransportError({
-                      detail: "Failed to process OpenCode permission request.",
-                      cause,
-                    }),
-                ),
-              ),
-            );
-            yield* acp.handleElicitation((request) =>
-              Effect.gen(function* () {
-                if (request.mode === "url") {
-                  return { action: { action: "cancel" as const } };
-                }
-                const requestId = ApprovalRequestId.make(yield* randomUUID);
-                const runtimeRequestId = RuntimeRequestId.make(requestId);
-                const resolution = yield* Deferred.make<
-                  | { readonly action: "accept"; readonly answers: ProviderUserInputAnswers }
-                  | { readonly action: "cancel" }
-                >();
-                pendingUserInputs.set(requestId, { resolution });
-                yield* emit({
-                  type: "user-input.requested",
-                  ...(yield* stamp()),
-                  provider: PROVIDER,
-                  threadId: input.threadId,
-                  turnId: ctx.activeTurnId,
-                  requestId: runtimeRequestId,
-                  payload: { questions: elicitationQuestions(request) },
-                  raw: { source: "acp.jsonrpc", method: "session/elicitation", payload: request },
-                });
-                const resolved = yield* Deferred.await(resolution);
-                pendingUserInputs.delete(requestId);
-                yield* emit({
-                  type: "user-input.resolved",
-                  ...(yield* stamp()),
-                  provider: PROVIDER,
-                  threadId: input.threadId,
-                  turnId: ctx.activeTurnId,
-                  requestId: runtimeRequestId,
-                  payload: {
-                    answers: resolved.action === "accept" ? resolved.answers : {},
-                  },
-                });
-                if (resolved.action === "cancel") {
-                  return { action: { action: "cancel" as const } };
-                }
-                const content = elicitationContent(request, resolved.answers);
-                if (content === undefined) {
-                  return { action: { action: "cancel" as const } };
-                }
-                return {
-                  action: {
-                    action: "accept" as const,
-                    content,
-                  },
-                };
-              }).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new EffectAcpErrors.AcpTransportError({
-                      detail: "Failed to process OpenCode elicitation.",
-                      cause,
-                    }),
-                ),
-              ),
-            );
-            return yield* acp.start();
-          }).pipe(
-            Effect.mapError((cause) =>
-              mapAcpToAdapterError(PROVIDER, input.threadId, "session/start", cause),
-            ),
-          );
-
-          ctx.session = {
-            ...ctx.session,
-            status: "ready",
-            resumeCursor: { schemaVersion: RESUME_VERSION, sessionId: started.sessionId },
-            updatedAt: yield* nowIso,
-          };
-          yield* configureSession({
-            ctx,
-            model: modelSelection?.model,
-            options: modelSelection?.options,
-            interactionMode: undefined,
-          });
-
-          const notificationFiber = yield* Stream.runForEach(acp.getEvents(), (event) =>
-            Effect.gen(function* () {
-              switch (event._tag) {
-                case "EventStreamBarrier":
-                  yield* Deferred.succeed(event.acknowledge, undefined);
-                  return;
-                case "ModeChanged":
-                  return;
-                case "AssistantItemStarted":
-                  yield* emit(
-                    makeAcpAssistantItemEvent({
-                      stamp: yield* stamp(),
-                      provider: PROVIDER,
-                      threadId: ctx.threadId,
-                      turnId: ctx.activeTurnId,
-                      itemId: event.itemId,
-                      lifecycle: "item.started",
-                    }),
-                  );
-                  return;
-                case "AssistantItemCompleted":
-                  yield* emit(
-                    makeAcpAssistantItemEvent({
-                      stamp: yield* stamp(),
-                      provider: PROVIDER,
-                      threadId: ctx.threadId,
-                      turnId: ctx.activeTurnId,
-                      itemId: event.itemId,
-                      lifecycle: "item.completed",
-                    }),
-                  );
-                  return;
-                case "ContentDelta":
-                  yield* emit(
-                    makeAcpContentDeltaEvent({
-                      stamp: yield* stamp(),
-                      provider: PROVIDER,
-                      threadId: ctx.threadId,
-                      turnId: ctx.activeTurnId,
-                      ...(event.itemId ? { itemId: event.itemId } : {}),
-                      text: event.text,
-                      rawPayload: event.rawPayload,
-                    }),
-                  );
-                  return;
-                case "ToolCallUpdated":
-                  yield* emit(
-                    makeAcpToolCallEvent({
-                      stamp: yield* stamp(),
-                      provider: PROVIDER,
-                      threadId: ctx.threadId,
-                      turnId: ctx.activeTurnId,
-                      toolCall: event.toolCall,
-                      rawPayload: event.rawPayload,
-                    }),
-                  );
-                  return;
-                case "PlanUpdated": {
-                  const fingerprint = `${ctx.activeTurnId ?? "no-turn"}:${event.payload.explanation ?? ""}:${event.payload.plan.map((step) => `${step.status}:${step.step}`).join("|")}`;
-                  if (ctx.lastPlanFingerprint === fingerprint) return;
-                  ctx.lastPlanFingerprint = fingerprint;
-                  yield* emit(
-                    makeAcpPlanUpdatedEvent({
-                      stamp: yield* stamp(),
-                      provider: PROVIDER,
-                      threadId: ctx.threadId,
-                      turnId: ctx.activeTurnId,
-                      payload: event.payload,
-                      source: "acp.jsonrpc",
-                      method: "session/update",
-                      rawPayload: event.rawPayload,
-                    }),
-                  );
-                }
-              }
-            }),
-          ).pipe(
-            Effect.catch((cause) =>
-              Effect.logError("Failed to process OpenCode2 ACP notification.", { cause }),
-            ),
-            Effect.forkIn(sessionScope),
-          );
-          ctx.notificationFiber = notificationFiber;
-          transferred = true;
-          yield* emit({
-            type: "session.started",
-            ...(yield* stamp()),
-            provider: PROVIDER,
-            threadId: input.threadId,
-            payload: { resume: started.initializeResult },
-          });
-          yield* emit({
-            type: "session.state.changed",
-            ...(yield* stamp()),
-            provider: PROVIDER,
-            threadId: input.threadId,
-            payload: { state: "ready", reason: "OpenCode2 ACP session ready" },
-          });
-          yield* emit({
-            type: "thread.started",
-            ...(yield* stamp()),
-            provider: PROVIDER,
-            threadId: input.threadId,
-            payload: { providerThreadId: started.sessionId },
-          });
-          return ctx.session;
-        }).pipe(Effect.scoped),
-      );
-
-    const sendTurn: OpenCodeAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
-        const { ctx, steeringTurnId, turnId } = yield* withLock(
+        const { acp, ctx, modelSelection, ownership, sessionScope } = yield* withLock(
           input.threadId,
           Effect.gen(function* () {
-            const ctx = yield* requireSession(input.threadId);
+            if (input.provider !== undefined && input.provider !== PROVIDER) {
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "startSession",
+                issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
+              });
+            }
             if (input.modelSelection && input.modelSelection.instanceId !== boundInstanceId) {
               return yield* new ProviderAdapterValidationError({
                 provider: PROVIDER,
-                operation: "sendTurn",
+                operation: "startSession",
                 issue: `Model selection belongs to provider instance '${input.modelSelection.instanceId}', not '${boundInstanceId}'.`,
               });
             }
-            const steeringTurnId = ctx.activeTurnId;
-            const turnId = steeringTurnId ?? TurnId.make(yield* randomUUID);
-            if (!steeringTurnId) ctx.interruptedTurnId = undefined;
-            ctx.promptsInFlight += 1;
-            ctx.activeTurnId = turnId;
-            return { ctx, steeringTurnId, turnId };
-          }),
-        );
-        const abortActiveTurn = (reason: string) =>
-          Effect.gen(function* () {
-            const { activeTurnId: _activeTurnId, ...readySession } = ctx.session;
-            ctx.activeTurnId = undefined;
-            ctx.session = {
-              ...readySession,
-              status: "ready",
-              updatedAt: yield* nowIso,
-              lastError: reason,
-            };
-            yield* emit({
-              type: "turn.aborted",
-              ...(yield* stamp()),
-              provider: PROVIDER,
-              threadId: input.threadId,
-              turnId,
-              payload: { reason },
-            });
-          });
-        return yield* Effect.gen(function* () {
-          const selection = input.modelSelection;
-          const requestedModel = selection?.model;
-
-          if (!steeringTurnId) ctx.lastPlanFingerprint = undefined;
-          ctx.session = {
-            ...ctx.session,
-            status: "running",
-            activeTurnId: turnId,
-            updatedAt: yield* nowIso,
-          };
-          if (!steeringTurnId) {
-            yield* emit({
-              type: "turn.started",
-              ...(yield* stamp()),
-              provider: PROVIDER,
-              threadId: input.threadId,
-              turnId,
-              payload: { model: requestedModel ?? ctx.session.model ?? "default" },
-            });
-          }
-
-          const prompt: Array<EffectAcpSchema.ContentBlock> = [];
-          if (input.input?.trim()) prompt.push({ type: "text", text: input.input.trim() });
-          for (const attachment of input.attachments ?? []) {
-            const attachmentPath = resolveAttachmentPath({
-              attachmentsDir: serverConfig.attachmentsDir,
-              attachment,
-            });
-            if (!attachmentPath) {
-              return yield* new ProviderAdapterRequestError({
+            if (!input.cwd?.trim()) {
+              return yield* new ProviderAdapterValidationError({
                 provider: PROVIDER,
-                method: "session/prompt",
-                detail: `Invalid attachment id '${attachment.id}'.`,
+                operation: "startSession",
+                issue: "cwd is required and must be non-empty.",
               });
             }
-            const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
+            const cwd = path.resolve(input.cwd.trim());
+            const modelSelection = input.modelSelection;
+            const existing = sessions.get(input.threadId);
+            if (existing && !existing.stopped) yield* stopInternal(existing);
+
+            const sessionScope = yield* Scope.make("sequential");
+            const ownership = { transferred: false };
+            yield* Effect.addFinalizer(() =>
+              ownership.transferred ? Effect.void : Scope.close(sessionScope, Exit.void),
+            );
+            const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
+            const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
+            const resumeSessionId = parseResume(input.resumeCursor)?.sessionId;
+            const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+            const acpNativeLoggers = makeAcpNativeLoggers({
+              nativeEventLogger,
+              provider: PROVIDER,
+              threadId: input.threadId,
+            });
+            const acp = yield* makeOpenCode2AcpRuntime({
+              settings,
+              childProcessSpawner,
+              cwd,
+              ...(options?.environment ? { environment: options.environment } : {}),
+              ...(resumeSessionId ? { resumeSessionId } : {}),
+              clientInfo: { name: "t3-code", version: "0.0.0" },
+              ...(mcpSession
+                ? {
+                    mcpServers: [
+                      {
+                        type: "http" as const,
+                        name: "t3-code",
+                        url: mcpSession.endpoint,
+                        headers: [{ name: "Authorization", value: mcpSession.authorizationHeader }],
+                      },
+                    ],
+                  }
+                : {}),
+              ...acpNativeLoggers,
+            }).pipe(
+              Effect.provideService(Crypto.Crypto, crypto),
+              Effect.provideService(Scope.Scope, sessionScope),
               Effect.mapError(
                 (cause) =>
-                  new ProviderAdapterRequestError({
+                  new ProviderAdapterProcessError({
                     provider: PROVIDER,
-                    method: "session/prompt",
-                    detail: `Failed to read attachment '${attachment.id}'.`,
+                    threadId: input.threadId,
+                    detail: "Failed to start the OpenCode 2.0 ACP session.",
                     cause,
                   }),
               ),
             );
-            prompt.push({
-              type: "image",
-              data: Buffer.from(bytes).toString("base64"),
-              mimeType: attachment.mimeType,
-            });
-          }
-          if (prompt.length === 0) {
-            return yield* new ProviderAdapterValidationError({
-              provider: PROVIDER,
-              operation: "sendTurn",
-              issue: "Turn requires non-empty text or attachments.",
-            });
-          }
 
-          const result = yield* ctx.turnSemaphore.withPermit(
+            const now = yield* nowIso;
+            const turnSemaphore = yield* Semaphore.make(1);
+            const ctx: OpenCode2SessionContext = {
+              threadId: input.threadId,
+              session: {
+                provider: PROVIDER,
+                providerInstanceId: boundInstanceId,
+                status: "connecting",
+                runtimeMode: input.runtimeMode,
+                cwd,
+                model: modelSelection?.model,
+                threadId: input.threadId,
+                ...(resumeSessionId ? { resumeCursor: input.resumeCursor } : {}),
+                createdAt: now,
+                updatedAt: now,
+              },
+              scope: sessionScope,
+              acp,
+              notificationFiber: undefined,
+              pendingApprovals,
+              pendingUserInputs,
+              turns: [],
+              turnSemaphore,
+              lastPlanFingerprint: undefined,
+              activeTurnId: undefined,
+              interruptedTurnId: undefined,
+              promptsInFlight: 0,
+              stopped: false,
+            };
+            sessions.set(input.threadId, ctx);
+            yield* Effect.addFinalizer(() =>
+              !ownership.transferred && sessions.get(input.threadId) === ctx
+                ? Effect.sync(() => sessions.delete(input.threadId))
+                : Effect.void,
+            );
+
+            return { acp, ctx, modelSelection, ownership, sessionScope };
+          }),
+        );
+
+        const started = yield* Effect.gen(function* () {
+          yield* acp.handleRequestPermission((request) =>
             Effect.gen(function* () {
-              if (ctx.interruptedTurnId === turnId) {
-                return { stopReason: "cancelled" as const };
+              if (input.runtimeMode === "full-access") {
+                const optionId = autoApproveOptionId(request);
+                if (optionId) {
+                  return { outcome: { outcome: "selected" as const, optionId } };
+                }
               }
-              const model = requestedModel ?? ctx.session.model;
-              yield* configureSession({
-                ctx,
-                model,
-                options: selection?.options,
-                interactionMode: input.interactionMode,
-              });
-              ctx.session = { ...ctx.session, model };
-              return yield* promptOpenCode2Acp(
-                ctx.acp,
-                { prompt },
-                {
-                  shouldRetry: () => ctx.interruptedTurnId !== turnId,
-                  beforeRetry: applyOpenCode2AcpModelSelection({
-                    runtime: ctx.acp,
-                    model,
-                    selections: selection?.options,
-                    interactionMode: input.interactionMode,
-                    mapError: ({ cause }) => cause,
-                  }),
-                },
-              ).pipe(
-                Effect.catchTags({
-                  OpenCode2ReloadError: (error) =>
-                    Effect.gen(function* () {
-                      yield* abortActiveTurn(error.message);
-                      yield* stopInternal(ctx);
-                      return yield* new ProviderAdapterRequestError({
-                        provider: PROVIDER,
-                        method: error.method,
-                        detail: "OpenCode 2.0 ACP session reload failed.",
-                        cause: error,
-                      });
-                    }).pipe(Effect.uninterruptible),
+              const permissionRequest = parsePermissionRequest(request);
+              const requestId = ApprovalRequestId.make(yield* randomUUID);
+              const runtimeRequestId = RuntimeRequestId.make(requestId);
+              const decision = yield* Deferred.make<ProviderApprovalDecision>();
+              ctx.pendingApprovals.set(requestId, { decision });
+              yield* emit(
+                makeAcpRequestOpenedEvent({
+                  stamp: yield* stamp(),
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  turnId: ctx.activeTurnId,
+                  requestId: runtimeRequestId,
+                  permissionRequest,
+                  detail: permissionRequest.detail ?? "OpenCode requested permission.",
+                  args: request,
+                  source: "acp.jsonrpc",
+                  method: "session/request_permission",
+                  rawPayload: request,
                 }),
-                Effect.mapError((cause) =>
-                  cause._tag === "ProviderAdapterRequestError"
-                    ? cause
-                    : mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", cause),
-                ),
               );
-            }),
+              const resolved = yield* Deferred.await(decision);
+              ctx.pendingApprovals.delete(requestId);
+              yield* emit(
+                makeAcpRequestResolvedEvent({
+                  stamp: yield* stamp(),
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  turnId: ctx.activeTurnId,
+                  requestId: runtimeRequestId,
+                  permissionRequest,
+                  decision: resolved,
+                }),
+              );
+              if (resolved === "cancel") return { outcome: { outcome: "cancelled" as const } };
+              const optionId = permissionOptionId(request, resolved);
+              return optionId
+                ? { outcome: { outcome: "selected" as const, optionId } }
+                : { outcome: { outcome: "cancelled" as const } };
+            }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new EffectAcpErrors.AcpTransportError({
+                    detail: "Failed to process OpenCode permission request.",
+                    cause,
+                  }),
+              ),
+            ),
           );
-          return yield* withLock(
+          yield* acp.handleElicitation((request) =>
+            Effect.gen(function* () {
+              if (request.mode === "url") {
+                return { action: { action: "cancel" as const } };
+              }
+              const requestId = ApprovalRequestId.make(yield* randomUUID);
+              const runtimeRequestId = RuntimeRequestId.make(requestId);
+              const resolution = yield* Deferred.make<
+                | { readonly action: "accept"; readonly answers: ProviderUserInputAnswers }
+                | { readonly action: "cancel" }
+              >();
+              ctx.pendingUserInputs.set(requestId, { resolution });
+              yield* emit({
+                type: "user-input.requested",
+                ...(yield* stamp()),
+                provider: PROVIDER,
+                threadId: input.threadId,
+                turnId: ctx.activeTurnId,
+                requestId: runtimeRequestId,
+                payload: { questions: elicitationQuestions(request) },
+                raw: { source: "acp.jsonrpc", method: "session/elicitation", payload: request },
+              });
+              const resolved = yield* Deferred.await(resolution);
+              ctx.pendingUserInputs.delete(requestId);
+              yield* emit({
+                type: "user-input.resolved",
+                ...(yield* stamp()),
+                provider: PROVIDER,
+                threadId: input.threadId,
+                turnId: ctx.activeTurnId,
+                requestId: runtimeRequestId,
+                payload: {
+                  answers: resolved.action === "accept" ? resolved.answers : {},
+                },
+              });
+              if (resolved.action === "cancel") {
+                return { action: { action: "cancel" as const } };
+              }
+              const content = elicitationContent(request, resolved.answers);
+              if (content === undefined) {
+                return { action: { action: "cancel" as const } };
+              }
+              return {
+                action: {
+                  action: "accept" as const,
+                  content,
+                },
+              };
+            }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new EffectAcpErrors.AcpTransportError({
+                    detail: "Failed to process OpenCode elicitation.",
+                    cause,
+                  }),
+              ),
+            ),
+          );
+          return yield* acp.start();
+        }).pipe(
+          Effect.mapError((cause) =>
+            mapAcpToAdapterError(PROVIDER, input.threadId, "session/start", cause),
+          ),
+        );
+
+        yield* configureSession({
+          ctx,
+          model: modelSelection?.model,
+          options: modelSelection?.options,
+          interactionMode: undefined,
+        });
+
+        const notificationFiber = yield* Stream.runForEach(acp.getEvents(), (event) =>
+          Effect.gen(function* () {
+            switch (event._tag) {
+              case "EventStreamBarrier":
+                yield* Deferred.succeed(event.acknowledge, undefined);
+                return;
+              case "ModeChanged":
+                return;
+              case "AssistantItemStarted":
+                yield* emit(
+                  makeAcpAssistantItemEvent({
+                    stamp: yield* stamp(),
+                    provider: PROVIDER,
+                    threadId: ctx.threadId,
+                    turnId: ctx.activeTurnId,
+                    itemId: event.itemId,
+                    lifecycle: "item.started",
+                  }),
+                );
+                return;
+              case "AssistantItemCompleted":
+                yield* emit(
+                  makeAcpAssistantItemEvent({
+                    stamp: yield* stamp(),
+                    provider: PROVIDER,
+                    threadId: ctx.threadId,
+                    turnId: ctx.activeTurnId,
+                    itemId: event.itemId,
+                    lifecycle: "item.completed",
+                  }),
+                );
+                return;
+              case "ContentDelta":
+                yield* emit(
+                  makeAcpContentDeltaEvent({
+                    stamp: yield* stamp(),
+                    provider: PROVIDER,
+                    threadId: ctx.threadId,
+                    turnId: ctx.activeTurnId,
+                    ...(event.itemId ? { itemId: event.itemId } : {}),
+                    text: event.text,
+                    rawPayload: event.rawPayload,
+                  }),
+                );
+                return;
+              case "ToolCallUpdated":
+                yield* emit(
+                  makeAcpToolCallEvent({
+                    stamp: yield* stamp(),
+                    provider: PROVIDER,
+                    threadId: ctx.threadId,
+                    turnId: ctx.activeTurnId,
+                    toolCall: event.toolCall,
+                    rawPayload: event.rawPayload,
+                  }),
+                );
+                return;
+              case "PlanUpdated": {
+                const fingerprint = `${ctx.activeTurnId ?? "no-turn"}:${event.payload.explanation ?? ""}:${event.payload.plan.map((step) => `${step.status}:${step.step}`).join("|")}`;
+                if (ctx.lastPlanFingerprint === fingerprint) return;
+                ctx.lastPlanFingerprint = fingerprint;
+                yield* emit(
+                  makeAcpPlanUpdatedEvent({
+                    stamp: yield* stamp(),
+                    provider: PROVIDER,
+                    threadId: ctx.threadId,
+                    turnId: ctx.activeTurnId,
+                    payload: event.payload,
+                    source: "acp.jsonrpc",
+                    method: "session/update",
+                    rawPayload: event.rawPayload,
+                  }),
+                );
+              }
+            }
+          }),
+        ).pipe(
+          Effect.catch((cause) =>
+            Effect.logError("Failed to process OpenCode2 ACP notification.", { cause }),
+          ),
+          Effect.forkIn(sessionScope),
+        );
+        return yield* withLock(
+          input.threadId,
+          Effect.gen(function* () {
+            if (sessions.get(input.threadId) !== ctx || ctx.stopped) {
+              return yield* new ProviderAdapterSessionNotFoundError({
+                provider: PROVIDER,
+                threadId: input.threadId,
+              });
+            }
+            const updatedAt = yield* nowIso;
+            const sessionStartedStamp = yield* stamp();
+            const stateChangedStamp = yield* stamp();
+            const threadStartedStamp = yield* stamp();
+            ctx.notificationFiber = notificationFiber;
+            ctx.session = {
+              ...ctx.session,
+              status: "ready",
+              resumeCursor: { schemaVersion: RESUME_VERSION, sessionId: started.sessionId },
+              updatedAt,
+            };
+            yield* emit({
+              type: "session.started",
+              ...sessionStartedStamp,
+              provider: PROVIDER,
+              threadId: input.threadId,
+              payload: { resume: started.initializeResult },
+            });
+            yield* emit({
+              type: "session.state.changed",
+              ...stateChangedStamp,
+              provider: PROVIDER,
+              threadId: input.threadId,
+              payload: { state: "ready", reason: "OpenCode2 ACP session ready" },
+            });
+            yield* emit({
+              type: "thread.started",
+              ...threadStartedStamp,
+              provider: PROVIDER,
+              threadId: input.threadId,
+              payload: { providerThreadId: started.sessionId },
+            });
+            ownership.transferred = true;
+            return ctx.session;
+          }).pipe(Effect.uninterruptible),
+        );
+      }).pipe(Effect.scoped);
+
+    const sendTurn: OpenCodeAdapterShape["sendTurn"] = (input) =>
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const selection = input.modelSelection;
+          const requestedModel = selection?.model;
+          const { ctx, turnId } = yield* withLock(
             input.threadId,
             Effect.gen(function* () {
-              yield* requireSession(input.threadId);
-              yield* ctx.acp.drainEvents;
-              let attachmentIndex = 0;
-              const recordedPrompt = prompt.map((block) => {
-                if (block.type !== "image") return block;
-                const attachment = input.attachments?.[attachmentIndex++];
-                return {
-                  type: "image",
-                  mimeType: block.mimeType,
-                  ...(attachment ? { attachmentId: attachment.id } : {}),
-                };
-              });
-              const turn = ctx.turns.find((candidate) => candidate.id === turnId);
-              if (turn) turn.items.push({ prompt: recordedPrompt, result });
-              else ctx.turns.push({ id: turnId, items: [{ prompt: recordedPrompt, result }] });
-              if (ctx.promptsInFlight === 1) {
-                const {
-                  activeTurnId: _activeTurnId,
-                  lastError: _lastError,
-                  ...readySession
-                } = ctx.session;
-                ctx.activeTurnId = undefined;
-                ctx.session = {
-                  ...readySession,
-                  status: "ready",
-                  updatedAt: yield* nowIso,
-                };
+              const ctx = yield* requireSession(input.threadId);
+              if (input.modelSelection && input.modelSelection.instanceId !== boundInstanceId) {
+                return yield* new ProviderAdapterValidationError({
+                  provider: PROVIDER,
+                  operation: "sendTurn",
+                  issue: `Model selection belongs to provider instance '${input.modelSelection.instanceId}', not '${boundInstanceId}'.`,
+                });
+              }
+              const steeringTurnId = ctx.activeTurnId;
+              const turnId = steeringTurnId ?? TurnId.make(yield* randomUUID);
+              const updatedAt = yield* nowIso;
+              const startedStamp = steeringTurnId ? undefined : yield* stamp();
+              if (!steeringTurnId) ctx.interruptedTurnId = undefined;
+              ctx.promptsInFlight += 1;
+              ctx.activeTurnId = turnId;
+              if (!steeringTurnId) ctx.lastPlanFingerprint = undefined;
+              ctx.session = {
+                ...ctx.session,
+                status: "running",
+                activeTurnId: turnId,
+                updatedAt,
+              };
+              if (!steeringTurnId) {
                 yield* emit({
-                  type: "turn.completed",
-                  ...(yield* stamp()),
+                  type: "turn.started",
+                  ...startedStamp!,
                   provider: PROVIDER,
                   threadId: input.threadId,
                   turnId,
-                  payload: {
-                    state: result.stopReason === "cancelled" ? "cancelled" : "completed",
-                    stopReason: result.stopReason ?? null,
-                  },
+                  payload: { model: requestedModel ?? ctx.session.model ?? "default" },
                 });
               }
-              return { threadId: input.threadId, turnId, resumeCursor: ctx.session.resumeCursor };
-            }),
+              return { ctx, turnId };
+            }).pipe(Effect.uninterruptible),
           );
-        }).pipe(
-          Effect.tapError((error) => {
-            const abortTurn =
-              !ctx.stopped && ctx.activeTurnId === turnId && ctx.promptsInFlight === 1
-                ? abortActiveTurn(error.message)
-                : Effect.void;
-            return abortTurn;
-          }),
-          Effect.ensuring(
+          const abortActiveTurn = (reason: string) =>
             Effect.gen(function* () {
-              ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);
-              if (!ctx.stopped && ctx.promptsInFlight === 0 && ctx.activeTurnId === turnId) {
-                yield* ctx.acp.cancelAndWait.pipe(Effect.ignore);
-                yield* abortActiveTurn("Turn interrupted").pipe(Effect.ignore);
+              const updatedAt = yield* nowIso;
+              const abortedStamp = yield* stamp();
+              const { activeTurnId: _activeTurnId, ...readySession } = ctx.session;
+              ctx.activeTurnId = undefined;
+              ctx.session = {
+                ...readySession,
+                status: "ready",
+                updatedAt,
+                lastError: reason,
+              };
+              yield* emit({
+                type: "turn.aborted",
+                ...abortedStamp,
+                provider: PROVIDER,
+                threadId: input.threadId,
+                turnId,
+                payload: { reason },
+              });
+            });
+          return yield* restore(
+            Effect.gen(function* () {
+              const prompt: Array<EffectAcpSchema.ContentBlock> = [];
+              if (input.input?.trim()) prompt.push({ type: "text", text: input.input.trim() });
+              for (const attachment of input.attachments ?? []) {
+                const attachmentPath = resolveAttachmentPath({
+                  attachmentsDir: serverConfig.attachmentsDir,
+                  attachment,
+                });
+                if (!attachmentPath) {
+                  return yield* new ProviderAdapterRequestError({
+                    provider: PROVIDER,
+                    method: "session/prompt",
+                    detail: `Invalid attachment id '${attachment.id}'.`,
+                  });
+                }
+                const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderAdapterRequestError({
+                        provider: PROVIDER,
+                        method: "session/prompt",
+                        detail: `Failed to read attachment '${attachment.id}'.`,
+                        cause,
+                      }),
+                  ),
+                );
+                prompt.push({
+                  type: "image",
+                  data: Buffer.from(bytes).toString("base64"),
+                  mimeType: attachment.mimeType,
+                });
               }
+              if (prompt.length === 0) {
+                return yield* new ProviderAdapterValidationError({
+                  provider: PROVIDER,
+                  operation: "sendTurn",
+                  issue: "Turn requires non-empty text or attachments.",
+                });
+              }
+
+              const result = yield* ctx.turnSemaphore.withPermit(
+                Effect.gen(function* () {
+                  if (ctx.interruptedTurnId === turnId) {
+                    return { stopReason: "cancelled" as const };
+                  }
+                  const model = requestedModel ?? ctx.session.model;
+                  yield* configureSession({
+                    ctx,
+                    model,
+                    options: selection?.options,
+                    interactionMode: input.interactionMode,
+                  });
+                  ctx.session = { ...ctx.session, model };
+                  return yield* promptOpenCode2Acp(
+                    ctx.acp,
+                    { prompt },
+                    {
+                      shouldRetry: () => ctx.interruptedTurnId !== turnId,
+                      beforeRetry: applyOpenCode2AcpModelSelection({
+                        runtime: ctx.acp,
+                        model,
+                        selections: selection?.options,
+                        interactionMode: input.interactionMode,
+                        mapError: ({ cause }) => cause,
+                      }),
+                    },
+                  ).pipe(
+                    Effect.catchTags({
+                      OpenCode2ReloadError: (error) =>
+                        withLock(
+                          input.threadId,
+                          Effect.gen(function* () {
+                            if (sessions.get(input.threadId) === ctx && !ctx.stopped) {
+                              yield* abortActiveTurn(error.message);
+                              yield* stopInternal(ctx);
+                            }
+                            return yield* new ProviderAdapterRequestError({
+                              provider: PROVIDER,
+                              method: error.method,
+                              detail: "OpenCode 2.0 ACP session reload failed.",
+                              cause: error,
+                            });
+                          }).pipe(Effect.uninterruptible),
+                        ),
+                    }),
+                    Effect.mapError((cause) =>
+                      cause._tag === "ProviderAdapterRequestError"
+                        ? cause
+                        : mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", cause),
+                    ),
+                  );
+                }),
+              );
+              return yield* withLock(
+                input.threadId,
+                Effect.gen(function* () {
+                  if (sessions.get(input.threadId) !== ctx || ctx.stopped) {
+                    return yield* new ProviderAdapterSessionNotFoundError({
+                      provider: PROVIDER,
+                      threadId: input.threadId,
+                    });
+                  }
+                  yield* ctx.acp.drainEvents;
+                  return yield* Effect.gen(function* () {
+                    const updatedAt = yield* nowIso;
+                    const completedStamp = ctx.promptsInFlight === 1 ? yield* stamp() : undefined;
+                    let attachmentIndex = 0;
+                    const recordedPrompt = prompt.map((block) => {
+                      if (block.type !== "image") return block;
+                      const attachment = input.attachments?.[attachmentIndex++];
+                      return {
+                        type: "image",
+                        mimeType: block.mimeType,
+                        ...(attachment ? { attachmentId: attachment.id } : {}),
+                      };
+                    });
+                    const turn = ctx.turns.find((candidate) => candidate.id === turnId);
+                    if (turn) turn.items.push({ prompt: recordedPrompt, result });
+                    else
+                      ctx.turns.push({ id: turnId, items: [{ prompt: recordedPrompt, result }] });
+                    if (ctx.promptsInFlight === 1) {
+                      const {
+                        activeTurnId: _activeTurnId,
+                        lastError: _lastError,
+                        ...readySession
+                      } = ctx.session;
+                      ctx.activeTurnId = undefined;
+                      ctx.session = { ...readySession, status: "ready", updatedAt };
+                      yield* emit({
+                        type: "turn.completed",
+                        ...completedStamp!,
+                        provider: PROVIDER,
+                        threadId: input.threadId,
+                        turnId,
+                        payload: {
+                          state: result.stopReason === "cancelled" ? "cancelled" : "completed",
+                          stopReason: result.stopReason ?? null,
+                        },
+                      });
+                    }
+                    return {
+                      threadId: input.threadId,
+                      turnId,
+                      resumeCursor: ctx.session.resumeCursor,
+                    };
+                  }).pipe(Effect.uninterruptible);
+                }),
+              );
             }),
-          ),
-        );
-      });
+          ).pipe(
+            Effect.tapError((error) =>
+              withLock(
+                input.threadId,
+                Effect.suspend(() =>
+                  sessions.get(input.threadId) === ctx &&
+                  !ctx.stopped &&
+                  ctx.activeTurnId === turnId &&
+                  ctx.promptsInFlight === 1
+                    ? abortActiveTurn(error.message).pipe(Effect.uninterruptible)
+                    : Effect.void,
+                ),
+              ),
+            ),
+            Effect.ensuring(
+              withLock(
+                input.threadId,
+                Effect.gen(function* () {
+                  ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);
+                  if (
+                    sessions.get(input.threadId) === ctx &&
+                    !ctx.stopped &&
+                    ctx.promptsInFlight === 0 &&
+                    ctx.activeTurnId === turnId
+                  ) {
+                    yield* ctx.acp.cancelAndWait.pipe(Effect.ignore);
+                    yield* abortActiveTurn("Turn interrupted").pipe(
+                      Effect.uninterruptible,
+                      Effect.ignore,
+                    );
+                  }
+                }),
+              ).pipe(Effect.uninterruptible),
+            ),
+          );
+        }),
+      );
 
     const interruptTurn: OpenCodeAdapterShape["interruptTurn"] = (threadId) =>
       Effect.gen(function* () {

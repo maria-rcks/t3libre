@@ -195,6 +195,56 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
     ),
   );
 
+  it.effect("stops a session waiting on startup elicitation", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const adapter = yield* makeTestAdapter(
+          yield* makeMockWrapper({ T3_ACP_ELICIT_DURING_CREATE_SESSION: "1" }),
+        );
+        const threadId = ThreadId.make("opencode2-stop-startup-elicitation");
+        const requested = yield* Deferred.make<void>();
+        const exited = yield* Deferred.make<void>();
+        const events: ProviderRuntimeEvent[] = [];
+        const eventFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => events.push(event)).pipe(
+              Effect.andThen(
+                event.type === "user-input.requested"
+                  ? Deferred.succeed(requested, undefined)
+                  : event.type === "session.exited"
+                    ? Deferred.succeed(exited, undefined)
+                    : Effect.void,
+              ),
+            ),
+          ),
+          Effect.forkChild,
+        );
+        const startFiber = yield* adapter
+          .startSession({
+            threadId,
+            cwd: process.cwd(),
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.forkChild);
+
+        yield* Deferred.await(requested).pipe(Effect.timeout("2 seconds"));
+        yield* adapter.stopSession(threadId).pipe(Effect.timeout("5 seconds"));
+        const startExit = yield* Fiber.await(startFiber).pipe(Effect.timeout("5 seconds"));
+        assert.strictEqual(startExit._tag, "Failure");
+        yield* Deferred.await(exited).pipe(Effect.timeout("2 seconds"));
+
+        const exitedIndex = events.findIndex((event) => event.type === "session.exited");
+        assert.isAtLeast(exitedIndex, 0);
+        assert.isFalse(
+          events.slice(exitedIndex + 1).some((event) => event.type === "session.started"),
+        );
+        assert.isFalse(yield* adapter.hasSession(threadId));
+        assert.deepStrictEqual(yield* adapter.listSessions(), []);
+        yield* Fiber.interrupt(eventFiber);
+      }),
+    ),
+  );
+
   it.effect("offers explicit boolean elicitation choices", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -688,11 +738,19 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
         );
         const threadId = ThreadId.make("opencode2-stop-in-flight");
         const requested = yield* Deferred.make<void>();
+        const exited = yield* Deferred.make<void>();
+        const events: ProviderRuntimeEvent[] = [];
         const eventFiber = yield* adapter.streamEvents.pipe(
           Stream.runForEach((event) =>
-            event.type === "user-input.requested"
-              ? Deferred.succeed(requested, undefined)
-              : Effect.void,
+            Effect.sync(() => events.push(event)).pipe(
+              Effect.andThen(
+                event.type === "user-input.requested"
+                  ? Deferred.succeed(requested, undefined)
+                  : event.type === "session.exited"
+                    ? Deferred.succeed(exited, undefined)
+                    : Effect.void,
+              ),
+            ),
           ),
           Effect.forkChild,
         );
@@ -708,6 +766,19 @@ it.layer(testLayer)("OpenCode2Adapter", (it) => {
         yield* Deferred.await(requested).pipe(Effect.timeout("2 seconds"));
         yield* adapter.stopSession(threadId).pipe(Effect.timeout("5 seconds"));
         yield* Fiber.join(sendFiber).pipe(Effect.flip, Effect.timeout("5 seconds"));
+        yield* Deferred.await(exited).pipe(Effect.timeout("2 seconds"));
+
+        const startedIndex = events.findIndex((event) => event.type === "turn.started");
+        const abortedIndex = events.findIndex((event) => event.type === "turn.aborted");
+        const exitedIndex = events.findIndex((event) => event.type === "session.exited");
+        assert.isAtLeast(startedIndex, 0);
+        assert.isBelow(startedIndex, abortedIndex);
+        assert.isBelow(abortedIndex, exitedIndex);
+        assert.lengthOf(
+          events.filter((event) => event.type === "turn.aborted"),
+          1,
+        );
+        assert.isFalse(events.some((event) => event.type === "turn.completed"));
         assert.isFalse(yield* adapter.hasSession(threadId));
         yield* Fiber.interrupt(eventFiber);
       }),
