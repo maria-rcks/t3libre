@@ -99,6 +99,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
                 <ComposerCommandMenuItem
                   key={item.id}
                   item={item}
+                  triggerKind={props.triggerKind}
                   resolvedTheme={props.resolvedTheme}
                   isActive={props.activeItemId === item.id}
                   onHighlight={props.onHighlightedItemChange}
@@ -130,6 +131,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
 
 const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
   item: ComposerCommandItem;
+  triggerKind: ComposerTriggerKind | null;
   resolvedTheme: "light" | "dark";
   isActive: boolean;
   onHighlight: (itemId: string | null) => void;
@@ -137,6 +139,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
 }) {
   const skillSourceKind =
     props.item.type === "skill" ? resolveProviderSkillSourceKind(props.item.skill) : null;
+  const isSlashSkill = props.triggerKind === "slash-command" && props.item.type === "skill";
 
   return (
     <CommandItem
@@ -166,7 +169,16 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         <SkillSourceIcon kind={skillSourceKind} />
       ) : null}
       <span className="flex min-w-0 flex-1 items-baseline gap-3">
-        <span className="shrink-0 font-sans text-xs font-medium">{props.item.label}</span>
+        <span className="shrink-0 font-sans text-xs font-medium">
+          {isSlashSkill ? (
+            <>
+              <span className="text-secondary-label">skill:</span>
+              {props.item.skill.name}
+            </>
+          ) : (
+            props.item.label
+          )}
+        </span>
         <span className="min-w-0 flex-1 truncate text-right text-secondary-label text-xs">
           {props.item.description}
         </span>

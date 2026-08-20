@@ -33,7 +33,7 @@ describe("searchSlashCommandItems", () => {
         description: "Create distinctive, production-grade frontend interfaces",
       },
     ] satisfies Array<
-      Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" }>
+      Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" | "skill" }>
     >;
 
     expect(searchSlashCommandItems(items, "ui").map((item) => item.id)).toEqual([
@@ -61,11 +61,65 @@ describe("searchSlashCommandItems", () => {
         description: "General GitHub help",
       },
     ] satisfies Array<
-      Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" }>
+      Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" | "skill" }>
     >;
 
     expect(searchSlashCommandItems(items, "gfc").map((item) => item.id)).toEqual([
       "provider-slash-command:claudeAgent:gh-fix-ci",
+    ]);
+  });
+
+  it("includes skills by name and description", () => {
+    const items = [
+      {
+        id: "skill:claudeAgent:browser",
+        type: "skill",
+        provider: claudeDriver,
+        skill: {
+          name: "browser",
+          path: "/skills/browser/SKILL.md",
+          enabled: true,
+          shortDescription: "Open and control the in-app browser",
+        },
+        label: "skill:browser",
+        description: "Open and control the in-app browser",
+      },
+    ] satisfies Array<Extract<ComposerCommandItem, { type: "skill" }>>;
+
+    expect(searchSlashCommandItems(items, "browser").map((item) => item.id)).toEqual([
+      "skill:claudeAgent:browser",
+    ]);
+    expect(searchSlashCommandItems(items, "control").map((item) => item.id)).toEqual([
+      "skill:claudeAgent:browser",
+    ]);
+  });
+
+  it("keeps skills alongside commands for an empty slash query", () => {
+    const items = [
+      {
+        id: "slash:model",
+        type: "slash-command",
+        command: "model",
+        label: "/model",
+        description: "Switch model",
+      },
+      {
+        id: "skill:claudeAgent:unslop",
+        type: "skill",
+        provider: claudeDriver,
+        skill: {
+          name: "unslop",
+          path: "/skills/unslop/SKILL.md",
+          enabled: true,
+        },
+        label: "skill:unslop",
+        description: "Cut AI tells from writing",
+      },
+    ] satisfies Array<Extract<ComposerCommandItem, { type: "slash-command" | "skill" }>>;
+
+    expect(searchSlashCommandItems(items, "").map((item) => item.id)).toEqual([
+      "slash:model",
+      "skill:claudeAgent:unslop",
     ]);
   });
 });

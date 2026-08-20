@@ -430,7 +430,23 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         });
       }
 
-      return [...builtIn, ...providerCommands];
+      const skillItems = (selectedProviderStatus?.skills ?? [])
+        .filter((skill) => {
+          if (!skill.enabled) return false;
+          if (!q) return true;
+          return [skill.name, skill.displayName, skill.shortDescription, skill.description].some(
+            (value) => value?.toLowerCase().includes(q),
+          );
+        })
+        .map((skill) => ({
+          id: `skill:${skill.name}`,
+          type: "skill" as const,
+          skill,
+          label: `skill:${skill.name}`,
+          description: skill.shortDescription ?? skill.description ?? "",
+        }));
+
+      return [...builtIn, ...providerCommands, ...skillItems];
     }
 
     if (composerTrigger.kind === "skill") {
