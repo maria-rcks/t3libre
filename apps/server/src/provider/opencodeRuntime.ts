@@ -952,13 +952,16 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
     if (trimmed.length > 0 && trimmed.toLowerCase() !== "opencode") {
       return Effect.succeed(input.binaryPath);
     }
+    // An empty setting falls back to the stable binary name rather than
+    // propagating a spawnable-but-empty path.
+    const fallback = trimmed.length > 0 ? input.binaryPath : "opencode";
     return runOpenCodeCommand({
       binaryPath: OPENCODE2_DEFAULT_BINARY,
       args: ["--version"],
       ...(input.environment !== undefined ? { environment: input.environment } : {}),
     }).pipe(
-      Effect.map((result) => (result.code === 0 ? OPENCODE2_DEFAULT_BINARY : input.binaryPath)),
-      Effect.orElseSucceed(() => input.binaryPath),
+      Effect.map((result) => (result.code === 0 ? OPENCODE2_DEFAULT_BINARY : fallback)),
+      Effect.orElseSucceed(() => fallback),
     );
   };
 
