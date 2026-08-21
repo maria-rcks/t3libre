@@ -1117,8 +1117,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }),
       );
       const query = composerTrigger.query.trim().toLowerCase();
-      const skillItems = searchProviderSkills(selectedProviderStatus?.skills ?? [], query).map(
-        (skill) => ({
+      const skillItems = (selectedProviderStatus?.skills ?? [])
+        .filter((skill) => skill.enabled)
+        .map((skill) => ({
           id: `skill:${selectedProvider}:${skill.name}`,
           type: "skill" as const,
           provider: selectedProvider,
@@ -1128,8 +1129,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             skill.shortDescription ??
             skill.description ??
             (skill.scope ? `${skill.scope} skill` : ""),
-        }),
-      );
+        }));
       const slashCommandItems = [
         ...builtInSlashCommandItems,
         ...providerSlashCommandItems,

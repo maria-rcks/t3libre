@@ -5,6 +5,7 @@ import {
 } from "@t3tools/shared/searchRanking";
 
 import type { ComposerCommandItem } from "./ComposerCommandMenu";
+import { scoreProviderSkill } from "../../providerSkillSearch";
 
 type SlashSearchItem = Extract<
   ComposerCommandItem,
@@ -12,12 +13,12 @@ type SlashSearchItem = Extract<
 >;
 
 function scoreSlashCommandItem(item: SlashSearchItem, query: string): number | null {
+  if (item.type === "skill") {
+    return scoreProviderSkill(item.skill, query);
+  }
+
   const primaryValue =
-    item.type === "slash-command"
-      ? item.command.toLowerCase()
-      : item.type === "provider-slash-command"
-        ? item.command.name.toLowerCase()
-        : item.skill.name.toLowerCase();
+    item.type === "slash-command" ? item.command.toLowerCase() : item.command.name.toLowerCase();
   const description = item.description.toLowerCase();
 
   const scores = [
