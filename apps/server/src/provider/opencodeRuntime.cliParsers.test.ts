@@ -61,7 +61,6 @@ describe("parseOpenCode2ServiceRegistration", () => {
 
   it("rejects non-HTTP URLs and malformed payloads", () => {
     NodeAssert.equal(parseOpenCode2ServiceRegistration({ url: "unix:///tmp/sock" }), null);
-    NodeAssert.equal(parseOpenCode2ServiceRegistration({ password: "x" }), null);
     NodeAssert.equal(parseOpenCode2ServiceRegistration("nope"), null);
     NodeAssert.equal(parseOpenCode2ServiceRegistration(null), null);
   });

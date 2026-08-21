@@ -1229,16 +1229,22 @@ export function makeOpenCodeAdapter(
                 serverPassword,
                 ...(options?.environment ? { environment: options.environment } : {}),
               });
+              // The connection's own password wins: spawned OpenCode 2
+              // children always require theirs, and adopted background
+              // services carry the registration one. Explicit settings apply
+              // only to external servers, whose credentials we never guess.
+              const effectiveServerPassword =
+                server.serverPassword ?? (server.external ? serverPassword : undefined);
               const client = openCodeRuntime.createOpenCodeSdkClient({
                 baseUrl: server.url,
                 directory,
-                // Adopted background services carry their registration
-                // password; explicit settings apply to external servers.
-                ...(server.external && (server.serverPassword ?? serverPassword)
-                  ? { serverPassword: server.serverPassword ?? serverPassword }
-                  : {}),
+                ...(effectiveServerPassword ? { serverPassword: effectiveServerPassword } : {}),
               });
               const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+              // Skipped for external servers — including adopted background
+              // services — so we never write our endpoint into a daemon the
+              // user's other clients share. Those sessions run without the
+              // t3-code MCP tools.
               if (mcpSession && !server.external) {
                 yield* runOpenCodeSdk("mcp.add", () =>
                   client.mcp.add({

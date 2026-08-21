@@ -134,9 +134,9 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       // Upgrade the default binary to the v2 preview when one resolves, so
       // users with `opencode2` installed get it without touching settings.
       // Skipped while the instance is disabled so a boot-time probe doesn't
-      // spawn subprocesses for providers the user never turned on — enabling
-      // rebuilds the instance and resolves then. Everything downstream
-      // (adapter, probe, inventory, maintenance) keys off the resolved path.
+      // spawn subprocesses for providers the user never turned on; enabling
+      // rebuilds the instance and resolves then. While disabled, every
+      // consumer consistently sees the unresolved path.
       const configuredConfig = { ...config, enabled } satisfies OpenCodeSettings;
       const resolvedBinaryPath = enabled
         ? yield* openCodeRuntime.resolveDefaultBinaryPath({
@@ -144,10 +144,10 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
             environment: processEnv,
           })
         : configuredConfig.binaryPath;
-      const effectiveConfig: OpenCodeSettings =
-        resolvedBinaryPath === configuredConfig.binaryPath
-          ? configuredConfig
-          : { ...configuredConfig, binaryPath: resolvedBinaryPath };
+      const effectiveConfig: OpenCodeSettings = {
+        ...configuredConfig,
+        binaryPath: resolvedBinaryPath,
+      };
       const maintenanceCapabilities = isOpenCode2BinaryPath(effectiveConfig.binaryPath)
         ? makeManualOnlyProviderMaintenanceCapabilities({
             provider: DRIVER_KIND,
