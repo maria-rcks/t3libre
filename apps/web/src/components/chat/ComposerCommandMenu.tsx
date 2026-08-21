@@ -166,7 +166,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           kind={props.item.pathKind}
           theme={props.resolvedTheme}
         />
-      ) : skillSourceKind ? (
+      ) : skillSourceKind && !slashSkill ? (
         <SkillSourceIcon kind={skillSourceKind} />
       ) : null}
       <span className="flex min-w-0 flex-1 items-baseline gap-3">
