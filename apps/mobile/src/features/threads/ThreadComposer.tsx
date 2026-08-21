@@ -67,6 +67,7 @@ import {
 import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
 import { useComposerPathSearch } from "../../state/use-composer-path-search";
 import { ComposerCommandPopover, type ComposerCommandItem } from "./ComposerCommandPopover";
+import { matchesSlashSkillQuery } from "./composerSlashSkillSearch";
 import {
   type ExistingThreadSettingsRouteSession,
   useExistingThreadSettingsRoutePresentation,
@@ -431,13 +432,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       }
 
       const skillItems = (selectedProviderStatus?.skills ?? [])
-        .filter((skill) => {
-          if (!skill.enabled) return false;
-          if (!q) return true;
-          return [skill.name, skill.displayName, skill.shortDescription, skill.description].some(
-            (value) => value?.toLowerCase().includes(q),
-          );
-        })
+        .filter((skill) => matchesSlashSkillQuery(skill, q))
         .map((skill) => ({
           id: `skill:${skill.name}`,
           type: "skill" as const,

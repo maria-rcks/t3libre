@@ -117,6 +117,27 @@ describe("searchSlashCommandItems", () => {
     ]);
   });
 
+  it("matches skills by their rendered prefix", () => {
+    const items = [
+      {
+        id: "skill:claudeAgent:browser",
+        type: "skill",
+        provider: claudeDriver,
+        skill: {
+          name: "browser",
+          path: "/skills/browser/SKILL.md",
+          enabled: true,
+        },
+        label: "skill:browser",
+        description: "Open and control the in-app browser",
+      },
+    ] satisfies Array<Extract<ComposerCommandItem, { type: "skill" }>>;
+
+    expect(searchSlashCommandItems(items, "/skill:brow").map((item) => item.id)).toEqual([
+      "skill:claudeAgent:browser",
+    ]);
+  });
+
   it("keeps skills alongside commands for an empty slash query", () => {
     const items = [
       {
