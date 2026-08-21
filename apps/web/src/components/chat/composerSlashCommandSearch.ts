@@ -14,19 +14,9 @@ type SlashSearchItem = Extract<
 
 function scoreSlashCommandItem(item: SlashSearchItem, query: string): number | null {
   if (item.type === "skill") {
-    const scores = [
-      scoreProviderSkill(item.skill, query),
-      scoreQueryMatch({
-        value: item.label.toLowerCase(),
-        query,
-        exactBase: 0,
-        prefixBase: 2,
-        boundaryBase: 4,
-        includesBase: 6,
-        boundaryMarkers: ["-", "_", "/", ":"],
-      }),
-    ].filter((score): score is number => score !== null);
-    return scores.length === 0 ? null : Math.min(...scores);
+    const skillQuery =
+      query === "skill" ? "" : query.startsWith("skill:") ? query.slice("skill:".length) : query;
+    return skillQuery ? scoreProviderSkill(item.skill, skillQuery) : 0;
   }
 
   const primaryValue =

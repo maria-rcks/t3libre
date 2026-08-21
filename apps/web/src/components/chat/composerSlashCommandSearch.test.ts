@@ -136,6 +136,8 @@ describe("searchSlashCommandItems", () => {
     expect(searchSlashCommandItems(items, "/skill:brow").map((item) => item.id)).toEqual([
       "skill:claudeAgent:browser",
     ]);
+    expect(searchSlashCommandItems(items, "/sk")).toEqual([]);
+    expect(searchSlashCommandItems(items, "/ill")).toEqual([]);
   });
 
   it("keeps skills alongside commands for an empty slash query", () => {
