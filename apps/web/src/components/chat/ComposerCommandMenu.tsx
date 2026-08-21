@@ -139,7 +139,8 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
 }) {
   const skillSourceKind =
     props.item.type === "skill" ? resolveProviderSkillSourceKind(props.item.skill) : null;
-  const isSlashSkill = props.triggerKind === "slash-command" && props.item.type === "skill";
+  const slashSkill =
+    props.triggerKind === "slash-command" && props.item.type === "skill" ? props.item.skill : null;
 
   return (
     <CommandItem
@@ -170,10 +171,10 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       ) : null}
       <span className="flex min-w-0 flex-1 items-baseline gap-3">
         <span className="shrink-0 font-sans text-xs font-medium">
-          {isSlashSkill ? (
+          {slashSkill ? (
             <>
               <span className="text-secondary-label">skill:</span>
-              {props.item.skill.name}
+              {slashSkill.name}
             </>
           ) : (
             props.item.label
