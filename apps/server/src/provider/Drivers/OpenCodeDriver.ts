@@ -27,18 +27,13 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
-import { makeOpenCode2Adapter } from "../Layers/OpenCode2Adapter.ts";
 import {
   checkOpenCodeProviderStatus,
   makePendingOpenCodeProvider,
 } from "../Layers/OpenCodeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import {
-  isOpenCode2BinaryPath,
-  OpenCodeRuntime,
-  shouldUseOpenCode2Acp,
-} from "../opencodeRuntime.ts";
+import { isOpenCode2BinaryPath, OpenCodeRuntime } from "../opencodeRuntime.ts";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
@@ -136,7 +131,23 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
-      const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings;
+      // Upgrade the default binary to the v2 preview when one resolves, so
+      // users with `opencode2` installed get it without touching settings.
+      // Skipped while the instance is disabled so a boot-time probe doesn't
+      // spawn subprocesses for providers the user never turned on — enabling
+      // rebuilds the instance and resolves then. Everything downstream
+      // (adapter, probe, inventory, maintenance) keys off the resolved path.
+      const configuredConfig = { ...config, enabled } satisfies OpenCodeSettings;
+      const resolvedBinaryPath = enabled
+        ? yield* openCodeRuntime.resolveDefaultBinaryPath({
+            binaryPath: configuredConfig.binaryPath,
+            environment: processEnv,
+          })
+        : configuredConfig.binaryPath;
+      const effectiveConfig: OpenCodeSettings =
+        resolvedBinaryPath === configuredConfig.binaryPath
+          ? configuredConfig
+          : { ...configuredConfig, binaryPath: resolvedBinaryPath };
       const maintenanceCapabilities = isOpenCode2BinaryPath(effectiveConfig.binaryPath)
         ? makeManualOnlyProviderMaintenanceCapabilities({
             provider: DRIVER_KIND,
@@ -147,10 +158,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
             env: processEnv,
           });
 
-      const makeAdapter = shouldUseOpenCode2Acp(effectiveConfig)
-        ? makeOpenCode2Adapter
-        : makeOpenCodeAdapter;
-      const adapter = yield* makeAdapter(effectiveConfig, {
+      const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),

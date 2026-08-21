@@ -62,6 +62,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
       url: "http://127.0.0.1:4301",
       exitCode: Effect.never,
     }),
+  resolveDefaultBinaryPath: ({ binaryPath }) => Effect.succeed(binaryPath),
   connectToOpenCodeServer: ({ serverUrl }) =>
     Effect.gen(function* () {
       if (!serverUrl) {

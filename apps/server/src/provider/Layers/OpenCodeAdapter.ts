@@ -1224,12 +1224,19 @@ export function makeOpenCodeAdapter(
               const server = yield* openCodeRuntime.connectToOpenCodeServer({
                 binaryPath,
                 serverUrl,
+                // An explicit password means the user targets their own
+                // authenticated server — skip background-service adoption.
+                serverPassword,
                 ...(options?.environment ? { environment: options.environment } : {}),
               });
               const client = openCodeRuntime.createOpenCodeSdkClient({
                 baseUrl: server.url,
                 directory,
-                ...(server.external && serverPassword ? { serverPassword } : {}),
+                // Adopted background services carry their registration
+                // password; explicit settings apply to external servers.
+                ...(server.external && (server.serverPassword ?? serverPassword)
+                  ? { serverPassword: server.serverPassword ?? serverPassword }
+                  : {}),
               });
               const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
               if (mcpSession && !server.external) {

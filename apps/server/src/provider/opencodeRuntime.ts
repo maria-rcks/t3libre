@@ -1,3 +1,4 @@
+import * as NodeOS from "node:os";
 import * as NodeURL from "node:url";
 
 import type {
@@ -32,7 +33,9 @@ import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as FileSystem from "effect/FileSystem";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 import { isWindowsCommandNotFound } from "../processRunner.ts";
 import { collectStreamAsString } from "./providerSnapshot.ts";
@@ -59,14 +62,51 @@ const OPENCODE2_SERVER_PASSWORD_PREFIX = "server password ";
 const DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 30_000;
 const DEFAULT_HOSTNAME = "127.0.0.1";
 
+/**
+ * Binary name of the OpenCode 2 preview. When the user has not pinned a
+ * `binaryPath` (left at the `"opencode"` default), the driver upgrades to this
+ * binary whenever it resolves on PATH — no settings change required.
+ */
+export const OPENCODE2_DEFAULT_BINARY = "opencode2";
+
 export function isOpenCode2BinaryPath(binaryPath: string): boolean {
   return /(?:^|[\\/])opencode2(?:\.exe)?$/i.test(binaryPath.trim());
 }
 
-export function shouldUseOpenCode2Acp(
-  settings: Pick<OpenCodeSettings, "binaryPath" | "serverUrl">,
-): boolean {
-  return isOpenCode2BinaryPath(settings.binaryPath) && !settings.serverUrl?.trim();
+/**
+ * Where the OpenCode 2 background service registers itself while running
+ * (`~/.local/state/opencode/service.json` by default, `$XDG_STATE_HOME`
+ * aware). Reading this file is how we detect an already-running server
+ * instead of spawning our own.
+ */
+export function openCode2ServiceStateFile(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  // Unix-only: discovery skips Windows entirely (see
+  // discoverRegisteredOpenCode2Server), so forward slashes are correct.
+  const stateHome = env.XDG_STATE_HOME?.trim() || `${NodeOS.homedir()}/.local/state`;
+  return `${stateHome}/opencode/service.json`;
+}
+
+export interface OpenCode2ServiceRegistration {
+  readonly url: string;
+  readonly serverPassword?: string;
+}
+
+/**
+ * Validate a parsed `service.json` payload. Returns null for anything that
+ * isn't a usable HTTP endpoint so a corrupt or future-shaped registration
+ * degrades to "no running server" rather than a failed spawn.
+ *
+ * @internal
+ */
+export function parseOpenCode2ServiceRegistration(raw: unknown): OpenCode2ServiceRegistration | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const url = typeof record.url === "string" ? record.url.trim() : "";
+  if (!/^https?:\/\//i.test(url)) return null;
+  const password = typeof record.password === "string" ? record.password.trim() : "";
+  return { url, ...(password ? { serverPassword: password } : {}) };
 }
 
 export interface OpenCodeServerProcess {
@@ -173,17 +213,33 @@ export interface OpenCodeRuntimeShape {
   }) => Effect.Effect<OpenCodeServerProcess, OpenCodeRuntimeError, Scope.Scope>;
   /**
    * Returns a handle to either an externally-managed OpenCode server (when
-   * `serverUrl` is provided — no lifetime is attached to the caller's scope) or a
-   * freshly spawned local server whose lifetime is bound to the caller's scope.
+   * `serverUrl` is provided — no lifetime is attached to the caller's scope),
+   * an already-running OpenCode 2 background service adopted from its
+   * registration file (also external — we don't own its lifetime), or a
+   * freshly spawned local server whose lifetime is bound to the caller's
+   * scope. Adoption is attempted for `opencode2` binaries only and is skipped
+   * when an explicit `serverPassword` is set.
    */
   readonly connectToOpenCodeServer: (input: {
     readonly binaryPath: string;
     readonly serverUrl?: string | null;
+    readonly serverPassword?: string | null;
     readonly environment?: NodeJS.ProcessEnv;
     readonly port?: number;
     readonly hostname?: string;
     readonly timeoutMs?: number;
   }) => Effect.Effect<OpenCodeServerConnection, OpenCodeRuntimeError, Scope.Scope>;
+  /**
+   * Upgrade the default OpenCode binary to the v2 preview when one resolves:
+   * a `binaryPath` left at the `"opencode"` default (or empty) becomes
+   * `"opencode2"` when `<opencode2> --version` succeeds, so users with the
+   * preview installed get it without touching settings. Any explicit path is
+   * returned unchanged.
+   */
+  readonly resolveDefaultBinaryPath: (input: {
+    readonly binaryPath: string;
+    readonly environment?: NodeJS.ProcessEnv;
+  }) => Effect.Effect<string>;
   readonly runOpenCodeCommand: (input: {
     readonly binaryPath: string;
     readonly args: ReadonlyArray<string>;
@@ -620,6 +676,8 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const netService = yield* NetService.NetService;
   const hostPlatform = yield* HostProcessPlatform;
+  const httpClient = yield* HttpClient.HttpClient;
+  const fileSystem = yield* FileSystem.FileSystem;
   const resolveCommand = (command: string, args: ReadonlyArray<string>, env?: NodeJS.ProcessEnv) =>
     resolveSpawnCommand(command, args, env ? { env } : {});
 
@@ -831,6 +889,69 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       } satisfies OpenCodeServerProcess;
     });
 
+  /**
+   * Look for an already-running OpenCode 2 background service and health-check
+   * it before adopting. Any failure — missing registration file, unparsable
+   * JSON, dead endpoint, timeout — resolves to null so the caller falls
+   * through to spawning its own server. Never starts anything.
+   */
+  const discoverRegisteredOpenCode2Server = (
+    input: {
+      readonly environment?: NodeJS.ProcessEnv;
+    },
+  ): Effect.Effect<OpenCode2ServiceRegistration | null> =>
+    Effect.gen(function* () {
+      // The service registration is documented for unix state directories;
+      // don't guess a Windows location.
+      if (hostPlatform === "win32") return null;
+      const raw = yield* fileSystem.readFileString(openCode2ServiceStateFile(input.environment)).pipe(
+        Effect.option,
+      );
+      if (Option.isNone(raw)) return null;
+      const parsedExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown))(raw.value);
+      if (!Exit.isSuccess(parsedExit)) return null;
+      const registration = parseOpenCode2ServiceRegistration(parsedExit.value);
+      if (!registration) return null;
+
+      const baseUrl = registration.url.replace(/\/+$/, "");
+      let request = HttpClientRequest.get(`${baseUrl}/api/health`);
+      if (registration.serverPassword) {
+        request = HttpClientRequest.setHeader(
+          request,
+          "authorization",
+          `Basic ${Buffer.from(`opencode:${registration.serverPassword}`, "utf8").toString("base64")}`,
+        );
+      }
+      // A stale registration (crashed daemon, rebooted machine) must fall
+      // through to spawning our own server, so any transport failure or
+      // timeout resolves to "not adopted".
+      const healthy = yield* httpClient.execute(request).pipe(
+        Effect.timeout("3 seconds"),
+        Effect.map((response) => response.status === 200),
+        Effect.orElseSucceed(() => false),
+      );
+      return healthy ? registration : null;
+    }).pipe(Effect.orElseSucceed(() => null));
+
+  const resolveDefaultBinaryPath: OpenCodeRuntimeShape["resolveDefaultBinaryPath"] = (input) => {
+    const trimmed = input.binaryPath.trim();
+    // Only upgrade when no explicit binary was configured ("opencode" is the
+    // settings default; empty behaves the same way).
+    if (trimmed.length > 0 && trimmed.toLowerCase() !== "opencode") {
+      return Effect.succeed(input.binaryPath);
+    }
+    return runOpenCodeCommand({
+      binaryPath: OPENCODE2_DEFAULT_BINARY,
+      args: ["--version"],
+      ...(input.environment !== undefined ? { environment: input.environment } : {}),
+    }).pipe(
+      Effect.map((result) =>
+        result.code === 0 ? OPENCODE2_DEFAULT_BINARY : input.binaryPath,
+      ),
+      Effect.orElseSucceed(() => input.binaryPath),
+    );
+  };
+
   const connectToOpenCodeServer: OpenCodeRuntimeShape["connectToOpenCodeServer"] = (input) => {
     const serverUrl = input.serverUrl?.trim();
     if (serverUrl) {
@@ -842,19 +963,44 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       });
     }
 
-    return startOpenCodeServerProcess({
-      binaryPath: input.binaryPath,
-      ...(input.environment !== undefined ? { environment: input.environment } : {}),
-      ...(input.port !== undefined ? { port: input.port } : {}),
-      ...(input.hostname !== undefined ? { hostname: input.hostname } : {}),
-      ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
-    }).pipe(
-      Effect.map((server) => ({
-        url: server.url,
-        ...(server.serverPassword ? { serverPassword: server.serverPassword } : {}),
-        exitCode: server.exitCode,
-        external: false,
-      })),
+    // Adopt the user's running OpenCode 2 background service when one is up
+    // (mirrors how v2's own clients connect). An explicit `serverPassword`
+    // means the user is targeting their own authenticated server, not the
+    // shared registration, so discovery stays out of the way. Adopted
+    // services are external: we never kill them.
+    const adoptSharedService =
+      !input.serverPassword && isOpenCode2BinaryPath(input.binaryPath)
+        ? discoverRegisteredOpenCode2Server({
+            ...(input.environment !== undefined ? { environment: input.environment } : {}),
+          })
+        : Effect.succeed(null);
+
+    return Effect.flatMap(
+      adoptSharedService,
+      (adopted): Effect.Effect<OpenCodeServerConnection, OpenCodeRuntimeError, Scope.Scope> => {
+        if (adopted) {
+          return Effect.succeed({
+            url: adopted.url,
+            ...(adopted.serverPassword ? { serverPassword: adopted.serverPassword } : {}),
+            exitCode: null,
+            external: true,
+          });
+        }
+        return startOpenCodeServerProcess({
+          binaryPath: input.binaryPath,
+          ...(input.environment !== undefined ? { environment: input.environment } : {}),
+          ...(input.port !== undefined ? { port: input.port } : {}),
+          ...(input.hostname !== undefined ? { hostname: input.hostname } : {}),
+          ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+        }).pipe(
+          Effect.map((server) => ({
+            url: server.url,
+            ...(server.serverPassword ? { serverPassword: server.serverPassword } : {}),
+            exitCode: server.exitCode,
+            external: false,
+          })),
+        );
+      },
     );
   };
 
@@ -1014,6 +1160,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
   return {
     startOpenCodeServerProcess,
     connectToOpenCodeServer,
+    resolveDefaultBinaryPath,
     runOpenCodeCommand,
     createOpenCodeSdkClient,
     loadOpenCodeInventory,
@@ -1027,4 +1174,7 @@ export class OpenCodeRuntime extends Context.Service<OpenCodeRuntime, OpenCodeRu
 
 export const OpenCodeRuntimeLive = Layer.effect(OpenCodeRuntime, makeOpenCodeRuntime).pipe(
   Layer.provide(NetService.layer),
+  // Satisfies the runtime's HttpClient requirement internally so consumers
+  // only need to provide filesystem services (NodeServices in tests/prod).
+  Layer.provide(FetchHttpClient.layer),
 );

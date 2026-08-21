@@ -71,8 +71,10 @@ T3 Code looks for, but authenticate with `agent login`, not `cursor-agent login`
 Run the login command on the machine running the T3 Code server, not on the device you browse
 from.
 
-The OpenCode 2.0 preview installs a separate `opencode2` executable. Set OpenCode's **Binary path**
-to `opencode2`, or its full path. T3 Code detects it automatically and uses its ACP interface.
+The OpenCode 2.0 preview installs a separate `opencode2` executable. T3 Code detects it
+automatically and talks to OpenCode 2's native server: if a background service is already
+running, it is adopted; otherwise T3 Code starts one for the session. No settings change is
+needed, and an explicit **Binary path** still wins.
 
 ### Binary Discovery
 

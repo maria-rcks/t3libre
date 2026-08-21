@@ -4,14 +4,15 @@ import { describe, it } from "vite-plus/test";
 
 import {
   isOpenCode2BinaryPath,
+  openCode2ServiceStateFile,
   parseAgentListCliOutput,
   parseModelsCliOutput,
   parseOpenCode2AgentsCliOutput,
   parseOpenCode2ModelsCliOutput,
+  parseOpenCode2ServiceRegistration,
   parseOpenCodeServerReadyOutput,
   redactOpenCodeServerOutput,
   parseSkillsCliOutput,
-  shouldUseOpenCode2Acp,
 } from "./opencodeRuntime.ts";
 
 describe("OpenCode CLI family detection", () => {
@@ -22,13 +23,47 @@ describe("OpenCode CLI family detection", () => {
     NodeAssert.equal(isOpenCode2BinaryPath("/usr/local/bin/opencode"), false);
     NodeAssert.equal(isOpenCode2BinaryPath("opencode2-preview"), false);
   });
+});
 
-  it("keeps explicit server URLs on the HTTP adapter", () => {
+describe("openCode2ServiceStateFile", () => {
+  it("honors XDG_STATE_HOME", () => {
     NodeAssert.equal(
-      shouldUseOpenCode2Acp({ binaryPath: "opencode2", serverUrl: "http://127.0.0.1:4096" }),
-      false,
+      openCode2ServiceStateFile({ XDG_STATE_HOME: "/var/state" }),
+      "/var/state/opencode/service.json",
     );
-    NodeAssert.equal(shouldUseOpenCode2Acp({ binaryPath: "opencode2", serverUrl: "" }), true);
+  });
+
+  it("falls back to the default state directory", () => {
+    const path = openCode2ServiceStateFile({});
+    NodeAssert.equal(path.endsWith("/.local/state/opencode/service.json"), true);
+  });
+});
+
+describe("parseOpenCode2ServiceRegistration", () => {
+  it("accepts a healthy registration payload", () => {
+    NodeAssert.deepEqual(
+      parseOpenCode2ServiceRegistration({
+        id: "abc",
+        version: "0.0.0-beta-17823",
+        url: "http://127.0.0.1:49374",
+        pid: 10028,
+        password: "secret",
+      }),
+      { url: "http://127.0.0.1:49374", serverPassword: "secret" },
+    );
+  });
+
+  it("accepts a registration without a password", () => {
+    NodeAssert.deepEqual(parseOpenCode2ServiceRegistration({ url: "http://127.0.0.1:4096" }), {
+      url: "http://127.0.0.1:4096",
+    });
+  });
+
+  it("rejects non-HTTP URLs and malformed payloads", () => {
+    NodeAssert.equal(parseOpenCode2ServiceRegistration({ url: "unix:///tmp/sock" }), null);
+    NodeAssert.equal(parseOpenCode2ServiceRegistration({ password: "x" }), null);
+    NodeAssert.equal(parseOpenCode2ServiceRegistration("nope"), null);
+    NodeAssert.equal(parseOpenCode2ServiceRegistration(null), null);
   });
 });
 

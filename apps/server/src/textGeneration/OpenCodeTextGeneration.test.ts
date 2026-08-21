@@ -64,6 +64,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
       exitCode: null,
       external: Boolean(serverUrl),
     }),
+  resolveDefaultBinaryPath: ({ binaryPath }) => Effect.succeed(binaryPath),
   runOpenCodeCommand: () => Effect.succeed({ stdout: "", stderr: "", code: 0 }),
   createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
     ({
