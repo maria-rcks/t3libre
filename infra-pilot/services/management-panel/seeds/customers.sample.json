@@ -1,0 +1,17 @@
+[
+  {
+    "owner_user_id": "00000000-0000-0000-0000-000000000001",
+    "name": "Acme Corporation",
+    "email": "contact@acme.example"
+  },
+  {
+    "owner_user_id": "00000000-0000-0000-0000-000000000001",
+    "name": "Beta LLC",
+    "email": "hello@beta.example"
+  },
+  {
+    "owner_user_id": "00000000-0000-0000-0000-000000000002",
+    "name": "Gamma Industries",
+    "email": "info@gamma.example"
+  }
+]

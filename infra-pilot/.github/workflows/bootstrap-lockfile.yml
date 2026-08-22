@@ -1,0 +1,44 @@
+name: Bootstrap Lockfiles
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to generate a lockfile for (discord-service or management-panel)'
+        type: choice
+        options: [discord-service, management-panel]
+        required: true
+        default: discord-service
+
+permissions:
+  contents: write
+
+jobs:
+  generate-lockfile:
+    runs-on: ubuntu-latest
+    name: Generate package-lock.json
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Generate lockfile
+        working-directory: services/${{ inputs.service }}
+        run: npm install --package-lock-only --no-audit --no-fund
+
+      - name: Commit and push lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add services/${{ inputs.service }}/package-lock.json
+          if git diff --cached --quiet; then
+            echo "No lockfile changes to commit"
+          else
+            git commit -m "chore(${{ inputs.service }}): add package-lock.json"
+            git push origin main
+          fi

@@ -1,0 +1,68 @@
+[
+  {
+    "type": "app:create",
+    "userId": "u1",
+    "description": "Test export",
+    "severity": "info",
+    "id": "43f16050-c12c-44d5-bb3e-48fbe36fe896",
+    "timestamp": "2026-05-27T19:04:52.612Z"
+  },
+  {
+    "type": "app:create",
+    "userId": "u1",
+    "userName": "User",
+    "description": "Test",
+    "severity": "info",
+    "id": "3a1678b6-ace5-4851-b33c-352e066ab398",
+    "timestamp": "2026-05-27T19:04:52.604Z"
+  },
+  {
+    "type": "app:create",
+    "userId": "user-b",
+    "description": "B creates",
+    "severity": "info",
+    "id": "5a67b0cc-9c09-4dae-afb0-70d528a12df9",
+    "timestamp": "2026-05-27T19:04:52.595Z"
+  },
+  {
+    "type": "app:create",
+    "userId": "user-a",
+    "description": "A creates",
+    "severity": "info",
+    "id": "f27b0947-0318-470e-86ad-9e64ae1ac45b",
+    "timestamp": "2026-05-27T19:04:52.592Z"
+  },
+  {
+    "type": "app:stop",
+    "userId": "u1",
+    "description": "App stopped",
+    "severity": "warning",
+    "id": "d205ab22-105f-487a-a1d6-a2ea115ba155",
+    "timestamp": "2026-05-27T19:04:52.584Z"
+  },
+  {
+    "type": "backup:create",
+    "userId": "u1",
+    "description": "Backup created",
+    "severity": "info",
+    "id": "70d20104-826d-4456-be03-92522350ee76",
+    "timestamp": "2026-05-27T19:04:52.580Z"
+  },
+  {
+    "type": "app:start",
+    "userId": "u1",
+    "description": "App started",
+    "severity": "info",
+    "id": "03c8e7d5-3291-49d1-b89d-db612fe9ed9d",
+    "timestamp": "2026-05-27T19:04:52.578Z"
+  },
+  {
+    "type": "app:create",
+    "userId": "user-1",
+    "userName": "Test User",
+    "description": "Created test app",
+    "severity": "info",
+    "id": "ceffca88-0cdb-4090-bc6a-ac31153c0462",
+    "timestamp": "2026-05-27T19:04:52.568Z"
+  }
+]

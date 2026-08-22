@@ -1,0 +1,27 @@
+{
+  "name": "discord-service",
+  "version": "1.0.0",
+  "description": "Infra Pilot Discord Bot - Server management and automation",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js",
+    "test": "node --test tests/*.js",
+    "test:coverage": "NODE_V8_COVERAGE=coverage/v8 node --test --experimental-test-coverage tests/*.js --test-coverage-lines=15 --test-coverage-functions=10 --test-coverage-branches=5 --test-coverage-statements=15",
+    "lint": "node --check index.js && node --check integration.js && node --check cli-bridge.js && node --check ./modules/*.js",
+    "type-check": "node --check index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "discord.js": "^14.14.1",
+    "@discordjs/builders": "^1.7.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.13.0",
+    "systeminformation": "^5.21.0",
+    "pretty-bytes": "^7.1.0",
+    "canvas": "^3.2.3",
+    "quickchart-js": "^4.0.0",
+    "fast-xml-parser": "^5.0.0",
+    "node-cron": "^4.2.1"
+  }
+}

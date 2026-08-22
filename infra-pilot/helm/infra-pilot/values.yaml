@@ -1,0 +1,208 @@
+# Default values for infra-pilot Helm chart
+
+replicaCount: 1
+
+global:
+  environment: production
+  imageRegistry: ghcr.io/drosemann
+
+image:
+  repository: infra-pilot
+  pullPolicy: IfNotPresent
+  # Empty tag defaults to Chart.AppVersion for reproducible deployments
+  tag: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 8500
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+  hosts:
+    - host: api.infra-pilot.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: infra-pilot-tls
+      hosts:
+        - api.infra-pilot.example.com
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+postgresql:
+  enabled: true
+  auth:
+    database: infrapilot
+    username: infrapilot
+    password: ""  # MUST be overridden in production via --set postgresql.auth.password=$DB_PASSWORD or external secret
+  primary:
+    persistence:
+      size: 50Gi
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: ""  # MUST be overridden in production via --set redis.auth.password=$REDIS_PASSWORD or external secret
+  architecture: replication
+  replica:
+    replicaCount: 2
+  metrics:
+    enabled: true
+
+orchestrator:
+  enabled: true
+  image:
+    repository: ghcr.io/drosemann/infra-pilot-orchestrator-agent
+    tag: ""
+  config:
+    logLevel: INFO
+    workerCount: 4
+  env:
+    - name: DB_HOST
+      value: "infra-pilot-postgresql"
+    - name: REDIS_HOST
+      value: "infra-pilot-redis-master"
+    - name: ENVIRONMENT
+      value: production
+
+managementPanel:
+  enabled: true
+  image:
+    repository: ghcr.io/drosemann/infra-pilot-management-panel
+    tag: ""
+  service:
+    port: 3000
+  env:
+    - name: ORCHESTRATOR_URL
+      value: "http://infra-pilot-orchestrator:8500"
+    # ORCHESTRATOR_API_TOKEN is intentionally unset here: the panel only
+    # forwards deployments when it is configured. Set it via a Kubernetes
+    # Secret reference (e.g. secretKeyRef from a generated secret) instead
+    # of committing a placeholder token.
+    - name: SUPABASE_URL
+      value: ""
+    - name: SUPABASE_ANON_KEY
+      value: ""
+
+discordService:
+  enabled: false
+  image:
+    repository: ghcr.io/drosemann/infra-pilot-discord-service
+    tag: ""
+  env:
+    - name: DISCORD_TOKEN
+      value: ""
+    - name: DB_HOST
+      value: "infra-pilot-postgresql"
+
+prometheus:
+  enabled: true
+  alertmanager:
+    enabled: true
+  kubeStateMetrics:
+    enabled: true
+  nodeExporter:
+    enabled: true
+  pushgateway:
+    enabled: false
+
+grafana:
+  enabled: true
+  adminPassword: ""  # MUST be overridden in production via --set grafana.adminPassword=$GRAFANA_PASSWORD or external secret
+  dashboards:
+    enabled: true
+  datasources:
+    enabled: true
+  persistence:
+    enabled: true
+    size: 10Gi
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+
+configMaps:
+  create: true
+  data:
+    LOG_LEVEL: INFO
+    MAX_CONNECTIONS: "100"
+    CACHE_TTL: "300"
+
+secrets:
+  create: true
+  # WARNING: In production, use external-secrets or a vault provider instead of plain values
+  data:
+    DB_PASSWORD: ""  # REQUIRED in production
+    REDIS_PASSWORD: ""  # REQUIRED in production
+    API_KEY: ""  # REQUIRED in production - generate via: openssl rand -hex 32
+
+networkPolicies:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8500
+        - port: 3000
+  egress:
+    enabled: true
+
+serviceMesh:
+  enabled: false
+  sidecar: true
+  mtls: true

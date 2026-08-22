@@ -1,0 +1,35 @@
+apiVersion: v2
+name: infra-pilot
+description: A Helm chart for deploying Infra Pilot on Kubernetes
+type: application
+version: 0.1.0
+appVersion: "2.0.0"
+icon: https://infra-pilot.example.com/icon.png
+keywords:
+  - infrastructure
+  - orchestration
+  - cloud
+  - devops
+home: https://github.com/drosemann/infra-pilot
+sources:
+  - https://github.com/drosemann/infra-pilot
+maintainers:
+  - name: Infra Pilot Team
+    email: team@infra-pilot.example.com
+dependencies:
+  - name: postgresql
+    version: ~15.0
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: redis
+    version: ~20.0
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+  - name: prometheus
+    version: ~25.0
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: prometheus.enabled
+  - name: grafana
+    version: ~8.0
+    repository: https://grafana.github.io/helm-charts
+    condition: grafana.enabled

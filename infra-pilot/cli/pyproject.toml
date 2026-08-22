@@ -1,0 +1,25 @@
+[project]
+name = "infrapilot"
+version = "2.0.0"
+description = "Infra Pilot CLI - CLI-first infrastructure orchestration platform"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+readme = "README.md"
+
+dependencies = [
+    "typer==0.26.8",
+    "rich==15.0.0",
+    "pyyaml==6.0.3",
+    "requests==2.34.2",
+]
+
+[project.scripts]
+ipilot = "ipilot.main:app"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ipilot*"]

@@ -1,0 +1,56 @@
+name: PR Community Vote
+
+on:
+  schedule:
+    # Every Saturday at 19:00 UTC
+    - cron: "0 19 * * 6"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Score PRs and report the winner without merging
+        type: boolean
+        default: false
+      min_voters:
+        description: Minimum number of unique voters required
+        type: number
+        default: 2
+
+concurrency:
+  group: pr-community-vote
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  vote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: Weekly PR Vote
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Run community vote
+        env:
+          # Default GITHUB_TOKEN cannot merge past branch protection that
+          # requires reviews; set the VOTE_MERGE_TOKEN secret to an admin PAT
+          # to override.
+          GH_TOKEN: ${{ secrets.VOTE_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          MIN_VOTERS: ${{ inputs.min_voters }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          ARGS=("--repo" "$REPO")
+          if [ "$EVENT_NAME" == "workflow_dispatch" ]; then
+            ARGS+=("--min-voters" "$MIN_VOTERS")
+            if [ "$DRY_RUN" == "true" ]; then
+              ARGS+=("--dry-run")
+            fi
+          fi
+          python scripts/pr_voting.py "${ARGS[@]}"

@@ -1,0 +1,79 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "python"
+    assignees:
+      - "drosemann"
+    reviewers:
+      - "drosemann"
+
+  - package-ecosystem: "pip"
+    directory: "/services/orchestrator-agent"
+    schedule:
+      interval: "monthly"
+      day: "monday"
+    open-pull-requests-limit: 2
+    groups:
+      patch-and-minor:
+        update-types:
+          - "patch"
+          - "minor"
+        patterns:
+          - "*"
+      major:
+        update-types:
+          - "major"
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "python"
+    assignees:
+      - "drosemann"
+
+  - package-ecosystem: "npm"
+    directory: "/services/management-panel"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "javascript"
+    assignees:
+      - "drosemann"
+    reviewers:
+      - "drosemann"
+
+  - package-ecosystem: "npm"
+    directory: "/services/discord-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript"
+    assignees:
+      - "drosemann"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "github-actions"
+    assignees:
+      - "drosemann"
+    reviewers:
+      - "drosemann"

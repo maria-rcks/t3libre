@@ -1,0 +1,108 @@
+name: Release Management
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.2.3)'
+        required: false
+        type: string
+      prerelease:
+        description: 'Pre-release flag'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    name: Determine Version
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+      is_prerelease: ${{ steps.semver.outputs.prerelease }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: semver
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            echo "prerelease=${{ inputs.prerelease }}" >> $GITHUB_OUTPUT
+          else
+            tag_count=$(git tag --list 'v*' | wc -l)
+            next_version=$((tag_count + 1))
+            echo "version=0.${next_version}.0" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+  changelog:
+    runs-on: ubuntu-latest
+    name: Generate Changelog
+    needs: version
+    outputs:
+      changelog: ${{ steps.gen.outputs.changelog }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: gen
+        run: |
+          {
+            echo "## Release ${{ needs.version.outputs.version }}"
+            echo ""
+            echo "### Changes since last release"
+            echo ""
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            if [ -z "$LATEST_TAG" ]; then
+              git log --oneline --no-decorate
+            else
+              git log --oneline --no-decorate "${LATEST_TAG}..HEAD"
+            fi
+            echo ""
+            echo "### Services included"
+            echo "- CLI Service"
+            echo "- Orchestrator Agent"
+            echo "- Management Panel"
+            echo "- Discord Service"
+          } > changelog.md
+
+          EOF_DELIMITER=$(dd if=/dev/urandom bs=15 count=1 2>/dev/null | base64 | tr -dc 'a-zA-Z0-9')
+          echo "changelog<<${EOF_DELIMITER}" >> $GITHUB_OUTPUT
+          cat changelog.md >> $GITHUB_OUTPUT
+          echo "${EOF_DELIMITER}" >> $GITHUB_OUTPUT
+
+      - name: Upload changelog
+        uses: actions/upload-artifact@v7
+        with:
+          name: changelog
+          path: changelog.md
+
+  release:
+    runs-on: ubuntu-latest
+    name: Create Release
+    needs: [version, changelog]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          body: ${{ needs.changelog.outputs.changelog }}
+          prerelease: ${{ needs.version.outputs.is_prerelease == 'true' }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

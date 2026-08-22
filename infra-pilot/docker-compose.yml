@@ -1,0 +1,353 @@
+name: infra-pilot
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: infra-pilot-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-infra_pilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set (see .env.example or scripts/generate-env.sh)}
+      POSTGRES_DB: ${POSTGRES_DB:-infra_pilot}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - infra-pilot-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    labels:
+      app.kubernetes.io/name: infra-pilot
+      app.kubernetes.io/component: postgres
+      app.kubernetes.io/part-of: infra-pilot
+
+  redis:
+    image: redis:7-alpine
+    container_name: infra-pilot-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - infra-pilot-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    labels:
+      app.kubernetes.io/name: infra-pilot
+      app.kubernetes.io/component: redis
+      app.kubernetes.io/part-of: infra-pilot
+
+  management-panel:
+    build:
+      context: ./services/management-panel
+      dockerfile: Dockerfile
+      target: development
+    container_name: infra-pilot-management-panel
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+      VITE_ENVIRONMENT: ${VITE_ENVIRONMENT:-development}
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://localhost:54321}
+      VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-local-dev-anon-key}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-infra_pilot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-infra_pilot}
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3001}
+    ports:
+      - "${MANAGEMENT_FRONTEND_PORT:-5173}:5173"
+      - "${MANAGEMENT_BACKEND_PORT:-3001}:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', r => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - infra-pilot-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    labels:
+      app.kubernetes.io/name: infra-pilot
+      app.kubernetes.io/component: management-panel
+      app.kubernetes.io/part-of: infra-pilot
+
+  orchestrator-agent:
+    build:
+      context: ./services/orchestrator-agent
+      dockerfile: Dockerfile
+      target: production
+    container_name: infra-pilot-orchestrator
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-infra_pilot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-infra_pilot}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      GITOPS_WEBHOOK_PORT: 8500
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITOPS_WEBHOOK_TOKEN: ${GITOPS_WEBHOOK_TOKEN:?GITOPS_WEBHOOK_TOKEN must be set (see .env.example or scripts/generate-env.sh)}
+      # Bearer token for the /api/ route group. Fails closed when set:
+      # requests without a matching Authorization header get a 401.
+      FEDERATION_API_TOKEN: ${FEDERATION_API_TOKEN:?FEDERATION_API_TOKEN must be set (see .env.example or scripts/generate-env.sh)}
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "${ORCHESTRATOR_WEBHOOK_PORT:-8500}:8500"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - infra-pilot-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    labels:
+      app.kubernetes.io/name: infra-pilot
+      app.kubernetes.io/component: orchestrator-agent
+      app.kubernetes.io/part-of: infra-pilot
+
+  discord-service:
+    build:
+      context: ./services/discord-service
+      dockerfile: Dockerfile
+      target: production
+    container_name: infra-pilot-discord
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
+      PTERODACTYL_API_URL: ${PTERODACTYL_API_URL:-http://localhost:8080/api}
+      PTERODACTYL_API_KEY: ${PTERODACTYL_API_KEY:-local-dev-key}
+      SERVER_CREATION_CHANNEL_ID: ${SERVER_CREATION_CHANNEL_ID:-}
+      LOCATION_ID: ${LOCATION_ID:-1}
+      API_BASE_URL: http://management-panel:3001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-infra_pilot}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:-infra_pilot}
+      WHITELIST_IDS: ${WHITELIST_IDS:-}
+      HEALTH_CHECK_INTERVAL_SECONDS: ${HEALTH_CHECK_INTERVAL_SECONDS:-60}
+      DEFAULT_SSH_IMAGE: ${DEFAULT_SSH_IMAGE:-ubuntu:22.04}
+      PUBLIC_IP: ${PUBLIC_IP:-127.0.0.1}
+      SERVER_LIMIT: ${SERVER_LIMIT:-5}
+      CUTTLY_API_KEY: ${CUTTLY_API_KEY:-}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
+      BACKUP_RETENTION: '${BACKUP_RETENTION:-{"daily": 7, "weekly": 4, "monthly": 6}}'
+      HOST_IP: ${HOST_IP:-127.0.0.1}
+      NODE_ENV: ${NODE_ENV:-development}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "${DISCORD_WEBHOOK_PORT:-3002}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', r => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - infra-pilot-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    labels:
+      app.kubernetes.io/name: infra-pilot
+      app.kubernetes.io/component: discord-service
+      app.kubernetes.io/part-of: infra-pilot
+    profiles:
+      - discord
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: infra-pilot-prometheus
+    volumes:
+      - ./infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:9090/-/healthy", "-O", "/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - infra-pilot-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    labels:
+      app.kubernetes.io/name: infra-pilot
+      app.kubernetes.io/component: prometheus
+      app.kubernetes.io/part-of: infra-pilot
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: infra-pilot-grafana
+    volumes:
+      - ./infra/monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./infra/monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: ""
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:3000/api/health", "-O", "/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    networks:
+      - infra-pilot-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    labels:
+      app.kubernetes.io/name: infra-pilot
+      app.kubernetes.io/component: grafana
+      app.kubernetes.io/part-of: infra-pilot
+    profiles:
+      - monitoring
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: infra-pilot-postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-infra_pilot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-infra_pilot}?sslmode=disable"
+    ports:
+      - "${POSTGRES_EXPORTER_PORT:-9187}:9187"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - infra-pilot-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+    profiles:
+      - monitoring
+
+  # One-shot k6 load test runner (scenarios in tests/load/k6).
+  # Run:  docker compose --profile loadtest up postgres redis orchestrator-agent management-panel -d
+  #       docker compose --profile loadtest run --rm loadtest
+  # The k6 container waits for the orchestrator healthcheck, executes the
+  # scenario selected via K6_SCENARIO and writes loadtest-results.json
+  # back into tests/load/k6/ (gitignored).
+  loadtest:
+    image: grafana/k6:latest
+    container_name: infra-pilot-loadtest
+    profiles:
+      - loadtest
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        k6 run "/tests/${K6_SCENARIO:-smoke}.js" \
+          --out json=/tests/loadtest-results.json
+    environment:
+      K6_TARGET_ORCHESTRATOR: http://orchestrator-agent:8500
+      K6_TARGET_PANEL: http://management-panel:3001
+      K6_FEDERATION_TOKEN: ${FEDERATION_API_TOKEN}
+      K6_GITOPS_WEBHOOK_TOKEN: ${GITOPS_WEBHOOK_TOKEN}
+      K6_SOAK_VUS: ${K6_SOAK_VUS:-50}
+      K6_SOAK_DURATION: ${K6_SOAK_DURATION:-30m}
+      K6_SPIKE_MAX_VU: ${K6_SPIKE_MAX_VU:-500}
+      K6_MANIFEST_COUNT: ${K6_MANIFEST_COUNT:-1}
+    volumes:
+      - ./tests/load/k6:/tests:rw
+    depends_on:
+      orchestrator-agent:
+        condition: service_healthy
+    networks:
+      - infra-pilot-net
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    labels:
+      app.kubernetes.io/name: infra-pilot
+      app.kubernetes.io/component: loadtest
+      app.kubernetes.io/part-of: infra-pilot
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  infra-pilot-net:
+    driver: bridge

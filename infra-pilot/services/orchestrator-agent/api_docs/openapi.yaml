@@ -1,0 +1,495 @@
+openapi: 3.0.3
+info:
+  title: Infra Pilot Orchestrator Agent API
+  version: 1.0.0
+  description: |
+    HTTP surface of the Orchestrator Agent (aiohttp webhook server).
+    This file is the single source of truth for the route table: the
+    contract test tests/unit/test_openapi_contract.py fails when the
+    running routes and this spec drift apart.
+    Routes under /api/ require the FEDERATION_API_TOKEN bearer token
+    (fail closed in production). /webhook/gitops requires its own
+    HMAC-SHA256 signature; /health and /metrics are public.
+servers:
+  - url: http://localhost:8500
+    description: Local development (GITOPS_WEBHOOK_PORT)
+security:
+  - BearerAuth: []
+tags:
+  - name: Monitoring
+    description: Health and Prometheus metrics endpoints
+  - name: Federation
+    description: Federation peer status
+  - name: RBAC
+    description: Organizations, roles and permissions management
+  - name: Deployments
+    description: Manifest-based reconciliation and provider discovery
+  - name: GitOps
+    description: Signed webhook that converges toward a manifest
+paths:
+  /health:
+    get:
+      tags: [Monitoring]
+      summary: Health check (database probe)
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, postgresql]
+                properties:
+                  status: { type: string, enum: [ok, degraded] }
+                  service: { type: string }
+                  postgresql: { type: string, enum: [up, down] }
+  /api/health:
+    get:
+      tags: [Monitoring]
+      summary: Health check (aliased under the authenticated API prefix)
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, postgresql]
+                properties:
+                  status: { type: string, enum: [ok, degraded] }
+                  service: { type: string }
+                  postgresql: { type: string, enum: [up, down] }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthNotConfigured"
+  /metrics:
+    get:
+      tags: [Monitoring]
+      summary: Prometheus metrics
+      description: Metrics in Prometheus text exposition format (OpenMetrics compatible).
+      security: []
+      responses:
+        "200":
+          description: Metrics payload
+          content:
+            text/plain:
+              schema: { type: string }
+  /api/v1/federation/status:
+    get:
+      tags: [Federation]
+      summary: Federation status
+      responses:
+        "200":
+          description: Federation status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, federation, version]
+                properties:
+                  status: { type: string }
+                  service: { type: string }
+                  federation:
+                    type: object
+                    properties:
+                      enabled: { type: boolean }
+                  version: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthNotConfigured"
+  /api/v1/rbac/roles:
+    get:
+      tags: [RBAC]
+      summary: List all roles with their permissions
+      responses:
+        "200":
+          description: Role list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roles]
+                properties:
+                  roles:
+                    type: array
+                    items: { $ref: "#/components/schemas/Role" }
+    post:
+      tags: [RBAC]
+      summary: Create a custom role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, permissions]
+              properties:
+                name: { type: string, minLength: 1 }
+                permissions:
+                  type: array
+                  items: { $ref: "#/components/schemas/Permission" }
+                description: { type: string }
+      responses:
+        "201":
+          description: Role created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "400":
+          description: Missing fields or unknown permission
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/rbac/orgs:
+    post:
+      tags: [RBAC]
+      summary: Create an organization and auto-assign the owner role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, owner_user_id]
+              properties:
+                name: { type: string, minLength: 1 }
+                owner_user_id: { type: string, minLength: 1 }
+                id: { type: string }
+      responses:
+        "201":
+          description: Organization created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Organization" }
+        "400":
+          description: Missing fields
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [RBAC]
+      summary: List organizations for a user
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Organization list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orgs]
+                properties:
+                  orgs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Organization" }
+        "400":
+          description: user_id query parameter missing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/rbac/assign:
+    post:
+      tags: [RBAC]
+      summary: Assign a role to a user within an organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, org_id, role_name]
+              properties:
+                user_id: { type: string }
+                org_id: { type: string }
+                role_name: { type: string }
+                project_id: { type: string }
+                granted_by: { type: string }
+      responses:
+        "201":
+          description: Membership created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Membership" }
+        "400":
+          description: Missing fields or unknown role
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Organization not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/rbac/orgs/{org_id}/permissions:
+    get:
+      tags: [RBAC]
+      summary: Resolved permissions for a user within an organization
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Resolved permissions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, org_id, permissions]
+                properties:
+                  user_id: { type: string }
+                  org_id: { type: string }
+                  permissions:
+                    type: array
+                    items: { $ref: "#/components/schemas/Permission" }
+        "400":
+          description: user_id query parameter missing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Organization not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/rbac/orgs/{org_id}/members:
+    get:
+      tags: [RBAC]
+      summary: List memberships of an organization
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: project_id
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Membership list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members]
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: "#/components/schemas/Membership" }
+        "404":
+          description: Organization not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/deployments:
+    post:
+      tags: [Deployments]
+      summary: Reconcile a manifest on demand
+      description: |
+        Body carries an InfraFile manifest. When user_id and org_id are
+        supplied the caller must hold the manifest:deploy permission in
+        that organization; without them the federation token holder acts
+        as platform administrator. Returns 207 when reconciliation
+        produced errors, 200 when it was clean.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manifest]
+              properties:
+                manifest: { type: object }
+                dry_run: { type: boolean, default: false }
+                user_id: { type: string }
+                org_id: { type: string }
+      responses:
+        "200":
+          description: Reconcile completed without errors
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReconcileResult" }
+        "207":
+          description: Reconcile completed with errors
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReconcileResult" }
+        "400":
+          description: Invalid body or manifest
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: manifest:deploy permission required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/providers:
+    get:
+      tags: [Deployments]
+      summary: List registered compute providers
+      responses:
+        "200":
+          description: Provider list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [providers]
+                properties:
+                  providers:
+                    type: array
+                    items: { type: string }
+  /webhook/gitops:
+    post:
+      tags: [GitOps]
+      summary: GitOps push webhook (HMAC-SHA256 signed)
+      description: |
+        Converges toward the manifest in the body. Requires the
+        X-Timestamp and X-Signature-256 headers; fails closed when
+        GITOPS_WEBHOOK_TOKEN is not configured.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manifest]
+              properties:
+                manifest: { type: object }
+                dry_run: { type: boolean, default: false }
+                user_id: { type: string }
+                org_id: { type: string }
+      responses:
+        "200":
+          description: Reconcile completed without errors
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReconcileResult" }
+        "207":
+          description: Reconcile completed with errors
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReconcileResult" }
+        "400":
+          description: Invalid body or manifest
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Missing, stale or invalid signature
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: GITOPS_WEBHOOK_TOKEN not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: FEDERATION_API_TOKEN (constant-time compared)
+  responses:
+    Unauthorized:
+      description: Invalid or missing federation API token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    AuthNotConfigured:
+      description: FEDERATION_API_TOKEN is required in production
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        message: { type: string }
+    Permission:
+      type: string
+      enum:
+        - instance:create
+        - instance:read
+        - instance:update
+        - instance:delete
+        - instance:start
+        - instance:stop
+        - instance:restart
+        - snapshot:create
+        - snapshot:restore
+        - backup:create
+        - backup:restore
+        - network:create
+        - network:read
+        - network:update
+        - network:delete
+        - dns:create
+        - dns:update
+        - dns:delete
+        - billing:read
+        - billing:manage
+        - org:manage
+        - org:delete
+        - project:manage
+        - project:delete
+        - role:assign
+        - member:invite
+        - member:remove
+        - audit:read
+        - audit:export
+        - manifest:deploy
+        - manifest:read
+    Role:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        permissions:
+          type: array
+          items: { $ref: "#/components/schemas/Permission" }
+    Organization:
+      type: object
+      required: [id, name, owner_user_id]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        owner_user_id: { type: string }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Membership:
+      type: object
+      required: [user_id, org_id, role_name]
+      properties:
+        user_id: { type: string }
+        org_id: { type: string }
+        project_id: { type: string }
+        role_name: { type: string }
+        granted_by: { type: string }
+        granted_at: { type: string, format: date-time }
+    ReconcileResult:
+      type: object
+      properties:
+        errors:
+          type: array
+          items: { type: string }

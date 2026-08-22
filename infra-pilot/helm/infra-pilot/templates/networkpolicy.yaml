@@ -1,0 +1,61 @@
+{{- if .Values.networkPolicies.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "infra-pilot.fullname" . }}-default-deny
+  labels:
+    {{- include "infra-pilot.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "infra-pilot.fullname" . }}-allow-ingress
+  labels:
+    {{- include "infra-pilot.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "infra-pilot.selectorLabels" . | nindent 6 }}
+  ingress:
+    {{- range .Values.networkPolicies.ingress }}
+    - from:
+        {{- range .from }}
+        - {{- toYaml . | nindent 10 }}
+        {{- end }}
+      ports:
+        {{- range .ports }}
+        - port: {{ .port }}
+        {{- end }}
+    {{- end }}
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - port: 443
+        - port: 80
+        - port: 53
+          protocol: UDP
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 5432
+        - port: 6379
+    {{- if .Values.networkPolicies.egress.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: management-panel
+      ports:
+        - port: 3000
+    {{- end }}
+{{- end }}
