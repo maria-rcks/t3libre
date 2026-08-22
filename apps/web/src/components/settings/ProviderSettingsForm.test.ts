@@ -39,7 +39,8 @@ describe("ProviderSettingsForm helpers", () => {
   it("exposes one OpenCode provider backed by OpenCode 2", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
 
-    expect(opencode).toMatchObject({ label: "OpenCode", badgeLabel: "New" });
+    expect(opencode).toMatchObject({ label: "OpenCode" });
+    expect(opencode).not.toHaveProperty("badgeLabel");
     expect(DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode2")]).toBeUndefined();
     expect(deriveProviderSettingsFields(opencode!).map((field) => field.key)).toEqual([
       "binaryPath",
