@@ -44,6 +44,12 @@ import * as OpenCodeRuntime from "../opencodeRuntime.ts";
 import type { EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
+
+/**
+ * Version tag stamped into the OpenCode resume cursor. Bump if the cursor
+ * shape changes so stale-shaped cursors written by older builds are ignored
+ * rather than misread (mirrors GROK_RESUME_VERSION / CURSOR_RESUME_VERSION).
+ */
 const RESUME_VERSION = 1 as const;
 
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown);
@@ -164,6 +170,11 @@ function parseResumeCursor(raw: unknown): string | undefined {
   return stringField(record, "sessionId");
 }
 
+/**
+ * Whether two directory spellings name the same location. Lexically equal
+ * paths short-circuit; otherwise both sides use `realPath`, falling back to
+ * their lexical forms on failure, so the probe can only widen matches.
+ */
 export function isSameOpenCodeDirectory(
   fileSystem: FileSystem.FileSystem,
   path: Path.Path,
