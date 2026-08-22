@@ -83,7 +83,11 @@ export function OpenCode2AutoEnableNotification() {
         timeout: 0,
         actionProps: {
           children: "Go to settings",
-          onClick: () => void navigate({ to: "/settings/providers" }),
+          onClick: () => {
+            dismiss();
+            toastManager.close(toastId);
+            void navigate({ to: "/settings/providers" });
+          },
         },
         actionVariant: "outline",
         data: {
