@@ -59,6 +59,7 @@ import {
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
+  WorkflowIcon,
   WrenchIcon,
   XIcon,
   ZapIcon,
@@ -1523,6 +1524,9 @@ function toolGroupSummaryIconName(
     case "tone-tool":
       return "zap";
     case "mixed":
+      // Several different tool kinds chained together (e.g. OpenCode 2 code
+      // mode fanning out shell + read + grep in one run).
+      return "workflow";
     case null:
       return "hammer";
   }
@@ -2139,6 +2143,7 @@ type WorkEntryIconName =
   | "search"
   | "square-pen"
   | "terminal"
+  | "workflow"
   | "wrench"
   | "x"
   | "zap";
@@ -2167,6 +2172,8 @@ function WorkEntryIconSvg({ name, className }: { name: WorkEntryIconName; classN
       return <TerminalIcon className={className} aria-hidden />;
     case "wrench":
       return <WrenchIcon className={className} aria-hidden />;
+    case "workflow":
+      return <WorkflowIcon className={className} aria-hidden />;
     case "x":
       return <XIcon className={className} aria-hidden />;
     case "zap":

@@ -64,18 +64,27 @@ const MessagesResponseSchema = Schema.Struct({
 
 const decodeUnknownRecord = Schema.decodeUnknownOption(UnknownRecordSchema);
 const decodeUnknownRecordArray = Schema.decodeUnknownOption(UnknownRecordArraySchema);
+const decodeUnknownJsonString = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Unknown),
+);
 
 interface OpenCodeTurnSnapshot {
   readonly id: TurnId;
   readonly items: Array<unknown>;
 }
 
+interface OpenCodeToolCallState {
+  readonly name: string;
+  input?: unknown;
+  inputText?: string;
+}
+
 interface OpenCodeSessionContext {
   session: ProviderSession;
   readonly providerSessionId: string;
   readonly pendingPermissions: Set<string>;
-  readonly pendingForms: Set<string>;
-  readonly toolNameByCallId: Map<string, string>;
+  readonly pendingForms: Map<string, Readonly<Record<string, unknown>>>;
+  readonly toolsByCallId: Map<string, OpenCodeToolCallState>;
   activeTurnId: TurnId | undefined;
   currentModel: string | undefined;
   currentVariant: string | undefined;
@@ -206,6 +215,75 @@ function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType {
   return "dynamic_tool_call";
 }
 
+/** Human title for the common OpenCode 2 built-in tools; unknown tools keep their raw name. */
+function openCodeToolTitle(toolName: string): string {
+  const normalized = toolName.toLowerCase();
+  if (normalized === "read") return "Reading file";
+  if (normalized === "grep" || normalized.includes("search")) return "Searching files";
+  if (normalized === "glob" || normalized.includes("find")) return "Finding files";
+  if (normalized === "shell" || normalized.includes("bash")) return "Running command";
+  if (normalized.includes("edit") || normalized.includes("patch")) return "Editing file";
+  if (normalized.includes("write")) return "Writing file";
+  if (normalized.includes("fetch")) return "Fetching page";
+  if (normalized.includes("task") || normalized.includes("agent")) return "Running agent";
+  return toolName;
+}
+
+/**
+ * Short human summary of a tool call's input for the row preview. OpenCode 2
+ * streams inputs as raw JSON text; parse out the field a human would scan.
+ */
+function openCodeToolInputDetail(
+  toolName: string,
+  input: unknown,
+): string | undefined {
+  const record = recordFromUnknown(input);
+  if (!record) return undefined;
+  const firstString = (...keys: ReadonlyArray<string>) => stringField(record, ...keys);
+  const normalized = toolName.toLowerCase();
+  if (normalized === "grep" || normalized === "glob" || /search|find|list/u.test(normalized)) {
+    return firstString("pattern", "query", "include");
+  }
+  if (/fetch|web/u.test(normalized)) return firstString("url");
+  if (/read|edit|write|patch|apply/u.test(normalized)) {
+    return firstString("filePath", "path", "file");
+  }
+  return firstString("command", "script", "url", "pattern", "filePath", "path", "file", "query");
+}
+
+/**
+ * Shape clients already understand: `toolCallId` keys started/updated/completed
+ * merges, and a flattened `command` lets them show live command previews.
+ */
+function toolItemData(callId: string, state: OpenCodeToolCallState): Record<string, unknown> {
+  const inputRecord = recordFromUnknown(state.input);
+  const command =
+    typeof inputRecord?.command === "string" && inputRecord.command.trim().length > 0
+      ? inputRecord.command
+      : undefined;
+  return {
+    toolCallId: callId,
+    tool: state.name,
+    ...(state.input !== undefined ? { input: state.input } : {}),
+    ...(command ? { command } : {}),
+  };
+}
+
+/**
+ * OpenCode 2's shell tool pads empty output with "(no output)" and always
+ * appends an exit-code line; drop the placeholder and the exit-0 line so quiet
+ * commands render as quietly succeeding.
+ */
+function cleanToolOutputText(text: string): string | undefined {
+  let cleaned = text.replace(/^\(no output\)\s*/u, "");
+  const match = /(?:^|\n)\s*Command exited with code (\d+)\.\s*$/u.exec(cleaned);
+  if (match?.[1] === "0") {
+    cleaned = cleaned.slice(0, match.index).trimEnd();
+  }
+  cleaned = cleaned.trim();
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
 function permissionRequestType(
   action: string,
 ): "command_execution_approval" | "file_read_approval" | "file_change_approval" | "unknown" {
@@ -279,6 +357,45 @@ function formQuestions(form: Readonly<Record<string, unknown>>): ReadonlyArray<U
   });
 }
 
+/**
+ * Clients reply with option labels, display indices ("2"), or raw values.
+ * OpenCode 2 validates against the field's option `value` ("choose"), so
+ * translate through the options captured from form.created before replying.
+ */
+function normalizeFormAnswers(
+  form: Readonly<Record<string, unknown>>,
+  answers: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const fields = recordsFromUnknown(form.fields);
+  const toOptionValue = (options: ReadonlyArray<Readonly<Record<string, unknown>>>) =>
+    (candidate: unknown): unknown => {
+      if (typeof candidate !== "string") return candidate;
+      const text = candidate.trim();
+      if (text.length === 0 || options.some((option) => stringField(option, "value") === text)) {
+        return text;
+      }
+      const byLabel = options.find(
+        (option) => stringField(option, "label", "value")?.toLowerCase() === text.toLowerCase(),
+      );
+      if (byLabel) return stringField(byLabel, "value");
+      if (/^\d+$/u.test(text)) {
+        const index = Number.parseInt(text, 10);
+        const option = index >= 1 && index <= options.length ? options[index - 1] : undefined;
+        if (option) return stringField(option, "value");
+      }
+      return text;
+    };
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(answers)) {
+    const options = recordsFromUnknown(
+      fields.find((field) => stringField(field, "key", "id") === key)?.options,
+    );
+    const translate = toOptionValue(options);
+    normalized[key] = Array.isArray(value) ? value.map(translate) : translate(value);
+  }
+  return normalized;
+}
+
 function contentItemId(
   data: Readonly<Record<string, unknown>>,
   kind: "text" | "reasoning",
@@ -298,8 +415,10 @@ function toolDetail(data: Readonly<Record<string, unknown>>): string | undefined
   const texts = recordsFromUnknown(data.content)
     .map((item) => stringField(item, "text"))
     .filter((value): value is string => value !== undefined);
-  if (texts.length > 0) return texts.join("\n");
-  if (typeof data.result === "string" && data.result.trim().length > 0) return data.result;
+  if (texts.length > 0) return cleanToolOutputText(texts.join("\n"));
+  if (typeof data.result === "string" && data.result.trim().length > 0) {
+    return cleanToolOutputText(data.result);
+  }
   return undefined;
 }
 
@@ -600,7 +719,7 @@ export function makeOpenCodeAdapter(
           const callId = stringField(data, "callID", "id");
           if (!callId) break;
           const tool = stringField(data, "tool", "name") ?? "tool";
-          context.toolNameByCallId.set(callId, tool);
+          context.toolsByCallId.set(callId, { name: tool });
           yield* emit({
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
@@ -612,7 +731,7 @@ export function makeOpenCodeAdapter(
             payload: {
               itemType: toToolLifecycleItemType(tool),
               status: "inProgress",
-              title: tool,
+              title: openCodeToolTitle(tool),
             },
           });
           break;
@@ -622,8 +741,20 @@ export function makeOpenCodeAdapter(
         case "session.tool.input.ended": {
           const callId = stringField(data, "callID", "id");
           if (!callId) break;
-          const tool = context.toolNameByCallId.get(callId) ?? "tool";
-          const detail = stringField(data, "delta", "text");
+          const state = context.toolsByCallId.get(callId);
+          if (!state) break;
+          if (type === "session.tool.input.delta") {
+            const delta = stringField(data, "delta", "text");
+            if (delta) state.inputText = `${state.inputText ?? ""}${delta}`;
+          } else if (state.input === undefined) {
+            // input.ended normally carries the full JSON text. Fall back to
+            // accumulated deltas for compatible servers that omit it.
+            const rawInput = stringField(data, "text") ?? state.inputText;
+            if (rawInput) {
+              state.input = Option.getOrElse(decodeUnknownJsonString(rawInput), () => rawInput);
+            }
+          }
+          const detail = openCodeToolInputDetail(state.name, state.input);
           yield* emit({
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
@@ -633,11 +764,11 @@ export function makeOpenCodeAdapter(
             })),
             type: "item.updated",
             payload: {
-              itemType: toToolLifecycleItemType(tool),
+              itemType: toToolLifecycleItemType(state.name),
               status: "inProgress",
-              title: tool,
+              title: openCodeToolTitle(state.name),
               ...(detail ? { detail } : {}),
-              data,
+              data: toolItemData(callId, state),
             },
           });
           break;
@@ -647,8 +778,14 @@ export function makeOpenCodeAdapter(
           const callId = stringField(data, "callID", "id");
           if (!callId) break;
           const tool = stringField(data, "tool", "name") ?? "tool";
-          const inputStarted = context.toolNameByCallId.has(callId);
-          context.toolNameByCallId.set(callId, tool);
+          const state = context.toolsByCallId.get(callId);
+          if (state && data.input !== undefined) {
+            state.input = data.input;
+          } else if (!state) {
+            context.toolsByCallId.set(callId, { name: tool, input: data.input });
+          }
+          const resolved = context.toolsByCallId.get(callId)!;
+          const detail = openCodeToolInputDetail(resolved.name, resolved.input);
           yield* emit({
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
@@ -656,15 +793,13 @@ export function makeOpenCodeAdapter(
               itemId: callId,
               raw: event,
             })),
-            type: inputStarted ? "item.updated" : "item.started",
+            type: state ? "item.updated" : "item.started",
             payload: {
-              itemType: toToolLifecycleItemType(tool),
+              itemType: toToolLifecycleItemType(resolved.name),
               status: "inProgress",
-              title: tool,
-              data: {
-                tool,
-                input: data.input,
-              },
+              title: openCodeToolTitle(resolved.name),
+              ...(detail ? { detail } : {}),
+              data: toolItemData(callId, resolved),
             },
           });
           break;
@@ -675,8 +810,10 @@ export function makeOpenCodeAdapter(
         case "session.tool.failed": {
           const callId = stringField(data, "callID", "id");
           if (!callId) break;
-          const tool = context.toolNameByCallId.get(callId) ?? "tool";
+          const state = context.toolsByCallId.get(callId);
+          const tool = state?.name ?? stringField(data, "tool", "name") ?? "tool";
           const terminal = type !== "session.tool.progress";
+          const output = terminal ? toolDetail(data) : undefined;
           yield* emit({
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
@@ -689,12 +826,15 @@ export function makeOpenCodeAdapter(
               itemType: toToolLifecycleItemType(tool),
               status:
                 type === "session.tool.failed" ? "failed" : terminal ? "completed" : "inProgress",
-              title: tool,
-              ...(toolDetail(data) ? { detail: toolDetail(data) } : {}),
-              data,
+              title: openCodeToolTitle(tool),
+              ...(output ? { detail: output } : {}),
+              data: {
+                ...toolItemData(callId, state ?? { name: tool }),
+                ...(output ? { output } : {}),
+              },
             },
           });
-          if (terminal) context.toolNameByCallId.delete(callId);
+          if (terminal) context.toolsByCallId.delete(callId);
           break;
         }
 
@@ -767,7 +907,7 @@ export function makeOpenCodeAdapter(
           if (!form) break;
           const formId = stringField(form, "id", "formID");
           if (!formId) break;
-          context.pendingForms.add(formId);
+          context.pendingForms.set(formId, form);
           yield* emit({
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
@@ -1127,8 +1267,8 @@ export function makeOpenCodeAdapter(
         session,
         providerSessionId,
         pendingPermissions: new Set(),
-        pendingForms: new Set(),
-        toolNameByCallId: new Map(),
+        pendingForms: new Map(),
+        toolsByCallId: new Map(),
         activeTurnId: undefined,
         currentModel: selectedModel,
         currentVariant: variant,
@@ -1347,7 +1487,8 @@ export function makeOpenCodeAdapter(
       "OpenCodeAdapter.respondToUserInput",
     )(function* (threadId, requestId, answers) {
       const context = yield* ensureSession(threadId);
-      if (!context.pendingForms.has(requestId)) {
+      const form = context.pendingForms.get(requestId);
+      if (!form) {
         return yield* new ProviderAdapterRequestError({
           provider: PROVIDER,
           method: "form.reply",
@@ -1360,7 +1501,7 @@ export function makeOpenCodeAdapter(
         {
           operation: "form.reply",
           schema: Schema.Void,
-          body: { answer: answers },
+          body: { answer: normalizeFormAnswers(form, answers) },
         },
       ).pipe(Effect.mapError((cause) => toRequestError("form.reply", cause)));
     });

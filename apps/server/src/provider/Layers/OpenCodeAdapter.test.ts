@@ -410,6 +410,15 @@ it.effect("attaches once and maps native deltas, tools, and terminal events", ()
         observed.some((next) => next.type === "item.completed"),
         true,
       );
+      const toolUpdates = observed.filter(
+        (next) => next.itemId === "call-1" && next.type === "item.updated",
+      );
+      const endedUpdate = toolUpdates[1];
+      NodeAssert.ok(endedUpdate);
+      NodeAssert.equal(
+        (endedUpdate.payload as Record<string, unknown>).detail,
+        "pwd",
+      );
       NodeAssert.equal(
         observed.some((next) => next.type === "turn.completed" && next.turnId === turn.turnId),
         true,
@@ -437,6 +446,200 @@ it.effect("attaches once and maps native deltas, tools, and terminal events", ()
         true,
       );
       NodeAssert.equal(observed.filter((next) => next.type === "turn.completed").length, 2);
+    }),
+  ),
+);
+
+it.effect("maps OpenCode 2 tool calls to friendly titles and structured data", () =>
+  withHarness("flat", ({ adapter, publish }) =>
+    Effect.gen(function* () {
+      const observed: Array<ProviderRuntimeEvent> = [];
+      const completed = yield* Deferred.make<void>();
+      yield* collectEvents(adapter, observed, (next) =>
+        next.type === "turn.completed"
+          ? Deferred.succeed(completed, undefined).pipe(Effect.ignore)
+          : Effect.void,
+      );
+      yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+      yield* adapter.sendTurn({ threadId, input: "search" });
+
+      yield* publish(
+        event("grep-started", "session.next.tool.input.started", {
+          sessionID: "ses_test",
+          callID: "call-grep",
+          name: "grep",
+        }),
+      );
+      yield* publish(
+        event("grep-called", "session.next.tool.called", {
+          sessionID: "ses_test",
+          callID: "call-grep",
+          input: { pattern: "toolCall" },
+        }),
+      );
+      yield* publish(
+        event("shell-input-started", "session.next.tool.input.started", {
+          sessionID: "ses_test",
+          callID: "call-shell",
+          name: "shell",
+        }),
+      );
+      yield* publish(
+        event("shell-input-ended", "session.next.tool.input.ended", {
+          sessionID: "ses_test",
+          callID: "call-shell",
+          text: '{"command":"git status"}',
+        }),
+      );
+      yield* publish(
+        event("shell-success-quiet", "session.next.tool.success", {
+          sessionID: "ses_test",
+          callID: "call-shell",
+          content: [{ type: "text", text: "(no output)\nCommand exited with code 0." }],
+        }),
+      );
+      yield* publish(
+        event("settled", "session.next.execution.settled", {
+          sessionID: "ses_test",
+          outcome: "success",
+        }),
+      );
+      yield* Deferred.await(completed);
+
+      const itemEvents = observed.filter((next) => next.type.startsWith("item."));
+      const payloadOf = (next: ProviderRuntimeEvent | undefined) =>
+        next?.payload as Record<string, unknown>;
+      const grepStarted = itemEvents.find(
+        (next) => next.itemId === "call-grep" && next.type === "item.started",
+      );
+      NodeAssert.equal(payloadOf(grepStarted).title, "Searching files");
+      const grepUpdated = itemEvents.find(
+        (next) => next.itemId === "call-grep" && next.type === "item.updated",
+      );
+      NodeAssert.equal(payloadOf(grepUpdated).detail, "toolCall");
+      NodeAssert.deepEqual(payloadOf(grepUpdated).data, {
+        toolCallId: "call-grep",
+        tool: "grep",
+        input: { pattern: "toolCall" },
+      });
+      const shellUpdated = itemEvents.find(
+        (next) => next.itemId === "call-shell" && next.type === "item.updated",
+      );
+      NodeAssert.equal(payloadOf(shellUpdated).title, "Running command");
+      NodeAssert.equal(payloadOf(shellUpdated).detail, "git status");
+      NodeAssert.equal(
+        (payloadOf(shellUpdated).data as Record<string, unknown>).command,
+        "git status",
+      );
+      const shellCompleted = itemEvents.find(
+        (next) => next.itemId === "call-shell" && next.type === "item.completed",
+      );
+      // "(no output)\nCommand exited with code 0." is shell padding; quiet
+      // commands complete without detail.
+      NodeAssert.equal(payloadOf(shellCompleted).detail, undefined);
+      NodeAssert.equal(payloadOf(shellCompleted).status, "completed");
+    }),
+  ),
+);
+
+it.effect("keeps non-zero exit codes in OpenCode 2 tool output detail", () =>
+  withHarness("flat", ({ adapter, publish }) =>
+    Effect.gen(function* () {
+      const observed: Array<ProviderRuntimeEvent> = [];
+      const completed = yield* Deferred.make<void>();
+      yield* collectEvents(adapter, observed, (next) =>
+        next.type === "turn.completed"
+          ? Deferred.succeed(completed, undefined).pipe(Effect.ignore)
+          : Effect.void,
+      );
+      yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+      yield* adapter.sendTurn({ threadId, input: "run" });
+      yield* publish(
+        event("failed-shell", "session.next.tool.failed", {
+          sessionID: "ses_test",
+          callID: "call-fail",
+          name: "shell",
+          content: [{ type: "text", text: "(no output)\nCommand exited with code 1." }],
+        }),
+      );
+      yield* publish(
+        event("settled", "session.next.execution.settled", {
+          sessionID: "ses_test",
+          outcome: "success",
+        }),
+      );
+      yield* Deferred.await(completed);
+
+      const failed = observed.find((next) => next.itemId === "call-fail");
+      NodeAssert.ok(failed);
+      NodeAssert.equal(
+        (failed.payload as Record<string, unknown>).detail,
+        "Command exited with code 1.",
+      );
+    }),
+  ),
+);
+
+it.effect("translates form answers into OpenCode 2 option values", () =>
+  withHarness("nested", ({ adapter, calls, publish }) =>
+    Effect.gen(function* () {
+      const observed: Array<ProviderRuntimeEvent> = [];
+      const formOpened = yield* Deferred.make<void>();
+      yield* collectEvents(adapter, observed, (next) =>
+        next.type === "user-input.requested"
+          ? Deferred.succeed(formOpened, undefined).pipe(Effect.ignore)
+          : Effect.void,
+      );
+      yield* adapter.startSession({ threadId, runtimeMode: "approval-required" });
+      yield* publish(
+        event("form", "form.created", {
+          form: {
+            id: "frm_values",
+            sessionID: "ses_test",
+            title: "Choices",
+            fields: [
+              {
+                key: "choice",
+                type: "string",
+                title: "Choice",
+                description: "Pick one",
+                options: [
+                  { value: "allow", label: "Allow search" },
+                  { value: "choose", label: "Choose another provider" },
+                  { value: "disable", label: "Disable web search" },
+                ],
+              },
+              {
+                key: "mode",
+                type: "string",
+                title: "Mode",
+                description: "Pick a mode",
+                options: [
+                  { value: "auto", label: "Auto" },
+                  { value: "manual", label: "Manual" },
+                ],
+              },
+            ],
+          },
+        }),
+      );
+      yield* Deferred.await(formOpened);
+
+      // Labels map to values, display indices ("2") map to their option.
+      yield* adapter.respondToUserInput(threadId, ApprovalRequestId.make("frm_values"), {
+        choice: "Choose another provider",
+        mode: "2",
+      });
+
+      NodeAssert.deepEqual(
+        calls.find((call) => call.operation === "form.reply"),
+        {
+          method: "POST",
+          path: "/api/session/ses_test/form/frm_values/reply",
+          operation: "form.reply",
+          body: { answer: { choice: "choose", mode: "manual" } },
+        },
+      );
     }),
   ),
 );

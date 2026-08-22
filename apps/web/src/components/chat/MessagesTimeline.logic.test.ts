@@ -6,6 +6,7 @@ import {
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   shouldPreserveAssistantLineBreaks,
+  toolGroupAction,
 } from "./MessagesTimeline.logic";
 
 describe("shouldPreserveAssistantLineBreaks", () => {
@@ -215,6 +216,21 @@ describe("normalizeCompactToolLabel", () => {
 
   it("removes trailing completion wording from other labels", () => {
     expect(normalizeCompactToolLabel("Read file completed")).toBe("Read file");
+  });
+});
+
+describe("toolGroupAction", () => {
+  it("groups the OpenCode 2 read title with file reads", () => {
+    expect(
+      toolGroupAction({
+        id: "read-1",
+        createdAt: "2026-01-01T00:00:00Z",
+        label: "Reading file",
+        tone: "tool",
+        itemType: "dynamic_tool_call",
+        toolTitle: "Reading file",
+      }),
+    ).toBe("read");
   });
 });
 
