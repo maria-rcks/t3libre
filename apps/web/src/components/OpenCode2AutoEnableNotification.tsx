@@ -87,7 +87,7 @@ export function OpenCode2AutoEnableNotification() {
         },
         actionVariant: "outline",
         data: {
-          leadingIcon: <OpenCodeIcon className="size-5" />,
+          leadingIcon: <OpenCodeIcon aria-hidden="true" className="size-4" />,
           hideCopyButton: true,
           disableSwipe: true,
           onClose: dismiss,
