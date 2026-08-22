@@ -13,6 +13,7 @@ import { createModelSelection } from "@t3tools/shared/model";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -35,6 +36,8 @@ interface Harness {
   readonly attachCount: () => number;
   readonly failNextRequest: (operation: string) => void;
   readonly missNextRequest: (operation: string) => void;
+  readonly blockNextRequest: (operation: string, blocker: Effect.Effect<void>) => void;
+  readonly queueSessionIds: (...sessionIds: ReadonlyArray<string>) => void;
   readonly publish: (event: OpenCodeRuntime.OpenCodeEvent) => Effect.Effect<void>;
   readonly failEvents: (error: OpenCodeRuntime.OpenCodeRuntimeFailure) => Effect.Effect<void>;
 }
@@ -64,6 +67,8 @@ function withHarness<A, E>(
     const calls: Array<RequestCall> = [];
     const failedOperations = new Set<string>();
     const missingOperations = new Set<string>();
+    const blockedOperations = new Map<string, Effect.Effect<void>>();
+    const queuedSessionIds: Array<string> = [];
     let attachCalls = 0;
     const request = ((
       method: OpenCodeRuntime.OpenCodeHttpMethod,
@@ -77,6 +82,11 @@ function withHarness<A, E>(
           operation: input.operation,
           ...(input.body !== undefined ? { body: input.body } : {}),
         });
+        const blocker = blockedOperations.get(input.operation);
+        if (blocker) {
+          blockedOperations.delete(input.operation);
+          yield* blocker;
+        }
         if (failedOperations.delete(input.operation)) {
           return yield* new OpenCodeRuntime.OpenCodeRuntimeError({
             operation: input.operation,
@@ -91,7 +101,10 @@ function withHarness<A, E>(
           });
         }
         if (path === "/api/session" || (method === "GET" && path.startsWith("/api/session/"))) {
-          const id = path === "/api/session" ? "ses_test" : path.slice("/api/session/".length);
+          const id =
+            path === "/api/session"
+              ? (queuedSessionIds.shift() ?? "ses_test")
+              : path.slice("/api/session/".length);
           return { data: { id } };
         }
         if (path.endsWith("/message")) return { data: [], cursor: {} };
@@ -149,6 +162,8 @@ function withHarness<A, E>(
       attachCount: () => attachCalls,
       failNextRequest: (operation) => failedOperations.add(operation),
       missNextRequest: (operation) => missingOperations.add(operation),
+      blockNextRequest: (operation, blocker) => blockedOperations.set(operation, blocker),
+      queueSessionIds: (...sessionIds) => queuedSessionIds.push(...sessionIds),
       publish: (next) => Queue.offer(events, next).pipe(Effect.asVoid),
       failEvents: (error) => Queue.offer(events, error).pipe(Effect.asVoid),
     });
@@ -548,7 +563,7 @@ it.effect("resumes existing sessions and detaches without stop or delete request
 );
 
 it.effect("starts a fresh native session when a stored resume cursor no longer exists", () =>
-  withHarness("flat", ({ adapter, calls, missNextRequest }) =>
+  withHarness("flat", ({ adapter, attachCount, calls, missNextRequest }) =>
     Effect.gen(function* () {
       missNextRequest("session.get");
       const session = yield* adapter.startSession({
@@ -567,6 +582,47 @@ it.effect("starts a fresh native session when a stored resume cursor no longer e
         ],
       );
       NodeAssert.deepEqual(session.resumeCursor, { schemaVersion: 1, sessionId: "ses_test" });
+      NodeAssert.equal(attachCount(), 1);
+    }),
+  ),
+);
+
+it.effect("serializes concurrent starts for the same thread", () =>
+  withHarness("flat", ({ adapter, blockNextRequest, calls, queueSessionIds }) =>
+    Effect.gen(function* () {
+      const firstCreateStarted = yield* Deferred.make<void>();
+      const releaseFirstCreate = yield* Deferred.make<void>();
+      queueSessionIds("ses_first", "ses_second");
+      blockNextRequest(
+        "session.create",
+        Deferred.succeed(firstCreateStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseFirstCreate)),
+        ),
+      );
+
+      const first = yield* adapter
+        .startSession({ threadId, runtimeMode: "full-access" })
+        .pipe(Effect.forkScoped);
+      yield* Deferred.await(firstCreateStarted);
+      const second = yield* adapter
+        .startSession({ threadId, runtimeMode: "full-access" })
+        .pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      NodeAssert.equal(calls.filter((call) => call.operation === "session.create").length, 1);
+
+      yield* Deferred.succeed(releaseFirstCreate, undefined);
+      yield* Fiber.join(first);
+      yield* Fiber.join(second);
+
+      const sessions = yield* adapter.listSessions();
+      NodeAssert.equal(sessions.length, 1);
+      NodeAssert.deepEqual(sessions[0]?.resumeCursor, {
+        schemaVersion: 1,
+        sessionId: "ses_second",
+      });
+      yield* adapter.stopSession(threadId);
+      NodeAssert.deepEqual(yield* adapter.listSessions(), []);
     }),
   ),
 );

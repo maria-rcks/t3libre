@@ -310,6 +310,15 @@ function isMissingOpenCodeSession(cause: OpenCodeRuntime.OpenCodeRuntimeFailure)
   );
 }
 
+function shouldInvalidateConnection(cause: OpenCodeRuntime.OpenCodeRuntimeFailure): boolean {
+  return (
+    OpenCodeRuntime.isOpenCodeRuntimeError(cause) &&
+    (cause.reason === "transport" ||
+      cause.reason === "connection-ended" ||
+      (cause.reason === "http-status" && cause.status === 401))
+  );
+}
+
 export function makeOpenCodeAdapter(
   settings: OpenCodeSettings,
   options?: OpenCodeAdapterLiveOptions,
@@ -324,6 +333,7 @@ export function makeOpenCodeAdapter(
     const sessions = new Map<ThreadId, OpenCodeSessionContext>();
     const sessionByProviderId = new Map<string, OpenCodeSessionContext>();
     const connectionLock = yield* Semaphore.make(1);
+    const sessionStartLock = yield* Semaphore.make(1);
     let activeConnection: OpenCodeActiveConnection | undefined;
     const randomUUIDv4 = crypto.randomUUIDv4.pipe(
       Effect.mapError(
@@ -899,7 +909,11 @@ export function makeOpenCodeAdapter(
         Effect.flatMap((entry) =>
           entry.connection
             .request(method, path, input)
-            .pipe(Effect.tapError(() => invalidateConnection(entry))),
+            .pipe(
+              Effect.tapError((cause) =>
+                shouldInvalidateConnection(cause) ? invalidateConnection(entry) : Effect.void,
+              ),
+            ),
         ),
       );
 
@@ -949,7 +963,7 @@ export function makeOpenCodeAdapter(
       });
     });
 
-    const startSession: OpenCodeAdapterShape["startSession"] = Effect.fn(
+    const startSessionUnlocked: OpenCodeAdapterShape["startSession"] = Effect.fn(
       "OpenCodeAdapter.startSession",
     )(function* (input) {
       if (!settings.enabled) {
@@ -1070,6 +1084,8 @@ export function makeOpenCodeAdapter(
       });
       return session;
     });
+    const startSession: OpenCodeAdapterShape["startSession"] = (input) =>
+      sessionStartLock.withPermit(startSessionUnlocked(input));
 
     const sendTurn: OpenCodeAdapterShape["sendTurn"] = Effect.fn("OpenCodeAdapter.sendTurn")(
       function* (input) {
