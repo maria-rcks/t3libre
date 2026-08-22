@@ -17,14 +17,13 @@ import {
 
 function openApi(
   promptProperty: "text" | "prompt",
-  eventType = "session.text.delta",
-  operationId: string | undefined = "v2.session.prompt",
+  operationId: string | null = "v2.session.prompt",
 ) {
   return {
     paths: {
       "/api/session/{sessionID}/prompt": {
         post: {
-          ...(operationId ? { operationId } : {}),
+          ...(operationId === null ? {} : { operationId }),
           requestBody: {
             content: {
               "application/json": {
@@ -41,7 +40,6 @@ function openApi(
           type: "object",
           properties: { [promptProperty]: { type: "string" } },
         },
-        EventType: { enum: [eventType] },
       },
     },
   };
@@ -178,7 +176,7 @@ it.effect("fails explicitly when the preview OpenAPI shape is unknown", () => {
     const error = yield* Effect.flip(runtime.attach({ binaryPath: "opencode2" }));
 
     NodeAssert.equal(error.kind, "unsupported-preview");
-    NodeAssert.match(error.detail, /unsupported prompt or event protocol/i);
+    NodeAssert.match(error.detail, /unsupported prompt protocol/i);
   });
 });
 
@@ -199,27 +197,17 @@ it.effect("times out a wedged service command", () => {
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer()));
 });
 
-it("detects both adjacent preview prompt and event namespaces", () => {
+it("detects both adjacent preview prompt shapes", () => {
   NodeAssert.deepEqual(detectOpenCode2Protocol(openApi("text")), {
     promptShape: "flat",
-    eventNamespace: "session",
   });
-  NodeAssert.deepEqual(detectOpenCode2Protocol(openApi("prompt", "session.next.text.delta")), {
+  NodeAssert.deepEqual(detectOpenCode2Protocol(openApi("prompt")), {
     promptShape: "nested",
-    eventNamespace: "session.next",
   });
-  NodeAssert.deepEqual(
-    detectOpenCode2Protocol(openApi("prompt", "session.next.text.delta", "session.prompt")),
-    {
-      promptShape: "nested",
-      eventNamespace: "session.next",
-    },
-  );
-  NodeAssert.deepEqual(
-    detectOpenCode2Protocol(openApi("prompt", "session.next.text.delta", undefined)),
-    {
-      promptShape: "nested",
-      eventNamespace: "session.next",
-    },
-  );
+  NodeAssert.deepEqual(detectOpenCode2Protocol(openApi("prompt", "session.prompt")), {
+    promptShape: "nested",
+  });
+  NodeAssert.deepEqual(detectOpenCode2Protocol(openApi("prompt", null)), {
+    promptShape: "nested",
+  });
 });

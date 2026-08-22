@@ -21,7 +21,7 @@ interface CapturedRequest {
 function runtimeLayer(response: unknown, requests: Array<CapturedRequest>) {
   const connection: OpenCode2Connection = {
     url: "http://127.0.0.1:49374/",
-    protocol: { promptShape: "flat", eventNamespace: "session" },
+    protocol: { promptShape: "flat" },
     request: ((
       method: string,
       path: string,

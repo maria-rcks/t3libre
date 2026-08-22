@@ -86,10 +86,7 @@ function withHarness<A, E>(
       })) as OpenCode2Connection["request"];
     const connection: OpenCode2Connection = {
       url: "http://127.0.0.1:4096",
-      protocol: {
-        promptShape,
-        eventNamespace: promptShape === "flat" ? "session.next" : "session",
-      },
+      protocol: { promptShape },
       request,
       globalEvents: Stream.make(event("connected", "server.connected", {})).pipe(
         Stream.concat(Stream.fromQueue(events)),

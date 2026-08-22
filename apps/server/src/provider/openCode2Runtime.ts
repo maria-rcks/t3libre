@@ -17,7 +17,6 @@ export type OpenCode2HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
 export interface OpenCode2Protocol {
   readonly promptShape: "flat" | "nested";
-  readonly eventNamespace: "session" | "session.next";
 }
 
 export interface OpenCode2Event {
@@ -217,16 +216,6 @@ function findPromptOperation(document: unknown): unknown {
   return undefined;
 }
 
-function containsString(value: unknown, expected: string, visited = new Set<unknown>()): boolean {
-  if (value === expected) return true;
-  if (!isRecord(value) && !Array.isArray(value)) return false;
-  if (visited.has(value)) return false;
-  visited.add(value);
-  return (Array.isArray(value) ? value : Object.values(value)).some((nested) =>
-    containsString(nested, expected, visited),
-  );
-}
-
 export function detectOpenCode2Protocol(document: unknown): OpenCode2Protocol | null {
   const operation = findPromptOperation(document);
   if (!isRecord(operation)) return null;
@@ -237,14 +226,7 @@ export function detectOpenCode2Protocol(document: unknown): OpenCode2Protocol | 
   const properties = schemaPropertyNames(document, schema);
   const promptShape = properties.has("text") ? "flat" : properties.has("prompt") ? "nested" : null;
   if (promptShape === null) return null;
-
-  const eventNamespace = containsString(document, "session.next.text.delta")
-    ? "session.next"
-    : containsString(document, "session.text.delta")
-      ? "session"
-      : null;
-  if (eventNamespace === null) return null;
-  return { promptShape, eventNamespace };
+  return { promptShape };
 }
 
 function requestUrl(
@@ -493,7 +475,7 @@ export const makeOpenCode2Runtime = Effect.fn("makeOpenCode2Runtime")(function* 
           baseUrl,
           password,
           httpClient: input.httpClient,
-          protocol: { promptShape: "flat", eventNamespace: "session" },
+          protocol: { promptShape: "flat" },
         });
         const document = yield* provisional.request("GET", "/openapi.json", {
           operation: "openapi.get",
@@ -505,7 +487,7 @@ export const makeOpenCode2Runtime = Effect.fn("makeOpenCode2Runtime")(function* 
             operation: "openapi.detect",
             kind: "unsupported-preview",
             detail:
-              "This OpenCode 2 preview exposes an unsupported prompt or event protocol in `/openapi.json`.",
+              "This OpenCode 2 preview exposes an unsupported prompt protocol in `/openapi.json`.",
           });
         }
 
