@@ -37,6 +37,15 @@ describe("ProviderSettingsForm helpers", () => {
     });
   });
 
+  it("exposes the OpenCode 2 provider definition", () => {
+    const opencode2 = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode2")];
+
+    expect(opencode2).toMatchObject({ label: "OpenCode 2", badgeLabel: "New" });
+    expect(deriveProviderSettingsFields(opencode2!).map((field) => field.key)).toEqual([
+      "binaryPath",
+    ]);
+  });
+
   it("preserves unknown config keys while omitting empty configurable fields", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();

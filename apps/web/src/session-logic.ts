@@ -41,6 +41,12 @@ export const PROVIDER_OPTIONS: Array<{
     pickerSidebarBadge: "new",
   },
   {
+    value: ProviderDriverKind.make("opencode2"),
+    label: "OpenCode 2",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
+  {
     value: ProviderDriverKind.make("cursor"),
     label: "Cursor",
     available: true,
