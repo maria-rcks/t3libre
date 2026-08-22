@@ -616,6 +616,12 @@ it.effect("translates form answers into OpenCode 2 option values", () =>
                   { value: "manual", label: "Manual" },
                 ],
               },
+              {
+                key: "notes",
+                type: "string",
+                title: "Notes",
+                description: "Add notes",
+              },
             ],
           },
         }),
@@ -626,6 +632,7 @@ it.effect("translates form answers into OpenCode 2 option values", () =>
       yield* adapter.respondToUserInput(threadId, ApprovalRequestId.make("frm_values"), {
         choice: "Choose another provider",
         mode: "2",
+        notes: "  indented text  ",
       });
 
       NodeAssert.deepEqual(
@@ -634,7 +641,13 @@ it.effect("translates form answers into OpenCode 2 option values", () =>
           method: "POST",
           path: "/api/session/ses_test/form/frm_values/reply",
           operation: "form.reply",
-          body: { answer: { choice: "choose", mode: "manual" } },
+          body: {
+            answer: {
+              choice: "choose",
+              mode: "manual",
+              notes: "  indented text  ",
+            },
+          },
         },
       );
     }),

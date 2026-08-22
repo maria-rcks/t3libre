@@ -365,6 +365,7 @@ function normalizeFormAnswers(
   const toOptionValue =
     (options: ReadonlyArray<Readonly<Record<string, unknown>>>) =>
     (candidate: unknown): unknown => {
+      if (options.length === 0) return candidate;
       if (typeof candidate !== "string") return candidate;
       const text = candidate.trim();
       if (text.length === 0 || options.some((option) => stringField(option, "value") === text)) {
