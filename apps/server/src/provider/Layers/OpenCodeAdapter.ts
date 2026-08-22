@@ -41,8 +41,6 @@ import type { ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
 import * as OpenCodeRuntime from "../opencodeRuntime.ts";
 import type { EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
-export type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
-
 const PROVIDER = ProviderDriverKind.make("opencode");
 const RESUME_VERSION = 1 as const;
 
@@ -405,7 +403,7 @@ export function makeOpenCodeAdapter(
     const completeTurn = Effect.fn("OpenCodeAdapter.completeTurn")(function* (
       context: OpenCodeSessionContext,
       state: "completed" | "failed" | "interrupted",
-      raw: OpenCodeRuntime.OpenCodeEvent,
+      raw: OpenCodeRuntime.OpenCodeEvent | undefined,
       errorMessage?: string,
     ) {
       const turnId = context.activeTurnId;
@@ -805,15 +803,14 @@ export function makeOpenCodeAdapter(
         sessions.values(),
         (context) =>
           Effect.gen(function* () {
-            context.activeTurnId = undefined;
-            yield* updateSession(
-              context,
-              {
+            if (context.activeTurnId) {
+              yield* completeTurn(context, "failed", undefined, cause.message);
+            } else {
+              yield* updateSession(context, {
                 status: "error",
                 lastError: cause.message,
-              },
-              "activeTurnId",
-            );
+              });
+            }
             yield* emit({
               ...(yield* buildEventBase({ threadId: context.session.threadId })),
               type: "runtime.error",

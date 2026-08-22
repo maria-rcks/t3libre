@@ -21,7 +21,8 @@ import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../../config.ts";
 import * as OpenCodeRuntime from "../opencodeRuntime.ts";
-import { makeOpenCodeAdapter, type OpenCodeAdapterShape } from "./OpenCodeAdapter.ts";
+import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
+import { makeOpenCodeAdapter } from "./OpenCodeAdapter.ts";
 
 interface RequestCall {
   readonly method: OpenCodeRuntime.OpenCodeHttpMethod;
@@ -681,7 +682,7 @@ it.effect("reconnects after the native event stream fails", () =>
         }),
       );
       yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
-      yield* adapter.sendTurn({ threadId, input: "before disconnect" });
+      const firstTurn = yield* adapter.sendTurn({ threadId, input: "before disconnect" });
       yield* failEvents(
         new OpenCodeRuntime.OpenCodeRuntimeError({
           operation: "event.subscribe",
@@ -690,6 +691,15 @@ it.effect("reconnects after the native event stream fails", () =>
       );
       yield* Deferred.await(runtimeError);
       NodeAssert.equal((yield* adapter.listSessions())[0]?.activeTurnId, undefined);
+      NodeAssert.equal(
+        observed.some(
+          (event) =>
+            event.type === "turn.completed" &&
+            event.turnId === firstTurn.turnId &&
+            event.payload.state === "failed",
+        ),
+        true,
+      );
 
       yield* adapter.sendTurn({ threadId, input: "reconnect" });
       yield* Deferred.await(secondTurnStarted);
