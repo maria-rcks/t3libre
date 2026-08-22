@@ -131,6 +131,88 @@ it.effect("reports unsupported adjacent preview protocols without hanging", () =
   ),
 );
 
+it.effect("does not report an HTTP 404 as a missing CLI", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* checkOpenCode2ProviderStatus(settings);
+
+    NodeAssert.equal(snapshot.status, "error");
+    NodeAssert.equal(snapshot.installed, true);
+    NodeAssert.doesNotMatch(snapshot.message ?? "", /not installed/i);
+  }).pipe(
+    Effect.provide(
+      runtimeLayer({
+        attachError: new OpenCode2RuntimeError({
+          operation: "model.list",
+          kind: "request",
+          detail: "OpenCode 2 model.list returned HTTP 404 Not Found.",
+        }),
+      }),
+    ),
+  ),
+);
+
+it.effect("warns when the attached OpenCode 2 service reports unhealthy", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* checkOpenCode2ProviderStatus(settings);
+
+    NodeAssert.equal(snapshot.status, "warning");
+    NodeAssert.match(snapshot.message ?? "", /reported that it is unhealthy/i);
+  }).pipe(
+    Effect.provide(
+      runtimeLayer({
+        responses: {
+          "/api/health": { healthy: false, version: "0.0.0-beta-17823" },
+          "/api/model": {
+            data: [
+              {
+                id: "gpt-5.6",
+                providerID: "openai",
+                name: "GPT-5.6",
+              },
+            ],
+          },
+          "/api/model/default": { data: null },
+          "/api/agent": { data: [] },
+        },
+      }),
+    ),
+  ),
+);
+
+it.effect("describes custom models without counting deprecated upstream providers", () => {
+  const customSettings = {
+    ...settings,
+    customModels: ["custom/local-model"],
+  };
+  return Effect.gen(function* () {
+    const snapshot = yield* checkOpenCode2ProviderStatus(customSettings);
+
+    NodeAssert.equal(snapshot.status, "ready");
+    NodeAssert.match(snapshot.message ?? "", /custom models configured/i);
+    NodeAssert.doesNotMatch(snapshot.message ?? "", /0 upstream providers/i);
+  }).pipe(
+    Effect.provide(
+      runtimeLayer({
+        responses: {
+          "/api/health": { healthy: true, version: "0.0.0-beta-17823" },
+          "/api/model": {
+            data: [
+              {
+                id: "old-model",
+                providerID: "legacy",
+                name: "Old Model",
+                status: "deprecated",
+              },
+            ],
+          },
+          "/api/model/default": { data: null },
+          "/api/agent": { data: [] },
+        },
+      }),
+    ),
+  );
+});
+
 it.effect("finishes the provider check when attachment is wedged", () => {
   const layer = Layer.succeed(
     OpenCode2Runtime,

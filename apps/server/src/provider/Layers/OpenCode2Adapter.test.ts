@@ -25,6 +25,7 @@ import {
   type OpenCode2HttpMethod,
   type OpenCode2RequestInput,
   OpenCode2Runtime,
+  OpenCode2RuntimeError,
   type OpenCode2RuntimeShape,
 } from "../openCode2Runtime.ts";
 import { makeOpenCode2Adapter, type OpenCode2AdapterShape } from "./OpenCode2Adapter.ts";
@@ -41,6 +42,7 @@ interface Harness {
   readonly calls: Array<RequestCall>;
   readonly attachCount: () => number;
   readonly publish: (event: OpenCode2Event) => Effect.Effect<void>;
+  readonly failEvents: (error: OpenCode2RuntimeError) => Effect.Effect<void>;
 }
 
 const settings = Schema.decodeSync(OpenCode2Settings)({
@@ -59,9 +61,10 @@ function withHarness<A, E>(
   promptShape: "flat" | "nested",
   run: (harness: Harness) => Effect.Effect<A, E, Scope.Scope>,
   enabled = true,
+  failFirstHandshake = false,
 ) {
   return Effect.gen(function* () {
-    const events = yield* Queue.unbounded<OpenCode2Event>();
+    const events = yield* Queue.unbounded<OpenCode2Event | OpenCode2RuntimeError>();
     const calls: Array<RequestCall> = [];
     let attachCalls = 0;
     const request = ((
@@ -89,15 +92,36 @@ function withHarness<A, E>(
       protocol: { promptShape },
       request,
       globalEvents: Stream.make(event("connected", "server.connected", {})).pipe(
-        Stream.concat(Stream.fromQueue(events)),
+        Stream.concat(
+          Stream.fromQueue(events).pipe(
+            Stream.mapEffect((next) =>
+              next instanceof OpenCode2RuntimeError ? Effect.fail(next) : Effect.succeed(next),
+            ),
+          ),
+        ),
       ),
     };
     const runtime: OpenCode2RuntimeShape = {
       attach: () =>
         Effect.sync(() => {
           attachCalls += 1;
-          return connection;
-        }),
+          return attachCalls;
+        }).pipe(
+          Effect.map((attempt) =>
+            failFirstHandshake && attempt === 1
+              ? {
+                  ...connection,
+                  globalEvents: Stream.fail(
+                    new OpenCode2RuntimeError({
+                      operation: "event.subscribe",
+                      kind: "connection",
+                      detail: "The initial event handshake failed.",
+                    }),
+                  ),
+                }
+              : connection,
+          ),
+        ),
     };
     const adapter = yield* makeOpenCode2Adapter({ ...settings, enabled }).pipe(
       Effect.provideService(OpenCode2Runtime, runtime),
@@ -109,6 +133,7 @@ function withHarness<A, E>(
       calls,
       attachCount: () => attachCalls,
       publish: (next) => Queue.offer(events, next).pipe(Effect.asVoid),
+      failEvents: (error) => Queue.offer(events, error).pipe(Effect.asVoid),
     });
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped);
 }
@@ -488,5 +513,94 @@ it.effect("does not attach when OpenCode 2 is disabled", () =>
         NodeAssert.equal(attachCount(), 0);
       }),
     false,
+  ),
+);
+
+it.effect("retries after the initial event handshake fails", () =>
+  withHarness(
+    "flat",
+    ({ adapter, attachCount }) =>
+      Effect.gen(function* () {
+        const first = yield* adapter
+          .startSession({ threadId, runtimeMode: "full-access" })
+          .pipe(Effect.exit);
+        NodeAssert.equal(Exit.isFailure(first), true);
+
+        yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+        NodeAssert.equal(attachCount(), 2);
+      }),
+    true,
+    true,
+  ),
+);
+
+it.effect("reconnects after the native event stream fails", () =>
+  withHarness("flat", ({ adapter, attachCount, failEvents }) =>
+    Effect.gen(function* () {
+      const runtimeError = yield* Deferred.make<void>();
+      yield* collectEvents(adapter, [], (next) =>
+        next.type === "runtime.error"
+          ? Deferred.succeed(runtimeError, undefined).pipe(Effect.ignore)
+          : Effect.void,
+      );
+      yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+      yield* failEvents(
+        new OpenCode2RuntimeError({
+          operation: "event.subscribe",
+          kind: "connection",
+          detail: "The shared event stream disconnected.",
+        }),
+      );
+      yield* Deferred.await(runtimeError);
+
+      yield* adapter.sendTurn({ threadId, input: "reconnect" });
+      NodeAssert.equal(attachCount(), 2);
+    }),
+  ),
+);
+
+it.effect("restores the regular agent after a plan turn", () =>
+  withHarness("flat", ({ adapter, calls }) =>
+    Effect.gen(function* () {
+      yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "plan this",
+        interactionMode: "plan",
+      });
+      yield* adapter.sendTurn({ threadId, input: "build this" });
+
+      NodeAssert.deepEqual(
+        calls.filter((call) => call.operation === "session.switchAgent").map((call) => call.body),
+        [{ agent: "plan" }, { agent: "build" }],
+      );
+    }),
+  ),
+);
+
+it.effect("moves a resumed provider session to its latest T3 thread", () =>
+  withHarness("flat", ({ adapter }) =>
+    Effect.gen(function* () {
+      const firstThread = ThreadId.make("thread-opencode2-first");
+      const secondThread = ThreadId.make("thread-opencode2-second");
+      const resumeCursor = { schemaVersion: 1, sessionId: "ses_shared" } as const;
+      yield* adapter.startSession({
+        threadId: firstThread,
+        runtimeMode: "full-access",
+        resumeCursor,
+      });
+      yield* adapter.startSession({
+        threadId: secondThread,
+        runtimeMode: "full-access",
+        resumeCursor,
+      });
+
+      NodeAssert.deepEqual(
+        (yield* adapter.listSessions()).map((session) => session.threadId),
+        [secondThread],
+      );
+      yield* adapter.stopSession(secondThread);
+      NodeAssert.deepEqual(yield* adapter.listSessions(), []);
+    }),
   ),
 );

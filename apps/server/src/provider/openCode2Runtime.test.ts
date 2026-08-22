@@ -109,13 +109,43 @@ it.effect("memoizes one service attachment per binary and environment", () => {
   });
 });
 
+it.effect("refreshes a cached attachment when the shared service is no longer healthy", () => {
+  let healthFails = false;
+  const fake = fakeRuntime({
+    onRequest: (request) => {
+      if (new URL(request.url).pathname === "/api/health" && healthFails) {
+        return Response.json({ healthy: false }, { status: 503 });
+      }
+      return Response.json({ healthy: true });
+    },
+  });
+  return Effect.gen(function* () {
+    const runtime = yield* fake.runtime;
+    const first = yield* runtime.attach({ binaryPath: "opencode2" });
+    healthFails = true;
+    const second = yield* runtime.attach({ binaryPath: "opencode2" });
+
+    NodeAssert.notEqual(first, second);
+    NodeAssert.deepEqual(
+      fake.commands.map((command) => command.args),
+      [
+        ["service", "start"],
+        ["service", "get", "password"],
+        ["service", "start"],
+        ["service", "get", "password"],
+      ],
+    );
+  });
+});
+
 it.effect("uses private Basic auth for typed JSON and global SSE requests", () => {
   const fake = fakeRuntime({
     onRequest: (request) => {
       const pathname = new URL(request.url).pathname;
       if (pathname === "/api/event") {
         return new Response(
-          'data: {"id":"evt_1","type":"server.connected","data":{}}\n\n' +
+          'data: {"id":"evt_1",\n' +
+            'data: "type":"server.connected","data":{}}\n\n' +
             'data: {"id":"evt_2","type":"session.text.delta","data":{"delta":"hi"}}\n\n',
           { headers: { "content-type": "text/event-stream" } },
         );

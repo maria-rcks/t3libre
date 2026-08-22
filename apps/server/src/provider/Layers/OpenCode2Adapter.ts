@@ -19,9 +19,12 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -34,6 +37,7 @@ import {
 } from "../Errors.ts";
 import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
 import {
+  type OpenCode2Connection,
   type OpenCode2Event,
   type OpenCode2RequestInput,
   OpenCode2Runtime,
@@ -81,6 +85,7 @@ interface OpenCode2SessionContext {
   currentModel: string | undefined;
   currentVariant: string | undefined;
   currentAgent: string | undefined;
+  regularAgent: string;
 }
 
 export interface OpenCode2AdapterLiveOptions {
@@ -101,6 +106,11 @@ interface EventBaseInput {
   readonly itemId?: string;
   readonly requestId?: string;
   readonly raw?: OpenCode2Event;
+}
+
+interface OpenCode2ActiveConnection {
+  readonly connection: OpenCode2Connection;
+  readonly interrupt: Effect.Effect<void>;
 }
 
 function recordFromUnknown(value: unknown): Readonly<Record<string, unknown>> | undefined {
@@ -310,7 +320,8 @@ export function makeOpenCode2Adapter(
     const events = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, OpenCode2SessionContext>();
     const sessionByProviderId = new Map<string, OpenCode2SessionContext>();
-    const serverConnected = yield* Deferred.make<void, OpenCode2RuntimeError>();
+    const connectionLock = yield* Semaphore.make(1);
+    let activeConnection: OpenCode2ActiveConnection | undefined;
     let eventCounter = 0;
 
     const buildEventBase = Effect.fn("OpenCode2Adapter.buildEventBase")(function* (
@@ -421,7 +432,6 @@ export function makeOpenCode2Adapter(
       event: OpenCode2Event,
     ) {
       if (normalizeEventType(event.type) === "server.connected") {
-        yield* Deferred.succeed(serverConnected, undefined).pipe(Effect.ignore);
         return;
       }
       const providerSessionId = eventSessionId(event);
@@ -787,14 +797,29 @@ export function makeOpenCode2Adapter(
         { discard: true },
       );
 
-    const ensureConnection = yield* Effect.cached(
+    const invalidateConnection = (entry: OpenCode2ActiveConnection) =>
       Effect.gen(function* () {
+        if (activeConnection !== entry) return;
+        activeConnection = undefined;
+        yield* entry.interrupt;
+      });
+
+    const ensureConnection = connectionLock.withPermit(
+      Effect.gen(function* () {
+        if (activeConnection) return activeConnection;
+
         const connection = yield* runtime.attach({
           binaryPath: settings.binaryPath,
           ...(options?.environment ? { environment: options.environment } : {}),
         });
-        yield* connection.globalEvents.pipe(
-          Stream.runForEach(handleEvent),
+        const connected = yield* Deferred.make<void, OpenCode2RuntimeError>();
+        const streamFailure = yield* Ref.make<Option.Option<OpenCode2RuntimeError>>(Option.none());
+        const eventFiber = yield* connection.globalEvents.pipe(
+          Stream.runForEach((event) =>
+            normalizeEventType(event.type) === "server.connected"
+              ? Deferred.succeed(connected, undefined).pipe(Effect.ignore)
+              : handleEvent(event),
+          ),
           Effect.flatMap(() =>
             Effect.fail(
               new OpenCode2RuntimeError({
@@ -804,27 +829,41 @@ export function makeOpenCode2Adapter(
               }),
             ),
           ),
-          Effect.tapError((cause) => Deferred.fail(serverConnected, cause).pipe(Effect.ignore)),
-          Effect.catch(reportConnectionFailure),
-          Effect.forkIn(scope),
-        );
-        yield* Deferred.await(serverConnected).pipe(
-          Effect.timeoutOption("10 seconds"),
-          Effect.flatMap(
-            Option.match({
-              onNone: () =>
-                Effect.fail(
-                  new OpenCode2RuntimeError({
-                    operation: "event.subscribe",
-                    kind: "connection",
-                    detail: "Timed out waiting for OpenCode 2 server.connected.",
-                  }),
-                ),
-              onSome: Effect.succeed,
+          Effect.catchTag("OpenCode2RuntimeError", (cause) =>
+            Effect.gen(function* () {
+              yield* Ref.set(streamFailure, Option.some(cause));
+              yield* Deferred.fail(connected, cause).pipe(Effect.ignore);
+              if (activeConnection?.connection === connection) activeConnection = undefined;
+              yield* reportConnectionFailure(cause);
             }),
           ),
+          Effect.forkIn(scope),
         );
-        return connection;
+        const interrupt = Fiber.interrupt(eventFiber).pipe(Effect.asVoid);
+        const handshake = yield* Deferred.await(connected).pipe(Effect.timeoutOption("10 seconds"));
+        if (Option.isNone(handshake)) {
+          yield* interrupt;
+          return yield* new OpenCode2RuntimeError({
+            operation: "event.subscribe",
+            kind: "connection",
+            detail: "Timed out waiting for OpenCode 2 server.connected.",
+          });
+        }
+
+        const entry = { connection, interrupt } satisfies OpenCode2ActiveConnection;
+        const failedBeforeActivation = yield* Ref.get(streamFailure);
+        if (Option.isSome(failedBeforeActivation)) {
+          yield* interrupt;
+          return yield* failedBeforeActivation.value;
+        }
+        activeConnection = entry;
+        const failedDuringActivation = yield* Ref.get(streamFailure);
+        if (Option.isSome(failedDuringActivation)) {
+          activeConnection = undefined;
+          yield* interrupt;
+          return yield* failedDuringActivation.value;
+        }
+        return entry;
       }),
     );
 
@@ -834,7 +873,11 @@ export function makeOpenCode2Adapter(
       input: OpenCode2RequestInput<S>,
     ) =>
       ensureConnection.pipe(
-        Effect.flatMap((connection) => connection.request(method, path, input)),
+        Effect.flatMap((entry) =>
+          entry.connection
+            .request(method, path, input)
+            .pipe(Effect.tapError(() => invalidateConnection(entry))),
+        ),
       );
 
     const interruptContext = Effect.fn("OpenCode2Adapter.interruptContext")(function* (
@@ -929,6 +972,14 @@ export function makeOpenCode2Adapter(
             },
           }).pipe(Effect.mapError((cause) => toProcessError(input.threadId, cause)));
       const providerSessionId = resolved.data.id;
+      const staleContexts = new Set<OpenCode2SessionContext>();
+      const previousForThread = sessions.get(input.threadId);
+      const previousForProvider = sessionByProviderId.get(providerSessionId);
+      if (previousForThread) staleContexts.add(previousForThread);
+      if (previousForProvider) staleContexts.add(previousForProvider);
+      for (const stale of staleContexts) {
+        yield* detachContext(stale);
+      }
       if (resumeSessionId && modelRef) {
         yield* request("POST", `/api/session/${encodedPathSegment(providerSessionId)}/model`, {
           operation: "session.switchModel",
@@ -968,12 +1019,9 @@ export function makeOpenCode2Adapter(
         activeTurnId: undefined,
         currentModel: selectedModel,
         currentVariant: variant,
-        currentAgent: agent,
+        currentAgent: agent ?? "build",
+        regularAgent: agent ?? "build",
       };
-      const previous = sessions.get(input.threadId);
-      if (previous) {
-        yield* detachContext(previous);
-      }
       sessions.set(input.threadId, context);
       sessionByProviderId.set(providerSessionId, context);
       yield* emit({
@@ -998,6 +1046,7 @@ export function makeOpenCode2Adapter(
       function* (input) {
         const context = yield* ensureSession(input.threadId);
         const connection = yield* ensureConnection.pipe(
+          Effect.map((entry) => entry.connection),
           Effect.mapError((cause) => toRequestError("connection.attach", cause)),
         );
         if (input.modelSelection && input.modelSelection.instanceId !== instanceId) {
@@ -1064,9 +1113,12 @@ export function makeOpenCode2Adapter(
           context.currentVariant = variant;
         }
 
+        const explicitAgent = getModelSelectionStringOptionValue(input.modelSelection, "agent");
         const selectedAgent =
-          getModelSelectionStringOptionValue(input.modelSelection, "agent") ??
-          (input.interactionMode === "plan" ? "plan" : context.currentAgent);
+          input.interactionMode === "plan" ? "plan" : (explicitAgent ?? context.regularAgent);
+        if (input.interactionMode !== "plan" && explicitAgent) {
+          context.regularAgent = explicitAgent;
+        }
         if (selectedAgent && selectedAgent !== context.currentAgent) {
           yield* request(
             "POST",

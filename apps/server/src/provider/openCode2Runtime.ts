@@ -1,14 +1,15 @@
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import * as Sse from "effect/unstable/encoding/Sse";
 
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { collectStreamAsString } from "./providerSnapshot.ts";
@@ -112,10 +113,6 @@ const OpenCode2EventSchema = Schema.Struct({
   ),
   metadata: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
 });
-
-const decodeOpenCode2SseEvent = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(OpenCode2EventSchema),
-);
 
 function environmentKey(environment: NodeJS.ProcessEnv): string {
   return JSON.stringify(
@@ -357,23 +354,8 @@ function makeConnection(input: {
       ),
   ).pipe(
     Stream.decodeText(),
-    Stream.splitLines,
-    Stream.filterMap((line) => {
-      if (!line.startsWith("data:")) return Result.failVoid;
-      return Result.succeed(line.slice("data:".length).trimStart());
-    }),
-    Stream.mapEffect((line) =>
-      decodeOpenCode2SseEvent(line).pipe(
-        Effect.mapError((cause) =>
-          runtimeError({
-            operation: "event.decode",
-            kind: "unsupported-preview",
-            detail: "This OpenCode 2 preview returned an unsupported event payload.",
-            cause,
-          }),
-        ),
-      ),
-    ),
+    Stream.pipeThroughChannel(Sse.decodeDataSchema(OpenCode2EventSchema)),
+    Stream.map((event) => event.data),
     Stream.mapError((cause) =>
       cause instanceof OpenCode2RuntimeError
         ? cause
@@ -424,7 +406,16 @@ export const makeOpenCode2Runtime = Effect.fn("makeOpenCode2Runtime")(function* 
     return attachLock.withPermit(
       Effect.gen(function* () {
         const existing = connections.get(key);
-        if (existing) return existing;
+        if (existing) {
+          const health = yield* Effect.exit(
+            existing.request("GET", "/api/health", {
+              operation: "health.get",
+              schema: Schema.Unknown,
+            }),
+          );
+          if (Exit.isSuccess(health)) return existing;
+          connections.delete(key);
+        }
 
         const start = yield* runCommand({
           binaryPath: attachInput.binaryPath,

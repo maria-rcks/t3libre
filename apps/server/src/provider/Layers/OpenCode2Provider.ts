@@ -198,7 +198,11 @@ function failureSnapshot(input: {
   const unsupported =
     input.cause instanceof OpenCode2RuntimeError && input.cause.kind === "unsupported-preview";
   const detail = errorText(input.cause);
-  const missing = /(?:enoent|not found|could not resolve|failed to execute)/iu.test(detail);
+  const missing =
+    input.cause instanceof OpenCode2RuntimeError &&
+    input.cause.kind === "command" &&
+    (input.cause.operation === "command.resolve" || input.cause.operation === "command.spawn") &&
+    /(?:enoent|not found|could not resolve|failed to execute)/iu.test(detail);
   return buildServerProvider({
     presentation: OPENCODE2_PRESENTATION,
     enabled: input.settings.enabled,
@@ -318,16 +322,16 @@ export const checkOpenCode2ProviderStatus = Effect.fn("checkOpenCode2ProviderSta
   }
 
   const value = attached.value.value;
+  const discoveredModels = providerModels(value);
   const models = providerModelsFromSettings(
-    providerModels(value),
+    discoveredModels,
     settings.customModels,
     DEFAULT_OPENCODE2_MODEL_CAPABILITIES,
   );
   const providerCount = new Set(
-    value.models
-      .filter((model: OpenCode2Model) => model.enabled !== false)
-      .map((model: OpenCode2Model) => model.providerID),
+    discoveredModels.map((model) => model.subProvider).filter((provider) => provider !== undefined),
   ).size;
+  const healthy = value.health.healthy !== false;
   return buildServerProvider({
     presentation: OPENCODE2_PRESENTATION,
     enabled: true,
@@ -336,12 +340,15 @@ export const checkOpenCode2ProviderStatus = Effect.fn("checkOpenCode2ProviderSta
     probe: {
       installed: true,
       version: value.health.version ?? null,
-      status: models.length > 0 ? "ready" : "warning",
+      status: healthy && models.length > 0 ? "ready" : "warning",
       auth: { status: "authenticated", type: "opencode" },
-      message:
-        models.length > 0
+      message: !healthy
+        ? "The OpenCode 2 background service reported that it is unhealthy."
+        : providerCount > 0
           ? `${providerCount} upstream provider${providerCount === 1 ? "" : "s"} available through the OpenCode 2 background service.`
-          : "Connected to OpenCode 2, but it did not report any available models.",
+          : models.length > 0
+            ? "Connected to OpenCode 2 using the custom models configured in T3 Code."
+            : "Connected to OpenCode 2, but it did not report any available models.",
     },
   });
 });
