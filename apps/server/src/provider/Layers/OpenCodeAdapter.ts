@@ -64,9 +64,7 @@ const MessagesResponseSchema = Schema.Struct({
 
 const decodeUnknownRecord = Schema.decodeUnknownOption(UnknownRecordSchema);
 const decodeUnknownRecordArray = Schema.decodeUnknownOption(UnknownRecordArraySchema);
-const decodeUnknownJsonString = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Unknown),
-);
+const decodeUnknownJsonString = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
 interface OpenCodeTurnSnapshot {
   readonly id: TurnId;
@@ -233,10 +231,7 @@ function openCodeToolTitle(toolName: string): string {
  * Short human summary of a tool call's input for the row preview. OpenCode 2
  * streams inputs as raw JSON text; parse out the field a human would scan.
  */
-function openCodeToolInputDetail(
-  toolName: string,
-  input: unknown,
-): string | undefined {
+function openCodeToolInputDetail(toolName: string, input: unknown): string | undefined {
   const record = recordFromUnknown(input);
   if (!record) return undefined;
   const firstString = (...keys: ReadonlyArray<string>) => stringField(record, ...keys);
@@ -367,7 +362,8 @@ function normalizeFormAnswers(
   answers: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> {
   const fields = recordsFromUnknown(form.fields);
-  const toOptionValue = (options: ReadonlyArray<Readonly<Record<string, unknown>>>) =>
+  const toOptionValue =
+    (options: ReadonlyArray<Readonly<Record<string, unknown>>>) =>
     (candidate: unknown): unknown => {
       if (typeof candidate !== "string") return candidate;
       const text = candidate.trim();

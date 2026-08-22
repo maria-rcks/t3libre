@@ -415,10 +415,7 @@ it.effect("attaches once and maps native deltas, tools, and terminal events", ()
       );
       const endedUpdate = toolUpdates[1];
       NodeAssert.ok(endedUpdate);
-      NodeAssert.equal(
-        (endedUpdate.payload as Record<string, unknown>).detail,
-        "pwd",
-      );
+      NodeAssert.equal((endedUpdate.payload as Record<string, unknown>).detail, "pwd");
       NodeAssert.equal(
         observed.some((next) => next.type === "turn.completed" && next.turnId === turn.turnId),
         true,
