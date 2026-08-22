@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 import {
@@ -49,6 +50,11 @@ const UnknownRecordArraySchema = Schema.Array(UnknownRecordSchema);
 const SessionResponseSchema = Schema.Struct({
   data: Schema.Struct({
     id: Schema.String,
+    location: Schema.optionalKey(
+      Schema.Struct({
+        directory: Schema.String,
+      }),
+    ),
   }),
 });
 const MessagesResponseSchema = Schema.Struct({
@@ -148,6 +154,10 @@ function parseResumeCursor(raw: unknown): string | undefined {
   const record = recordFromUnknown(raw);
   if (record?.schemaVersion !== RESUME_VERSION) return undefined;
   return stringField(record, "sessionId");
+}
+
+function isSameDirectory(left: string, right: string): boolean {
+  return NodePath.resolve(left) === NodePath.resolve(right);
 }
 
 function parseModelRef(model: string, variant?: string): ModelRef | undefined {
@@ -456,6 +466,7 @@ export function makeOpenCodeAdapter(
 
     const handleEvent = Effect.fn("OpenCodeAdapter.handleEvent")(function* (
       event: OpenCodeRuntime.OpenCodeEvent,
+      connection: OpenCodeRuntime.OpenCodeConnection,
     ) {
       if (normalizeEventType(event.type) === "server.connected") {
         return;
@@ -673,6 +684,20 @@ export function makeOpenCodeAdapter(
         case "permission.asked": {
           const requestId = stringField(data, "id", "requestID");
           if (!requestId) break;
+          if (context.session.runtimeMode === "full-access") {
+            yield* connection
+              .request(
+                "POST",
+                `/api/session/${encodedPathSegment(context.providerSessionId)}/permission/${encodedPathSegment(requestId)}/reply`,
+                {
+                  operation: "permission.reply",
+                  schema: Schema.Void,
+                  body: { reply: "once" },
+                },
+              )
+              .pipe(Effect.mapError((cause) => toRequestError("permission.reply", cause)));
+            break;
+          }
           const action = stringField(data, "action", "permission") ?? "unknown";
           const resources = Array.isArray(data.resources)
             ? data.resources.filter((value): value is string => typeof value === "string")
@@ -857,7 +882,16 @@ export function makeOpenCodeAdapter(
           Stream.runForEach((event) =>
             normalizeEventType(event.type) === "server.connected"
               ? Deferred.succeed(connected, undefined).pipe(Effect.ignore)
-              : handleEvent(event),
+              : handleEvent(event, connection).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OpenCodeRuntime.OpenCodeRuntimeError({
+                        operation: "event.process",
+                        reason: "transport",
+                        cause,
+                      }),
+                  ),
+                ),
           ),
           Effect.flatMap(() =>
             Effect.fail(
@@ -1003,14 +1037,19 @@ export function makeOpenCodeAdapter(
           ...(modelRef ? { model: modelRef } : {}),
           ...(agent ? { agent } : {}),
         },
-      }).pipe(Effect.map((resolved) => ({ resolved, resumedExistingSession: false as const })));
+      }).pipe(Effect.map((resolved) => ({ resolved, resumedExistingSession: false })));
       const resolution = yield* (
         resumeSessionId
           ? request("GET", `/api/session/${encodedPathSegment(resumeSessionId)}`, {
               operation: "session.get",
               schema: SessionResponseSchema,
             }).pipe(
-              Effect.map((resolved) => ({ resolved, resumedExistingSession: true as const })),
+              Effect.flatMap((resolved) =>
+                resolved.data.location === undefined ||
+                isSameDirectory(resolved.data.location.directory, directory)
+                  ? Effect.succeed({ resolved, resumedExistingSession: true })
+                  : createSession,
+              ),
               Effect.catchIf(isMissingOpenCodeSession, () => createSession),
             )
           : createSession

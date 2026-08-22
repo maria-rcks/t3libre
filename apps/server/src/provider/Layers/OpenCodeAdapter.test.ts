@@ -10,10 +10,12 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
+import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as PlatformError from "effect/PlatformError";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -36,9 +38,11 @@ interface Harness {
   readonly calls: Array<RequestCall>;
   readonly attachCount: () => number;
   readonly failNextRequest: (operation: string) => void;
+  readonly failNextEventId: () => void;
   readonly missNextRequest: (operation: string) => void;
   readonly blockNextRequest: (operation: string, blocker: Effect.Effect<void>) => void;
   readonly queueSessionIds: (...sessionIds: ReadonlyArray<string>) => void;
+  readonly setSessionDirectory: (sessionId: string, directory: string) => void;
   readonly publish: (event: OpenCodeRuntime.OpenCodeEvent) => Effect.Effect<void>;
   readonly failEvents: (error: OpenCodeRuntime.OpenCodeRuntimeFailure) => Effect.Effect<void>;
 }
@@ -62,6 +66,7 @@ function withHarness<A, E>(
   failFirstHandshake = false,
 ) {
   return Effect.gen(function* () {
+    const crypto = yield* Crypto.Crypto;
     const events = yield* Queue.unbounded<
       OpenCodeRuntime.OpenCodeEvent | OpenCodeRuntime.OpenCodeRuntimeFailure
     >();
@@ -70,6 +75,8 @@ function withHarness<A, E>(
     const missingOperations = new Set<string>();
     const blockedOperations = new Map<string, Effect.Effect<void>>();
     const queuedSessionIds: Array<string> = [];
+    const sessionDirectories = new Map<string, string>();
+    let shouldFailNextEventId = false;
     let attachCalls = 0;
     const request = ((
       method: OpenCodeRuntime.OpenCodeHttpMethod,
@@ -106,7 +113,14 @@ function withHarness<A, E>(
             path === "/api/session"
               ? (queuedSessionIds.shift() ?? "ses_test")
               : path.slice("/api/session/".length);
-          return { data: { id } };
+          return {
+            data: {
+              id,
+              ...(method === "GET"
+                ? { location: { directory: sessionDirectories.get(id) ?? process.cwd() } }
+                : {}),
+            },
+          };
         }
         if (path.endsWith("/message")) return { data: [], cursor: {} };
         if (path.endsWith("/prompt")) return { data: { id: "msg_user" } };
@@ -152,8 +166,23 @@ function withHarness<A, E>(
           ),
         ),
     };
+    const uuidError = PlatformError.systemError({
+      _tag: "Unknown",
+      module: "Crypto",
+      method: "randomUUIDv4",
+      description: "UUID generation unavailable",
+    });
+    const testCrypto = {
+      ...crypto,
+      randomUUIDv4: Effect.suspend(() => {
+        if (!shouldFailNextEventId) return crypto.randomUUIDv4;
+        shouldFailNextEventId = false;
+        return Effect.fail(uuidError);
+      }),
+    };
     const adapter = yield* makeOpenCodeAdapter({ ...settings, enabled }).pipe(
       Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, runtime),
+      Effect.provideService(Crypto.Crypto, testCrypto),
       Effect.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-opencode2-adapter-" })),
     );
     yield* Effect.yieldNow;
@@ -162,9 +191,13 @@ function withHarness<A, E>(
       calls,
       attachCount: () => attachCalls,
       failNextRequest: (operation) => failedOperations.add(operation),
+      failNextEventId: () => {
+        shouldFailNextEventId = true;
+      },
       missNextRequest: (operation) => missingOperations.add(operation),
       blockNextRequest: (operation, blocker) => blockedOperations.set(operation, blocker),
       queueSessionIds: (...sessionIds) => queuedSessionIds.push(...sessionIds),
+      setSessionDirectory: (sessionId, directory) => sessionDirectories.set(sessionId, directory),
       publish: (next) => Queue.offer(events, next).pipe(Effect.asVoid),
       failEvents: (error) => Queue.offer(events, error).pipe(Effect.asVoid),
     });
@@ -502,6 +535,46 @@ it.effect("replies to permissions and forms and interrupts through native routes
   ),
 );
 
+it.effect("auto-accepts native permissions in full-access mode", () =>
+  withHarness("flat", ({ adapter, blockNextRequest, calls, publish }) =>
+    Effect.gen(function* () {
+      const observed: Array<ProviderRuntimeEvent> = [];
+      const replyStarted = yield* Deferred.make<void>();
+      yield* collectEvents(adapter, observed);
+      yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+      yield* adapter.sendTurn({ threadId, input: "edit this" });
+      blockNextRequest(
+        "permission.reply",
+        Deferred.succeed(replyStarted, undefined).pipe(Effect.ignore),
+      );
+
+      yield* publish(
+        event("permission", "permission.asked", {
+          id: "per_test",
+          sessionID: "ses_test",
+          action: "edit",
+          resources: ["src/index.ts"],
+        }),
+      );
+      yield* Deferred.await(replyStarted);
+
+      NodeAssert.deepEqual(
+        calls.find((call) => call.operation === "permission.reply"),
+        {
+          method: "POST",
+          path: "/api/session/ses_test/permission/per_test/reply",
+          operation: "permission.reply",
+          body: { reply: "once" },
+        },
+      );
+      NodeAssert.equal(
+        observed.some((next) => next.type === "request.opened"),
+        false,
+      );
+    }),
+  ),
+);
+
 it.effect("resumes existing sessions and detaches without stop or delete requests", () =>
   withHarness("flat", ({ adapter, calls }) =>
     Effect.gen(function* () {
@@ -584,6 +657,38 @@ it.effect("starts a fresh native session when a stored resume cursor no longer e
       );
       NodeAssert.deepEqual(session.resumeCursor, { schemaVersion: 1, sessionId: "ses_test" });
       NodeAssert.equal(attachCount(), 1);
+    }),
+  ),
+);
+
+it.effect("starts a fresh native session when the stored session uses another directory", () =>
+  withHarness("flat", ({ adapter, calls, queueSessionIds, setSessionDirectory }) =>
+    Effect.gen(function* () {
+      setSessionDirectory("ses_from_v1", "/tmp/opencode2-old");
+      queueSessionIds("ses_fresh");
+      const session = yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        cwd: "/tmp/opencode2-new",
+        resumeCursor: { schemaVersion: 1, sessionId: "ses_from_v1" },
+      });
+
+      NodeAssert.deepEqual(
+        calls
+          .filter((call) => call.operation === "session.get" || call.operation === "session.create")
+          .map((call) => [call.method, call.path]),
+        [
+          ["GET", "/api/session/ses_from_v1"],
+          ["POST", "/api/session"],
+        ],
+      );
+      NodeAssert.deepEqual(calls.find((call) => call.operation === "session.create")?.body, {
+        location: { directory: "/tmp/opencode2-new" },
+      });
+      NodeAssert.deepEqual(session.resumeCursor, {
+        schemaVersion: 1,
+        sessionId: "ses_fresh",
+      });
     }),
   ),
 );
@@ -705,6 +810,45 @@ it.effect("reconnects after the native event stream fails", () =>
       yield* Deferred.await(secondTurnStarted);
       NodeAssert.equal(attachCount(), 2);
       NodeAssert.equal(observed.filter((event) => event.type === "turn.started").length, 2);
+    }),
+  ),
+);
+
+it.effect("reconnects after native event processing fails", () =>
+  withHarness("flat", ({ adapter, attachCount, failNextEventId, publish }) =>
+    Effect.gen(function* () {
+      const runtimeError = yield* Deferred.make<void>();
+      const observed: Array<ProviderRuntimeEvent> = [];
+      yield* collectEvents(adapter, observed, (next) =>
+        next.type === "runtime.error"
+          ? Deferred.succeed(runtimeError, undefined).pipe(Effect.ignore)
+          : Effect.void,
+      );
+      yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+      const firstTurn = yield* adapter.sendTurn({ threadId, input: "before event failure" });
+      failNextEventId();
+      yield* publish(
+        event("text", "session.text.delta", {
+          sessionID: "ses_test",
+          assistantMessageID: "msg_assistant",
+          ordinal: 0,
+          delta: "partial",
+        }),
+      );
+      yield* Deferred.await(runtimeError);
+
+      NodeAssert.equal((yield* adapter.listSessions())[0]?.activeTurnId, undefined);
+      NodeAssert.equal(
+        observed.some(
+          (next) =>
+            next.type === "turn.completed" &&
+            next.turnId === firstTurn.turnId &&
+            next.payload.state === "failed",
+        ),
+        true,
+      );
+      yield* adapter.sendTurn({ threadId, input: "after event failure" });
+      NodeAssert.equal(attachCount(), 2);
     }),
   ),
 );
