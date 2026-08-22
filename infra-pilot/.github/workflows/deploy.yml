@@ -1,0 +1,157 @@
+name: Production Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        type: choice
+        options: [staging, prod]
+        required: true
+        default: staging
+      image_tag:
+        description: 'Docker image tag to deploy (defaults to git tag/short SHA)'
+        type: string
+        required: false
+  push:
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_TAG: ${{ github.ref_name == 'main' && 'latest' || github.ref_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      matrix:
+        service: [orchestrator-agent, management-panel, discord-service]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4.5.2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service }}
+          tags: |
+            type=raw,value=${{ inputs.image_tag || 'latest' }}
+            type=semver,pattern={{version}}
+            type=sha,format=short
+      - uses: docker/build-push-action@v7
+        with:
+          context: services/${{ matrix.service }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: [build-and-push]
+    if: ${{ github.event.inputs.environment == 'staging' || startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      - run: aws eks update-kubeconfig --name infra-pilot-staging --region us-east-1
+      - name: Deploy Helm chart
+        env:
+          HELM_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
+        run: |
+          tag="${HELM_TAG}"
+          if [[ ! "$tag" =~ ^v ]]; then tag="${GITHUB_SHA::7}"; fi
+          helm upgrade --install infra-pilot helm/infra-pilot \
+            --namespace infra-pilot --create-namespace \
+            --set image.tag=${{ inputs.image_tag != '' && inputs.image_tag || '$tag' }} \
+            --set global.environment=staging \
+            --set postgresql.auth.password=${{ secrets.DB_PASSWORD }} \
+            --set redis.auth.password=${{ secrets.REDIS_PASSWORD }} \
+            --set orchestrator.env[0].value=staging \
+            --wait --timeout 10m
+
+  deploy-production:
+    name: Deploy to Production
+    needs: [build-and-push, deploy-staging]
+    if: ${{ github.event.inputs.environment == 'prod' && github.event.inputs.environment != 'staging' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_PROD_ROLE_ARN }}
+          aws-region: us-east-1
+      - run: aws eks update-kubeconfig --name infra-pilot-prod --region us-east-1
+      - name: Deploy Helm chart
+        env:
+          HELM_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
+        run: |
+          tag="${HELM_TAG}"
+          if [[ ! "$tag" =~ ^v ]]; then tag="${GITHUB_SHA::7}"; fi
+          helm upgrade --install infra-pilot helm/infra-pilot \
+            --namespace infra-pilot --create-namespace \
+            --set image.tag=${{ inputs.image_tag != '' && inputs.image_tag || '$tag' }} \
+            --set global.environment=production \
+            --set replicaCount=3 \
+            --set autoscaling.minReplicas=3 \
+            --set autoscaling.maxReplicas=20 \
+            --set postgresql.auth.password=${{ secrets.DB_PASSWORD }} \
+            --set redis.auth.password=${{ secrets.REDIS_PASSWORD }} \
+            --set orchestrator.env[0].value=production \
+            --wait --timeout 15m
+      - name: Smoke test
+        env:
+          SMOKE_TEST_URL: ${{ vars.SMOKE_TEST_URL }}
+        run: |
+          if [[ -z "${SMOKE_TEST_URL}" ]]; then
+            echo "::error::SMOKE_TEST_URL is not configured for the production environment. Set it as an environment variable in the repository settings."
+            exit 1
+          fi
+          curl -f --retry 10 --retry-delay 10 "${SMOKE_TEST_URL%/}/health"
+          echo "Production smoke test passed"
+
+  notify:
+    name: Notify
+    needs: [deploy-staging, deploy-production]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const environments = ['staging', 'production'];
+            const results = environments.map(e => ({
+              environment: e,
+              status: '${{ needs.deploy-staging.result }}'
+            }));
+            console.log('Deployment results:', results);

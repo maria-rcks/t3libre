@@ -1,0 +1,183 @@
+name: Reusable CI - Node.js Service
+
+on:
+  workflow_call:
+    inputs:
+      service-path:
+        description: Path to the Node.js service directory.
+        required: true
+        type: string
+      image-name:
+        description: GHCR image name without the registry prefix, usually owner/repo/service.
+        required: true
+        type: string
+      node-version:
+        description: Node.js version used for validation jobs.
+        required: false
+        type: string
+        default: '22'
+      run-build:
+        description: Run the build command after lint, type-check, and tests pass.
+        required: false
+        type: boolean
+        default: false
+      run-lint:
+        description: Run the lint command.
+        required: false
+        type: boolean
+        default: true
+      run-type-check:
+        description: Run the type-check command.
+        required: false
+        type: boolean
+        default: true
+      run-tests:
+        description: Run the test command.
+        required: false
+        type: boolean
+        default: true
+      lint-command:
+        description: Command used to lint the service.
+        required: false
+        type: string
+        default: npm run lint
+      type-check-command:
+        description: Command used to type-check the service.
+        required: false
+        type: string
+        default: npm run type-check
+      test-command:
+        description: Command used to run service tests.
+        required: false
+        type: string
+        default: npm run test
+      build-command:
+        description: Command used when run-build is enabled.
+        required: false
+        type: string
+        default: npm run build
+      upload-coverage:
+        description: Upload coverage to Codecov after tests complete.
+        required: false
+        type: boolean
+        default: false
+      coverage-files:
+        description: Coverage file glob passed to Codecov.
+        required: false
+        type: string
+        default: ''
+      coverage-flag:
+        description: Codecov flag for the service.
+        required: false
+        type: string
+        default: ''
+      coverage-name:
+        description: Codecov upload name for the service.
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Validate Node.js service
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.service-path }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.service-path }}
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
+
+      - name: Run lint
+        if: inputs.run-lint
+        working-directory: ${{ inputs.service-path }}
+        run: ${{ inputs.lint-command }}
+
+      - name: Run type-check
+        if: inputs.run-type-check
+        working-directory: ${{ inputs.service-path }}
+        run: ${{ inputs.type-check-command }}
+
+      - name: Run tests
+        if: inputs.run-tests
+        working-directory: ${{ inputs.service-path }}
+        run: ${{ inputs.test-command }}
+
+      - name: Run npm audit
+        working-directory: ${{ inputs.service-path }}
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Upload coverage
+        if: inputs.upload-coverage
+        uses: codecov/codecov-action@v7
+        with:
+          files: ${{ inputs.coverage-files }}
+          flags: ${{ inputs.coverage-flag }}
+          name: ${{ inputs.coverage-name }}
+
+      - name: Build service
+        if: inputs.run-build
+        working-directory: ${{ inputs.service-path }}
+        run: ${{ inputs.build-command }}
+
+  docker:
+    needs: validate
+    runs-on: ubuntu-latest
+    name: Build and publish Docker image
+    if: github.event_name == 'push'
+
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      REGISTRY: ghcr.io
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ inputs.image-name }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ inputs.service-path }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

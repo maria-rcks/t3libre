@@ -1,0 +1,16 @@
+{
+  "folders": [
+    { "path": "services/orchestrator-agent", "name": "Orchestrator Agent" },
+    { "path": "services/management-panel", "name": "Management Panel" },
+    { "path": "cli", "name": "CLI" },
+    { "path": ".", "name": "Infra Pilot (Root)" }
+  ],
+  "settings": {
+    "python.defaultInterpreterPath": "${workspaceFolder}/services/orchestrator-agent/.venv/bin/python",
+    "files.exclude": {
+      "**/.venv": true,
+      "**/__pycache__": true,
+      "**/node_modules": true
+    }
+  }
+}

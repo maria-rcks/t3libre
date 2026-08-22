@@ -1,0 +1,15 @@
+docker==7.2.0
+python-dotenv==1.2.2
+colorama==0.4.6
+psutil==7.2.2
+aiohttp==3.14.3
+asyncpg==0.31.0
+psycopg2-binary==2.9.12
+cryptography==50.0.0
+pillow==12.3.0
+typing-extensions==4.16.0
+requests==2.34.2
+croniter==6.2.4
+aiofiles==25.1.0
+alembic==1.19.1
+hvac==2.4.0

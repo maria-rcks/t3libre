@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Infra Pilot
+    orgId: 1
+    folder: Infra Pilot
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards

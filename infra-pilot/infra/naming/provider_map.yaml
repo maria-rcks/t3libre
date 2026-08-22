@@ -1,0 +1,3 @@
+PROVIDER_MOCK: mock-provider
+REGION_MOCK_US_EAST: mock-region-us-east
+SKU_MOCK_LARGE: mock-sku-large

@@ -1,0 +1,12 @@
+node_modules
+coverage
+dist
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+src-tauri/target
+playwright-report
+test-results
+*.log

@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "infra-pilot.fullname" . }}-config
+  labels:
+    {{- include "infra-pilot.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      port: 8500
+      host: 0.0.0.0
+      log_level: {{ .Values.orchestrator.config.logLevel | default "INFO" }}
+      workers: {{ .Values.orchestrator.config.workerCount | default 4 }}
+    database:
+      host: {{ .Values.orchestrator.env | where "name" "DB_HOST" | first | default "localhost" | pluck "value" }}
+      port: 5432
+      name: infrapilot
+      user: infrapilot
+      max_connections: 100
+    redis:
+      host: {{ .Values.orchestrator.env | where "name" "REDIS_HOST" | first | default "localhost" | pluck "value" }}
+      port: 6379
+      db: 0
+    monitoring:
+      enabled: true
+      metrics_port: 9090
+    {{- if .Values.configMaps.create }}
+    {{- range $key, $value := .Values.configMaps.data }}
+    {{ $key }}: {{ $value }}
+    {{- end }}
+    {{- end }}

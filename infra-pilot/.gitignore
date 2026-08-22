@@ -1,0 +1,60 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and temp
+*.log
+logs/
+.tmp/
+.cache/
+
+# Load test artifacts
+tests/load/k6/loadtest-results.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Python packaging
+*.egg-info/
+.coverage
+coverage.xml
+
+# Java
+*.class
+*.jar
+target/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Database backups
+backups/
+
+# Debian/package artifacts
+*.deb
+*.gz
+VPS-MAKER-BOT/deb/
+
+# Convex generated output
+panel_implementation/convex/_generated/
+
+# Cursor/editor generated config
+panel_implementation/.cursor/
+
+# Auto-generated AI stubs (setup.py previously had 600K+ lines of generated stubs)
+generated_stubs/
+ai_generated/
+stubs/

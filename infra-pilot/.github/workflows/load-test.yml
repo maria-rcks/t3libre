@@ -1,0 +1,129 @@
+name: Load Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: k6 scenario to run
+        required: false
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - soak
+          - spike
+      soak-duration:
+        description: Soak duration, e.g. 30m or 2h (soak only)
+        required: false
+        default: 10m
+        type: string
+      spike-max-vus:
+        description: Peak virtual users (spike only)
+        required: false
+        default: "200"
+        type: string
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'tests/load/**'
+
+concurrency:
+  group: load-test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  loadtest:
+    runs-on: ubuntu-latest
+    name: k6 ${{ inputs.scenario || 'smoke' }}
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: infra_pilot_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    env:
+      # Tokens below are CI-only and never leave the runner.
+      FEDERATION_API_TOKEN: loadtest-ci-token
+      GITOPS_WEBHOOK_TOKEN: loadtest-ci-gitops-token
+      DATABASE_URL: postgresql://test:test@localhost:5432/infra_pilot_test
+      REDIS_URL: redis://localhost:6379
+      GITOPS_WEBHOOK_PORT: 8500
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install orchestrator dependencies
+        run: pip install -r services/orchestrator-agent/requirements.txt
+
+      - name: Prepare database schema
+        run: |
+          cd services/orchestrator-agent
+          alembic upgrade head
+
+      - name: Start orchestrator-agent
+        run: |
+          cd services/orchestrator-agent
+          nohup python main.py > orchestrator-agent.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:8500/health > /dev/null; then
+              echo "orchestrator-agent is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "orchestrator-agent did not become healthy"
+          cat orchestrator-agent.log
+          exit 1
+
+      - name: Set up k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Run ${{ inputs.scenario || 'smoke' }} scenario
+        env:
+          K6_TARGET_ORCHESTRATOR: http://localhost:8500
+          K6_TARGET_PANEL: ""
+          K6_FEDERATION_TOKEN: ${{ env.FEDERATION_API_TOKEN }}
+          K6_GITOPS_WEBHOOK_TOKEN: ${{ env.GITOPS_WEBHOOK_TOKEN }}
+          K6_SOAK_DURATION: ${{ inputs.soak-duration || '10m' }}
+          K6_SPIKE_MAX_VU: ${{ inputs.spike-max-vus || '200' }}
+        run: |
+          SCENARIO="${{ inputs.scenario || 'smoke' }}"
+          k6 run "tests/load/k6/${SCENARIO}.js" --out json=loadtest-results.json
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-${{ inputs.scenario || 'smoke' }}-results
+          path: loadtest-results.json
