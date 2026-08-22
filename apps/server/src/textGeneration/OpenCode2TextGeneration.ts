@@ -7,7 +7,7 @@ import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shar
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { extractJsonObject } from "@t3tools/shared/schemaJson";
 
-import { OpenCode2Runtime, type OpenCode2RuntimeError } from "../provider/openCode2Runtime.ts";
+import * as OpenCode2Runtime from "../provider/openCode2Runtime.ts";
 import type { OpenCode2ProviderSettings } from "../provider/Layers/OpenCode2Provider.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
@@ -58,17 +58,11 @@ function generatedText(response: typeof OpenCode2GenerateResponseSchema.Type): s
   return "data" in response ? response.data.text : response.text;
 }
 
-function runtimeFailureDetail(cause: OpenCode2RuntimeError): string {
-  return cause.kind === "unsupported-preview"
-    ? `This OpenCode 2 preview is not supported for text generation. ${cause.detail}`
-    : cause.detail;
-}
-
 export const makeOpenCode2TextGeneration = Effect.fn("makeOpenCode2TextGeneration")(function* (
   settings: Pick<OpenCode2ProviderSettings, "binaryPath">,
   environment?: NodeJS.ProcessEnv,
 ) {
-  const runtime = yield* OpenCode2Runtime;
+  const runtime = yield* OpenCode2Runtime.OpenCode2Runtime;
 
   const runOpenCode2Json = Effect.fn("runOpenCode2Json")(function* <S extends Schema.Top>(input: {
     readonly operation: OpenCode2TextGenerationOperation;
@@ -115,7 +109,9 @@ export const makeOpenCode2TextGeneration = Effect.fn("makeOpenCode2TextGeneratio
           ? cause
           : new TextGenerationError({
               operation: input.operation,
-              detail: runtimeFailureDetail(cause),
+              detail: OpenCode2Runtime.isOpenCode2UnsupportedPreviewError(cause)
+                ? "This OpenCode 2 preview is not supported for text generation."
+                : "OpenCode 2 text generation request failed.",
               cause,
             }),
       ),

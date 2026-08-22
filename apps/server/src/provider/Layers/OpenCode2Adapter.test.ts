@@ -19,19 +19,11 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../../config.ts";
-import {
-  type OpenCode2Connection,
-  type OpenCode2Event,
-  type OpenCode2HttpMethod,
-  type OpenCode2RequestInput,
-  OpenCode2Runtime,
-  OpenCode2RuntimeError,
-  type OpenCode2RuntimeShape,
-} from "../openCode2Runtime.ts";
+import * as OpenCode2Runtime from "../openCode2Runtime.ts";
 import { makeOpenCode2Adapter, type OpenCode2AdapterShape } from "./OpenCode2Adapter.ts";
 
 interface RequestCall {
-  readonly method: OpenCode2HttpMethod;
+  readonly method: OpenCode2Runtime.OpenCode2HttpMethod;
   readonly path: string;
   readonly operation: string;
   readonly body?: unknown;
@@ -41,8 +33,9 @@ interface Harness {
   readonly adapter: OpenCode2AdapterShape;
   readonly calls: Array<RequestCall>;
   readonly attachCount: () => number;
-  readonly publish: (event: OpenCode2Event) => Effect.Effect<void>;
-  readonly failEvents: (error: OpenCode2RuntimeError) => Effect.Effect<void>;
+  readonly failNextRequest: (operation: string) => void;
+  readonly publish: (event: OpenCode2Runtime.OpenCode2Event) => Effect.Effect<void>;
+  readonly failEvents: (error: OpenCode2Runtime.OpenCode2RuntimeFailure) => Effect.Effect<void>;
 }
 
 const settings = Schema.decodeSync(OpenCode2Settings)({
@@ -53,7 +46,7 @@ const settings = Schema.decodeSync(OpenCode2Settings)({
 
 const threadId = ThreadId.make("thread-opencode2-test");
 
-function event(id: string, type: string, data: unknown): OpenCode2Event {
+function event(id: string, type: string, data: unknown): OpenCode2Runtime.OpenCode2Event {
   return { id, type, data };
 }
 
@@ -64,21 +57,30 @@ function withHarness<A, E>(
   failFirstHandshake = false,
 ) {
   return Effect.gen(function* () {
-    const events = yield* Queue.unbounded<OpenCode2Event | OpenCode2RuntimeError>();
+    const events = yield* Queue.unbounded<
+      OpenCode2Runtime.OpenCode2Event | OpenCode2Runtime.OpenCode2RuntimeFailure
+    >();
     const calls: Array<RequestCall> = [];
+    const failedOperations = new Set<string>();
     let attachCalls = 0;
     const request = ((
-      method: OpenCode2HttpMethod,
+      method: OpenCode2Runtime.OpenCode2HttpMethod,
       path: string,
-      input: OpenCode2RequestInput<Schema.Top>,
+      input: OpenCode2Runtime.OpenCode2RequestInput<Schema.Top>,
     ) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         calls.push({
           method,
           path,
           operation: input.operation,
           ...(input.body !== undefined ? { body: input.body } : {}),
         });
+        if (failedOperations.delete(input.operation)) {
+          return yield* new OpenCode2Runtime.OpenCode2RuntimeError({
+            operation: input.operation,
+            reason: "transport",
+          });
+        }
         if (path === "/api/session" || (method === "GET" && path.startsWith("/api/session/"))) {
           const id = path === "/api/session" ? "ses_test" : path.slice("/api/session/".length);
           return { data: { id } };
@@ -86,8 +88,8 @@ function withHarness<A, E>(
         if (path.endsWith("/message")) return { data: [], cursor: {} };
         if (path.endsWith("/prompt")) return { data: { id: "msg_user" } };
         return undefined;
-      })) as OpenCode2Connection["request"];
-    const connection: OpenCode2Connection = {
+      })) as OpenCode2Runtime.OpenCode2Connection["request"];
+    const connection: OpenCode2Runtime.OpenCode2Connection = {
       url: "http://127.0.0.1:4096",
       protocol: { promptShape },
       request,
@@ -95,13 +97,18 @@ function withHarness<A, E>(
         Stream.concat(
           Stream.fromQueue(events).pipe(
             Stream.mapEffect((next) =>
-              next instanceof OpenCode2RuntimeError ? Effect.fail(next) : Effect.succeed(next),
+              OpenCode2Runtime.isOpenCode2RuntimeError(next) ||
+              OpenCode2Runtime.isOpenCode2UnsupportedPreviewError(next) ||
+              OpenCode2Runtime.isOpenCode2CommandNotFoundError(next) ||
+              OpenCode2Runtime.isOpenCode2TimeoutError(next)
+                ? Effect.fail(next)
+                : Effect.succeed(next),
             ),
           ),
         ),
       ),
     };
-    const runtime: OpenCode2RuntimeShape = {
+    const runtime: OpenCode2Runtime.OpenCode2Runtime["Service"] = {
       attach: () =>
         Effect.sync(() => {
           attachCalls += 1;
@@ -112,10 +119,9 @@ function withHarness<A, E>(
               ? {
                   ...connection,
                   globalEvents: Stream.fail(
-                    new OpenCode2RuntimeError({
+                    new OpenCode2Runtime.OpenCode2RuntimeError({
                       operation: "event.subscribe",
-                      kind: "connection",
-                      detail: "The initial event handshake failed.",
+                      reason: "connection-ended",
                     }),
                   ),
                 }
@@ -124,7 +130,7 @@ function withHarness<A, E>(
         ),
     };
     const adapter = yield* makeOpenCode2Adapter({ ...settings, enabled }).pipe(
-      Effect.provideService(OpenCode2Runtime, runtime),
+      Effect.provideService(OpenCode2Runtime.OpenCode2Runtime, runtime),
       Effect.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-opencode2-adapter-" })),
     );
     yield* Effect.yieldNow;
@@ -132,6 +138,7 @@ function withHarness<A, E>(
       adapter,
       calls,
       attachCount: () => attachCalls,
+      failNextRequest: (operation) => failedOperations.add(operation),
       publish: (next) => Queue.offer(events, next).pipe(Effect.asVoid),
       failEvents: (error) => Queue.offer(events, error).pipe(Effect.asVoid),
     });
@@ -545,10 +552,9 @@ it.effect("reconnects after the native event stream fails", () =>
       );
       yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
       yield* failEvents(
-        new OpenCode2RuntimeError({
+        new OpenCode2Runtime.OpenCode2RuntimeError({
           operation: "event.subscribe",
-          kind: "connection",
-          detail: "The shared event stream disconnected.",
+          reason: "connection-ended",
         }),
       );
       yield* Deferred.await(runtimeError);
@@ -601,6 +607,39 @@ it.effect("moves a resumed provider session to its latest T3 thread", () =>
       );
       yield* adapter.stopSession(secondThread);
       NodeAssert.deepEqual(yield* adapter.listSessions(), []);
+    }),
+  ),
+);
+
+it.effect("keeps the existing session when resumed setup fails", () =>
+  withHarness("flat", ({ adapter, failNextRequest }) =>
+    Effect.gen(function* () {
+      const firstThread = ThreadId.make("thread-opencode2-first");
+      const secondThread = ThreadId.make("thread-opencode2-second");
+      const resumeCursor = { schemaVersion: 1, sessionId: "ses_shared" } as const;
+      yield* adapter.startSession({
+        threadId: firstThread,
+        runtimeMode: "full-access",
+        resumeCursor,
+      });
+      failNextRequest("session.switchModel");
+      const result = yield* adapter
+        .startSession({
+          threadId: secondThread,
+          runtimeMode: "full-access",
+          resumeCursor,
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("opencode2"),
+            "anthropic/claude-sonnet",
+          ),
+        })
+        .pipe(Effect.exit);
+
+      NodeAssert.equal(Exit.isFailure(result), true);
+      NodeAssert.deepEqual(
+        (yield* adapter.listSessions()).map((session) => session.threadId),
+        [firstThread],
+      );
     }),
   ),
 );

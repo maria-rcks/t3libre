@@ -1,9 +1,9 @@
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -50,33 +50,87 @@ export interface OpenCode2Connection {
     method: OpenCode2HttpMethod,
     path: string,
     input: OpenCode2RequestInput<S>,
-  ) => Effect.Effect<S["Type"], OpenCode2RuntimeError, S["DecodingServices"]>;
-  readonly globalEvents: Stream.Stream<OpenCode2Event, OpenCode2RuntimeError>;
+  ) => Effect.Effect<S["Type"], OpenCode2RuntimeFailure, S["DecodingServices"]>;
+  readonly globalEvents: Stream.Stream<OpenCode2Event, OpenCode2RuntimeFailure>;
 }
 
-export type OpenCode2RuntimeErrorKind =
-  | "command"
-  | "connection"
-  | "request"
-  | "unsupported-preview";
+const OpenCode2RuntimeFailureReason = Schema.Literals([
+  "command-exit",
+  "connection-ended",
+  "http-status",
+  "transport",
+]);
 
-export class OpenCode2RuntimeError extends Data.TaggedError("OpenCode2RuntimeError")<{
-  readonly operation: string;
-  readonly kind: OpenCode2RuntimeErrorKind;
-  readonly detail: string;
-  readonly cause?: unknown;
-}> {}
-
-export interface OpenCode2RuntimeShape {
-  readonly attach: (input: {
-    readonly binaryPath: string;
-    readonly environment?: NodeJS.ProcessEnv;
-  }) => Effect.Effect<OpenCode2Connection, OpenCode2RuntimeError>;
+export class OpenCode2RuntimeError extends Schema.TaggedErrorClass<OpenCode2RuntimeError>()(
+  "OpenCode2RuntimeError",
+  {
+    operation: Schema.String,
+    reason: OpenCode2RuntimeFailureReason,
+    status: Schema.optionalKey(Schema.Number),
+    exitCode: Schema.optionalKey(Schema.Number),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    const status = this.status === undefined ? "" : `, HTTP ${this.status}`;
+    const exitCode = this.exitCode === undefined ? "" : `, exit ${this.exitCode}`;
+    return `OpenCode 2 operation '${this.operation}' failed (${this.reason}${status}${exitCode}).`;
+  }
 }
 
-export class OpenCode2Runtime extends Context.Service<OpenCode2Runtime, OpenCode2RuntimeShape>()(
-  "t3/provider/openCode2Runtime",
-) {}
+export class OpenCode2UnsupportedPreviewError extends Schema.TaggedErrorClass<OpenCode2UnsupportedPreviewError>()(
+  "OpenCode2UnsupportedPreviewError",
+  {
+    operation: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `This OpenCode 2 preview is not supported during '${this.operation}'.`;
+  }
+}
+
+export class OpenCode2CommandNotFoundError extends Schema.TaggedErrorClass<OpenCode2CommandNotFoundError>()(
+  "OpenCode2CommandNotFoundError",
+  {
+    operation: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `OpenCode 2 command was not found during '${this.operation}'.`;
+  }
+}
+
+export class OpenCode2TimeoutError extends Schema.TaggedErrorClass<OpenCode2TimeoutError>()(
+  "OpenCode2TimeoutError",
+  { operation: Schema.String },
+) {
+  override get message(): string {
+    return `OpenCode 2 operation '${this.operation}' timed out.`;
+  }
+}
+
+export const isOpenCode2RuntimeError = Schema.is(OpenCode2RuntimeError);
+export const isOpenCode2UnsupportedPreviewError = Schema.is(OpenCode2UnsupportedPreviewError);
+export const isOpenCode2CommandNotFoundError = Schema.is(OpenCode2CommandNotFoundError);
+export const isOpenCode2TimeoutError = Schema.is(OpenCode2TimeoutError);
+
+export type OpenCode2RuntimeFailure =
+  | OpenCode2RuntimeError
+  | OpenCode2UnsupportedPreviewError
+  | OpenCode2CommandNotFoundError
+  | OpenCode2TimeoutError;
+
+export class OpenCode2Runtime extends Context.Service<
+  OpenCode2Runtime,
+  {
+    readonly attach: (input: {
+      readonly binaryPath: string;
+      readonly environment?: NodeJS.ProcessEnv;
+    }) => Effect.Effect<OpenCode2Connection, OpenCode2RuntimeFailure>;
+  }
+>()("t3/provider/openCode2Runtime") {}
 
 export interface OpenCode2CommandResult {
   readonly stdout: string;
@@ -84,15 +138,12 @@ export interface OpenCode2CommandResult {
   readonly code: number;
 }
 
-export interface OpenCode2CommandInput {
+interface OpenCode2CommandInput {
+  readonly operation: string;
   readonly binaryPath: string;
   readonly args: ReadonlyArray<string>;
   readonly environment: NodeJS.ProcessEnv;
 }
-
-export type OpenCode2CommandRunner = (
-  input: OpenCode2CommandInput,
-) => Effect.Effect<OpenCode2CommandResult, OpenCode2RuntimeError>;
 
 const OpenCode2EventSchema = Schema.Struct({
   id: Schema.String,
@@ -113,6 +164,8 @@ const OpenCode2EventSchema = Schema.Struct({
   ),
   metadata: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
 });
+
+const OPENCODE2_ATTACH_REQUEST_TIMEOUT = "10 seconds";
 
 function environmentKey(environment: NodeJS.ProcessEnv): string {
   return JSON.stringify(
@@ -137,15 +190,6 @@ function parseServiceUrl(stdout: string): string | null {
     if (url.protocol === "http:" || url.protocol === "https:") return url.toString();
   }
   return null;
-}
-
-function commandFailureDetail(input: {
-  readonly args: ReadonlyArray<string>;
-  readonly result: OpenCode2CommandResult;
-}): string {
-  const stderr = input.result.stderr.trim();
-  if (stderr.length > 0) return stderr;
-  return `OpenCode 2 command \`${input.args.join(" ")}\` exited with code ${input.result.code}.`;
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -257,13 +301,12 @@ function makeRequest(
   return body === undefined ? request : request.pipe(HttpClientRequest.bodyJsonUnsafe(body));
 }
 
-function runtimeError(input: {
-  readonly operation: string;
-  readonly kind: OpenCode2RuntimeErrorKind;
-  readonly detail: string;
-  readonly cause?: unknown;
-}): OpenCode2RuntimeError {
-  return new OpenCode2RuntimeError(input);
+function isCommandNotFoundCause(cause: unknown): boolean {
+  return (
+    cause instanceof PlatformError.PlatformError &&
+    cause.reason instanceof PlatformError.SystemError &&
+    cause.reason._tag === "NotFound"
+  );
 }
 
 function makeConnection(input: {
@@ -273,53 +316,50 @@ function makeConnection(input: {
   readonly protocol: OpenCode2Protocol;
 }): OpenCode2Connection {
   const request: OpenCode2Connection["request"] = (method, path, requestInput) =>
-    input.httpClient
-      .execute(
-        withAuthentication(
-          makeRequest(
-            method,
-            requestUrl(input.baseUrl, path, requestInput.query),
-            requestInput.body,
+    Effect.gen(function* () {
+      const response = yield* input.httpClient
+        .execute(
+          withAuthentication(
+            makeRequest(
+              method,
+              requestUrl(input.baseUrl, path, requestInput.query),
+              requestInput.body,
+            ),
+            input.password,
           ),
-          input.password,
-        ),
-      )
-      .pipe(
-        Effect.mapError((cause) =>
-          runtimeError({
-            operation: requestInput.operation,
-            kind: "request",
-            detail: `OpenCode 2 ${requestInput.operation} request failed.`,
-            cause,
-          }),
-        ),
-        Effect.flatMap((response) => {
-          if (response.status < 200 || response.status >= 300) {
-            return Effect.fail(
-              runtimeError({
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new OpenCode2RuntimeError({
                 operation: requestInput.operation,
-                kind: "request",
-                detail: `OpenCode 2 ${requestInput.operation} returned HTTP ${response.status}.`,
-              }),
-            );
-          }
-          const decodeEmptyResponse = Schema.decodeUnknownEffect(requestInput.schema);
-          const decodeResponse =
-            response.status === 204
-              ? decodeEmptyResponse(undefined)
-              : HttpClientResponse.schemaBodyJson(requestInput.schema)(response);
-          return decodeResponse.pipe(
-            Effect.mapError((cause) =>
-              runtimeError({
-                operation: requestInput.operation,
-                kind: "unsupported-preview",
-                detail: `This OpenCode 2 preview returned an unsupported ${requestInput.operation} response.`,
+                reason: "transport",
                 cause,
               }),
-            ),
-          );
-        }),
+          ),
+        );
+      if (response.status < 200 || response.status >= 300) {
+        return yield* new OpenCode2RuntimeError({
+          operation: requestInput.operation,
+          reason: "http-status",
+          status: response.status,
+        });
+      }
+      const decodeEmptyResponse = Schema.decodeUnknownEffect(requestInput.schema);
+      const decodeResponse =
+        response.status === 204
+          ? decodeEmptyResponse(undefined)
+          : HttpClientResponse.schemaBodyJson(requestInput.schema)(response);
+      return yield* decodeResponse.pipe(
+        Effect.mapError(
+          (cause) =>
+            new OpenCode2UnsupportedPreviewError({
+              operation: requestInput.operation,
+              cause,
+            }),
+        ),
       );
+    });
 
   const globalEvents = Stream.unwrap(
     input.httpClient
@@ -332,22 +372,22 @@ function makeConnection(input: {
         ),
       )
       .pipe(
-        Effect.mapError((cause) =>
-          runtimeError({
-            operation: "event.subscribe",
-            kind: "request",
-            detail: "OpenCode 2 event subscription failed.",
-            cause,
-          }),
+        Effect.mapError(
+          (cause) =>
+            new OpenCode2RuntimeError({
+              operation: "event.subscribe",
+              reason: "transport",
+              cause,
+            }),
         ),
         Effect.flatMap((response) =>
           response.status >= 200 && response.status < 300
             ? Effect.succeed(response.stream)
             : Effect.fail(
-                runtimeError({
+                new OpenCode2RuntimeError({
                   operation: "event.subscribe",
-                  kind: "request",
-                  detail: `OpenCode 2 event subscription returned HTTP ${response.status}.`,
+                  reason: "http-status",
+                  status: response.status,
                 }),
               ),
         ),
@@ -357,12 +397,13 @@ function makeConnection(input: {
     Stream.pipeThroughChannel(Sse.decodeDataSchema(OpenCode2EventSchema)),
     Stream.map((event) => event.data),
     Stream.mapError((cause) =>
-      cause instanceof OpenCode2RuntimeError
+      isOpenCode2RuntimeError(cause) ||
+      isOpenCode2UnsupportedPreviewError(cause) ||
+      isOpenCode2CommandNotFoundError(cause) ||
+      isOpenCode2TimeoutError(cause)
         ? cause
-        : runtimeError({
+        : new OpenCode2UnsupportedPreviewError({
             operation: "event.subscribe",
-            kind: "request",
-            detail: "OpenCode 2 event stream failed.",
             cause,
           }),
     ),
@@ -376,31 +417,73 @@ function makeConnection(input: {
   };
 }
 
-export const makeOpenCode2Runtime = Effect.fn("makeOpenCode2Runtime")(function* (input: {
-  readonly runCommand: OpenCode2CommandRunner;
-  readonly httpClient: HttpClient.HttpClient;
-}) {
+export const make = Effect.fn("OpenCode2Runtime.make")(function* () {
+  const httpClient = yield* HttpClient.HttpClient;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const connections = new Map<string, OpenCode2Connection>();
   const attachLock = yield* Semaphore.make(1);
+
   const runCommand = (command: OpenCode2CommandInput) =>
-    input.runCommand(command).pipe(
+    Effect.gen(function* () {
+      const spawn = yield* resolveSpawnCommand(command.binaryPath, command.args, {
+        env: command.environment,
+      });
+      const child = yield* spawner
+        .spawn(
+          ChildProcess.make(spawn.command, spawn.args, {
+            env: command.environment,
+            shell: spawn.shell,
+          }),
+        )
+        .pipe(
+          Effect.mapError((cause) =>
+            isCommandNotFoundCause(cause)
+              ? new OpenCode2CommandNotFoundError({
+                  operation: command.operation,
+                  cause,
+                })
+              : new OpenCode2RuntimeError({
+                  operation: command.operation,
+                  reason: "transport",
+                  cause,
+                }),
+          ),
+        );
+      const [stdout, stderr, code] = yield* Effect.all(
+        [
+          collectStreamAsString(child.stdout),
+          collectStreamAsString(child.stderr),
+          child.exitCode.pipe(Effect.map(Number)),
+        ],
+        { concurrency: "unbounded" },
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OpenCode2RuntimeError({
+              operation: command.operation,
+              reason: "transport",
+              cause,
+            }),
+        ),
+      );
+      return { stdout, stderr, code };
+    }).pipe(
+      Effect.scoped,
       Effect.timeoutOption("10 seconds"),
       Effect.flatMap(
         Option.match({
           onNone: () =>
             Effect.fail(
-              runtimeError({
-                operation: command.args.join("."),
-                kind: "command",
-                detail: `OpenCode 2 command \`${command.args.join(" ")}\` timed out.`,
+              new OpenCode2TimeoutError({
+                operation: command.operation,
               }),
             ),
-          onSome: (result) => Effect.succeed(result),
+          onSome: Effect.succeed,
         }),
       ),
     );
 
-  const attach: OpenCode2RuntimeShape["attach"] = (attachInput) => {
+  const attach: OpenCode2Runtime["Service"]["attach"] = (attachInput) => {
     const environment = attachInput.environment ?? process.env;
     const key = attachKey({ binaryPath: attachInput.binaryPath, environment });
     return attachLock.withPermit(
@@ -408,84 +491,97 @@ export const makeOpenCode2Runtime = Effect.fn("makeOpenCode2Runtime")(function* 
         const existing = connections.get(key);
         if (existing) {
           const health = yield* Effect.exit(
-            existing.request("GET", "/api/health", {
-              operation: "health.get",
-              schema: Schema.Unknown,
-            }),
+            existing
+              .request("GET", "/api/health", {
+                operation: "health.get",
+                schema: Schema.Unknown,
+              })
+              .pipe(
+                Effect.timeoutOption(OPENCODE2_ATTACH_REQUEST_TIMEOUT),
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () =>
+                      Effect.fail(new OpenCode2TimeoutError({ operation: "health.get" })),
+                    onSome: Effect.succeed,
+                  }),
+                ),
+              ),
           );
           if (Exit.isSuccess(health)) return existing;
           connections.delete(key);
         }
 
         const start = yield* runCommand({
+          operation: "service.start",
           binaryPath: attachInput.binaryPath,
           args: ["service", "start"],
           environment,
         });
         if (start.code !== 0) {
-          return yield* runtimeError({
+          return yield* new OpenCode2RuntimeError({
             operation: "service.start",
-            kind: "command",
-            detail: commandFailureDetail({ args: ["service", "start"], result: start }),
+            reason: "command-exit",
+            exitCode: start.code,
           });
         }
         const baseUrl = parseServiceUrl(start.stdout);
         if (baseUrl === null) {
-          return yield* runtimeError({
+          return yield* new OpenCode2UnsupportedPreviewError({
             operation: "service.start",
-            kind: "unsupported-preview",
-            detail: "OpenCode 2 `service start` did not return a supported HTTP URL.",
           });
         }
 
         const passwordResult = yield* runCommand({
+          operation: "service.get.password",
           binaryPath: attachInput.binaryPath,
           args: ["service", "get", "password"],
           environment,
         });
         if (passwordResult.code !== 0) {
-          return yield* runtimeError({
+          return yield* new OpenCode2RuntimeError({
             operation: "service.get.password",
-            kind: "command",
-            detail: commandFailureDetail({
-              args: ["service", "get", "password"],
-              result: passwordResult,
-            }),
+            reason: "command-exit",
+            exitCode: passwordResult.code,
           });
         }
         const password = passwordResult.stdout.trim();
         if (password.length === 0) {
-          return yield* runtimeError({
+          return yield* new OpenCode2UnsupportedPreviewError({
             operation: "service.get.password",
-            kind: "unsupported-preview",
-            detail: "OpenCode 2 `service get password` returned an empty credential.",
           });
         }
 
         const provisional = makeConnection({
           baseUrl,
           password,
-          httpClient: input.httpClient,
+          httpClient,
           protocol: { promptShape: "flat" },
         });
-        const document = yield* provisional.request("GET", "/openapi.json", {
-          operation: "openapi.get",
-          schema: Schema.Unknown,
-        });
+        const document = yield* provisional
+          .request("GET", "/openapi.json", {
+            operation: "openapi.get",
+            schema: Schema.Unknown,
+          })
+          .pipe(
+            Effect.timeoutOption(OPENCODE2_ATTACH_REQUEST_TIMEOUT),
+            Effect.flatMap(
+              Option.match({
+                onNone: () => Effect.fail(new OpenCode2TimeoutError({ operation: "openapi.get" })),
+                onSome: Effect.succeed,
+              }),
+            ),
+          );
         const protocol = detectOpenCode2Protocol(document);
         if (protocol === null) {
-          return yield* runtimeError({
+          return yield* new OpenCode2UnsupportedPreviewError({
             operation: "openapi.detect",
-            kind: "unsupported-preview",
-            detail:
-              "This OpenCode 2 preview exposes an unsupported prompt protocol in `/openapi.json`.",
           });
         }
 
         const connection = makeConnection({
           baseUrl,
           password,
-          httpClient: input.httpClient,
+          httpClient,
           protocol,
         });
         connections.set(key, connection);
@@ -497,66 +593,4 @@ export const makeOpenCode2Runtime = Effect.fn("makeOpenCode2Runtime")(function* 
   return OpenCode2Runtime.of({ attach });
 });
 
-const makeLiveCommandRunner = Effect.fn("makeOpenCode2CommandRunner")(function* () {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const runCommand: OpenCode2CommandRunner = (input) =>
-    Effect.gen(function* () {
-      const spawn = yield* resolveSpawnCommand(input.binaryPath, input.args, {
-        env: input.environment,
-      }).pipe(
-        Effect.mapError((cause) =>
-          runtimeError({
-            operation: "command.resolve",
-            kind: "command",
-            detail: "Failed to resolve the OpenCode 2 command.",
-            cause,
-          }),
-        ),
-      );
-      const child = yield* spawner
-        .spawn(
-          ChildProcess.make(spawn.command, spawn.args, {
-            env: input.environment,
-            shell: spawn.shell,
-          }),
-        )
-        .pipe(
-          Effect.mapError((cause) =>
-            runtimeError({
-              operation: "command.spawn",
-              kind: "command",
-              detail: `Failed to execute the OpenCode 2 CLI at \`${input.binaryPath}\`.`,
-              cause,
-            }),
-          ),
-        );
-      const [stdout, stderr, code] = yield* Effect.all(
-        [
-          collectStreamAsString(child.stdout),
-          collectStreamAsString(child.stderr),
-          child.exitCode.pipe(Effect.map(Number)),
-        ],
-        { concurrency: "unbounded" },
-      ).pipe(
-        Effect.mapError((cause) =>
-          runtimeError({
-            operation: "command.collect",
-            kind: "command",
-            detail: "Failed to collect OpenCode 2 command output.",
-            cause,
-          }),
-        ),
-      );
-      return { stdout, stderr, code };
-    }).pipe(Effect.scoped);
-  return runCommand;
-});
-
-export const OpenCode2RuntimeLive = Layer.effect(
-  OpenCode2Runtime,
-  Effect.gen(function* () {
-    const runCommand = yield* makeLiveCommandRunner();
-    const httpClient = yield* HttpClient.HttpClient;
-    return yield* makeOpenCode2Runtime({ runCommand, httpClient });
-  }),
-);
+export const layer = Layer.effect(OpenCode2Runtime, make());

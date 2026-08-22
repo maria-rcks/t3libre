@@ -4,16 +4,35 @@ import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
+import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
-import {
-  detectOpenCode2Protocol,
-  makeOpenCode2Runtime,
-  type OpenCode2CommandInput,
-  type OpenCode2CommandResult,
-} from "./openCode2Runtime.ts";
+import * as OpenCode2Runtime from "./openCode2Runtime.ts";
+
+interface RecordedCommand {
+  readonly binaryPath: string;
+  readonly args: ReadonlyArray<string>;
+  readonly environment: NodeJS.ProcessEnv;
+}
+
+function commandHandle(result: OpenCode2Runtime.OpenCode2CommandResult) {
+  return ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(1),
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(result.code)),
+    isRunning: Effect.succeed(false),
+    kill: () => Effect.void,
+    unref: Effect.succeed(Effect.void),
+    stdin: Sink.drain,
+    stdout: Stream.encodeText(Stream.make(result.stdout)),
+    stderr: Stream.encodeText(Stream.make(result.stderr)),
+    all: Stream.empty,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+  });
+}
 
 function openApi(
   promptProperty: "text" | "prompt",
@@ -48,19 +67,36 @@ function openApi(
 function fakeRuntime(input?: {
   readonly document?: unknown;
   readonly onRequest?: (request: HttpClientRequest.HttpClientRequest) => Response;
+  readonly onExecute?: (request: HttpClientRequest.HttpClientRequest) => Effect.Effect<Response>;
 }) {
-  const commands: OpenCode2CommandInput[] = [];
+  const commands: RecordedCommand[] = [];
   const requests: HttpClientRequest.HttpClientRequest[] = [];
-  const runCommand = (command: OpenCode2CommandInput) => {
-    commands.push(command);
-    const result: OpenCode2CommandResult =
-      command.args.join(" ") === "service start"
-        ? { stdout: "http://127.0.0.1:49374\n", stderr: "", code: 0 }
-        : { stdout: "private-password\n", stderr: "", code: 0 };
-    return Effect.succeed(result);
-  };
+  const spawner = ChildProcessSpawner.make((command) =>
+    Effect.sync(() => {
+      const value = command as unknown as {
+        readonly command: string;
+        readonly args: ReadonlyArray<string>;
+        readonly options: { readonly env: NodeJS.ProcessEnv };
+      };
+      commands.push({
+        binaryPath: value.command,
+        args: value.args,
+        environment: value.options.env,
+      });
+      return commandHandle(
+        value.args.join(" ") === "service start"
+          ? { stdout: "http://127.0.0.1:49374\n", stderr: "", code: 0 }
+          : { stdout: "private-password\n", stderr: "", code: 0 },
+      );
+    }),
+  );
   const httpClient = HttpClient.make((request) => {
     requests.push(request);
+    if (input?.onExecute) {
+      return input
+        .onExecute(request)
+        .pipe(Effect.map((response) => HttpClientResponse.fromWeb(request, response)));
+    }
     const pathname = new URL(request.url).pathname;
     const response =
       pathname === "/openapi.json"
@@ -71,7 +107,10 @@ function fakeRuntime(input?: {
   return {
     commands,
     requests,
-    runtime: makeOpenCode2Runtime({ runCommand, httpClient }),
+    runtime: OpenCode2Runtime.make().pipe(
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    ),
   };
 }
 
@@ -205,39 +244,94 @@ it.effect("fails explicitly when the preview OpenAPI shape is unknown", () => {
     const runtime = yield* fake.runtime;
     const error = yield* Effect.flip(runtime.attach({ binaryPath: "opencode2" }));
 
-    NodeAssert.equal(error.kind, "unsupported-preview");
-    NodeAssert.match(error.detail, /unsupported prompt protocol/i);
+    NodeAssert.equal(OpenCode2Runtime.isOpenCode2UnsupportedPreviewError(error), true);
+    NodeAssert.equal(error.operation, "openapi.detect");
+    NodeAssert.match(error.message, /preview is not supported/i);
   });
 });
 
 it.effect("times out a wedged service command", () => {
   const httpClient = HttpClient.make(() => Effect.die("HTTP should not be reached"));
+  const spawner = ChildProcessSpawner.make(() =>
+    Effect.succeed(
+      ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(1),
+        exitCode: Effect.never,
+        isRunning: Effect.succeed(true),
+        kill: () => Effect.void,
+        unref: Effect.succeed(Effect.void),
+        stdin: Sink.drain,
+        stdout: Stream.never,
+        stderr: Stream.never,
+        all: Stream.never,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+      }),
+    ),
+  );
   return Effect.gen(function* () {
-    const runtime = yield* makeOpenCode2Runtime({
-      runCommand: () => Effect.never,
-      httpClient,
-    });
+    const runtime = yield* OpenCode2Runtime.make().pipe(
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    );
     const fiber = yield* runtime.attach({ binaryPath: "opencode2" }).pipe(Effect.forkScoped);
     yield* Effect.yieldNow;
     yield* TestClock.adjust("10 seconds");
     const error = yield* Fiber.join(fiber).pipe(Effect.flip);
 
-    NodeAssert.equal(error.kind, "command");
-    NodeAssert.match(error.detail, /service start.*timed out/i);
+    NodeAssert.equal(OpenCode2Runtime.isOpenCode2TimeoutError(error), true);
+    if (!OpenCode2Runtime.isOpenCode2TimeoutError(error)) return;
+    NodeAssert.equal(error.operation, "service.start");
+  }).pipe(Effect.scoped, Effect.provide(TestClock.layer()));
+});
+
+it.effect("times out a wedged OpenAPI probe and releases the attachment lock", () => {
+  let openApiCalls = 0;
+  const fake = fakeRuntime({
+    onExecute: (request) => {
+      if (new URL(request.url).pathname !== "/openapi.json") {
+        return Effect.succeed(Response.json({ ok: true }));
+      }
+      openApiCalls += 1;
+      return openApiCalls === 1 ? Effect.never : Effect.succeed(Response.json(openApi("text")));
+    },
+  });
+  return Effect.gen(function* () {
+    const runtime = yield* fake.runtime;
+    const first = yield* runtime
+      .attach({ binaryPath: "opencode2", environment: { PATH: "/one" } })
+      .pipe(Effect.forkScoped);
+    yield* Effect.yieldNow;
+    yield* TestClock.adjust("10 seconds");
+    const error = yield* Fiber.join(first).pipe(Effect.flip);
+
+    NodeAssert.equal(OpenCode2Runtime.isOpenCode2TimeoutError(error), true);
+    if (!OpenCode2Runtime.isOpenCode2TimeoutError(error)) return;
+    NodeAssert.equal(error.operation, "openapi.get");
+
+    const connection = yield* runtime.attach({
+      binaryPath: "opencode2",
+      environment: { PATH: "/two" },
+    });
+    NodeAssert.equal(connection.url, "http://127.0.0.1:49374/");
+    NodeAssert.equal(openApiCalls, 2);
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer()));
 });
 
 it("detects both adjacent preview prompt shapes", () => {
-  NodeAssert.deepEqual(detectOpenCode2Protocol(openApi("text")), {
+  NodeAssert.deepEqual(OpenCode2Runtime.detectOpenCode2Protocol(openApi("text")), {
     promptShape: "flat",
   });
-  NodeAssert.deepEqual(detectOpenCode2Protocol(openApi("prompt")), {
+  NodeAssert.deepEqual(OpenCode2Runtime.detectOpenCode2Protocol(openApi("prompt")), {
     promptShape: "nested",
   });
-  NodeAssert.deepEqual(detectOpenCode2Protocol(openApi("prompt", "session.prompt")), {
-    promptShape: "nested",
-  });
-  NodeAssert.deepEqual(detectOpenCode2Protocol(openApi("prompt", null)), {
+  NodeAssert.deepEqual(
+    OpenCode2Runtime.detectOpenCode2Protocol(openApi("prompt", "session.prompt")),
+    {
+      promptShape: "nested",
+    },
+  );
+  NodeAssert.deepEqual(OpenCode2Runtime.detectOpenCode2Protocol(openApi("prompt", null)), {
     promptShape: "nested",
   });
 });

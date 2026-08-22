@@ -46,7 +46,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { BUILT_IN_DRIVERS } from "../builtInDrivers.ts";
 import { CodexDriver } from "../Drivers/CodexDriver.ts";
-import { OpenCode2RuntimeLive } from "../openCode2Runtime.ts";
+import * as OpenCode2Runtime from "../openCode2Runtime.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
@@ -309,7 +309,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
   // provides `OpenCodeRuntimeLive`'s deps while keeping its own outputs
   // surfaced; that merged layer then provides `ServerConfig.layerTest`'s
   // `FileSystem` dep while keeping everything else surfaced to the test.
-  const infraLayer = Layer.merge(OpenCodeRuntimeLive, OpenCode2RuntimeLive).pipe(
+  const infraLayer = Layer.merge(OpenCodeRuntimeLive, OpenCode2Runtime.layer).pipe(
     Layer.provideMerge(NodeServices.layer),
   );
   const testLayer = ServerConfig.layerTest(process.cwd(), {

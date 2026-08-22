@@ -396,9 +396,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // OpenCode drivers capture their runtime services while building instances.
   // Providing both services here keeps one stable runtime per protocol for all
   // consumers, including OpenCode 2's singleton background-service attachment.
-  Layer.provideMerge(
-    Layer.merge(OpenCodeRuntime.OpenCodeRuntimeLive, OpenCode2Runtime.OpenCode2RuntimeLive),
-  ),
+  Layer.provideMerge(Layer.merge(OpenCodeRuntime.OpenCodeRuntimeLive, OpenCode2Runtime.layer)),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLayerLive),
   Layer.provideMerge(RepositoryIdentityResolver.layer),

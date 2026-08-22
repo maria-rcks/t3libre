@@ -8,7 +8,7 @@ import * as Stream from "effect/Stream";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 
-import { OpenCode2Runtime, type OpenCode2Connection } from "../provider/openCode2Runtime.ts";
+import * as OpenCode2Runtime from "../provider/openCode2Runtime.ts";
 import { makeOpenCode2TextGeneration } from "./OpenCode2TextGeneration.ts";
 
 interface CapturedRequest {
@@ -19,7 +19,7 @@ interface CapturedRequest {
 }
 
 function runtimeLayer(response: unknown, requests: Array<CapturedRequest>) {
-  const connection: OpenCode2Connection = {
+  const connection: OpenCode2Runtime.OpenCode2Connection = {
     url: "http://127.0.0.1:49374/",
     protocol: { promptShape: "flat" },
     request: ((
@@ -29,12 +29,12 @@ function runtimeLayer(response: unknown, requests: Array<CapturedRequest>) {
     ) => {
       requests.push({ method, path, query: input.query, body: input.body });
       return Effect.succeed(response);
-    }) as OpenCode2Connection["request"],
+    }) as OpenCode2Runtime.OpenCode2Connection["request"],
     globalEvents: Stream.empty,
   };
   return Layer.succeed(
-    OpenCode2Runtime,
-    OpenCode2Runtime.of({ attach: () => Effect.succeed(connection) }),
+    OpenCode2Runtime.OpenCode2Runtime,
+    OpenCode2Runtime.OpenCode2Runtime.of({ attach: () => Effect.succeed(connection) }),
   );
 }
 

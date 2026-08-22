@@ -13,7 +13,7 @@ import {
   providerModelsFromSettings,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
-import { OpenCode2Runtime, OpenCode2RuntimeError } from "../openCode2Runtime.ts";
+import * as OpenCode2Runtime from "../openCode2Runtime.ts";
 
 export interface OpenCode2ProviderSettings {
   readonly enabled: boolean;
@@ -181,28 +181,15 @@ function providerModels(input: {
     .toSorted((left, right) => left.name.localeCompare(right.name));
 }
 
-function errorText(cause: unknown): string {
-  if (cause instanceof OpenCode2RuntimeError) {
-    return `${cause.detail} ${errorText(cause.cause)}`.trim();
-  }
-  if (cause instanceof Error) return cause.message;
-  return typeof cause === "string" ? cause : "";
-}
-
 function failureSnapshot(input: {
   readonly settings: OpenCode2ProviderSettings;
   readonly checkedAt: string;
   readonly cause: unknown;
   readonly version?: string | null;
 }): ServerProviderDraft {
-  const unsupported =
-    input.cause instanceof OpenCode2RuntimeError && input.cause.kind === "unsupported-preview";
-  const detail = errorText(input.cause);
-  const missing =
-    input.cause instanceof OpenCode2RuntimeError &&
-    input.cause.kind === "command" &&
-    (input.cause.operation === "command.resolve" || input.cause.operation === "command.spawn") &&
-    /(?:enoent|not found|could not resolve|failed to execute)/iu.test(detail);
+  const unsupported = OpenCode2Runtime.isOpenCode2UnsupportedPreviewError(input.cause);
+  const missing = OpenCode2Runtime.isOpenCode2CommandNotFoundError(input.cause);
+  const timedOut = OpenCode2Runtime.isOpenCode2TimeoutError(input.cause);
   return buildServerProvider({
     presentation: OPENCODE2_PRESENTATION,
     enabled: input.settings.enabled,
@@ -218,10 +205,14 @@ function failureSnapshot(input: {
       status: "error",
       auth: { status: "unknown" },
       message: unsupported
-        ? `This OpenCode 2 preview is not supported by T3 Code. ${input.cause.detail}`
+        ? "This OpenCode 2 preview is not supported by T3 Code."
         : missing
           ? "OpenCode 2 CLI (`opencode2`) is not installed or not on PATH."
-          : detail || "Failed to connect to the OpenCode 2 background service.",
+          : timedOut
+            ? "OpenCode 2 provider discovery timed out."
+            : input.cause instanceof Error
+              ? input.cause.message
+              : "Failed to connect to the OpenCode 2 background service.",
     },
   });
 }
@@ -261,11 +252,11 @@ export const buildInitialOpenCode2ProviderSnapshot = (
 export const checkOpenCode2ProviderStatus = Effect.fn("checkOpenCode2ProviderStatus")(function* (
   settings: OpenCode2ProviderSettings,
   environment?: NodeJS.ProcessEnv,
-): Effect.fn.Return<ServerProviderDraft, never, OpenCode2Runtime> {
+): Effect.fn.Return<ServerProviderDraft, never, OpenCode2Runtime.OpenCode2Runtime> {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   if (!settings.enabled) return yield* buildInitialOpenCode2ProviderSnapshot(settings);
 
-  const runtime = yield* OpenCode2Runtime;
+  const runtime = yield* OpenCode2Runtime.OpenCode2Runtime;
   const attached = yield* Effect.exit(
     Effect.gen(function* () {
       const connection = yield* runtime.attach({
@@ -313,10 +304,8 @@ export const checkOpenCode2ProviderStatus = Effect.fn("checkOpenCode2ProviderSta
     return failureSnapshot({
       settings,
       checkedAt,
-      cause: new OpenCode2RuntimeError({
+      cause: new OpenCode2Runtime.OpenCode2TimeoutError({
         operation: "provider.probe",
-        kind: "connection",
-        detail: "OpenCode 2 provider discovery timed out.",
       }),
     });
   }

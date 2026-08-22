@@ -14,7 +14,7 @@ import {
 } from "../Layers/OpenCode2Provider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import { OpenCode2Runtime } from "../openCode2Runtime.ts";
+import * as OpenCode2Runtime from "../openCode2Runtime.ts";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
@@ -38,7 +38,7 @@ const MAINTENANCE = makeManualOnlyProviderMaintenanceCapabilities({
 
 export type OpenCode2DriverEnv =
   | BackgroundPolicy.BackgroundPolicy
-  | OpenCode2Runtime
+  | OpenCode2Runtime.OpenCode2Runtime
   | ProviderEventLoggers
   | ServerConfig
   | ServerSettingsService;
@@ -69,7 +69,7 @@ export const OpenCode2Driver: ProviderDriver<OpenCode2Settings, OpenCode2DriverE
   defaultConfig: (): OpenCode2Settings => decodeOpenCode2Settings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
-      const runtime = yield* OpenCode2Runtime;
+      const runtime = yield* OpenCode2Runtime.OpenCode2Runtime;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
@@ -89,14 +89,14 @@ export const OpenCode2Driver: ProviderDriver<OpenCode2Settings, OpenCode2DriverE
         instanceId,
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
-      }).pipe(Effect.provideService(OpenCode2Runtime, runtime));
+      }).pipe(Effect.provideService(OpenCode2Runtime.OpenCode2Runtime, runtime));
       const textGeneration = yield* makeOpenCode2TextGeneration(effectiveConfig, processEnv).pipe(
-        Effect.provideService(OpenCode2Runtime, runtime),
+        Effect.provideService(OpenCode2Runtime.OpenCode2Runtime, runtime),
       );
 
       const checkProvider = checkOpenCode2ProviderStatus(effectiveConfig, processEnv).pipe(
         Effect.map(stampIdentity),
-        Effect.provideService(OpenCode2Runtime, runtime),
+        Effect.provideService(OpenCode2Runtime.OpenCode2Runtime, runtime),
       );
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<
@@ -115,7 +115,7 @@ export const OpenCode2Driver: ProviderDriver<OpenCode2Settings, OpenCode2DriverE
             new ProviderDriverError({
               driver: DRIVER_KIND,
               instanceId,
-              detail: `Failed to build OpenCode 2 snapshot: ${cause.message ?? String(cause)}`,
+              detail: "Failed to build the OpenCode 2 provider snapshot.",
               cause,
             }),
         ),

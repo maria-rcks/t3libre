@@ -7,11 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
-import {
-  OpenCode2Runtime,
-  OpenCode2RuntimeError,
-  type OpenCode2Connection,
-} from "../openCode2Runtime.ts";
+import * as OpenCode2Runtime from "../openCode2Runtime.ts";
 import { checkOpenCode2ProviderStatus } from "./OpenCode2Provider.ts";
 
 const settings = {
@@ -22,21 +18,21 @@ const settings = {
 
 function runtimeLayer(input: {
   readonly responses?: Readonly<Record<string, unknown>>;
-  readonly attachError?: OpenCode2RuntimeError;
+  readonly attachError?: OpenCode2Runtime.OpenCode2RuntimeFailure;
   readonly paths?: Array<string>;
 }) {
-  const connection: OpenCode2Connection = {
+  const connection: OpenCode2Runtime.OpenCode2Connection = {
     url: "http://127.0.0.1:49374/",
     protocol: { promptShape: "flat" },
     request: ((method: string, path: string, _requestInput: { readonly schema: unknown }) => {
       input.paths?.push(`${method} ${path}`);
       return Effect.succeed(input.responses?.[path]);
-    }) as OpenCode2Connection["request"],
+    }) as OpenCode2Runtime.OpenCode2Connection["request"],
     globalEvents: Stream.empty,
   };
   return Layer.succeed(
-    OpenCode2Runtime,
-    OpenCode2Runtime.of({
+    OpenCode2Runtime.OpenCode2Runtime,
+    OpenCode2Runtime.OpenCode2Runtime.of({
       attach: () =>
         input.attachError ? Effect.fail(input.attachError) : Effect.succeed(connection),
     }),
@@ -121,10 +117,8 @@ it.effect("reports unsupported adjacent preview protocols without hanging", () =
   }).pipe(
     Effect.provide(
       runtimeLayer({
-        attachError: new OpenCode2RuntimeError({
+        attachError: new OpenCode2Runtime.OpenCode2UnsupportedPreviewError({
           operation: "openapi.detect",
-          kind: "unsupported-preview",
-          detail: "Unsupported prompt response.",
         }),
       }),
     ),
@@ -141,10 +135,29 @@ it.effect("does not report an HTTP 404 as a missing CLI", () =>
   }).pipe(
     Effect.provide(
       runtimeLayer({
-        attachError: new OpenCode2RuntimeError({
+        attachError: new OpenCode2Runtime.OpenCode2RuntimeError({
           operation: "model.list",
-          kind: "request",
-          detail: "OpenCode 2 model.list returned HTTP 404 Not Found.",
+          reason: "http-status",
+          status: 404,
+        }),
+      }),
+    ),
+  ),
+);
+
+it.effect("reports a structurally missing CLI", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* checkOpenCode2ProviderStatus(settings);
+
+    NodeAssert.equal(snapshot.status, "error");
+    NodeAssert.equal(snapshot.installed, false);
+    NodeAssert.match(snapshot.message ?? "", /not installed or not on PATH/i);
+  }).pipe(
+    Effect.provide(
+      runtimeLayer({
+        attachError: new OpenCode2Runtime.OpenCode2CommandNotFoundError({
+          operation: "service.start",
+          cause: new Error("Command was unavailable."),
         }),
       }),
     ),
@@ -215,8 +228,8 @@ it.effect("describes custom models without counting deprecated upstream provider
 
 it.effect("finishes the provider check when attachment is wedged", () => {
   const layer = Layer.succeed(
-    OpenCode2Runtime,
-    OpenCode2Runtime.of({ attach: () => Effect.never }),
+    OpenCode2Runtime.OpenCode2Runtime,
+    OpenCode2Runtime.OpenCode2Runtime.of({ attach: () => Effect.never }),
   );
   return Effect.gen(function* () {
     const fiber = yield* checkOpenCode2ProviderStatus(settings).pipe(Effect.forkScoped);
