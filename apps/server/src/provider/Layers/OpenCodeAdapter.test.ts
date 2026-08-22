@@ -551,18 +551,23 @@ it.effect("replies to permissions and forms and interrupts through native routes
   ),
 );
 
-it.effect("auto-accepts native permissions in full-access mode", () =>
-  withHarness("flat", ({ adapter, blockNextRequest, calls, publish }) =>
+it.effect("auto-accepts native permissions and falls back to approval on failure", () =>
+  withHarness("flat", ({ adapter, attachCount, calls, failNextRequest, publish }) =>
     Effect.gen(function* () {
       const observed: Array<ProviderRuntimeEvent> = [];
-      const replyStarted = yield* Deferred.make<void>();
-      yield* collectEvents(adapter, observed);
+      const permissionResolved = yield* Deferred.make<void>();
+      const fallbackOpened = yield* Deferred.make<void>();
+      yield* collectEvents(adapter, observed, (next) => {
+        if (next.type === "request.resolved") {
+          return Deferred.succeed(permissionResolved, undefined).pipe(Effect.ignore);
+        }
+        if (next.type === "request.opened") {
+          return Deferred.succeed(fallbackOpened, undefined).pipe(Effect.ignore);
+        }
+        return Effect.void;
+      });
       yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
       yield* adapter.sendTurn({ threadId, input: "edit this" });
-      blockNextRequest(
-        "permission.reply",
-        Deferred.succeed(replyStarted, undefined).pipe(Effect.ignore),
-      );
 
       yield* publish(
         event("permission", "permission.asked", {
@@ -572,7 +577,14 @@ it.effect("auto-accepts native permissions in full-access mode", () =>
           resources: ["src/index.ts"],
         }),
       );
-      yield* Deferred.await(replyStarted);
+      yield* publish(
+        event("permission-replied", "permission.replied", {
+          requestID: "per_test",
+          sessionID: "ses_test",
+          reply: "once",
+        }),
+      );
+      yield* Deferred.await(permissionResolved);
 
       NodeAssert.deepEqual(
         calls.find((call) => call.operation === "permission.reply"),
@@ -587,6 +599,19 @@ it.effect("auto-accepts native permissions in full-access mode", () =>
         observed.some((next) => next.type === "request.opened"),
         false,
       );
+      failNextRequest("permission.reply");
+      yield* publish(
+        event("fallback-permission", "permission.asked", {
+          id: "per_fallback",
+          sessionID: "ses_test",
+          action: "edit",
+          resources: ["src/other.ts"],
+        }),
+      );
+      yield* Deferred.await(fallbackOpened);
+
+      NodeAssert.equal(attachCount(), 1);
+      NodeAssert.equal(calls.filter((call) => call.operation === "permission.reply").length, 2);
     }),
   ),
 );

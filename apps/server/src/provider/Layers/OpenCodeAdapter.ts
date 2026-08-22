@@ -701,8 +701,14 @@ export function makeOpenCodeAdapter(
         case "permission.asked": {
           const requestId = stringField(data, "id", "requestID");
           if (!requestId) break;
+          const action = stringField(data, "action", "permission") ?? "unknown";
+          const resources = Array.isArray(data.resources)
+            ? data.resources.filter((value): value is string => typeof value === "string")
+            : Array.isArray(data.patterns)
+              ? data.patterns.filter((value): value is string => typeof value === "string")
+              : [];
           if (context.session.runtimeMode === "full-access") {
-            yield* connection
+            const replied = yield* connection
               .request(
                 "POST",
                 `/api/session/${encodedPathSegment(context.providerSessionId)}/permission/${encodedPathSegment(requestId)}/reply`,
@@ -712,15 +718,12 @@ export function makeOpenCodeAdapter(
                   body: { reply: "once" },
                 },
               )
-              .pipe(Effect.mapError((cause) => toRequestError("permission.reply", cause)));
-            break;
+              .pipe(
+                Effect.as(true),
+                Effect.catchCause(() => Effect.succeed(false)),
+              );
+            if (replied) break;
           }
-          const action = stringField(data, "action", "permission") ?? "unknown";
-          const resources = Array.isArray(data.resources)
-            ? data.resources.filter((value): value is string => typeof value === "string")
-            : Array.isArray(data.patterns)
-              ? data.patterns.filter((value): value is string => typeof value === "string")
-              : [];
           context.pendingPermissions.add(requestId);
           yield* emit({
             ...(yield* buildEventBase({
