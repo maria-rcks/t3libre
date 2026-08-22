@@ -293,7 +293,7 @@ function toProcessError(threadId: ThreadId, cause: OpenCodeRuntime.OpenCodeRunti
   return new ProviderAdapterProcessError({
     provider: PROVIDER,
     threadId,
-    detail: "OpenCode 2 could not attach the requested session.",
+    detail: `OpenCode 2 could not attach the requested session during '${cause.operation}'.`,
     cause,
   });
 }
@@ -1025,14 +1025,14 @@ export function makeOpenCodeAdapter(
           operation: "session.switchModel",
           schema: Schema.Void,
           body: { model: modelRef },
-        }).pipe(Effect.mapError((cause) => toProcessError(input.threadId, cause)));
+        }).pipe(Effect.mapError((cause) => toRequestError("session.switchModel", cause)));
       }
       if (resolution.resumedExistingSession && agent) {
         yield* request("POST", `/api/session/${encodedPathSegment(providerSessionId)}/agent`, {
           operation: "session.switchAgent",
           schema: Schema.Void,
           body: { agent },
-        }).pipe(Effect.mapError((cause) => toProcessError(input.threadId, cause)));
+        }).pipe(Effect.mapError((cause) => toRequestError("session.switchAgent", cause)));
       }
       for (const stale of staleContexts) {
         yield* detachContext(stale);

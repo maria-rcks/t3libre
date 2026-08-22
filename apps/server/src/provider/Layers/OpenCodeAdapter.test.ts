@@ -757,8 +757,8 @@ it.effect("keeps the existing session when resumed setup fails", () =>
         resumeCursor,
       });
       failNextRequest("session.switchModel");
-      const result = yield* adapter
-        .startSession({
+      const error = yield* Effect.flip(
+        adapter.startSession({
           threadId: secondThread,
           runtimeMode: "full-access",
           resumeCursor,
@@ -766,10 +766,13 @@ it.effect("keeps the existing session when resumed setup fails", () =>
             ProviderInstanceId.make("opencode"),
             "anthropic/claude-sonnet",
           ),
-        })
-        .pipe(Effect.exit);
+        }),
+      );
 
-      NodeAssert.equal(Exit.isFailure(result), true);
+      NodeAssert.equal(error._tag, "ProviderAdapterRequestError");
+      if (error._tag === "ProviderAdapterRequestError") {
+        NodeAssert.equal(error.method, "session.switchModel");
+      }
       NodeAssert.deepEqual(
         (yield* adapter.listSessions()).map((session) => session.threadId),
         [firstThread],
