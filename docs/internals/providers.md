@@ -7,16 +7,15 @@ orchestration layer does not know which one is behind a thread.
 
 ## Built-in drivers
 
-[`builtInDrivers.ts`][drivers] exports `BUILT_IN_DRIVERS` with six entries:
+[`builtInDrivers.ts`][drivers] exports `BUILT_IN_DRIVERS` with five entries:
 
-| Driver kind   | Driver source                             |
-| ------------- | ----------------------------------------- |
-| `codex`       | [`Drivers/CodexDriver.ts`][codex]         |
-| `claudeAgent` | [`Drivers/ClaudeDriver.ts`][claude]       |
-| `cursor`      | [`Drivers/CursorDriver.ts`][cursor]       |
-| `grok`        | [`Drivers/GrokDriver.ts`][grok]           |
-| `opencode`    | [`Drivers/OpenCodeDriver.ts`][opencode]   |
-| `opencode2`   | [`Drivers/OpenCode2Driver.ts`][opencode2] |
+| Driver kind   | Driver source                           |
+| ------------- | --------------------------------------- |
+| `codex`       | [`Drivers/CodexDriver.ts`][codex]       |
+| `claudeAgent` | [`Drivers/ClaudeDriver.ts`][claude]     |
+| `cursor`      | [`Drivers/CursorDriver.ts`][cursor]     |
+| `grok`        | [`Drivers/GrokDriver.ts`][grok]         |
+| `opencode`    | [`Drivers/OpenCodeDriver.ts`][opencode] |
 
 Each driver declares its `driverKind`, a `configSchema`, and a `create` function that builds an
 adapter in a child scope. Adapter implementations live beside them in
@@ -24,9 +23,9 @@ adapter in a child scope. Adapter implementations live beside them in
 [`ProviderAdapter.ts`][adapter]. Read the driver plus its adapter to see how a specific agent's
 transport, config, and event shapes are mapped.
 
-OpenCode 2 follows the CLI's desktop lifecycle instead of owning a daemon. Its runtime runs the
-idempotent `opencode2 service start`, reads the service credential with
-`opencode2 service get password`, and attaches to that singleton over the native `/api/*` HTTP and
+The OpenCode driver uses OpenCode 2 and follows the CLI's desktop lifecycle instead of owning a daemon. Its runtime runs the
+idempotent `opencode2 service start`, reads the service credential with the CLI's service password
+command, and attaches to that singleton over the native `/api/*` HTTP and
 SSE protocol. T3 Code never starts `opencode2 serve` and never stops or deletes the shared service.
 
 ## Registry and routing
@@ -87,7 +86,6 @@ when a request opens (approval) or user input is requested, via
 [cursor]: ../../apps/server/src/provider/Drivers/CursorDriver.ts
 [grok]: ../../apps/server/src/provider/Drivers/GrokDriver.ts
 [opencode]: ../../apps/server/src/provider/Drivers/OpenCodeDriver.ts
-[opencode2]: ../../apps/server/src/provider/Drivers/OpenCode2Driver.ts
 [adapter]: ../../apps/server/src/provider/Services/ProviderAdapter.ts
 [instances]: ../../apps/server/src/provider/Services/ProviderInstanceRegistry.ts
 [registry]: ../../apps/server/src/provider/Services/ProviderAdapterRegistry.ts

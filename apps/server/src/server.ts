@@ -35,7 +35,6 @@ import * as ProviderEventLoggers from "./provider/Layers/ProviderEventLoggers.ts
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
-import * as OpenCode2Runtime from "./provider/openCode2Runtime.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
@@ -393,10 +392,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Provided once at the runtime level so every consumer sees the same
   // logger instances.
   Layer.provideMerge(ProviderEventLoggers.layer),
-  // OpenCode drivers capture their runtime services while building instances.
-  // Providing both services here keeps one stable runtime per protocol for all
-  // consumers, including OpenCode 2's singleton background-service attachment.
-  Layer.provideMerge(Layer.merge(OpenCodeRuntime.OpenCodeRuntimeLive, OpenCode2Runtime.layer)),
+  // OpenCode captures one shared native runtime while building its instance.
+  Layer.provideMerge(OpenCodeRuntime.layer),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLayerLive),
   Layer.provideMerge(RepositoryIdentityResolver.layer),

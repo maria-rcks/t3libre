@@ -23,22 +23,22 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.providerInstanceId).toBe("ollama_local");
   });
 
-  it("accepts raw OpenCode 2 SDK events", () => {
+  it("accepts raw native OpenCode events", () => {
     const parsed = decodeRuntimeEvent({
       type: "session.started",
-      eventId: "event-opencode2-session",
-      provider: "opencode2",
-      providerInstanceId: "opencode2",
+      eventId: "event-opencode-session",
+      provider: "opencode",
+      providerInstanceId: "opencode",
       createdAt: "2026-08-21T00:00:00.000Z",
       threadId: "thread-1",
       payload: { message: "started" },
       raw: {
-        source: "opencode2.api.event",
+        source: "opencode.api.event",
         payload: { type: "server.connected" },
       },
     });
 
-    expect(parsed.raw?.source).toBe("opencode2.api.event");
+    expect(parsed.raw?.source).toBe("opencode.api.event");
   });
 
   it("decodes turn.plan.updated for plan rendering", () => {

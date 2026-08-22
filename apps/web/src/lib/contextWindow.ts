@@ -38,8 +38,6 @@ export function formatProviderDisplayName(provider: string | null | undefined): 
       return "Cursor";
     case "opencode":
       return "OpenCode";
-    case "opencode2":
-      return "OpenCode 2";
     default: {
       // Title-case unknown driver kinds so they read reasonably.
       const trimmed = provider.replace(/Agent$/i, "").trim();

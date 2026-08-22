@@ -25,7 +25,7 @@ export const EMPTY_OPENCODE2_AUTO_ENABLE_NOTIFICATION_STATE: OpenCode2AutoEnable
     dismissedKeys: [],
   };
 
-const OPENCODE2_DRIVER = ProviderDriverKind.make("opencode2");
+const OPENCODE2_DRIVER = ProviderDriverKind.make("opencode");
 const OPENCODE2_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(OPENCODE2_DRIVER);
 
 export function openCode2AutoEnableNotificationKey(environmentId: EnvironmentId): string {

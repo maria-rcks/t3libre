@@ -10,7 +10,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import * as OpenCode2Runtime from "./openCode2Runtime.ts";
+import * as OpenCodeRuntime from "./opencodeRuntime.ts";
 
 interface RecordedCommand {
   readonly binaryPath: string;
@@ -18,7 +18,7 @@ interface RecordedCommand {
   readonly environment: NodeJS.ProcessEnv;
 }
 
-function commandHandle(result: OpenCode2Runtime.OpenCode2CommandResult) {
+function commandHandle(result: OpenCodeRuntime.OpenCodeCommandResult) {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(1),
     exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(result.code)),
@@ -66,6 +66,9 @@ function openApi(
 
 function fakeRuntime(input?: {
   readonly document?: unknown;
+  readonly onCommand?: (
+    args: ReadonlyArray<string>,
+  ) => OpenCodeRuntime.OpenCodeCommandResult | undefined;
   readonly onRequest?: (request: HttpClientRequest.HttpClientRequest) => Response;
   readonly onExecute?: (request: HttpClientRequest.HttpClientRequest) => Effect.Effect<Response>;
 }) {
@@ -84,9 +87,10 @@ function fakeRuntime(input?: {
         environment: value.options.env,
       });
       return commandHandle(
-        value.args.join(" ") === "service start"
-          ? { stdout: "http://127.0.0.1:49374\n", stderr: "", code: 0 }
-          : { stdout: "private-password\n", stderr: "", code: 0 },
+        input?.onCommand?.(value.args) ??
+          (value.args.join(" ") === "service start"
+            ? { stdout: "http://127.0.0.1:49374\n", stderr: "", code: 0 }
+            : { stdout: "private-password\n", stderr: "", code: 0 }),
       );
     }),
   );
@@ -107,7 +111,7 @@ function fakeRuntime(input?: {
   return {
     commands,
     requests,
-    runtime: OpenCode2Runtime.make().pipe(
+    runtime: OpenCodeRuntime.make().pipe(
       Effect.provideService(HttpClient.HttpClient, httpClient),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     ),
@@ -145,6 +149,28 @@ it.effect("memoizes one service attachment per binary and environment", () => {
       environment: { PATH: "/two" },
     });
     NodeAssert.equal(fake.commands.length, 4);
+  });
+});
+
+it.effect("supports the current OpenCode 2 service password command", () => {
+  const fake = fakeRuntime({
+    onCommand: (args) =>
+      args.join(" ") === "service get password"
+        ? { stdout: "", stderr: "Unknown subcommand", code: 1 }
+        : undefined,
+  });
+  return Effect.gen(function* () {
+    const runtime = yield* fake.runtime;
+    yield* runtime.attach({ binaryPath: "opencode2" });
+
+    NodeAssert.deepEqual(
+      fake.commands.map((command) => command.args),
+      [
+        ["service", "start"],
+        ["service", "get", "password"],
+        ["service", "password"],
+      ],
+    );
   });
 });
 
@@ -244,7 +270,7 @@ it.effect("fails explicitly when the preview OpenAPI shape is unknown", () => {
     const runtime = yield* fake.runtime;
     const error = yield* Effect.flip(runtime.attach({ binaryPath: "opencode2" }));
 
-    NodeAssert.equal(OpenCode2Runtime.isOpenCode2UnsupportedPreviewError(error), true);
+    NodeAssert.equal(OpenCodeRuntime.isOpenCodeUnsupportedPreviewError(error), true);
     NodeAssert.equal(error.operation, "openapi.detect");
     NodeAssert.match(error.message, /preview is not supported/i);
   });
@@ -270,7 +296,7 @@ it.effect("times out a wedged service command", () => {
     ),
   );
   return Effect.gen(function* () {
-    const runtime = yield* OpenCode2Runtime.make().pipe(
+    const runtime = yield* OpenCodeRuntime.make().pipe(
       Effect.provideService(HttpClient.HttpClient, httpClient),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );
@@ -279,8 +305,8 @@ it.effect("times out a wedged service command", () => {
     yield* TestClock.adjust("10 seconds");
     const error = yield* Fiber.join(fiber).pipe(Effect.flip);
 
-    NodeAssert.equal(OpenCode2Runtime.isOpenCode2TimeoutError(error), true);
-    if (!OpenCode2Runtime.isOpenCode2TimeoutError(error)) return;
+    NodeAssert.equal(OpenCodeRuntime.isOpenCodeTimeoutError(error), true);
+    if (!OpenCodeRuntime.isOpenCodeTimeoutError(error)) return;
     NodeAssert.equal(error.operation, "service.start");
   }).pipe(Effect.scoped, Effect.provide(TestClock.layer()));
 });
@@ -305,8 +331,8 @@ it.effect("times out a wedged OpenAPI probe and releases the attachment lock", (
     yield* TestClock.adjust("10 seconds");
     const error = yield* Fiber.join(first).pipe(Effect.flip);
 
-    NodeAssert.equal(OpenCode2Runtime.isOpenCode2TimeoutError(error), true);
-    if (!OpenCode2Runtime.isOpenCode2TimeoutError(error)) return;
+    NodeAssert.equal(OpenCodeRuntime.isOpenCodeTimeoutError(error), true);
+    if (!OpenCodeRuntime.isOpenCodeTimeoutError(error)) return;
     NodeAssert.equal(error.operation, "openapi.get");
 
     const connection = yield* runtime.attach({
@@ -319,19 +345,19 @@ it.effect("times out a wedged OpenAPI probe and releases the attachment lock", (
 });
 
 it("detects both adjacent preview prompt shapes", () => {
-  NodeAssert.deepEqual(OpenCode2Runtime.detectOpenCode2Protocol(openApi("text")), {
+  NodeAssert.deepEqual(OpenCodeRuntime.detectOpenCodeProtocol(openApi("text")), {
     promptShape: "flat",
   });
-  NodeAssert.deepEqual(OpenCode2Runtime.detectOpenCode2Protocol(openApi("prompt")), {
+  NodeAssert.deepEqual(OpenCodeRuntime.detectOpenCodeProtocol(openApi("prompt")), {
     promptShape: "nested",
   });
   NodeAssert.deepEqual(
-    OpenCode2Runtime.detectOpenCode2Protocol(openApi("prompt", "session.prompt")),
+    OpenCodeRuntime.detectOpenCodeProtocol(openApi("prompt", "session.prompt")),
     {
       promptShape: "nested",
     },
   );
-  NodeAssert.deepEqual(OpenCode2Runtime.detectOpenCode2Protocol(openApi("prompt", null)), {
+  NodeAssert.deepEqual(OpenCodeRuntime.detectOpenCodeProtocol(openApi("prompt", null)), {
     promptShape: "nested",
   });
 });

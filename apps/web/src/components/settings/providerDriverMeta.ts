@@ -3,7 +3,6 @@ import {
   CodexSettings,
   CursorSettings,
   GrokSettings,
-  OpenCode2Settings,
   OpenCodeSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
@@ -66,14 +65,8 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     value: ProviderDriverKind.make("opencode"),
     label: "OpenCode",
     icon: OpenCodeIcon,
-    settingsSchema: OpenCodeSettings,
-  },
-  {
-    value: ProviderDriverKind.make("opencode2"),
-    label: "OpenCode 2",
-    icon: OpenCodeIcon,
     badgeLabel: "New",
-    settingsSchema: OpenCode2Settings,
+    settingsSchema: OpenCodeSettings,
   },
 ];
 

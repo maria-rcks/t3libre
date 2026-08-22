@@ -25,8 +25,8 @@ function provider(
   input: Partial<Pick<ServerProvider, "driver" | "instanceId" | "enabled" | "installed">> = {},
 ): ServerProvider {
   return {
-    instanceId: input.instanceId ?? ProviderInstanceId.make("opencode2"),
-    driver: input.driver ?? ProviderDriverKind.make("opencode2"),
+    instanceId: input.instanceId ?? ProviderInstanceId.make("opencode"),
+    driver: input.driver ?? ProviderDriverKind.make("opencode"),
     enabled: input.enabled ?? true,
     installed: input.installed ?? true,
     version: "2.0.0",
@@ -55,12 +55,12 @@ describe("OpenCode 2 auto-enable notification", () => {
     ).toBeNull();
     expect(
       resolveOpenCode2AutoEnableDetectionKey(environmentId, [
-        provider({ driver: ProviderDriverKind.make("opencode") }),
+        provider({ driver: ProviderDriverKind.make("codex") }),
       ]),
     ).toBeNull();
     expect(
       resolveOpenCode2AutoEnableDetectionKey(environmentId, [
-        provider({ instanceId: ProviderInstanceId.make("opencode2-custom") }),
+        provider({ instanceId: ProviderInstanceId.make("opencode-custom") }),
       ]),
     ).toBeNull();
   });
