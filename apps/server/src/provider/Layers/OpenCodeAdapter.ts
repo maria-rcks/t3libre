@@ -418,7 +418,11 @@ export function makeOpenCodeAdapter(
         "activeTurnId",
       );
       yield* emit({
-        ...(yield* buildEventBase({ threadId: context.session.threadId, turnId, raw })),
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId,
+          ...(raw ? { raw } : {}),
+        })),
         type: "turn.completed",
         payload: {
           state,
