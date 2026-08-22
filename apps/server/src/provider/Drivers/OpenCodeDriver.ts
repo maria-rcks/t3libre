@@ -1,6 +1,8 @@
 import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
 import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import type * as FileSystem from "effect/FileSystem";
+import type * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
@@ -40,7 +42,9 @@ const MAINTENANCE = makeManualOnlyProviderMaintenanceCapabilities({
 export type OpenCodeDriverEnv =
   | BackgroundPolicy.BackgroundPolicy
   | Crypto.Crypto
+  | FileSystem.FileSystem
   | OpenCodeRuntime.OpenCodeRuntime
+  | Path.Path
   | ProviderEventLoggers
   | ServerConfig
   | ServerSettingsService;

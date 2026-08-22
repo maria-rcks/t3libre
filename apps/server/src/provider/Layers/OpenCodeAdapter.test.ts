@@ -14,7 +14,9 @@ import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
+import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
@@ -24,7 +26,7 @@ import * as Stream from "effect/Stream";
 import { ServerConfig } from "../../config.ts";
 import * as OpenCodeRuntime from "../opencodeRuntime.ts";
 import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
-import { makeOpenCodeAdapter } from "./OpenCodeAdapter.ts";
+import { isSameOpenCodeDirectory, makeOpenCodeAdapter } from "./OpenCodeAdapter.ts";
 
 interface RequestCall {
   readonly method: OpenCodeRuntime.OpenCodeHttpMethod;
@@ -218,6 +220,20 @@ function collectEvents(
     Effect.forkScoped,
   );
 }
+
+it.effect("matches symlink-equivalent OpenCode session directories", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-opencode2-cwd-" });
+    const directory = path.join(root, "directory");
+    const alias = path.join(root, "alias");
+    yield* fileSystem.makeDirectory(directory);
+    yield* fileSystem.symlink(directory, alias);
+
+    NodeAssert.equal(yield* isSameOpenCodeDirectory(fileSystem, path, directory, alias), true);
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
 
 it.effect("generates unique event ids when an adapter is recreated", () =>
   withHarness("flat", ({ adapter: first }) =>

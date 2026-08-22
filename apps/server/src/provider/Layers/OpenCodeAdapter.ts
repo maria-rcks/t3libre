@@ -1,5 +1,4 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 import {
@@ -21,8 +20,10 @@ import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -156,8 +157,22 @@ function parseResumeCursor(raw: unknown): string | undefined {
   return stringField(record, "sessionId");
 }
 
-function isSameDirectory(left: string, right: string): boolean {
-  return NodePath.resolve(left) === NodePath.resolve(right);
+export function isSameOpenCodeDirectory(
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  left: string,
+  right: string,
+): Effect.Effect<boolean> {
+  const lexicalLeft = path.resolve(left);
+  const lexicalRight = path.resolve(right);
+  if (lexicalLeft === lexicalRight) return Effect.succeed(true);
+  const canonicalize = (value: string) =>
+    fileSystem.realPath(value).pipe(Effect.orElseSucceed(() => value));
+  return Effect.zipWith(
+    canonicalize(lexicalLeft),
+    canonicalize(lexicalRight),
+    (canonicalLeft, canonicalRight) => canonicalLeft === canonicalRight,
+  );
 }
 
 function parseModelRef(model: string, variant?: string): ModelRef | undefined {
@@ -335,6 +350,8 @@ export function makeOpenCodeAdapter(
     const runtime = yield* OpenCodeRuntime.OpenCodeRuntime;
     const serverConfig = yield* ServerConfig;
     const crypto = yield* Crypto.Crypto;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
     const scope = yield* Effect.scope;
     const instanceId = options?.instanceId ?? ProviderInstanceId.make("opencode");
     const events = yield* Queue.unbounded<ProviderRuntimeEvent>();
@@ -1045,10 +1062,20 @@ export function makeOpenCodeAdapter(
               schema: SessionResponseSchema,
             }).pipe(
               Effect.flatMap((resolved) =>
-                resolved.data.location === undefined ||
-                isSameDirectory(resolved.data.location.directory, directory)
+                resolved.data.location === undefined
                   ? Effect.succeed({ resolved, resumedExistingSession: true })
-                  : createSession,
+                  : isSameOpenCodeDirectory(
+                      fileSystem,
+                      path,
+                      resolved.data.location.directory,
+                      directory,
+                    ).pipe(
+                      Effect.flatMap((sameDirectory) =>
+                        sameDirectory
+                          ? Effect.succeed({ resolved, resumedExistingSession: true })
+                          : createSession,
+                      ),
+                    ),
               ),
               Effect.catchIf(isMissingOpenCodeSession, () => createSession),
             )
