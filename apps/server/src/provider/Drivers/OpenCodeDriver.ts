@@ -1,4 +1,5 @@
 import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -38,13 +39,14 @@ const MAINTENANCE = makeManualOnlyProviderMaintenanceCapabilities({
 
 export type OpenCodeDriverEnv =
   | BackgroundPolicy.BackgroundPolicy
+  | Crypto.Crypto
   | OpenCodeRuntime.OpenCodeRuntime
   | ProviderEventLoggers
   | ServerConfig
   | ServerSettingsService;
 
 function nativeBinaryPath(binaryPath: string): string {
-  return /(?:^|[/\\])opencode(?:\.exe)?$/iu.test(binaryPath)
+  return /^opencode(?:\.exe)?$/iu.test(binaryPath)
     ? binaryPath.replace(/opencode(?=(?:\.exe)?$)/iu, "opencode2")
     : binaryPath;
 }

@@ -309,18 +309,24 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
               operation: "model.list",
               schema: OpenCodeModelListSchema,
             }),
-            connection.request("GET", "/api/model/default", {
-              operation: "model.default",
-              schema: OpenCodeDefaultModelSchema,
-            }),
-            connection.request("GET", "/api/agent", {
-              operation: "agent.list",
-              schema: OpenCodeAgentListSchema,
-            }),
-            connection.request("GET", "/api/skill", {
-              operation: "skill.list",
-              schema: OpenCodeSkillListSchema,
-            }),
+            connection
+              .request("GET", "/api/model/default", {
+                operation: "model.default",
+                schema: OpenCodeDefaultModelSchema,
+              })
+              .pipe(Effect.orElseSucceed(() => null)),
+            connection
+              .request("GET", "/api/agent", {
+                operation: "agent.list",
+                schema: OpenCodeAgentListSchema,
+              })
+              .pipe(Effect.orElseSucceed(() => [])),
+            connection
+              .request("GET", "/api/skill", {
+                operation: "skill.list",
+                schema: OpenCodeSkillListSchema,
+              })
+              .pipe(Effect.orElseSucceed(() => [])),
           ],
           { concurrency: "unbounded" },
         );

@@ -17,6 +17,7 @@ import {
 } from "@t3tools/contracts";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import * as DateTime from "effect/DateTime";
+import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -35,9 +36,12 @@ import {
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
-import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
+import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
+import type { ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
 import * as OpenCodeRuntime from "../opencodeRuntime.ts";
 import type { EventNdjsonLogger } from "./EventNdjsonLogger.ts";
+
+export type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
 const RESUME_VERSION = 1 as const;
@@ -55,14 +59,6 @@ const MessagesResponseSchema = Schema.Struct({
 
 const decodeUnknownRecord = Schema.decodeUnknownOption(UnknownRecordSchema);
 const decodeUnknownRecordArray = Schema.decodeUnknownOption(UnknownRecordArraySchema);
-
-type OpenCodeAdapterError =
-  | ProviderAdapterProcessError
-  | ProviderAdapterRequestError
-  | ProviderAdapterSessionNotFoundError
-  | ProviderAdapterValidationError;
-
-export type OpenCodeAdapterShape = ProviderAdapterShape<OpenCodeAdapterError>;
 
 interface OpenCodeTurnSnapshot {
   readonly id: TurnId;
@@ -321,6 +317,7 @@ export function makeOpenCodeAdapter(
   return Effect.gen(function* () {
     const runtime = yield* OpenCodeRuntime.OpenCodeRuntime;
     const serverConfig = yield* ServerConfig;
+    const crypto = yield* Crypto.Crypto;
     const scope = yield* Effect.scope;
     const instanceId = options?.instanceId ?? ProviderInstanceId.make("opencode");
     const events = yield* Queue.unbounded<ProviderRuntimeEvent>();
@@ -328,14 +325,25 @@ export function makeOpenCodeAdapter(
     const sessionByProviderId = new Map<string, OpenCodeSessionContext>();
     const connectionLock = yield* Semaphore.make(1);
     let activeConnection: OpenCodeActiveConnection | undefined;
-    let eventCounter = 0;
+    const randomUUIDv4 = crypto.randomUUIDv4.pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "crypto/randomUUIDv4",
+            detail: "Failed to generate an OpenCode runtime identifier.",
+            cause,
+          }),
+      ),
+    );
+    const nextEventId = Effect.map(randomUUIDv4, EventId.make);
+    const nextTurnId = Effect.map(randomUUIDv4, TurnId.make);
 
     const buildEventBase = Effect.fn("OpenCodeAdapter.buildEventBase")(function* (
       input: EventBaseInput,
     ) {
-      eventCounter += 1;
       return {
-        eventId: EventId.make(`opencode-event-${eventCounter}`),
+        eventId: yield* nextEventId,
         provider: PROVIDER,
         providerInstanceId: instanceId,
         threadId: input.threadId,
@@ -1154,8 +1162,7 @@ export function makeOpenCodeAdapter(
         }
 
         const steeringTurnId = context.activeTurnId;
-        eventCounter += 1;
-        const turnId = steeringTurnId ?? TurnId.make(`opencode-turn-${eventCounter}`);
+        const turnId = steeringTurnId ?? (yield* nextTurnId);
         context.activeTurnId = turnId;
         yield* updateSession(
           context,

@@ -19,6 +19,7 @@ const settings = {
 function runtimeLayer(input: {
   readonly responses?: Readonly<Record<string, unknown>>;
   readonly attachError?: OpenCodeRuntime.OpenCodeRuntimeFailure;
+  readonly failedPaths?: ReadonlySet<string>;
   readonly paths?: Array<string>;
 }) {
   const connection: OpenCodeRuntime.OpenCodeConnection = {
@@ -26,6 +27,15 @@ function runtimeLayer(input: {
     protocol: { promptShape: "flat" },
     request: ((method: string, path: string, _requestInput: { readonly schema: unknown }) => {
       input.paths?.push(`${method} ${path}`);
+      if (input.failedPaths?.has(path)) {
+        return Effect.fail(
+          new OpenCodeRuntime.OpenCodeRuntimeError({
+            operation: `probe${path}`,
+            reason: "http-status",
+            status: 404,
+          }),
+        );
+      }
       return Effect.succeed(input.responses?.[path]);
     }) as OpenCodeRuntime.OpenCodeConnection["request"],
     globalEvents: Stream.empty,
@@ -126,6 +136,42 @@ it.effect("builds model inventory from the attached OpenCode 2 service", () => {
     ),
   );
 });
+
+it.effect("keeps core discovery ready when optional metadata endpoints fail", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* checkOpenCodeProviderStatus(settings);
+
+    NodeAssert.equal(snapshot.status, "ready");
+    NodeAssert.equal(snapshot.installed, true);
+    NodeAssert.deepEqual(
+      snapshot.models.map((model) => model.slug),
+      ["openai/gpt-5.6"],
+    );
+    NodeAssert.deepEqual(snapshot.skills, []);
+    NodeAssert.deepEqual(
+      snapshot.models[0]?.capabilities?.optionDescriptors?.map((descriptor) => descriptor.id) ?? [],
+      [],
+    );
+  }).pipe(
+    Effect.provide(
+      runtimeLayer({
+        failedPaths: new Set(["/api/model/default", "/api/agent", "/api/skill"]),
+        responses: {
+          "/api/health": { healthy: true, version: "0.0.0-beta-17823" },
+          "/api/model": {
+            data: [
+              {
+                id: "gpt-5.6",
+                providerID: "openai",
+                name: "GPT-5.6",
+              },
+            ],
+          },
+        },
+      }),
+    ),
+  ),
+);
 
 it.effect("reports unsupported adjacent preview protocols without hanging", () =>
   Effect.gen(function* () {

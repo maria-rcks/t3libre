@@ -170,6 +170,35 @@ function collectEvents(
   );
 }
 
+it.effect("generates unique event ids when an adapter is recreated", () =>
+  withHarness("flat", ({ adapter: first }) =>
+    withHarness("flat", ({ adapter: second }) =>
+      Effect.gen(function* () {
+        const firstEventId = yield* Deferred.make<string>();
+        const secondEventId = yield* Deferred.make<string>();
+        yield* collectEvents(first, [], (next) =>
+          next.type === "session.started"
+            ? Deferred.succeed(firstEventId, next.eventId).pipe(Effect.ignore)
+            : Effect.void,
+        );
+        yield* collectEvents(second, [], (next) =>
+          next.type === "session.started"
+            ? Deferred.succeed(secondEventId, next.eventId).pipe(Effect.ignore)
+            : Effect.void,
+        );
+
+        yield* first.startSession({ threadId, runtimeMode: "full-access" });
+        yield* second.startSession({ threadId, runtimeMode: "full-access" });
+
+        NodeAssert.notEqual(
+          yield* Deferred.await(firstEventId),
+          yield* Deferred.await(secondEventId),
+        );
+      }),
+    ),
+  ),
+);
+
 it.effect("attaches once and maps native deltas, tools, and terminal events", () =>
   withHarness("flat", ({ adapter, attachCount, calls, publish }) =>
     Effect.gen(function* () {
