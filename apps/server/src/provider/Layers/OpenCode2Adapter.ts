@@ -779,10 +779,15 @@ export function makeOpenCode2Adapter(
         sessions.values(),
         (context) =>
           Effect.gen(function* () {
-            yield* updateSession(context, {
-              status: "error",
-              lastError: cause.message,
-            });
+            context.activeTurnId = undefined;
+            yield* updateSession(
+              context,
+              {
+                status: "error",
+                lastError: cause.message,
+              },
+              "activeTurnId",
+            );
             yield* emit({
               ...(yield* buildEventBase({ threadId: context.session.threadId })),
               type: "runtime.error",

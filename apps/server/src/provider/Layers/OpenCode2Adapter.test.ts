@@ -545,12 +545,24 @@ it.effect("reconnects after the native event stream fails", () =>
   withHarness("flat", ({ adapter, attachCount, failEvents }) =>
     Effect.gen(function* () {
       const runtimeError = yield* Deferred.make<void>();
-      yield* collectEvents(adapter, [], (next) =>
-        next.type === "runtime.error"
-          ? Deferred.succeed(runtimeError, undefined).pipe(Effect.ignore)
-          : Effect.void,
+      const secondTurnStarted = yield* Deferred.make<void>();
+      const observed: Array<ProviderRuntimeEvent> = [];
+      let startedTurns = 0;
+      yield* collectEvents(adapter, observed, (next) =>
+        Effect.gen(function* () {
+          if (next.type === "runtime.error") {
+            yield* Deferred.succeed(runtimeError, undefined).pipe(Effect.ignore);
+          }
+          if (next.type === "turn.started") {
+            startedTurns += 1;
+            if (startedTurns === 2) {
+              yield* Deferred.succeed(secondTurnStarted, undefined).pipe(Effect.ignore);
+            }
+          }
+        }),
       );
       yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+      yield* adapter.sendTurn({ threadId, input: "before disconnect" });
       yield* failEvents(
         new OpenCode2Runtime.OpenCode2RuntimeError({
           operation: "event.subscribe",
@@ -558,9 +570,12 @@ it.effect("reconnects after the native event stream fails", () =>
         }),
       );
       yield* Deferred.await(runtimeError);
+      NodeAssert.equal((yield* adapter.listSessions())[0]?.activeTurnId, undefined);
 
       yield* adapter.sendTurn({ threadId, input: "reconnect" });
+      yield* Deferred.await(secondTurnStarted);
       NodeAssert.equal(attachCount(), 2);
+      NodeAssert.equal(observed.filter((event) => event.type === "turn.started").length, 2);
     }),
   ),
 );
