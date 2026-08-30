@@ -1284,6 +1284,79 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("keeps manual compaction correlated through a turnless abort acknowledgment", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-compact-after-turnless-abort");
+      const abortEvent = promiseWithResolvers<unknown>();
+      const compactedEvent = promiseWithResolvers<unknown>();
+      const abortStarted = promiseWithResolvers<void>();
+      const abortRelease = promiseWithResolvers<void>();
+      runtimeMock.state.subscribedEvents = [abortEvent.promise, compactedEvent.promise];
+      runtimeMock.state.abortImplementation = async () => {
+        abortStarted.resolve(undefined);
+        await abortRelease.promise;
+      };
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+      });
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "turn.started" ||
+              event.type === "turn.completed" ||
+              event.type === "thread.state.changed"),
+        ),
+        Stream.take(3),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const interruptFiber = yield* adapter.interruptTurn(threadId).pipe(Effect.forkChild);
+      yield* Effect.promise(() => abortStarted.promise);
+      const compactThread = adapter.compactThread;
+      NodeAssert.ok(compactThread);
+      yield* compactThread(threadId);
+
+      abortEvent.resolve({
+        id: "evt-turnless-abort-during-manual-compact",
+        type: "session.error",
+        properties: {
+          sessionID: "http://127.0.0.1:9999/session",
+          error: { name: "MessageAbortedError", data: { message: "Aborted" } },
+        },
+      });
+      yield* Fiber.join(interruptFiber);
+      abortRelease.resolve(undefined);
+      compactedEvent.resolve({
+        id: "evt-session-compacted-after-turnless-abort",
+        type: "session.compacted",
+        properties: { sessionID: "http://127.0.0.1:9999/session" },
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      const compactTurnId = events[0]?.turnId;
+      NodeAssert.ok(compactTurnId);
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        ["turn.started", "thread.state.changed", "turn.completed"],
+      );
+      NodeAssert.deepEqual(
+        events.map((event) => event.turnId),
+        [compactTurnId, compactTurnId, compactTurnId],
+      );
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("falls back to a fresh session when the persisted session is gone", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;

@@ -1219,7 +1219,15 @@ const make = Effect.gen(function* () {
       return Effect.gen(function* () {
         const latestThread = yield* resolveThread(event.payload.threadId);
         const latestSession = latestThread?.session;
-        if (latestSession?.status === "running" && latestSession.activeTurnId !== null) {
+        const runtimeSession = (yield* providerService.listSessions()).find(
+          (session) => session.threadId === event.payload.threadId,
+        );
+        if (
+          latestSession?.status === "running" &&
+          latestSession.activeTurnId !== null &&
+          runtimeSession?.status === "running" &&
+          runtimeSession.activeTurnId === latestSession.activeTurnId
+        ) {
           // Consume the pending turn-start projection without disturbing the
           // provider turn that rejected compaction because it is still live.
           yield* setThreadSession({

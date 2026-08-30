@@ -2276,7 +2276,6 @@ export function makeOpenCodeAdapter(
         case "session.error": {
           const message = sessionErrorMessage(event.properties.error);
           const activeTurnId = context.activeTurnId;
-          context.manualCompactionTurnId = undefined;
           const cancellation = context.cancellation;
           if (isOpenCodeAbortError(event.properties.error)) {
             if (cancellation !== undefined && cancellation.turnId === undefined) {
@@ -2293,6 +2292,7 @@ export function makeOpenCodeAdapter(
               break;
             }
           }
+          context.manualCompactionTurnId = undefined;
           yield* cancelIdleReconciliation(context);
           const terminalCancellation =
             activeTurnId !== undefined && cancellation?.turnId === activeTurnId

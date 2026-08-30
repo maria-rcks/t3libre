@@ -691,6 +691,16 @@ describe("ProviderCommandReactor", () => {
         },
         createdAt: now,
       });
+      const runtimeSession = harness.runtimeSessions.find(
+        (session) => session.threadId === ThreadId.make("thread-1"),
+      );
+      expect(runtimeSession).toBeDefined();
+      if (runtimeSession) {
+        Object.assign(runtimeSession, {
+          status: "running",
+          activeTurnId: asTurnId("turn-running"),
+        });
+      }
 
       yield* harness.engine.dispatch({
         type: "thread.turn.start",
@@ -733,6 +743,75 @@ describe("ProviderCommandReactor", () => {
         thread?.activities.find((activity) => activity.summary === "Context compaction failed")
           ?.payload,
       ).toEqual({ detail: rejection.detail });
+    }),
+  );
+
+  effectIt.effect("does not restore a compact turn the provider already cleared", () =>
+    Effect.gen(function* () {
+      const releaseFailure = yield* Deferred.make<void>();
+      const rejection = new ProviderAdapterRequestError({
+        provider: ProviderDriverKind.make("codex"),
+        method: "thread/compact/start",
+        detail: "Compaction failed after its turn started.",
+      });
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          compactThreadEffect: () =>
+            Deferred.await(releaseFailure).pipe(Effect.andThen(Effect.fail(rejection))),
+        }),
+      );
+      const now = "2026-01-01T00:00:00.000Z";
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-compact-with-stale-projection"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-compact-with-stale-projection"),
+          role: "user",
+          text: "/compact",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      });
+      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-stale-compact-turn"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-compact-cleared-by-provider"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      });
+      yield* Deferred.succeed(releaseFailure, undefined);
+
+      yield* Effect.promise(() =>
+        waitFor(async () => {
+          const readModel = await harness.readModel();
+          return (
+            readModel.threads
+              .find((entry) => entry.id === ThreadId.make("thread-1"))
+              ?.activities.some((activity) => activity.summary === "Context compaction failed") ??
+            false
+          );
+        }),
+      );
+      const readModel = yield* Effect.promise(() => harness.readModel());
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      expect(thread?.session).toMatchObject({
+        status: "error",
+        activeTurnId: null,
+        lastError: rejection.detail,
+      });
     }),
   );
 
