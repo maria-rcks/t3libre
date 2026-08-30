@@ -2,6 +2,7 @@ import { type ContextMenuItem, type EnvironmentId, type ServerProvider } from "@
 import { CircleAlertIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
 
+import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import { formatProviderDriverKindLabel } from "~/providerModels";
 import { Button } from "../ui/button";
@@ -12,6 +13,7 @@ export interface ChatWarning {
   readonly id: string;
   readonly title: string;
   readonly description: string;
+  readonly severity: "warning" | "error";
 }
 
 export type ChatWarningContextMenuAction =
@@ -54,6 +56,7 @@ export function resolveProviderChatWarning(
     ].join("\u0000"),
     title,
     description,
+    severity: status.status === "warning" ? "warning" : "error",
   };
 }
 
@@ -66,6 +69,7 @@ export function resolveThreadErrorChatWarning(
     id: ["thread", threadKey, error].join("\u0000"),
     title: "Thread failed",
     description: error,
+    severity: "error",
   };
 }
 
@@ -185,6 +189,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
   if (warnings.length === 0) return null;
 
   const warningCountLabel = `${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}`;
+  const severity = warnings.some((warning) => warning.severity === "error") ? "error" : "warning";
   const dismissForNowLabel = warnings.length === 1 ? "Dismiss for now" : "Dismiss all for now";
   const dismissForeverLabel = warnings.length === 1 ? "Don't show again" : "Don't show these again";
   const dismissForNowButton = (
@@ -216,26 +221,44 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
               variant="ghost"
               size="icon-xs"
               aria-label={`${warningCountLabel}. Right-click to dismiss.`}
-              className="size-6 shrink-0 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+              className={cn(
+                "size-6 shrink-0 rounded-full",
+                severity === "error"
+                  ? "text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  : "text-warning hover:bg-warning/10 hover:text-warning",
+              )}
               onContextMenu={(event) => void handleContextMenu(event)}
             />
           }
         >
-          <CircleAlertIcon className="size-4.5 fill-destructive/12 text-destructive" aria-hidden />
+          <CircleAlertIcon
+            className={cn(
+              "size-4.5",
+              severity === "error"
+                ? "fill-destructive/12 text-destructive"
+                : "fill-warning/12 text-warning",
+            )}
+            aria-hidden
+          />
         </PopoverTrigger>
         <PopoverPopup
           tooltipStyle
           align="start"
           side="bottom"
           viewportClassName="p-0"
-          className="alert-glass w-72 max-w-[calc(100vw-1rem)] border-destructive/40! text-left text-pretty text-error-foreground"
-          data-variant="error"
+          className={cn(
+            "alert-glass w-72 max-w-[calc(100vw-1rem)] text-left text-pretty",
+            severity === "error"
+              ? "border-destructive/40! text-error-foreground"
+              : "border-warning/40! text-warning-foreground",
+          )}
+          data-variant={severity}
         >
           <div>
             {warnings.map((warning) => (
               <div key={warning.id} className="p-2.5 pb-1.5">
-                <div className="font-medium text-error-foreground">{warning.title}</div>
-                <div className="mt-0.5 max-h-48 overflow-y-auto whitespace-pre-wrap text-error-foreground/80">
+                <div className="font-medium">{warning.title}</div>
+                <div className="mt-0.5 max-h-48 overflow-y-auto whitespace-pre-wrap opacity-80">
                   {warning.description}
                 </div>
               </div>

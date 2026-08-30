@@ -12,6 +12,7 @@ const warning: ChatWarning = {
   id: "provider-warning",
   title: "Codex is unavailable",
   description: "Codex App Server process exited with code 1.",
+  severity: "error",
 };
 
 describe("ChatWarningIndicator", () => {
@@ -35,6 +36,30 @@ describe("ChatWarningIndicator", () => {
     ).toMatchObject({
       title: "Codex is unavailable",
       description: "Codex App Server process exited with code 1.",
+      severity: "error",
+    });
+  });
+
+  it("preserves degraded provider status as a warning", () => {
+    expect(
+      resolveProviderChatWarning(EnvironmentId.make("local"), {
+        instanceId: ProviderInstanceId.make("codex"),
+        driver: ProviderDriverKind.make("codex"),
+        displayName: "Codex",
+        enabled: true,
+        installed: true,
+        version: "1.0.0",
+        status: "warning",
+        auth: { status: "authenticated" },
+        checkedAt: "2026-07-23T12:00:00.000Z",
+        message: "Codex is available with limited functionality.",
+        models: [],
+        slashCommands: [],
+        skills: [],
+      }),
+    ).toMatchObject({
+      title: "Codex has limited availability",
+      severity: "warning",
     });
   });
 
@@ -43,6 +68,7 @@ describe("ChatWarningIndicator", () => {
       id: "thread\u0000local:thread-a\u0000Turn failed",
       title: "Thread failed",
       description: "Turn failed",
+      severity: "error",
     });
   });
 
@@ -50,7 +76,12 @@ describe("ChatWarningIndicator", () => {
     expect(
       buildChatWarningContextMenuItems([
         warning,
-        { id: "thread-warning", title: "Thread failed", description: "Turn failed" },
+        {
+          id: "thread-warning",
+          title: "Thread failed",
+          description: "Turn failed",
+          severity: "error",
+        },
       ]),
     ).toEqual([
       {
