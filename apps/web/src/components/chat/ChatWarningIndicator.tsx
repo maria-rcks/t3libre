@@ -232,7 +232,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
             {warnings.map((warning) => (
               <div key={warning.id} className="p-2.5 pb-1.5">
                 <div className="font-medium text-error-foreground">{warning.title}</div>
-                <div className="mt-0.5 whitespace-pre-wrap text-error-foreground/80">
+                <div className="mt-0.5 max-h-48 overflow-y-auto whitespace-pre-wrap text-error-foreground/80">
                   {warning.description}
                 </div>
               </div>
