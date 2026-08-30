@@ -182,9 +182,7 @@ function PullRequestFilterRadioGroup<Value extends string>({
             <span className="flex min-w-0 items-center gap-2">
               <option.Icon aria-hidden className="size-3.5" />
               {option.label}
-              {option.unavailable ? (
-                <span className="ml-auto text-xs text-warning">Unavailable</span>
-              ) : null}
+              {option.unavailable ? " · Unavailable" : null}
             </span>
           </MenuRadioItem>
         );
