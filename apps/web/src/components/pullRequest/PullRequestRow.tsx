@@ -17,7 +17,7 @@ import {
 
 function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry["labels"] }) {
   return (
-    <span className="inline-flex max-w-40 min-w-0 items-center gap-1 rounded-full border border-border/60 bg-muted/35 px-1.5 py-px text-[10px] leading-4 text-muted-foreground">
+    <span className="inline-flex max-w-40 min-w-0 items-center gap-1 rounded-full border border-border/60 bg-muted/35 px-1.5 text-[10px] leading-3.5 text-muted-foreground">
       <span className="truncate">{labels[0]?.name}</span>
       {labels.length > 1 ? <span className="shrink-0">+{labels.length - 1}</span> : null}
     </span>
