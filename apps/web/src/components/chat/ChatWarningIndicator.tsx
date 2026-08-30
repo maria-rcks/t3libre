@@ -120,15 +120,16 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
   readonly onDismissAllWarningsForever: () => void;
   readonly canDismissForNow: boolean;
 }) {
-  const contextMenuOpenRef = useRef(false);
+  const activeContextMenusRef = useRef(new Set<symbol>());
   const closeContextMenu = useCallback(() => {
-    if (!contextMenuOpenRef.current) return;
-    contextMenuOpenRef.current = false;
+    if (activeContextMenusRef.current.size === 0) return;
+    activeContextMenusRef.current.clear();
     void readLocalApi()?.contextMenu.close();
   }, []);
+  const warningIds = JSON.stringify(warnings.map((warning) => warning.id));
   useEffect(() => {
-    if (warnings.length === 0) closeContextMenu();
-  }, [closeContextMenu, warnings.length]);
+    closeContextMenu();
+  }, [closeContextMenu, warningIds]);
   useEffect(() => closeContextMenu, [closeContextMenu]);
 
   const handleContextMenu = useCallback(
@@ -137,7 +138,8 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
       event.stopPropagation();
       const api = readLocalApi();
       if (!api) return;
-      contextMenuOpenRef.current = true;
+      const contextMenuToken = Symbol();
+      activeContextMenusRef.current.add(contextMenuToken);
       try {
         const action = await api.contextMenu.show(
           buildChatWarningContextMenuItems(warnings, canDismissForNow),
@@ -146,6 +148,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
             y: event.clientY,
           },
         );
+        if (!activeContextMenusRef.current.has(contextMenuToken)) return;
         if (action === "dismiss-all-now") {
           if (canDismissForNow) onDismissAllWarningsForNow();
           return;
@@ -166,7 +169,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
       } catch {
         // Losing a context menu should not add another warning to the warning center.
       } finally {
-        contextMenuOpenRef.current = false;
+        activeContextMenusRef.current.delete(contextMenuToken);
       }
     },
     [
