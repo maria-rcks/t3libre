@@ -44,14 +44,11 @@ export interface PullRequestGroup<Entry extends PullRequestListEntry = PullReque
 
 export interface PullRequestAuthorFacet {
   readonly actor: PullRequestActor;
-  /** Rows under the current state and scope. */
   readonly count: number;
-  /** Merged rows in the recent all-state sample. */
   readonly mergedCount: number;
 }
 
 export interface PullRequestLabelFacet extends PullRequestLabel {
-  /** Rows under the current state and scope. */
   readonly count: number;
 }
 
@@ -89,10 +86,7 @@ export function collectPullRequestListFacets(
   entries: ReadonlyArray<PullRequestListEntry>,
   state: PullRequestListState,
 ): PullRequestListFacets {
-  const authors = new Map<
-    string,
-    { actor: PullRequestActor; count: number; mergedCount: number }
-  >();
+  const authors = new Map<string, PullRequestAuthorFacet>();
   const labels = new Map<string, PullRequestLabelFacet>();
   for (const entry of entries) {
     const inState = state === "all" || entry.state === state;
@@ -503,13 +497,16 @@ export function mergePullRequestDiffStats(
   if (stats.length === 0) return previous;
   const next = new Map(previous);
   for (const stat of stats) {
-    next.set(diffStatKey(stat), { additions: stat.additions, deletions: stat.deletions });
+    next.set(pullRequestDiffStatKey(stat), {
+      additions: stat.additions,
+      deletions: stat.deletions,
+    });
   }
   return next;
 }
 
 /** A project id only names a project within its own environment, so the key carries both. */
-const diffStatKey = (row: {
+export const pullRequestDiffStatKey = (row: {
   readonly environmentId: string;
   readonly projectId: string;
   readonly number: number;
@@ -862,6 +859,6 @@ export function withDiffStat<
   statsByRow: ReadonlyMap<string, { readonly additions: number; readonly deletions: number }>,
 ): Entry {
   if (entry.additions !== 0 || entry.deletions !== 0) return entry;
-  const stat = statsByRow.get(diffStatKey(entry));
+  const stat = statsByRow.get(pullRequestDiffStatKey(entry));
   return stat === undefined ? entry : { ...entry, ...stat };
 }

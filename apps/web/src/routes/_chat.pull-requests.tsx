@@ -41,6 +41,7 @@ import {
   narrowPullRequestsToFilters,
   mergePullRequestDiffStats,
   partitionPullRequestsWithPriority,
+  pullRequestDiffStatKey,
   pullRequestEntryKey,
   pullRequestEntryViewer,
   rankPullRequestMatches,
@@ -698,7 +699,6 @@ function PullRequestsRouteView() {
     ],
   );
   const baselineQuery = usePullRequestList(baselineTargets);
-  // One lazy all-state sample supplies both filter choices and recent merge counts.
   const facetTargets = useMemo(() => {
     if (!filtersOpen) return NO_LIST_TARGETS;
     return environmentQueries.map(({ environmentId, projectIds }) => ({
@@ -1238,14 +1238,19 @@ function PullRequestsRouteView() {
     }));
     if (sort === "updated") return enriched;
     const entries = enriched.flatMap((group) => group.entries);
+    const hasSize = (entry: (typeof entries)[number]) =>
+      entry.additions + entry.deletions > 0 || statsByRow.has(pullRequestDiffStatKey(entry));
     return [
       {
         key: "others" as const,
         label: "",
         entries: entries.toSorted((left, right) => {
+          const measured = Number(hasSize(right)) - Number(hasSize(left));
           const sized = left.additions + left.deletions - (right.additions + right.deletions);
           return (
-            (sort === "largest" ? -sized : sized) || right.updatedAt.localeCompare(left.updatedAt)
+            measured ||
+            (sort === "largest" ? -sized : sized) ||
+            right.updatedAt.localeCompare(left.updatedAt)
           );
         }),
       },
