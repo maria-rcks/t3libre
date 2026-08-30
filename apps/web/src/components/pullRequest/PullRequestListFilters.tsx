@@ -217,10 +217,8 @@ function PullRequestFilterRadioSubmenu<Value extends string>({
     <MenuSub>
       <MenuSubTrigger>
         <current.Icon aria-hidden className="size-3.5" />
-        <span>{label}</span>
-        <span className="ml-auto max-w-32 truncate text-xs text-muted-foreground">
-          {current.label}
-        </span>
+        <span className="flex-1">{label}</span>
+        <span className="max-w-32 truncate text-xs text-muted-foreground">{current.label}</span>
       </MenuSubTrigger>
       <MenuSubPopup className="min-w-56">
         <PullRequestFilterRadioGroup
@@ -260,10 +258,8 @@ function PullRequestAuthorFilter({
     <MenuSub>
       <MenuSubTrigger>
         <UserRoundIcon aria-hidden className="size-3.5" />
-        <span>Author</span>
-        <span className="ml-auto max-w-32 truncate text-xs text-muted-foreground">
-          {value ?? "Anyone"}
-        </span>
+        <span className="flex-1">Author</span>
+        <span className="max-w-32 truncate text-xs text-muted-foreground">{value ?? "Anyone"}</span>
       </MenuSubTrigger>
       <MenuSubPopup className="w-80">
         <div className="p-1 pb-2">
@@ -323,8 +319,8 @@ function PullRequestLabelFilter({
     <MenuSub>
       <MenuSubTrigger>
         <TagIcon aria-hidden className="size-3.5" />
-        <span>Labels</span>
-        <span className="ml-auto text-xs text-muted-foreground">
+        <span className="flex-1">Labels</span>
+        <span className="text-xs text-muted-foreground">
           {value.length === 0 ? "Any" : `${value.length} selected`}
         </span>
       </MenuSubTrigger>
