@@ -199,8 +199,8 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
       className={cn(
         "aria-disabled:cursor-default aria-disabled:opacity-64",
         severity === "error"
-          ? "border-destructive/32 bg-error-surface text-error-foreground [:hover,[data-pressed]]:bg-destructive/12 aria-disabled:hover:border-destructive/32 aria-disabled:hover:bg-error-surface"
-          : "border-warning/32 bg-warning-surface text-warning-foreground [:hover,[data-pressed]]:border-warning/40 [:hover,[data-pressed]]:bg-warning/12 aria-disabled:hover:border-warning/32 aria-disabled:hover:bg-warning-surface",
+          ? "border-destructive/32 bg-error-surface text-error-foreground dark:bg-error-surface [:hover,[data-pressed]]:bg-destructive/12 aria-disabled:hover:border-destructive/32 aria-disabled:hover:bg-error-surface"
+          : "border-warning/32 bg-warning-surface text-warning-foreground dark:bg-warning-surface [:hover,[data-pressed]]:border-warning/40 [:hover,[data-pressed]]:bg-warning/12 dark:[:hover,[data-pressed]]:bg-warning/12 aria-disabled:hover:border-warning/32 aria-disabled:hover:bg-warning-surface",
       )}
       aria-disabled={!canDismissForNow || undefined}
       onClick={() => {
@@ -282,7 +282,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
                 variant={severity === "error" ? "destructive" : "outline"}
                 className={
                   severity === "warning"
-                    ? "border-warning/32 bg-warning-surface text-warning-foreground [:hover,[data-pressed]]:border-warning/40 [:hover,[data-pressed]]:bg-warning/12"
+                    ? "border-warning/32 bg-warning-surface text-warning-foreground dark:bg-warning-surface [:hover,[data-pressed]]:border-warning/40 [:hover,[data-pressed]]:bg-warning/12 dark:[:hover,[data-pressed]]:bg-warning/12"
                     : undefined
                 }
                 onClick={onDismissAllWarningsForever}
