@@ -1043,7 +1043,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       routing.cursor.sendTurn.mockClear();
       const eventsFiber = yield* provider.streamEvents.pipe(
-        Stream.take(2),
+        Stream.take(3),
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1052,6 +1052,15 @@ routing.layer("ProviderServiceLive routing", (it) => {
       yield* provider.compactThread(threadId);
 
       assert.deepEqual(routing.cursor.sendTurn.mock.calls, [[{ threadId, input: "/compress" }]]);
+      routing.cursor.emit({
+        type: "turn.completed",
+        eventId: asEventId("evt-cursor-unrelated-completed"),
+        provider: CURSOR_DRIVER,
+        createdAt: "2026-01-01T00:00:00.500Z",
+        threadId,
+        turnId: asTurnId("turn-unrelated"),
+        payload: { state: "completed" },
+      });
       routing.cursor.emit({
         type: "turn.completed",
         eventId: asEventId("evt-cursor-compact-completed"),
@@ -1064,9 +1073,9 @@ routing.layer("ProviderServiceLive routing", (it) => {
       const events = Array.from(yield* Fiber.join(eventsFiber));
       assert.deepEqual(
         events.map((event) => event.type),
-        ["turn.completed", "thread.state.changed"],
+        ["turn.completed", "turn.completed", "thread.state.changed"],
       );
-      const compactedEvent = events[1];
+      const compactedEvent = events[2];
       assert.equal(compactedEvent?.type, "thread.state.changed");
       if (compactedEvent?.type === "thread.state.changed") {
         assert.equal(compactedEvent.payload.state, "compacted");

@@ -25,6 +25,7 @@ import {
   type ProviderDriverKind,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type TurnId,
 } from "@t3tools/contracts";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import * as DateTime from "effect/DateTime";
@@ -233,7 +234,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const revokeMcpCredential =
     options?.revokeMcpCredential ?? McpSessionRegistry.revokeActiveMcpThread;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
-  const pendingFallbackCompactions = new Set<ThreadId>();
+  const pendingFallbackCompactions = new Set<TurnId>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   /**
    * Attach the `t3-code` MCP server to the session that is about to start.
@@ -358,7 +359,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const fallbackCompactionSettled =
         (canonicalEvent.type === "turn.completed" || canonicalEvent.type === "turn.aborted") &&
-        pendingFallbackCompactions.delete(canonicalEvent.threadId);
+        canonicalEvent.turnId !== undefined &&
+        pendingFallbackCompactions.delete(canonicalEvent.turnId);
       if (
         !fallbackCompactionSettled ||
         canonicalEvent.type !== "turn.completed" ||
@@ -872,11 +874,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* routed.adapter.compactThread(routed.threadId);
       } else {
         const input = routed.adapter.provider === "cursor" ? "/compress" : "/compact";
-        pendingFallbackCompactions.add(threadId);
-        yield* sendTurn({ threadId, input }).pipe(
-          Effect.tapError(() => Effect.sync(() => pendingFallbackCompactions.delete(threadId))),
-          Effect.asVoid,
-        );
+        const turn = yield* sendTurn({ threadId, input });
+        pendingFallbackCompactions.add(turn.turnId);
       }
       yield* analytics.record("provider.thread.compacted", {
         provider: routed.adapter.provider,

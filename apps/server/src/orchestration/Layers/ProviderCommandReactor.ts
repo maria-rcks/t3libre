@@ -1211,6 +1211,23 @@ const make = Effect.gen(function* () {
         ),
       );
 
+    const isCompactCommand =
+      (message.attachments?.length ?? 0) === 0 && message.text.trim().toLowerCase() === "/compact";
+    if (isCompactCommand) {
+      yield* Effect.gen(function* () {
+        yield* ensureSessionForThread(event.payload.threadId, event.payload.createdAt, {
+          ...(event.payload.modelSelection !== undefined
+            ? { modelSelection: event.payload.modelSelection }
+            : {}),
+        });
+        if (event.payload.modelSelection !== undefined) {
+          threadModelSelections.set(event.payload.threadId, event.payload.modelSelection);
+        }
+        yield* providerService.compactThread(event.payload.threadId);
+      }).pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+      return;
+    }
+
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
       messageText: message.text,
@@ -1229,13 +1246,9 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const isCompactCommand =
-      (message.attachments?.length ?? 0) === 0 && message.text.trim().toLowerCase() === "/compact";
-    yield* (
-      isCompactCommand
-        ? providerService.compactThread(event.payload.threadId)
-        : providerService.sendTurn(sendTurnRequest.value).pipe(Effect.asVoid)
-    ).pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+    yield* providerService
+      .sendTurn(sendTurnRequest.value)
+      .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (

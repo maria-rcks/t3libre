@@ -642,6 +642,9 @@ describe("ProviderCommandReactor", () => {
       yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
       expect(harness.compactThread).toHaveBeenCalledWith(ThreadId.make("thread-1"));
       expect(harness.sendTurn).not.toHaveBeenCalled();
+      const readModel = yield* Effect.promise(() => harness.readModel());
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      expect(thread?.session?.status).toBe("ready");
     }),
   );
 
