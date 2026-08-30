@@ -21,7 +21,7 @@ import {
   TagIcon,
   UserRoundIcon,
 } from "lucide-react";
-import { type ElementType, useMemo, useState } from "react";
+import { type ElementType, type ReactNode, useState } from "react";
 
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -58,7 +58,8 @@ export interface PullRequestFilterOption<Value extends string> {
    * Carries the option's own tone, so an icon reads the same here as it does on a row. Left
    * uncoloured, which lets the item's selected state stay the thing the eye follows.
    */
-  readonly Icon: ElementType<{ className?: string }>;
+  readonly Icon?: ElementType<{ className?: string }>;
+  readonly icon?: ReactNode;
   /** Why it cannot be chosen, carried onto the item as its title. */
   readonly unavailable?: string | undefined;
 }
@@ -180,7 +181,8 @@ function PullRequestFilterRadioGroup<Value extends string>({
             disabled={option.unavailable !== undefined}
           >
             <span className="flex min-w-0 items-center gap-2">
-              <option.Icon aria-hidden className="size-3.5" />
+              {option.icon ??
+                (option.Icon ? <option.Icon aria-hidden className="size-3.5" /> : null)}
               <span className="min-w-0 flex-1 truncate">{option.label}</span>
               {option.unavailable ? <span className="shrink-0">· Unavailable</span> : null}
             </span>
@@ -216,7 +218,7 @@ function PullRequestFilterRadioSubmenu<Value extends string>({
   return (
     <MenuSub>
       <MenuSubTrigger>
-        <current.Icon aria-hidden className="size-3.5" />
+        {current.icon ?? (current.Icon ? <current.Icon aria-hidden className="size-3.5" /> : null)}
         <span className="flex-1">{label}</span>
         <span className="max-w-32 truncate text-xs text-muted-foreground">{current.label}</span>
       </MenuSubTrigger>
@@ -463,33 +465,30 @@ export function PullRequestFiltersMenu({
     projectId === undefined || projectEnvironmentId === undefined
       ? ALL_PROJECTS_VALUE
       : pullRequestProjectKey({ id: projectId, environmentId: projectEnvironmentId });
-  const projectOptions = useMemo<ReadonlyArray<PullRequestFilterOption<string>>>(
-    () => [
-      { value: ALL_PROJECTS_VALUE, label: "All projects", Icon: LayersIcon },
-      ...projects
-        .toSorted(
-          (left, right) =>
-            Number(unavailable.has(pullRequestProjectKey(left))) -
-            Number(unavailable.has(pullRequestProjectKey(right))),
-        )
-        .map((project) => ({
-          value: pullRequestProjectKey(project),
-          label: project.title,
-          Icon: ({ className }: { className?: string }) => (
-            <ProjectFavicon
-              environmentId={project.environmentId}
-              cwd={project.workspaceRoot}
-              fallbackIcon={FolderGit2Icon}
-              className={className}
-            />
-          ),
-          ...(unavailable.has(pullRequestProjectKey(project))
-            ? { unavailable: unavailable.get(pullRequestProjectKey(project)) }
-            : {}),
-        })),
-    ],
-    [projects, unavailable],
-  );
+  const projectOptions: ReadonlyArray<PullRequestFilterOption<string>> = [
+    { value: ALL_PROJECTS_VALUE, label: "All projects", Icon: LayersIcon },
+    ...projects
+      .toSorted(
+        (left, right) =>
+          Number(unavailable.has(pullRequestProjectKey(left))) -
+          Number(unavailable.has(pullRequestProjectKey(right))),
+      )
+      .map((project) => ({
+        value: pullRequestProjectKey(project),
+        label: project.title,
+        icon: (
+          <ProjectFavicon
+            environmentId={project.environmentId}
+            cwd={project.workspaceRoot}
+            fallbackIcon={FolderGit2Icon}
+            className="size-3.5"
+          />
+        ),
+        ...(unavailable.has(pullRequestProjectKey(project))
+          ? { unavailable: unavailable.get(pullRequestProjectKey(project)) }
+          : {}),
+      })),
+  ];
   return (
     <Menu onOpenChange={onOpenChange}>
       <MenuTrigger
