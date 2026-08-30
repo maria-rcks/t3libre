@@ -62,6 +62,7 @@ import { assignProjectsToEnvironments } from "../components/pullRequest/pullRequ
 import { PullRequestDetailPanel } from "../components/pullRequest/PullRequestDetailPanel";
 import {
   PullRequestFiltersMenu,
+  PullRequestFilterOptionIcon,
   PullRequestSearchInput,
   pullRequestHostLabel,
   pullRequestProjectKey,
@@ -1775,8 +1776,7 @@ function CompactFilterMenu<Value extends string>({
                 className="data-disabled:pointer-events-auto"
               >
                 <span className="flex min-w-0 items-center gap-2">
-                  {option.icon ??
-                    (option.Icon ? <option.Icon aria-hidden className="size-3.5" /> : null)}
+                  <PullRequestFilterOptionIcon option={option} />
                   {option.label}
                 </span>
               </MenuRadioItem>
