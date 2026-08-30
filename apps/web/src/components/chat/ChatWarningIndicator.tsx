@@ -199,7 +199,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
       className={cn(
         "aria-disabled:cursor-default aria-disabled:opacity-64",
         severity === "error"
-          ? "border-destructive/32 bg-error-surface text-error-foreground hover:bg-destructive/12 aria-disabled:hover:border-destructive/32 aria-disabled:hover:bg-error-surface"
+          ? "border-destructive/32 bg-error-surface text-error-foreground [:hover,[data-pressed]]:bg-destructive/12 aria-disabled:hover:border-destructive/32 aria-disabled:hover:bg-error-surface"
           : "border-warning/32 bg-warning-surface text-warning-foreground [:hover,[data-pressed]]:border-warning/40 [:hover,[data-pressed]]:bg-warning/12 aria-disabled:hover:border-warning/32 aria-disabled:hover:bg-warning-surface",
       )}
       aria-disabled={!canDismissForNow || undefined}
@@ -229,8 +229,8 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
               className={cn(
                 "size-6 shrink-0 rounded-full",
                 severity === "error"
-                  ? "text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  : "text-warning hover:bg-warning/10 hover:text-warning",
+                  ? "text-destructive [:hover,[data-pressed]]:bg-destructive/10 [:hover,[data-pressed]]:text-destructive"
+                  : "text-warning [:hover,[data-pressed]]:bg-warning/10 [:hover,[data-pressed]]:text-warning",
               )}
               onContextMenu={(event) => void handleContextMenu(event)}
             />
