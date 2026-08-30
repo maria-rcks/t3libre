@@ -21,7 +21,7 @@ import {
   TagIcon,
   UserRoundIcon,
 } from "lucide-react";
-import { type ElementType, useState } from "react";
+import { type ElementType, useMemo, useState } from "react";
 
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -463,30 +463,33 @@ export function PullRequestFiltersMenu({
     projectId === undefined || projectEnvironmentId === undefined
       ? ALL_PROJECTS_VALUE
       : pullRequestProjectKey({ id: projectId, environmentId: projectEnvironmentId });
-  const projectOptions: ReadonlyArray<PullRequestFilterOption<string>> = [
-    { value: ALL_PROJECTS_VALUE, label: "All projects", Icon: LayersIcon },
-    ...projects
-      .toSorted(
-        (left, right) =>
-          Number(unavailable.has(pullRequestProjectKey(left))) -
-          Number(unavailable.has(pullRequestProjectKey(right))),
-      )
-      .map((project) => ({
-        value: pullRequestProjectKey(project),
-        label: project.title,
-        Icon: ({ className }: { className?: string }) => (
-          <ProjectFavicon
-            environmentId={project.environmentId}
-            cwd={project.workspaceRoot}
-            fallbackIcon={FolderGit2Icon}
-            className={className}
-          />
-        ),
-        ...(unavailable.has(pullRequestProjectKey(project))
-          ? { unavailable: unavailable.get(pullRequestProjectKey(project)) }
-          : {}),
-      })),
-  ];
+  const projectOptions = useMemo<ReadonlyArray<PullRequestFilterOption<string>>>(
+    () => [
+      { value: ALL_PROJECTS_VALUE, label: "All projects", Icon: LayersIcon },
+      ...projects
+        .toSorted(
+          (left, right) =>
+            Number(unavailable.has(pullRequestProjectKey(left))) -
+            Number(unavailable.has(pullRequestProjectKey(right))),
+        )
+        .map((project) => ({
+          value: pullRequestProjectKey(project),
+          label: project.title,
+          Icon: ({ className }: { className?: string }) => (
+            <ProjectFavicon
+              environmentId={project.environmentId}
+              cwd={project.workspaceRoot}
+              fallbackIcon={FolderGit2Icon}
+              className={className}
+            />
+          ),
+          ...(unavailable.has(pullRequestProjectKey(project))
+            ? { unavailable: unavailable.get(pullRequestProjectKey(project)) }
+            : {}),
+        })),
+    ],
+    [projects, unavailable],
+  );
   return (
     <Menu onOpenChange={onOpenChange}>
       <MenuTrigger
