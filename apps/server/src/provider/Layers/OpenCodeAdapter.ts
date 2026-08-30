@@ -3071,7 +3071,7 @@ export function makeOpenCodeAdapter(
             yield* emit({
               ...(yield* buildEventBase({ threadId, turnId })),
               type: "turn.aborted",
-              payload: { reason: Cause.pretty(compactExit.cause) },
+              payload: { reason: openCodeRuntimeErrorDetail(Cause.squash(compactExit.cause)) },
             });
           }
           return yield* Effect.failCause(compactExit.cause);
