@@ -1206,6 +1206,84 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("does not complete a failed manual compaction twice", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-failed-manual-compact");
+      const errorEvent = promiseWithResolvers<unknown>();
+      const compactedEvent = promiseWithResolvers<unknown>();
+      runtimeMock.state.subscribedEvents = [errorEvent.promise, compactedEvent.promise];
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+      });
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "turn.started" ||
+              event.type === "turn.completed" ||
+              event.type === "thread.state.changed" ||
+              event.type === "runtime.error"),
+        ),
+        Stream.take(5),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const compactThread = adapter.compactThread;
+      NodeAssert.ok(compactThread);
+      yield* compactThread(threadId);
+      errorEvent.resolve({
+        id: "evt-manual-compact-failed",
+        type: "session.error",
+        properties: {
+          sessionID: "http://127.0.0.1:9999/session",
+          error: { name: "UnknownError", data: { message: "Compaction failed" } },
+        },
+      });
+      yield* Effect.yieldNow;
+
+      const promptTurn = yield* adapter.sendTurn({
+        threadId,
+        input: "Continue after failed compaction",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+      });
+      compactedEvent.resolve({
+        id: "evt-session-compacted-after-failure",
+        type: "session.compacted",
+        properties: { sessionID: "http://127.0.0.1:9999/session" },
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      const compactTurnId = events[0]?.turnId;
+      NodeAssert.ok(compactTurnId);
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        ["turn.started", "turn.completed", "runtime.error", "turn.started", "thread.state.changed"],
+      );
+      NodeAssert.deepEqual(
+        events.filter((event) => event.type === "turn.completed").map((event) => event.turnId),
+        [compactTurnId],
+      );
+      NodeAssert.equal(events[4]?.turnId, promptTurn.turnId);
+      const sessions = yield* adapter.listSessions();
+      const session = sessions.find((candidate) => candidate.threadId === threadId);
+      NodeAssert.equal(session?.status, "running");
+      NodeAssert.equal(session?.activeTurnId, promptTurn.turnId);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("falls back to a fresh session when the persisted session is gone", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
