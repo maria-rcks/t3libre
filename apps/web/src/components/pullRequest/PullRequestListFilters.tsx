@@ -54,10 +54,7 @@ function labelDotColor(color: string | null): string | null {
 export interface PullRequestFilterOption<Value extends string> {
   readonly value: Value;
   readonly label: string;
-  /**
-   * Carries the option's own tone, so an icon reads the same here as it does on a row. Left
-   * uncoloured, which lets the item's selected state stay the thing the eye follows.
-   */
+  /** Uses the option's native icon tone. */
   readonly Icon: ElementType<{ className?: string }>;
   readonly favicon?: {
     readonly environmentId: EnvironmentId;
@@ -356,6 +353,7 @@ function PullRequestLabelFilter({
             return (
               <MenuCheckboxItem
                 key={key}
+                className="grid-cols-[1rem_minmax(0,1fr)]"
                 checked={checked}
                 onCheckedChange={(next) =>
                   onChange(
