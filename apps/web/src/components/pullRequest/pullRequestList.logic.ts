@@ -8,8 +8,10 @@ import {
   resolvePullRequestAuthorFilter,
 } from "@t3tools/contracts";
 import type {
+  PullRequestActor,
   PullRequestDiffStat,
   PullRequestInvolvement,
+  PullRequestLabel,
   PullRequestListCursors,
   PullRequestListFilters,
   PullRequestListState,
@@ -40,6 +42,24 @@ export interface PullRequestGroup<Entry extends PullRequestListEntry = PullReque
   readonly entries: ReadonlyArray<Entry>;
 }
 
+export interface PullRequestAuthorFacet {
+  readonly actor: PullRequestActor;
+  /** Rows under the current state and scope. */
+  readonly count: number;
+  /** Merged rows in the recent all-state sample. */
+  readonly mergedCount: number;
+}
+
+export interface PullRequestLabelFacet extends PullRequestLabel {
+  /** Rows under the current state and scope. */
+  readonly count: number;
+}
+
+export interface PullRequestListFacets {
+  readonly authors: ReadonlyArray<PullRequestAuthorFacet>;
+  readonly labels: ReadonlyArray<PullRequestLabelFacet>;
+}
+
 /**
  * The signed-in account per host. Keyed `"<environmentId> <host>"` once a listing spans more than
  * one environment: two machines can both reach github.com signed in as different people, and a
@@ -63,6 +83,56 @@ const GROUP_LABELS: Record<PullRequestGroupKey, string> = {
 function normalize(value: string | null | undefined): string | null {
   const trimmed = value?.trim().toLowerCase() ?? "";
   return trimmed.length > 0 ? trimmed : null;
+}
+
+export function collectPullRequestListFacets(
+  entries: ReadonlyArray<PullRequestListEntry>,
+  state: PullRequestListState,
+): PullRequestListFacets {
+  const authors = new Map<
+    string,
+    { actor: PullRequestActor; count: number; mergedCount: number }
+  >();
+  const labels = new Map<string, PullRequestLabelFacet>();
+  for (const entry of entries) {
+    const inState = state === "all" || entry.state === state;
+    if (entry.author !== null) {
+      const key = normalize(entry.author.login);
+      if (key !== null) {
+        const held = authors.get(key);
+        authors.set(key, {
+          actor: held?.actor ?? entry.author,
+          count: (held?.count ?? 0) + Number(inState),
+          mergedCount: (held?.mergedCount ?? 0) + Number(entry.state === "merged"),
+        });
+      }
+    }
+    if (!inState) continue;
+    for (const label of entry.labels) {
+      const key = normalize(label.name);
+      if (key === null) continue;
+      const held = labels.get(key);
+      labels.set(key, {
+        ...label,
+        name: held?.name ?? label.name,
+        color: held?.color ?? label.color,
+        count: (held?.count ?? 0) + 1,
+      });
+    }
+  }
+  return {
+    authors: [...authors.values()]
+      .filter((author) => author.count > 0)
+      .toSorted(
+        (left, right) =>
+          right.mergedCount - left.mergedCount ||
+          right.count - left.count ||
+          left.actor.login.localeCompare(right.actor.login),
+      ),
+    labels: [...labels.values()].toSorted(
+      (left, right) => right.count - left.count || left.name.localeCompare(right.name),
+    ),
+  };
 }
 
 /**

@@ -15,6 +15,39 @@ import {
   PullRequestStateGlyph,
 } from "./pullRequestPresentation";
 
+function labelDotColor(color: string | null): string | null {
+  const hex = color?.trim().replace(/^#/, "") ?? "";
+  return /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex}` : null;
+}
+
+function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry["labels"] }) {
+  if (labels.length === 0) return null;
+  const shown = labels.slice(0, 2);
+  return (
+    <span className="flex min-w-0 shrink items-center gap-1 overflow-hidden">
+      {shown.map((label) => {
+        const dot = labelDotColor(label.color);
+        return (
+          <span
+            key={label.name}
+            className="inline-flex max-w-32 min-w-0 items-center gap-1 rounded-full border border-border/60 bg-muted/35 px-1.5 py-px text-[10px] leading-4 text-muted-foreground"
+          >
+            <span
+              aria-hidden
+              className="size-1.5 shrink-0 rounded-full bg-muted-foreground"
+              {...(dot ? { style: { backgroundColor: dot } } : {})}
+            />
+            <span className="truncate">{label.name}</span>
+          </span>
+        );
+      })}
+      {labels.length > shown.length ? (
+        <span className="shrink-0 text-[10px]">+{labels.length - shown.length}</span>
+      ) : null}
+    </span>
+  );
+}
+
 function PullRequestRowImpl({
   entry,
   selected,
@@ -92,6 +125,7 @@ function PullRequestRowImpl({
             <span className="max-w-32 shrink-0 truncate">{environmentLabel}</span>
           ) : null}
           <PullRequestActorLabel actor={entry.author} className="max-w-40 shrink-0" />
+          <PullRequestRowLabels labels={entry.labels} />
           {/* Only a verdict somebody has actually given: "review required" is the absence of
               one, and saying so on every unreviewed row would say nothing. */}
           {entry.reviewDecision === "approved" || entry.reviewDecision === "changes-requested" ? (
@@ -126,7 +160,12 @@ function PullRequestRowImpl({
       </span>
       <span className="flex shrink-0 flex-col items-end gap-0.5 text-xs text-muted-foreground/70 tabular-nums">
         <span>{formatRelativeTimeLabel(entry.updatedAt)}</span>
-        <PullRequestDiffStat additions={entry.additions} deletions={entry.deletions} />
+        {entry.additions + entry.deletions > 0 ? (
+          <span className="flex items-baseline gap-2">
+            <span>{(entry.additions + entry.deletions).toLocaleString()} lines</span>
+            <PullRequestDiffStat additions={entry.additions} deletions={entry.deletions} />
+          </span>
+        ) : null}
       </span>
     </button>
   );
