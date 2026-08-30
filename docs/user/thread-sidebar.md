@@ -25,6 +25,12 @@ If reordering is unavailable for one environment, update the T3 Code server runn
 environment. Older servers can still pin and unpin threads, but do not understand synced ordering;
 their pinned threads keep the default newest-first order below the ones you have arranged.
 
+## Panel motion
+
+The main sidebar and right panel open and close immediately by default. Enable **Panel animations**
+under **Settings → Appearance** to slide them instead. The preview beside the switch replays the
+motion without changing either panel.
+
 ## Environment artwork
 
 Dev and Nightly environments can identify themselves with artwork at the top of the sidebar and in

@@ -98,6 +98,18 @@ describe("ClientSettings appearance contrast", () => {
   });
 });
 
+describe("ClientSettings panel animations", () => {
+  it("defaults off and accepts an explicit opt-in", () => {
+    expect(decodeClientSettings({}).panelAnimationsEnabled).toBe(false);
+    expect(decodeClientSettings({ panelAnimationsEnabled: true }).panelAnimationsEnabled).toBe(
+      true,
+    );
+    expect(decodeClientSettingsPatch({ panelAnimationsEnabled: true }).panelAnimationsEnabled).toBe(
+      true,
+    );
+  });
+});
+
 describe("ClientSettings environment identification", () => {
   it("defaults to artwork and accepts each presentation mode", () => {
     expect(decodeClientSettings({}).environmentIdentificationMode).toBe("artwork");

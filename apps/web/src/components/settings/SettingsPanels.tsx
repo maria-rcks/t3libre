@@ -146,6 +146,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
@@ -481,6 +482,9 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Contrast"]
         : []),
       ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
+      ...(settings.panelAnimationsEnabled !== DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled
+        ? ["Panel animations"]
+        : []),
       ...(settings.environmentIdentificationMode !==
       DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
         ? ["Environment identification"]
@@ -574,6 +578,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.fontSizePrompt,
       settings.fontSizeTerminal,
       settings.glassOpacity,
+      settings.panelAnimationsEnabled,
       settings.enableLegacyTokenStreaming,
       settings.enableProviderUpdateChecks,
       settings.sidebarAutoSettleAfterDays,
@@ -659,6 +664,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
+      panelAnimationsEnabled: DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
@@ -1119,6 +1125,35 @@ export function AppearanceSettingsPanel() {
                 style={glassOpacitySliderStyle}
                 type="range"
                 value={settings.glassOpacity}
+              />
+            </div>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("panel-animations")}
+          description="Slide the main sidebar and right panel when they open and close. Off by default to reduce rendering work."
+          resetAction={
+            settings.panelAnimationsEnabled !== DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled ? (
+              <SettingResetButton
+                label="panel animations"
+                onClick={() =>
+                  updateSettings({
+                    panelAnimationsEnabled: DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex items-center gap-3">
+              <PanelAnimationsPreview enabled={settings.panelAnimationsEnabled} />
+              <Switch
+                checked={settings.panelAnimationsEnabled}
+                onCheckedChange={(checked) =>
+                  updateSettings({ panelAnimationsEnabled: Boolean(checked) })
+                }
+                aria-label="Panel animations"
               />
             </div>
           }

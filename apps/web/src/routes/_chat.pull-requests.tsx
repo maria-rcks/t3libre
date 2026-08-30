@@ -83,6 +83,7 @@ import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../
 import { SidebarInset } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { usePanelAnimationsActive, usePanelPresence } from "../panelAnimations";
 import {
   selectActiveRightPanelSurface,
   selectSelectedRightPanelSurface,
@@ -382,10 +383,16 @@ function PullRequestsRouteView() {
   const selectedPullRequestSurface =
     selectedRightPanelSurface?.kind === "pull-request" ? selectedRightPanelSurface : null;
   const activePullRequestSurface = rightPanelState.isOpen ? selectedPullRequestSurface : null;
+  const panelAnimationsActive = usePanelAnimationsActive();
+  const rightPanelPresent = usePanelPresence(
+    rightPanelState.isOpen && selectedPullRequestSurface !== null,
+    panelAnimationsActive,
+  );
+  const renderedPullRequestSurface = rightPanelPresent ? selectedPullRequestSurface : null;
   // The open tab names its own server; a link that arrived before any tab was opened names it
   // through the project it selected.
   const panelEnvironmentId =
-    (activePullRequestSurface?.environmentId as EnvironmentId | undefined) ??
+    (renderedPullRequestSurface?.environmentId as EnvironmentId | undefined) ??
     selectedProject?.environmentId ??
     null;
   const [pullRequestTabStatuses, setPullRequestTabStatuses] = useState<
@@ -1553,16 +1560,18 @@ function PullRequestsRouteView() {
         {pullRequestsSupported && rightPanelState.isOpen ? openPanelControls : null}
         <PullRequestsColumn {...columnProps} />
 
-        {rightPanelState.isOpen && activePullRequestSurface && panelEnvironmentId !== null ? (
+        {rightPanelPresent && renderedPullRequestSurface && panelEnvironmentId !== null ? (
           <RightPanelTabs
             mode="inline"
+            animated={panelAnimationsActive}
+            open={rightPanelState.isOpen}
             widthStorageKey="t3code:pull-request-panel-width"
             // Default to roughly half the viewport: the PR list needs more
             // room than a chat, so the 540px chat-preview default squashes
             // it. SSR has no window, so fall back to a reasonable width.
             defaultWidth={typeof window === "undefined" ? 640 : Math.floor(window.innerWidth / 2)}
             surfaces={rightPanelState.surfaces}
-            activeSurfaceId={activePullRequestSurface.id}
+            activeSurfaceId={renderedPullRequestSurface.id}
             pendingSurfaceIds={EMPTY_PENDING_SURFACES}
             previewSessions={EMPTY_PREVIEW_SESSIONS}
             desktopByTabId={EMPTY_PREVIEW_DESKTOP_STATE}
@@ -1597,12 +1606,12 @@ function PullRequestsRouteView() {
             pullRequestStatuses={pullRequestTabStatuses}
           >
             <PullRequestDetailPanel
-              key={activePullRequestSurface.id}
+              key={renderedPullRequestSurface.id}
               environmentId={panelEnvironmentId}
               reference={{
-                projectId: activePullRequestSurface.projectId as ProjectId,
-                repository: activePullRequestSurface.repository,
-                number: activePullRequestSurface.number,
+                projectId: renderedPullRequestSurface.projectId as ProjectId,
+                repository: renderedPullRequestSurface.repository,
+                number: renderedPullRequestSurface.number,
               }}
               refreshToken={detailRefreshToken}
               // Merging, closing or reopening changes the row this panel was opened from, so

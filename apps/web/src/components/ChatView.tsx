@@ -149,6 +149,7 @@ import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
+  selectSelectedRightPanelSurface,
   selectThreadRightPanelState,
   type RightPanelSurface,
   updatePullRequestTabStatus,
@@ -218,6 +219,7 @@ import {
   useEnvironmentSettings,
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
+import { usePanelAnimationsActive, usePanelPresence } from "../panelAnimations";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
@@ -1731,6 +1733,9 @@ function ChatViewContent(props: ChatViewProps) {
   const activeRightPanelSurface = useRightPanelStore((state) =>
     selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef),
   );
+  const selectedRightPanelSurface = useRightPanelStore((state) =>
+    selectSelectedRightPanelSurface(state.byThreadKey, activeThreadRef),
+  );
   const [pullRequestTabStatuses, setPullRequestTabStatuses] = useState<
     Record<string, PullRequestTabStatus>
   >({});
@@ -1746,8 +1751,6 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activePullRequestSurfaceId],
   );
-  const activeFileSurface =
-    activeRightPanelSurface?.kind === "file" ? activeRightPanelSurface : null;
   const activePreviewState = useThreadPreviewState(activeThreadRef);
   const activePreviewServerEpoch = activePreviewState.serverEpoch;
   const resolvePreviewRuntimeTabId = useMemo(
@@ -1775,6 +1778,20 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
   const rightPanelOpen = rightPanelState.isOpen;
+  const panelAnimationsActive = usePanelAnimationsActive();
+  const inlineRightPanelPresent = usePanelPresence(
+    rightPanelOpen && !shouldUseRightPanelSheet && activeThreadRef !== null,
+    panelAnimationsActive && !shouldUseRightPanelSheet,
+  );
+  const sheetRightPanelPresent = usePanelPresence(
+    rightPanelOpen && shouldUseRightPanelSheet && activeThreadRef !== null,
+    panelAnimationsActive && shouldUseRightPanelSheet,
+  );
+  const renderedRightPanelSurface = rightPanelOpen
+    ? activeRightPanelSurface
+    : inlineRightPanelPresent || sheetRightPanelPresent
+      ? selectedRightPanelSurface
+      : null;
   const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
     canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
@@ -7027,12 +7044,12 @@ function ChatViewContent(props: ChatViewProps) {
     </div>
   );
   const rightPanelContent = activeThreadRef ? (
-    activeRightPanelSurface?.kind === "preview" ? (
+    renderedRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
         <PreviewPanel
           mode="embedded"
           threadRef={activeThreadRef}
-          tabId={activeRightPanelSurface.resourceId}
+          tabId={renderedRightPanelSurface.resourceId}
           configuredUrls={configuredPreviewUrls}
           visible
           onSendAnnotation={(annotation, image) => {
@@ -7040,10 +7057,10 @@ function ChatViewContent(props: ChatViewProps) {
           }}
         />
       </Suspense>
-    ) : activeRightPanelSurface?.kind === "terminal" ? (
+    ) : renderedRightPanelSurface?.kind === "terminal" ? (
       <PersistentThreadTerminalPanel
         threadRef={activeThreadRef}
-        surface={activeRightPanelSurface}
+        surface={renderedRightPanelSurface}
         launchContext={activeTerminalLaunchContext ?? null}
         focusRequestId={terminalFocusRequestId}
         keybindings={keybindings}
@@ -7058,7 +7075,7 @@ function ChatViewContent(props: ChatViewProps) {
         newShortcutLabel={newTerminalShortcutLabel ?? undefined}
         closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
       />
-    ) : activeRightPanelSurface?.kind === "diff" ? (
+    ) : renderedRightPanelSurface?.kind === "diff" ? (
       <Suspense fallback={null}>
         <DiffPanel
           key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
@@ -7068,26 +7085,26 @@ function ChatViewContent(props: ChatViewProps) {
           workspaceMutationId={workspaceMutationId}
         />
       </Suspense>
-    ) : activeRightPanelSurface?.kind === "pull-request" && !pullRequestsCapabilityKnown ? (
+    ) : renderedRightPanelSurface?.kind === "pull-request" && !pullRequestsCapabilityKnown ? (
       <PullRequestDetailGhost />
-    ) : activeRightPanelSurface?.kind === "pull-request" && !supportsPullRequests ? (
+    ) : renderedRightPanelSurface?.kind === "pull-request" && !supportsPullRequests ? (
       <PullRequestsUnavailableState
         title="Pull requests unavailable"
         error="Update this environment's T3 Code server to browse pull requests."
       />
-    ) : activeRightPanelSurface?.kind === "pull-request" ? (
+    ) : renderedRightPanelSurface?.kind === "pull-request" ? (
       // No onClose: the surface tab's own X owns closing here, and a second X in the header
       // would be the same action twice. The thread context also drops the checkout button, so it
       // is only right for the thread's own pull request, whose branch is already under the
       // reader's feet. A link the agent wrote can open any other one here, and that one has to be
       // checkable out like it is anywhere else.
       <PullRequestDetailPanel
-        key={`${activeRightPanelSurface.repository}#${activeRightPanelSurface.number}`}
+        key={`${renderedRightPanelSurface.repository}#${renderedRightPanelSurface.number}`}
         environmentId={activeThread.environmentId}
         reference={{
-          projectId: activeRightPanelSurface.projectId as ProjectId,
-          repository: activeRightPanelSurface.repository,
-          number: activeRightPanelSurface.number,
+          projectId: renderedRightPanelSurface.projectId as ProjectId,
+          repository: renderedRightPanelSurface.repository,
+          number: renderedRightPanelSurface.number,
         }}
         context={
           isThreadOwnPullRequest(
@@ -7097,9 +7114,9 @@ function ChatViewContent(props: ChatViewProps) {
               number: activeThreadPr?.number ?? null,
             },
             {
-              projectId: activeRightPanelSurface.projectId,
-              repository: activeRightPanelSurface.repository,
-              number: activeRightPanelSurface.number,
+              projectId: renderedRightPanelSurface.projectId,
+              repository: renderedRightPanelSurface.repository,
+              number: renderedRightPanelSurface.number,
             },
           )
             ? "thread"
@@ -7108,13 +7125,14 @@ function ChatViewContent(props: ChatViewProps) {
         composerDraftTarget={composerDraftTarget}
         onStateChange={handlePullRequestTabStatusChange}
       />
-    ) : activeRightPanelSurface?.kind === "agents" ? (
+    ) : renderedRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}
         environmentId={activeThreadRef?.environmentId ?? null}
         threadId={activeThreadRef?.threadId ?? null}
       />
-    ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
+    ) : (renderedRightPanelSurface?.kind === "files" ||
+        renderedRightPanelSurface?.kind === "file") &&
       activeProject &&
       activeWorkspaceRoot ? (
       <Suspense fallback={null}>
@@ -7128,14 +7146,25 @@ function ChatViewContent(props: ChatViewProps) {
           keybindings={keybindings}
           availableEditors={availableEditors}
           relativePath={
-            activeRightPanelSurface.kind === "file" ? activeRightPanelSurface.relativePath : null
+            renderedRightPanelSurface.kind === "file"
+              ? renderedRightPanelSurface.relativePath
+              : null
           }
-          revealLine={activeFileSurface?.revealLine ?? null}
-          revealRequestId={activeFileSurface?.revealRequestId ?? 0}
+          revealLine={
+            renderedRightPanelSurface.kind === "file"
+              ? (renderedRightPanelSurface.revealLine ?? null)
+              : null
+          }
+          revealRequestId={
+            renderedRightPanelSurface.kind === "file"
+              ? renderedRightPanelSurface.revealRequestId
+              : 0
+          }
           onOpenFile={openFileSurface}
           onPendingChange={handleFilePendingChange}
           selectedFilePending={
-            activeFileSurface !== null && pendingFileSurfaceIds.has(activeFileSurface.id)
+            renderedRightPanelSurface.kind === "file" &&
+            pendingFileSurfaceIds.has(renderedRightPanelSurface.id)
           }
           workspaceMutationId={workspaceMutationId}
         />
@@ -7575,12 +7604,14 @@ function ChatViewContent(props: ChatViewProps) {
         ))}
       </div>
 
-      {!shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
+      {inlineRightPanelPresent && activeThreadRef ? (
         <RightPanelTabs
           mode="inline"
+          animated={panelAnimationsActive}
+          open={rightPanelOpen}
           maximized={rightPanelMaximized}
           surfaces={rightPanelState.surfaces}
-          activeSurfaceId={activeRightPanelSurface?.id ?? null}
+          activeSurfaceId={renderedRightPanelSurface?.id ?? null}
           pendingSurfaceIds={pendingFileSurfaceIds}
           previewSessions={activePreviewState.sessions}
           desktopByTabId={activePreviewState.desktopByTabId}
@@ -7610,8 +7641,12 @@ function ChatViewContent(props: ChatViewProps) {
           {rightPanelContent}
         </RightPanelTabs>
       ) : null}
-      {shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
-        <RightPanelSheet open onClose={closePreviewPanel}>
+      {sheetRightPanelPresent && activeThreadRef ? (
+        <RightPanelSheet
+          animated={panelAnimationsActive}
+          open={rightPanelOpen}
+          onClose={closePreviewPanel}
+        >
           <RightPanelTabs
             mode="sheet"
             // Same effective inset as the closed-state titlebar controls
@@ -7620,7 +7655,7 @@ function ChatViewContent(props: ChatViewProps) {
             // the sheet opens.
             layoutControls={<div className="mr-px flex items-center">{panelToggleControls}</div>}
             surfaces={rightPanelState.surfaces}
-            activeSurfaceId={activeRightPanelSurface?.id ?? null}
+            activeSurfaceId={renderedRightPanelSurface?.id ?? null}
             pendingSurfaceIds={pendingFileSurfaceIds}
             previewSessions={activePreviewState.sessions}
             desktopByTabId={activePreviewState.desktopByTabId}

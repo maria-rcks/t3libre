@@ -70,6 +70,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
+    id: "panel-animations",
+    title: "Panel animations",
+    to: "/settings/appearance",
+  },
+  {
     id: "environment-identification",
     title: "Environment identification",
     to: "/settings/appearance",

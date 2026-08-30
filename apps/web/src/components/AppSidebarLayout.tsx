@@ -15,6 +15,7 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings"
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
+import { usePanelAnimationsActive } from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
 import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
@@ -139,6 +140,7 @@ function ProjectProjectionRetention() {
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
+  const panelAnimationsActive = usePanelAnimationsActive();
   // Settings routes show the settings nav in place of whichever thread
   // sidebar is active.
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -209,9 +211,15 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate, pathname]);
 
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={sidebarProviderStyle}>
+    <SidebarProvider
+      className="h-dvh! min-h-0!"
+      data-panel-animations={panelAnimationsActive ? "true" : "false"}
+      defaultOpen
+      style={sidebarProviderStyle}
+    >
       <ProjectProjectionRetention />
       <Sidebar
+        animated={panelAnimationsActive}
         side="left"
         collapsible="offcanvas"
         data-app-sidebar=""

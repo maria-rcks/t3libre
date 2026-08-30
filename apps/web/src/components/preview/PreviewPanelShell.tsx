@@ -52,6 +52,8 @@ export function getPreviewPanelMaxWidth(viewportWidth: number, containerWidth?: 
 export function PreviewPanelShell(props: {
   mode: PreviewPanelMode;
   maximized?: boolean;
+  animated?: boolean;
+  open?: boolean;
   /**
    * Overrides the localStorage key used to persist the panel width. Callers
    * embedding this shell for a different surface (e.g. the pull requests
@@ -65,6 +67,8 @@ export function PreviewPanelShell(props: {
 }) {
   const useDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
   const isInline = props.mode === "inline";
+  const animated = isInline && props.animated === true && !props.maximized;
+  const open = props.open ?? true;
   const hostRef = useRef<HTMLDivElement | null>(null);
   // Only inline non-maximized mode applies `width`/`maxWidth`; skip the
   // container measurement (and its re-renders) everywhere else.
@@ -87,8 +91,17 @@ export function PreviewPanelShell(props: {
             ? "flex-1 border-l border-border"
             : "shrink-0 border-l border-border"
           : "w-full",
+        animated &&
+          "overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none",
+        animated && !open && "pointer-events-none",
       )}
-      style={isInline && !props.maximized ? { width: `${width}px` } : undefined}
+      style={
+        isInline && !props.maximized
+          ? { width: animated && !open ? "0px" : `${width}px` }
+          : undefined
+      }
+      data-panel-motion={animated ? "true" : "false"}
+      data-panel-state={open ? "open" : "closed"}
       data-preview-panel-mode={props.mode}
       data-preview-panel-maximized={props.maximized ? "true" : "false"}
     >
