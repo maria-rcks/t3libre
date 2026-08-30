@@ -1775,7 +1775,8 @@ function CompactFilterMenu<Value extends string>({
                 className="data-disabled:pointer-events-auto"
               >
                 <span className="flex min-w-0 items-center gap-2">
-                  <option.Icon aria-hidden className="size-3.5" />
+                  {option.icon ??
+                    (option.Icon ? <option.Icon aria-hidden className="size-3.5" /> : null)}
                   {option.label}
                 </span>
               </MenuRadioItem>
