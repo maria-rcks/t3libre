@@ -1378,7 +1378,9 @@ function ChatViewContent(props: ChatViewProps) {
   // settings UI never writes to remote environments), so read them from the
   // primary server rather than the thread's environment.
   const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
-  const serverRunId = useAtomValue(environmentServerRunIdAtom(environmentId));
+  const warningEnvironmentId =
+    activeServerThread?.environmentId ?? draftThread?.environmentId ?? environmentId;
+  const serverRunId = useAtomValue(environmentServerRunIdAtom(warningEnvironmentId));
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -2947,7 +2949,10 @@ function ChatViewContent(props: ChatViewProps) {
     resumeCompactionPermanentlyDismissed,
     setResumeCompactionPermanentlyDismissed,
   ]);
-  const providerStatusWarning = resolveProviderChatWarning(environmentId, activeProviderStatus);
+  const providerStatusWarning = resolveProviderChatWarning(
+    warningEnvironmentId,
+    activeProviderStatus,
+  );
   const chatWarnings = useMemo(
     () =>
       [threadErrorWarning, providerStatusWarning].filter(
@@ -7133,6 +7138,7 @@ function ChatViewContent(props: ChatViewProps) {
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
             warnings={chatWarnings}
+            canDismissWarningsForNow={serverRunId !== null}
             onDismissWarningForNow={(warningId) => dismissWarningKeysForServerRun([warningId])}
             onDismissWarningForever={(warningId) => dismissWarningKeys([warningId])}
             onDismissAllWarningsForNow={() =>

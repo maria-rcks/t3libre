@@ -77,4 +77,11 @@ describe("ChatWarningIndicator", () => {
       { id: "dismiss-all-forever", label: "Don't show these again" },
     ]);
   });
+
+  it("keeps temporary dismissals visible but disabled until the server run is known", () => {
+    expect(buildChatWarningContextMenuItems([warning], false)).toEqual([
+      { id: "dismiss-now:0", label: "Dismiss for now", disabled: true },
+      { id: "dismiss-forever:0", label: "Don't show again" },
+    ]);
+  });
 });

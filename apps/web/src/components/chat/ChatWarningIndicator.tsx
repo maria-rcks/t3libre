@@ -1,6 +1,12 @@
 import { type ContextMenuItem, type EnvironmentId, type ServerProvider } from "@t3tools/contracts";
 import { CircleAlertIcon } from "lucide-react";
-import { memo, useCallback, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 
 import { readLocalApi } from "~/localApi";
 import { formatProviderDriverKindLabel } from "~/providerModels";
@@ -70,10 +76,12 @@ export function resolveThreadErrorChatWarning(
 
 export function buildChatWarningContextMenuItems(
   warnings: ReadonlyArray<ChatWarning>,
+  canDismissForNow = true,
 ): ReadonlyArray<ContextMenuItem<ChatWarningContextMenuAction>> {
+  const temporarilyUnavailable = canDismissForNow ? {} : { disabled: true };
   if (warnings.length === 1) {
     return [
-      { id: "dismiss-now:0", label: "Dismiss for now" },
+      { id: "dismiss-now:0", label: "Dismiss for now", ...temporarilyUnavailable },
       { id: "dismiss-forever:0", label: "Don't show again" },
     ];
   }
@@ -83,7 +91,11 @@ export function buildChatWarningContextMenuItems(
         id: `warning:${index}`,
         label: warning.title,
         children: [
-          { id: `dismiss-now:${index}`, label: "Dismiss for now" },
+          {
+            id: `dismiss-now:${index}`,
+            label: "Dismiss for now",
+            ...temporarilyUnavailable,
+          },
           { id: `dismiss-forever:${index}`, label: "Don't show again" },
         ],
       }),
@@ -91,6 +103,7 @@ export function buildChatWarningContextMenuItems(
     {
       id: "dismiss-all-now",
       label: "Dismiss all for now",
+      ...temporarilyUnavailable,
       separatorBefore: true,
     },
     { id: "dismiss-all-forever", label: "Don't show these again" },
@@ -103,26 +116,43 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
   onDismissWarningForever,
   onDismissAllWarningsForNow,
   onDismissAllWarningsForever,
+  canDismissForNow,
 }: {
   readonly warnings: ReadonlyArray<ChatWarning>;
   readonly onDismissWarningForNow: (warningId: string) => void;
   readonly onDismissWarningForever: (warningId: string) => void;
   readonly onDismissAllWarningsForNow: () => void;
   readonly onDismissAllWarningsForever: () => void;
+  readonly canDismissForNow: boolean;
 }) {
+  const contextMenuOpenRef = useRef(false);
+  const closeContextMenu = useCallback(() => {
+    if (!contextMenuOpenRef.current) return;
+    contextMenuOpenRef.current = false;
+    void readLocalApi()?.contextMenu.close();
+  }, []);
+  useEffect(() => {
+    if (warnings.length === 0) closeContextMenu();
+  }, [closeContextMenu, warnings.length]);
+  useEffect(() => closeContextMenu, [closeContextMenu]);
+
   const handleContextMenu = useCallback(
     async (event: ReactMouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
       event.stopPropagation();
       const api = readLocalApi();
       if (!api) return;
+      contextMenuOpenRef.current = true;
       try {
-        const action = await api.contextMenu.show(buildChatWarningContextMenuItems(warnings), {
-          x: event.clientX,
-          y: event.clientY,
-        });
+        const action = await api.contextMenu.show(
+          buildChatWarningContextMenuItems(warnings, canDismissForNow),
+          {
+            x: event.clientX,
+            y: event.clientY,
+          },
+        );
         if (action === "dismiss-all-now") {
-          onDismissAllWarningsForNow();
+          if (canDismissForNow) onDismissAllWarningsForNow();
           return;
         }
         if (action === "dismiss-all-forever") {
@@ -131,7 +161,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
         }
         if (action?.startsWith("dismiss-now:")) {
           const warning = warnings[Number(action.slice("dismiss-now:".length))];
-          if (warning) onDismissWarningForNow(warning.id);
+          if (warning && canDismissForNow) onDismissWarningForNow(warning.id);
           return;
         }
         if (action?.startsWith("dismiss-forever:")) {
@@ -140,9 +170,12 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
         }
       } catch {
         // Losing a context menu should not add another warning to the warning center.
+      } finally {
+        contextMenuOpenRef.current = false;
       }
     },
     [
+      canDismissForNow,
       onDismissAllWarningsForNow,
       onDismissAllWarningsForever,
       onDismissWarningForNow,
@@ -157,56 +190,63 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
   const dismissForNowLabel = warnings.length === 1 ? "Dismiss for now" : "Dismiss all for now";
   const dismissForeverLabel = warnings.length === 1 ? "Don't show again" : "Don't show these again";
   return (
-    <Popover>
-      <PopoverTrigger
-        openOnHover
-        delay={100}
-        closeDelay={200}
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label={`${warningCountLabel}. Right-click to dismiss.`}
-            className="size-7 shrink-0 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onContextMenu={(event) => void handleContextMenu(event)}
-          />
-        }
-      >
-        <CircleAlertIcon className="size-4.5 fill-destructive/12 text-destructive" aria-hidden />
-      </PopoverTrigger>
-      <PopoverPopup
-        tooltipStyle
-        align="start"
-        side="bottom"
-        viewportClassName="p-0"
-        className="alert-glass w-72 max-w-[calc(100vw-1rem)] border-destructive/40! text-left text-pretty text-error-foreground"
-        data-variant="error"
-      >
-        <div>
-          {warnings.map((warning) => (
-            <div key={warning.id} className="p-2.5 pb-1.5">
-              <div className="font-medium text-error-foreground">{warning.title}</div>
-              <div className="mt-0.5 whitespace-pre-wrap text-error-foreground/80">
-                {warning.description}
-              </div>
-            </div>
-          ))}
-          <div className="flex items-center justify-end gap-1.5 px-2.5 pt-1 pb-2.5">
+    <>
+      <span role="alert" className="sr-only">
+        {warnings.map((warning) => `${warning.title}: ${warning.description}`).join(" ")}
+      </span>
+      <Popover>
+        <PopoverTrigger
+          openOnHover
+          delay={100}
+          closeDelay={200}
+          render={
             <Button
-              size="xs"
-              variant="destructive-outline"
-              className="border-destructive/32 bg-error-surface text-error-foreground hover:bg-destructive/12"
-              onClick={onDismissAllWarningsForNow}
-            >
-              {dismissForNowLabel}
-            </Button>
-            <Button size="xs" variant="destructive" onClick={onDismissAllWarningsForever}>
-              {dismissForeverLabel}
-            </Button>
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={`${warningCountLabel}. Right-click to dismiss.`}
+              className="size-7 shrink-0 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onContextMenu={(event) => void handleContextMenu(event)}
+            />
+          }
+        >
+          <CircleAlertIcon className="size-4.5 fill-destructive/12 text-destructive" aria-hidden />
+        </PopoverTrigger>
+        <PopoverPopup
+          tooltipStyle
+          align="start"
+          side="bottom"
+          viewportClassName="p-0"
+          className="alert-glass w-72 max-w-[calc(100vw-1rem)] border-destructive/40! text-left text-pretty text-error-foreground"
+          data-variant="error"
+        >
+          <div>
+            {warnings.map((warning) => (
+              <div key={warning.id} className="p-2.5 pb-1.5">
+                <div className="font-medium text-error-foreground">{warning.title}</div>
+                <div className="mt-0.5 whitespace-pre-wrap text-error-foreground/80">
+                  {warning.description}
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center justify-end gap-1.5 px-2.5 pt-1 pb-2.5">
+              <Button
+                size="xs"
+                variant="destructive-outline"
+                className="border-destructive/32 bg-error-surface text-error-foreground hover:bg-destructive/12"
+                disabled={!canDismissForNow}
+                title={canDismissForNow ? undefined : "Available after the server connects"}
+                onClick={onDismissAllWarningsForNow}
+              >
+                {dismissForNowLabel}
+              </Button>
+              <Button size="xs" variant="destructive" onClick={onDismissAllWarningsForever}>
+                {dismissForeverLabel}
+              </Button>
+            </div>
           </div>
-        </div>
-      </PopoverPopup>
-    </Popover>
+        </PopoverPopup>
+      </Popover>
+    </>
   );
 });

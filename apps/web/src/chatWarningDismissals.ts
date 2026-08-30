@@ -6,7 +6,6 @@ import { useLocalStorage } from "./hooks/useLocalStorage";
 const CHAT_WARNING_DISMISSALS_STORAGE_KEY = "t3code:chat-warning-dismissals:v1";
 const CHAT_WARNING_SERVER_RUN_DISMISSALS_STORAGE_KEY =
   "t3code:chat-warning-server-run-dismissals:v1";
-const MAX_DISMISSED_CHAT_WARNINGS = 200;
 const MAX_DISMISSED_SERVER_RUNS = 20;
 const EMPTY_DISMISSALS = { keys: [] as string[] };
 const EMPTY_SERVER_RUN_DISMISSALS = {
@@ -33,8 +32,7 @@ export function mergeDismissedChatWarningKeys(
   currentKeys: ReadonlyArray<string>,
   addedKeys: ReadonlyArray<string>,
 ): string[] {
-  const mergedKeys = [...new Set([...currentKeys, ...addedKeys.filter((key) => key.length > 0)])];
-  return mergedKeys.slice(-MAX_DISMISSED_CHAT_WARNINGS);
+  return [...new Set([...currentKeys, ...addedKeys.filter((key) => key.length > 0)])];
 }
 
 export function mergeServerRunChatWarningDismissals(
@@ -100,5 +98,19 @@ export function useChatWarningDismissals(serverRunId: string | null) {
     dismissedWarningKeysForServerRun,
     dismissWarningKeys,
     dismissWarningKeysForServerRun,
+  };
+}
+
+export function usePermanentlyDismissedChatWarnings() {
+  const [dismissals, setDismissals] = useLocalStorage(
+    CHAT_WARNING_DISMISSALS_STORAGE_KEY,
+    EMPTY_DISMISSALS,
+    ChatWarningDismissalsSchema,
+  );
+  const restoreAllWarnings = useCallback(() => setDismissals(EMPTY_DISMISSALS), [setDismissals]);
+
+  return {
+    permanentlyDismissedWarningCount: dismissals.keys.length,
+    restoreAllWarnings,
   };
 }

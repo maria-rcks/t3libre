@@ -67,6 +67,7 @@ interface ChatHeaderProps {
   rightPanelOpen: boolean;
   gitCwd: string | null;
   warnings: ReadonlyArray<ChatWarning>;
+  canDismissWarningsForNow: boolean;
   onDismissWarningForNow: (warningId: string) => void;
   onDismissWarningForever: (warningId: string) => void;
   onDismissAllWarningsForNow: () => void;
@@ -141,6 +142,7 @@ export const ChatHeader = memo(function ChatHeader({
   rightPanelOpen,
   gitCwd,
   warnings,
+  canDismissWarningsForNow,
   onDismissWarningForNow,
   onDismissWarningForever,
   onDismissAllWarningsForNow,
@@ -384,6 +386,7 @@ export const ChatHeader = memo(function ChatHeader({
           )}
           <ChatWarningIndicator
             warnings={warnings}
+            canDismissForNow={canDismissWarningsForNow}
             onDismissWarningForNow={onDismissWarningForNow}
             onDismissWarningForever={onDismissWarningForever}
             onDismissAllWarningsForNow={onDismissAllWarningsForNow}

@@ -15,9 +15,9 @@ describe("mergeDismissedChatWarningKeys", () => {
     ]);
   });
 
-  it("bounds persisted warning history", () => {
+  it("keeps every permanent dismissal", () => {
     const keys = Array.from({ length: 201 }, (_, index) => `warning-${index}`);
-    expect(mergeDismissedChatWarningKeys([], keys)).toEqual(keys.slice(1));
+    expect(mergeDismissedChatWarningKeys([], keys)).toEqual(keys);
   });
 
   it("keeps temporary dismissals scoped to one server run", () => {
