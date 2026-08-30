@@ -39,6 +39,7 @@ describe("workspace mutation refresh", () => {
     expect(
       latestWorkspaceMutationId([
         activity("command-updated", "tool.updated", "command_execution", "inProgress"),
+        activity("legacy-command-updated", "tool.updated", "command_execution", "in_progress"),
         activity("image-completed", "tool.completed", "image_view"),
       ]),
     ).toBeNull();

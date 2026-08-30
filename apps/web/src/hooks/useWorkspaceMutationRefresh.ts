@@ -24,7 +24,8 @@ export function latestWorkspaceMutationId(
     const terminalUpdate =
       activity.kind === "tool.updated" &&
       typeof payload?.status === "string" &&
-      payload.status !== "inProgress";
+      payload.status !== "inProgress" &&
+      payload.status !== "in_progress";
     if (activity.kind !== "tool.completed" && !terminalUpdate) continue;
     const itemType = payload?.itemType;
     if (typeof itemType === "string" && WORKSPACE_MUTATION_ITEM_TYPES.has(itemType)) {
