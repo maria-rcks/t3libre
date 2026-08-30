@@ -1761,7 +1761,7 @@ function CompactFilterMenu<Value extends string>({
             : "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
         }
       >
-        {triggerLabel ? `${triggerLabel}: ${current.label}` : current.label}
+        {triggerLabel ?? current.label}
         <ChevronDownIcon aria-hidden className="size-3 text-muted-foreground/70" />
       </MenuTrigger>
       <MenuPopup align="start" side="bottom" className="min-w-40">
