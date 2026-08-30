@@ -266,16 +266,17 @@ function PullRequestAuthorFilter({
       </MenuSubTrigger>
       <MenuSubPopup className="w-80">
         <div className="p-1 pb-2">
-          <InputGroup className="h-8">
+          <InputGroup>
             <InputGroupAddon>
               <SearchIcon aria-hidden />
             </InputGroupAddon>
             <InputGroupInput
               autoFocus
+              size="compact"
               value={query}
               onChange={(event) => setQuery(event.currentTarget.value)}
               onKeyDown={(event) => {
-                if (event.key !== "Escape") event.stopPropagation();
+                if (event.key.length === 1) event.stopPropagation();
               }}
               placeholder="Search authors"
               aria-label="Search authors"

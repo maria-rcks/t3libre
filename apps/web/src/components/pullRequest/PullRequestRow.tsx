@@ -16,7 +16,6 @@ import {
 } from "./pullRequestPresentation";
 
 function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry["labels"] }) {
-  if (labels.length === 0) return null;
   const shown = labels.slice(0, 2);
   return (
     <span className="flex min-w-0 shrink items-center gap-1 overflow-hidden">
@@ -113,7 +112,7 @@ function PullRequestRowImpl({
             <span className="max-w-32 shrink-0 truncate">{environmentLabel}</span>
           ) : null}
           <PullRequestActorLabel actor={entry.author} className="max-w-40 shrink-0" />
-          <PullRequestRowLabels labels={entry.labels} />
+          {entry.labels.length > 0 ? <PullRequestRowLabels labels={entry.labels} /> : null}
           {/* Only a verdict somebody has actually given: "review required" is the absence of
               one, and saying so on every unreviewed row would say nothing. */}
           {entry.reviewDecision === "approved" || entry.reviewDecision === "changes-requested" ? (

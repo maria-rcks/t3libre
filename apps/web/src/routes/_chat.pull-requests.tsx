@@ -1433,6 +1433,7 @@ function PullRequestsRouteView() {
           onRefresh={() => void refreshFromHost()}
           query={typedQuery}
           filtered={
+            menuFiltered ||
             search.state !== "open" ||
             search.involvement !== "all" ||
             scopedProjectId !== undefined ||
@@ -1747,10 +1748,12 @@ function CompactFilterMenu<Value extends string>({
     <Menu>
       <MenuTrigger
         aria-label={label}
-        className={cn(
-          "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground",
-          outlined && "h-8 gap-2 border border-input px-3 text-foreground shadow-xs/5",
-        )}
+        render={outlined ? <Button variant="outline" /> : undefined}
+        className={
+          outlined
+            ? undefined
+            : "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+        }
       >
         {triggerLabel ? `${triggerLabel}: ${current.label}` : current.label}
         <ChevronDownIcon aria-hidden className="size-3 text-muted-foreground/70" />

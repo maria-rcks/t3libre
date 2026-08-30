@@ -52,11 +52,6 @@ export interface PullRequestLabelFacet extends PullRequestLabel {
   readonly count: number;
 }
 
-export interface PullRequestListFacets {
-  readonly authors: ReadonlyArray<PullRequestAuthorFacet>;
-  readonly labels: ReadonlyArray<PullRequestLabelFacet>;
-}
-
 /**
  * The signed-in account per host. Keyed `"<environmentId> <host>"` once a listing spans more than
  * one environment: two machines can both reach github.com signed in as different people, and a
@@ -85,7 +80,7 @@ function normalize(value: string | null | undefined): string | null {
 export function collectPullRequestListFacets(
   entries: ReadonlyArray<PullRequestListEntry>,
   state: PullRequestListState,
-): PullRequestListFacets {
+) {
   const authors = new Map<string, PullRequestAuthorFacet>();
   const labels = new Map<string, PullRequestLabelFacet>();
   for (const entry of entries) {
