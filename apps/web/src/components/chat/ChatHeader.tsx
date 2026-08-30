@@ -45,6 +45,7 @@ import {
   WorkspaceBreadcrumbSeparator,
 } from "../WorkspaceBreadcrumb";
 import { cn } from "~/lib/utils";
+import { ChatWarningIndicator, type ChatWarning } from "./ChatWarningIndicator";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -65,6 +66,11 @@ interface ChatHeaderProps {
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
   gitCwd: string | null;
+  warnings: ReadonlyArray<ChatWarning>;
+  onDismissWarningForNow: (warningId: string) => void;
+  onDismissWarningForever: (warningId: string) => void;
+  onDismissAllWarningsForNow: () => void;
+  onDismissAllWarningsForever: () => void;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
@@ -134,6 +140,11 @@ export const ChatHeader = memo(function ChatHeader({
   availableEditors,
   rightPanelOpen,
   gitCwd,
+  warnings,
+  onDismissWarningForNow,
+  onDismissWarningForever,
+  onDismissAllWarningsForNow,
+  onDismissAllWarningsForever,
   onOpenPullRequest,
   onNewThreadInProject,
   onRunProjectScript,
@@ -320,7 +331,7 @@ export const ChatHeader = memo(function ChatHeader({
             <WorkspaceBreadcrumbSeparator />
           </>
         ) : null}
-        <WorkspaceBreadcrumbItem current className="flex-1">
+        <WorkspaceBreadcrumbItem current className="flex-1 gap-1">
           {renamingTitle !== null ? (
             <input
               autoFocus
@@ -371,6 +382,13 @@ export const ChatHeader = memo(function ChatHeader({
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
             </Tooltip>
           )}
+          <ChatWarningIndicator
+            warnings={warnings}
+            onDismissWarningForNow={onDismissWarningForNow}
+            onDismissWarningForever={onDismissWarningForever}
+            onDismissAllWarningsForNow={onDismissAllWarningsForNow}
+            onDismissAllWarningsForever={onDismissAllWarningsForever}
+          />
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
       <div

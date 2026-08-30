@@ -1,6 +1,7 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   type EditorId,
+  type EnvironmentId,
   type EnvironmentTheme,
   type ServerConfig,
   type ServerConfigStreamEvent,
@@ -33,6 +34,18 @@ export const environmentServerConfigsAtom = createEnvironmentServerConfigsAtom({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   serverConfigValueAtom: serverEnvironment.configValueAtom,
 });
+export const environmentServerLifecycleAtom = Atom.family((environmentId: EnvironmentId) => {
+  const target = { environmentId, input: {} };
+  return Atom.make((get) =>
+    Option.getOrNull(AsyncResult.value(get(serverEnvironment.lifecycle(target)))),
+  ).pipe(Atom.withLabel(`web-server-lifecycle:${environmentId}`));
+});
+export const environmentServerRunIdAtom = Atom.family((environmentId: EnvironmentId) =>
+  Atom.make((get): string | null => {
+    const readyAt = get(environmentServerLifecycleAtom(environmentId))?.readyAt;
+    return readyAt ? `${environmentId}\u0000${readyAt}` : null;
+  }).pipe(Atom.withLabel(`web-server-run-id:${environmentId}`)),
+);
 
 interface PrimaryServerState {
   readonly config: ServerConfig | null;
@@ -58,7 +71,7 @@ export const primaryServerStateAtom = Atom.make((get): PrimaryServerState => {
   const configProjection = Option.getOrNull(
     AsyncResult.value(get(serverEnvironment.configProjection(target))),
   );
-  const welcome = Option.getOrNull(AsyncResult.value(get(serverEnvironment.welcome(target))));
+  const welcome = get(environmentServerLifecycleAtom(environmentId))?.welcome ?? null;
 
   return {
     config: get(serverEnvironment.configValueAtom(environmentId)),

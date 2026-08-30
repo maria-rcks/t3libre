@@ -35,7 +35,7 @@ import {
   isLegacyUpdateHandoffLoss,
   matchesServerUpdateReadyEvent,
   nudgeReconnectDuringUpdateRestart,
-  projectServerWelcome,
+  projectServerLifecycle,
   resolveServerConfigValue,
   resolveServerUpdateProgressResult,
   serverUpdateStateForProgressEvent,
@@ -381,23 +381,29 @@ describe("server state projection", () => {
     expect(Option.getOrThrow(downgraded).config.environmentThemes).toBeUndefined();
   });
 
-  it("retains welcome when a ready event follows in the same stream chunk", () => {
+  it("projects one server run from its welcome and ready events", () => {
     const welcome = {
       environment: {} as ServerLifecycleWelcomePayload["environment"],
       cwd: "/repo",
       projectName: "repo",
     } as ServerLifecycleWelcomePayload;
-    const [afterWelcome] = projectServerWelcome(Option.none(), {
-      type: "welcome",
-      payload: welcome,
-    });
-    const [afterReady, emitted] = projectServerWelcome(afterWelcome, {
+    const [afterWelcome] = projectServerLifecycle(
+      { welcome: null, readyAt: null },
+      {
+        type: "welcome",
+        payload: welcome,
+      },
+    );
+    const [afterReady, emitted] = projectServerLifecycle(afterWelcome, {
       type: "ready",
-      payload: {},
+      payload: {
+        at: "2026-08-30T20:00:00.000Z",
+        environment: welcome.environment,
+      },
     });
 
-    expect(Option.getOrThrow(afterReady)).toBe(welcome);
-    expect(emitted).toEqual([]);
+    expect(afterReady).toEqual({ welcome, readyAt: "2026-08-30T20:00:00.000Z" });
+    expect(emitted).toEqual([afterReady]);
   });
 
   it("prefers an active session config over cache until a live event arrives", () => {
