@@ -81,11 +81,13 @@ function contextMenuItems(
   ];
   if (warnings.length === 1) return actions(0);
   return [
-    ...warnings.map((warning, index): ContextMenuItem<ContextMenuAction> => ({
-      id: `warning:${index}`,
-      label: warning.title,
-      children: actions(index),
-    })),
+    ...warnings.map(
+      (warning, index): ContextMenuItem<ContextMenuAction> => ({
+        id: `warning:${index}`,
+        label: warning.title,
+        children: actions(index),
+      }),
+    ),
     ...(canDismissForNow
       ? ([{ id: "dismiss-all-now", label: "Dismiss all for now", separatorBefore: true }] as const)
       : []),
