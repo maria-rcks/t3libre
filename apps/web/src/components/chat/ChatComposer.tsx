@@ -157,7 +157,10 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
-import { resolveContextWindowModelDisplayName } from "./ContextWindowMeter.logic";
+import {
+  providerSupportsManualCompaction,
+  resolveContextWindowModelDisplayName,
+} from "./ContextWindowMeter.logic";
 import {
   attachVideoThumbnail,
   buildExpandedImagePreview,
@@ -1106,8 +1109,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
   );
-  const compactCommandAvailable =
-    selectedProviderStatus?.slashCommands.some((command) => command.name === "compact") ?? false;
+  const compactCommandAvailable = providerSupportsManualCompaction(selectedProviderEntry);
   const selectedProviderModels = useMemo<ReadonlyArray<ServerProvider["models"][number]>>(
     () => selectedProviderEntry?.models ?? [],
     [selectedProviderEntry],
