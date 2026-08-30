@@ -68,10 +68,8 @@ interface ChatHeaderProps {
   gitCwd: string | null;
   warnings: ReadonlyArray<ChatWarning>;
   canDismissWarningsForNow: boolean;
-  onDismissWarningForNow: (warningId: string) => void;
-  onDismissWarningForever: (warningId: string) => void;
-  onDismissAllWarningsForNow: () => void;
-  onDismissAllWarningsForever: () => void;
+  onDismissWarningsForNow: (warningIds: ReadonlyArray<string>) => void;
+  onDismissWarningsForever: (warningIds: ReadonlyArray<string>) => void;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
@@ -143,10 +141,8 @@ export const ChatHeader = memo(function ChatHeader({
   gitCwd,
   warnings,
   canDismissWarningsForNow,
-  onDismissWarningForNow,
-  onDismissWarningForever,
-  onDismissAllWarningsForNow,
-  onDismissAllWarningsForever,
+  onDismissWarningsForNow,
+  onDismissWarningsForever,
   onOpenPullRequest,
   onNewThreadInProject,
   onRunProjectScript,
@@ -387,10 +383,8 @@ export const ChatHeader = memo(function ChatHeader({
           <ChatWarningIndicator
             warnings={warnings}
             canDismissForNow={canDismissWarningsForNow}
-            onDismissWarningForNow={onDismissWarningForNow}
-            onDismissWarningForever={onDismissWarningForever}
-            onDismissAllWarningsForNow={onDismissAllWarningsForNow}
-            onDismissAllWarningsForever={onDismissAllWarningsForever}
+            onDismissForNow={onDismissWarningsForNow}
+            onDismissForever={onDismissWarningsForever}
           />
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>

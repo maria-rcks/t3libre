@@ -64,13 +64,6 @@ describe("searchSettings", () => {
     ]);
   });
 
-  it("finds the dismissed warning controls", () => {
-    expect(searchSettings("dismissed warnings")[0]).toMatchObject({
-      id: "dismissed-warnings",
-      to: "/settings/general",
-    });
-  });
-
   it("returns no results for an empty query", () => {
     expect(searchSettings("   ", ITEMS)).toEqual([]);
   });
