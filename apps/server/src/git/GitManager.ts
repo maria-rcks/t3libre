@@ -611,8 +611,8 @@ export const make = Effect.gen(function* () {
 
   const sourceControlProvider = (cwd: string) => sourceControlProviders.resolve({ cwd });
   const serverSettingsService = yield* ServerSettings.ServerSettingsService;
-  const readRepositoryInstructions = (cwd: string) =>
-    fileSystem.readFileString(path.join(cwd, "AGENTS.md")).pipe(
+  const readRepositoryInstructions = (cwd: string, fileName: string) =>
+    fileSystem.readFileString(path.join(cwd, fileName)).pipe(
       Effect.map((contents) => contents.trim()),
       Effect.orElseSucceed(() => ""),
     );
@@ -634,28 +634,39 @@ export const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => []),
       );
 
-  const resolveStylePolicy = (cwd: string, style: SourceControlWritingStyleSettings) =>
+  const resolveStylePolicy = (cwd: string, settings: SourceControlTextGenerationSettings) =>
     Effect.gen(function* () {
-      switch (style.mode) {
+      switch (settings.style.mode) {
         case "conventional_commits":
           return conventionalCommitsTextGenerationPolicy;
         case "custom":
           return customTextGenerationPolicy(
-            style.customInstructions
+            settings.style.customInstructions
               ? {
-                  commitInstructions: style.customInstructions,
-                  changeRequestInstructions: style.customInstructions,
+                  commitInstructions: settings.style.customInstructions,
+                  changeRequestInstructions: settings.style.customInstructions,
                 }
               : {},
           );
         case "repo_conventions": {
           const subjects = yield* readRecentCommitSubjects(cwd);
-          const repositoryInstructions = yield* readRepositoryInstructions(cwd);
+          const agentInstructions = yield* readRepositoryInstructions(cwd, "AGENTS.md");
+          const isClaudeWriter =
+            settings.modelSelection.instanceId === "claudeAgent" ||
+            (yield* providerRegistry.getProviders).some(
+              (provider) =>
+                provider.instanceId === settings.modelSelection.instanceId &&
+                provider.driver === "claudeAgent",
+            );
+          const claudeInstructions = isClaudeWriter
+            ? yield* readRepositoryInstructions(cwd, "CLAUDE.md")
+            : "";
           const examples = [
             ...(subjects.length > 0
               ? [["Recent commit subjects from this repository:", ...subjects].join("\n")]
               : []),
-            ...(repositoryInstructions ? [`Local AGENTS.md:\n${repositoryInstructions}`] : []),
+            ...(agentInstructions ? [`Local AGENTS.md:\n${agentInstructions}`] : []),
+            ...(claudeInstructions ? [`Local CLAUDE.md:\n${claudeInstructions}`] : []),
           ].join("\n\n");
           if (!examples) {
             return repositoryConventionsTextGenerationPolicy;
@@ -1575,7 +1586,7 @@ export const make = Effect.gen(function* () {
         };
       }
 
-      const policy = yield* resolveStylePolicy(input.cwd, input.settings.style);
+      const policy = yield* resolveStylePolicy(input.cwd, input.settings);
 
       const generated = yield* textGeneration
         .generateCommitMessage({
@@ -1761,7 +1772,7 @@ export const make = Effect.gen(function* () {
     });
     const baseRangeRef = yield* resolveBaseRangeRef(cwd, baseBranch);
     const rangeContext = yield* gitCore.readRangeContext(cwd, baseRangeRef);
-    const policy = yield* resolveStylePolicy(cwd, settings.style);
+    const policy = yield* resolveStylePolicy(cwd, settings);
     const changeRequestTemplate =
       settings.style.followChangeRequestTemplates && provider.kind === "github"
         ? Option.getOrUndefined(yield* detectPrTemplate(cwd, baseRangeRef, gitCore.execute))
