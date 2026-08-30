@@ -23,7 +23,6 @@ import {
 } from "lucide-react";
 import { type ElementType, useState } from "react";
 
-import { cn } from "~/lib/utils";
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
@@ -183,6 +182,9 @@ function PullRequestFilterRadioGroup<Value extends string>({
             <span className="flex min-w-0 items-center gap-2">
               <option.Icon aria-hidden className="size-3.5" />
               {option.label}
+              {option.unavailable ? (
+                <span className="ml-auto text-xs text-warning">Unavailable</span>
+              ) : null}
             </span>
           </MenuRadioItem>
         );
@@ -496,9 +498,8 @@ export function PullRequestFiltersMenu({
       <MenuTrigger
         render={
           <Button
-            className={cn("relative", filterCount > 0 && "[--control-icon-color:currentColor]")}
+            className={filterCount > 0 ? "[--control-icon-color:currentColor]" : undefined}
             variant="outline"
-            aria-label="Filter pull requests"
           />
         }
       >
