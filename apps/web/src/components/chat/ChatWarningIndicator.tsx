@@ -195,8 +195,13 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
   const dismissForNowButton = (
     <Button
       size="xs"
-      variant="destructive-outline"
-      className="border-destructive/32 bg-error-surface text-error-foreground hover:bg-destructive/12 aria-disabled:hover:border-destructive/32 aria-disabled:hover:bg-error-surface aria-disabled:cursor-default aria-disabled:opacity-64"
+      variant={severity === "error" ? "destructive-outline" : "outline"}
+      className={cn(
+        "aria-disabled:cursor-default aria-disabled:opacity-64",
+        severity === "error"
+          ? "border-destructive/32 bg-error-surface text-error-foreground hover:bg-destructive/12 aria-disabled:hover:border-destructive/32 aria-disabled:hover:bg-error-surface"
+          : "border-warning/32 bg-warning-surface text-warning-foreground [:hover,[data-pressed]]:border-warning/40 [:hover,[data-pressed]]:bg-warning/12 aria-disabled:hover:border-warning/32 aria-disabled:hover:bg-warning-surface",
+      )}
       aria-disabled={!canDismissForNow || undefined}
       onClick={() => {
         if (canDismissForNow) onDismissAllWarningsForNow();
@@ -272,7 +277,16 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
                   <TooltipPopup side="bottom">Available after the server connects</TooltipPopup>
                 </Tooltip>
               )}
-              <Button size="xs" variant="destructive" onClick={onDismissAllWarningsForever}>
+              <Button
+                size="xs"
+                variant={severity === "error" ? "destructive" : "outline"}
+                className={
+                  severity === "warning"
+                    ? "border-warning/32 bg-warning-surface text-warning-foreground [:hover,[data-pressed]]:border-warning/40 [:hover,[data-pressed]]:bg-warning/12"
+                    : undefined
+                }
+                onClick={onDismissAllWarningsForever}
+              >
                 {dismissForeverLabel}
               </Button>
             </div>
