@@ -606,9 +606,16 @@ export const make = Effect.gen(function* () {
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const crypto = yield* Crypto.Crypto;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
 
   const sourceControlProvider = (cwd: string) => sourceControlProviders.resolve({ cwd });
   const serverSettingsService = yield* ServerSettings.ServerSettingsService;
+  const readRepositoryInstructions = (cwd: string) =>
+    fileSystem.readFileString(path.join(cwd, "AGENTS.md")).pipe(
+      Effect.map((contents) => contents.trim()),
+      Effect.orElseSucceed(() => ""),
+    );
 
   const readRecentCommitSubjects = (cwd: string) =>
     gitCore
@@ -643,10 +650,16 @@ export const make = Effect.gen(function* () {
           );
         case "repo_conventions": {
           const subjects = yield* readRecentCommitSubjects(cwd);
-          if (subjects.length === 0) {
+          const repositoryInstructions = yield* readRepositoryInstructions(cwd);
+          const examples = [
+            ...(subjects.length > 0
+              ? [["Recent commit subjects from this repository:", ...subjects].join("\n")]
+              : []),
+            ...(repositoryInstructions ? [`Local AGENTS.md:\n${repositoryInstructions}`] : []),
+          ].join("\n\n");
+          if (!examples) {
             return repositoryConventionsTextGenerationPolicy;
           }
-          const examples = ["Recent commit subjects from this repository:", ...subjects].join("\n");
           return {
             ...repositoryConventionsTextGenerationPolicy,
             commitInstructions: `${repositoryConventionsTextGenerationPolicy.commitInstructions}\n\n${examples}`,
@@ -848,9 +861,6 @@ export const make = Effect.gen(function* () {
           ),
       ),
     );
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-
   const tempDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? "/tmp";
   const canonicalizeExistingPath = (value: string) =>
     fileSystem.realPath(value).pipe(Effect.orElseSucceed(() => value));

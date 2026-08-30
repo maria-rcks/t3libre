@@ -1967,12 +1967,14 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("preserves repository conventions style when recent history is empty", () =>
+  it.effect("includes local AGENTS.md when recent history is empty", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* runGit(repoDir, ["init", "--initial-branch=main"]);
       yield* runGit(repoDir, ["config", "user.email", "test@example.com"]);
       yield* runGit(repoDir, ["config", "user.name", "Test User"]);
+      const repositoryInstructions = "Use lowercase source control text.";
+      NodeFS.writeFileSync(NodePath.join(repoDir, "AGENTS.md"), repositoryInstructions);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\n");
       yield* runGit(repoDir, ["add", "README.md"]);
       let generatedPolicy: TextGeneration.CommitMessageGenerationInput["policy"] = undefined;
@@ -1997,10 +1999,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       expect(generatedPolicy).toEqual({
         kind: "repo_conventions",
-        commitInstructions:
-          "Follow the repository's established commit message style when examples are available.",
-        changeRequestInstructions:
-          "Follow the repository's established change request title and body style when examples are available.",
+        commitInstructions: `Follow the repository's established commit message style when examples are available.\n\nLocal AGENTS.md:\n${repositoryInstructions}`,
+        changeRequestInstructions: `Follow the repository's established change request title and body style when examples are available.\n\nLocal AGENTS.md:\n${repositoryInstructions}`,
         inferRepositoryConventions: true,
       });
     }),
