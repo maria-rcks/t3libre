@@ -213,7 +213,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
               variant="ghost"
               size="icon-xs"
               aria-label={`${warningCountLabel}. Right-click to dismiss.`}
-              className="size-7 shrink-0 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+              className="size-6 shrink-0 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
               onContextMenu={(event) => void handleContextMenu(event)}
             />
           }
