@@ -6,6 +6,7 @@ import { readLocalApi } from "~/localApi";
 import { formatProviderDriverKindLabel } from "~/providerModels";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface ChatWarning {
   readonly id: string;
@@ -183,6 +184,19 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
   const warningCountLabel = `${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}`;
   const dismissForNowLabel = warnings.length === 1 ? "Dismiss for now" : "Dismiss all for now";
   const dismissForeverLabel = warnings.length === 1 ? "Don't show again" : "Don't show these again";
+  const dismissForNowButton = (
+    <Button
+      size="xs"
+      variant="destructive-outline"
+      className="border-destructive/32 bg-error-surface text-error-foreground hover:bg-destructive/12 aria-disabled:hover:border-destructive/32 aria-disabled:hover:bg-error-surface aria-disabled:cursor-default aria-disabled:opacity-64"
+      aria-disabled={!canDismissForNow || undefined}
+      onClick={() => {
+        if (canDismissForNow) onDismissAllWarningsForNow();
+      }}
+    >
+      {dismissForNowLabel}
+    </Button>
+  );
   return (
     <>
       <span role="alert" className="sr-only">
@@ -224,18 +238,14 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
               </div>
             ))}
             <div className="flex items-center justify-end gap-1.5 px-2.5 pt-1 pb-2.5">
-              <Button
-                size="xs"
-                variant="destructive-outline"
-                className="border-destructive/32 bg-error-surface text-error-foreground hover:bg-destructive/12 aria-disabled:cursor-default aria-disabled:opacity-64"
-                aria-disabled={!canDismissForNow || undefined}
-                title={canDismissForNow ? undefined : "Available after the server connects"}
-                onClick={() => {
-                  if (canDismissForNow) onDismissAllWarningsForNow();
-                }}
-              >
-                {dismissForNowLabel}
-              </Button>
+              {canDismissForNow ? (
+                dismissForNowButton
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger render={dismissForNowButton} />
+                  <TooltipPopup side="bottom">Available after the server connects</TooltipPopup>
+                </Tooltip>
+              )}
               <Button size="xs" variant="destructive" onClick={onDismissAllWarningsForever}>
                 {dismissForeverLabel}
               </Button>
