@@ -612,10 +612,25 @@ export const make = Effect.gen(function* () {
   const sourceControlProvider = (cwd: string) => sourceControlProviders.resolve({ cwd });
   const serverSettingsService = yield* ServerSettings.ServerSettingsService;
   const readRepositoryInstructions = (cwd: string, fileName: string) =>
-    fileSystem.readFileString(path.join(cwd, fileName)).pipe(
-      Effect.map((contents) => contents.trim()),
-      Effect.orElseSucceed(() => ""),
-    );
+    Effect.gen(function* () {
+      const root = yield* fileSystem.realPath(cwd);
+      const instructionPath = yield* fileSystem.realPath(path.join(root, fileName));
+      if (!instructionPath.startsWith(`${root}${path.sep}`)) {
+        return "";
+      }
+      return yield* Effect.scoped(
+        Effect.gen(function* () {
+          const file = yield* fileSystem.open(instructionPath, { flag: "r" });
+          if ((yield* file.stat).type !== "File") {
+            return "";
+          }
+          return Option.match(yield* file.readAlloc(20_000), {
+            onNone: () => "",
+            onSome: (contents) => new TextDecoder().decode(contents).trim(),
+          });
+        }),
+      );
+    }).pipe(Effect.orElseSucceed(() => ""));
 
   const readRecentCommitSubjects = (cwd: string) =>
     gitCore
