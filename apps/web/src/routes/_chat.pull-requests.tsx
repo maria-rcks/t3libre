@@ -1246,6 +1246,8 @@ function PullRequestsRouteView() {
     const entries = enriched.flatMap((group) => group.entries);
     const hasSize = (entry: (typeof entries)[number]) =>
       entry.additions + entry.deletions > 0 || statsByRow.has(pullRequestDiffStatKey(entry));
+    const timestamp = (entry: (typeof entries)[number]) =>
+      toSortableTimestamp(entry.updatedAt) ?? toSortableTimestamp(entry.createdAt) ?? 0;
     return [
       {
         key: "others" as const,
@@ -1254,10 +1256,7 @@ function PullRequestsRouteView() {
           const measured = Number(hasSize(right)) - Number(hasSize(left));
           const sized = left.additions + left.deletions - (right.additions + right.deletions);
           return (
-            measured ||
-            (sort === "largest" ? -sized : sized) ||
-            (toSortableTimestamp(right.updatedAt) ?? Number.NEGATIVE_INFINITY) -
-              (toSortableTimestamp(left.updatedAt) ?? Number.NEGATIVE_INFINITY)
+            measured || (sort === "largest" ? -sized : sized) || timestamp(right) - timestamp(left)
           );
         }),
       },
@@ -1754,7 +1753,7 @@ function CompactFilterMenu<Value extends string>({
   return (
     <Menu>
       <MenuTrigger
-        aria-label={label}
+        aria-label={triggerLabel ? undefined : label}
         render={outlined ? <Button variant="outline" /> : undefined}
         className={
           outlined

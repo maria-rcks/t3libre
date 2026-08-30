@@ -181,8 +181,8 @@ function PullRequestFilterRadioGroup<Value extends string>({
           >
             <span className="flex min-w-0 items-center gap-2">
               <option.Icon aria-hidden className="size-3.5" />
-              {option.label}
-              {option.unavailable ? " · Unavailable" : null}
+              <span className="min-w-0 flex-1 truncate">{option.label}</span>
+              {option.unavailable ? <span className="shrink-0">· Unavailable</span> : null}
             </span>
           </MenuRadioItem>
         );
@@ -277,7 +277,7 @@ function PullRequestAuthorFilter({
               value={query}
               onChange={(event) => setQuery(event.currentTarget.value)}
               onKeyDown={(event) => {
-                if (event.key.length === 1) event.stopPropagation();
+                if (event.key !== "ArrowDown" && event.key !== "Escape") event.stopPropagation();
               }}
               placeholder="Search authors"
               aria-label="Search authors"
