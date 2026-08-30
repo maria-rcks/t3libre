@@ -227,10 +227,12 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
               <Button
                 size="xs"
                 variant="destructive-outline"
-                className="border-destructive/32 bg-error-surface text-error-foreground hover:bg-destructive/12"
-                disabled={!canDismissForNow}
+                className="border-destructive/32 bg-error-surface text-error-foreground hover:bg-destructive/12 aria-disabled:cursor-default aria-disabled:opacity-64"
+                aria-disabled={!canDismissForNow || undefined}
                 title={canDismissForNow ? undefined : "Available after the server connects"}
-                onClick={onDismissAllWarningsForNow}
+                onClick={() => {
+                  if (canDismissForNow) onDismissAllWarningsForNow();
+                }}
               >
                 {dismissForNowLabel}
               </Button>
