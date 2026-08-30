@@ -53,6 +53,9 @@ export interface ProviderServiceShape {
     input: ProviderSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
 
+  /** Compact the active provider conversation. */
+  readonly compactThread: (threadId: ThreadId) => Effect.Effect<void, ProviderServiceError>;
+
   /**
    * Interrupt a running provider turn.
    */

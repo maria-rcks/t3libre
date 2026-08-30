@@ -348,6 +348,7 @@ interface OpenCodeSessionContext {
   pendingRequestRecovery: OpenCodePendingRequestRecovery | undefined;
   promptGeneration: number;
   promptAdmission: OpenCodePromptAdmission | undefined;
+  manualCompactionTurnId: TurnId | undefined;
   readonly promptSemaphore: Semaphore.Semaphore;
   readonly firstConnection: Deferred.Deferred<void, ProviderAdapterRequestError>;
   /**
@@ -1049,6 +1050,9 @@ export function makeOpenCodeAdapter(
         context.pendingIdleReconciliation = undefined;
       }
       context.activeTurnId = undefined;
+      if (context.manualCompactionTurnId === turnId) {
+        context.manualCompactionTurnId = undefined;
+      }
       context.activeAgent = undefined;
       context.activeVariant = undefined;
       context.interruptedTurnId = undefined;
@@ -1409,6 +1413,9 @@ export function makeOpenCodeAdapter(
       }
       if (context.activeTurnId === turnId) {
         context.activeTurnId = undefined;
+        if (context.manualCompactionTurnId === turnId) {
+          context.manualCompactionTurnId = undefined;
+        }
         context.activeAgent = undefined;
         context.activeVariant = undefined;
         yield* updateProviderSession(
@@ -2015,6 +2022,26 @@ export function makeOpenCodeAdapter(
           break;
         }
 
+        case "session.compacted": {
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              raw: event,
+            })),
+            type: "thread.state.changed",
+            payload: {
+              state: "compacted",
+              detail: event,
+            },
+          });
+          if (turnId !== undefined && context.manualCompactionTurnId === turnId) {
+            context.manualCompactionTurnId = undefined;
+            yield* completeOpenCodeTurn(context, turnId, context.promptGeneration, event);
+          }
+          break;
+        }
+
         case "message.updated": {
           const promptAdmission = context.promptAdmission;
           if (
@@ -2574,6 +2601,7 @@ export function makeOpenCodeAdapter(
           pendingRequestRecovery: undefined,
           promptGeneration: 0,
           promptAdmission: undefined,
+          manualCompactionTurnId: undefined,
           promptSemaphore: Semaphore.makeUnsafe(1),
           firstConnection: Deferred.makeUnsafe<void, ProviderAdapterRequestError>(),
           stopped: yield* Ref.make(false),
@@ -2984,6 +3012,73 @@ export function makeOpenCodeAdapter(
       );
     });
 
+    const compactThread: NonNullable<OpenCodeAdapterShape["compactThread"]> = Effect.fn(
+      "compactThread",
+    )(function* (threadId) {
+      const context = yield* ensureSessionContext(sessions, threadId);
+      yield* awaitOpenCodeContextReady(context);
+      const parsedModel = parseOpenCodeModelSlug(context.session.model);
+      if (!parsedModel) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "compactThread",
+          issue: "OpenCode compaction requires an active 'provider/model' selection.",
+        });
+      }
+
+      yield* context.promptSemaphore.withPermit(
+        Effect.gen(function* () {
+          if (context.activeTurnId !== undefined) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "compactThread",
+              issue: "OpenCode cannot compact while a turn is running.",
+            });
+          }
+          const turnId = TurnId.make(`opencode-compact-${yield* randomUUIDv4}`);
+          context.promptGeneration += 1;
+          context.activeTurnId = turnId;
+          context.manualCompactionTurnId = turnId;
+          yield* updateProviderSession(
+            context,
+            { status: "running", activeTurnId: turnId },
+            { clearLastError: true },
+          );
+          yield* emit({
+            ...(yield* buildEventBase({ threadId, turnId })),
+            type: "turn.started",
+            payload: { model: context.session.model },
+          });
+
+          const compactExit = yield* runOpenCodeSdk("session.summarize", (signal) =>
+            context.client.session.summarize(
+              {
+                sessionID: context.openCodeSessionId,
+                ...parsedModel,
+                auto: false,
+              },
+              { signal },
+            ),
+          ).pipe(Effect.mapError(toRequestError), Effect.exit);
+          if (Exit.isSuccess(compactExit)) {
+            return;
+          }
+
+          context.manualCompactionTurnId = undefined;
+          if (context.activeTurnId === turnId) {
+            context.activeTurnId = undefined;
+            yield* updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
+            yield* emit({
+              ...(yield* buildEventBase({ threadId, turnId })),
+              type: "turn.aborted",
+              payload: { reason: Cause.pretty(compactExit.cause) },
+            });
+          }
+          return yield* Effect.failCause(compactExit.cause);
+        }),
+      );
+    });
+
     const interruptTurn: OpenCodeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
       function* (threadId, turnId) {
         const context = yield* ensureSessionContext(sessions, threadId);
@@ -3268,6 +3363,7 @@ export function makeOpenCodeAdapter(
       },
       startSession,
       sendTurn,
+      compactThread,
       interruptTurn,
       respondToRequest,
       respondToUserInput,

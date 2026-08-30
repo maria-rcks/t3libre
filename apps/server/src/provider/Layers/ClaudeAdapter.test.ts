@@ -713,7 +713,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("keeps compact commands intact when ultrathink is selected", () => {
+  it.effect("routes native compaction through Claude's compact command", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -729,12 +729,9 @@ describe("ClaudeAdapterLive", () => {
         runtimeMode: "full-access",
       });
 
-      yield* adapter.sendTurn({
-        threadId: session.threadId,
-        input: "/compact",
-        attachments: [],
-        modelSelection,
-      });
+      const compactThread = adapter.compactThread;
+      assert.ok(compactThread);
+      yield* compactThread(session.threadId);
 
       const promptText = yield* Effect.promise(() =>
         readFirstPromptText(harness.getLastCreateQueryInput()),
@@ -2242,6 +2239,25 @@ describe("ClaudeAdapterLive", () => {
           lastUsedTokens: 200,
           totalProcessedTokens: 450,
           maxTokens: 200000,
+        });
+      }
+      const compactedEvent = runtimeEvents.find((event) => event.type === "thread.state.changed");
+      assert.equal(compactedEvent?.type, "thread.state.changed");
+      if (compactedEvent?.type === "thread.state.changed") {
+        assert.deepEqual(compactedEvent.payload, {
+          state: "compacted",
+          beforeTokens: 200,
+          afterTokens: 40,
+          detail: {
+            type: "system",
+            subtype: "compact_boundary",
+            compact_metadata: {
+              pre_tokens: 200,
+              post_tokens: 40,
+            },
+            session_id: "sdk-session-compacted-usage",
+            uuid: "compact-boundary-usage",
+          },
         });
       }
       assert.equal(

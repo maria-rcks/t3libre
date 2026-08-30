@@ -144,6 +144,10 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
       Effect.void,
   );
 
+  const compactThread = vi.fn(
+    (_threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> => Effect.void,
+  );
+
   const respondToRequest = vi.fn(
     (
       _threadId: ThreadId,
@@ -221,6 +225,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     },
     startSession,
     sendTurn,
+    ...(provider === CODEX_DRIVER ? { compactThread } : {}),
     interruptTurn,
     respondToRequest,
     respondToUserInput,
@@ -257,6 +262,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     updateSession,
     startSession,
     sendTurn,
+    compactThread,
     interruptTurn,
     respondToRequest,
     respondToUserInput,
@@ -959,6 +965,9 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
 
+      yield* provider.compactThread(session.threadId);
+      assert.deepEqual(routing.codex.compactThread.mock.calls, [[session.threadId]]);
+
       yield* provider.interruptTurn({ threadId: session.threadId });
       assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId, undefined]]);
 
@@ -1019,6 +1028,50 @@ routing.layer("ProviderServiceLive routing", (it) => {
         assert.equal(startPayload.threadId, session.threadId);
       }
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect("falls back to the provider's native slash command for compaction", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-compact-cursor");
+      yield* provider.startSession(threadId, {
+        provider: CURSOR_DRIVER,
+        providerInstanceId: ProviderInstanceId.make("cursor"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      routing.cursor.sendTurn.mockClear();
+      const eventsFiber = yield* provider.streamEvents.pipe(
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* advanceTestClock(50);
+
+      yield* provider.compactThread(threadId);
+
+      assert.deepEqual(routing.cursor.sendTurn.mock.calls, [[{ threadId, input: "/compress" }]]);
+      routing.cursor.emit({
+        type: "turn.completed",
+        eventId: asEventId("evt-cursor-compact-completed"),
+        provider: CURSOR_DRIVER,
+        createdAt: "2026-01-01T00:00:01.000Z",
+        threadId,
+        turnId: asTurnId(`turn-${threadId}`),
+        payload: { state: "completed" },
+      });
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      assert.deepEqual(
+        events.map((event) => event.type),
+        ["turn.completed", "thread.state.changed"],
+      );
+      const compactedEvent = events[1];
+      assert.equal(compactedEvent?.type, "thread.state.changed");
+      if (compactedEvent?.type === "thread.state.changed") {
+        assert.equal(compactedEvent.payload.state, "compacted");
+      }
+      yield* provider.stopSession({ threadId });
     }),
   );
 

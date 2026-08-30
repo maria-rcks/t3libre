@@ -205,11 +205,7 @@ import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { useBrowserHistoryStore } from "~/browserHistoryStore";
 import { registerFaviconProjectForThread } from "~/browserFaviconStore";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
-import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  NO_PROVIDER_MODEL_SELECTION,
-} from "../providerInstances";
+import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
 import {
   useClientSettings,
   useClientSettingsHydrated,
@@ -325,7 +321,6 @@ import {
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import {
-  hasAvailableClaudeCompactionProvider,
   hasDismissedResumeCompaction,
   shouldOfferResumeCompaction,
 } from "./chat/ContextWindowMeter.logic";
@@ -2878,29 +2873,6 @@ function ChatViewContent(props: ChatViewProps) {
     activeThread?.modelSelection.instanceId ??
     activeProject?.defaultModelSelection?.instanceId ??
     null;
-  const compactionProviderAvailable = useMemo(
-    () =>
-      hasAvailableClaudeCompactionProvider({
-        providers: applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(providerStatuses),
-          settings,
-        ),
-        instanceId: activeProviderInstanceId,
-        lockedInstanceId: lockedProvider
-          ? (activeThread?.session?.providerInstanceId ??
-            activeThread?.modelSelection.instanceId ??
-            null)
-          : null,
-      }),
-    [
-      activeProviderInstanceId,
-      activeThread?.modelSelection.instanceId,
-      activeThread?.session?.providerInstanceId,
-      lockedProvider,
-      providerStatuses,
-      settings,
-    ],
-  );
   const activeProviderStatus = useMemo(() => {
     if (activeProviderInstanceId) {
       return (
@@ -2910,6 +2882,8 @@ function ChatViewContent(props: ChatViewProps) {
     const defaultInstanceId = defaultInstanceIdForDriver(selectedProvider);
     return providerStatuses.find((status) => status.instanceId === defaultInstanceId) ?? null;
   }, [activeProviderInstanceId, providerStatuses, selectedProvider]);
+  const manualCompactionProviderAvailable =
+    activeProviderStatus?.slashCommands.some((command) => command.name === "compact") ?? false;
   const [resumeCompactionPermanentlyDismissed, setResumeCompactionPermanentlyDismissed] =
     useLocalStorage(
       `t3code:resume-compaction-dismissed:${environmentId}:${activeProviderInstanceId ?? "claudeAgent"}`,
@@ -5018,8 +4992,7 @@ function ChatViewContent(props: ChatViewProps) {
     !activeThread ||
     !activeProject ||
     !isServerThread ||
-    selectedProvider !== "claudeAgent" ||
-    !compactionProviderAvailable ||
+    !manualCompactionProviderAvailable ||
     isWorking ||
     threadDetailLoading ||
     isPreparingWorktree ||
@@ -5034,8 +5007,8 @@ function ChatViewContent(props: ChatViewProps) {
       ? "Send or clear your draft before compacting"
       : !activeProject
         ? "Choose a project before compacting"
-        : !compactionProviderAvailable
-          ? "Enable a Claude provider before compacting"
+        : !manualCompactionProviderAvailable
+          ? "Compaction is unavailable for this provider"
           : "Compacting is unavailable right now"
     : null;
   const resumeCompactionBannerItem = useMemo<ComposerBannerStackItem | null>(() => {

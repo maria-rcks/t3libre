@@ -1229,9 +1229,13 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    yield* providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+    const isCompactCommand =
+      (message.attachments?.length ?? 0) === 0 && message.text.trim().toLowerCase() === "/compact";
+    yield* (
+      isCompactCommand
+        ? providerService.compactThread(event.payload.threadId)
+        : providerService.sendTurn(sendTurnRequest.value).pipe(Effect.asVoid)
+    ).pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (

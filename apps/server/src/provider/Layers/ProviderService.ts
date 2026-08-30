@@ -10,6 +10,7 @@
  * @module ProviderServiceLive
  */
 import {
+  EventId,
   ModelSelection,
   NonNegativeInt,
   ThreadId,
@@ -232,6 +233,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const revokeMcpCredential =
     options?.revokeMcpCredential ?? McpSessionRegistry.revokeActiveMcpThread;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+  const pendingFallbackCompactions = new Set<ThreadId>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   /**
    * Attach the `t3-code` MCP server to the session that is about to start.
@@ -344,14 +346,42 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
     event: ProviderRuntimeEvent,
   ): Effect.Effect<void> =>
-    Effect.sync(() => correlateRuntimeEventWithInstance(source, event)).pipe(
-      Effect.flatMap((canonicalEvent) =>
-        increment(providerRuntimeEventsTotal, {
-          provider: canonicalEvent.provider,
-          eventType: canonicalEvent.type,
-        }).pipe(Effect.andThen(publishRuntimeEvent(canonicalEvent))),
-      ),
-    );
+    Effect.gen(function* () {
+      const canonicalEvent = yield* Effect.sync(() =>
+        correlateRuntimeEventWithInstance(source, event),
+      );
+      yield* increment(providerRuntimeEventsTotal, {
+        provider: canonicalEvent.provider,
+        eventType: canonicalEvent.type,
+      });
+      yield* publishRuntimeEvent(canonicalEvent);
+
+      const fallbackCompactionSettled =
+        (canonicalEvent.type === "turn.completed" || canonicalEvent.type === "turn.aborted") &&
+        pendingFallbackCompactions.delete(canonicalEvent.threadId);
+      if (
+        !fallbackCompactionSettled ||
+        canonicalEvent.type !== "turn.completed" ||
+        canonicalEvent.payload.state !== "completed"
+      ) {
+        return;
+      }
+
+      const compactedEvent = {
+        ...canonicalEvent,
+        eventId: EventId.make(`${canonicalEvent.eventId}:context-compaction`),
+        type: "thread.state.changed",
+        payload: {
+          state: "compacted",
+          detail: { source: "provider-native-command" },
+        },
+      } satisfies ProviderRuntimeEvent;
+      yield* increment(providerRuntimeEventsTotal, {
+        provider: compactedEvent.provider,
+        eventType: compactedEvent.type,
+      });
+      yield* publishRuntimeEvent(compactedEvent);
+    });
 
   // `subscribedAdapters` is our source-of-truth for "which instance adapters
   // are currently wired into the runtime event bus". It both tracks the set
@@ -825,6 +855,35 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const compactThread: ProviderServiceMethod<"compactThread"> = Effect.fn("compactThread")(
+    function* (threadId) {
+      const routed = yield* resolveRoutableSession({
+        threadId,
+        operation: "ProviderService.compactThread",
+        allowRecovery: true,
+      });
+      yield* Effect.annotateCurrentSpan({
+        "provider.operation": "compact-thread",
+        "provider.kind": routed.adapter.provider,
+        "provider.thread_id": threadId,
+      });
+      yield* McpSessionRegistry.touchActiveMcpThread(threadId);
+      if (routed.adapter.compactThread) {
+        yield* routed.adapter.compactThread(routed.threadId);
+      } else {
+        const input = routed.adapter.provider === "cursor" ? "/compress" : "/compact";
+        pendingFallbackCompactions.add(threadId);
+        yield* sendTurn({ threadId, input }).pipe(
+          Effect.tapError(() => Effect.sync(() => pendingFallbackCompactions.delete(threadId))),
+          Effect.asVoid,
+        );
+      }
+      yield* analytics.record("provider.thread.compacted", {
+        provider: routed.adapter.provider,
+      });
+    },
+  );
+
   const interruptTurn: ProviderServiceMethod<"interruptTurn"> = Effect.fn("interruptTurn")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -1220,6 +1279,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   return {
     startSession,
     sendTurn,
+    compactThread,
     interruptTurn,
     respondToRequest,
     respondToUserInput,

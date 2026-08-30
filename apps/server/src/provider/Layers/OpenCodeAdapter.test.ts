@@ -79,6 +79,7 @@ const runtimeMock = {
     messageCalls: [] as Array<{ sessionID: string; messageID: string }>,
     messageFailures: 0,
     promptCalls: [] as Array<unknown>,
+    summarizeCalls: [] as Array<unknown>,
     promptAsyncError: null as Error | null,
     promptAsyncImplementation: null as (() => Promise<void>) | null,
     autoPromptEcho: true,
@@ -129,6 +130,7 @@ const runtimeMock = {
     this.state.messageCalls.length = 0;
     this.state.messageFailures = 0;
     this.state.promptCalls.length = 0;
+    this.state.summarizeCalls.length = 0;
     this.state.promptAsyncError = null;
     this.state.promptAsyncImplementation = null;
     this.state.autoPromptEcho = true;
@@ -312,6 +314,10 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
               },
             });
           }
+        },
+        summarize: async (input: unknown) => {
+          runtimeMock.state.summarizeCalls.push(input);
+          return { data: true };
         },
         messages: async () => ({ data: runtimeMock.state.messages }),
         message: async ({ sessionID, messageID }: { sessionID: string; messageID: string }) => {
@@ -943,6 +949,65 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         sessionId: "ses_persisted",
       });
 
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("compacts through the native OpenCode session API", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-compact");
+      const compactedEvent = promiseWithResolvers<unknown>();
+      runtimeMock.state.subscribedEvents = [compactedEvent.promise];
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+      });
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.type === "thread.state.changed" ||
+            ((event.type === "turn.started" || event.type === "turn.completed") &&
+              event.turnId?.startsWith("opencode-compact-") === true),
+        ),
+        Stream.take(3),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const compactThread = adapter.compactThread;
+      NodeAssert.ok(compactThread);
+
+      yield* compactThread(threadId);
+      NodeAssert.deepEqual(runtimeMock.state.summarizeCalls, [
+        {
+          sessionID: "http://127.0.0.1:9999/session",
+          providerID: "anthropic",
+          modelID: "sonnet",
+          auto: false,
+        },
+      ]);
+      compactedEvent.resolve({
+        id: "evt-session-compacted",
+        type: "session.compacted",
+        properties: { sessionID: "http://127.0.0.1:9999/session" },
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        ["turn.started", "thread.state.changed", "turn.completed"],
+      );
+      const compacted = events.find((event) => event.type === "thread.state.changed");
+      NodeAssert.equal(compacted?.type, "thread.state.changed");
+      if (compacted?.type === "thread.state.changed") {
+        NodeAssert.equal(compacted.payload.state, "compacted");
+      }
       yield* adapter.stopSession(threadId);
     }),
   );
