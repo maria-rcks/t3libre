@@ -48,7 +48,6 @@ function PullRequestRowImpl({
   onSelect: (entry: EnvironmentPullRequestEntry) => void;
 }) {
   const { Icon, providerName } = getSourceControlPresentationForKind(entry.provider);
-  const changedLines = entry.additions + entry.deletions;
   return (
     <button
       type="button"
@@ -137,14 +136,7 @@ function PullRequestRowImpl({
       </span>
       <span className="flex shrink-0 flex-col items-end gap-0.5 text-xs text-muted-foreground/70 tabular-nums">
         <span>{formatRelativeTimeLabel(entry.updatedAt)}</span>
-        {changedLines > 0 ? (
-          <span className="flex items-baseline gap-2">
-            <span>
-              {changedLines.toLocaleString()} line{changedLines === 1 ? "" : "s"}
-            </span>
-            <PullRequestDiffStat additions={entry.additions} deletions={entry.deletions} />
-          </span>
-        ) : null}
+        <PullRequestDiffStat additions={entry.additions} deletions={entry.deletions} />
       </span>
     </button>
   );
