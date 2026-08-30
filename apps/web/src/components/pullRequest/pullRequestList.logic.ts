@@ -83,7 +83,8 @@ export function collectPullRequestListFacets(
 ) {
   const authors = new Map<string, PullRequestAuthorFacet>();
   const labels = new Map<string, PullRequestLabelFacet>();
-  for (const entry of entries) {
+  const uniqueEntries = new Map(entries.map((entry) => [pullRequestEntryKey(entry), entry]));
+  for (const entry of uniqueEntries.values()) {
     const inState = state === "all" || entry.state === state;
     if (entry.author !== null) {
       const key = normalize(entry.author.login);

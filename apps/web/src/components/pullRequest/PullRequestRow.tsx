@@ -16,20 +16,10 @@ import {
 } from "./pullRequestPresentation";
 
 function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry["labels"] }) {
-  const shown = labels.slice(0, 2);
   return (
-    <span className="flex min-w-0 shrink items-center gap-1 overflow-hidden">
-      {shown.map((label) => (
-        <span
-          key={label.name}
-          className="inline-flex max-w-32 min-w-0 items-center rounded-full border border-border/60 bg-muted/35 px-1.5 py-px text-[10px] leading-4 text-muted-foreground"
-        >
-          <span className="truncate">{label.name}</span>
-        </span>
-      ))}
-      {labels.length > shown.length ? (
-        <span className="shrink-0 text-[10px]">+{labels.length - shown.length}</span>
-      ) : null}
+    <span className="inline-flex max-w-40 min-w-0 items-center gap-1 rounded-full border border-border/60 bg-muted/35 px-1.5 py-px text-[10px] leading-4 text-muted-foreground">
+      <span className="truncate">{labels[0]?.name}</span>
+      {labels.length > 1 ? <span className="shrink-0">+{labels.length - 1}</span> : null}
     </span>
   );
 }

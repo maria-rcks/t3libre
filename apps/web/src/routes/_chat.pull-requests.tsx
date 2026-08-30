@@ -87,6 +87,7 @@ import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../
 import { SidebarInset } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { toSortableTimestamp } from "../lib/threadSort";
 import {
   selectActiveRightPanelSurface,
   selectSelectedRightPanelSurface,
@@ -1037,11 +1038,16 @@ function PullRequestsRouteView() {
 
   const viewers = baselineQuery.data?.viewers ?? listData?.viewers ?? EMPTY_VIEWERS;
   const listErrors = baselineQuery.data?.errors ?? listData?.errors ?? [];
-  const facetEntries =
-    facetQuery.data?.entries ?? baselineQuery.data?.entries ?? listData?.entries ?? [];
   const facets = useMemo(
-    () => collectPullRequestListFacets(facetEntries, search.state),
-    [facetEntries, search.state],
+    () =>
+      collectPullRequestListFacets(
+        [
+          ...(facetQuery.data?.entries ?? []),
+          ...(baselineQuery.data?.entries ?? listData?.entries ?? []),
+        ],
+        search.state,
+      ),
+    [baselineQuery.data?.entries, facetQuery.data?.entries, listData?.entries, search.state],
   );
 
   /** The hosts that narrowed the listing themselves, so their answer is not narrowed again. */
@@ -1250,7 +1256,8 @@ function PullRequestsRouteView() {
           return (
             measured ||
             (sort === "largest" ? -sized : sized) ||
-            right.updatedAt.localeCompare(left.updatedAt)
+            (toSortableTimestamp(right.updatedAt) ?? Number.NEGATIVE_INFINITY) -
+              (toSortableTimestamp(left.updatedAt) ?? Number.NEGATIVE_INFINITY)
           );
         }),
       },

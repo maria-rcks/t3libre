@@ -151,8 +151,6 @@ const CHECKS_OPTIONS = [
   { value: "failing", label: "Failing", Icon: CircleXIcon },
 ] as const satisfies ReadonlyArray<PullRequestFilterOption<string>>;
 
-const AUTHOR_RESULT_LIMIT = 10;
-
 function PullRequestFilterRadioGroup<Value extends string>({
   label,
   value,
@@ -247,14 +245,17 @@ function PullRequestAuthorFilter({
 }) {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
-  const visible = options
-    .filter(
+  const selected = options.find((option) => option.actor.login === value);
+  const visible = [
+    ...(selected ? [selected] : []),
+    ...options.filter(
       (option) =>
-        needle.length === 0 ||
-        option.actor.login.toLowerCase().includes(needle) ||
-        option.actor.name?.toLowerCase().includes(needle),
-    )
-    .slice(0, AUTHOR_RESULT_LIMIT);
+        option !== selected &&
+        (needle.length === 0 ||
+          option.actor.login.toLowerCase().includes(needle) ||
+          option.actor.name?.toLowerCase().includes(needle)),
+    ),
+  ].slice(0, 10);
   return (
     <MenuSub>
       <MenuSubTrigger>
