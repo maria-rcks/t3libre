@@ -713,11 +713,8 @@ describe("ProviderCommandReactor", () => {
           return (
             readModel.threads
               .find((entry) => entry.id === ThreadId.make("thread-1"))
-              ?.activities.some(
-                (activity) =>
-                  activity.summary === "Context compaction failed" &&
-                  activity.payload.detail === rejection.detail,
-              ) ?? false
+              ?.activities.some((activity) => activity.summary === "Context compaction failed") ??
+            false
           );
         }),
       );
@@ -732,6 +729,10 @@ describe("ProviderCommandReactor", () => {
         turnId: asTurnId("turn-running"),
         state: "running",
       });
+      expect(
+        thread?.activities.find((activity) => activity.summary === "Context compaction failed")
+          ?.payload,
+      ).toEqual({ detail: rejection.detail });
     }),
   );
 
