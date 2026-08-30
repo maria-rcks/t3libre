@@ -48,6 +48,7 @@ import {
 
 import { GitManagerError, GitPullRequestMaterializationError } from "@t3tools/contracts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import { readThemeFileGuarded as readFileGuarded } from "../environmentTheme.ts";
 import {
   conventionalCommitsTextGenerationPolicy,
   customTextGenerationPolicy,
@@ -618,18 +619,7 @@ export const make = Effect.gen(function* () {
       if (!instructionPath.startsWith(`${root}${path.sep}`)) {
         return "";
       }
-      return yield* Effect.scoped(
-        Effect.gen(function* () {
-          const file = yield* fileSystem.open(instructionPath, { flag: "r" });
-          if ((yield* file.stat).type !== "File") {
-            return "";
-          }
-          return Option.match(yield* file.readAlloc(20_000), {
-            onNone: () => "",
-            onSome: (contents) => new TextDecoder().decode(contents).trim(),
-          });
-        }),
-      );
+      return readFileGuarded(instructionPath, 20_000)?.trim() ?? "";
     }).pipe(Effect.orElseSucceed(() => ""));
 
   const readRecentCommitSubjects = (cwd: string) =>
