@@ -329,12 +329,6 @@ function PullRequestLabelFilter({
         </span>
       </MenuSubTrigger>
       <MenuSubPopup className="w-72">
-        {value.length > 0 ? (
-          <>
-            <MenuItem onClick={() => onChange([])}>Clear selected labels</MenuItem>
-            <MenuSeparator />
-          </>
-        ) : null}
         {options.length === 0 ? (
           <MenuItem disabled>No labels in this view</MenuItem>
         ) : (
