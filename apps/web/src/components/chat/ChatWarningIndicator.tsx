@@ -1,12 +1,6 @@
 import { type ContextMenuItem, type EnvironmentId, type ServerProvider } from "@t3tools/contracts";
 import { CircleAlertIcon } from "lucide-react";
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useRef,
-  type MouseEvent as ReactMouseEvent,
-} from "react";
+import { memo, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
 
 import { readLocalApi } from "~/localApi";
 import { formatProviderDriverKindLabel } from "~/providerModels";
