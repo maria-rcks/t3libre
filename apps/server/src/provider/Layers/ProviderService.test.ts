@@ -164,20 +164,18 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     ): Effect.Effect<void, ProviderAdapterError> => Effect.void,
   );
 
-  const stopSession = vi.fn(
-    (threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> =>
-      Effect.sync(() => {
-        sessions.delete(threadId);
-      }),
+  const stopSession = vi.fn((threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> =>
+    Effect.sync(() => {
+      sessions.delete(threadId);
+    }),
   );
 
-  const listSessions = vi.fn(
-    (): Effect.Effect<ReadonlyArray<ProviderSession>> =>
-      Effect.sync(() => Array.from(sessions.values())),
+  const listSessions = vi.fn((): Effect.Effect<ReadonlyArray<ProviderSession>> =>
+    Effect.sync(() => Array.from(sessions.values())),
   );
 
-  const hasSession = vi.fn(
-    (threadId: ThreadId): Effect.Effect<boolean> => Effect.succeed(sessions.has(threadId)),
+  const hasSession = vi.fn((threadId: ThreadId): Effect.Effect<boolean> =>
+    Effect.succeed(sessions.has(threadId)),
   );
 
   const readThread = vi.fn(
@@ -211,11 +209,10 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
       Effect.succeed({ feedbackId: `feedback-${input.threadId}` }),
   );
 
-  const stopAll = vi.fn(
-    (): Effect.Effect<void, ProviderAdapterError> =>
-      Effect.sync(() => {
-        sessions.clear();
-      }),
+  const stopAll = vi.fn((): Effect.Effect<void, ProviderAdapterError> =>
+    Effect.sync(() => {
+      sessions.clear();
+    }),
   );
 
   const adapter: ProviderAdapterShape<ProviderAdapterError> = {
@@ -1076,6 +1073,66 @@ routing.layer("ProviderServiceLive routing", (it) => {
         ["turn.completed", "turn.completed", "thread.state.changed"],
       );
       const compactedEvent = events[2];
+      assert.equal(compactedEvent?.type, "thread.state.changed");
+      if (compactedEvent?.type === "thread.state.changed") {
+        assert.equal(compactedEvent.payload.state, "compacted");
+      }
+      yield* provider.stopSession({ threadId });
+    }),
+  );
+
+  it.effect("correlates fallback completion emitted before sendTurn returns", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-compact-cursor-inline-completion");
+      const turnId = asTurnId(`turn-${threadId}`);
+      yield* provider.startSession(threadId, {
+        provider: CURSOR_DRIVER,
+        providerInstanceId: ProviderInstanceId.make("cursor"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const canonicalCompletionObserved = yield* Deferred.make<void>();
+      const eventsFiber = yield* provider.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "turn.completed" || event.type === "thread.state.changed"),
+        ),
+        Stream.tap((event) =>
+          event.type === "turn.completed"
+            ? Deferred.succeed(canonicalCompletionObserved, undefined)
+            : Effect.void,
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* advanceTestClock(50);
+      routing.cursor.sendTurn.mockImplementationOnce((input) =>
+        Effect.gen(function* () {
+          routing.cursor.emit({
+            type: "turn.completed",
+            eventId: asEventId("evt-cursor-inline-compact-completed"),
+            provider: CURSOR_DRIVER,
+            createdAt: "2026-01-01T00:00:01.000Z",
+            threadId,
+            turnId,
+            payload: { state: "completed" },
+          });
+          yield* Deferred.await(canonicalCompletionObserved);
+          return { threadId: input.threadId, turnId };
+        }),
+      );
+
+      yield* provider.compactThread(threadId);
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      assert.deepEqual(
+        events.map((event) => event.type),
+        ["turn.completed", "thread.state.changed"],
+      );
+      const compactedEvent = events[1];
       assert.equal(compactedEvent?.type, "thread.state.changed");
       if (compactedEvent?.type === "thread.state.changed") {
         assert.equal(compactedEvent.payload.state, "compacted");

@@ -1026,6 +1026,24 @@ export function makeOpenCodeAdapter(
       }
     });
 
+    const emitOpenCodeTurnCompleted = Effect.fn("emitOpenCodeTurnCompleted")(function* (
+      context: OpenCodeSessionContext,
+      turnId: TurnId,
+      raw: unknown,
+    ) {
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId,
+          raw,
+        })),
+        type: "turn.completed",
+        payload: {
+          state: "completed",
+        },
+      });
+    });
+
     const completeOpenCodeTurn = Effect.fn("completeOpenCodeTurn")(function* (
       context: OpenCodeSessionContext,
       turnId: TurnId,
@@ -1067,17 +1085,7 @@ export function makeOpenCodeAdapter(
       if (pendingIdleReconciliation?.fiber) {
         yield* Fiber.interrupt(pendingIdleReconciliation.fiber);
       }
-      yield* emit({
-        ...(yield* buildEventBase({
-          threadId: context.session.threadId,
-          turnId,
-          raw,
-        })),
-        type: "turn.completed",
-        payload: {
-          state: "completed",
-        },
-      });
+      yield* emitOpenCodeTurnCompleted(context, turnId, raw);
     });
 
     const scheduleIdleReconciliation = Effect.fn("scheduleIdleReconciliation")(function* (
@@ -1975,7 +1983,10 @@ export function makeOpenCodeAdapter(
         return;
       }
 
-      const turnId = context.activeTurnId;
+      const turnId =
+        event.type === "session.compacted"
+          ? (context.manualCompactionTurnId ?? context.activeTurnId)
+          : context.activeTurnId;
       yield* writeNativeEventBestEffort(context.session.threadId, {
         observedAt: yield* nowIso,
         event: {
@@ -2037,7 +2048,11 @@ export function makeOpenCodeAdapter(
           });
           if (turnId !== undefined && context.manualCompactionTurnId === turnId) {
             context.manualCompactionTurnId = undefined;
-            yield* completeOpenCodeTurn(context, turnId, context.promptGeneration, event);
+            if (context.activeTurnId === turnId) {
+              yield* completeOpenCodeTurn(context, turnId, context.promptGeneration, event);
+            } else {
+              yield* emitOpenCodeTurnCompleted(context, turnId, event);
+            }
           }
           break;
         }
@@ -2728,7 +2743,10 @@ export function makeOpenCodeAdapter(
           }
           // A sendTurn while a turn is active is a steer. OpenCode queues the
           // prompt into the running session, so the active turn id is reused.
-          const steeringTurnId = context.activeTurnId;
+          const activeTurnIsManualCompaction =
+            context.activeTurnId !== undefined &&
+            context.activeTurnId === context.manualCompactionTurnId;
+          const steeringTurnId = activeTurnIsManualCompaction ? undefined : context.activeTurnId;
           const turnId = steeringTurnId ?? freshTurnId;
           const agent = getModelSelectionStringOptionValue(modelSelection, "agent");
           const variant = getModelSelectionStringOptionValue(modelSelection, "variant");
@@ -3028,6 +3046,9 @@ export function makeOpenCodeAdapter(
 
       yield* context.promptSemaphore.withPermit(
         Effect.gen(function* () {
+          if (sessions.get(threadId) !== context || (yield* Ref.get(context.stopped))) {
+            return yield* Effect.interrupt;
+          }
           if (context.activeTurnId !== undefined) {
             return yield* new ProviderAdapterValidationError({
               provider: PROVIDER,
@@ -3059,7 +3080,22 @@ export function makeOpenCodeAdapter(
               },
               { signal },
             ),
-          ).pipe(Effect.mapError(toRequestError), Effect.exit);
+          ).pipe(
+            Effect.timeout("10 seconds"),
+            Effect.catchTags({
+              OpenCodeRuntimeError: (cause) => Effect.fail(toRequestError(cause)),
+              TimeoutError: (cause) =>
+                Effect.fail(
+                  new ProviderAdapterRequestError({
+                    provider: PROVIDER,
+                    method: "session.summarize",
+                    detail: "OpenCode session compaction did not complete within 10 seconds.",
+                    cause,
+                  }),
+                ),
+            }),
+            Effect.exit,
+          );
           if (Exit.isSuccess(compactExit)) {
             return;
           }

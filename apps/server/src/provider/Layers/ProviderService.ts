@@ -29,6 +29,7 @@ import {
 } from "@t3tools/contracts";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -235,6 +236,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     options?.revokeMcpCredential ?? McpSessionRegistry.revokeActiveMcpThread;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
   const pendingFallbackCompactions = new Set<TurnId>();
+  const registeringFallbackCompactions = new Map<ThreadId, Set<Deferred.Deferred<void>>>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   /**
    * Attach the `t3-code` MCP server to the session that is about to start.
@@ -356,6 +358,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         eventType: canonicalEvent.type,
       });
       yield* publishRuntimeEvent(canonicalEvent);
+
+      if (
+        (canonicalEvent.type === "turn.completed" || canonicalEvent.type === "turn.aborted") &&
+        canonicalEvent.turnId !== undefined
+      ) {
+        const registrations = registeringFallbackCompactions.get(canonicalEvent.threadId);
+        if (registrations !== undefined) {
+          yield* Effect.forEach([...registrations], Deferred.await, { discard: true });
+        }
+      }
 
       const fallbackCompactionSettled =
         (canonicalEvent.type === "turn.completed" || canonicalEvent.type === "turn.aborted") &&
@@ -874,8 +886,33 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* routed.adapter.compactThread(routed.threadId);
       } else {
         const input = routed.adapter.provider === "cursor" ? "/compress" : "/compact";
-        const turn = yield* sendTurn({ threadId, input });
-        pendingFallbackCompactions.add(turn.turnId);
+        const registration = yield* Deferred.make<void>();
+        yield* Effect.sync(() => {
+          const registrations = registeringFallbackCompactions.get(threadId) ?? new Set();
+          registrations.add(registration);
+          registeringFallbackCompactions.set(threadId, registrations);
+        });
+        yield* sendTurn({ threadId, input }).pipe(
+          Effect.tap((turn) =>
+            Effect.sync(() => {
+              pendingFallbackCompactions.add(turn.turnId);
+            }),
+          ),
+          Effect.ensuring(
+            Deferred.succeed(registration, undefined).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  const registrations = registeringFallbackCompactions.get(threadId);
+                  registrations?.delete(registration);
+                  if (registrations?.size === 0) {
+                    registeringFallbackCompactions.delete(threadId);
+                  }
+                }),
+              ),
+              Effect.asVoid,
+            ),
+          ),
+        );
       }
       yield* analytics.record("provider.thread.compacted", {
         provider: routed.adapter.provider,

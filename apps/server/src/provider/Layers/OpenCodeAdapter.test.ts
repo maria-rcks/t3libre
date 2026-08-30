@@ -80,6 +80,8 @@ const runtimeMock = {
     messageFailures: 0,
     promptCalls: [] as Array<unknown>,
     summarizeCalls: [] as Array<unknown>,
+    summarizeSignals: [] as AbortSignal[],
+    summarizeImplementation: null as ((signal?: AbortSignal) => Promise<void>) | null,
     promptAsyncError: null as Error | null,
     promptAsyncImplementation: null as (() => Promise<void>) | null,
     autoPromptEcho: true,
@@ -131,6 +133,8 @@ const runtimeMock = {
     this.state.messageFailures = 0;
     this.state.promptCalls.length = 0;
     this.state.summarizeCalls.length = 0;
+    this.state.summarizeSignals.length = 0;
+    this.state.summarizeImplementation = null;
     this.state.promptAsyncError = null;
     this.state.promptAsyncImplementation = null;
     this.state.autoPromptEcho = true;
@@ -315,8 +319,12 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             });
           }
         },
-        summarize: async (input: unknown) => {
+        summarize: async (input: unknown, options?: { signal?: AbortSignal }) => {
           runtimeMock.state.summarizeCalls.push(input);
+          if (options?.signal) {
+            runtimeMock.state.summarizeSignals.push(options.signal);
+          }
+          await runtimeMock.state.summarizeImplementation?.(options?.signal);
           return { data: true };
         },
         messages: async () => ({ data: runtimeMock.state.messages }),
@@ -1008,6 +1016,192 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       if (compacted?.type === "thread.state.changed") {
         NodeAssert.equal(compacted.payload.state, "compacted");
       }
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("does not compact a stopped context after waiting for the prompt permit", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-compact-stopped-context");
+      const promptStarted = promiseWithResolvers<void>();
+      const promptRelease = promiseWithResolvers<void>();
+      runtimeMock.state.promptAsyncImplementation = async () => {
+        promptStarted.resolve(undefined);
+        await promptRelease.promise;
+      };
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+      });
+      const sendFiber = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "Hold the prompt permit",
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("opencode"),
+            "anthropic/sonnet",
+          ),
+        })
+        .pipe(Effect.exit, Effect.forkChild);
+      yield* Effect.promise(() => promptStarted.promise);
+      const compactThread = adapter.compactThread;
+      NodeAssert.ok(compactThread);
+      const compactFiber = yield* compactThread(threadId).pipe(Effect.exit, Effect.forkChild);
+      yield* Effect.yieldNow;
+      NodeAssert.equal(runtimeMock.state.summarizeCalls.length, 0);
+
+      yield* adapter.stopSession(threadId);
+      promptRelease.resolve(undefined);
+      const compactExit = yield* Fiber.join(compactFiber);
+      yield* Fiber.join(sendFiber);
+
+      NodeAssert.equal(Exit.isFailure(compactExit), true);
+      NodeAssert.equal(runtimeMock.state.summarizeCalls.length, 0);
+      NodeAssert.equal(yield* adapter.hasSession(threadId), false);
+    }),
+  );
+
+  it.effect("times out a stalled native compaction and releases the prompt permit", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-compact-timeout");
+      const summarizeStarted = promiseWithResolvers<void>();
+      runtimeMock.state.summarizeImplementation = async () => {
+        summarizeStarted.resolve(undefined);
+        await new Promise<void>(() => {});
+      };
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+      });
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "turn.started" || event.type === "turn.aborted"),
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const compactThread = adapter.compactThread;
+      NodeAssert.ok(compactThread);
+      const compactFiber = yield* compactThread(threadId).pipe(Effect.flip, Effect.forkChild);
+      yield* Effect.promise(() => summarizeStarted.promise);
+
+      yield* advanceTestClock(9_999);
+      NodeAssert.equal(compactFiber.pollUnsafe(), undefined);
+      NodeAssert.equal(runtimeMock.state.summarizeSignals[0]?.aborted, false);
+      yield* advanceTestClock(1);
+
+      const error = yield* Fiber.join(compactFiber);
+      NodeAssert.equal(error._tag, "ProviderAdapterRequestError");
+      if (error._tag !== "ProviderAdapterRequestError") {
+        throw new Error("Unexpected error type");
+      }
+      NodeAssert.equal(
+        error.detail,
+        "OpenCode session compaction did not complete within 10 seconds.",
+      );
+      NodeAssert.equal(runtimeMock.state.summarizeSignals[0]?.aborted, true);
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        ["turn.started", "turn.aborted"],
+      );
+      const sessions = yield* adapter.listSessions();
+      const session = sessions.find((candidate) => candidate.threadId === threadId);
+      NodeAssert.equal(session?.status, "ready");
+      NodeAssert.equal(session?.activeTurnId, undefined);
+
+      const nextTurn = yield* adapter.sendTurn({
+        threadId,
+        input: "Continue after compaction timeout",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+      });
+      NodeAssert.equal(nextTurn.threadId, threadId);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("keeps a prompt active when manual compaction completes late", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-late-manual-compact");
+      const compactedEvent = promiseWithResolvers<unknown>();
+      runtimeMock.state.subscribedEvents = [compactedEvent.promise];
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+      });
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "turn.started" ||
+              event.type === "turn.completed" ||
+              event.type === "thread.state.changed"),
+        ),
+        Stream.take(4),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const compactThread = adapter.compactThread;
+      NodeAssert.ok(compactThread);
+      yield* compactThread(threadId);
+      const promptTurn = yield* adapter.sendTurn({
+        threadId,
+        input: "Continue after compaction",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+      });
+
+      compactedEvent.resolve({
+        id: "evt-session-compacted-after-prompt",
+        type: "session.compacted",
+        properties: { sessionID: "http://127.0.0.1:9999/session" },
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        ["turn.started", "turn.started", "thread.state.changed", "turn.completed"],
+      );
+      const compactTurnId = events[0]?.turnId;
+      NodeAssert.ok(compactTurnId);
+      NodeAssert.notEqual(promptTurn.turnId, compactTurnId);
+      NodeAssert.equal(events[1]?.turnId, promptTurn.turnId);
+      NodeAssert.equal(events[2]?.turnId, compactTurnId);
+      NodeAssert.equal(events[3]?.turnId, compactTurnId);
+      const sessions = yield* adapter.listSessions();
+      const session = sessions.find((candidate) => candidate.threadId === threadId);
+      NodeAssert.equal(session?.status, "running");
+      NodeAssert.equal(session?.activeTurnId, promptTurn.turnId);
+
       yield* adapter.stopSession(threadId);
     }),
   );

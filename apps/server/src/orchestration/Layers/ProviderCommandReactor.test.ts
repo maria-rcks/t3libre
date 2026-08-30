@@ -154,6 +154,7 @@ describe("ProviderCommandReactor", () => {
     readonly serverActivation?: Effect.Effect<void>;
     readonly interruptTurnEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly stopSessionEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
+    readonly compactThreadEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -239,7 +240,7 @@ describe("ProviderCommandReactor", () => {
         turnId: asTurnId("turn-1"),
       }),
     );
-    const compactThread = vi.fn((_: ThreadId) => Effect.void);
+    const compactThread = vi.fn((_: ThreadId) => input?.compactThreadEffect?.() ?? Effect.void);
     const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void);
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
     const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
@@ -645,6 +646,92 @@ describe("ProviderCommandReactor", () => {
       const readModel = yield* Effect.promise(() => harness.readModel());
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
       expect(thread?.session?.status).toBe("ready");
+    }),
+  );
+
+  effectIt.effect("preserves a running turn when /compact is rejected", () =>
+    Effect.gen(function* () {
+      const rejection = new ProviderAdapterRequestError({
+        provider: ProviderDriverKind.make("codex"),
+        method: "thread/compact/start",
+        detail: "Cannot compact while a turn is running.",
+      });
+      const harness = yield* Effect.promise(() =>
+        createHarness({ compactThreadEffect: () => Effect.fail(rejection) }),
+      );
+      const now = "2026-01-01T00:00:00.000Z";
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-before-compact-rejection"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-before-compact-rejection"),
+          role: "user",
+          text: "Keep this turn running",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      });
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-running-before-compact"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-running"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      });
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-compact-while-running"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-compact-while-running"),
+          role: "user",
+          text: "/compact",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      });
+
+      yield* Effect.promise(() =>
+        waitFor(async () => {
+          const readModel = await harness.readModel();
+          return (
+            readModel.threads
+              .find((entry) => entry.id === ThreadId.make("thread-1"))
+              ?.activities.some(
+                (activity) =>
+                  activity.summary === "Context compaction failed" &&
+                  activity.payload.detail === rejection.detail,
+              ) ?? false
+          );
+        }),
+      );
+      const readModel = yield* Effect.promise(() => harness.readModel());
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      expect(thread?.session).toMatchObject({
+        status: "running",
+        activeTurnId: asTurnId("turn-running"),
+        lastError: null,
+      });
+      expect(thread?.latestTurn).toMatchObject({
+        turnId: asTurnId("turn-running"),
+        state: "running",
+      });
     }),
   );
 

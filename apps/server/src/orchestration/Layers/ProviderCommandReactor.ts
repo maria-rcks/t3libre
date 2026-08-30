@@ -1211,6 +1211,52 @@ const make = Effect.gen(function* () {
         ),
       );
 
+    const handleCompactionFailure = (cause: Cause.Cause<unknown>) => {
+      if (Cause.hasInterruptsOnly(cause)) {
+        return Effect.void;
+      }
+      const detail = formatFailureDetail(cause);
+      return Effect.gen(function* () {
+        const latestThread = yield* resolveThread(event.payload.threadId);
+        const latestSession = latestThread?.session;
+        if (latestSession?.status === "running" && latestSession.activeTurnId !== null) {
+          // Consume the pending turn-start projection without disturbing the
+          // provider turn that rejected compaction because it is still live.
+          yield* setThreadSession({
+            threadId: event.payload.threadId,
+            session: latestSession,
+            createdAt: event.payload.createdAt,
+          });
+        } else {
+          yield* setThreadSessionErrorOnTurnStartFailure({
+            threadId: event.payload.threadId,
+            detail,
+            createdAt: event.payload.createdAt,
+          });
+        }
+        yield* appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.turn.start.failed",
+          summary: "Context compaction failed",
+          detail,
+          turnId: latestSession?.activeTurnId ?? null,
+          createdAt: event.payload.createdAt,
+        });
+      });
+    };
+
+    const recoverCompactionFailure = (cause: Cause.Cause<unknown>) =>
+      handleCompactionFailure(cause).pipe(
+        Effect.catchCause((recoveryCause) =>
+          Effect.logWarning("provider command reactor failed to recover compaction failure", {
+            eventType: event.type,
+            threadId: event.payload.threadId,
+            cause: Cause.pretty(recoveryCause),
+            originalCause: Cause.pretty(cause),
+          }),
+        ),
+      );
+
     const isCompactCommand =
       (message.attachments?.length ?? 0) === 0 && message.text.trim().toLowerCase() === "/compact";
     if (isCompactCommand) {
@@ -1224,7 +1270,7 @@ const make = Effect.gen(function* () {
           threadModelSelections.set(event.payload.threadId, event.payload.modelSelection);
         }
         yield* providerService.compactThread(event.payload.threadId);
-      }).pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+      }).pipe(Effect.catchCause(recoverCompactionFailure), Effect.forkScoped);
       return;
     }
 
