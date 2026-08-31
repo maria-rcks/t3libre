@@ -295,6 +295,35 @@ describe("browser recording", () => {
     expect(events.at(-1)).toBe("clear");
   });
 
+  it("times out stalled stream acquisition and stops a late stream", async () => {
+    vi.useFakeTimers();
+    let finishCapture!: (stream: MediaStream) => void;
+    const stopTrack = vi.fn();
+    getUserMedia.mockImplementationOnce(
+      () =>
+        new Promise<MediaStream>((resolve) => {
+          finishCapture = resolve;
+        }),
+    );
+
+    const startPromise = startBrowserRecording("recording-tab");
+    await vi.waitFor(() => expect(getUserMedia).toHaveBeenCalledOnce());
+    const rejection = expect(startPromise).rejects.toMatchObject({
+      operation: "capture-media-stream",
+      tabId: "recording-tab",
+    });
+    await vi.advanceTimersByTimeAsync(BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS);
+
+    await rejection;
+    expect(stopScreencast).toHaveBeenCalledWith("recording-tab");
+    expect(readActiveBrowserRecordingTabIds()).toEqual(new Set());
+    expect(useBrowserSurfaceStore.getState().activityByTabId["recording-tab"]).toBeUndefined();
+
+    finishCapture({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stopTrack).toHaveBeenCalledOnce();
+  });
+
   it("records separate tabs concurrently", async () => {
     const firstThreadRef = {
       environmentId: EnvironmentId.make("environment-recording"),

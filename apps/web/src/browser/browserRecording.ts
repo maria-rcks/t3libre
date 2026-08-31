@@ -203,6 +203,32 @@ const stopMediaStream = (stream: MediaStream | null): void => {
   for (const track of stream?.getTracks() ?? []) track.stop();
 };
 
+const captureTabMediaStreamWithTimeout = async (
+  source: DesktopPreviewRecordingSource,
+  frameRate: number,
+): Promise<MediaStream> => {
+  let acceptStream = true;
+  let timeoutId: number | null = null;
+  const streamPromise = captureTabMediaStream(source, frameRate).then((stream) => {
+    if (!acceptStream) stopMediaStream(stream);
+    return stream;
+  });
+  try {
+    return await Promise.race([
+      streamPromise,
+      new Promise<never>((_, reject) => {
+        timeoutId = window.setTimeout(
+          () => reject(new Error("Browser recording media capture did not settle.")),
+          BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    acceptStream = false;
+    if (timeoutId !== null) window.clearTimeout(timeoutId);
+  }
+};
+
 const clearActiveRecording = (recording: ActiveRecording): void => {
   recording.releaseSurfaceActivity?.();
   recording.releaseSurfaceActivity = null;
@@ -390,7 +416,7 @@ export async function startBrowserRecording(
     };
     await throwIfStartupCancelled();
     try {
-      recording.stream = await captureTabMediaStream(source, frameRate);
+      recording.stream = await captureTabMediaStreamWithTimeout(source, frameRate);
     } catch (cause) {
       const cleanupCause = await cleanupFailedRecordingStart(bridge, recording);
       throw new BrowserRecordingOperationError({
