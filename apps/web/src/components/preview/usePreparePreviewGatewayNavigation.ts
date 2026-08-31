@@ -42,8 +42,8 @@ export function usePreparePreviewGatewayNavigation() {
         if (!isLoopbackHost(target.hostname)) return null;
         try {
           await gatewayBridge.clearGateway(environmentId);
-        } catch {
-          throw new PreviewGatewayNavigationError({ reason: "configuration-failed" });
+        } catch (cause) {
+          throw new PreviewGatewayNavigationError({ reason: "configuration-failed", cause });
         }
         return null;
       }
@@ -69,6 +69,7 @@ export function usePreparePreviewGatewayNavigation() {
             ? "authorization-insufficient"
             : "configuration-failed",
           port,
+          cause,
         });
       }
       if (result.value.port !== port) {
@@ -82,8 +83,8 @@ export function usePreparePreviewGatewayNavigation() {
           port,
           expiresAtEpochMilliseconds: result.value.expiresAt.epochMilliseconds,
         });
-      } catch {
-        throw new PreviewGatewayNavigationError({ reason: "configuration-failed", port });
+      } catch (cause) {
+        throw new PreviewGatewayNavigationError({ reason: "configuration-failed", port, cause });
       }
       return result.value.expiresAt.epochMilliseconds;
     },

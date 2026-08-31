@@ -27,6 +27,7 @@ export class PreviewGatewayNavigationError extends Schema.TaggedErrorClass<Previ
     port: Schema.optional(
       Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThan(65_536)),
     ),
+    cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {
   override get message(): string {
