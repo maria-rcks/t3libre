@@ -1634,10 +1634,6 @@ function ChatViewContent(props: ChatViewProps) {
     : localDraftError;
   const threadErrorWarning = resolveThreadErrorChatWarning(routeThreadKey, threadError);
   const [warningDismissals, setWarningDismissals] = useChatWarningDismissals();
-  const temporaryWarningIdSet = useMemo(
-    () => new Set(warningDismissals.temporary),
-    [warningDismissals.temporary],
-  );
   const permanentWarningIdSet = useMemo(
     () => new Set(warningDismissals.permanent),
     [warningDismissals.permanent],
@@ -2982,16 +2978,17 @@ function ChatViewContent(props: ChatViewProps) {
       [threadErrorWarning, providerStatusWarning].filter(
         (warning): warning is ChatWarning =>
           warning !== null &&
-          (serverRunId === null
-            ? !warningDismissals.temporary.some((id) => id.endsWith(`\u0000${warning.id}`))
-            : !temporaryWarningIdSet.has(`${serverRunId}\u0000${warning.id}`)) &&
+          !warningDismissals.temporary.some((id) =>
+            serverRunId === null
+              ? id.endsWith(`\u0000${warning.id}`)
+              : id === `${serverRunId}\u0000${warning.id}`,
+          ) &&
           !permanentWarningIdSet.has(warning.id),
       ),
     [
       permanentWarningIdSet,
       providerStatusWarning,
       serverRunId,
-      temporaryWarningIdSet,
       threadErrorWarning,
       warningDismissals.temporary,
     ],
