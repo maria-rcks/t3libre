@@ -2165,6 +2165,153 @@ describe("PreviewManager", () => {
     ),
   );
 
+  effectIt.effect("reports invalid native recording dimensions as a structured error", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const capturePage = vi.fn(async () => ({
+          toJPEG: () => Buffer.from("unused-recording-frame"),
+          getSize: () => ({ width: 1280, height: 720 }),
+        }));
+        const getMediaSourceId = vi.fn(() => "tab:42");
+        const webContents = Object.assign(makeTestPreviewWebContents(capturePage), {
+          executeJavaScript: vi.fn(async () => ({ width: 0, height: 720 })),
+          getMediaSourceId,
+        });
+        fromId.mockReturnValue(webContents);
+
+        yield* manager.createTab("tab_invalid_recording_size");
+        yield* manager.registerWebview("tab_invalid_recording_size", 42);
+        const exit = yield* Effect.exit(manager.startRecording("tab_invalid_recording_size"));
+
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isSuccess(exit)) return;
+        expect(Option.getOrThrow(Cause.findErrorOption(exit.cause))).toMatchObject({
+          _tag: "PreviewRecordingSourceSizeUnavailableError",
+          tabId: "tab_invalid_recording_size",
+          webContentsId: 42,
+        });
+        expect(getMediaSourceId).not.toHaveBeenCalled();
+      }),
+    ),
+  );
+
+  effectIt.effect("keeps a newer recording lease when an earlier start fails", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const setBackgroundThrottling = vi.fn();
+        const capturePage = vi.fn(async () => ({
+          toJPEG: () => Buffer.from("unused-recording-frame"),
+          getSize: () => ({ width: 1280, height: 720 }),
+        }));
+        let markMeasurementStarted!: () => void;
+        const measurementStarted = new Promise<void>((resolve) => {
+          markMeasurementStarted = resolve;
+        });
+        let rejectFirstMeasurement!: (error: Error) => void;
+        const executeJavaScript = vi
+          .fn<(expression: string, userGesture?: boolean) => Promise<unknown>>()
+          .mockImplementationOnce(() => {
+            markMeasurementStarted();
+            return new Promise((_, reject) => {
+              rejectFirstMeasurement = reject;
+            });
+          })
+          .mockResolvedValue({ width: 1280, height: 720 });
+        const webContents = Object.assign(makeTestPreviewWebContents(capturePage), {
+          executeJavaScript,
+        });
+        fromId.mockReturnValue(webContents);
+
+        yield* manager.createTab("tab_recording_start_race");
+        yield* manager.registerWebview("tab_recording_start_race", 42);
+        yield* manager.setMainWindow({
+          isDestroyed: () => false,
+          once: vi.fn(),
+          webContents: { setBackgroundThrottling },
+        } as never);
+
+        const firstStart = yield* manager
+          .startRecording("tab_recording_start_race")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.promise(() => measurementStarted);
+        const secondStart = yield* manager
+          .startRecording("tab_recording_start_race")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        expect(executeJavaScript).toHaveBeenCalledOnce();
+
+        rejectFirstMeasurement(new Error("first measurement failed"));
+        const firstExit = yield* Fiber.await(firstStart);
+        expect(Exit.isFailure(firstExit)).toBe(true);
+        expect(yield* Fiber.join(secondStart)).toEqual({
+          sourceId: "tab:42",
+          width: 1280,
+          height: 720,
+        });
+
+        yield* manager.stopRecording("tab_recording_start_race");
+        expect(setBackgroundThrottling.mock.calls).toEqual([[false], [true], [false], [true]]);
+      }),
+    ),
+  );
+
+  effectIt.effect("serializes recording source acquisition with webview replacement", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const capturePage = vi.fn(async () => ({
+          toJPEG: () => Buffer.from("unused-recording-frame"),
+          getSize: () => ({ width: 1280, height: 720 }),
+        }));
+        let markMeasurementStarted!: () => void;
+        const measurementStarted = new Promise<void>((resolve) => {
+          markMeasurementStarted = resolve;
+        });
+        let finishMeasurement!: (size: { readonly width: number; readonly height: number }) => void;
+        const executeJavaScript = vi.fn(
+          () =>
+            new Promise<{ readonly width: number; readonly height: number }>((resolve) => {
+              markMeasurementStarted();
+              finishMeasurement = resolve;
+            }),
+        );
+        const initialWebContents = Object.assign(makeTestPreviewWebContents(capturePage, 42), {
+          executeJavaScript,
+        });
+        const replacementOn = vi.fn();
+        const replacementWebContents = Object.assign(makeTestPreviewWebContents(capturePage, 43), {
+          on: replacementOn,
+        });
+        fromId.mockImplementation((id) => {
+          if (id === 42) return initialWebContents;
+          if (id === 43) return replacementWebContents;
+          return null;
+        });
+
+        yield* manager.createTab("tab_recording_replacement_race");
+        yield* manager.registerWebview("tab_recording_replacement_race", 42);
+        const start = yield* manager
+          .startRecording("tab_recording_replacement_race")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.promise(() => measurementStarted);
+        const replacement = yield* manager
+          .registerWebview("tab_recording_replacement_race", 43)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        expect(replacementOn).not.toHaveBeenCalled();
+
+        finishMeasurement({ width: 1280, height: 720 });
+        expect(yield* Fiber.join(start)).toEqual({
+          sourceId: "tab:42",
+          width: 1280,
+          height: 720,
+        });
+        yield* Fiber.join(replacement);
+        expect(replacementOn).toHaveBeenCalled();
+        yield* manager.stopRecording("tab_recording_replacement_race");
+      }),
+    ),
+  );
+
   effectIt.effect("shares background frame capture between recording and picture-in-picture", () =>
     withManager((manager) =>
       Effect.gen(function* () {

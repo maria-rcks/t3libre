@@ -3100,59 +3100,69 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   });
 
   const startRecording = Effect.fn("PreviewManager.startRecording")(function* (tabId: string) {
-    yield* startFrameCapture(tabId, "recording");
-    return yield* Effect.gen(function* () {
-      const wc = yield* requireWebContents(tabId);
-      const requestWebContents = wc.hostWebContents;
-      if (requestWebContents === null) {
-        return yield* new PreviewMainWindowClosedError({ tabId });
-      }
-      const measuredSize = yield* attemptPromise(
-        {
-          operation: "recording.measureSource",
-          tabId,
-          webContentsId: wc.id,
-        },
-        () => wc.executeJavaScript(RECORDING_SOURCE_SIZE_EXPRESSION, true),
-      );
-      const size = yield* attempt(
-        {
-          operation: "recording.measureSource",
-          tabId,
-          webContentsId: wc.id,
-        },
-        () => {
-          if (
-            typeof measuredSize !== "object" ||
-            measuredSize === null ||
-            !("width" in measuredSize) ||
-            !("height" in measuredSize) ||
-            typeof measuredSize.width !== "number" ||
-            typeof measuredSize.height !== "number" ||
-            !Number.isInteger(measuredSize.width) ||
-            !Number.isInteger(measuredSize.height) ||
-            measuredSize.width <= 0 ||
-            measuredSize.height <= 0
-          ) {
-            throw new Error("Preview media source dimensions are unavailable.");
-          }
-          return { width: measuredSize.width, height: measuredSize.height };
-        },
-      );
-      const sourceId = yield* attempt(
-        {
-          operation: "recording.getMediaSourceId",
-          tabId,
-          webContentsId: wc.id,
-        },
-        () => wc.getMediaSourceId(requestWebContents),
-      );
-      return { sourceId, ...size } satisfies DesktopPreviewRecordingSource;
-    }).pipe(Effect.onError(() => stopFrameCapture(tabId, "recording").pipe(Effect.ignore)));
+    if ((yield* Ref.get(closingTabIdsRef)).has(tabId)) {
+      return yield* new PreviewTabNotFoundError({ tabId });
+    }
+    return yield* withTabLifecycleLock(
+      tabId,
+      Effect.gen(function* () {
+        yield* startFrameCapture(tabId, "recording");
+        const wc = yield* requireWebContents(tabId);
+        const requestWebContents = wc.hostWebContents;
+        if (requestWebContents === null) {
+          return yield* new PreviewMainWindowClosedError({ tabId });
+        }
+        const measuredSize = yield* attemptPromise(
+          {
+            operation: "recording.measureSource",
+            tabId,
+            webContentsId: wc.id,
+          },
+          () => wc.executeJavaScript(RECORDING_SOURCE_SIZE_EXPRESSION, true),
+        );
+        if (
+          typeof measuredSize !== "object" ||
+          measuredSize === null ||
+          !("width" in measuredSize) ||
+          !("height" in measuredSize) ||
+          typeof measuredSize.width !== "number" ||
+          typeof measuredSize.height !== "number" ||
+          !Number.isInteger(measuredSize.width) ||
+          !Number.isInteger(measuredSize.height) ||
+          measuredSize.width <= 0 ||
+          measuredSize.height <= 0
+        ) {
+          return yield* new PreviewRecordingSourceSizeUnavailableError({
+            tabId,
+            webContentsId: wc.id,
+          });
+        }
+        const currentWebContents = yield* requireWebContents(tabId);
+        if (currentWebContents !== wc || wc.isDestroyed()) {
+          return yield* new PreviewWebContentsNotFoundError({
+            tabId,
+            webContentsId: wc.id,
+          });
+        }
+        const sourceId = yield* attempt(
+          {
+            operation: "recording.getMediaSourceId",
+            tabId,
+            webContentsId: wc.id,
+          },
+          () => wc.getMediaSourceId(requestWebContents),
+        );
+        return {
+          sourceId,
+          width: measuredSize.width,
+          height: measuredSize.height,
+        } satisfies DesktopPreviewRecordingSource;
+      }).pipe(Effect.onError(() => stopFrameCapture(tabId, "recording").pipe(Effect.ignore))),
+    );
   });
 
   const stopRecording = Effect.fn("PreviewManager.stopRecording")(function* (tabId: string) {
-    yield* stopFrameCapture(tabId, "recording");
+    yield* withTabLifecycleLock(tabId, stopFrameCapture(tabId, "recording"));
   });
 
   const saveRecording = Effect.fn("PreviewManager.saveRecording")(function* (
@@ -3962,6 +3972,15 @@ export class PreviewMainWindowClosedError extends Schema.TaggedErrorClass<Previe
   }
 }
 
+export class PreviewRecordingSourceSizeUnavailableError extends Schema.TaggedErrorClass<PreviewRecordingSourceSizeUnavailableError>()(
+  "PreviewRecordingSourceSizeUnavailableError",
+  { tabId: Schema.String, webContentsId: Schema.Number },
+) {
+  override get message(): string {
+    return `Preview media source dimensions are unavailable for tab ${this.tabId}`;
+  }
+}
+
 export class PreviewOperationError extends Schema.TaggedErrorClass<PreviewOperationError>()(
   "PreviewOperationError",
   {
@@ -4169,6 +4188,7 @@ export const PreviewManagerError = Schema.Union([
   PreviewWebContentsNotFoundError,
   PreviewWebviewNotInitializedError,
   PreviewMainWindowClosedError,
+  PreviewRecordingSourceSizeUnavailableError,
   PreviewOperationError,
   PreviewArtifactPathOutsideDirectoryError,
   PreviewArtifactImageLoadError,
