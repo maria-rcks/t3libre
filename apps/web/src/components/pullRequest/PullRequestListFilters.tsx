@@ -43,13 +43,12 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { type PullRequestAuthorFacet, type PullRequestLabelFacet } from "./pullRequestList.logic";
+import {
+  pullRequestLabelColor,
+  type PullRequestAuthorFacet,
+  type PullRequestLabelFacet,
+} from "./pullRequestList.logic";
 import { PullRequestActorAvatar } from "./pullRequestPresentation";
-
-function labelDotColor(color: string | null): string | null {
-  const hex = color?.trim().replace(/^#/, "") ?? "";
-  return /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex}` : null;
-}
 
 export interface PullRequestFilterOption<Value extends string> {
   readonly value: Value;
@@ -349,7 +348,7 @@ function PullRequestLabelFilter({
           options.map((option) => {
             const key = option.name.toLowerCase();
             const checked = selected.has(key);
-            const dot = labelDotColor(option.color);
+            const dot = pullRequestLabelColor(option.color);
             return (
               <MenuCheckboxItem
                 key={key}
@@ -518,7 +517,7 @@ export function PullRequestFiltersMenu({
           </span>
         ) : null}
       </MenuTrigger>
-      <MenuPopup align="end" side="bottom" className="min-w-72">
+      <MenuPopup align="end" side="bottom" className="w-56">
         <PullRequestFilterRadioSubmenu
           label="State"
           value={state}

@@ -13,6 +13,9 @@ import type {
 } from "@t3tools/contracts";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
+  ArrowDownUpIcon,
+  CalendarArrowDownIcon,
+  CalendarArrowUpIcon,
   ChevronDownIcon,
   ClockIcon,
   EyeIcon,
@@ -24,8 +27,9 @@ import {
   LayersIcon,
   PenLineIcon,
   LoaderIcon,
+  Maximize2Icon,
+  Minimize2Icon,
   RefreshCwIcon,
-  Rows3Icon,
   SearchIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -147,7 +151,7 @@ export interface PullRequestsSearch {
   readonly sort?: PullRequestListSort;
 }
 
-type PullRequestListSort = "updated" | "largest" | "smallest";
+type PullRequestListSort = "updated" | "newest" | "oldest" | "largest" | "smallest";
 
 // The state filters wear the same glyphs the rows do, so the two read as one vocabulary.
 const INVOLVEMENT_TABS = [
@@ -165,8 +169,10 @@ const STATE_TABS = [
 
 const SORT_OPTIONS = [
   { value: "updated", label: "Recently updated", Icon: ClockIcon },
-  { value: "largest", label: "Largest change", Icon: Rows3Icon },
-  { value: "smallest", label: "Smallest change", Icon: Rows3Icon },
+  { value: "newest", label: "Newest", Icon: CalendarArrowDownIcon },
+  { value: "oldest", label: "Oldest", Icon: CalendarArrowUpIcon },
+  { value: "largest", label: "Largest change", Icon: Maximize2Icon },
+  { value: "smallest", label: "Smallest change", Icon: Minimize2Icon },
 ] as const satisfies ReadonlyArray<PullRequestFilterOption<PullRequestListSort>>;
 
 /** Long enough that a keystroke does not become a request, short enough to feel answered. */
@@ -215,7 +221,9 @@ export const Route = createFileRoute("/_chat/pull-requests")({
       raw.involvement === "reviewing" || raw.involvement === "authored" ? raw.involvement : "all",
     state:
       raw.state === "closed" || raw.state === "merged" || raw.state === "all" ? raw.state : "open",
-    ...(raw.sort === "largest" || raw.sort === "smallest" ? { sort: raw.sort } : {}),
+    ...(SORT_OPTIONS.some((option) => option.value === raw.sort)
+      ? { sort: raw.sort as PullRequestListSort }
+      : {}),
     ...(typeof raw.repository === "string" && raw.repository
       ? { repository: raw.repository.slice(0, 200) }
       : {}),
@@ -1254,6 +1262,15 @@ function PullRequestsRouteView() {
         key: "others" as const,
         label: "",
         entries: entries.toSorted((left, right) => {
+          if (sort === "newest" || sort === "oldest") {
+            const leftCreated = toSortableTimestamp(left.createdAt);
+            const rightCreated = toSortableTimestamp(right.createdAt);
+            const measured = Number(rightCreated !== null) - Number(leftCreated !== null);
+            const dated = (leftCreated ?? 0) - (rightCreated ?? 0);
+            return (
+              measured || (sort === "newest" ? -dated : dated) || timestamp(right) - timestamp(left)
+            );
+          }
           const measured = Number(hasSize(right)) - Number(hasSize(left));
           const sized = left.additions + left.deletions - (right.additions + right.deletions);
           return (
@@ -1543,7 +1560,7 @@ function PullRequestsRouteView() {
   const sortMenu = (
     <CompactFilterMenu
       label="Sort pull requests"
-      triggerLabel="Sort"
+      iconOnly
       outlined
       value={sort}
       options={SORT_OPTIONS}
@@ -1736,14 +1753,14 @@ function PullRequestsRouteView() {
 /** A compact stand-in for one pill group when the header is narrow. */
 function CompactFilterMenu<Value extends string>({
   label,
-  triggerLabel,
+  iconOnly = false,
   outlined = false,
   value,
   options,
   onChange,
 }: {
   label: string;
-  triggerLabel?: string;
+  iconOnly?: boolean;
   outlined?: boolean;
   value: Value;
   options: ReadonlyArray<PullRequestFilterOption<Value>>;
@@ -1754,16 +1771,24 @@ function CompactFilterMenu<Value extends string>({
   return (
     <Menu>
       <MenuTrigger
-        aria-label={triggerLabel ? undefined : label}
-        render={outlined ? <Button variant="outline" /> : undefined}
+        aria-label={iconOnly ? `${label}: ${current.label}` : label}
+        render={
+          outlined ? <Button size={iconOnly ? "icon" : "default"} variant="outline" /> : undefined
+        }
         className={
           outlined
             ? undefined
             : "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
         }
       >
-        {triggerLabel ?? current.label}
-        <ChevronDownIcon aria-hidden className="size-3 text-muted-foreground/70" />
+        {iconOnly ? (
+          <ArrowDownUpIcon aria-hidden className="size-4" />
+        ) : (
+          <>
+            {current.label}
+            <ChevronDownIcon aria-hidden className="size-3 text-muted-foreground/70" />
+          </>
+        )}
       </MenuTrigger>
       <MenuPopup align="start" side="bottom" className="min-w-40">
         <MenuRadioGroup value={value} onValueChange={(next) => onChange(next as Value)}>

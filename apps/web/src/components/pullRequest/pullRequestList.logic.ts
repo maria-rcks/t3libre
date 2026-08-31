@@ -77,6 +77,11 @@ function normalize(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+export function pullRequestLabelColor(color: string | null): string | null {
+  const hex = color?.trim().replace(/^#/, "") ?? "";
+  return /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex}` : null;
+}
+
 export function collectPullRequestListFacets(
   entries: ReadonlyArray<PullRequestListEntry>,
   state: PullRequestListState,

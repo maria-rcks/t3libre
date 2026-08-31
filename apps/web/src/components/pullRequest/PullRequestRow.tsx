@@ -6,7 +6,7 @@ import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PullRequestChecksPopover } from "./PullRequestChecksPopover";
-import type { EnvironmentPullRequestEntry } from "./pullRequestList.logic";
+import { pullRequestLabelColor, type EnvironmentPullRequestEntry } from "./pullRequestList.logic";
 import { openOnHostLabel, showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
 import {
   PullRequestActorLabel,
@@ -16,9 +16,17 @@ import {
 } from "./pullRequestPresentation";
 
 function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry["labels"] }) {
+  const label = labels[0];
+  if (!label) return null;
+  const dot = pullRequestLabelColor(label.color);
   return (
-    <span className="inline-flex max-w-40 min-w-0 items-center gap-1 rounded-full border border-border/60 bg-muted/35 px-1.5 text-[10px] leading-3.5 text-muted-foreground">
-      <span className="truncate">{labels[0]?.name}</span>
+    <span className="inline-flex max-w-40 min-w-0 items-center gap-1 rounded-full border border-border/70 bg-muted/40 py-0 pl-1 pr-1.5 text-[10px] leading-3.5 text-muted-foreground">
+      <span
+        aria-hidden
+        className="size-2 shrink-0 rounded-full bg-muted-foreground"
+        {...(dot ? { style: { backgroundColor: dot } } : {})}
+      />
+      <span className="truncate">{label.name}</span>
       {labels.length > 1 ? <span className="shrink-0">+{labels.length - 1}</span> : null}
     </span>
   );
