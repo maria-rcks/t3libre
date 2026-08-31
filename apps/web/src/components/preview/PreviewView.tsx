@@ -182,8 +182,12 @@ export function PreviewView({
           kind: "url",
           url: normalized,
         });
-        await prepareGatewayNavigation(resolution);
-        if (await navigateToResolvedUrl(resolution.resolvedUrl)) {
+        const navigation =
+          resolution.resolutionKind === "environment-gateway"
+            ? resolution
+            : { ...resolution, resolvedUrl: normalized, resolutionKind: "direct" as const };
+        await prepareGatewayNavigation(navigation);
+        if (await navigateToResolvedUrl(navigation.resolvedUrl)) {
           recordVisitForThread(threadRef, normalized);
         }
       } catch {
