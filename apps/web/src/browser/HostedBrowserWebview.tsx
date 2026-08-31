@@ -5,8 +5,10 @@ import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { previewBridge } from "~/components/preview/previewBridge";
+import { isPreviewGatewayNavigationError } from "~/components/preview/previewAutomationErrors";
 import { usePreparePreviewGatewayNavigation } from "~/components/preview/usePreparePreviewGatewayNavigation";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
+import { toastManager } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
@@ -56,8 +58,11 @@ export function HostedBrowserWebview(props: {
   const { threadRef, tabId, runtimeTabId, initialUrl, viewport, pictureInPicture, zoomFactor } =
     props;
   const config = usePreviewWebviewConfig(threadRef.environmentId);
-  const [initialSrc] = useState(() => initialUrl ?? "about:blank");
+  const [initialSrc, setInitialSrc] = useState(() => initialUrl ?? "about:blank");
   const [gatewayReady, setGatewayReady] = useState(initialUrl === null);
+  const [webviewGeneration, setWebviewGeneration] = useState(0);
+  const [recoverySrc, setRecoverySrc] = useState(initialSrc);
+  const latestUrlRef = useRef(initialUrl);
   const prepareGatewayNavigation = usePreparePreviewGatewayNavigation();
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -103,8 +108,19 @@ export function HostedBrowserWebview(props: {
         if (expiresAt !== null) {
           refreshTimeout = setTimeout(prepare, Math.max(1_000, expiresAt - Date.now() - 30_000));
         }
-      } catch {
-        // Automation receives the preparation error before opening the tab.
+      } catch (error) {
+        if (disposed) return;
+        setInitialSrc("about:blank");
+        setRecoverySrc("about:blank");
+        latestUrlRef.current = null;
+        setGatewayReady(true);
+        if (isPreviewGatewayNavigationError(error)) {
+          toastManager.add({
+            type: "error",
+            title: "Unable to open remote preview",
+            description: error.message,
+          });
+        }
       }
     };
     void prepare();
@@ -123,10 +139,6 @@ export function HostedBrowserWebview(props: {
       lease.release();
     };
   }, [runtimeTabId]);
-
-  const [webviewGeneration, setWebviewGeneration] = useState(0);
-  const [recoverySrc, setRecoverySrc] = useState(initialSrc);
-  const latestUrlRef = useRef(initialUrl);
 
   useEffect(() => {
     latestUrlRef.current = initialUrl;

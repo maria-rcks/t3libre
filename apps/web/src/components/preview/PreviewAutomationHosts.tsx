@@ -478,6 +478,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 request.operation,
                 "load",
                 request.timeoutMs,
+                inputResolution?.resolutionKind === "environment-gateway",
               );
             }
             return await currentStatus(threadRef, activeTabId);
@@ -502,6 +503,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               request.operation,
               input.readiness ?? "load",
               input.timeoutMs ?? request.timeoutMs,
+              resolution.resolutionKind === "environment-gateway",
             );
             return await currentStatus(threadRef, ready.tabId);
           }

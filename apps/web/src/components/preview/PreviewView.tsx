@@ -46,6 +46,7 @@ import {
 import { browserResponsiveViewportForToggle, useBrowserDefaults } from "~/browser/browserDefaults";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { PreviewUnreachable } from "./PreviewUnreachable";
+import { isPreviewGatewayNavigationError } from "./previewAutomationErrors";
 import { usePreparePreviewGatewayNavigation } from "./usePreparePreviewGatewayNavigation";
 import { revealInFileExplorerLabel } from "./fileExplorerLabel";
 import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
@@ -74,6 +75,15 @@ interface Props {
 }
 
 const localApi = typeof window === "undefined" ? null : ensureLocalApi();
+
+const reportPreviewGatewayFailure = (error: unknown): void => {
+  if (!isPreviewGatewayNavigationError(error)) return;
+  toastManager.add({
+    type: "error",
+    title: "Unable to open remote preview",
+    description: error.message,
+  });
+};
 
 /**
  * Single-tab preview surface: chrome row on top, one webview below, empty
@@ -190,8 +200,8 @@ export function PreviewView({
         if (await navigateToResolvedUrl(navigation.resolvedUrl)) {
           recordVisitForThread(threadRef, normalized);
         }
-      } catch {
-        // Server-side `failed` event renders the unreachable view.
+      } catch (error) {
+        reportPreviewGatewayFailure(error);
       }
     },
     [navigateToResolvedUrl, prepareGatewayNavigation, threadRef],
@@ -208,8 +218,8 @@ export function PreviewView({
         if (await navigateToResolvedUrl(resolution.resolvedUrl)) {
           recordVisitForThread(threadRef, next);
         }
-      } catch {
-        // Server-side `failed` event renders the unreachable view.
+      } catch (error) {
+        reportPreviewGatewayFailure(error);
       }
     },
     [navigateToResolvedUrl, prepareGatewayNavigation, threadRef],

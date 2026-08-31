@@ -3,7 +3,6 @@ import {
   type PreviewAutomationHost,
   PreviewAutomationOperation,
   PreviewGatewayFailureReason,
-  type PreviewGatewayFailureReason as PreviewGatewayFailureReasonType,
   previewGatewayFailureMessage,
   type PreviewAutomationRequest,
   type PreviewAutomationResponse,
@@ -13,8 +12,6 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-const isPreviewGatewayFailureReason = Schema.is(PreviewGatewayFailureReason);
-
 export interface PreviewAutomationOperationContext {
   readonly requestId: PreviewAutomationRequest["requestId"];
   readonly operation: PreviewAutomationRequest["operation"];
@@ -23,16 +20,21 @@ export interface PreviewAutomationOperationContext {
   readonly tabId: Exclude<PreviewAutomationRequest["tabId"], undefined> | null;
 }
 
-export class PreviewGatewayNavigationError extends Error {
-  readonly _tag = "PreviewGatewayNavigationError";
-
-  constructor(
-    readonly reason: PreviewGatewayFailureReasonType,
-    readonly port?: number,
-  ) {
-    super(previewGatewayFailureMessage(reason, port));
+export class PreviewGatewayNavigationError extends Schema.TaggedErrorClass<PreviewGatewayNavigationError>()(
+  "PreviewGatewayNavigationError",
+  {
+    reason: PreviewGatewayFailureReason,
+    port: Schema.optional(
+      Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThan(65_536)),
+    ),
+  },
+) {
+  override get message(): string {
+    return previewGatewayFailureMessage(this.reason, this.port);
   }
 }
+
+export const isPreviewGatewayNavigationError = Schema.is(PreviewGatewayNavigationError);
 
 export class PreviewAutomationOverlayTimeoutError extends Schema.TaggedErrorClass<PreviewAutomationOverlayTimeoutError>()(
   "PreviewAutomationOverlayTimeoutError",
@@ -203,18 +205,8 @@ export class PreviewAutomationOperationError extends Schema.TaggedErrorClass<Pre
     input: PreviewAutomationOperationContext & { readonly cause: unknown },
   ): PreviewAutomationHostError {
     if (isPreviewAutomationHostError(input.cause)) return input.cause;
-    if (
-      typeof input.cause === "object" &&
-      input.cause !== null &&
-      "_tag" in input.cause &&
-      input.cause._tag === "PreviewGatewayNavigationError" &&
-      "reason" in input.cause &&
-      isPreviewGatewayFailureReason(input.cause.reason)
-    ) {
-      const gatewayPort =
-        "port" in input.cause && typeof input.cause.port === "number"
-          ? input.cause.port
-          : undefined;
+    if (isPreviewGatewayNavigationError(input.cause)) {
+      const gatewayPort = input.cause.port;
       return new PreviewAutomationOperationError({
         ...input,
         gatewayReason: input.cause.reason,

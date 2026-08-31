@@ -7,8 +7,8 @@ import {
   normalizePreviewGatewayDialTarget,
   parsePreviewGatewayTarget,
 } from "@t3tools/shared/previewGateway";
-import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
+import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -372,13 +372,13 @@ const proxyWebSocketRequest = Effect.fn("PreviewGateway.proxyWebSocket")(functio
   );
 });
 
-const handleGateway = <E, R>(
-  effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E | PreviewGatewayRequestError, R>,
-): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> =>
+const handleGateway = <R>(
+  effect: Effect.Effect<HttpServerResponse.HttpServerResponse, PreviewGatewayRequestError, R>,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, never, R> =>
   effect.pipe(
-    Effect.catchIf(Schema.is(PreviewGatewayRequestError), (error) =>
-      Effect.succeed(previewGatewayErrorResponse(error)),
-    ),
+    Effect.catchTags({
+      PreviewGatewayRequestError: (error) => Effect.succeed(previewGatewayErrorResponse(error)),
+    }),
   );
 
 export const previewGatewayRouteLayer = Layer.unwrap(

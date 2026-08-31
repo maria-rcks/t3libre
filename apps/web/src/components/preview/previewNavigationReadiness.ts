@@ -45,7 +45,7 @@ async function throwIfPreviewGatewayFailed(runtimeTabId: string): Promise<void> 
     parsedPort < 65_536
       ? parsedPort
       : undefined;
-  throw new PreviewGatewayNavigationError(reason, port);
+  throw new PreviewGatewayNavigationError({ reason, ...(port === undefined ? {} : { port }) });
 }
 
 export function assertPreviewRuntimeCurrent(
@@ -79,6 +79,7 @@ export async function waitForNavigationReadiness(
   operation: PreviewAutomationRequest["operation"],
   readiness: PreviewAutomationNavigateInput["readiness"],
   timeoutMs: number,
+  gatewayExpected = false,
 ): Promise<void> {
   const targetReadiness = readiness ?? "load";
   if (!previewBridge) return;
@@ -92,13 +93,13 @@ export async function waitForNavigationReadiness(
         expression: "document.readyState",
       });
       if (readyState === "interactive" || readyState === "complete") {
-        await throwIfPreviewGatewayFailed(runtimeTabId);
+        if (gatewayExpected) await throwIfPreviewGatewayFailed(runtimeTabId);
         return;
       }
     } else {
       const status = await previewBridge.automation.status(runtimeTabId);
       if (status.available && !status.loading) {
-        await throwIfPreviewGatewayFailed(runtimeTabId);
+        if (gatewayExpected) await throwIfPreviewGatewayFailed(runtimeTabId);
         return;
       }
     }

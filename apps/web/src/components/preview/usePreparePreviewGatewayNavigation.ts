@@ -43,7 +43,7 @@ export function usePreparePreviewGatewayNavigation() {
         try {
           await gatewayBridge.clearGateway(environmentId);
         } catch {
-          throw new PreviewGatewayNavigationError("configuration-failed");
+          throw new PreviewGatewayNavigationError({ reason: "configuration-failed" });
         }
         return null;
       }
@@ -51,28 +51,28 @@ export function usePreparePreviewGatewayNavigation() {
       const target = new URL(resolution.resolvedUrl);
       const port = Number(target.port || (target.protocol === "https:" ? 443 : 80));
       if (target.protocol !== "http:") {
-        throw new PreviewGatewayNavigationError("unsupported-protocol", port);
+        throw new PreviewGatewayNavigationError({ reason: "unsupported-protocol", port });
       }
       if (!readEnvironmentSupportsPreviewGateway(environmentId)) {
-        throw new PreviewGatewayNavigationError("server-update-required", port);
+        throw new PreviewGatewayNavigationError({ reason: "server-update-required", port });
       }
       const connection = readPreparedConnection(environmentId);
       if (!connection || !gatewayBridge?.configureGateway) {
-        throw new PreviewGatewayNavigationError("configuration-failed", port);
+        throw new PreviewGatewayNavigationError({ reason: "configuration-failed", port });
       }
 
       const result = await issueGatewayTicket({ environmentId, input: { port } });
       if (result._tag === "Failure") {
         const cause = squashAtomCommandFailure(result);
-        throw new PreviewGatewayNavigationError(
-          isEnvironmentAuthorizationError(cause)
+        throw new PreviewGatewayNavigationError({
+          reason: isEnvironmentAuthorizationError(cause)
             ? "authorization-insufficient"
             : "configuration-failed",
           port,
-        );
+        });
       }
       if (result.value.port !== port) {
-        throw new PreviewGatewayNavigationError("configuration-failed", port);
+        throw new PreviewGatewayNavigationError({ reason: "configuration-failed", port });
       }
       try {
         await gatewayBridge.configureGateway({
@@ -83,7 +83,7 @@ export function usePreparePreviewGatewayNavigation() {
           expiresAtEpochMilliseconds: result.value.expiresAt.epochMilliseconds,
         });
       } catch {
-        throw new PreviewGatewayNavigationError("configuration-failed", port);
+        throw new PreviewGatewayNavigationError({ reason: "configuration-failed", port });
       }
       return result.value.expiresAt.epochMilliseconds;
     },

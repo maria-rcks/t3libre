@@ -62,7 +62,7 @@ describe("waitForNavigationReadiness", () => {
     ).rejects.toBeInstanceOf(PreviewAutomationTargetUnavailableError);
   });
 
-  it("returns an actionable error from a gateway error document", async () => {
+  it("trusts gateway error documents only for gateway-routed navigation", async () => {
     const threadRef = {
       environmentId: EnvironmentId.make("environment-2"),
       threadId: ThreadId.make("thread-1"),
@@ -88,6 +88,19 @@ describe("waitForNavigationReadiness", () => {
         "navigate",
         "load",
         100,
+      ),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      waitForNavigationReadiness(
+        threadRef,
+        "request-1",
+        tabId,
+        runtimeTabId,
+        "navigate",
+        "load",
+        100,
+        true,
       ),
     ).rejects.toMatchObject({
       _tag: "PreviewGatewayNavigationError",

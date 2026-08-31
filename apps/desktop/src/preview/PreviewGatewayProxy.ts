@@ -83,6 +83,12 @@ const responseHeaders = (headers: NodeHttp.IncomingHttpHeaders): NodeHttp.Outgoi
   return forwarded;
 };
 
+const decodedRawResponseHeaders = (rawHeaders: ReadonlyArray<string>): ReadonlyArray<string> =>
+  rawHeaders.filter((_, index) => {
+    const name = rawHeaders[index - (index % 2)];
+    return name === undefined || !HOP_BY_HOP_HEADERS.has(name.toLowerCase());
+  });
+
 const gatewayUrl = (httpBaseUrl: string, path: string): URL => {
   const url = new URL(httpBaseUrl);
   url.pathname = path;
@@ -337,7 +343,7 @@ export const startPreviewGatewayProxy = async (
         browserSocket,
         gatewayResponse.statusCode ?? 502,
         gatewayResponse.statusMessage ?? "Bad Gateway",
-        gatewayResponse.rawHeaders,
+        decodedRawResponseHeaders(gatewayResponse.rawHeaders),
       );
       gatewayResponse.pipe(browserSocket);
     });
