@@ -235,7 +235,9 @@ function PullRequestFilterRadioSubmenu<Value extends string>({
       <MenuSubTrigger>
         <PullRequestFilterOptionIcon option={current} />
         <span className="flex-1">{label}</span>
-        <span className="max-w-32 truncate text-xs text-muted-foreground">{current.label}</span>
+        <span className="min-w-0 max-w-32 truncate text-xs text-muted-foreground">
+          {current.label}
+        </span>
       </MenuSubTrigger>
       <MenuSubPopup className="min-w-56">
         <PullRequestFilterRadioGroup
@@ -276,7 +278,9 @@ function PullRequestAuthorFilter({
       <MenuSubTrigger>
         <UserRoundIcon aria-hidden className="size-3.5" />
         <span className="flex-1">Author</span>
-        <span className="max-w-32 truncate text-xs text-muted-foreground">{value ?? "Anyone"}</span>
+        <span className="min-w-0 max-w-32 truncate text-xs text-muted-foreground">
+          {value ?? "Anyone"}
+        </span>
       </MenuSubTrigger>
       <MenuSubPopup className="w-80">
         <div className="p-1 pb-2">
