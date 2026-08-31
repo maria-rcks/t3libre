@@ -114,7 +114,7 @@ export function PreviewPanelShell(props: {
           !resizing &&
           "transition-[width] [transition-duration:var(--panel-animation-duration)] ease-out motion-reduce:transition-none",
         animated && open && "starting:w-0!",
-        animated && !open && "overflow-hidden pointer-events-none",
+        animated && !open && "pointer-events-none",
       )}
       style={
         isInline && !props.maximized
@@ -125,12 +125,14 @@ export function PreviewPanelShell(props: {
       data-preview-panel-maximized={props.maximized ? "true" : "false"}
     >
       {isInline && !props.maximized ? <RightPanelResizeHandle handlers={resizeHandlers} /> : null}
-      <div
-        className="flex h-full min-h-0 min-w-0 flex-col"
-        style={animated ? { width: `${width}px` } : undefined}
-      >
-        {useDragRegion ? <div className="electron-drag-region h-0 w-full" aria-hidden /> : null}
-        {props.children}
+      <div className={cn("h-full min-h-0 w-full", animated && "overflow-clip")}>
+        <div
+          className="flex h-full min-h-0 min-w-0 flex-col"
+          style={animated ? { width: `${width}px` } : undefined}
+        >
+          {useDragRegion ? <div className="electron-drag-region h-0 w-full" aria-hidden /> : null}
+          {props.children}
+        </div>
       </div>
     </div>
   );
