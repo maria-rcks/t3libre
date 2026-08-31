@@ -149,7 +149,6 @@ import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
-  selectSelectedRightPanelSurface,
   selectThreadRightPanelState,
   type RightPanelSurface,
   updatePullRequestTabStatus,
@@ -1733,9 +1732,6 @@ function ChatViewContent(props: ChatViewProps) {
   const activeRightPanelSurface = useRightPanelStore((state) =>
     selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef),
   );
-  const selectedRightPanelSurface = useRightPanelStore((state) =>
-    selectSelectedRightPanelSurface(state.byThreadKey, activeThreadRef),
-  );
   const [pullRequestTabStatuses, setPullRequestTabStatuses] = useState<
     Record<string, PullRequestTabStatus>
   >({});
@@ -1779,23 +1775,25 @@ function ChatViewContent(props: ChatViewProps) {
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
   const rightPanelOpen = rightPanelState.isOpen;
   const panelAnimationsActive = usePanelAnimationsActive();
-  const inlineRightPanelPresent = usePanelPresence(
+  const inlineRightPanelPresence = usePanelPresence(
     rightPanelOpen && !shouldUseRightPanelSheet && activeThreadRef !== null,
+    activeRightPanelSurface,
     panelAnimationsActive && !shouldUseRightPanelSheet,
+    activeThreadKey,
   );
-  const sheetRightPanelPresent = usePanelPresence(
+  const sheetRightPanelPresence = usePanelPresence(
     rightPanelOpen && shouldUseRightPanelSheet && activeThreadRef !== null,
+    activeRightPanelSurface,
     panelAnimationsActive && shouldUseRightPanelSheet,
+    activeThreadKey,
   );
-  const renderedRightPanelSurface = rightPanelOpen
-    ? activeRightPanelSurface
-    : inlineRightPanelPresent || sheetRightPanelPresent
-      ? selectedRightPanelSurface
-      : null;
-  const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
+  const inlineRightPanelPresent = inlineRightPanelPresence.present;
+  const sheetRightPanelPresent = sheetRightPanelPresence.present;
+  const renderedRightPanelSurface = inlineRightPanelPresence.value ?? sheetRightPanelPresence.value;
+  const canMaximizeRightPanel = inlineRightPanelPresent && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
     canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
-  const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUseRightPanelSheet;
+  const inlineRightPanelOwnsTitleBar = inlineRightPanelPresent && !shouldUseRightPanelSheet;
 
   useEffect(() => {
     if (!activeThreadRef) return;
@@ -7034,7 +7032,7 @@ function ChatViewContent(props: ChatViewProps) {
       )}
       data-workspace-titlebar-controls
     >
-      {rightPanelOpen && !shouldUseRightPanelSheet ? (
+      {inlineRightPanelPresent && !shouldUseRightPanelSheet ? (
         <RightPanelMaximizeControl
           maximized={rightPanelMaximized}
           onToggle={toggleRightPanelMaximized}
@@ -7181,7 +7179,7 @@ function ChatViewContent(props: ChatViewProps) {
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      {rightPanelOpen && !shouldUseRightPanelSheet ? panelLayoutControls : null}
+      {inlineRightPanelPresent && !shouldUseRightPanelSheet ? panelLayoutControls : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
@@ -7196,7 +7194,7 @@ function ChatViewContent(props: ChatViewProps) {
           reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
           className="relative bg-background"
         >
-          {!rightPanelOpen ? panelLayoutControls : null}
+          {!inlineRightPanelPresent ? panelLayoutControls : null}
           <ChatHeader
             {...(!supportsPullRequests || activeProjectRepository === null
               ? {}
@@ -7217,7 +7215,7 @@ function ChatViewContent(props: ChatViewProps) {
             }
             keybindings={keybindings}
             availableEditors={availableEditors}
-            rightPanelOpen={rightPanelOpen}
+            rightPanelOpen={inlineRightPanelPresent}
             gitCwd={gitCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
             onRunProjectScript={runProjectScript}

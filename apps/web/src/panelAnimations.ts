@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useClientSettings } from "./hooks/useSettings";
@@ -12,11 +12,22 @@ export function usePanelAnimationsActive(): boolean {
 }
 
 /** Keeps closing panel content mounted until its opt-in width transition ends. */
-export function usePanelPresence(open: boolean, animated: boolean): boolean {
-  const [present, setPresent] = useState(open);
+export function usePanelPresence<T>(
+  open: boolean,
+  value: T | null,
+  animated: boolean,
+  scopeKey: string | null,
+): { present: boolean; value: T | null } {
+  const wantsPresent = open && value !== null;
+  const [present, setPresent] = useState(wantsPresent);
+  const retainedRef = useRef<{ scopeKey: string | null; value: T } | null>(null);
 
   useEffect(() => {
-    if (open) {
+    if (wantsPresent) retainedRef.current = { scopeKey, value };
+  }, [scopeKey, value, wantsPresent]);
+
+  useEffect(() => {
+    if (wantsPresent) {
       const frame = window.requestAnimationFrame(() => setPresent(true));
       return () => window.cancelAnimationFrame(frame);
     }
@@ -27,7 +38,10 @@ export function usePanelPresence(open: boolean, animated: boolean): boolean {
 
     const timeout = window.setTimeout(() => setPresent(false), PANEL_ANIMATION_DURATION_MS);
     return () => window.clearTimeout(timeout);
-  }, [animated, open]);
+  }, [animated, wantsPresent]);
 
-  return open || (animated && present);
+  const retainedValue =
+    retainedRef.current?.scopeKey === scopeKey ? retainedRef.current.value : null;
+  const visible = wantsPresent || (animated && present && retainedValue !== null);
+  return { present: visible, value: wantsPresent ? value : visible ? retainedValue : null };
 }

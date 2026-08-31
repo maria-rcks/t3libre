@@ -384,11 +384,14 @@ function PullRequestsRouteView() {
     selectedRightPanelSurface?.kind === "pull-request" ? selectedRightPanelSurface : null;
   const activePullRequestSurface = rightPanelState.isOpen ? selectedPullRequestSurface : null;
   const panelAnimationsActive = usePanelAnimationsActive();
-  const rightPanelPresent = usePanelPresence(
+  const rightPanelPresence = usePanelPresence(
     rightPanelState.isOpen && selectedPullRequestSurface !== null,
+    selectedPullRequestSurface,
     panelAnimationsActive,
+    rightPanelRef === null ? null : PULL_REQUESTS_PANEL_ID,
   );
-  const renderedPullRequestSurface = rightPanelPresent ? selectedPullRequestSurface : null;
+  const rightPanelPresent = rightPanelPresence.present;
+  const renderedPullRequestSurface = rightPanelPresence.value;
   // The open tab names its own server; a link that arrived before any tab was opened names it
   // through the project it selected.
   const panelEnvironmentId =
@@ -1506,7 +1509,7 @@ function PullRequestsRouteView() {
       // mounted at the fixed titlebar inset in both states so it cannot move
       // on toggle, and this spacer keeps refresh from sliding underneath it
       // (sized per header padding so refresh ends a normal gap short of it).
-      !pullRequestsSupported || rightPanelState.isOpen ? null : (
+      !pullRequestsSupported || rightPanelPresent ? null : (
         <span aria-hidden className="w-7 shrink-0 sm:w-5" />
       ),
     titlebarControls:
@@ -1515,8 +1518,8 @@ function PullRequestsRouteView() {
       // sibling loses (app-region hit-testing ignores z-index). Open, it moves
       // back out to the route container, which spans the panel too, so the
       // toggle keeps one fixed top-right anchor and never jumps sideways.
-      pullRequestsSupported && !rightPanelState.isOpen ? openPanelControls : null,
-    rightPanelOpen: rightPanelState.isOpen,
+      pullRequestsSupported && !rightPanelPresent ? openPanelControls : null,
+    rightPanelOpen: rightPanelPresent,
     listBody,
   };
 
@@ -1557,7 +1560,7 @@ function PullRequestsRouteView() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="relative flex min-h-0 flex-1">
-        {pullRequestsSupported && rightPanelState.isOpen ? openPanelControls : null}
+        {pullRequestsSupported && rightPanelPresent ? openPanelControls : null}
         <PullRequestsColumn {...columnProps} />
 
         {rightPanelPresent && renderedPullRequestSurface && panelEnvironmentId !== null ? (
