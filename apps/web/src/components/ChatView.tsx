@@ -1789,6 +1789,7 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const inlineRightPanelPresent = inlineRightPanelPresence.present;
   const sheetRightPanelPresent = sheetRightPanelPresence.present;
+  const rightPanelPresent = inlineRightPanelPresent || sheetRightPanelPresent;
   const renderedRightPanelSurface = inlineRightPanelPresence.value ?? sheetRightPanelPresence.value;
   const canMaximizeRightPanel = inlineRightPanelPresent && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
@@ -7194,7 +7195,7 @@ function ChatViewContent(props: ChatViewProps) {
           reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
           className="relative bg-background"
         >
-          {!inlineRightPanelPresent ? panelLayoutControls : null}
+          {!rightPanelPresent ? panelLayoutControls : null}
           <ChatHeader
             {...(!supportsPullRequests || activeProjectRepository === null
               ? {}
@@ -7215,7 +7216,7 @@ function ChatViewContent(props: ChatViewProps) {
             }
             keybindings={keybindings}
             availableEditors={availableEditors}
-            rightPanelOpen={inlineRightPanelPresent}
+            rightPanelOpen={rightPanelPresent}
             gitCwd={gitCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
             onRunProjectScript={runProjectScript}
