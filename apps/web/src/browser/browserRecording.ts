@@ -119,6 +119,7 @@ const publishActiveRecordingTabIds = (): void => {
 };
 
 export const BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS = 5_000;
+export const BROWSER_RECORDING_PAINT_SETTLE_TIMEOUT_MS = 250;
 
 export function readActiveBrowserRecordingTabIds(threadRef?: ScopedThreadRef): ReadonlySet<string> {
   const tabIds = new Set<string>();
@@ -211,8 +212,28 @@ const clearActiveRecording = (recording: ActiveRecording): void => {
 };
 
 const waitForBrowserRecordingPaint = async (): Promise<void> => {
-  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  let firstFrameId: number | null = null;
+  let secondFrameId: number | null = null;
+  let timeoutId: number | null = null;
+  const painted = new Promise<void>((resolve) => {
+    firstFrameId = window.requestAnimationFrame(() => {
+      firstFrameId = null;
+      secondFrameId = window.requestAnimationFrame(() => {
+        secondFrameId = null;
+        resolve();
+      });
+    });
+  });
+  const timedOut = new Promise<void>((resolve) => {
+    timeoutId = window.setTimeout(resolve, BROWSER_RECORDING_PAINT_SETTLE_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([painted, timedOut]);
+  } finally {
+    if (timeoutId !== null) window.clearTimeout(timeoutId);
+    if (firstFrameId !== null) window.cancelAnimationFrame(firstFrameId);
+    if (secondFrameId !== null) window.cancelAnimationFrame(secondFrameId);
+  }
 };
 
 const cleanupFailedRecordingStart = async (

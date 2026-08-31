@@ -45,6 +45,7 @@ vi.mock("~/hooks/useSettings", () => ({
 }));
 
 import {
+  BROWSER_RECORDING_PAINT_SETTLE_TIMEOUT_MS,
   BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS,
   BrowserRecordingConflictError,
   BrowserRecordingFormatUnavailableError,
@@ -118,6 +119,7 @@ describe("browser recording", () => {
       callback(animationFrameCount);
       return animationFrameCount;
     });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
     vi.stubGlobal("MediaRecorder", FakeMediaRecorder as unknown as typeof MediaRecorder);
     getUserMedia.mockResolvedValue({
       getTracks: () => [{ stop: vi.fn() }],
@@ -156,6 +158,23 @@ describe("browser recording", () => {
 
     await stopBrowserRecording("background-tab");
     expect(useBrowserSurfaceStore.getState().activityByTabId["background-tab"]).toBeUndefined();
+  });
+
+  it("bounds compositor warmup when animation frames are paused", async () => {
+    vi.useFakeTimers();
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 42),
+    );
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+
+    const startPromise = startBrowserRecording("hidden-window-tab");
+    await vi.advanceTimersByTimeAsync(BROWSER_RECORDING_PAINT_SETTLE_TIMEOUT_MS);
+
+    await startPromise;
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(42);
+    await stopBrowserRecording("hidden-window-tab");
   });
 
   it("records the native tab stream at the preview's current dimensions", async () => {
