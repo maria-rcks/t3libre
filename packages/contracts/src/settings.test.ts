@@ -67,8 +67,8 @@ describe("ClientSettings word wrap", () => {
 });
 
 describe("ClientSettings browser recording frame rate", () => {
-  it("defaults to 60 fps", () => {
-    expect(decodeClientSettings({}).browserRecordingFrameRate).toBe(60);
+  it("defaults to 30 fps", () => {
+    expect(decodeClientSettings({}).browserRecordingFrameRate).toBe(30);
   });
 
   it.each([30, 60])("accepts a supported frame rate: %s", (frameRate) => {

@@ -268,7 +268,7 @@ describe("getChangedBrowserSettingLabels", () => {
         browserDefaultViewport: { _tag: "freeform", width: 900, height: 600 },
         browserDefaultZoomFactor: 1.5,
         browserDefaultAppearance: "dark",
-        browserRecordingFrameRate: 30,
+        browserRecordingFrameRate: 60,
         browserAutoShowFloatingPreview: !DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview,
       }),
     ).toEqual([

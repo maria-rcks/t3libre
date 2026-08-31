@@ -5,7 +5,7 @@ const { clientSettings, events, getUserMedia, registrySet, save, startScreencast
   vi.hoisted(() => {
     const events: string[] = [];
     return {
-      clientSettings: { browserRecordingFrameRate: 60 as 30 | 60 },
+      clientSettings: { browserRecordingFrameRate: 30 as 30 | 60 },
       events,
       getUserMedia: vi.fn(),
       registrySet: vi.fn((_atom: unknown, value: { readonly tabIds: ReadonlySet<string> }) => {
@@ -112,7 +112,7 @@ describe("browser recording", () => {
     FakeMediaRecorder.supportedTypes = new Set(["video/webm;codecs=vp9"]);
     FakeMediaRecorder.outputMimeType = undefined;
     FakeMediaRecorder.stopError = undefined;
-    clientSettings.browserRecordingFrameRate = 60;
+    clientSettings.browserRecordingFrameRate = 30;
     animationFrameCount = 0;
     vi.stubGlobal("window", globalThis);
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -195,7 +195,7 @@ describe("browser recording", () => {
           maxWidth: 1000,
           minHeight: 620,
           maxHeight: 620,
-          maxFrameRate: 60,
+          maxFrameRate: 30,
         },
       },
     });
@@ -206,14 +206,14 @@ describe("browser recording", () => {
   });
 
   it("uses the configured recording frame rate", async () => {
-    clientSettings.browserRecordingFrameRate = 30;
+    clientSettings.browserRecordingFrameRate = 60;
 
     await startBrowserRecording("recording-tab");
 
     expect(getUserMedia).toHaveBeenCalledWith({
       audio: false,
       video: {
-        mandatory: expect.objectContaining({ maxFrameRate: 30 }),
+        mandatory: expect.objectContaining({ maxFrameRate: 60 }),
       },
     });
     await stopBrowserRecording("recording-tab");
