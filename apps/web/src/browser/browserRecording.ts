@@ -355,6 +355,7 @@ export async function startBrowserRecording(
     const frameRatePromise = ensureClientSettingsHydrated().then(
       () => getClientSettings().browserRecordingFrameRate,
     );
+    const [frameRate] = await Promise.all([frameRatePromise, waitForBrowserRecordingPaint()]);
     let source: DesktopPreviewRecordingSource;
     try {
       source = await bridge.recording.startScreencast(tabId);
@@ -387,8 +388,6 @@ export async function startBrowserRecording(
       }
       throw recordingStartupCancelledError(recording);
     };
-    await throwIfStartupCancelled();
-    const [frameRate] = await Promise.all([frameRatePromise, waitForBrowserRecordingPaint()]);
     await throwIfStartupCancelled();
     try {
       recording.stream = await captureTabMediaStream(source, frameRate);

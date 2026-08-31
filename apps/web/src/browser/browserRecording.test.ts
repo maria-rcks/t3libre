@@ -143,7 +143,7 @@ describe("browser recording", () => {
 
   it("paints and holds a hidden browser surface for the recording lifetime", async () => {
     startScreencast.mockImplementationOnce(async (tabId: string) => {
-      expect(animationFrameCount).toBe(0);
+      expect(animationFrameCount).toBe(2);
       expect(useBrowserSurfaceStore.getState().activityByTabId[tabId]).toBe(1);
       return { sourceId: `source:${tabId}`, width: 1000, height: 620 };
     });
@@ -424,7 +424,7 @@ describe("browser recording", () => {
     });
 
     const startPromise = startBrowserRecording("recording-tab");
-    expect(startScreencast).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(startScreencast).toHaveBeenCalledOnce());
 
     const stopPromise = stopBrowserRecording("recording-tab");
     expect(stopScreencast).not.toHaveBeenCalled();
@@ -509,7 +509,7 @@ describe("browser recording", () => {
     });
 
     const startPromise = startBrowserRecording("recording-tab");
-    expect(startScreencast).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(startScreencast).toHaveBeenCalledOnce());
 
     const stopPromise = stopBrowserRecording("recording-tab");
     await vi.advanceTimersByTimeAsync(0);

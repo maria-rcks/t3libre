@@ -2165,6 +2165,35 @@ describe("PreviewManager", () => {
     ),
   );
 
+  effectIt.effect("continues native recording when the source warmup fails", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const capturePage = vi.fn(async () => {
+          throw new Error("source is not ready");
+        });
+        const getMediaSourceId = vi.fn(() => "tab:42");
+        const webContents = Object.assign(makeTestPreviewWebContents(capturePage), {
+          executeJavaScript: vi.fn(async () => ({ width: 1280, height: 720 })),
+          getMediaSourceId,
+        });
+        fromId.mockReturnValue(webContents);
+
+        yield* manager.createTab("tab_recording_warmup_failure");
+        yield* manager.registerWebview("tab_recording_warmup_failure", 42);
+
+        expect(yield* manager.startRecording("tab_recording_warmup_failure")).toEqual({
+          sourceId: "tab:42",
+          width: 1280,
+          height: 720,
+        });
+        expect(capturePage).toHaveBeenCalledTimes(2);
+        expect(getMediaSourceId).toHaveBeenCalledOnce();
+
+        yield* manager.stopRecording("tab_recording_warmup_failure");
+      }),
+    ),
+  );
+
   effectIt.effect("reports invalid native recording dimensions as a structured error", () =>
     withManager((manager) =>
       Effect.gen(function* () {
