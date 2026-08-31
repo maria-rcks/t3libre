@@ -262,7 +262,8 @@ function PullRequestAuthorFilter({
 }) {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
-  const selected = options.find((option) => option.actor.login === value);
+  const login = value?.toLowerCase() ?? "";
+  const selected = options.find((option) => option.actor.login.toLowerCase() === login);
   const visible = [
     ...(selected ? [selected] : []),
     ...options.filter(
@@ -273,7 +274,7 @@ function PullRequestAuthorFilter({
           option.actor.name?.toLowerCase().includes(needle)),
     ),
   ].slice(0, 10);
-  const selectAuthor = (next: string) => next !== (value ?? "") && onChange(next || undefined);
+  const select = (next: string) => next.toLowerCase() !== login && onChange(next || undefined);
   return (
     <MenuSub>
       <MenuSubTrigger>
@@ -302,7 +303,7 @@ function PullRequestAuthorFilter({
             />
           </InputGroup>
         </div>
-        <MenuRadioGroup value={value ?? ""} onValueChange={selectAuthor}>
+        <MenuRadioGroup value={selected?.actor.login ?? value ?? ""} onValueChange={select}>
           <MenuRadioItem value="">
             <span className="flex min-w-0 items-center gap-2">
               <LayersIcon aria-hidden className="size-3.5" />
