@@ -3,8 +3,12 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("./hooks/useMediaQuery", () => ({ useMediaQuery: () => false }));
 vi.mock("./hooks/useSettings", () => ({
-  useClientSettings: (selector: (settings: { panelAnimationsEnabled: boolean }) => unknown) =>
-    selector({ panelAnimationsEnabled: true }),
+  useClientSettings: (
+    selector: (settings: {
+      panelAnimationsEnabled: boolean;
+      panelAnimationDurationMs: number;
+    }) => unknown,
+  ) => selector({ panelAnimationsEnabled: true, panelAnimationDurationMs: 200 }),
 }));
 
 import { PANEL_ANIMATION_DURATION_MS, usePanelPresence } from "./panelAnimations";
@@ -14,12 +18,19 @@ type HarnessProps = {
   readonly value: string | null;
   readonly animated: boolean;
   readonly scopeKey: string;
+  readonly durationMs?: number;
 };
 
 let latestPresence: ReturnType<typeof usePanelPresence<string>>;
 
 function Harness(props: HarnessProps) {
-  latestPresence = usePanelPresence(props.open, props.value, props.animated, props.scopeKey);
+  latestPresence = usePanelPresence(
+    props.open,
+    props.value,
+    props.animated,
+    props.scopeKey,
+    props.durationMs,
+  );
   return null;
 }
 
@@ -120,6 +131,33 @@ describe("usePanelPresence", () => {
       expect(latestPresence).toEqual({ present: true, value: null });
 
       await harness.render({ open: false, value: null, animated: false, scopeKey: "thread-a" });
+      expect(latestPresence).toEqual({ present: false, value: null });
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  it("uses the configured animation duration before unmounting", async () => {
+    const harness = await installHarness();
+    try {
+      await harness.render({
+        open: true,
+        value: "diff",
+        animated: true,
+        scopeKey: "thread-a",
+        durationMs: 350,
+      });
+      await harness.render({
+        open: false,
+        value: null,
+        animated: true,
+        scopeKey: "thread-a",
+        durationMs: 350,
+      });
+
+      await act(() => vi.advanceTimersByTimeAsync(349));
+      expect(latestPresence).toEqual({ present: true, value: "diff" });
+      await act(() => vi.advanceTimersByTimeAsync(1));
       expect(latestPresence).toEqual({ present: false, value: null });
     } finally {
       await harness.cleanup();

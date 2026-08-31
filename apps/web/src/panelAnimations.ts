@@ -1,14 +1,22 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  DEFAULT_PANEL_ANIMATION_DURATION_MS,
+  type PanelAnimationDurationMs,
+} from "@t3tools/contracts/settings";
 
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useClientSettings } from "./hooks/useSettings";
 
-export const PANEL_ANIMATION_DURATION_MS = 200;
+export const PANEL_ANIMATION_DURATION_MS = DEFAULT_PANEL_ANIMATION_DURATION_MS;
 
-export function usePanelAnimationsActive(): boolean {
+export function usePanelAnimationSettings(): {
+  active: boolean;
+  durationMs: PanelAnimationDurationMs;
+} {
   const enabled = useClientSettings((settings) => settings.panelAnimationsEnabled);
+  const durationMs = useClientSettings((settings) => settings.panelAnimationDurationMs);
   const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-  return enabled && !prefersReducedMotion;
+  return { active: enabled && !prefersReducedMotion, durationMs };
 }
 
 /** Keeps closing panel content mounted until its opt-in width transition ends. */
@@ -17,6 +25,7 @@ export function usePanelPresence<T>(
   value: T | null,
   animated: boolean,
   scopeKey: string | null,
+  durationMs = PANEL_ANIMATION_DURATION_MS,
 ): { present: boolean; value: T | null } {
   const [present, setPresent] = useState(open);
   const retainedRef = useRef<{ scopeKey: string | null; value: T | null } | null>(
@@ -37,9 +46,9 @@ export function usePanelPresence<T>(
       return () => window.clearTimeout(timeout);
     }
 
-    const timeout = window.setTimeout(() => setPresent(false), PANEL_ANIMATION_DURATION_MS);
+    const timeout = window.setTimeout(() => setPresent(false), durationMs);
     return () => window.clearTimeout(timeout);
-  }, [animated, open]);
+  }, [animated, durationMs, open]);
 
   const retainedValue =
     retainedRef.current?.scopeKey === scopeKey ? retainedRef.current.value : null;

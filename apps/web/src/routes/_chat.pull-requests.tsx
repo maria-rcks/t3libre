@@ -83,7 +83,7 @@ import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../
 import { SidebarInset } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
-import { usePanelAnimationsActive, usePanelPresence } from "../panelAnimations";
+import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
 import {
   selectActiveRightPanelSurface,
   selectSelectedRightPanelSurface,
@@ -383,12 +383,14 @@ function PullRequestsRouteView() {
   const selectedPullRequestSurface =
     selectedRightPanelSurface?.kind === "pull-request" ? selectedRightPanelSurface : null;
   const activePullRequestSurface = rightPanelState.isOpen ? selectedPullRequestSurface : null;
-  const panelAnimationsActive = usePanelAnimationsActive();
+  const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
+    usePanelAnimationSettings();
   const rightPanelPresence = usePanelPresence(
     rightPanelState.isOpen && selectedPullRequestSurface !== null,
     selectedPullRequestSurface,
     panelAnimationsActive,
     rightPanelRef === null ? null : PULL_REQUESTS_PANEL_ID,
+    panelAnimationDurationMs,
   );
   const rightPanelPresent = rightPanelPresence.present;
   const renderedPullRequestSurface = rightPanelPresence.value;

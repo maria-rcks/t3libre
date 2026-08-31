@@ -112,7 +112,7 @@ export function PreviewPanelShell(props: {
           : "w-full",
         animated &&
           !resizing &&
-          "transition-[width] duration-200 ease-out motion-reduce:transition-none",
+          "transition-[width] [transition-duration:var(--panel-animation-duration)] ease-out motion-reduce:transition-none",
         animated && open && "starting:w-0!",
         animated && !open && "overflow-hidden pointer-events-none",
       )}

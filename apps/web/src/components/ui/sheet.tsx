@@ -2,6 +2,7 @@
 
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
+import type { CSSProperties } from "react";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { ScrollArea } from "~/components/ui/scroll-area";
@@ -63,16 +64,24 @@ function SheetPopup({
   showCloseButton = true,
   keepMounted = false,
   animated = true,
+  transitionDurationMs,
   side = "right",
   variant = "default",
+  style,
   ...props
 }: SheetPrimitive.Popup.Props & {
   showCloseButton?: boolean;
   keepMounted?: boolean;
   animated?: boolean;
+  transitionDurationMs?: number;
   side?: "right" | "left" | "top" | "bottom";
   variant?: "default" | "inset";
 }) {
+  const transitionStyle =
+    transitionDurationMs === undefined
+      ? undefined
+      : ({ transitionDuration: `${transitionDurationMs}ms` } satisfies CSSProperties);
+
   return (
     <SheetPortal keepMounted={keepMounted}>
       <SheetBackdrop
@@ -81,6 +90,7 @@ function SheetPopup({
             ? undefined
             : "transition-none! data-ending-style:opacity-100! data-starting-style:opacity-100!"
         }
+        style={transitionStyle}
       />
       <SheetViewport side={side} variant={variant}>
         <SheetPrimitive.Popup
@@ -101,6 +111,7 @@ function SheetPopup({
             className,
           )}
           data-slot="sheet-popup"
+          style={{ ...transitionStyle, ...style }}
           {...props}
         >
           {children}

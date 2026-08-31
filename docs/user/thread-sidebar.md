@@ -28,8 +28,9 @@ their pinned threads keep the default newest-first order below the ones you have
 ## Panel motion
 
 The main sidebar and right panel open and close immediately by default. Enable **Panel animations**
-under **Settings → Appearance** to slide them instead. The preview beside the switch replays the
-motion without changing either panel.
+under **Settings → Appearance** to slide them instead. Use the duration slider to choose how fast
+they move. Clicking the preview replays the selected motion; while animations are off, it snaps
+between the same open and closed states.
 
 ## Environment artwork
 

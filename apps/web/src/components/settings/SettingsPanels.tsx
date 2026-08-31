@@ -24,6 +24,7 @@ import {
   MAX_CODE_FONT_SIZE,
   MAX_GLASS_OPACITY,
   MAX_INTERFACE_FONT_SIZE,
+  MAX_PANEL_ANIMATION_DURATION_MS,
   MAX_PROMPT_FONT_SIZE,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MAX_TERMINAL_FONT_SIZE,
@@ -31,6 +32,7 @@ import {
   MIN_APPEARANCE_CONTRAST,
   MIN_GLASS_OPACITY,
   MIN_INTERFACE_FONT_SIZE,
+  MIN_PANEL_ANIMATION_DURATION_MS,
   MIN_PROMPT_FONT_SIZE,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MIN_TERMINAL_FONT_SIZE,
@@ -482,7 +484,8 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Contrast"]
         : []),
       ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
-      ...(settings.panelAnimationsEnabled !== DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled
+      ...(settings.panelAnimationsEnabled !== DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled ||
+      settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
         ? ["Panel animations"]
         : []),
       ...(settings.environmentIdentificationMode !==
@@ -578,6 +581,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.fontSizePrompt,
       settings.fontSizeTerminal,
       settings.glassOpacity,
+      settings.panelAnimationDurationMs,
       settings.panelAnimationsEnabled,
       settings.enableLegacyTokenStreaming,
       settings.enableProviderUpdateChecks,
@@ -664,6 +668,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
+      panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
       panelAnimationsEnabled: DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
@@ -1016,6 +1021,13 @@ export function AppearanceSettingsPanel() {
     "--settings-slider-progress": `${appearanceContrastRatio * 100}%`,
     "--settings-slider-fill-offset": `${0.5 - appearanceContrastRatio}rem`,
   } as CSSProperties;
+  const panelAnimationDurationRatio =
+    (settings.panelAnimationDurationMs - MIN_PANEL_ANIMATION_DURATION_MS) /
+    (MAX_PANEL_ANIMATION_DURATION_MS - MIN_PANEL_ANIMATION_DURATION_MS);
+  const panelAnimationDurationSliderStyle = {
+    "--settings-slider-progress": `${panelAnimationDurationRatio * 100}%`,
+    "--settings-slider-fill-offset": `${0.5 - panelAnimationDurationRatio}rem`,
+  } as CSSProperties;
 
   return (
     <SettingsPageContainer>
@@ -1134,20 +1146,56 @@ export function AppearanceSettingsPanel() {
           {...searchableSetting("panel-animations")}
           description="Slide the main sidebar and right panel when they open and close. Off by default to reduce rendering work."
           resetAction={
-            settings.panelAnimationsEnabled !== DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled ? (
+            settings.panelAnimationsEnabled !== DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled ||
+            settings.panelAnimationDurationMs !==
+              DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs ? (
               <SettingResetButton
                 label="panel animations"
                 onClick={() =>
                   updateSettings({
                     panelAnimationsEnabled: DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled,
+                    panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
                   })
                 }
               />
             ) : null
           }
           control={
-            <div className="flex items-center gap-3">
-              <PanelAnimationsPreview enabled={settings.panelAnimationsEnabled} />
+            <div className="flex w-full flex-wrap items-center justify-end gap-3 sm:w-[26rem]">
+              <PanelAnimationsPreview
+                durationMs={settings.panelAnimationDurationMs}
+                enabled={settings.panelAnimationsEnabled}
+              />
+              <div className="flex min-w-44 flex-1 items-center gap-2">
+                <input
+                  aria-label="Panel animation duration"
+                  className="settings-slider min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!settings.panelAnimationsEnabled}
+                  id="panel-animation-duration"
+                  max={MAX_PANEL_ANIMATION_DURATION_MS}
+                  min={MIN_PANEL_ANIMATION_DURATION_MS}
+                  onChange={(event) => {
+                    const panelAnimationDurationMs = Number(event.currentTarget.value);
+                    if (
+                      Number.isInteger(panelAnimationDurationMs) &&
+                      panelAnimationDurationMs >= MIN_PANEL_ANIMATION_DURATION_MS &&
+                      panelAnimationDurationMs <= MAX_PANEL_ANIMATION_DURATION_MS
+                    ) {
+                      updateSettings({ panelAnimationDurationMs });
+                    }
+                  }}
+                  step={50}
+                  style={panelAnimationDurationSliderStyle}
+                  type="range"
+                  value={settings.panelAnimationDurationMs}
+                />
+                <output
+                  className="min-w-14 text-right font-mono text-xs tabular-nums text-muted-foreground"
+                  htmlFor="panel-animation-duration"
+                >
+                  {settings.panelAnimationDurationMs} ms
+                </output>
+              </div>
               <Switch
                 checked={settings.panelAnimationsEnabled}
                 onCheckedChange={(checked) =>

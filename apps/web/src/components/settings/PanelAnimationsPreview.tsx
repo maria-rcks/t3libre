@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
 
-export function PanelAnimationsPreview({ enabled }: { enabled: boolean }) {
+export function PanelAnimationsPreview({
+  enabled,
+  durationMs,
+}: {
+  enabled: boolean;
+  durationMs: number;
+}) {
   const [panelsOpen, setPanelsOpen] = useState(false);
 
   useEffect(() => {
@@ -20,9 +26,11 @@ export function PanelAnimationsPreview({ enabled }: { enabled: boolean }) {
       <span
         aria-hidden
         className={cn(
-          "h-full shrink-0 rounded-sm bg-sidebar transition-[width] duration-200 ease-out motion-reduce:transition-none",
+          "h-full shrink-0 rounded-sm bg-sidebar motion-reduce:transition-none",
+          enabled ? "transition-[width] ease-out" : "transition-none",
           panelsOpen ? "w-5" : "w-1",
         )}
+        style={enabled ? { transitionDuration: `${durationMs}ms` } : undefined}
       />
       <span aria-hidden className="flex min-w-0 flex-1 flex-col gap-1 px-1 pt-1.5">
         <span className="h-0.5 w-full rounded-full bg-muted-foreground/30" />
@@ -32,9 +40,11 @@ export function PanelAnimationsPreview({ enabled }: { enabled: boolean }) {
       <span
         aria-hidden
         className={cn(
-          "h-full shrink-0 rounded-sm bg-muted transition-[width] duration-200 ease-out motion-reduce:transition-none",
+          "h-full shrink-0 rounded-sm bg-muted motion-reduce:transition-none",
+          enabled ? "transition-[width] ease-out" : "transition-none",
           panelsOpen ? "w-6" : "w-1",
         )}
+        style={enabled ? { transitionDuration: `${durationMs}ms` } : undefined}
       />
     </button>
   );

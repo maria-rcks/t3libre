@@ -218,7 +218,7 @@ import {
   useEnvironmentSettings,
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
-import { usePanelAnimationsActive, usePanelPresence } from "../panelAnimations";
+import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
@@ -1774,18 +1774,21 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
   const rightPanelOpen = rightPanelState.isOpen;
-  const panelAnimationsActive = usePanelAnimationsActive();
+  const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
+    usePanelAnimationSettings();
   const inlineRightPanelPresence = usePanelPresence(
     rightPanelOpen && !shouldUseRightPanelSheet && activeThreadRef !== null,
     activeRightPanelSurface,
     panelAnimationsActive && !shouldUseRightPanelSheet,
     activeThreadKey,
+    panelAnimationDurationMs,
   );
   const sheetRightPanelPresence = usePanelPresence(
     rightPanelOpen && shouldUseRightPanelSheet && activeThreadRef !== null,
     activeRightPanelSurface,
     panelAnimationsActive && shouldUseRightPanelSheet,
     activeThreadKey,
+    panelAnimationDurationMs,
   );
   const inlineRightPanelPresent = inlineRightPanelPresence.present;
   const sheetRightPanelPresent = sheetRightPanelPresence.present;
@@ -7644,6 +7647,7 @@ function ChatViewContent(props: ChatViewProps) {
       {sheetRightPanelPresent && activeThreadRef ? (
         <RightPanelSheet
           animated={panelAnimationsActive}
+          animationDurationMs={panelAnimationDurationMs}
           open={rightPanelOpen}
           onClose={closePreviewPanel}
         >
