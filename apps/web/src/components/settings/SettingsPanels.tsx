@@ -41,7 +41,7 @@ import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
 import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
-import { useDismissedChatWarnings } from "../../chatWarningDismissals";
+import { useChatWarningDismissals } from "../../chatWarningDismissals";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -1862,7 +1862,8 @@ function LegacyFeaturesSection() {
 export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
-  const [dismissedWarningIds, setDismissedWarningIds] = useDismissedChatWarnings();
+  const [warningDismissals, setWarningDismissals] = useChatWarningDismissals();
+  const dismissedWarningIds = warningDismissals.permanent;
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
@@ -2155,7 +2156,7 @@ export function GeneralSettingsPanel() {
               size="xs"
               variant="outline"
               disabled={dismissedWarningIds.length === 0}
-              onClick={() => setDismissedWarningIds([])}
+              onClick={() => setWarningDismissals((current) => ({ ...current, permanent: [] }))}
             >
               Restore all
             </Button>

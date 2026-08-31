@@ -40,6 +40,15 @@ export const environmentServerWelcomeAtom = Atom.family((environmentId: Environm
     Option.getOrNull(AsyncResult.value(get(serverEnvironment.welcome(target)))),
   ).pipe(Atom.withLabel(`web-server-welcome:${environmentId}`));
 });
+export const environmentServerRunIdAtom = Atom.family((environmentId: EnvironmentId) => {
+  const target = { environmentId, input: {} };
+  return Atom.make((get) => {
+    const startedAt = Option.getOrNull(
+      AsyncResult.value(get(serverEnvironment.runStartedAt(target))),
+    );
+    return startedAt === null ? null : `${environmentId}\u0000${startedAt}`;
+  }).pipe(Atom.withLabel(`web-server-run-id:${environmentId}`));
+});
 
 interface PrimaryServerState {
   readonly config: ServerConfig | null;

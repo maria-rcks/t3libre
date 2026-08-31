@@ -163,7 +163,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
               size="icon-xs"
               aria-label={`${warnings.length} ${isSingle ? "warning" : "warnings"}. Right-click to dismiss.`}
               className={cn(
-                "size-6 shrink-0 rounded-full",
+                "size-6 shrink-0 rounded-full [--control-icon-color:currentColor]",
                 isError
                   ? "text-destructive [:hover,[data-pressed]]:bg-destructive/10"
                   : "text-warning [:hover,[data-pressed]]:bg-warning/10",

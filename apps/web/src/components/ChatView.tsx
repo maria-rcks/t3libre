@@ -262,7 +262,7 @@ import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import {
   environmentServerConfigsAtom,
-  environmentServerWelcomeAtom,
+  environmentServerRunIdAtom,
   primaryServerAvailableEditorsAtom,
   primaryServerKeybindingsAtom,
   primaryServerSettingsAtom,
@@ -306,7 +306,7 @@ import {
   resolveThreadErrorChatWarning,
   type ChatWarning,
 } from "./chat/ChatWarningIndicator";
-import { useDismissedChatWarnings } from "../chatWarningDismissals";
+import { useChatWarningDismissals } from "../chatWarningDismissals";
 import {
   resolveDisplayedThreadPr,
   threadChangeRequestSnapshotsAtom,
@@ -494,8 +494,6 @@ const PreviewPanel = lazy(() =>
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
-const EMPTY_WARNING_IDS: ReadonlySet<string> = new Set();
-const TEMPORARY_WARNING_DISMISSALS = new WeakMap<object, ReadonlySet<string>>();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
   "textarea",
@@ -1382,7 +1380,7 @@ function ChatViewContent(props: ChatViewProps) {
   const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
   const warningEnvironmentId =
     activeServerThread?.environmentId ?? draftThread?.environmentId ?? environmentId;
-  const serverWelcome = useAtomValue(environmentServerWelcomeAtom(warningEnvironmentId));
+  const serverRunId = useAtomValue(environmentServerRunIdAtom(warningEnvironmentId));
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -1635,36 +1633,35 @@ function ChatViewContent(props: ChatViewProps) {
     ? (localServerError ?? activeServerThread?.session?.lastError ?? null)
     : localDraftError;
   const threadErrorWarning = resolveThreadErrorChatWarning(routeThreadKey, threadError);
-  const [dismissedWarningIds, setDismissedWarningIds] = useDismissedChatWarnings();
-  const [temporaryWarningDismissals, setTemporaryWarningDismissals] = useState(() => ({
-    serverWelcome,
-    ids: serverWelcome
-      ? (TEMPORARY_WARNING_DISMISSALS.get(serverWelcome) ?? EMPTY_WARNING_IDS)
-      : EMPTY_WARNING_IDS,
-  }));
-  const dismissedWarningIdsForNow =
-    temporaryWarningDismissals.serverWelcome === serverWelcome
-      ? temporaryWarningDismissals.ids
-      : EMPTY_WARNING_IDS;
-  const dismissedWarningIdSet = useMemo(() => new Set(dismissedWarningIds), [dismissedWarningIds]);
+  const [warningDismissals, setWarningDismissals] = useChatWarningDismissals();
+  const temporaryWarningIdSet = useMemo(
+    () => new Set(warningDismissals.temporary),
+    [warningDismissals.temporary],
+  );
+  const permanentWarningIdSet = useMemo(
+    () => new Set(warningDismissals.permanent),
+    [warningDismissals.permanent],
+  );
   const dismissWarningsForNow = useCallback(
     (ids: ReadonlyArray<string>) => {
-      setTemporaryWarningDismissals((current) => {
-        const nextIds = new Set([
-          ...(current.serverWelcome === serverWelcome ? current.ids : EMPTY_WARNING_IDS),
-          ...ids,
-        ]);
-        if (serverWelcome) TEMPORARY_WARNING_DISMISSALS.set(serverWelcome, nextIds);
-        return { serverWelcome, ids: nextIds };
-      });
+      if (!serverRunId) return;
+      setWarningDismissals((current) => ({
+        ...current,
+        temporary: [
+          ...new Set([...current.temporary, ...ids.map((id) => `${serverRunId}\u0000${id}`)]),
+        ].slice(-100),
+      }));
     },
-    [serverWelcome],
+    [serverRunId, setWarningDismissals],
   );
   const dismissWarningsForever = useCallback(
     (ids: ReadonlyArray<string>) => {
-      setDismissedWarningIds((current) => [...new Set([...current, ...ids])]);
+      setWarningDismissals((current) => ({
+        ...current,
+        permanent: [...new Set([...current.permanent, ...ids])],
+      }));
     },
-    [setDismissedWarningIds],
+    [setWarningDismissals],
   );
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   // Plan mode is legacy (Settings → Beta). With the flag off the effective
@@ -2985,10 +2982,16 @@ function ChatViewContent(props: ChatViewProps) {
       [threadErrorWarning, providerStatusWarning].filter(
         (warning): warning is ChatWarning =>
           warning !== null &&
-          !dismissedWarningIdsForNow.has(warning.id) &&
-          !dismissedWarningIdSet.has(warning.id),
+          !temporaryWarningIdSet.has(`${serverRunId}\u0000${warning.id}`) &&
+          !permanentWarningIdSet.has(warning.id),
       ),
-    [dismissedWarningIdSet, dismissedWarningIdsForNow, providerStatusWarning, threadErrorWarning],
+    [
+      permanentWarningIdSet,
+      providerStatusWarning,
+      serverRunId,
+      temporaryWarningIdSet,
+      threadErrorWarning,
+    ],
   );
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
@@ -7160,7 +7163,7 @@ function ChatViewContent(props: ChatViewProps) {
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
             warnings={chatWarnings}
-            canDismissWarningsForNow={serverWelcome !== null}
+            canDismissWarningsForNow={serverRunId !== null}
             onDismissWarningsForNow={dismissWarningsForNow}
             onDismissWarningsForever={dismissWarningsForever}
             onNewThreadInProject={handleNewThreadInActiveProject}
