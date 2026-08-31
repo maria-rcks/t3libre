@@ -3758,8 +3758,8 @@ function ChatViewContent(props: ChatViewProps) {
         !activeThreadRef ||
         !activeThreadId ||
         !activeProject ||
-        activeRightPanelSurface?.kind !== "terminal" ||
-        activeRightPanelSurface.terminalIds.length >= MAX_TERMINALS_PER_GROUP
+        renderedRightPanelSurface?.kind !== "terminal" ||
+        renderedRightPanelSurface.terminalIds.length >= MAX_TERMINALS_PER_GROUP
       ) {
         return;
       }
@@ -3767,7 +3767,7 @@ function ChatViewContent(props: ChatViewProps) {
       const cwd = gitCwd ?? activeProject.workspaceRoot;
       useRightPanelStore
         .getState()
-        .splitTerminal(activeThreadRef, activeRightPanelSurface.id, terminalId, direction);
+        .splitTerminal(activeThreadRef, renderedRightPanelSurface.id, terminalId, direction);
       setTerminalFocusRequestId((value) => value + 1);
       void openTerminal({
         environmentId: activeThreadRef.environmentId,
@@ -3785,13 +3785,13 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [
       activeProject,
-      activeRightPanelSurface,
       activeThreadId,
       activeThreadRef,
       activeThreadWorktreePath,
       allocatableActiveTerminalIds,
       gitCwd,
       openTerminal,
+      renderedRightPanelSurface,
     ],
   );
   const splitPanelTerminalVertical = useCallback(() => {
@@ -3799,17 +3799,17 @@ function ChatViewContent(props: ChatViewProps) {
   }, [splitPanelTerminal]);
   const activatePanelTerminal = useCallback(
     (terminalId: string) => {
-      if (!activeThreadRef || activeRightPanelSurface?.kind !== "terminal") return;
+      if (!activeThreadRef || renderedRightPanelSurface?.kind !== "terminal") return;
       useRightPanelStore
         .getState()
-        .activateTerminal(activeThreadRef, activeRightPanelSurface.id, terminalId);
+        .activateTerminal(activeThreadRef, renderedRightPanelSurface.id, terminalId);
       setTerminalFocusRequestId((value) => value + 1);
     },
-    [activeRightPanelSurface, activeThreadRef],
+    [activeThreadRef, renderedRightPanelSurface],
   );
   const closePanelTerminal = useCallback(
     (terminalId: string) => {
-      if (!activeThreadRef || activeRightPanelSurface?.kind !== "terminal") return;
+      if (!activeThreadRef || renderedRightPanelSurface?.kind !== "terminal") return;
       void closeTerminalMutation({
         environmentId: activeThreadRef.environmentId,
         input: { threadId: activeThreadRef.threadId, terminalId, deleteHistory: true },
@@ -3817,10 +3817,10 @@ function ChatViewContent(props: ChatViewProps) {
       storeCloseTerminal(activeThreadRef, terminalId);
       useRightPanelStore
         .getState()
-        .closeTerminal(activeThreadRef, activeRightPanelSurface.id, terminalId);
+        .closeTerminal(activeThreadRef, renderedRightPanelSurface.id, terminalId);
       setTerminalFocusRequestId((value) => value + 1);
     },
-    [activeRightPanelSurface, activeThreadRef, closeTerminalMutation, storeCloseTerminal],
+    [activeThreadRef, closeTerminalMutation, renderedRightPanelSurface, storeCloseTerminal],
   );
   const requestCloseTerminal = useCallback(
     (terminalId: string) => {
@@ -5433,8 +5433,11 @@ function ChatViewContent(props: ChatViewProps) {
       if (command === "terminal.close") {
         event.preventDefault();
         event.stopPropagation();
-        if (terminalFocusOwner === "right-panel" && activeRightPanelSurface?.kind === "terminal") {
-          requestClosePanelTerminal(activeRightPanelSurface.activeTerminalId);
+        if (
+          terminalFocusOwner === "right-panel" &&
+          renderedRightPanelSurface?.kind === "terminal"
+        ) {
+          requestClosePanelTerminal(renderedRightPanelSurface.activeTerminalId);
           return;
         }
         if (!terminalUiState.terminalOpen) return;
@@ -5482,7 +5485,6 @@ function ChatViewContent(props: ChatViewProps) {
     return () => window.removeEventListener("keydown", handler, true);
   }, [
     activeProject,
-    activeRightPanelSurface,
     addTerminalSurface,
     activeThreadRef,
     activeThreadPinned,
@@ -5492,6 +5494,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeThreadId,
     requestCloseTerminal,
     requestClosePanelTerminal,
+    renderedRightPanelSurface,
     createNewTerminal,
     setTerminalOpen,
     runProjectScript,
