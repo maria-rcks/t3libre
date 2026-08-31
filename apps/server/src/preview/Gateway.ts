@@ -60,6 +60,7 @@ export class PreviewGatewayRequestError extends Schema.TaggedErrorClass<PreviewG
     code: Schema.String,
     detail: Schema.String,
     port: Schema.optionalKey(Schema.String),
+    cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {}
 
@@ -167,12 +168,13 @@ const authenticateGatewayRequest = Effect.fn("PreviewGateway.authenticateRequest
 
   const authorization = yield* validatePreviewGatewayTicket(ticket).pipe(
     Effect.mapError(
-      () =>
+      (cause) =>
         new PreviewGatewayRequestError({
           status: 502,
           code: "configuration-failed",
           detail:
             "T3 could not verify the preview gateway ticket. Reconnect to the environment and retry.",
+          cause,
         }),
     ),
   );
@@ -203,20 +205,22 @@ const targetFromRequest = Effect.fn("PreviewGateway.targetFromRequest")(function
   return target;
 });
 
-const upstreamUnavailable = (target: PreviewGatewayTarget) =>
+const upstreamUnavailable = (target: PreviewGatewayTarget, cause?: unknown) =>
   new PreviewGatewayRequestError({
     status: 502,
     code: "upstream-unreachable",
     detail: `T3 could not reach the preview server at ${target.hostHeader}. Start the dev server on that port and make sure it listens on loopback.`,
     port: target.port,
+    ...(cause === undefined ? {} : { cause }),
   });
 
-const upstreamTimedOut = (target: PreviewGatewayTarget) =>
+const upstreamTimedOut = (target: PreviewGatewayTarget, cause?: unknown) =>
   new PreviewGatewayRequestError({
     status: 504,
     code: "upstream-unreachable",
     detail: `The preview server at ${target.hostHeader} did not respond within 10 seconds. Check the dev server and retry.`,
     port: target.port,
+    ...(cause === undefined ? {} : { cause }),
   });
 
 const authorizeGatewayTarget = (
@@ -251,7 +255,7 @@ const proxyHttpRequest = Effect.fn("PreviewGateway.proxyHttp")(function* (
 
   const response = yield* httpClient.execute(upstreamRequest).pipe(
     Effect.timeoutOption(GATEWAY_CONNECT_TIMEOUT),
-    Effect.mapError(() => upstreamUnavailable(target)),
+    Effect.mapError((cause) => upstreamUnavailable(target, cause)),
   );
   if (Option.isNone(response)) return yield* upstreamTimedOut(target);
 
@@ -334,19 +338,20 @@ const proxyWebSocketRequest = Effect.fn("PreviewGateway.proxyWebSocket")(functio
             : Socket.isSocketError(error) &&
                 error.reason._tag === "SocketOpenError" &&
                 error.reason.kind === "Timeout"
-              ? upstreamTimedOut(target)
-              : upstreamUnavailable(target),
+              ? upstreamTimedOut(target, error)
+              : upstreamUnavailable(target, error),
         ),
       );
 
       const client = yield* request.upgrade.pipe(
         Effect.mapError(
-          () =>
+          (cause) =>
             new PreviewGatewayRequestError({
               status: 400,
               code: "configuration-failed",
               detail:
                 "T3 could not upgrade this request to a WebSocket. Retry the preview connection.",
+              cause,
             }),
         ),
       );
