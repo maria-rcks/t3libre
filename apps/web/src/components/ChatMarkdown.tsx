@@ -1216,12 +1216,12 @@ function ChatMarkdownImageFallback(props: {
 }
 
 /** Markdown images whose src is a workspace file path load through a signed asset URL. */
-const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(props: {
+export const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(props: {
   readonly threadRef: ScopedThreadRef;
   readonly path: string;
   readonly alt: string;
-  readonly copyMarkdown: string;
-  readonly srcFragment: string;
+  readonly copyMarkdown?: string;
+  readonly srcFragment?: string;
   readonly style?: CSSProperties | undefined;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }) {
@@ -1250,7 +1250,7 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
       />
     );
   }
-  const src = assetUrl.url + props.srcFragment;
+  const src = assetUrl.url + (props.srcFragment ?? "");
   return (
     <img
       src={src}

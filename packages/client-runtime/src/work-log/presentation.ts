@@ -1,4 +1,5 @@
 import { isToolLifecycleItemType, type ToolLifecycleItemType } from "@t3tools/contracts";
+import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 
 export function isWorktreeSetupActivity(kind: string): boolean {
   return kind === "setup-script.requested" || kind === "setup-script.started";
@@ -9,6 +10,7 @@ export interface WorkLogPresentationEntry {
   readonly toolTitle?: string;
   readonly tone: "thinking" | "tool" | "info" | "error";
   readonly command?: string;
+  readonly detail?: string;
   readonly changedFiles?: ReadonlyArray<string>;
   readonly itemType?: ToolLifecycleItemType;
   readonly requestKind?: string;
@@ -57,7 +59,8 @@ export function toolGroupAction(entry: WorkLogPresentationEntry): ToolGroupActio
   if (
     entry.requestKind === "file-read" ||
     entry.itemType === "image_view" ||
-    (entry.itemType === "dynamic_tool_call" && entry.toolTitle === "Read File")
+    (entry.itemType === "dynamic_tool_call" &&
+      entry.toolTitle?.trim().toLowerCase() === "read file")
   ) {
     return "read";
   }
@@ -74,6 +77,16 @@ export function toolGroupAction(entry: WorkLogPresentationEntry): ToolGroupActio
   if (workLogEntryIsLocalCodeSearch(entry)) return "code-search";
   if (entry.itemType === "web_search") return "search";
   return workLogEntryIsToolLike(entry) ? "other" : "update";
+}
+
+export function workEntryViewedImagePath(entry: WorkLogPresentationEntry): string | null {
+  const detail = entry.detail?.trim();
+  return toolGroupAction(entry) === "read" &&
+    detail !== undefined &&
+    !/[\r\n]/.test(detail) &&
+    isWorkspaceImagePreviewPath(detail)
+    ? detail
+    : null;
 }
 
 function toolGroupActionCount(
