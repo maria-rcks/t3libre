@@ -45,6 +45,18 @@ export class BrowserRecordingFormatUnavailableError extends Schema.TaggedErrorCl
   }
 }
 
+export class BrowserRecordingCaptureTimeoutError extends Schema.TaggedErrorClass<BrowserRecordingCaptureTimeoutError>()(
+  "BrowserRecordingCaptureTimeoutError",
+  {
+    tabId: Schema.String,
+    timeoutMs: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return `Browser recording media capture for tab ${this.tabId} did not settle within ${this.timeoutMs}ms.`;
+  }
+}
+
 export class BrowserRecordingOperationError extends Schema.TaggedErrorClass<BrowserRecordingOperationError>()(
   "BrowserRecordingOperationError",
   {
@@ -69,6 +81,7 @@ export class BrowserRecordingOperationError extends Schema.TaggedErrorClass<Brow
 }
 
 const isBrowserRecordingOperationError = Schema.is(BrowserRecordingOperationError);
+const isBrowserRecordingCaptureTimeoutError = Schema.is(BrowserRecordingCaptureTimeoutError);
 
 type BrowserRecordingLifecycle =
   | { readonly phase: "starting" }
@@ -204,6 +217,7 @@ const stopMediaStream = (stream: MediaStream | null): void => {
 };
 
 const captureTabMediaStreamWithTimeout = async (
+  tabId: string,
   source: DesktopPreviewRecordingSource,
   frameRate: number,
 ): Promise<MediaStream> => {
@@ -218,7 +232,13 @@ const captureTabMediaStreamWithTimeout = async (
       streamPromise,
       new Promise<never>((_, reject) => {
         timeoutId = window.setTimeout(
-          () => reject(new Error("Browser recording media capture did not settle.")),
+          () =>
+            reject(
+              new BrowserRecordingCaptureTimeoutError({
+                tabId,
+                timeoutMs: BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS,
+              }),
+            ),
           BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS,
         );
       }),
@@ -416,9 +436,10 @@ export async function startBrowserRecording(
     };
     await throwIfStartupCancelled();
     try {
-      recording.stream = await captureTabMediaStreamWithTimeout(source, frameRate);
+      recording.stream = await captureTabMediaStreamWithTimeout(tabId, source, frameRate);
     } catch (cause) {
       const cleanupCause = await cleanupFailedRecordingStart(bridge, recording);
+      if (isBrowserRecordingCaptureTimeoutError(cause) && cleanupCause === undefined) throw cause;
       throw new BrowserRecordingOperationError({
         operation: "capture-media-stream",
         tabId,

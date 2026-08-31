@@ -47,6 +47,7 @@ vi.mock("~/hooks/useSettings", () => ({
 import {
   BROWSER_RECORDING_PAINT_SETTLE_TIMEOUT_MS,
   BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS,
+  BrowserRecordingCaptureTimeoutError,
   BrowserRecordingConflictError,
   BrowserRecordingFormatUnavailableError,
   findActiveBrowserRecordingRuntimeTabId,
@@ -309,12 +310,14 @@ describe("browser recording", () => {
     const startPromise = startBrowserRecording("recording-tab");
     await vi.waitFor(() => expect(getUserMedia).toHaveBeenCalledOnce());
     const rejection = expect(startPromise).rejects.toMatchObject({
-      operation: "capture-media-stream",
+      _tag: "BrowserRecordingCaptureTimeoutError",
       tabId: "recording-tab",
+      timeoutMs: BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS,
     });
     await vi.advanceTimersByTimeAsync(BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS);
 
     await rejection;
+    await expect(startPromise).rejects.toBeInstanceOf(BrowserRecordingCaptureTimeoutError);
     expect(stopScreencast).toHaveBeenCalledWith("recording-tab");
     expect(readActiveBrowserRecordingTabIds()).toEqual(new Set());
     expect(useBrowserSurfaceStore.getState().activityByTabId["recording-tab"]).toBeUndefined();
