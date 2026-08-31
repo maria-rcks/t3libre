@@ -690,7 +690,7 @@ export const PreviewGatewayFailureReason = Schema.Literals([
   "authorization-insufficient",
 ]);
 export type PreviewGatewayFailureReason = typeof PreviewGatewayFailureReason.Type;
-const isPreviewGatewayFailureReason = Schema.is(PreviewGatewayFailureReason);
+export const isPreviewGatewayFailureReason = Schema.is(PreviewGatewayFailureReason);
 
 export const previewGatewayFailureMessage = (
   reason: PreviewGatewayFailureReason,
@@ -788,28 +788,15 @@ export class PreviewAutomationExecutionError extends Schema.TaggedErrorClass<Pre
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
+    gatewayReason: Schema.optional(PreviewGatewayFailureReason),
+    gatewayPort: Schema.optional(
+      Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThan(65_536)),
+    ),
   },
 ) {
   override get message(): string {
-    const detail =
-      this.remoteTag === "PreviewAutomationExecutionError" &&
-      typeof this.cause === "object" &&
-      this.cause !== null &&
-      "detail" in this.cause &&
-      typeof this.cause.detail === "object" &&
-      this.cause.detail !== null
-        ? this.cause.detail
-        : null;
-    if (
-      detail &&
-      "gatewayReason" in detail &&
-      isPreviewGatewayFailureReason(detail.gatewayReason)
-    ) {
-      const port =
-        "gatewayPort" in detail && typeof detail.gatewayPort === "number"
-          ? detail.gatewayPort
-          : undefined;
-      return previewGatewayFailureMessage(detail.gatewayReason, port);
+    if (this.gatewayReason !== undefined) {
+      return previewGatewayFailureMessage(this.gatewayReason, this.gatewayPort);
     }
     return `Preview automation ${this.operation} failed on client ${this.clientId}.`;
   }

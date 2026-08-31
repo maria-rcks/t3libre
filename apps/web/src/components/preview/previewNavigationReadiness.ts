@@ -1,11 +1,9 @@
 import {
+  isPreviewGatewayFailureReason,
   type PreviewAutomationNavigateInput,
   type PreviewAutomationRequest,
-  PreviewGatewayFailureReason,
-  type PreviewGatewayFailureReason as PreviewGatewayFailureReasonType,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import * as Schema from "effect/Schema";
 
 import { isCurrentPreviewRuntimeTab } from "~/browser/previewRuntimeTabId";
 import { readThreadPreviewState } from "~/previewStateStore";
@@ -17,16 +15,10 @@ import {
   PreviewGatewayNavigationError,
 } from "./previewAutomationErrors";
 
-const isPreviewGatewayFailureReason = Schema.is(PreviewGatewayFailureReason);
-
 const READ_PREVIEW_GATEWAY_ERROR_EXPRESSION = `(() => {
   const meta = document.querySelector('meta[name="t3-preview-gateway-error"]');
   return meta ? { reason: meta.getAttribute("content"), port: meta.getAttribute("data-port") } : null;
 })()`;
-
-export const normalizeGatewayUnavailableReason = (
-  value: unknown,
-): PreviewGatewayFailureReasonType | null => (isPreviewGatewayFailureReason(value) ? value : null);
 
 async function throwIfPreviewGatewayFailed(runtimeTabId: string): Promise<void> {
   if (!previewBridge) return;
@@ -34,8 +26,8 @@ async function throwIfPreviewGatewayFailed(runtimeTabId: string): Promise<void> 
     expression: READ_PREVIEW_GATEWAY_ERROR_EXPRESSION,
   });
   if (typeof value !== "object" || value === null || !("reason" in value)) return;
-  const reason = normalizeGatewayUnavailableReason(value.reason);
-  if (!reason) return;
+  const reason = value.reason;
+  if (!isPreviewGatewayFailureReason(reason)) return;
   const rawPort = "port" in value ? value.port : undefined;
   const parsedPort = typeof rawPort === "string" ? Number(rawPort) : rawPort;
   const port =
