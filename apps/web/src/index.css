@@ -134,14 +134,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   );
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  @starting-style {
-    [data-panel-animations="true"] [data-panel-motion="true"][data-panel-state="open"] {
-      width: 0 !important;
-    }
-  }
-}
-
 /* The font tokens are declared outside the inline theme so utilities reference
    the variables and Settings -> Appearance can override them at runtime. The
    default stacks are mirrored in `appearanceFonts.ts`. */

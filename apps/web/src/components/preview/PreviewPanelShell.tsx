@@ -1,4 +1,5 @@
 import {
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
   useEffect,
@@ -80,6 +81,24 @@ export function PreviewPanelShell(props: {
     maxWidth,
     edge: "left",
   });
+  const [resizing, setResizing] = useState(false);
+  const resizeHandlers = {
+    onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
+      handlers.onPointerDown(event);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        setResizing(true);
+      }
+    },
+    onPointerMove: handlers.onPointerMove,
+    onPointerUp: (event: ReactPointerEvent<HTMLElement>) => {
+      handlers.onPointerUp(event);
+      setResizing(false);
+    },
+    onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => {
+      handlers.onPointerCancel(event);
+      setResizing(false);
+    },
+  };
 
   return (
     <div
@@ -91,7 +110,10 @@ export function PreviewPanelShell(props: {
             ? "flex-1 border-l border-border"
             : "shrink-0 border-l border-border"
           : "w-full",
-        animated && "transition-[width] duration-200 ease-out motion-reduce:transition-none",
+        animated &&
+          !resizing &&
+          "transition-[width] duration-200 ease-out motion-reduce:transition-none",
+        animated && open && "starting:w-0!",
         animated && !open && "overflow-hidden pointer-events-none",
       )}
       style={
@@ -99,12 +121,10 @@ export function PreviewPanelShell(props: {
           ? { width: animated && !open ? "0px" : `${width}px` }
           : undefined
       }
-      data-panel-motion={animated ? "true" : "false"}
-      data-panel-state={open ? "open" : "closed"}
       data-preview-panel-mode={props.mode}
       data-preview-panel-maximized={props.maximized ? "true" : "false"}
     >
-      {isInline && !props.maximized ? <RightPanelResizeHandle handlers={handlers} /> : null}
+      {isInline && !props.maximized ? <RightPanelResizeHandle handlers={resizeHandlers} /> : null}
       <div
         className="flex h-full min-h-0 min-w-0 flex-col"
         style={animated ? { width: `${width}px` } : undefined}
