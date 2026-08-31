@@ -101,11 +101,15 @@ export function PreviewPanelShell(props: {
     const host = hostRef.current;
     if (!host) return;
     host.style.setProperty("transition-duration", "0ms");
-    const frame = window.requestAnimationFrame(() => {
-      host.style.removeProperty("transition-duration");
+    let restoreFrame = 0;
+    const paintFrame = window.requestAnimationFrame(() => {
+      restoreFrame = window.requestAnimationFrame(() => {
+        host.style.removeProperty("transition-duration");
+      });
     });
     return () => {
-      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(paintFrame);
+      window.cancelAnimationFrame(restoreFrame);
       host.style.removeProperty("transition-duration");
     };
   }, [animated, open, width]);
