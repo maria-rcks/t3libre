@@ -10,6 +10,7 @@ import { usePreparePreviewGatewayNavigation } from "~/components/preview/usePrep
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
 import { toastManager } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
+import { usePreparedConnection } from "~/state/session";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
 import { resolveBrowserNavigationTarget } from "./browserTargetResolver";
@@ -58,11 +59,15 @@ export function HostedBrowserWebview(props: {
   const { threadRef, tabId, runtimeTabId, initialUrl, viewport, pictureInPicture, zoomFactor } =
     props;
   const config = usePreviewWebviewConfig(threadRef.environmentId);
+  const preparedConnection = usePreparedConnection(threadRef.environmentId);
+  const environmentHttpBaseUrl =
+    preparedConnection._tag === "Some" ? preparedConnection.value.httpBaseUrl : null;
   const [initialSrc, setInitialSrc] = useState(() => initialUrl ?? "about:blank");
   const [gatewayReady, setGatewayReady] = useState(initialUrl === null);
   const [webviewGeneration, setWebviewGeneration] = useState(0);
   const [recoverySrc, setRecoverySrc] = useState(initialSrc);
   const latestUrlRef = useRef(initialUrl);
+  const initialPreparationCompleteRef = useRef(initialUrl === null);
   const prepareGatewayNavigation = usePreparePreviewGatewayNavigation();
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -104,15 +109,24 @@ export function HostedBrowserWebview(props: {
           }),
         );
         if (disposed) return;
+        initialPreparationCompleteRef.current = true;
+        if (latestUrlRef.current === null) {
+          setInitialSrc(initialUrl);
+          setRecoverySrc(initialUrl);
+          latestUrlRef.current = initialUrl;
+        }
         setGatewayReady(true);
         if (expiresAt !== null) {
           refreshTimeout = setTimeout(prepare, Math.max(1_000, expiresAt - Date.now() - 30_000));
         }
       } catch (error) {
         if (disposed) return;
-        setInitialSrc("about:blank");
-        setRecoverySrc("about:blank");
-        latestUrlRef.current = null;
+        if (!initialPreparationCompleteRef.current) {
+          initialPreparationCompleteRef.current = true;
+          setInitialSrc("about:blank");
+          setRecoverySrc("about:blank");
+          latestUrlRef.current = null;
+        }
         setGatewayReady(true);
         if (isPreviewGatewayNavigationError(error)) {
           toastManager.add({
@@ -128,7 +142,7 @@ export function HostedBrowserWebview(props: {
       disposed = true;
       if (refreshTimeout !== undefined) clearTimeout(refreshTimeout);
     };
-  }, [initialUrl, prepareGatewayNavigation, threadRef.environmentId]);
+  }, [environmentHttpBaseUrl, initialUrl, prepareGatewayNavigation, threadRef.environmentId]);
 
   useEffect(() => {
     crashRecoveryRef.current = INITIAL_WEBVIEW_CRASH_RECOVERY_STATE;

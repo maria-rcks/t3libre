@@ -9,7 +9,6 @@ import {
 } from "@t3tools/shared/previewGateway";
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
-import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -48,16 +47,6 @@ const GATEWAY_HEADERS = new Set([PREVIEW_GATEWAY_TARGET_HEADER, PREVIEW_GATEWAY_
 
 type GatewayKind = "http" | "websocket";
 
-class PreviewGatewayHttpClient extends Context.Service<
-  PreviewGatewayHttpClient,
-  HttpClient.HttpClient
->()("t3/preview/Gateway/PreviewGatewayHttpClient") {}
-
-const PreviewGatewayHttpClientLive = Layer.effect(
-  PreviewGatewayHttpClient,
-  HttpClient.HttpClient,
-).pipe(Layer.provide(NodeHttpClient.layerUndici));
-
 export interface PreviewGatewayTarget {
   readonly url: URL;
   readonly hostHeader: string;
@@ -75,9 +64,6 @@ export class PreviewGatewayRequestError extends Schema.TaggedErrorClass<PreviewG
 ) {}
 
 const isPreviewGatewayRequestError = Schema.is(PreviewGatewayRequestError);
-
-const requestError = (status: number, code: string, detail: string, port?: string) =>
-  new PreviewGatewayRequestError({ status, code, detail, ...(port === undefined ? {} : { port }) });
 
 const escapeHtml = (value: string): string =>
   value.replace(
@@ -172,28 +158,30 @@ const authenticateGatewayRequest = Effect.fn("PreviewGateway.authenticateRequest
 ) {
   const ticket = request.headers[PREVIEW_GATEWAY_TICKET_HEADER]?.trim();
   if (!ticket || ticket.length > MAX_GATEWAY_HEADER_LENGTH) {
-    return yield* requestError(
-      401,
-      "authentication-expired",
-      `Request a fresh ticket with preview.issueGatewayTicket and send it in ${PREVIEW_GATEWAY_TICKET_HEADER}.`,
-    );
+    return yield* new PreviewGatewayRequestError({
+      status: 401,
+      code: "authentication-expired",
+      detail: `Request a fresh ticket with preview.issueGatewayTicket and send it in ${PREVIEW_GATEWAY_TICKET_HEADER}.`,
+    });
   }
 
   const authorization = yield* validatePreviewGatewayTicket(ticket).pipe(
-    Effect.mapError(() =>
-      requestError(
-        502,
-        "configuration-failed",
-        "T3 could not verify the preview gateway ticket. Reconnect to the environment and retry.",
-      ),
+    Effect.mapError(
+      () =>
+        new PreviewGatewayRequestError({
+          status: 502,
+          code: "configuration-failed",
+          detail:
+            "T3 could not verify the preview gateway ticket. Reconnect to the environment and retry.",
+        }),
     ),
   );
   if (authorization === null) {
-    return yield* requestError(
-      401,
-      "authentication-expired",
-      "The preview gateway ticket is invalid or expired. Request a fresh ticket and retry.",
-    );
+    return yield* new PreviewGatewayRequestError({
+      status: 401,
+      code: "authentication-expired",
+      detail: "The preview gateway ticket is invalid or expired. Request a fresh ticket and retry.",
+    });
   }
   return authorization;
 });
@@ -206,30 +194,30 @@ const targetFromRequest = Effect.fn("PreviewGateway.targetFromRequest")(function
   const target = resolvePreviewGatewayTarget(rawTarget, kind);
   if (target === null) {
     const example = kind === "http" ? "http://localhost:5173/" : "ws://localhost:5173/";
-    return yield* requestError(
-      400,
-      "configuration-failed",
-      `Set ${PREVIEW_GATEWAY_TARGET_HEADER} to a full loopback ${kind} URL such as ${example}.`,
-    );
+    return yield* new PreviewGatewayRequestError({
+      status: 400,
+      code: "configuration-failed",
+      detail: `Set ${PREVIEW_GATEWAY_TARGET_HEADER} to a full loopback ${kind} URL such as ${example}.`,
+    });
   }
   return target;
 });
 
 const upstreamUnavailable = (target: PreviewGatewayTarget) =>
-  requestError(
-    502,
-    "upstream-unreachable",
-    `T3 could not reach the preview server at ${target.hostHeader}. Start the dev server on that port and make sure it listens on loopback.`,
-    target.port,
-  );
+  new PreviewGatewayRequestError({
+    status: 502,
+    code: "upstream-unreachable",
+    detail: `T3 could not reach the preview server at ${target.hostHeader}. Start the dev server on that port and make sure it listens on loopback.`,
+    port: target.port,
+  });
 
 const upstreamTimedOut = (target: PreviewGatewayTarget) =>
-  requestError(
-    504,
-    "upstream-unreachable",
-    `The preview server at ${target.hostHeader} did not respond within 10 seconds. Check the dev server and retry.`,
-    target.port,
-  );
+  new PreviewGatewayRequestError({
+    status: 504,
+    code: "upstream-unreachable",
+    detail: `The preview server at ${target.hostHeader} did not respond within 10 seconds. Check the dev server and retry.`,
+    port: target.port,
+  });
 
 const authorizeGatewayTarget = (
   authorization: { readonly port: number },
@@ -238,18 +226,18 @@ const authorizeGatewayTarget = (
   authorization.port === Number(target.port)
     ? Effect.void
     : Effect.fail(
-        requestError(
-          403,
-          "configuration-failed",
-          `This preview gateway ticket allows port ${authorization.port}, not port ${target.port}. Request a ticket for the selected port and retry.`,
-          target.port,
-        ),
+        new PreviewGatewayRequestError({
+          status: 403,
+          code: "configuration-failed",
+          detail: `This preview gateway ticket allows port ${authorization.port}, not port ${target.port}. Request a ticket for the selected port and retry.`,
+          port: target.port,
+        }),
       );
 
 const proxyHttpRequest = Effect.fn("PreviewGateway.proxyHttp")(function* (
   request: HttpServerRequest.HttpServerRequest,
-  httpClient: PreviewGatewayHttpClient["Service"],
 ) {
+  const httpClient = yield* HttpClient.HttpClient;
   const authorization = yield* authenticateGatewayRequest(request);
   const target = yield* targetFromRequest(request, "http");
   yield* authorizeGatewayTarget(authorization, target);
@@ -293,11 +281,11 @@ const proxyWebSocketRequest = Effect.fn("PreviewGateway.proxyWebSocket")(functio
       ?.split(",")
       .some((token) => token.trim().toLowerCase() === "upgrade")
   ) {
-    return yield* requestError(
-      400,
-      "configuration-failed",
-      "This preview gateway endpoint requires a WebSocket upgrade request.",
-    );
+    return yield* new PreviewGatewayRequestError({
+      status: 400,
+      code: "configuration-failed",
+      detail: "This preview gateway endpoint requires a WebSocket upgrade request.",
+    });
   }
 
   const upstreamHeaders = sanitizePreviewGatewayHeaders(request.headers, {
@@ -352,12 +340,14 @@ const proxyWebSocketRequest = Effect.fn("PreviewGateway.proxyWebSocket")(functio
       );
 
       const client = yield* request.upgrade.pipe(
-        Effect.mapError(() =>
-          requestError(
-            400,
-            "configuration-failed",
-            "T3 could not upgrade this request to a WebSocket. Retry the preview connection.",
-          ),
+        Effect.mapError(
+          () =>
+            new PreviewGatewayRequestError({
+              status: 400,
+              code: "configuration-failed",
+              detail:
+                "T3 could not upgrade this request to a WebSocket. Retry the preview connection.",
+            }),
         ),
       );
       const writeToClient = yield* client.writer;
@@ -381,15 +371,11 @@ const handleGateway = <R>(
     }),
   );
 
-export const previewGatewayRouteLayer = Layer.unwrap(
-  Effect.map(PreviewGatewayHttpClient, (httpClient) =>
-    Layer.mergeAll(
-      HttpRouter.add("*", PREVIEW_GATEWAY_HTTP_PATH, (request) =>
-        handleGateway(proxyHttpRequest(request, httpClient)),
-      ),
-      HttpRouter.add("GET", PREVIEW_GATEWAY_WEBSOCKET_PATH, (request) =>
-        handleGateway(proxyWebSocketRequest(request)),
-      ),
-    ),
+export const previewGatewayRouteLayer = Layer.mergeAll(
+  HttpRouter.add("*", PREVIEW_GATEWAY_HTTP_PATH, (request) =>
+    handleGateway(proxyHttpRequest(request)),
   ),
-).pipe(Layer.provide(PreviewGatewayHttpClientLive));
+  HttpRouter.add("GET", PREVIEW_GATEWAY_WEBSOCKET_PATH, (request) =>
+    handleGateway(proxyWebSocketRequest(request)),
+  ),
+).pipe(HttpRouter.provideRequest(NodeHttpClient.layerUndici));

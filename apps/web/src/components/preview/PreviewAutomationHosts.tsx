@@ -467,9 +467,11 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               // operation failure.
               await waitForPreviewPresentation(activeRuntimeTabId);
             }
-            if (reusedExistingTab && resolvedInputUrl && previewBridge) {
+            if (resolvedInputUrl && previewBridge) {
               assertPreviewRuntimeCurrent(threadRef, activeTabId, activeRuntimeTabId, request);
-              await previewBridge.navigate(activeRuntimeTabId, resolvedInputUrl);
+              if (reusedExistingTab) {
+                await previewBridge.navigate(activeRuntimeTabId, resolvedInputUrl);
+              }
               await waitForNavigationReadiness(
                 threadRef,
                 request.requestId,

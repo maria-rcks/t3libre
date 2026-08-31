@@ -94,18 +94,22 @@ describe("BrowserSession", () => {
 
       const proxyConfigA = sessionA.setProxy.mock.calls[0]?.[0] as {
         readonly mode: string;
-        readonly pacScript: string;
+        readonly proxyRules: string;
+        readonly proxyBypassRules: string;
       };
       const proxyConfigB = sessionB.setProxy.mock.calls[0]?.[0] as {
         readonly mode: string;
-        readonly pacScript: string;
+        readonly proxyRules: string;
+        readonly proxyBypassRules: string;
       };
-      assert.equal(proxyConfigA.mode, "pac_script");
-      assert.equal(proxyConfigB.mode, "pac_script");
-      const pacA = Buffer.from(proxyConfigA.pacScript.split(",")[1] ?? "", "base64").toString();
-      const pacB = Buffer.from(proxyConfigB.pacScript.split(",")[1] ?? "", "base64").toString();
-      const portA = pacA.match(/PROXY 127\.0\.0\.1:(\d+)/)?.[1];
-      const portB = pacB.match(/PROXY 127\.0\.0\.1:(\d+)/)?.[1];
+      assert.equal(proxyConfigA.mode, "fixed_servers");
+      assert.equal(proxyConfigB.mode, "fixed_servers");
+      assert.equal(
+        proxyConfigA.proxyBypassRules,
+        "*;<-loopback>;169.254.0.0/16;fe80::/10;loopback",
+      );
+      const portA = proxyConfigA.proxyRules.match(/http:\/\/127\.0\.0\.1:(\d+)/)?.[1];
+      const portB = proxyConfigB.proxyRules.match(/http:\/\/127\.0\.0\.1:(\d+)/)?.[1];
       assert.isDefined(portA);
       assert.isDefined(portB);
       assert.notEqual(portA, portB);
@@ -131,7 +135,7 @@ describe("BrowserSession", () => {
         expiresAtEpochMilliseconds: gatewayExpiry,
       });
       assert.strictEqual(sessionA.setProxy.mock.calls.length, 3);
-      assert.equal(sessionA.setProxy.mock.calls[2]?.[0]?.mode, "pac_script");
+      assert.equal(sessionA.setProxy.mock.calls[2]?.[0]?.mode, "fixed_servers");
     }).pipe(Effect.provide(layer)),
   );
 

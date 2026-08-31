@@ -3,11 +3,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 
-import {
-  makePreviewGatewayPacScript,
-  startPreviewGatewayProxy,
-  type PreviewGatewayProxy,
-} from "./PreviewGatewayProxy.ts";
+import { startPreviewGatewayProxy, type PreviewGatewayProxy } from "./PreviewGatewayProxy.ts";
 
 const servers: Array<NodeHttp.Server> = [];
 const proxies: Array<PreviewGatewayProxy> = [];
@@ -92,34 +88,6 @@ afterEach(async () => {
 
 describe("PreviewGatewayProxy", () => {
   it("routes selected loopback HTTP traffic without changing browser semantics", async () => {
-    const script = makePreviewGatewayPacScript(43123);
-    const findProxy = Function(
-      "isInNet",
-      `${script}; return FindProxyForURL;`,
-    )((host: string, network: string) => network === "127.0.0.0" && host.startsWith("127.")) as (
-      url: string,
-      host: string,
-    ) => string;
-
-    for (const [url, host] of [
-      ["http://localhost:3000", "localhost"],
-      ["http://app.localhost:3000", "app.localhost"],
-      ["http://127.42.0.1:3000", "127.42.0.1"],
-      ["http://0.0.0.0:3000", "0.0.0.0"],
-      ["ws://[::1]:3000/socket", "::1"],
-    ] as const) {
-      expect(findProxy(url, host)).toBe("PROXY 127.0.0.1:43123");
-    }
-
-    for (const [url, host] of [
-      ["https://localhost:3000", "localhost"],
-      ["wss://localhost:3000/socket", "localhost"],
-      ["http://192.168.1.20:3000", "192.168.1.20"],
-      ["http://10.0.0.20:3000", "10.0.0.20"],
-      ["http://example.com", "example.com"],
-    ] as const) {
-      expect(findProxy(url, host)).toBe("DIRECT");
-    }
     type ReceivedRequest = {
       readonly url: string | undefined;
       readonly method: string | undefined;
@@ -224,20 +192,25 @@ describe("PreviewGatewayProxy", () => {
     const browserResponse = await new Promise<string>((resolve, reject) => {
       const socket = NodeNet.connect(proxy.port, "127.0.0.1");
       let received = "";
+      let tunnelEstablished = false;
       socket.once("connect", () => {
-        socket.write(
-          "GET ws://localhost:4173/socket?channel=one HTTP/1.1\r\n" +
-            "Host: localhost:4173\r\n" +
-            "Connection: Upgrade\r\n" +
-            "Upgrade: websocket\r\n" +
-            "Sec-WebSocket-Key: dGVzdC1wcmV2aWV3LWtleQ==\r\n" +
-            "Sec-WebSocket-Version: 13\r\n" +
-            "Sec-WebSocket-Protocol: vite-hmr\r\n\r\n" +
-            "browser-head",
-        );
+        socket.write("CONNECT localhost:4173 HTTP/1.1\r\nHost: localhost:4173\r\n\r\n");
       });
       socket.on("data", (data) => {
         received += data.toString();
+        if (!tunnelEstablished && received.includes("HTTP/1.1 200 Connection Established")) {
+          tunnelEstablished = true;
+          socket.write(
+            "GET /socket?channel=one HTTP/1.1\r\n" +
+              "Host: localhost:4173\r\n" +
+              "Connection: Upgrade\r\n" +
+              "Upgrade: websocket\r\n" +
+              "Sec-WebSocket-Key: dGVzdC1wcmV2aWV3LWtleQ==\r\n" +
+              "Sec-WebSocket-Version: 13\r\n" +
+              "Sec-WebSocket-Protocol: vite-hmr\r\n\r\n" +
+              "browser-head",
+          );
+        }
         if (received.includes("echo:browser-head")) {
           socket.destroy();
           resolve(received);

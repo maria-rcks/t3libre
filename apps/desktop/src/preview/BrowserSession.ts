@@ -12,7 +12,6 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import {
   type PreviewGatewayProxy,
   type PreviewGatewayProxyConfiguration,
-  makePreviewGatewayPacUrl,
   startPreviewGatewayProxy,
 } from "./PreviewGatewayProxy.ts";
 
@@ -235,8 +234,12 @@ export const make = Effect.gen(function* BrowserSessionMake() {
               Effect.tryPromise({
                 try: () =>
                   browserSession.setProxy({
-                    mode: "pac_script",
-                    pacScript: makePreviewGatewayPacUrl(proxy.port),
+                    mode: "fixed_servers",
+                    proxyRules: `http=http://127.0.0.1:${proxy.port};https=direct://;socks=http://127.0.0.1:${proxy.port}`,
+                    // Chromium implicitly bypasses loopback even when a PAC script
+                    // selects a proxy. Manual rules can subtract only that bypass;
+                    // the leading wildcard keeps every non-loopback host direct.
+                    proxyBypassRules: "*;<-loopback>;169.254.0.0/16;fe80::/10;loopback",
                   }),
                 catch: (cause) => new BrowserSessionGatewayConfigurationError({ scope, cause }),
               }).pipe(

@@ -161,27 +161,6 @@ const writeRawError = (socket: NodeStream.Duplex, statusCode: number, message: s
   );
 };
 
-export const makePreviewGatewayPacScript = (port: number): string => `
-function FindProxyForURL(url, host) {
-  var scheme = url.substring(0, url.indexOf(":"));
-  var normalizedHost = host.toLowerCase().replace(/\\.$/, "");
-  var loopback = normalizedHost === "localhost" ||
-    normalizedHost.slice(-10) === ".localhost" ||
-    normalizedHost === "0.0.0.0" ||
-    normalizedHost === "::" ||
-    normalizedHost === "::1" ||
-    isInNet(normalizedHost, "127.0.0.0", "255.0.0.0");
-  if ((scheme === "http" || scheme === "ws") && loopback) {
-    return "PROXY 127.0.0.1:${port}";
-  }
-  return "DIRECT";
-}`;
-
-export const makePreviewGatewayPacUrl = (port: number): string =>
-  `data:application/x-ns-proxy-autoconfig;base64,${Buffer.from(
-    makePreviewGatewayPacScript(port),
-  ).toString("base64")}`;
-
 export const startPreviewGatewayProxy = async (
   initialConfiguration: PreviewGatewayProxyConfiguration,
 ): Promise<PreviewGatewayProxy> => {
@@ -247,7 +226,7 @@ export const startPreviewGatewayProxy = async (
         gatewayResponse.statusMessage,
         responseHeaders(gatewayResponse.headers),
       );
-      gatewayResponse.pipe(response);
+      NodeStream.pipeline(gatewayResponse, response, () => undefined);
     });
     upstream.on("error", () => {
       sendGatewayHttpError(
@@ -265,24 +244,12 @@ export const startPreviewGatewayProxy = async (
     socket.once("close", () => sockets.delete(socket));
   });
 
-  server.on("connect", (_request, socket) => {
-    writeRawError(
-      socket,
-      501,
-      "t3 remote preview supports http and websocket targets; https targets are not supported",
-    );
-  });
-
-  server.on("upgrade", (request, browserSocket, browserHead) => {
-    const target = parsePreviewGatewayTarget(request.url ?? "", WEBSOCKET_PROTOCOLS);
-    if (!target) {
-      writeRawError(
-        browserSocket,
-        400,
-        "t3 preview proxy only accepts absolute loopback websocket targets",
-      );
-      return;
-    }
+  const handleWebSocketUpgrade = (
+    request: NodeHttp.IncomingMessage,
+    browserSocket: NodeStream.Duplex,
+    browserHead: Buffer,
+    target: URL,
+  ): void => {
     const selected = configurationForTarget(target);
     if (!selected.configuration) {
       writeRawError(
@@ -345,7 +312,7 @@ export const startPreviewGatewayProxy = async (
         gatewayResponse.statusMessage ?? "Bad Gateway",
         decodedRawResponseHeaders(gatewayResponse.rawHeaders),
       );
-      gatewayResponse.pipe(browserSocket);
+      NodeStream.pipeline(gatewayResponse, browserSocket, () => undefined);
     });
     upstream.on("error", () => {
       writeRawError(
@@ -356,6 +323,67 @@ export const startPreviewGatewayProxy = async (
     });
     browserSocket.once("close", () => upstream.destroy());
     upstream.end();
+  };
+
+  const tunnelTargets = new WeakMap<NodeStream.Duplex, URL>();
+  const tunnelServer = NodeHttp.createServer((_request, response) => {
+    response.shouldKeepAlive = false;
+    sendHttpError(response, 400, "t3 preview websocket tunnels only accept upgrade requests");
+  });
+  tunnelServer.on("upgrade", (request, browserSocket, browserHead) => {
+    const authority = tunnelTargets.get(browserSocket);
+    tunnelTargets.delete(browserSocket);
+    const path = request.url ?? "";
+    if (!authority || request.method !== "GET" || !path.startsWith("/") || path.startsWith("//")) {
+      writeRawError(browserSocket, 400, "t3 preview received an invalid websocket tunnel request");
+      return;
+    }
+    handleWebSocketUpgrade(request, browserSocket, browserHead, new URL(path, authority));
+  });
+
+  server.on("connect", (request, socket, head) => {
+    const target = parsePreviewGatewayTarget(`ws://${request.url ?? ""}/`, WEBSOCKET_PROTOCOLS);
+    if (
+      !target ||
+      target.username.length > 0 ||
+      target.password.length > 0 ||
+      target.pathname !== "/" ||
+      target.search.length > 0 ||
+      target.hash.length > 0
+    ) {
+      writeRawError(socket, 400, "t3 preview proxy only accepts loopback websocket tunnels");
+      return;
+    }
+    const selected = configurationForTarget(target);
+    if (!selected.configuration) {
+      writeRawError(
+        socket,
+        selected.expired ? 401 : 403,
+        selected.expired
+          ? "the t3 preview gateway credential expired; navigate again to reconnect"
+          : "this loopback port has not been authorized for remote preview",
+      );
+      return;
+    }
+    socket.pause();
+    socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+    tunnelTargets.set(socket, target);
+    tunnelServer.emit("connection", socket);
+    if (head.byteLength > 0) socket.unshift(head);
+    socket.resume();
+  });
+
+  server.on("upgrade", (request, browserSocket, browserHead) => {
+    const target = parsePreviewGatewayTarget(request.url ?? "", WEBSOCKET_PROTOCOLS);
+    if (!target) {
+      writeRawError(
+        browserSocket,
+        400,
+        "t3 preview proxy only accepts absolute loopback websocket targets",
+      );
+      return;
+    }
+    handleWebSocketUpgrade(request, browserSocket, browserHead, target);
   });
 
   await new Promise<void>((resolve, reject) => {

@@ -77,11 +77,17 @@ interface Props {
 const localApi = typeof window === "undefined" ? null : ensureLocalApi();
 
 const reportPreviewGatewayFailure = (error: unknown): void => {
-  if (!isPreviewGatewayNavigationError(error)) return;
+  const description = isPreviewGatewayNavigationError(error)
+    ? error.message
+    : error instanceof Error
+      ? `${error.message} Reconnect the environment and retry.`
+      : "Reconnect the environment and retry.";
   toastManager.add({
     type: "error",
-    title: "Unable to open remote preview",
-    description: error.message,
+    title: isPreviewGatewayNavigationError(error)
+      ? "Unable to open remote preview"
+      : "Unable to open preview",
+    description,
   });
 };
 
