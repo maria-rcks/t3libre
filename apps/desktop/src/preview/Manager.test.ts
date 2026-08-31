@@ -2146,8 +2146,8 @@ describe("PreviewManager", () => {
           { sourceId: "tab:41", width: 800, height: 600 },
           { sourceId: "tab:42", width: 390, height: 844 },
         ]);
-        expect(firstCapturePage).not.toHaveBeenCalled();
-        expect(secondCapturePage).not.toHaveBeenCalled();
+        expect(firstCapturePage).toHaveBeenCalledOnce();
+        expect(secondCapturePage).toHaveBeenCalledOnce();
         expect(firstSendCommand).not.toHaveBeenCalledWith(
           "Page.startScreencast",
           expect.anything(),
@@ -2440,11 +2440,11 @@ describe("PreviewManager", () => {
         const pictureInPictureFramesBeforeRecording = pictureInPictureSend.mock.calls.length;
 
         yield* manager.startRecording("tab_pip");
-        expect(capturePage).toHaveBeenCalledOnce();
+        expect(capturePage).toHaveBeenCalledTimes(2);
         expect(recordingFrames).toHaveLength(0);
 
         yield* TestClock.adjust(100);
-        expect(capturePage).toHaveBeenCalledTimes(2);
+        expect(capturePage).toHaveBeenCalledTimes(3);
         expect(pictureInPictureSend).toHaveBeenCalledTimes(pictureInPictureFramesBeforeRecording);
         expect(recordingFrames).toHaveLength(0);
 
@@ -2452,7 +2452,7 @@ describe("PreviewManager", () => {
         expect(setBackgroundThrottling.mock.calls).toEqual([[false]]);
         const framesBeforePictureInPictureOnlyTick = pictureInPictureSend.mock.calls.length;
         yield* TestClock.adjust(100);
-        expect(capturePage).toHaveBeenCalledTimes(3);
+        expect(capturePage).toHaveBeenCalledTimes(4);
         expect(pictureInPictureSend.mock.calls.length).toBe(framesBeforePictureInPictureOnlyTick);
         expect(recordingFrames).toHaveLength(0);
 
@@ -2470,7 +2470,7 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("starts picture-in-picture without an extra recording capture", () =>
+  effectIt.effect("keeps picture-in-picture capture separate from recording warmup", () =>
     withManager((manager) =>
       Effect.gen(function* () {
         const jpeg = Buffer.from("shared-preview-frame");
@@ -2495,14 +2495,14 @@ describe("PreviewManager", () => {
         yield* manager.startRecording("tab_recording_then_pip");
 
         expect(recordingFrames).toHaveLength(0);
-        expect(capturePage).not.toHaveBeenCalled();
-        yield* manager.openPictureInPicture("tab_recording_then_pip");
         expect(capturePage).toHaveBeenCalledOnce();
+        yield* manager.openPictureInPicture("tab_recording_then_pip");
+        expect(capturePage).toHaveBeenCalledTimes(2);
         expect(send).toHaveBeenCalledOnce();
 
         yield* TestClock.adjust(100);
 
-        expect(capturePage).toHaveBeenCalledTimes(2);
+        expect(capturePage).toHaveBeenCalledTimes(3);
         expect(recordingFrames).toHaveLength(0);
         expect(send).toHaveBeenCalledOnce();
         yield* manager.closePictureInPicture("tab_recording_then_pip");

@@ -3137,6 +3137,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             webContentsId: wc.id,
           });
         }
+        yield* attemptPromise(
+          {
+            operation: "recording.warmSource",
+            tabId,
+            webContentsId: wc.id,
+          },
+          () => wc.capturePage().then(() => undefined),
+        );
         const currentWebContents = yield* requireWebContents(tabId);
         if (currentWebContents !== wc || wc.isDestroyed()) {
           return yield* new PreviewWebContentsNotFoundError({

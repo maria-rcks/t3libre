@@ -39,11 +39,8 @@ export function resolveHostedBrowserWebviewWrapperStyle(input: {
   }
 
   return {
-    // Chromium can cull a guest that has never produced an onscreen frame.
-    // Keep active background work behind the app so native tab capture can
-    // start before the user has ever opened this preview.
-    left: renderingActive ? 0 : HIDDEN_BROWSER_WEBVIEW_OFFSET,
-    top: renderingActive ? 0 : HIDDEN_BROWSER_WEBVIEW_OFFSET,
+    left: HIDDEN_BROWSER_WEBVIEW_OFFSET,
+    top: HIDDEN_BROWSER_WEBVIEW_OFFSET,
     width: hiddenSize.width,
     height: hiddenSize.height,
     zIndex: -1,
