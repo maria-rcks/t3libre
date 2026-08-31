@@ -2979,20 +2979,21 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const chatWarnings = useMemo(
     () =>
-      serverRunId === null
-        ? []
-        : [threadErrorWarning, providerStatusWarning].filter(
-            (warning): warning is ChatWarning =>
-              warning !== null &&
-              !temporaryWarningIdSet.has(`${serverRunId}\u0000${warning.id}`) &&
-              !permanentWarningIdSet.has(warning.id),
-          ),
+      [threadErrorWarning, providerStatusWarning].filter(
+        (warning): warning is ChatWarning =>
+          warning !== null &&
+          (serverRunId === null
+            ? !warningDismissals.temporary.some((id) => id.endsWith(`\u0000${warning.id}`))
+            : !temporaryWarningIdSet.has(`${serverRunId}\u0000${warning.id}`)) &&
+          !permanentWarningIdSet.has(warning.id),
+      ),
     [
       permanentWarningIdSet,
       providerStatusWarning,
       serverRunId,
       temporaryWarningIdSet,
       threadErrorWarning,
+      warningDismissals.temporary,
     ],
   );
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
