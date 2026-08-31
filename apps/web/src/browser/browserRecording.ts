@@ -33,6 +33,15 @@ export class BrowserRecordingConflictError extends Schema.TaggedErrorClass<Brows
   }
 }
 
+export class BrowserRecordingFormatUnavailableError extends Schema.TaggedErrorClass<BrowserRecordingFormatUnavailableError>()(
+  "BrowserRecordingFormatUnavailableError",
+  { tabId: Schema.String },
+) {
+  override get message(): string {
+    return `MediaRecorder did not report an output format for tab ${this.tabId}.`;
+  }
+}
+
 export class BrowserRecordingOperationError extends Schema.TaggedErrorClass<BrowserRecordingOperationError>()(
   "BrowserRecordingOperationError",
   {
@@ -440,13 +449,13 @@ const finalizeBrowserRecording = async (
           cause,
         });
       }
+      const mimeType =
+        recording.recorder.mimeType ||
+        recording.chunks.find((chunk) => chunk.type.length > 0)?.type;
+      if (!mimeType) {
+        throw new BrowserRecordingFormatUnavailableError({ tabId });
+      }
       try {
-        const mimeType =
-          recording.recorder.mimeType ||
-          recording.chunks.find((chunk) => chunk.type.length > 0)?.type;
-        if (!mimeType) {
-          throw new Error("MediaRecorder did not report its output format.");
-        }
         const blob = new Blob(recording.chunks, { type: mimeType });
         const artifact = await bridge.recording.save(
           tabId,

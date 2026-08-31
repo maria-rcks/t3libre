@@ -42,6 +42,7 @@ vi.mock("~/rpc/atomRegistry", () => ({
 import {
   BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS,
   BrowserRecordingConflictError,
+  BrowserRecordingFormatUnavailableError,
   findActiveBrowserRecordingRuntimeTabId,
   readActiveBrowserRecordingTabIds,
   readActiveBrowserRecordingTargets,
@@ -199,6 +200,19 @@ describe("browser recording", () => {
       "video/platform-default",
       expect.any(Uint8Array),
     );
+  });
+
+  it("reports when MediaRecorder provides no output format", async () => {
+    FakeMediaRecorder.supportedTypes = new Set();
+    FakeMediaRecorder.outputMimeType = "";
+
+    await startBrowserRecording("recording-tab");
+
+    await expect(stopBrowserRecording("recording-tab")).rejects.toBeInstanceOf(
+      BrowserRecordingFormatUnavailableError,
+    );
+    expect(save).not.toHaveBeenCalled();
+    expect(readActiveBrowserRecordingTabIds()).toEqual(new Set());
   });
 
   it("releases the native capture lease when stream acquisition fails", async () => {
