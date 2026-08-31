@@ -273,6 +273,7 @@ function PullRequestAuthorFilter({
           option.actor.name?.toLowerCase().includes(needle)),
     ),
   ].slice(0, 10);
+  const selectAuthor = (next: string) => next !== (value ?? "") && onChange(next || undefined);
   return (
     <MenuSub>
       <MenuSubTrigger>
@@ -301,7 +302,7 @@ function PullRequestAuthorFilter({
             />
           </InputGroup>
         </div>
-        <MenuRadioGroup value={value ?? ""} onValueChange={(next) => onChange(next || undefined)}>
+        <MenuRadioGroup value={value ?? ""} onValueChange={selectAuthor}>
           <MenuRadioItem value="">
             <span className="flex min-w-0 items-center gap-2">
               <LayersIcon aria-hidden className="size-3.5" />
