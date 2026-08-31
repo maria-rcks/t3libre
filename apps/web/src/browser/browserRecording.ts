@@ -8,7 +8,10 @@ import * as Schema from "effect/Schema";
 import { Atom } from "effect/unstable/reactivity";
 
 import { previewBridge } from "~/components/preview/previewBridge";
+import { ensureClientSettingsHydrated, getClientSettings } from "~/hooks/useSettings";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
+
+import { acquireBrowserSurfaceActivity } from "./browserSurfaceStore";
 
 export class BrowserRecordingUnavailableError extends Schema.TaggedErrorClass<BrowserRecordingUnavailableError>()(
   "BrowserRecordingUnavailableError",
@@ -84,6 +87,7 @@ interface ActiveRecording {
   readonly chunks: Blob[];
   readonly startedAt: string;
   readonly startupSettled: Promise<void>;
+  releaseSurfaceActivity: (() => void) | null;
   stream: MediaStream | null;
   recorder: MediaRecorder | null;
   lifecycle: BrowserRecordingLifecycle;
@@ -166,7 +170,10 @@ const createMediaRecorder = (stream: MediaStream): MediaRecorder => {
   return mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
 };
 
-const captureTabMediaStream = (source: DesktopPreviewRecordingSource): Promise<MediaStream> =>
+const captureTabMediaStream = (
+  source: DesktopPreviewRecordingSource,
+  frameRate: number,
+): Promise<MediaStream> =>
   navigator.mediaDevices.getUserMedia({
     audio: false,
     video: {
@@ -177,7 +184,7 @@ const captureTabMediaStream = (source: DesktopPreviewRecordingSource): Promise<M
         maxWidth: source.width,
         minHeight: source.height,
         maxHeight: source.height,
-        maxFrameRate: 60,
+        maxFrameRate: frameRate,
       },
     } as unknown as MediaTrackConstraints,
   });
@@ -196,9 +203,16 @@ const stopMediaStream = (stream: MediaStream | null): void => {
 };
 
 const clearActiveRecording = (recording: ActiveRecording): void => {
+  recording.releaseSurfaceActivity?.();
+  recording.releaseSurfaceActivity = null;
   if (activeRecordings.get(recording.tabId) !== recording) return;
   activeRecordings.delete(recording.tabId);
   publishActiveRecordingTabIds();
+};
+
+const waitForBrowserRecordingPaint = async (): Promise<void> => {
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 };
 
 const cleanupFailedRecordingStart = async (
@@ -301,6 +315,7 @@ export async function startBrowserRecording(
   const startupSettled = new Promise<void>((resolve) => {
     settleStartup = resolve;
   });
+  const releaseSurfaceActivity = acquireBrowserSurfaceActivity(tabId);
   const recording: ActiveRecording = {
     tabId,
     serverTabId,
@@ -308,6 +323,7 @@ export async function startBrowserRecording(
     chunks,
     startedAt,
     startupSettled,
+    releaseSurfaceActivity,
     stream: null,
     recorder: null,
     lifecycle: { phase: "starting" },
@@ -315,6 +331,9 @@ export async function startBrowserRecording(
   activeRecordings.set(tabId, recording);
   publishActiveRecordingTabIds();
   try {
+    const frameRatePromise = ensureClientSettingsHydrated().then(
+      () => getClientSettings().browserRecordingFrameRate,
+    );
     let source: DesktopPreviewRecordingSource;
     try {
       source = await bridge.recording.startScreencast(tabId);
@@ -348,8 +367,10 @@ export async function startBrowserRecording(
       throw recordingStartupCancelledError(recording);
     };
     await throwIfStartupCancelled();
+    const [frameRate] = await Promise.all([frameRatePromise, waitForBrowserRecordingPaint()]);
+    await throwIfStartupCancelled();
     try {
-      recording.stream = await captureTabMediaStream(source);
+      recording.stream = await captureTabMediaStream(source, frameRate);
     } catch (cause) {
       const cleanupCause = await cleanupFailedRecordingStart(bridge, recording);
       throw new BrowserRecordingOperationError({
