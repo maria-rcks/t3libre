@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { workEntryViewedImagePath } from "./presentation.js";
+import { ThreadId } from "@t3tools/contracts";
+
+import { resolveViewedImageAsset, workEntryViewedImagePath } from "./presentation.js";
 
 describe("workEntryViewedImagePath", () => {
   const entry = { label: "Read", tone: "tool" } as const;
@@ -27,5 +29,42 @@ describe("workEntryViewedImagePath", () => {
       workEntryViewedImagePath({ ...entry, itemType: "image_view", detail: "a.png\nb.png" }),
     ).toBeNull();
     expect(workEntryViewedImagePath({ ...entry, detail: "a.png" })).toBeNull();
+  });
+});
+
+describe("resolveViewedImageAsset", () => {
+  const threadId = ThreadId.make("thread-1");
+
+  it("loads t3 attachment paths as attachments", () => {
+    const attachmentId =
+      "11111111-1111-4111-8111-111111111111-22222222-2222-4222-8222-222222222222";
+    expect(
+      resolveViewedImageAsset(`/Users/demo/.t3/dev/attachments/${attachmentId}.png`, {
+        threadId,
+        workspaceRoot: "/workspace",
+      }),
+    ).toEqual({
+      resource: { _tag: "attachment", attachmentId },
+      alt: `${attachmentId}.png`,
+      srcFragment: "",
+    });
+  });
+
+  it("normalizes workspace image sources", () => {
+    expect(
+      resolveViewedImageAsset("screens/logo.svg?v=2#mark", {
+        threadId,
+        workspaceRoot: "/workspace",
+      }),
+    ).toEqual({
+      resource: {
+        _tag: "workspace-file",
+        threadId,
+        path: "/workspace/screens/logo.svg",
+      },
+      alt: "logo.svg",
+      srcFragment: "#mark",
+    });
+    expect(resolveViewedImageAsset("https://example.com/logo.png", { threadId })).toBeNull();
   });
 });

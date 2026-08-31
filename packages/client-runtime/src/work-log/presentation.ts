@@ -1,5 +1,12 @@
-import { isToolLifecycleItemType, type ToolLifecycleItemType } from "@t3tools/contracts";
+import {
+  isToolLifecycleItemType,
+  type AssetResource,
+  type ThreadId,
+  type ToolLifecycleItemType,
+} from "@t3tools/contracts";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
+
+import { classifyMarkdownImageSource, markdownImageSourceFragment } from "../markdownImages.js";
 
 export function isWorktreeSetupActivity(kind: string): boolean {
   return kind === "setup-script.requested" || kind === "setup-script.started";
@@ -87,6 +94,43 @@ export function workEntryViewedImagePath(entry: WorkLogPresentationEntry): strin
     isWorkspaceImagePreviewPath(detail)
     ? detail
     : null;
+}
+
+export interface ViewedImageAsset {
+  readonly resource: Extract<AssetResource, { readonly _tag: "attachment" | "workspace-file" }>;
+  readonly alt: string;
+  readonly srcFragment: string;
+}
+
+const ABSOLUTE_IMAGE_SOURCE_PATTERN = /^(?:file:|[\\/]|[a-z]:[\\/])/i;
+const T3_ATTACHMENT_IMAGE_PATH_PATTERN =
+  /(?:^|[\\/])(?:dev|userdata)[\\/]attachments[\\/]([a-z0-9_-]{1,128})\.[a-z0-9]{1,10}$/i;
+
+export function resolveViewedImageAsset(
+  source: string,
+  input: {
+    readonly threadId: ThreadId;
+    readonly workspaceRoot?: string | null | undefined;
+  },
+): ViewedImageAsset | null {
+  const imageSource = classifyMarkdownImageSource(source, input.workspaceRoot ?? ".");
+  if (imageSource._tag !== "WorkspaceFile") return null;
+
+  const path =
+    input.workspaceRoot == null && imageSource.path.startsWith("./")
+      ? imageSource.path.slice(2)
+      : imageSource.path;
+  const attachmentId = ABSOLUTE_IMAGE_SOURCE_PATTERN.test(source)
+    ? (T3_ATTACHMENT_IMAGE_PATH_PATTERN.exec(path)?.[1] ?? null)
+    : null;
+
+  return {
+    resource: attachmentId
+      ? { _tag: "attachment", attachmentId }
+      : { _tag: "workspace-file", threadId: input.threadId, path },
+    alt: path.split(/[\\/]/).at(-1) ?? "image",
+    srcFragment: markdownImageSourceFragment(source),
+  };
 }
 
 function toolGroupActionCount(

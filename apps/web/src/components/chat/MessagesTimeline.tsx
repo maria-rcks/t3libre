@@ -9,7 +9,10 @@ import {
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
 import { commandProgramName } from "@t3tools/client-runtime/work-log/command-label";
-import { workEntryViewedImagePath } from "@t3tools/client-runtime/work-log/presentation";
+import {
+  resolveViewedImageAsset,
+  workEntryViewedImagePath,
+} from "@t3tools/client-runtime/work-log/presentation";
 import type { AgentPanelModel } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
   emptyAgentPanelModel,
@@ -56,7 +59,7 @@ import {
   resolveDiffThemeName,
   resolveFileDiffPath,
 } from "../../lib/diffRendering";
-import ChatMarkdown, { ChatMarkdownWorkspaceImage } from "../ChatMarkdown";
+import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
@@ -2423,6 +2426,13 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const displayText = workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry);
   const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
   const viewedImagePath = workEntryViewedImagePath(workEntry);
+  const viewedImage =
+    viewedImagePath && threadRef
+      ? resolveViewedImageAsset(viewedImagePath, {
+          threadId: threadRef.threadId,
+          workspaceRoot,
+        })
+      : null;
   const canExpand = expandedBody !== null;
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -2516,12 +2526,13 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          {viewedImagePath && threadRef ? (
+          {viewedImage && threadRef ? (
             <div className="mb-1.5">
-              <ChatMarkdownWorkspaceImage
-                threadRef={threadRef}
-                path={viewedImagePath}
-                alt={viewedImagePath.split(/[\\/]/).at(-1) ?? "image"}
+              <ChatMarkdownAssetImage
+                environmentId={threadRef.environmentId}
+                resource={viewedImage.resource}
+                alt={viewedImage.alt}
+                srcFragment={viewedImage.srcFragment}
                 style={{ maxHeight: "16rem" }}
                 onImageExpand={onImageExpand}
               />
