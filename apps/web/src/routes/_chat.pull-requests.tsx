@@ -1519,8 +1519,20 @@ function PullRequestsRouteView() {
       // mounted at the fixed titlebar inset in both states so it cannot move
       // on toggle, and this spacer keeps refresh from sliding underneath it
       // (sized per header padding so refresh ends a normal gap short of it).
-      !pullRequestsSupported || rightPanelPresent ? null : (
-        <span aria-hidden className="w-7 shrink-0 sm:w-5" />
+      !pullRequestsSupported ? null : (
+        <span
+          aria-hidden
+          className={cn(
+            "shrink-0",
+            rightPanelState.isOpen ? "w-0" : "w-7 sm:w-5",
+            panelAnimationsActive && "transition-[width] ease-out",
+          )}
+          style={
+            panelAnimationsActive
+              ? { transitionDuration: `${panelAnimationDurationMs}ms` }
+              : undefined
+          }
+        />
       ),
     titlebarControls:
       // While the panel is closed the strip lives inside the header: a no-drag
