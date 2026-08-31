@@ -385,15 +385,23 @@ function PullRequestsRouteView() {
   const activePullRequestSurface = rightPanelState.isOpen ? selectedPullRequestSurface : null;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
+  const rightPanelPresenceValue = useMemo(
+    () => ({
+      activeSurface: selectedPullRequestSurface,
+      surfaces: rightPanelState.surfaces,
+    }),
+    [rightPanelState.surfaces, selectedPullRequestSurface],
+  );
   const rightPanelPresence = usePanelPresence(
     rightPanelState.isOpen && selectedPullRequestSurface !== null,
-    selectedPullRequestSurface,
+    rightPanelPresenceValue,
     panelAnimationsActive,
     rightPanelRef === null ? null : PULL_REQUESTS_PANEL_ID,
     panelAnimationDurationMs,
   );
   const rightPanelPresent = rightPanelPresence.present;
-  const renderedPullRequestSurface = rightPanelPresence.value;
+  const renderedPullRequestSurface = rightPanelPresence.value?.activeSurface ?? null;
+  const renderedRightPanelSurfaces = rightPanelPresence.value?.surfaces ?? [];
   // The open tab names its own server; a link that arrived before any tab was opened names it
   // through the project it selected.
   const panelEnvironmentId =
@@ -1569,13 +1577,14 @@ function PullRequestsRouteView() {
           <RightPanelTabs
             mode="inline"
             animated={panelAnimationsActive}
+            animationDurationMs={panelAnimationDurationMs}
             open={rightPanelState.isOpen}
             widthStorageKey="t3code:pull-request-panel-width"
             // Default to roughly half the viewport: the PR list needs more
             // room than a chat, so the 540px chat-preview default squashes
             // it. SSR has no window, so fall back to a reasonable width.
             defaultWidth={typeof window === "undefined" ? 640 : Math.floor(window.innerWidth / 2)}
-            surfaces={rightPanelState.surfaces}
+            surfaces={renderedRightPanelSurfaces}
             activeSurfaceId={renderedPullRequestSurface.id}
             pendingSurfaceIds={EMPTY_PENDING_SURFACES}
             previewSessions={EMPTY_PREVIEW_SESSIONS}

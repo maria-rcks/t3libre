@@ -1,4 +1,6 @@
+import { DEFAULT_PANEL_ANIMATION_DURATION_MS } from "@t3tools/contracts/settings";
 import {
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
@@ -54,6 +56,7 @@ export function PreviewPanelShell(props: {
   mode: PreviewPanelMode;
   maximized?: boolean;
   animated?: boolean;
+  animationDurationMs?: number;
   open?: boolean;
   /**
    * Overrides the localStorage key used to persist the panel width. Callers
@@ -118,7 +121,10 @@ export function PreviewPanelShell(props: {
       )}
       style={
         isInline && !props.maximized
-          ? { width: animated && !open ? "0px" : `${width}px` }
+          ? ({
+              "--panel-animation-duration": `${props.animationDurationMs ?? DEFAULT_PANEL_ANIMATION_DURATION_MS}ms`,
+              width: animated && !open ? "0px" : `${width}px`,
+            } as CSSProperties)
           : undefined
       }
       data-preview-panel-mode={props.mode}

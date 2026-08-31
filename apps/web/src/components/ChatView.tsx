@@ -1776,16 +1776,23 @@ function ChatViewContent(props: ChatViewProps) {
   const rightPanelOpen = rightPanelState.isOpen;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
+  const rightPanelPresenceValue = useMemo(
+    () => ({
+      activeSurface: activeRightPanelSurface,
+      surfaces: rightPanelState.surfaces,
+    }),
+    [activeRightPanelSurface, rightPanelState.surfaces],
+  );
   const inlineRightPanelPresence = usePanelPresence(
     rightPanelOpen && !shouldUseRightPanelSheet && activeThreadRef !== null,
-    activeRightPanelSurface,
+    rightPanelPresenceValue,
     panelAnimationsActive && !shouldUseRightPanelSheet,
     activeThreadKey,
     panelAnimationDurationMs,
   );
   const sheetRightPanelPresence = usePanelPresence(
     rightPanelOpen && shouldUseRightPanelSheet && activeThreadRef !== null,
-    activeRightPanelSurface,
+    rightPanelPresenceValue,
     panelAnimationsActive && shouldUseRightPanelSheet,
     activeThreadKey,
     panelAnimationDurationMs,
@@ -1794,7 +1801,9 @@ function ChatViewContent(props: ChatViewProps) {
   const sheetRightPanelPresent = sheetRightPanelPresence.present;
   const rightPanelControlsInPanel =
     inlineRightPanelPresent || (sheetRightPanelPresent && rightPanelOpen);
-  const renderedRightPanelSurface = inlineRightPanelPresence.value ?? sheetRightPanelPresence.value;
+  const renderedRightPanelValue = inlineRightPanelPresence.value ?? sheetRightPanelPresence.value;
+  const renderedRightPanelSurface = renderedRightPanelValue?.activeSurface ?? null;
+  const renderedRightPanelSurfaces = renderedRightPanelValue?.surfaces ?? [];
   const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
     canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
@@ -7614,9 +7623,10 @@ function ChatViewContent(props: ChatViewProps) {
         <RightPanelTabs
           mode="inline"
           animated={panelAnimationsActive}
+          animationDurationMs={panelAnimationDurationMs}
           open={rightPanelOpen}
           maximized={rightPanelMaximized}
-          surfaces={rightPanelState.surfaces}
+          surfaces={renderedRightPanelSurfaces}
           activeSurfaceId={renderedRightPanelSurface?.id ?? null}
           pendingSurfaceIds={pendingFileSurfaceIds}
           previewSessions={activePreviewState.sessions}
@@ -7660,8 +7670,12 @@ function ChatViewContent(props: ChatViewProps) {
             // (pr-3 in the tab bar plus this pixel equals the absolute
             // right inset plus mr-px), so the cluster does not creep when
             // the sheet opens.
-            layoutControls={<div className="mr-px flex items-center">{panelToggleControls}</div>}
-            surfaces={rightPanelState.surfaces}
+            layoutControls={
+              rightPanelOpen ? (
+                <div className="mr-px flex items-center">{panelToggleControls}</div>
+              ) : null
+            }
+            surfaces={renderedRightPanelSurfaces}
             activeSurfaceId={renderedRightPanelSurface?.id ?? null}
             pendingSurfaceIds={pendingFileSurfaceIds}
             previewSessions={activePreviewState.sessions}
