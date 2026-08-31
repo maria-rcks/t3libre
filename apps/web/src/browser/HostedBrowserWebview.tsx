@@ -5,7 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { previewBridge } from "~/components/preview/previewBridge";
-import { isPreviewGatewayNavigationError } from "~/components/preview/previewAutomationErrors";
+import { previewGatewayFailureToast } from "~/components/preview/previewAutomationErrors";
 import { usePreparePreviewGatewayNavigation } from "~/components/preview/usePreparePreviewGatewayNavigation";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
 import { toastManager } from "~/components/ui/toast";
@@ -128,13 +128,7 @@ export function HostedBrowserWebview(props: {
           latestUrlRef.current = null;
         }
         setGatewayReady(true);
-        if (isPreviewGatewayNavigationError(error)) {
-          toastManager.add({
-            type: "error",
-            title: "Unable to open remote preview",
-            description: error.message,
-          });
-        }
+        toastManager.add(previewGatewayFailureToast(error));
       }
     };
     void prepare();

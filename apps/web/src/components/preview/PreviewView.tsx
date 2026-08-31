@@ -46,7 +46,7 @@ import {
 import { browserResponsiveViewportForToggle, useBrowserDefaults } from "~/browser/browserDefaults";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { PreviewUnreachable } from "./PreviewUnreachable";
-import { isPreviewGatewayNavigationError } from "./previewAutomationErrors";
+import { previewGatewayFailureToast } from "./previewAutomationErrors";
 import { usePreparePreviewGatewayNavigation } from "./usePreparePreviewGatewayNavigation";
 import { revealInFileExplorerLabel } from "./fileExplorerLabel";
 import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
@@ -75,21 +75,6 @@ interface Props {
 }
 
 const localApi = typeof window === "undefined" ? null : ensureLocalApi();
-
-const reportPreviewGatewayFailure = (error: unknown): void => {
-  const description = isPreviewGatewayNavigationError(error)
-    ? error.message
-    : error instanceof Error
-      ? `${error.message} Reconnect the environment and retry.`
-      : "Reconnect the environment and retry.";
-  toastManager.add({
-    type: "error",
-    title: isPreviewGatewayNavigationError(error)
-      ? "Unable to open remote preview"
-      : "Unable to open preview",
-    description,
-  });
-};
 
 /**
  * Single-tab preview surface: chrome row on top, one webview below, empty
@@ -207,7 +192,7 @@ export function PreviewView({
           recordVisitForThread(threadRef, normalized);
         }
       } catch (error) {
-        reportPreviewGatewayFailure(error);
+        toastManager.add(previewGatewayFailureToast(error));
       }
     },
     [navigateToResolvedUrl, prepareGatewayNavigation, threadRef],
@@ -225,7 +210,7 @@ export function PreviewView({
           recordVisitForThread(threadRef, next);
         }
       } catch (error) {
-        reportPreviewGatewayFailure(error);
+        toastManager.add(previewGatewayFailureToast(error));
       }
     },
     [navigateToResolvedUrl, prepareGatewayNavigation, threadRef],

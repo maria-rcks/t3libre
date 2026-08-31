@@ -37,6 +37,18 @@ export class PreviewGatewayNavigationError extends Schema.TaggedErrorClass<Previ
 
 export const isPreviewGatewayNavigationError = Schema.is(PreviewGatewayNavigationError);
 
+export const previewGatewayFailureToast = (error: unknown) => ({
+  type: "error" as const,
+  title: isPreviewGatewayNavigationError(error)
+    ? "Unable to open remote preview"
+    : "Unable to open preview",
+  description: isPreviewGatewayNavigationError(error)
+    ? error.message
+    : error instanceof Error
+      ? `${error.message} Reconnect the environment and retry.`
+      : "Reconnect the environment and retry.",
+});
+
 export class PreviewAutomationOverlayTimeoutError extends Schema.TaggedErrorClass<PreviewAutomationOverlayTimeoutError>()(
   "PreviewAutomationOverlayTimeoutError",
   {
