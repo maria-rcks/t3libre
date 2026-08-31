@@ -2,6 +2,9 @@ import {
   EnvironmentId,
   type PreviewAutomationHost,
   PreviewAutomationOperation,
+  PreviewGatewayFailureReason,
+  type PreviewGatewayFailureReason as PreviewGatewayFailureReasonType,
+  previewGatewayFailureMessage,
   type PreviewAutomationRequest,
   type PreviewAutomationResponse,
   PreviewTabId,
@@ -10,12 +13,25 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
+const isPreviewGatewayFailureReason = Schema.is(PreviewGatewayFailureReason);
+
 export interface PreviewAutomationOperationContext {
   readonly requestId: PreviewAutomationRequest["requestId"];
   readonly operation: PreviewAutomationRequest["operation"];
   readonly environmentId: PreviewAutomationHost["environmentId"];
   readonly threadId: PreviewAutomationRequest["threadId"];
   readonly tabId: Exclude<PreviewAutomationRequest["tabId"], undefined> | null;
+}
+
+export class PreviewGatewayNavigationError extends Error {
+  readonly _tag = "PreviewGatewayNavigationError";
+
+  constructor(
+    readonly reason: PreviewGatewayFailureReasonType,
+    readonly port?: number,
+  ) {
+    super(previewGatewayFailureMessage(reason, port));
+  }
 }
 
 export class PreviewAutomationOverlayTimeoutError extends Schema.TaggedErrorClass<PreviewAutomationOverlayTimeoutError>()(
@@ -177,12 +193,34 @@ export class PreviewAutomationOperationError extends Schema.TaggedErrorClass<Pre
     threadId: ThreadId,
     tabId: Schema.NullOr(PreviewTabId),
     cause: Schema.Defect(),
+    gatewayReason: Schema.optional(PreviewGatewayFailureReason),
+    gatewayPort: Schema.optional(
+      Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThan(65_536)),
+    ),
   },
 ) {
   static fromCause(
     input: PreviewAutomationOperationContext & { readonly cause: unknown },
   ): PreviewAutomationHostError {
     if (isPreviewAutomationHostError(input.cause)) return input.cause;
+    if (
+      typeof input.cause === "object" &&
+      input.cause !== null &&
+      "_tag" in input.cause &&
+      input.cause._tag === "PreviewGatewayNavigationError" &&
+      "reason" in input.cause &&
+      isPreviewGatewayFailureReason(input.cause.reason)
+    ) {
+      const gatewayPort =
+        "port" in input.cause && typeof input.cause.port === "number"
+          ? input.cause.port
+          : undefined;
+      return new PreviewAutomationOperationError({
+        ...input,
+        gatewayReason: input.cause.reason,
+        ...(gatewayPort === undefined ? {} : { gatewayPort }),
+      });
+    }
     const diagnostics = targetNotEditableDiagnostics(input.cause);
     return diagnostics
       ? new PreviewAutomationTargetNotEditableHostError({
@@ -201,6 +239,9 @@ export class PreviewAutomationOperationError extends Schema.TaggedErrorClass<Pre
   }
 
   override get message(): string {
+    if (this.gatewayReason !== undefined) {
+      return previewGatewayFailureMessage(this.gatewayReason, this.gatewayPort);
+    }
     return `Preview automation ${this.operation} request ${this.requestId} failed on environment ${this.environmentId} thread ${this.threadId} (tab ${this.tabId ?? "unassigned"}).`;
   }
 }

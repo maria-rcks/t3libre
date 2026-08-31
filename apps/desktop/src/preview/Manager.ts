@@ -18,6 +18,7 @@ import type {
   DesktopPreviewRecordingFrame,
   DesktopPreviewScreenshotArtifact,
   DesktopPreviewTabDefaults,
+  DesktopPreviewGatewayConfig,
   PreviewAutomationClickInput,
   PreviewAutomationActionEvent,
   PreviewAutomationConsoleEntry,
@@ -4141,6 +4142,11 @@ export class PreviewManager extends Context.Service<
   {
     readonly setMainWindow: (window: BrowserWindow) => Effect.Effect<void, PreviewManagerError>;
     readonly getBrowserSession: (scope?: string) => Effect.Effect<Session, PreviewManagerError>;
+    readonly configureGateway: (
+      scope: string,
+      configuration: Omit<DesktopPreviewGatewayConfig, "environmentId">,
+    ) => Effect.Effect<void, PreviewManagerError>;
+    readonly clearGateway: (scope: string) => Effect.Effect<void, PreviewManagerError>;
     readonly isBrowserPartition: (partition: string) => boolean;
     readonly createTab: (
       tabId: string,
@@ -4251,6 +4257,26 @@ export const make = Effect.gen(function* PreviewManagerMake() {
         .pipe(
           Effect.mapError(
             (cause) => new PreviewOperationError({ operation: "getBrowserSession", cause }),
+          ),
+        );
+    }),
+    configureGateway: Effect.fn("PreviewManager.configureGateway")(
+      function* (scope, configuration) {
+        yield* browserSession
+          .configureGateway(scope, configuration)
+          .pipe(
+            Effect.mapError(
+              (cause) => new PreviewOperationError({ operation: "configureGateway", cause }),
+            ),
+          );
+      },
+    ),
+    clearGateway: Effect.fn("PreviewManager.clearGateway")(function* (scope) {
+      yield* browserSession
+        .clearGateway(scope)
+        .pipe(
+          Effect.mapError(
+            (cause) => new PreviewOperationError({ operation: "clearGateway", cause }),
           ),
         );
     }),

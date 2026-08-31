@@ -5,10 +5,12 @@ import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { previewBridge } from "~/components/preview/previewBridge";
+import { usePreparePreviewGatewayNavigation } from "~/components/preview/usePreparePreviewGatewayNavigation";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
 import { cn } from "~/lib/utils";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
+import { resolveBrowserNavigationTarget } from "./browserTargetResolver";
 import { useActiveBrowserRecordingTabIds } from "./browserRecording";
 import {
   browserViewportSettingKey,
@@ -55,6 +57,8 @@ export function HostedBrowserWebview(props: {
     props;
   const config = usePreviewWebviewConfig(threadRef.environmentId);
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
+  const [gatewayReady, setGatewayReady] = useState(initialUrl === null);
+  const prepareGatewayNavigation = usePreparePreviewGatewayNavigation();
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const webviewRef = useRef<ElectronWebview | null>(null);
@@ -78,6 +82,37 @@ export function HostedBrowserWebview(props: {
   );
   const recordingActive = useActiveBrowserRecordingTabIds().has(runtimeTabId);
   usePreviewBridge({ threadRef, tabId, runtimeTabId });
+
+  useEffect(() => {
+    if (!initialUrl) {
+      setGatewayReady(true);
+      return;
+    }
+    let disposed = false;
+    let refreshTimeout: ReturnType<typeof setTimeout> | undefined;
+    const prepare = async () => {
+      try {
+        const expiresAt = await prepareGatewayNavigation(
+          resolveBrowserNavigationTarget(threadRef.environmentId, {
+            kind: "url",
+            url: initialUrl,
+          }),
+        );
+        if (disposed) return;
+        setGatewayReady(true);
+        if (expiresAt !== null) {
+          refreshTimeout = setTimeout(prepare, Math.max(1_000, expiresAt - Date.now() - 30_000));
+        }
+      } catch {
+        // Automation receives the preparation error before opening the tab.
+      }
+    };
+    void prepare();
+    return () => {
+      disposed = true;
+      if (refreshTimeout !== undefined) clearTimeout(refreshTimeout);
+    };
+  }, [initialUrl, prepareGatewayNavigation, threadRef.environmentId]);
 
   useEffect(() => {
     crashRecoveryRef.current = INITIAL_WEBVIEW_CRASH_RECOVERY_STATE;
@@ -235,7 +270,7 @@ export function HostedBrowserWebview(props: {
     wrapper.scrollTo({ left: 0, top: 0 });
   }, [runtimeTabId, viewport._tag, viewportHeight, viewportWidth]);
 
-  if (!config) return null;
+  if (!config || !gatewayReady) return null;
 
   const renderingActive = active || backgroundActivity || pictureInPicture || recordingActive;
   const wrapperStyle = resolveHostedBrowserWebviewWrapperStyle({

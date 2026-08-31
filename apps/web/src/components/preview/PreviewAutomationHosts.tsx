@@ -76,6 +76,7 @@ import {
 } from "./previewAutomationTarget";
 import { isPreviewViewportReady } from "./previewViewportReadiness";
 import { shouldRollbackPreviewViewport } from "./previewViewportRollback";
+import { usePreparePreviewGatewayNavigation } from "./usePreparePreviewGatewayNavigation";
 
 const PREVIEW_PRESENTATION_SETTLE_TIMEOUT_MS = 500;
 
@@ -301,6 +302,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
   const resize = useAtomCommand(previewEnvironment.resize, {
     reportFailure: false,
   });
+  const prepareGatewayNavigation = usePreparePreviewGatewayNavigation();
   const respondToAutomation = useAtomCommand(
     previewEnvironment.respondToAutomation,
     "preview automation response",
@@ -373,12 +375,14 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             return await currentStatus(threadRef, tabId);
           case "open": {
             const input = request.input as PreviewAutomationOpenInput;
-            const resolvedInputUrl = input.url
+            const inputResolution = input.url
               ? resolveBrowserNavigationTarget(environmentId, {
                   kind: "url",
                   url: input.url,
-                }).resolvedUrl
+                })
               : undefined;
+            if (inputResolution) await prepareGatewayNavigation(inputResolution);
+            const resolvedInputUrl = inputResolution?.resolvedUrl;
             let activeTabId = resolvePreviewAutomationOpenTab(
               state,
               request.tabId,
@@ -488,6 +492,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 url: input.url!,
               },
             );
+            await prepareGatewayNavigation(resolution);
             await ready.bridge.navigate(ready.runtimeTabId, resolution.resolvedUrl);
             await waitForNavigationReadiness(
               threadRef,
@@ -689,7 +694,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
         browserActivity.release?.();
       }
     },
-    [environmentId, listPreviews, open, registry, resize],
+    [environmentId, listPreviews, open, prepareGatewayNavigation, registry, resize],
   );
   const [requestHandlerAtom] = useState(() => Atom.make({ handle: handleRequest }));
   const setRequestHandler = useAtomSet(requestHandlerAtom);
