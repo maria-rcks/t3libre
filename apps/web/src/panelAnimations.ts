@@ -18,16 +18,17 @@ export function usePanelPresence<T>(
   animated: boolean,
   scopeKey: string | null,
 ): { present: boolean; value: T | null } {
-  const wantsPresent = open && value !== null;
-  const [present, setPresent] = useState(wantsPresent);
-  const retainedRef = useRef<{ scopeKey: string | null; value: T } | null>(null);
+  const [present, setPresent] = useState(open);
+  const retainedRef = useRef<{ scopeKey: string | null; value: T | null } | null>(
+    open ? { scopeKey, value } : null,
+  );
 
   useEffect(() => {
-    if (wantsPresent) retainedRef.current = { scopeKey, value };
-  }, [scopeKey, value, wantsPresent]);
+    if (open) retainedRef.current = { scopeKey, value };
+  }, [open, scopeKey, value]);
 
   useEffect(() => {
-    if (wantsPresent) {
+    if (open) {
       const frame = window.requestAnimationFrame(() => setPresent(true));
       return () => window.cancelAnimationFrame(frame);
     }
@@ -38,10 +39,10 @@ export function usePanelPresence<T>(
 
     const timeout = window.setTimeout(() => setPresent(false), PANEL_ANIMATION_DURATION_MS);
     return () => window.clearTimeout(timeout);
-  }, [animated, wantsPresent]);
+  }, [animated, open]);
 
   const retainedValue =
     retainedRef.current?.scopeKey === scopeKey ? retainedRef.current.value : null;
-  const visible = wantsPresent || (animated && present && retainedValue !== null);
-  return { present: visible, value: wantsPresent ? value : visible ? retainedValue : null };
+  const visible = open || (animated && present && retainedRef.current?.scopeKey === scopeKey);
+  return { present: visible, value: open ? value : visible ? retainedValue : null };
 }
