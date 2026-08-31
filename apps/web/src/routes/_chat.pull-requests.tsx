@@ -1524,8 +1524,8 @@ function PullRequestsRouteView() {
           aria-hidden
           className={cn(
             "shrink-0",
-            rightPanelState.isOpen ? "w-0" : "w-7 sm:w-5",
-            panelAnimationsActive && "transition-[width] ease-out",
+            rightPanelState.isOpen ? "-ml-3 w-0" : "w-7 sm:w-5",
+            panelAnimationsActive && "transition-[width,margin] ease-out",
           )}
           style={
             panelAnimationsActive
