@@ -2979,12 +2979,14 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const chatWarnings = useMemo(
     () =>
-      [threadErrorWarning, providerStatusWarning].filter(
-        (warning): warning is ChatWarning =>
-          warning !== null &&
-          !temporaryWarningIdSet.has(`${serverRunId}\u0000${warning.id}`) &&
-          !permanentWarningIdSet.has(warning.id),
-      ),
+      serverRunId === null
+        ? []
+        : [threadErrorWarning, providerStatusWarning].filter(
+            (warning): warning is ChatWarning =>
+              warning !== null &&
+              !temporaryWarningIdSet.has(`${serverRunId}\u0000${warning.id}`) &&
+              !permanentWarningIdSet.has(warning.id),
+          ),
     [
       permanentWarningIdSet,
       providerStatusWarning,
