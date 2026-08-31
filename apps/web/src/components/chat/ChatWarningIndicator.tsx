@@ -109,6 +109,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
   const handleContextMenu = useCallback(
     async (event: ReactMouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
+      event.stopPropagation();
       const api = readLocalApi();
       if (!api) return;
       let action: ContextMenuAction | null;
