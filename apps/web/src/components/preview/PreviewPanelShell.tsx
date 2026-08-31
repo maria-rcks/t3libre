@@ -36,6 +36,13 @@ const PREVIEW_PANEL_DEFAULT_WIDTH = 540;
  */
 const SIBLING_COLUMN_MIN_WIDTH = 360;
 
+export function shouldSuppressPanelWidthTransition(
+  previous: { open: boolean; width: number },
+  next: { open: boolean; width: number },
+): boolean {
+  return previous.open === next.open && previous.width !== next.width;
+}
+
 export function getPreviewPanelMaxWidth(viewportWidth: number, containerWidth?: number): number {
   const fractionCap = Math.floor(viewportWidth * PREVIEW_PANEL_MAX_WIDTH_FRACTION);
   const containerCap =
@@ -85,6 +92,23 @@ export function PreviewPanelShell(props: {
     edge: "left",
   });
   const [resizing, setResizing] = useState(false);
+  const previousLayoutRef = useRef({ open, width });
+  useLayoutEffect(() => {
+    const previous = previousLayoutRef.current;
+    const next = { open, width };
+    previousLayoutRef.current = next;
+    if (!animated || !shouldSuppressPanelWidthTransition(previous, next)) return;
+    const host = hostRef.current;
+    if (!host) return;
+    host.style.setProperty("transition-duration", "0ms");
+    const frame = window.requestAnimationFrame(() => {
+      host.style.removeProperty("transition-duration");
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      host.style.removeProperty("transition-duration");
+    };
+  }, [animated, open, width]);
   const resizeHandlers = {
     onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
       handlers.onPointerDown(event);

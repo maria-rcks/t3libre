@@ -2,7 +2,11 @@ import { jsx } from "react/jsx-runtime";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { getPreviewPanelMaxWidth, PreviewPanelShell } from "./PreviewPanelShell";
+import {
+  getPreviewPanelMaxWidth,
+  PreviewPanelShell,
+  shouldSuppressPanelWidthTransition,
+} from "./PreviewPanelShell";
 
 describe("getPreviewPanelMaxWidth", () => {
   it("allows the panel to use 70% of an ultra-wide viewport without a pixel ceiling", () => {
@@ -45,5 +49,19 @@ describe("getPreviewPanelMaxWidth", () => {
 
   it("stays at the panel minimum even when the row is narrower than the reservation", () => {
     expect(getPreviewPanelMaxWidth(1_512, 300)).toBe(360);
+  });
+});
+
+describe("shouldSuppressPanelWidthTransition", () => {
+  it("suppresses clamp and resize changes while visibility is stable", () => {
+    expect(
+      shouldSuppressPanelWidthTransition({ open: true, width: 540 }, { open: true, width: 480 }),
+    ).toBe(true);
+  });
+
+  it("keeps transitions for visibility changes", () => {
+    expect(
+      shouldSuppressPanelWidthTransition({ open: true, width: 540 }, { open: false, width: 540 }),
+    ).toBe(false);
   });
 });
