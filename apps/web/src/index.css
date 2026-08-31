@@ -1237,6 +1237,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     cursor: pointer;
   }
 
+  .settings-slider:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
   .settings-slider::-webkit-slider-runnable-track {
     height: 0.375rem;
     border-radius: 9999px;
@@ -1288,21 +1293,21 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       box-shadow 120ms ease;
   }
 
-  .settings-slider:hover::-webkit-slider-thumb {
+  .settings-slider:not(:disabled):hover::-webkit-slider-thumb {
     transform: scale(1.08);
     box-shadow: 0 1px 3px color-mix(in srgb, var(--contrast-foreground) 20%, transparent);
   }
 
-  .settings-slider:hover::-moz-range-thumb {
+  .settings-slider:not(:disabled):hover::-moz-range-thumb {
     transform: scale(1.08);
     box-shadow: 0 1px 3px color-mix(in srgb, var(--contrast-foreground) 20%, transparent);
   }
 
-  .settings-slider:active::-webkit-slider-thumb {
+  .settings-slider:not(:disabled):active::-webkit-slider-thumb {
     transform: scale(0.94);
   }
 
-  .settings-slider:active::-moz-range-thumb {
+  .settings-slider:not(:disabled):active::-moz-range-thumb {
     transform: scale(0.94);
   }
 

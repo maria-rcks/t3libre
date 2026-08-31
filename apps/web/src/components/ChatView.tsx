@@ -1795,7 +1795,7 @@ function ChatViewContent(props: ChatViewProps) {
   const rightPanelControlsInPanel =
     inlineRightPanelPresent || (sheetRightPanelPresent && rightPanelOpen);
   const renderedRightPanelSurface = inlineRightPanelPresence.value ?? sheetRightPanelPresence.value;
-  const canMaximizeRightPanel = inlineRightPanelPresent && !shouldUseRightPanelSheet;
+  const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
     canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
   const inlineRightPanelOwnsTitleBar = inlineRightPanelPresent && !shouldUseRightPanelSheet;

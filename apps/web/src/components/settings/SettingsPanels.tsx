@@ -1167,9 +1167,15 @@ export function AppearanceSettingsPanel() {
                 enabled={settings.panelAnimationsEnabled}
               />
               <div className="flex min-w-44 flex-1 items-center gap-2">
+                <output
+                  className="min-w-14 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                  htmlFor="panel-animation-duration"
+                >
+                  {settings.panelAnimationDurationMs} ms
+                </output>
                 <input
                   aria-label="Panel animation duration"
-                  className="settings-slider min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="settings-slider min-w-0 flex-1"
                   disabled={!settings.panelAnimationsEnabled}
                   id="panel-animation-duration"
                   max={MAX_PANEL_ANIMATION_DURATION_MS}
@@ -1189,12 +1195,6 @@ export function AppearanceSettingsPanel() {
                   type="range"
                   value={settings.panelAnimationDurationMs}
                 />
-                <output
-                  className="min-w-14 text-right font-mono text-xs tabular-nums text-muted-foreground"
-                  htmlFor="panel-animation-duration"
-                >
-                  {settings.panelAnimationDurationMs} ms
-                </output>
               </div>
               <Switch
                 checked={settings.panelAnimationsEnabled}
