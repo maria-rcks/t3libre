@@ -1,6 +1,10 @@
 "use client";
 
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
@@ -79,8 +83,9 @@ import { vcsEnvironment } from "../state/vcs";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useThreadShells } from "../state/entities";
+import { useProject, useProjects, useThreadShells } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
+import * as ThreadPr from "./ThreadStatusIndicators";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
@@ -591,16 +596,11 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const projects = useProjects();
-  const activeThreadProject = useMemo(
-    () =>
-      activeThread == null
-        ? null
-        : (projects.find(
-            (project) =>
-              project.environmentId === activeThread.environmentId &&
-              project.id === activeThread.projectId,
-          ) ?? null),
-    [activeThread, projects],
+  const changeRequestSnapshotByKey = useAtomValue(ThreadPr.threadChangeRequestSnapshotsAtom);
+  const activeThreadProject = useProject(
+    activeThread === null
+      ? null
+      : scopeProjectRef(activeThread.environmentId, activeThread.projectId),
   );
   const activeThreadCwd = activeThread?.worktreePath ?? activeThreadProject?.workspaceRoot ?? null;
   const activeThreadGitStatus = useEnvironmentQuery(
@@ -615,20 +615,24 @@ function OpenCommandPaletteDialog(props: {
       : null,
   ).data;
   const detectedPullRequestUrl =
-    activeThread?.branch != null && activeThreadGitStatus?.refName === activeThread.branch
-      ? (activeThreadGitStatus.pr?.url ?? null)
-      : null;
-  const activeThreadReferenceCopyTarget = useMemo(
-    () =>
-      activeThread == null
-        ? null
-        : resolveThreadReferenceCopyTarget({
-            threadId: activeThread.id,
-            linkedPullRequestUrl: activeThread.linkedPullRequest?.url ?? null,
-            detectedPullRequestUrl,
-          }),
-    [activeThread, detectedPullRequestUrl],
-  );
+    activeThread == null || activeThread.linkedPullRequest != null
+      ? null
+      : (ThreadPr.resolveDisplayedThreadPr({
+          threadBranch: activeThread.branch,
+          gitStatus: activeThreadGitStatus ?? null,
+          snapshot: changeRequestSnapshotByKey.get(
+            scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)),
+          ),
+          retainTerminalOnBranchMismatch: activeThread.worktreePath === null,
+        })?.url ?? null);
+  const activeThreadReferenceCopyTarget =
+    activeThread == null
+      ? null
+      : resolveThreadReferenceCopyTarget({
+          threadId: activeThread.id,
+          linkedPullRequestUrl: activeThread.linkedPullRequest?.url ?? null,
+          detectedPullRequestUrl,
+        });
   const copyActiveThreadReference = useCallback(async () => {
     const target = activeThreadReferenceCopyTarget;
     if (target === null) return;
@@ -2245,16 +2249,12 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
     }
-    if (command === "thread.copyReference") {
-      const matchingItem = displayedGroups
-        .flatMap((group) => group.items)
-        .find((item) => item.shortcutCommand === command);
-      if (matchingItem) {
-        event.preventDefault();
-        event.stopPropagation();
-        executeItem(matchingItem);
-        return;
-      }
+    if (command === "thread.copyReference" && activeThreadReferenceCopyTarget !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      void copyActiveThreadReference();
+      return;
     }
 
     if (addProjectCloneFlow?.step === "repository" && event.key === "Enter") {
