@@ -13,19 +13,24 @@ type SlashSearchItem = Extract<
 >;
 
 /**
- * A provider expands a slash command only when it opens the whole message;
- * anywhere else it reaches the agent as literal text, so it is not offered
- * there. Built-ins apply locally on selection and skills insert a `$` mention
- * the server dispatches from any position, so both stay available.
+ * Provider slash commands are only valid at the start of a prompt. Compact is
+ * additionally available only when it occupies the whole message. Built-ins
+ * and skills stay available at any position.
  */
 export function slashCommandItemsForPromptPosition(
   items: ReadonlyArray<SlashSearchItem>,
-  isAtPromptStart: boolean,
+  options: {
+    isAtPromptStart: boolean;
+    compactCommandIsWholeMessage: boolean;
+  },
 ): SlashSearchItem[] {
-  if (isAtPromptStart) {
-    return [...items];
-  }
-  return items.filter((item) => item.type !== "provider-slash-command");
+  return items.filter(
+    (item) =>
+      (item.type !== "provider-slash-command" || options.isAtPromptStart) &&
+      (item.type !== "provider-slash-command" ||
+        item.command.name !== "compact" ||
+        options.compactCommandIsWholeMessage),
+  );
 }
 
 function scoreSlashCommandItem(item: SlashSearchItem, query: string): number | null {

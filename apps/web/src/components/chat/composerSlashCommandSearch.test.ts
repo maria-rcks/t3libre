@@ -177,7 +177,7 @@ describe("searchSlashCommandItems", () => {
     ]);
   });
 
-  it("hides provider commands from slash completion after the first message line", () => {
+  it("hides provider commands when their position or state prevents running", () => {
     const items = [
       {
         id: "slash:model",
@@ -210,11 +210,24 @@ describe("searchSlashCommandItems", () => {
       Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" | "skill" }>
     >;
 
-    expect(slashCommandItemsForPromptPosition(items, false).map((item) => item.id)).toEqual([
-      "slash:model",
-      "skill:claudeAgent:unslop",
-    ]);
-    expect(slashCommandItemsForPromptPosition(items, true).map((item) => item.id)).toEqual([
+    expect(
+      slashCommandItemsForPromptPosition(items, {
+        isAtPromptStart: false,
+        compactCommandIsWholeMessage: false,
+      }).map((item) => item.id),
+    ).toEqual(["slash:model", "skill:claudeAgent:unslop"]);
+    expect(
+      slashCommandItemsForPromptPosition(items, {
+        isAtPromptStart: true,
+        compactCommandIsWholeMessage: false,
+      }).map((item) => item.id),
+    ).toEqual(["slash:model", "skill:claudeAgent:unslop"]);
+    expect(
+      slashCommandItemsForPromptPosition(items, {
+        isAtPromptStart: true,
+        compactCommandIsWholeMessage: true,
+      }).map((item) => item.id),
+    ).toEqual([
       "slash:model",
       "provider-slash-command:claudeAgent:compact",
       "skill:claudeAgent:unslop",
