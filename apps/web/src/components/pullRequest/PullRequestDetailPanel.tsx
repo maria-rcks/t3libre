@@ -516,11 +516,18 @@ export function PullRequestDetailPanel({
           <Button
             size="icon-micro"
             variant="ghost-muted"
-            className="shrink-0 text-muted-foreground/80"
             aria-label={`Copy ${checkoutCommand}`}
-            onClick={() =>
-              void writeTextToClipboard(checkoutCommand, "pull request checkout command")
-            }
+            onClick={() => {
+              void writeTextToClipboard(checkoutCommand, "pull request checkout command").catch(
+                (error: Error) => {
+                  toastManager.add({
+                    type: "error",
+                    title: "Could not copy checkout command",
+                    description: error.message,
+                  });
+                },
+              );
+            }}
           />
         }
       >
