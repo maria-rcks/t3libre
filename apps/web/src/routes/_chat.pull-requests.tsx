@@ -205,8 +205,8 @@ const EMPTY_PREVIEW_DESKTOP_STATE = {};
 const EMPTY_TERMINAL_LABELS = new Map<string, string>();
 const EMPTY_PENDING_SURFACES = new Set<string>();
 
-function pullRequestSearchLabels(raw: unknown): ReadonlyArray<string> | undefined {
-  const values = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+function pullRequestSearchLabels(raw: unknown): Partial<Pick<PullRequestsSearch, "labels">> {
+  const values = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : []).slice(0, 10);
   const labels = values
     .filter((value): value is string => typeof value === "string")
     .map((value) => value.trim().slice(0, 200))
@@ -214,9 +214,8 @@ function pullRequestSearchLabels(raw: unknown): ReadonlyArray<string> | undefine
       (value, index, all) =>
         value.length > 0 &&
         all.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index,
-    )
-    .slice(0, 10);
-  return labels.length === 0 ? undefined : labels;
+    );
+  return labels.length === 0 ? {} : { labels };
 }
 
 export const Route = createFileRoute("/_chat/pull-requests")({
@@ -259,9 +258,7 @@ export const Route = createFileRoute("/_chat/pull-requests")({
     ...(typeof raw.author === "string" && raw.author.trim()
       ? { author: raw.author.trim().slice(0, 200) }
       : {}),
-    ...(pullRequestSearchLabels(raw.labels) === undefined
-      ? {}
-      : { labels: pullRequestSearchLabels(raw.labels)! }),
+    ...pullRequestSearchLabels(raw.labels),
   }),
   component: PullRequestsRouteView,
 });
