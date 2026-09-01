@@ -35,6 +35,7 @@ describe("resolveThreadReferenceCopyTarget", () => {
       value: "thread-1",
       clipboardTarget: "thread ID",
       successTitle: "Thread ID copied",
+      failureTitle: "Failed to copy thread ID",
     });
   });
 });

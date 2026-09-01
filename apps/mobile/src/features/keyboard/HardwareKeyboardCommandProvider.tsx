@@ -69,16 +69,17 @@ export function HardwareKeyboardCommandProvider({
       : null;
   const copyTarget = useMemo(
     () =>
-      activeThread === null
+      activeThreadRef === null
         ? null
         : resolveThreadReferenceCopyTarget({
-            threadId: activeThread.id,
-            linkedPullRequestUrl: activeThread.linkedPullRequest?.url ?? null,
+            threadId: activeThread?.id ?? activeThreadRef.threadId,
+            linkedPullRequestUrl: activeThread?.linkedPullRequest?.url ?? null,
             detectedPullRequestUrl,
           }),
-    [activeThread, detectedPullRequestUrl],
+    [activeThread, activeThreadRef, detectedPullRequestUrl],
   );
   const [copyFeedback, setCopyFeedback] = useState<GitActionProgress>(EMPTY_COPY_FEEDBACK);
+  const copyRequestIdRef = useRef(0);
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dismissCopyFeedback = useCallback(() => {
     if (copyFeedbackTimerRef.current !== null) {
@@ -129,9 +130,11 @@ export function HardwareKeyboardCommandProvider({
 
       if (command === "copyThreadReference") {
         if (copyTarget === null) return;
+        const requestId = ++copyRequestIdRef.current;
         void tryCopyTextWithHaptic(copyTarget.value, {
           target: copyTarget.clipboardTarget,
         }).then((didCopy) => {
+          if (requestId !== copyRequestIdRef.current) return;
           showCopyFeedback(
             didCopy
               ? {
@@ -141,10 +144,7 @@ export function HardwareKeyboardCommandProvider({
                 }
               : {
                   phase: "error",
-                  label:
-                    copyTarget.kind === "pull-request"
-                      ? "Could not copy PR link"
-                      : "Could not copy thread ID",
+                  label: copyTarget.failureTitle,
                   description: "Try again.",
                 },
           );

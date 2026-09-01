@@ -3,6 +3,7 @@ export interface ThreadReferenceCopyTarget {
   readonly value: string;
   readonly clipboardTarget: string;
   readonly successTitle: string;
+  readonly failureTitle: string;
 }
 
 export function resolveThreadReferenceCopyTarget(input: {
@@ -17,11 +18,13 @@ export function resolveThreadReferenceCopyTarget(input: {
         value: pullRequestUrl,
         clipboardTarget: "pull request link",
         successTitle: "PR link copied",
+        failureTitle: "Failed to copy PR link",
       }
     : {
         kind: "thread",
         value: input.threadId,
         clipboardTarget: "thread ID",
         successTitle: "Thread ID copied",
+        failureTitle: "Failed to copy thread ID",
       };
 }

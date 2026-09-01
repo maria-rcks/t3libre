@@ -4629,10 +4629,7 @@ function ChatViewContent(props: ChatViewProps) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title:
-              target.kind === "pull-request"
-                ? "Failed to copy PR link"
-                : "Failed to copy thread ID",
+            title: target.failureTitle,
             description: error instanceof Error ? error.message : "An error occurred.",
           }),
         );
