@@ -34,7 +34,10 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "@t3tools/contracts";
-import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
+import {
+  ProviderAdapterRequestError,
+  ProviderAdapterValidationError,
+} from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -154,7 +157,10 @@ describe("ProviderCommandReactor", () => {
     readonly serverActivation?: Effect.Effect<void>;
     readonly interruptTurnEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly stopSessionEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
-    readonly compactThreadEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
+    readonly compactThreadEffect?: () => Effect.Effect<
+      void,
+      ProviderAdapterRequestError | ProviderAdapterValidationError
+    >;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -646,6 +652,123 @@ describe("ProviderCommandReactor", () => {
       const readModel = yield* Effect.promise(() => harness.readModel());
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
       expect(thread?.session?.status).toBe("ready");
+    }),
+  );
+
+  effectIt.effect("keeps the first real prompt eligible for title and branch generation", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      const now = "2026-01-01T00:00:00.000Z";
+      yield* harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-thread-compact-first-metadata"),
+        threadId: ThreadId.make("thread-1"),
+        title: "/compact",
+        branch: "t3code/1234abcd",
+        worktreePath: "/tmp/provider-project-worktree",
+      });
+      harness.generateThreadTitle.mockReturnValue(Effect.succeed({ title: "Real prompt title" }));
+      harness.generateBranchName.mockReturnValue(Effect.succeed({ branch: "feature/real-prompt" }));
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-compact-first"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-compact-first"),
+          role: "user",
+          text: "/compact",
+          attachments: [],
+        },
+        titleSeed: "/compact",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      });
+      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
+      yield* Effect.promise(() => harness.drain());
+      expect(harness.generateThreadTitle).not.toHaveBeenCalled();
+      expect(harness.generateBranchName).not.toHaveBeenCalled();
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-real-prompt-after-compact"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-real-prompt-after-compact"),
+          role: "user",
+          text: "Fix the reconnect spinner.",
+          attachments: [],
+        },
+        titleSeed: "/compact",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+
+      yield* Effect.promise(() =>
+        waitFor(
+          () =>
+            harness.generateThreadTitle.mock.calls.length === 1 &&
+            harness.generateBranchName.mock.calls.length === 1,
+        ),
+      );
+      expect(harness.generateThreadTitle.mock.calls[0]?.[0]).toMatchObject({
+        message: "Fix the reconnect spinner.",
+      });
+      expect(harness.generateBranchName.mock.calls[0]?.[0]).toMatchObject({
+        message: "Fix the reconnect spinner.",
+      });
+    }),
+  );
+
+  effectIt.effect("reports provider compaction validation issues without encoded causes", () =>
+    Effect.gen(function* () {
+      const rejection = new ProviderAdapterValidationError({
+        provider: ProviderDriverKind.make("opencode"),
+        operation: "compactThread",
+        issue: "OpenCode compaction requires an active 'provider/model' selection.",
+      });
+      const harness = yield* Effect.promise(() =>
+        createHarness({ compactThreadEffect: () => Effect.fail(rejection) }),
+      );
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-compact-validation-failure"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-compact-validation-failure"),
+          role: "user",
+          text: "/compact",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      yield* Effect.promise(() =>
+        waitFor(async () => {
+          const readModel = await harness.readModel();
+          return (
+            readModel.threads
+              .find((entry) => entry.id === ThreadId.make("thread-1"))
+              ?.activities.some((activity) => activity.summary === "Context compaction failed") ??
+            false
+          );
+        }),
+      );
+      const readModel = yield* Effect.promise(() => harness.readModel());
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      expect(thread?.session).toMatchObject({
+        status: "error",
+        lastError: rejection.issue,
+      });
+      expect(
+        thread?.activities.find((activity) => activity.summary === "Context compaction failed")
+          ?.payload,
+      ).toEqual({ detail: rejection.issue });
     }),
   );
 

@@ -353,10 +353,36 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       NodeAssert.ok(runtime);
       const compactThread = adapter.compactThread;
       NodeAssert.ok(compactThread);
+      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 3)).pipe(
+        Effect.forkChild,
+      );
 
       yield* compactThread(threadId);
+      yield* runtime.emit({
+        id: asEventId("evt-thread-compacted"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "thread/compacted",
+        threadId,
+        payload: { threadId: "provider-thread-1" },
+      });
 
       NodeAssert.equal(runtime.compactThreadImpl.mock.calls.length, 1);
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      NodeAssert.deepStrictEqual(
+        events.map((event) => event.type),
+        ["turn.started", "thread.state.changed", "turn.completed"],
+      );
+      NodeAssert.equal(events[0]?.turnId, events[2]?.turnId);
+      NodeAssert.match(String(events[0]?.turnId), /^codex-compact-/);
+      NodeAssert.equal(new Set(events.map((event) => event.eventId)).size, 3);
+      if (events[1]?.type === "thread.state.changed") {
+        NodeAssert.equal(events[1].payload.state, "compacted");
+      }
+      if (events[2]?.type === "turn.completed") {
+        NodeAssert.equal(events[2].payload.state, "completed");
+      }
     }),
   );
 

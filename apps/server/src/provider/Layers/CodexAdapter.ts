@@ -11,6 +11,7 @@ import {
   type CanonicalItemType,
   type CanonicalRequestType,
   type CodexSettings,
+  EventId,
   ProviderDriverKind,
   type ProviderEvent,
   ProviderInstanceId,
@@ -24,6 +25,7 @@ import {
   type RuntimeTaskUsage,
   ProviderApprovalDecision,
   ThreadId,
+  TurnId,
   ProviderSendTurnInput,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -93,6 +95,7 @@ interface CodexAdapterSessionContext {
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
+  manualCompactionTurnId: TurnId | undefined;
   stopped: boolean;
 }
 
@@ -1662,6 +1665,17 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>();
+  const randomUUIDv4 = crypto.randomUUIDv4.pipe(
+    Effect.mapError(
+      (cause) =>
+        new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "crypto/randomUUIDv4",
+          detail: "Failed to generate Codex runtime identifier.",
+          cause,
+        }),
+    ),
+  );
 
   const startSession: CodexAdapterShape["startSession"] = (input) =>
     Effect.scoped(
@@ -1753,6 +1767,31 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               });
               return;
             }
+            const session = sessions.get(event.threadId);
+            const manualCompactionTurnId =
+              event.method === "thread/compacted" ? session?.manualCompactionTurnId : undefined;
+            if (session && manualCompactionTurnId) {
+              const base = runtimeEventBase(event, event.threadId);
+              yield* Queue.offerAll(runtimeEventQueue, [
+                {
+                  ...base,
+                  eventId: EventId.make(`${event.id}:compact-started`),
+                  turnId: manualCompactionTurnId,
+                  type: "turn.started",
+                  payload: {},
+                },
+                ...runtimeEvents,
+                {
+                  ...base,
+                  eventId: EventId.make(`${event.id}:compact-completed`),
+                  turnId: manualCompactionTurnId,
+                  type: "turn.completed",
+                  payload: { state: "completed" },
+                },
+              ]);
+              session.manualCompactionTurnId = undefined;
+              return;
+            }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
           }),
         ).pipe(Effect.forkIn(sessionScope));
@@ -1781,6 +1820,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           scope: sessionScope,
           runtime,
           eventFiber,
+          manualCompactionTurnId: undefined,
           stopped: false,
         });
         sessionScopeTransferred = true;
@@ -1879,15 +1919,31 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       ),
     );
 
-  const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = (threadId) =>
-    requireSession(threadId).pipe(
-      Effect.flatMap((session) => session.runtime.compactThread),
-      Effect.mapError((cause) =>
-        cause._tag === "ProviderAdapterSessionNotFoundError"
-          ? cause
-          : mapCodexRuntimeError(threadId, "thread/compact/start", cause),
-      ),
-    );
+  const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = Effect.fn("compactThread")(
+    function* (threadId) {
+      const session = yield* requireSession(threadId);
+      if (session.manualCompactionTurnId !== undefined) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "compactThread",
+          issue: "Codex compaction is already in progress.",
+        });
+      }
+
+      const turnId = TurnId.make(`codex-compact-${yield* randomUUIDv4}`);
+      session.manualCompactionTurnId = turnId;
+      yield* session.runtime.compactThread.pipe(
+        Effect.mapError((cause) => mapCodexRuntimeError(threadId, "thread/compact/start", cause)),
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            if (session.manualCompactionTurnId === turnId) {
+              session.manualCompactionTurnId = undefined;
+            }
+          }),
+        ),
+      );
+    },
+  );
 
   const readThread: CodexAdapterShape["readThread"] = (threadId) =>
     requireSession(threadId).pipe(
