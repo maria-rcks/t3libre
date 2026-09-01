@@ -1090,7 +1090,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       Effect.gen(function* () {
         if (control.phase === "detached") return;
         control.phase = "quiescing";
-        const wc = webContents.fromId(webContentsId);
+        const wc = yield* attempt({ operation: "detachControlSession.lookup", webContentsId }, () =>
+          webContents.fromId(webContentsId),
+        );
         yield* Scope.close(control.scope, Exit.void).pipe(Effect.ignore);
         const pending = Array.from(control.inFlightCommands);
         if (pending.length > 0) {
@@ -1106,7 +1108,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             });
           }
         }
-        if (wc && !wc.isDestroyed() && wc.debugger.isAttached()) {
+        const shouldDetach = wc
+          ? yield* attempt(
+              { operation: "detachControlSession.inspect", webContentsId },
+              () => !wc.isDestroyed() && wc.debugger.isAttached(),
+            )
+          : false;
+        if (shouldDetach && wc) {
           yield* attempt({ operation: "detachControlSession", webContentsId }, () =>
             wc.debugger.detach(),
           );

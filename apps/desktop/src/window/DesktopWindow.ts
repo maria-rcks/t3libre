@@ -1,4 +1,5 @@
 import * as Clock from "effect/Clock";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -137,6 +138,18 @@ export function previewTeardownErrorLogAnnotations(
       ? { webContentsId: error.webContentsId }
       : {}),
   };
+}
+
+export function previewTeardownCauseLogAnnotations(
+  cause: Cause.Cause<PreviewManager.PreviewManagerError>,
+): Record<string, string | number> {
+  return Option.match(Cause.findErrorOption(cause), {
+    onNone: () => ({
+      errorTag: "PreviewTeardownDefect",
+      message: "Preview teardown failed unexpectedly.",
+    }),
+    onSome: previewTeardownErrorLogAnnotations,
+  });
 }
 
 function getIconOption(
@@ -630,18 +643,18 @@ export const make = Effect.gen(function* () {
       closePreparationRunning = true;
       void runPromise(
         previewManager.prepareForWindowTeardown.pipe(
-          Effect.matchEffect({
+          Effect.matchCauseEffect({
             onSuccess: () =>
               Effect.sync(() => {
                 closePrepared = true;
                 if (!window.isDestroyed()) window.close();
               }),
-            onFailure: (error) =>
+            onFailure: (cause) =>
               Effect.gen(function* () {
                 closePreparationRunning = false;
                 yield* logWindowWarning(
                   "preview teardown blocked main window close",
-                  previewTeardownErrorLogAnnotations(error),
+                  previewTeardownCauseLogAnnotations(cause),
                 );
               }),
           }),

@@ -134,13 +134,13 @@ function handleBeforeQuit(
         ),
       );
     }).pipe(
-      Effect.tapError((error) =>
+      Effect.onError((cause) =>
         Effect.gen(function* () {
           const state = yield* DesktopState.DesktopState;
           yield* Ref.set(state.quitting, false);
           yield* logLifecycleError(
             "preview teardown blocked desktop shutdown",
-            DesktopWindow.previewTeardownErrorLogAnnotations(error),
+            DesktopWindow.previewTeardownCauseLogAnnotations(cause),
           );
         }).pipe(Effect.withSpan("desktop.lifecycle.quitBlocked")),
       ),
@@ -178,12 +178,12 @@ function quitFromSignal(
       yield* requestDesktopShutdownAndWait();
       yield* electronApp.quit;
     }).pipe(
-      Effect.tapError((error) =>
+      Effect.onError((cause) =>
         Effect.gen(function* () {
           const state = yield* DesktopState.DesktopState;
           yield* Ref.set(state.quitting, false);
           yield* logLifecycleError("preview teardown blocked process signal shutdown", {
-            ...DesktopWindow.previewTeardownErrorLogAnnotations(error),
+            ...DesktopWindow.previewTeardownCauseLogAnnotations(cause),
             signal,
           });
         }).pipe(Effect.withSpan("desktop.lifecycle.processSignalBlocked")),

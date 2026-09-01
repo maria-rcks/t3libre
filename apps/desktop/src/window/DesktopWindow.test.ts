@@ -1080,6 +1080,61 @@ describe("DesktopWindow", () => {
     }),
   );
 
+  it.effect("allows another window close after a preview teardown defect", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const unsafeCause = new Error("https://example.com/private?token=secret");
+      const loggedAnnotations: Array<Record<string, unknown>> = [];
+      const logger = Logger.make(({ fiber }) => {
+        const annotations = fiber.getRef(References.CurrentLogAnnotations);
+        if (annotations.errorTag === "PreviewTeardownDefect") {
+          loggedAnnotations.push({ ...annotations });
+        }
+      });
+      let teardownAttempts = 0;
+      const preparePreviewTeardown = Effect.suspend(() => {
+        teardownAttempts += 1;
+        return teardownAttempts === 1 ? Effect.die(unsafeCause) : Effect.void;
+      });
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        preparePreviewTeardown,
+      }).pipe(Layer.provideMerge(Logger.layer([logger], { mergeWithExisting: false })));
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        const close = fakeWindow.windowListeners.get("close");
+        if (!close) return yield* Effect.die("window close listener was not registered");
+        const preventDefault = vi.fn();
+
+        close({ preventDefault });
+        yield* Effect.promise(() => vi.waitFor(() => assert.equal(loggedAnnotations.length, 1)));
+        close({ preventDefault });
+        yield* Effect.promise(() =>
+          vi.waitFor(() => assert.equal(fakeWindow.close.mock.calls.length, 1)),
+        );
+
+        assert.equal(preventDefault.mock.calls.length, 2);
+        assert.deepEqual(loggedAnnotations[0], {
+          component: "desktop-window",
+          errorTag: "PreviewTeardownDefect",
+          message: "Preview teardown failed unexpectedly.",
+        });
+        assert.notInclude(
+          Object.values(loggedAnnotations[0] ?? {})
+            .map(String)
+            .join(" "),
+          unsafeCause.message,
+        );
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it("bounds teardown messages and excludes operation causes", () => {
     const secret = `https://user:password@example.com/${"s".repeat(600)}`;
     const error = new PreviewManager.PreviewOperationError({

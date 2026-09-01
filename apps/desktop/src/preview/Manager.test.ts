@@ -4095,6 +4095,43 @@ describe("PreviewManager", () => {
     ),
   );
 
+  effectIt.effect("types Electron inspection failures during debugger detach", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const control = makeSnapshotWebContents({
+          id: 42,
+          capturePage: async () => ({}),
+        });
+        fromId.mockReturnValue(control.webContents);
+        yield* manager.createTab("tab_detach_inspection_failure");
+        yield* manager.registerWebview("tab_detach_inspection_failure", 42);
+        yield* manager.setColorScheme("tab_detach_inspection_failure", "dark");
+        const electronFailure = new Error("debugger target closed during inspection");
+        Object.assign((control.webContents as Electron.WebContents).debugger, {
+          isAttached: () => {
+            throw electronFailure;
+          },
+        });
+
+        const firstExit = yield* Effect.exit(manager.prepareForWindowTeardown);
+        expect(Exit.isFailure(firstExit)).toBe(true);
+        if (Exit.isSuccess(firstExit)) return;
+        expect(Option.getOrThrow(Cause.findErrorOption(firstExit.cause))).toMatchObject({
+          _tag: "PreviewOperationError",
+          operation: "detachControlSession.inspect",
+          webContentsId: 42,
+          cause: electronFailure,
+        });
+
+        Object.assign((control.webContents as Electron.WebContents).debugger, {
+          isAttached: () => true,
+        });
+        yield* manager.prepareForWindowTeardown;
+        expect(control.detach).toHaveBeenCalledOnce();
+      }),
+    ),
+  );
+
   effectIt.effect("keeps a tab registered when close cannot drain debugger commands", () =>
     withManager((manager) =>
       Effect.gen(function* () {

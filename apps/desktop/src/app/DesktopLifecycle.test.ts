@@ -281,6 +281,65 @@ describe("DesktopLifecycle", () => {
     }),
   );
 
+  it.effect("resets quitting after a preview teardown defect", () =>
+    Effect.gen(function* () {
+      const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
+      const unsafeCause = new Error("https://example.com/private?token=secret");
+      const loggedAnnotations: Array<Record<string, unknown>> = [];
+      const logger = Logger.make(({ fiber }) => {
+        const annotations = fiber.getRef(References.CurrentLogAnnotations);
+        if (annotations.errorTag === "PreviewTeardownDefect") {
+          loggedAnnotations.push({ ...annotations });
+        }
+      });
+      const environmentLayer = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
+        platform: "darwin",
+        isDevelopment: false,
+      } as DesktopEnvironment.DesktopEnvironment["Service"]);
+      const layer = DesktopLifecycle.layer.pipe(
+        Layer.provideMerge(makeElectronAppLayer(appListeners)),
+        Layer.provideMerge(electronThemeLayer),
+        Layer.provideMerge(makeElectronWindowLayer()),
+        Layer.provideMerge(
+          makeDesktopWindowLayer({ preparePreviewTeardown: Effect.die(unsafeCause) }),
+        ),
+        Layer.provideMerge(environmentLayer),
+        Layer.provideMerge(DesktopShutdown.layer),
+        Layer.provideMerge(DesktopState.layer),
+        Layer.provideMerge(Logger.layer([logger], { mergeWithExisting: false })),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+          const state = yield* DesktopState.DesktopState;
+          yield* lifecycle.register;
+          const preventDefault = vi.fn();
+
+          appListeners.get("before-quit")?.({ preventDefault } as unknown as Electron.Event);
+          yield* Effect.promise(() => vi.waitFor(() => assert.equal(loggedAnnotations.length, 1)));
+          assert.isFalse(yield* Ref.get(state.quitting));
+
+          appListeners.get("before-quit")?.({ preventDefault } as unknown as Electron.Event);
+          yield* Effect.promise(() => vi.waitFor(() => assert.equal(loggedAnnotations.length, 2)));
+          assert.isFalse(yield* Ref.get(state.quitting));
+          assert.equal(preventDefault.mock.calls.length, 2);
+          assert.deepEqual(loggedAnnotations[0], {
+            component: "desktop-lifecycle",
+            errorTag: "PreviewTeardownDefect",
+            message: "Preview teardown failed unexpectedly.",
+          });
+          assert.notInclude(
+            Object.values(loggedAnnotations[0] ?? {})
+              .map(String)
+              .join(" "),
+            unsafeCause.message,
+          );
+        }),
+      ).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect("keeps relaunch failure causes out of log annotations", () =>
     Effect.gen(function* () {
       const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
