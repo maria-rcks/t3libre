@@ -16,6 +16,7 @@ import {
   BookOpenIcon,
   CircleDotIcon,
   ChevronDownIcon,
+  CopyIcon,
   ExternalLinkIcon,
   FileDiffIcon,
   FolderGit2Icon,
@@ -507,6 +508,27 @@ export function PullRequestDetailPanel({
     [activity, coreDetail],
   );
   const repositoryUrl = detail === null ? null : changeRequestRepositoryUrl(detail.url);
+  const checkoutCommand = detail?.provider === "github" ? `gh pr checkout ${detail.number}` : null;
+  const checkoutCommandCopyButton = checkoutCommand ? (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-micro"
+            variant="ghost-muted"
+            className="shrink-0 text-muted-foreground/80"
+            aria-label={`Copy ${checkoutCommand}`}
+            onClick={() =>
+              void writeTextToClipboard(checkoutCommand, "pull request checkout command")
+            }
+          />
+        }
+      >
+        <CopyIcon aria-hidden className="size-3" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">Copy {checkoutCommand}</TooltipPopup>
+    </Tooltip>
+  ) : null;
   const branchRefsQuery = useEnvironmentQuery(
     detail === null
       ? null
@@ -1579,6 +1601,7 @@ export function PullRequestDetailPanel({
                       />
                       <TooltipPopup side="top">{detail.headBranch}</TooltipPopup>
                     </Tooltip>
+                    {checkoutCommandCopyButton}
                   </span>
                   <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2 text-[11px]">
                     <span
@@ -1758,6 +1781,7 @@ export function PullRequestDetailPanel({
                         {`${isBranchCopied ? "Copied" : "Copy pull request branch"}: ${detail.headBranch}`}
                       </TooltipPopup>
                     </Tooltip>
+                    {checkoutCommandCopyButton}
                   </span>
                   <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2">
                     <span className="inline-flex items-center gap-1.5 tabular-nums">
