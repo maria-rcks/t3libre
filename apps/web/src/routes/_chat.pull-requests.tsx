@@ -204,17 +204,24 @@ const EMPTY_PREVIEW_SESSIONS = {};
 const EMPTY_PREVIEW_DESKTOP_STATE = {};
 const EMPTY_TERMINAL_LABELS = new Map<string, string>();
 const EMPTY_PENDING_SURFACES = new Set<string>();
+const MAX_SEARCH_LABEL_CANDIDATES = 100;
 
 function pullRequestSearchLabels(raw: unknown): Partial<Pick<PullRequestsSearch, "labels">> {
-  const values = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : []).slice(0, 10);
-  const labels = values
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => value.trim().slice(0, 200))
-    .filter(
-      (value, index, all) =>
-        value.length > 0 &&
-        all.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index,
-    );
+  const values = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : []).slice(
+    0,
+    MAX_SEARCH_LABEL_CANDIDATES,
+  );
+  const labels: Array<string> = [];
+  const seen = new Set<string>();
+  for (const rawValue of values) {
+    if (typeof rawValue !== "string") continue;
+    const value = rawValue.trim().slice(0, 200);
+    const key = value.toLowerCase();
+    if (value.length === 0 || seen.has(key)) continue;
+    labels.push(value);
+    seen.add(key);
+    if (labels.length === 10) break;
+  }
   return labels.length === 0 ? {} : { labels };
 }
 
