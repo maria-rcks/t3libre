@@ -60,6 +60,8 @@ export function HostedBrowserWebview(props: {
   const webviewRef = useRef<ElectronWebview | null>(null);
   const crashRecoveryRef = useRef<WebviewCrashRecoveryState>(INITIAL_WEBVIEW_CRASH_RECOVERY_STATE);
   const [aspectRatioLocked, setAspectRatioLocked] = useState(false);
+  const [compositingReady, setCompositingReady] = useState(false);
+  const [registeredGeneration, setRegisteredGeneration] = useState<number | null>(null);
   const presentation = useBrowserSurfaceStore(
     useShallow((state) => {
       const current = state.byTabId[runtimeTabId];
@@ -97,6 +99,25 @@ export function HostedBrowserWebview(props: {
     latestUrlRef.current = initialUrl;
   }, [initialUrl]);
 
+  useEffect(() => {
+    const bridge = previewBridge;
+    if (!bridge?.onCaptureRecovery) return;
+    return bridge.onCaptureRecovery((recovery) => {
+      const webview = webviewRef.current;
+      if (recovery.tabId !== runtimeTabId || !webview) {
+        return;
+      }
+      try {
+        if (webview.getWebContentsId() !== recovery.webContentsId) return;
+      } catch {
+        return;
+      }
+      setCompositingReady(false);
+      setRecoverySrc(latestUrlRef.current ?? initialSrc);
+      setWebviewGeneration((generation) => generation + 1);
+    });
+  }, [initialSrc, runtimeTabId]);
+
   const setWebviewRef = useCallback((node: HTMLElement | null) => {
     webviewRef.current = node as ElectronWebview | null;
   }, []);
@@ -120,6 +141,9 @@ export function HostedBrowserWebview(props: {
           const webContentsId = webview.getWebContentsId();
           if (Number.isInteger(webContentsId) && webContentsId > 0) {
             await bridge.registerWebview(runtimeTabId, webContentsId);
+            if (!disposed && webviewRef.current === webview) {
+              setRegisteredGeneration(webviewGeneration);
+            }
           }
         } catch {
           // did-attach/dom-ready will retry if the guest was not ready yet.
@@ -235,8 +259,6 @@ export function HostedBrowserWebview(props: {
     wrapper.scrollTo({ left: 0, top: 0 });
   }, [runtimeTabId, viewport._tag, viewportHeight, viewportWidth]);
 
-  if (!config) return null;
-
   const renderingActive = active || backgroundActivity || pictureInPicture || recordingActive;
   const wrapperStyle = resolveHostedBrowserWebviewWrapperStyle({
     active,
@@ -246,6 +268,32 @@ export function HostedBrowserWebview(props: {
     hiddenSize,
   });
 
+  useEffect(() => {
+    setCompositingReady(false);
+    if (!renderingActive) return;
+    let secondFrameId: number | null = null;
+    const firstFrameId = window.requestAnimationFrame(() => {
+      secondFrameId = window.requestAnimationFrame(() => {
+        secondFrameId = null;
+        setCompositingReady(true);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrameId);
+      if (secondFrameId !== null) window.cancelAnimationFrame(secondFrameId);
+    };
+  }, [
+    renderingActive,
+    webviewGeneration,
+    wrapperStyle.height,
+    wrapperStyle.left,
+    wrapperStyle.top,
+    wrapperStyle.visibility,
+    wrapperStyle.width,
+  ]);
+
+  if (!config) return null;
+
   return (
     <div
       ref={wrapperRef}
@@ -253,6 +301,9 @@ export function HostedBrowserWebview(props: {
       style={{ ...wrapperStyle, overscrollBehavior: "contain" }}
       onScroll={syncContentPresentation}
       data-preview-rendering={renderingActive ? "active" : "suspended"}
+      data-preview-compositing={
+        compositingReady && registeredGeneration === webviewGeneration ? "ready" : "pending"
+      }
       data-preview-viewport={runtimeTabId}
     >
       <div className="relative" style={{ width: layout.canvasWidth, height: layout.canvasHeight }}>

@@ -78,6 +78,8 @@ import { isPreviewViewportReady } from "./previewViewportReadiness";
 import { shouldRollbackPreviewViewport } from "./previewViewportRollback";
 
 const PREVIEW_PRESENTATION_SETTLE_TIMEOUT_MS = 500;
+export const PREVIEW_OVERLAY_READINESS_TIMEOUT_MS = 3_000;
+export const PREVIEW_HOST_COMPLETION_HEADROOM_MS = 100;
 
 const waitForPreviewPresentation = async (runtimeTabId: string): Promise<void> => {
   const deadline = Date.now() + PREVIEW_PRESENTATION_SETTLE_TIMEOUT_MS;
@@ -96,23 +98,37 @@ const waitForDesktopOverlay = async (
   timeoutMs: number,
 ): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
+  const timeoutError = () =>
+    new PreviewAutomationOverlayTimeoutError({
+      requestId,
+      operation,
+      environmentId: threadRef.environmentId,
+      threadId: threadRef.threadId,
+      tabId,
+      stage: "overlay-readiness",
+      timeoutMs,
+    });
   while (Date.now() <= deadline) {
     const state = assertPreviewRuntimeCurrent(threadRef, tabId, runtimeTabId, {
       operation,
       requestId,
     });
-    if (state.desktopByTabId[tabId] && previewBridge && isPreviewWebviewRendering(runtimeTabId)) {
-      const status = await previewBridge.automation.status(runtimeTabId);
+    if (state.desktopByTabId[tabId] && previewBridge && isPreviewWebviewCompositing(runtimeTabId)) {
+      let timeoutId: number | null = null;
+      const remainingMs = Math.max(1, deadline - Date.now());
+      const status = await Promise.race([
+        previewBridge.automation.status(runtimeTabId),
+        new Promise<never>((_, reject) => {
+          timeoutId = window.setTimeout(() => reject(timeoutError()), remainingMs);
+        }),
+      ]).finally(() => {
+        if (timeoutId !== null) window.clearTimeout(timeoutId);
+      });
       if (status.available) return;
     }
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
   }
-  throw new PreviewAutomationOverlayTimeoutError({
-    requestId,
-    environmentId: threadRef.environmentId,
-    threadId: threadRef.threadId,
-    timeoutMs,
-  });
+  throw timeoutError();
 };
 
 interface ExecutablePreviewWebview extends Element {
@@ -127,6 +143,14 @@ const findPreviewWebview = (tabId: string): ExecutablePreviewWebview | null =>
 const isPreviewWebviewRendering = (runtimeTabId: string): boolean => {
   const wrapper = findPreviewWebview(runtimeTabId)?.closest<HTMLElement>("[data-preview-viewport]");
   return wrapper?.getAttribute("data-preview-rendering") === "active";
+};
+
+const isPreviewWebviewCompositing = (runtimeTabId: string): boolean => {
+  const wrapper = findPreviewWebview(runtimeTabId)?.closest<HTMLElement>("[data-preview-viewport]");
+  return (
+    wrapper?.getAttribute("data-preview-rendering") === "active" &&
+    wrapper.getAttribute("data-preview-compositing") === "ready"
+  );
 };
 
 const readWebviewViewport = async (
@@ -320,6 +344,15 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
       };
       let tabId = request.tabId ?? null;
       const browserActivity = { release: null as (() => void) | null };
+      const executionDeadline = Date.now() + request.timeoutMs;
+      const remainingTimeoutMs = (requestedTimeoutMs?: number): number =>
+        Math.max(
+          1,
+          Math.min(
+            requestedTimeoutMs ?? Number.POSITIVE_INFINITY,
+            executionDeadline - Date.now() - PREVIEW_HOST_COMPLETION_HEADROOM_MS,
+          ),
+        );
       try {
         let state = readThreadPreviewState(threadRef);
         const needsSessionSync = needsPreviewAutomationSessionSync(state, request.tabId);
@@ -360,7 +393,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             readyTabId,
             runtimeTabId,
             request.operation,
-            request.timeoutMs,
+            Math.min(PREVIEW_OVERLAY_READINESS_TIMEOUT_MS, remainingTimeoutMs()),
           );
           return {
             bridge,
@@ -473,7 +506,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 activeRuntimeTabId,
                 request.operation,
                 "load",
-                request.timeoutMs,
+                remainingTimeoutMs(),
               );
             }
             return await currentStatus(threadRef, activeTabId);
@@ -496,7 +529,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               ready.runtimeTabId,
               request.operation,
               input.readiness ?? "load",
-              input.timeoutMs ?? request.timeoutMs,
+              remainingTimeoutMs(input.timeoutMs),
             );
             return await currentStatus(threadRef, ready.tabId);
           }
@@ -537,7 +570,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 ready.tabId,
                 ready.runtimeTabId,
                 setting,
-                input.timeoutMs ?? request.timeoutMs,
+                remainingTimeoutMs(input.timeoutMs),
                 {
                   requestId: request.requestId,
                   operation: request.operation,
@@ -630,10 +663,11 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
           case "waitFor": {
             const ready = await requireReadyTab();
-            return await ready.bridge.automation.waitFor(
-              ready.runtimeTabId,
-              request.input as Parameters<typeof ready.bridge.automation.waitFor>[1],
-            );
+            const input = request.input as Parameters<typeof ready.bridge.automation.waitFor>[1];
+            return await ready.bridge.automation.waitFor(ready.runtimeTabId, {
+              ...input,
+              timeoutMs: remainingTimeoutMs(input.timeoutMs),
+            });
           }
           case "recordingStart": {
             const ready = await requireReadyTab();

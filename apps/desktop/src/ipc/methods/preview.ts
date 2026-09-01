@@ -11,7 +11,6 @@ import {
   DesktopPreviewConfigInputSchema,
   DesktopPreviewNavigateInputSchema,
   DesktopPreviewRecordingArtifactSchema,
-  DesktopPreviewRecordingSourceSchema,
   DesktopPreviewRecordingSaveInputSchema,
   DesktopPreviewRegisterWebviewInputSchema,
   DesktopPreviewScreenshotArtifactSchema,
@@ -47,6 +46,9 @@ export const installPreviewEventForwarding = Effect.fn(
   yield* manager.subscribePointerEvents((event) =>
     electronWindow.sendAll(IpcChannels.PREVIEW_POINTER_EVENT_CHANNEL, event),
   );
+  yield* manager.subscribeCaptureRecoveries((event) =>
+    electronWindow.sendAll(IpcChannels.PREVIEW_CAPTURE_RECOVERY_CHANNEL, event),
+  );
 });
 
 export const createTab = DesktopIpc.makeIpcMethod({
@@ -80,6 +82,19 @@ export const registerWebview = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.preview.registerWebview")(function* ({ tabId, webContentsId }) {
     const manager = yield* PreviewManager.PreviewManager;
     yield* manager.registerWebview(tabId, webContentsId);
+  }),
+});
+
+export const prepareWebviewRemoval = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_PREPARE_WEBVIEW_REMOVAL_CHANNEL,
+  payload: DesktopPreviewRegisterWebviewInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.prepareWebviewRemoval")(function* ({
+    tabId,
+    webContentsId,
+  }) {
+    const manager = yield* PreviewManager.PreviewManager;
+    yield* manager.prepareWebviewRemoval(tabId, webContentsId);
   }),
 });
 
@@ -174,15 +189,11 @@ export const cancelPickElement = tabMethod(
   "desktop.ipc.preview.cancelPickElement",
   (manager, tabId) => manager.cancelPickElement(tabId),
 );
-export const startRecording = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.PREVIEW_RECORDING_START_CHANNEL,
-  payload: DesktopPreviewTabInputSchema,
-  result: DesktopPreviewRecordingSourceSchema,
-  handler: Effect.fn("desktop.ipc.preview.startRecording")(function* ({ tabId }) {
-    const manager = yield* PreviewManager.PreviewManager;
-    return yield* manager.startRecording(tabId);
-  }),
-});
+export const startRecording = tabMethod(
+  IpcChannels.PREVIEW_RECORDING_START_CHANNEL,
+  "desktop.ipc.preview.startRecording",
+  (manager, tabId) => manager.startRecording(tabId),
+);
 export const stopRecording = tabMethod(
   IpcChannels.PREVIEW_RECORDING_STOP_CHANNEL,
   "desktop.ipc.preview.stopRecording",
@@ -378,6 +389,7 @@ export const methods = [
   createTab,
   closeTab,
   registerWebview,
+  prepareWebviewRemoval,
   navigate,
   goBack,
   goForward,

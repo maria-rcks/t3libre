@@ -22,8 +22,11 @@ export class PreviewAutomationOverlayTimeoutError extends Schema.TaggedErrorClas
   "PreviewAutomationOverlayTimeoutError",
   {
     requestId: TrimmedNonEmptyString,
+    operation: PreviewAutomationOperation,
     environmentId: EnvironmentId,
     threadId: ThreadId,
+    tabId: PreviewTabId,
+    stage: Schema.Literal("overlay-readiness"),
     timeoutMs: Schema.Int,
   },
 ) {
@@ -32,7 +35,28 @@ export class PreviewAutomationOverlayTimeoutError extends Schema.TaggedErrorClas
   }
 
   override get message(): string {
-    return `Preview webview for request ${this.requestId} on environment ${this.environmentId} thread ${this.threadId} did not register within ${this.timeoutMs}ms.`;
+    return `Preview webview for ${this.operation} request ${this.requestId} on environment ${this.environmentId} thread ${this.threadId} tab ${this.tabId} did not become compositing-ready within ${this.timeoutMs}ms.`;
+  }
+}
+
+export class PreviewAutomationHostDeadlineError extends Schema.TaggedErrorClass<PreviewAutomationHostDeadlineError>()(
+  "PreviewAutomationHostDeadlineError",
+  {
+    requestId: TrimmedNonEmptyString,
+    operation: PreviewAutomationOperation,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    tabId: Schema.NullOr(PreviewTabId),
+    stage: Schema.Literal("host-execution"),
+    timeoutMs: Schema.Int,
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationTimeoutError" as const;
+  }
+
+  override get message(): string {
+    return `Preview automation ${this.operation} request ${this.requestId} exceeded its ${this.timeoutMs}ms host execution deadline.`;
   }
 }
 
@@ -207,6 +231,7 @@ export class PreviewAutomationOperationError extends Schema.TaggedErrorClass<Pre
 
 export const PreviewAutomationHostError = Schema.Union([
   PreviewAutomationOverlayTimeoutError,
+  PreviewAutomationHostDeadlineError,
   PreviewAutomationNavigationTimeoutError,
   PreviewAutomationViewportTimeoutError,
   PreviewAutomationTargetUnavailableError,
@@ -218,6 +243,62 @@ export type PreviewAutomationHostError = typeof PreviewAutomationHostError.Type;
 
 export const isPreviewAutomationHostError = Schema.is(PreviewAutomationHostError);
 
+const SAFE_NATIVE_ERROR_NAMES = new Set(["AbortError", "UnknownVizError"]);
+const MAX_SAFE_ERROR_MESSAGE_LENGTH = 512;
+
+const safeErrorCause = (
+  cause: unknown,
+): { readonly name: string; readonly message: string; readonly stage?: string } | null => {
+  if (typeof cause !== "object" || cause === null) return null;
+  const record = cause as Record<string, unknown>;
+  const name = typeof record["name"] === "string" ? record["name"] : "";
+  const message = typeof record["message"] === "string" ? record["message"] : "";
+  const stage = typeof record["stage"] === "string" ? record["stage"] : undefined;
+  if (SAFE_NATIVE_ERROR_NAMES.has(name)) {
+    return {
+      name,
+      message: message.slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH),
+      ...(stage === undefined ? {} : { stage }),
+    };
+  }
+  const embedded = message.match(/\b(AbortError|UnknownVizError):\s*([^\n]*)/);
+  if (embedded?.[1]) {
+    return {
+      name: embedded[1],
+      message: (embedded[2] ?? "").slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH),
+    };
+  }
+  const ownedTimeout = message.match(/\b(Preview[A-Za-z]+TimeoutError):\s*([^\n]*?)(?:\s+at\s|$)/);
+  if (ownedTimeout?.[1]) {
+    const ownedMessage = (ownedTimeout[2] ?? "").slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH);
+    const ownedStage = ownedMessage.match(/\bduring\s+([a-z][a-z0-9-]*)\b/)?.[1];
+    return {
+      name: ownedTimeout[1],
+      message: ownedMessage,
+      ...(ownedStage === undefined ? {} : { stage: ownedStage }),
+    };
+  }
+  const flattenedOwnedTimeout = message.match(
+    /\b(Preview [^\n]{0,160}? timed out during ([a-z][a-z0-9-]*) after \d+ms[^\n]*)/,
+  );
+  if (flattenedOwnedTimeout?.[1] && flattenedOwnedTimeout[2]) {
+    return {
+      name: "PreviewAutomationTimeoutError",
+      message: flattenedOwnedTimeout[1].slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH),
+      stage: flattenedOwnedTimeout[2],
+    };
+  }
+  const tag = typeof record["_tag"] === "string" ? record["_tag"] : "";
+  if (tag.endsWith("TimeoutError") && message.length > 0) {
+    return {
+      name: tag,
+      message: message.slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH),
+      ...(stage === undefined ? {} : { stage }),
+    };
+  }
+  return null;
+};
+
 export function serializePreviewAutomationHostError(
   error: PreviewAutomationHostError,
 ): NonNullable<PreviewAutomationResponse["error"]> {
@@ -227,9 +308,12 @@ export function serializePreviewAutomationHostError(
         key !== "_tag" && key !== "cause" && key !== "name" && key !== "message" && key !== "stack",
     ),
   );
+  const cause = "cause" in error ? safeErrorCause(error.cause) : null;
   return {
     _tag: error.responseTag,
     message: error.message,
-    ...(Object.keys(detail).length === 0 ? {} : { detail }),
+    ...(Object.keys(detail).length === 0 && cause === null
+      ? {}
+      : { detail: { ...detail, ...(cause === null ? {} : { cause }) } }),
   };
 }

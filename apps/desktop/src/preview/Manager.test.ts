@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import type * as Electron from "electron";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -209,14 +210,41 @@ interface TestCapturedPreviewImage {
   readonly getSize: () => { readonly width: number; readonly height: number };
 }
 
+type TestDisplayMediaHandler = (
+  request: unknown,
+  callback: (streams: { video?: unknown }) => void,
+) => void;
+
+interface TestHostWebContents {
+  readonly id: number;
+  readonly session: {
+    readonly setDisplayMediaRequestHandler: ReturnType<typeof vi.fn>;
+  };
+  readonly displayMediaHandler: () => TestDisplayMediaHandler | undefined;
+}
+
+const makeTestHostWebContents = (): TestHostWebContents => {
+  let handler: TestDisplayMediaHandler | undefined;
+  return {
+    id: 7,
+    session: {
+      setDisplayMediaRequestHandler: vi.fn((next: TestDisplayMediaHandler) => {
+        handler = next;
+      }),
+    },
+    displayMediaHandler: () => handler,
+  };
+};
+
 const makeTestPreviewWebContents = (
   capturePage: () => Promise<TestCapturedPreviewImage>,
   id = 42,
+  hostWebContents: TestHostWebContents = makeTestHostWebContents(),
 ) =>
   ({
     id,
-    hostWebContents: { id: 7 },
-    getMediaSourceId: vi.fn(() => `tab:${id}`),
+    mainFrame: { routingId: id },
+    hostWebContents,
     executeJavaScript: vi.fn(async () => ({ width: 1280, height: 720 })),
     isDestroyed: () => false,
     getType: () => "webview",
@@ -236,12 +264,133 @@ const makeTestPreviewWebContents = (
     debugger: {
       isAttached: () => false,
       attach: vi.fn(),
+      detach: vi.fn(),
       sendCommand: vi.fn(async () => undefined),
       on: vi.fn(),
       off: vi.fn(),
     },
     capturePage,
   }) as never;
+
+const setupRecordingRaceTabs = (manager: PreviewManager.PreviewManager["Service"]) =>
+  Effect.gen(function* () {
+    const capturePage = vi.fn(async () => ({
+      toJPEG: () => Buffer.from("unused-recording-frame"),
+      getSize: () => ({ width: 1280, height: 720 }),
+    }));
+    const host = makeTestHostWebContents();
+    const destroyedIds = new Set<number>();
+    const makeWebContents = (id: number) =>
+      Object.assign(makeTestPreviewWebContents(capturePage, id, host), {
+        isDestroyed: () => destroyedIds.has(id),
+      });
+    const webContentsById = new Map([
+      [41, makeWebContents(41)],
+      [42, makeWebContents(42)],
+    ]);
+    fromId.mockImplementation((id) =>
+      id === undefined ? null : (webContentsById.get(id) ?? null),
+    );
+    yield* manager.createTab("tab_race_a");
+    yield* manager.createTab("tab_race_b");
+    yield* manager.registerWebview("tab_race_a", 41);
+    yield* manager.registerWebview("tab_race_b", 42);
+    const grants: Array<{ video?: unknown }> = [];
+    return {
+      host,
+      grants,
+      destroy: (id: number) => destroyedIds.add(id),
+      takeGrant: () =>
+        host.displayMediaHandler()?.({}, (value) => {
+          grants.push(value);
+        }),
+    };
+  });
+
+const makeSnapshotWebContents = (options: {
+  readonly id: number;
+  readonly capturePage: () => Promise<unknown>;
+  readonly sendCommand?: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+}) => {
+  let attached = false;
+  let debuggerMessage:
+    | ((event: Electron.Event, method: string, params: Record<string, unknown>) => void)
+    | undefined;
+  const detach = vi.fn(() => {
+    attached = false;
+  });
+  const defaultSendCommand = async (method: string, params?: Record<string, unknown>) => {
+    if (method === "Runtime.evaluate") {
+      const expression = typeof params?.["expression"] === "string" ? params["expression"] : "";
+      return expression.includes("document.querySelectorAll")
+        ? {
+            result: {
+              value: {
+                url: "https://example.com",
+                title: "Example",
+                loading: false,
+                visibleText: "ready",
+                interactiveElements: [],
+              },
+            },
+          }
+        : { result: { value: 42 } };
+    }
+    if (method === "Accessibility.getFullAXTree") return { nodes: [] };
+    return undefined;
+  };
+  const sendCommand = vi.fn(options.sendCommand ?? defaultSendCommand);
+  const webContents = {
+    id: options.id,
+    hostWebContents: makeTestHostWebContents(),
+    mainFrame: { routingId: options.id },
+    isDestroyed: () => false,
+    getType: () => "webview",
+    getURL: () => "https://example.com",
+    getTitle: () => "Example",
+    isLoading: () => false,
+    isDevToolsOpened: () => false,
+    getZoomFactor: () => 1,
+    setZoomFactor: vi.fn(),
+    setAudioMuted: vi.fn(),
+    isCurrentlyAudible: () => false,
+    on: vi.fn(),
+    off: vi.fn(),
+    ipc: { on: vi.fn(), off: vi.fn() },
+    send: webviewSend,
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+    setWindowOpenHandler: vi.fn(),
+    debugger: {
+      isAttached: () => attached,
+      attach: vi.fn(() => {
+        attached = true;
+      }),
+      detach,
+      sendCommand,
+      on: vi.fn(
+        (
+          event: string,
+          listener: (
+            event: Electron.Event,
+            method: string,
+            params: Record<string, unknown>,
+          ) => void,
+        ) => {
+          if (event === "message") debuggerMessage = listener;
+        },
+      ),
+      off: vi.fn(),
+    },
+    capturePage: options.capturePage,
+  } as never;
+  return {
+    detach,
+    sendCommand,
+    webContents,
+    emitDebuggerMessage: (method: string, params: Record<string, unknown>) =>
+      debuggerMessage?.({} as Electron.Event, method, params),
+  };
+};
 
 const TEST_FAVICON = "data:image/png;base64,cG5n";
 
@@ -1873,9 +2022,10 @@ describe("PreviewManager", () => {
           toJPEG: () => Buffer.from("recording-frame"),
           getSize: () => ({ width: 1280, height: 720 }),
         }));
+        const host = makeTestHostWebContents();
         const webContentsById = new Map([
-          [41, makeTestPreviewWebContents(capturePage, 41)],
-          [42, makeTestPreviewWebContents(capturePage, 42)],
+          [41, makeTestPreviewWebContents(capturePage, 41, host)],
+          [42, makeTestPreviewWebContents(capturePage, 42, host)],
         ]);
         fromId.mockImplementation((id) =>
           id === undefined ? null : (webContentsById.get(id) ?? null),
@@ -1892,6 +2042,7 @@ describe("PreviewManager", () => {
         } as never);
 
         yield* manager.startRecording("tab_capture_throttling_1");
+        host.displayMediaHandler()?.({}, () => {});
         yield* manager.startRecording("tab_capture_throttling_2");
         expect(setBackgroundThrottling.mock.calls).toEqual([[false]]);
 
@@ -2075,7 +2226,7 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("returns native media sources for concurrent preview recordings", () =>
+  effectIt.effect("grants each preview recording its own tab frame", () =>
     withManager((manager) =>
       Effect.gen(function* () {
         const firstJpeg = Buffer.from("first-recording-frame");
@@ -2090,6 +2241,7 @@ describe("PreviewManager", () => {
         }));
         const firstSendCommand = vi.fn(async () => undefined);
         const secondSendCommand = vi.fn(async () => undefined);
+        const host = makeTestHostWebContents();
         const makeWebContents = (
           id: number,
           capturePage: typeof firstCapturePage,
@@ -2097,8 +2249,8 @@ describe("PreviewManager", () => {
         ) =>
           ({
             id,
-            hostWebContents: { id: 7 },
-            getMediaSourceId: vi.fn(() => `tab:${id}`),
+            mainFrame: { routingId: id },
+            hostWebContents: host,
             executeJavaScript: vi.fn(async () =>
               id === 41 ? { width: 800, height: 600 } : { width: 390, height: 844 },
             ),
@@ -2120,6 +2272,7 @@ describe("PreviewManager", () => {
             debugger: {
               isAttached: () => false,
               attach: vi.fn(),
+              detach: vi.fn(),
               sendCommand,
               on: vi.fn(),
               off: vi.fn(),
@@ -2137,17 +2290,19 @@ describe("PreviewManager", () => {
         yield* manager.createTab("tab_2");
         yield* manager.registerWebview("tab_1", 41);
         yield* manager.registerWebview("tab_2", 42);
-        const sources = yield* Effect.all(
-          [manager.startRecording("tab_1"), manager.startRecording("tab_2")],
-          { concurrency: 2 },
-        );
+        const grants: Array<{ video?: unknown }> = [];
+        const takeGrant = () =>
+          host.displayMediaHandler()?.({}, (value) => {
+            grants.push(value);
+          });
+        yield* manager.startRecording("tab_1");
+        takeGrant();
+        yield* manager.startRecording("tab_2");
+        takeGrant();
 
-        expect(sources).toEqual([
-          { sourceId: "tab:41", width: 800, height: 600 },
-          { sourceId: "tab:42", width: 390, height: 844 },
-        ]);
-        expect(firstCapturePage).toHaveBeenCalledOnce();
-        expect(secondCapturePage).toHaveBeenCalledOnce();
+        expect(grants).toEqual([{ video: { routingId: 41 } }, { video: { routingId: 42 } }]);
+        expect(firstCapturePage).not.toHaveBeenCalled();
+        expect(secondCapturePage).not.toHaveBeenCalled();
         expect(firstSendCommand).not.toHaveBeenCalledWith(
           "Page.startScreencast",
           expect.anything(),
@@ -2165,178 +2320,88 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("continues native recording when the source warmup fails", () =>
+  effectIt.effect("starts native recording without a capturePage warmup", () =>
     withManager((manager) =>
       Effect.gen(function* () {
         const capturePage = vi.fn(async () => {
           throw new Error("source is not ready");
         });
-        const getMediaSourceId = vi.fn(() => "tab:42");
-        const webContents = Object.assign(makeTestPreviewWebContents(capturePage), {
-          executeJavaScript: vi.fn(async () => ({ width: 1280, height: 720 })),
-          getMediaSourceId,
-        });
+        const host = makeTestHostWebContents();
+        const webContents = makeTestPreviewWebContents(capturePage, 42, host);
         fromId.mockReturnValue(webContents);
 
         yield* manager.createTab("tab_recording_warmup_failure");
         yield* manager.registerWebview("tab_recording_warmup_failure", 42);
 
-        expect(yield* manager.startRecording("tab_recording_warmup_failure")).toEqual({
-          sourceId: "tab:42",
-          width: 1280,
-          height: 720,
-        });
-        expect(capturePage).toHaveBeenCalledTimes(2);
-        expect(getMediaSourceId).toHaveBeenCalledOnce();
+        yield* manager.startRecording("tab_recording_warmup_failure");
+        expect(capturePage).not.toHaveBeenCalled();
+        const grants: Array<{ video?: unknown }> = [];
+        host.displayMediaHandler()?.({}, (value) => grants.push(value));
+        host.displayMediaHandler()?.({}, (value) => grants.push(value));
+        expect(grants).toEqual([{ video: { routingId: 42 } }, {}]);
 
         yield* manager.stopRecording("tab_recording_warmup_failure");
       }),
     ),
   );
 
-  effectIt.effect("reports invalid native recording dimensions as a structured error", () =>
+  effectIt.effect("does not depend on renderer viewport measurement", () =>
     withManager((manager) =>
       Effect.gen(function* () {
         const capturePage = vi.fn(async () => ({
           toJPEG: () => Buffer.from("unused-recording-frame"),
           getSize: () => ({ width: 1280, height: 720 }),
         }));
-        const getMediaSourceId = vi.fn(() => "tab:42");
-        const webContents = Object.assign(makeTestPreviewWebContents(capturePage), {
-          executeJavaScript: vi.fn(async () => ({ width: 0, height: 720 })),
-          getMediaSourceId,
+        const host = makeTestHostWebContents();
+        const executeJavaScript = vi.fn(async () => ({ width: 0, height: 720 }));
+        const webContents = Object.assign(makeTestPreviewWebContents(capturePage, 42, host), {
+          executeJavaScript,
         });
         fromId.mockReturnValue(webContents);
 
         yield* manager.createTab("tab_invalid_recording_size");
         yield* manager.registerWebview("tab_invalid_recording_size", 42);
-        const exit = yield* Effect.exit(manager.startRecording("tab_invalid_recording_size"));
-
-        expect(Exit.isFailure(exit)).toBe(true);
-        if (Exit.isSuccess(exit)) return;
-        expect(Option.getOrThrow(Cause.findErrorOption(exit.cause))).toMatchObject({
-          _tag: "PreviewRecordingSourceSizeUnavailableError",
-          tabId: "tab_invalid_recording_size",
-          webContentsId: 42,
-        });
-        expect(getMediaSourceId).not.toHaveBeenCalled();
+        yield* manager.startRecording("tab_invalid_recording_size");
+        expect(executeJavaScript).not.toHaveBeenCalled();
+        expect(capturePage).not.toHaveBeenCalled();
+        yield* manager.stopRecording("tab_invalid_recording_size");
       }),
     ),
   );
 
-  effectIt.effect("keeps a newer recording lease when an earlier start fails", () =>
+  effectIt.live("fails fast when two tabs race for the display-media arm", () =>
     withManager((manager) =>
       Effect.gen(function* () {
-        const setBackgroundThrottling = vi.fn();
-        const capturePage = vi.fn(async () => ({
-          toJPEG: () => Buffer.from("unused-recording-frame"),
-          getSize: () => ({ width: 1280, height: 720 }),
-        }));
-        let markMeasurementStarted!: () => void;
-        const measurementStarted = new Promise<void>((resolve) => {
-          markMeasurementStarted = resolve;
-        });
-        let rejectFirstMeasurement!: (error: Error) => void;
-        const executeJavaScript = vi
-          .fn<(expression: string, userGesture?: boolean) => Promise<unknown>>()
-          .mockImplementationOnce(() => {
-            markMeasurementStarted();
-            return new Promise((_, reject) => {
-              rejectFirstMeasurement = reject;
-            });
-          })
-          .mockResolvedValue({ width: 1280, height: 720 });
-        const webContents = Object.assign(makeTestPreviewWebContents(capturePage), {
-          executeJavaScript,
-        });
-        fromId.mockReturnValue(webContents);
-
-        yield* manager.createTab("tab_recording_start_race");
-        yield* manager.registerWebview("tab_recording_start_race", 42);
-        yield* manager.setMainWindow({
-          isDestroyed: () => false,
-          once: vi.fn(),
-          webContents: { setBackgroundThrottling },
-        } as never);
-
-        const firstStart = yield* manager
-          .startRecording("tab_recording_start_race")
-          .pipe(Effect.forkChild({ startImmediately: true }));
-        yield* Effect.promise(() => measurementStarted);
-        const secondStart = yield* manager
-          .startRecording("tab_recording_start_race")
-          .pipe(Effect.forkChild({ startImmediately: true }));
-        yield* Effect.yieldNow;
-        expect(executeJavaScript).toHaveBeenCalledOnce();
-
-        rejectFirstMeasurement(new Error("first measurement failed"));
-        const firstExit = yield* Fiber.await(firstStart);
-        expect(Exit.isFailure(firstExit)).toBe(true);
-        expect(yield* Fiber.join(secondStart)).toEqual({
-          sourceId: "tab:42",
-          width: 1280,
-          height: 720,
-        });
-
-        yield* manager.stopRecording("tab_recording_start_race");
-        expect(setBackgroundThrottling.mock.calls).toEqual([[false], [true], [false], [true]]);
-      }),
-    ),
-  );
-
-  effectIt.effect("serializes recording source acquisition with webview replacement", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const capturePage = vi.fn(async () => ({
-          toJPEG: () => Buffer.from("unused-recording-frame"),
-          getSize: () => ({ width: 1280, height: 720 }),
-        }));
-        let markMeasurementStarted!: () => void;
-        const measurementStarted = new Promise<void>((resolve) => {
-          markMeasurementStarted = resolve;
-        });
-        let finishMeasurement!: (size: { readonly width: number; readonly height: number }) => void;
-        const executeJavaScript = vi.fn(
-          () =>
-            new Promise<{ readonly width: number; readonly height: number }>((resolve) => {
-              markMeasurementStarted();
-              finishMeasurement = resolve;
-            }),
+        const { grants, takeGrant } = yield* setupRecordingRaceTabs(manager);
+        const exits = yield* Effect.all(
+          [
+            Effect.exit(manager.startRecording("tab_race_a")),
+            Effect.exit(manager.startRecording("tab_race_b")),
+          ],
+          { concurrency: 2 },
         );
-        const initialWebContents = Object.assign(makeTestPreviewWebContents(capturePage, 42), {
-          executeJavaScript,
+        expect(exits.filter(Exit.isSuccess)).toHaveLength(1);
+        const failed = exits.find(Exit.isFailure);
+        if (!failed || Exit.isSuccess(failed)) throw new Error("expected one failed recording arm");
+        expect(Option.getOrThrow(Cause.findErrorOption(failed.cause))).toMatchObject({
+          _tag: "PreviewRecordingArmConflictError",
         });
-        const replacementOn = vi.fn();
-        const replacementWebContents = Object.assign(makeTestPreviewWebContents(capturePage, 43), {
-          on: replacementOn,
-        });
-        fromId.mockImplementation((id) => {
-          if (id === 42) return initialWebContents;
-          if (id === 43) return replacementWebContents;
-          return null;
-        });
+        takeGrant();
+        expect(grants).toHaveLength(1);
+      }),
+    ),
+  );
 
-        yield* manager.createTab("tab_recording_replacement_race");
-        yield* manager.registerWebview("tab_recording_replacement_race", 42);
-        const start = yield* manager
-          .startRecording("tab_recording_replacement_race")
-          .pipe(Effect.forkChild({ startImmediately: true }));
-        yield* Effect.promise(() => measurementStarted);
-        const replacement = yield* manager
-          .registerWebview("tab_recording_replacement_race", 43)
-          .pipe(Effect.forkChild({ startImmediately: true }));
-        yield* Effect.yieldNow;
-        expect(replacementOn).not.toHaveBeenCalled();
-
-        finishMeasurement({ width: 1280, height: 720 });
-        expect(yield* Fiber.join(start)).toEqual({
-          sourceId: "tab:42",
-          width: 1280,
-          height: 720,
-        });
-        yield* Fiber.join(replacement);
-        expect(replacementOn).toHaveBeenCalled();
-        yield* manager.stopRecording("tab_recording_replacement_race");
+  effectIt.effect("reclaims the display-media arm from a destroyed webview", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const { destroy, grants, takeGrant } = yield* setupRecordingRaceTabs(manager);
+        yield* manager.startRecording("tab_race_a");
+        destroy(41);
+        yield* manager.startRecording("tab_race_b");
+        takeGrant();
+        expect(grants).toEqual([{ video: { routingId: 42 } }]);
+        yield* manager.stopRecording("tab_race_b");
       }),
     ),
   );
@@ -2345,7 +2410,9 @@ describe("PreviewManager", () => {
     withManager((manager) =>
       Effect.gen(function* () {
         const setBackgroundThrottling = vi.fn();
-        const mainWindowWebContents = { setBackgroundThrottling };
+        const mainWindowWebContents = Object.assign(makeTestHostWebContents(), {
+          setBackgroundThrottling,
+        });
         const jpeg = Buffer.from("shared-preview-frame");
         const capturePage = vi.fn(async () => ({
           toJPEG: () => jpeg,
@@ -2353,8 +2420,8 @@ describe("PreviewManager", () => {
         }));
         fromId.mockReturnValue({
           id: 42,
+          mainFrame: { routingId: 42 },
           hostWebContents: mainWindowWebContents,
-          getMediaSourceId: vi.fn(() => "tab:42"),
           executeJavaScript: vi.fn(async () => ({ width: 1280, height: 720 })),
           isDestroyed: () => false,
           getType: () => "webview",
@@ -2374,6 +2441,7 @@ describe("PreviewManager", () => {
           debugger: {
             isAttached: () => false,
             attach: vi.fn(),
+            detach: vi.fn(),
             sendCommand: vi.fn(async () => undefined),
             on: vi.fn(),
             off: vi.fn(),
@@ -2469,11 +2537,11 @@ describe("PreviewManager", () => {
         const pictureInPictureFramesBeforeRecording = pictureInPictureSend.mock.calls.length;
 
         yield* manager.startRecording("tab_pip");
-        expect(capturePage).toHaveBeenCalledTimes(2);
+        expect(capturePage).toHaveBeenCalledOnce();
         expect(recordingFrames).toHaveLength(0);
 
         yield* TestClock.adjust(100);
-        expect(capturePage).toHaveBeenCalledTimes(3);
+        expect(capturePage).toHaveBeenCalledTimes(2);
         expect(pictureInPictureSend).toHaveBeenCalledTimes(pictureInPictureFramesBeforeRecording);
         expect(recordingFrames).toHaveLength(0);
 
@@ -2481,7 +2549,7 @@ describe("PreviewManager", () => {
         expect(setBackgroundThrottling.mock.calls).toEqual([[false]]);
         const framesBeforePictureInPictureOnlyTick = pictureInPictureSend.mock.calls.length;
         yield* TestClock.adjust(100);
-        expect(capturePage).toHaveBeenCalledTimes(4);
+        expect(capturePage).toHaveBeenCalledTimes(3);
         expect(pictureInPictureSend.mock.calls.length).toBe(framesBeforePictureInPictureOnlyTick);
         expect(recordingFrames).toHaveLength(0);
 
@@ -2499,7 +2567,7 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("keeps picture-in-picture capture separate from recording warmup", () =>
+  effectIt.effect("keeps picture-in-picture capture separate from recording", () =>
     withManager((manager) =>
       Effect.gen(function* () {
         const jpeg = Buffer.from("shared-preview-frame");
@@ -2524,14 +2592,14 @@ describe("PreviewManager", () => {
         yield* manager.startRecording("tab_recording_then_pip");
 
         expect(recordingFrames).toHaveLength(0);
-        expect(capturePage).toHaveBeenCalledOnce();
+        expect(capturePage).not.toHaveBeenCalled();
         yield* manager.openPictureInPicture("tab_recording_then_pip");
-        expect(capturePage).toHaveBeenCalledTimes(2);
+        expect(capturePage).toHaveBeenCalledOnce();
         expect(send).toHaveBeenCalledOnce();
 
         yield* TestClock.adjust(100);
 
-        expect(capturePage).toHaveBeenCalledTimes(3);
+        expect(capturePage).toHaveBeenCalledTimes(2);
         expect(recordingFrames).toHaveLength(0);
         expect(send).toHaveBeenCalledOnce();
         yield* manager.closePictureInPicture("tab_recording_then_pip");
@@ -3407,6 +3475,365 @@ describe("PreviewManager", () => {
       }),
     ),
   );
+
+  effectIt.effect("bounds stalled snapshot capture without blocking evaluate", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let markCaptureStarted!: () => void;
+        const captureStarted = new Promise<void>((resolve) => {
+          markCaptureStarted = resolve;
+        });
+        const initial = makeSnapshotWebContents({
+          id: 42,
+          capturePage: () => {
+            markCaptureStarted();
+            return new Promise(() => {});
+          },
+        });
+        const replacementImage = {
+          getSize: () => ({ width: 800, height: 600 }),
+          resize: vi.fn(),
+          toPNG: () => Buffer.from("replacement-snapshot"),
+        };
+        const replacement = makeSnapshotWebContents({
+          id: 43,
+          capturePage: async () => replacementImage,
+        });
+        fromId.mockImplementation((id) => {
+          if (id === 42) return initial.webContents;
+          if (id === 43) return replacement.webContents;
+          return null;
+        });
+        const recoveries: Array<{ tabId: string; webContentsId: number }> = [];
+        yield* manager.subscribeCaptureRecoveries((event) =>
+          Effect.sync(() => {
+            recoveries.push(event);
+          }),
+        );
+        yield* manager.createTab("tab_stalled_snapshot");
+        yield* manager.registerWebview("tab_stalled_snapshot", 42);
+
+        const snapshot = yield* manager
+          .automationSnapshot("tab_stalled_snapshot")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.promise(() => captureStarted);
+
+        expect(
+          yield* manager.automationEvaluate("tab_stalled_snapshot", { expression: "6 * 7" }),
+        ).toBe(42);
+        yield* TestClock.adjust(PreviewManager.PREVIEW_AUTOMATION_CAPTURE_TIMEOUT_MS);
+        const snapshotExit = yield* Fiber.await(snapshot);
+        expect(Exit.isFailure(snapshotExit)).toBe(true);
+        if (Exit.isSuccess(snapshotExit)) return;
+        expect(Option.getOrThrow(Cause.findErrorOption(snapshotExit.cause))).toMatchObject({
+          _tag: "PreviewAutomationCaptureTimeoutError",
+          stage: "capture-page",
+          timeoutMs: PreviewManager.PREVIEW_AUTOMATION_CAPTURE_TIMEOUT_MS,
+        });
+        expect(recoveries).toEqual([{ tabId: "tab_stalled_snapshot", webContentsId: 42 }]);
+
+        yield* manager.registerWebview("tab_stalled_snapshot", 43);
+        const recovered = yield* manager.automationSnapshot("tab_stalled_snapshot");
+        expect(recovered.screenshot.data).toBe(
+          Buffer.from("replacement-snapshot").toString("base64"),
+        );
+      }),
+    ),
+  );
+
+  effectIt.effect("replaces an UnknownViz capture surface without poisoning later snapshots", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const unknownViz = new Error("software compositor copy failed");
+        unknownViz.name = "UnknownVizError";
+        const initial = makeSnapshotWebContents({
+          id: 42,
+          capturePage: () => Promise.reject(unknownViz),
+        });
+        const replacementImage = {
+          getSize: () => ({ width: 800, height: 600 }),
+          resize: vi.fn(),
+          toPNG: () => Buffer.from("recovered-after-unknown-viz"),
+        };
+        const replacement = makeSnapshotWebContents({
+          id: 43,
+          capturePage: async () => replacementImage,
+        });
+        fromId.mockImplementation((id) => {
+          if (id === 42) return initial.webContents;
+          if (id === 43) return replacement.webContents;
+          return null;
+        });
+        const recoveries: Array<{ tabId: string; webContentsId: number }> = [];
+        yield* manager.subscribeCaptureRecoveries((event) =>
+          Effect.sync(() => {
+            recoveries.push(event);
+          }),
+        );
+        yield* manager.createTab("tab_unknown_viz");
+        yield* manager.registerWebview("tab_unknown_viz", 42);
+
+        const failed = yield* Effect.exit(manager.automationSnapshot("tab_unknown_viz"));
+        expect(Exit.isFailure(failed)).toBe(true);
+        if (Exit.isSuccess(failed)) return;
+        expect(Option.getOrThrow(Cause.findErrorOption(failed.cause))).toMatchObject({
+          _tag: "PreviewOperationError",
+          cause: unknownViz,
+        });
+        expect(Option.getOrThrow(Cause.findErrorOption(failed.cause)).message).toContain(
+          "UnknownVizError: software compositor copy failed",
+        );
+        expect(recoveries).toEqual([{ tabId: "tab_unknown_viz", webContentsId: 42 }]);
+
+        yield* manager.registerWebview("tab_unknown_viz", 43);
+        const recovered = yield* manager.automationSnapshot("tab_unknown_viz");
+        expect(recovered.screenshot.data).toBe(
+          Buffer.from("recovered-after-unknown-viz").toString("base64"),
+        );
+      }),
+    ),
+  );
+
+  effectIt.effect("drains an active snapshot before preparing webview removal", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let finishCapture!: (image: unknown) => void;
+        let markCaptureStarted!: () => void;
+        const captureStarted = new Promise<void>((resolve) => {
+          markCaptureStarted = resolve;
+        });
+        const control = makeSnapshotWebContents({
+          id: 42,
+          capturePage: () =>
+            new Promise((resolve) => {
+              markCaptureStarted();
+              finishCapture = resolve;
+            }),
+        });
+        fromId.mockReturnValue(control.webContents);
+        yield* manager.createTab("tab_capture_removal");
+        yield* manager.registerWebview("tab_capture_removal", 42);
+        const snapshot = yield* manager
+          .automationSnapshot("tab_capture_removal")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.promise(() => captureStarted);
+
+        const removal = yield* manager
+          .prepareWebviewRemoval("tab_capture_removal", 42)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        expect(control.detach).not.toHaveBeenCalled();
+        finishCapture({
+          getSize: () => ({ width: 800, height: 600 }),
+          resize: vi.fn(),
+          toPNG: () => Buffer.from("snapshot-before-removal"),
+        });
+
+        expect((yield* Fiber.join(snapshot)).screenshot.data).toBe(
+          Buffer.from("snapshot-before-removal").toString("base64"),
+        );
+        yield* Fiber.join(removal);
+        expect(control.detach).toHaveBeenCalledOnce();
+      }),
+    ),
+  );
+
+  effectIt.effect("waits for bounded snapshot recovery before window teardown", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let markCaptureStarted!: () => void;
+        const captureStarted = new Promise<void>((resolve) => {
+          markCaptureStarted = resolve;
+        });
+        const control = makeSnapshotWebContents({
+          id: 42,
+          capturePage: () => {
+            markCaptureStarted();
+            return new Promise(() => {});
+          },
+        });
+        fromId.mockReturnValue(control.webContents);
+        yield* manager.createTab("tab_capture_window_teardown");
+        yield* manager.registerWebview("tab_capture_window_teardown", 42);
+        const snapshot = yield* manager
+          .automationSnapshot("tab_capture_window_teardown")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.promise(() => captureStarted);
+
+        const teardown = yield* manager.prepareForWindowTeardown.pipe(
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* Effect.yieldNow;
+        expect(control.detach).not.toHaveBeenCalled();
+        yield* TestClock.adjust(PreviewManager.PREVIEW_AUTOMATION_CAPTURE_TIMEOUT_MS);
+
+        const snapshotExit = yield* Fiber.await(snapshot);
+        expect(Exit.isFailure(snapshotExit)).toBe(true);
+        yield* Fiber.join(teardown);
+        expect(control.detach).toHaveBeenCalledOnce();
+      }),
+    ),
+  );
+
+  effectIt.effect("drains screencast acknowledgements before replacement and close", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let finishFirstAck!: () => void;
+        let markFirstAckStarted!: () => void;
+        const firstAckStarted = new Promise<void>((resolve) => {
+          markFirstAckStarted = resolve;
+        });
+        const initial = makeSnapshotWebContents({
+          id: 42,
+          capturePage: async () => ({}),
+          sendCommand: (method) =>
+            method === "Page.screencastFrameAck"
+              ? new Promise<void>((resolve) => {
+                  markFirstAckStarted();
+                  finishFirstAck = resolve;
+                })
+              : Promise.resolve(undefined),
+        });
+        const replacement = makeSnapshotWebContents({
+          id: 43,
+          capturePage: async () => ({}),
+        });
+        fromId.mockImplementation((id) => {
+          if (id === 42) return initial.webContents;
+          if (id === 43) return replacement.webContents;
+          return null;
+        });
+        yield* manager.createTab("tab_debugger_drain");
+        yield* manager.registerWebview("tab_debugger_drain", 42);
+        yield* manager.setColorScheme("tab_debugger_drain", "dark");
+        initial.emitDebuggerMessage("Page.screencastFrame", { sessionId: 1 });
+        yield* Effect.promise(() => firstAckStarted);
+
+        const replace = yield* manager
+          .registerWebview("tab_debugger_drain", 43)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        expect(initial.detach).not.toHaveBeenCalled();
+        finishFirstAck();
+        yield* Fiber.join(replace);
+        expect(initial.detach).toHaveBeenCalledOnce();
+
+        let finishSecondAck!: () => void;
+        let markSecondAckStarted!: () => void;
+        const secondAckStarted = new Promise<void>((resolve) => {
+          markSecondAckStarted = resolve;
+        });
+        replacement.sendCommand.mockImplementation((method) =>
+          method === "Page.screencastFrameAck"
+            ? new Promise<void>((resolve) => {
+                markSecondAckStarted();
+                finishSecondAck = resolve;
+              })
+            : Promise.resolve(undefined),
+        );
+        yield* manager.setColorScheme("tab_debugger_drain", "light");
+        replacement.emitDebuggerMessage("Page.screencastFrame", { sessionId: 2 });
+        yield* Effect.promise(() => secondAckStarted);
+        const close = yield* manager
+          .closeTab("tab_debugger_drain")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        expect(replacement.detach).not.toHaveBeenCalled();
+        finishSecondAck();
+        yield* Fiber.join(close);
+        expect(replacement.detach).toHaveBeenCalledOnce();
+      }),
+    ),
+  );
+
+  effectIt.effect("keeps an initializing debugger session reachable by tab teardown", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let finishEnable!: () => void;
+        let markEnableStarted!: () => void;
+        const enableStarted = new Promise<void>((resolve) => {
+          markEnableStarted = resolve;
+        });
+        const control = makeSnapshotWebContents({
+          id: 42,
+          capturePage: async () => ({}),
+          sendCommand: (method) =>
+            method === "Runtime.enable"
+              ? new Promise<void>((resolve) => {
+                  markEnableStarted();
+                  finishEnable = resolve;
+                })
+              : Promise.resolve(undefined),
+        });
+        fromId.mockReturnValue(control.webContents);
+        yield* manager.createTab("tab_initializing_debugger");
+        yield* manager.registerWebview("tab_initializing_debugger", 42);
+
+        const initialize = yield* manager
+          .setColorScheme("tab_initializing_debugger", "dark")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.promise(() => enableStarted);
+        const close = yield* manager
+          .closeTab("tab_initializing_debugger")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        expect(control.detach).not.toHaveBeenCalled();
+
+        finishEnable();
+        yield* Fiber.join(close);
+        expect(Exit.isFailure(yield* Fiber.await(initialize))).toBe(true);
+        expect(control.detach).toHaveBeenCalledOnce();
+      }),
+    ),
+  );
+
+  effectIt.effect("bounds debugger drain and allows a later window teardown retry", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let finishAck!: () => void;
+        let markAckStarted!: () => void;
+        const ackStarted = new Promise<void>((resolve) => {
+          markAckStarted = resolve;
+        });
+        const control = makeSnapshotWebContents({
+          id: 42,
+          capturePage: async () => ({}),
+          sendCommand: (method) =>
+            method === "Page.screencastFrameAck"
+              ? new Promise<void>((resolve) => {
+                  markAckStarted();
+                  finishAck = resolve;
+                })
+              : Promise.resolve(undefined),
+        });
+        fromId.mockReturnValue(control.webContents);
+        yield* manager.createTab("tab_window_teardown");
+        yield* manager.registerWebview("tab_window_teardown", 42);
+        yield* manager.setColorScheme("tab_window_teardown", "dark");
+        control.emitDebuggerMessage("Page.screencastFrame", { sessionId: 1 });
+        yield* Effect.promise(() => ackStarted);
+
+        const teardown = yield* manager.prepareForWindowTeardown.pipe(
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* TestClock.adjust(PreviewManager.PREVIEW_DEBUGGER_DRAIN_TIMEOUT_MS);
+        const firstExit = yield* Fiber.await(teardown);
+        expect(Exit.isFailure(firstExit)).toBe(true);
+        if (Exit.isSuccess(firstExit)) return;
+        expect(Option.getOrThrow(Cause.findErrorOption(firstExit.cause))).toMatchObject({
+          _tag: "PreviewAutomationDebuggerDrainTimeoutError",
+          stage: "debugger-drain",
+          timeoutMs: PreviewManager.PREVIEW_DEBUGGER_DRAIN_TIMEOUT_MS,
+        });
+        expect(control.detach).not.toHaveBeenCalled();
+
+        finishAck();
+        yield* Effect.yieldNow;
+        yield* manager.prepareForWindowTeardown;
+        expect(control.detach).toHaveBeenCalledOnce();
+      }),
+    ),
+  );
 });
 
 describe("PreviewOperationError", () => {
@@ -3421,6 +3848,19 @@ describe("PreviewOperationError", () => {
 
     expect(error.message).not.toContain(cause.message);
     expect(PreviewManager.PreviewOperationError.toTimelineMessage(error)).toBe(cause.message);
+  });
+
+  it.each(["UnknownVizError", "AbortError"])("includes a bounded %s cause", (name) => {
+    const cause = new Error("capture failed safely");
+    cause.name = name;
+    const error = new PreviewManager.PreviewOperationError({
+      operation: "capturePage",
+      tabId: "tab_1",
+      webContentsId: 42,
+      cause,
+    });
+
+    expect(error.message).toContain(`${name}: capture failed safely`);
   });
 });
 

@@ -350,6 +350,93 @@ describe("previewAutomationRequestConsumer", () => {
     expect(JSON.stringify(response)).not.toContain("preview-secret");
   });
 
+  it.each(["UnknownVizError", "AbortError"])(
+    "preserves a bounded %s cause from Electron",
+    (name) => {
+      const cause = new Error("surface capture was aborted");
+      cause.name = name;
+      const response = serializePreviewAutomationError(cause, {
+        requestId: "request-native-error",
+        operation: "snapshot",
+        environmentId,
+        threadId,
+        tabId,
+      });
+
+      expect(response).toMatchObject({
+        _tag: "PreviewAutomationExecutionError",
+        detail: {
+          cause: { name, message: "surface capture was aborted" },
+        },
+      });
+    },
+  );
+
+  it("preserves the owned timeout stage from a flattened IPC error", () => {
+    const response = serializePreviewAutomationError(
+      new Error(
+        "Error invoking remote method: Preview snapshot capture timed out during capture-page after 2500ms in tab tab-1",
+      ),
+      {
+        requestId: "request-capture-timeout",
+        operation: "snapshot",
+        environmentId,
+        threadId,
+        tabId,
+      },
+    );
+
+    expect(response).toMatchObject({
+      detail: {
+        cause: {
+          name: "PreviewAutomationTimeoutError",
+          stage: "capture-page",
+        },
+      },
+    });
+  });
+
+  it("responds with the host execution deadline before a stuck handler settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const requestsAtom = Atom.make<AsyncResult.AsyncResult<PreviewAutomationStreamEvent, Error>>(
+        AsyncResult.initial<PreviewAutomationStreamEvent, Error>(false),
+      );
+      const respond = vi.fn(async (_response: PreviewAutomationResponse) => undefined);
+      const state = consumerState(() => new Promise(() => {}));
+      const consumerAtom = createPreviewAutomationRequestConsumerAtom({
+        requestsAtom,
+        clientId,
+        connectionAtom: state.connectionAtom,
+        environmentId,
+        requestHandlerAtom: state.requestHandlerAtom,
+        respond,
+        label: "test:preview-automation-host-deadline",
+      });
+      const registry = AtomRegistry.make();
+      registry.mount(consumerAtom);
+      registry.set(
+        requestsAtom,
+        AsyncResult.success(requestEvent("request-host-deadline", { timeoutMs: 250 })),
+      );
+
+      await vi.advanceTimersByTimeAsync(250);
+      expect(respond).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: "request-host-deadline",
+          ok: false,
+          error: expect.objectContaining({
+            _tag: "PreviewAutomationTimeoutError",
+            detail: expect.objectContaining({ stage: "host-execution", timeoutMs: 250 }),
+          }),
+        }),
+      );
+      registry.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("sanitizes unexpected handler failures at the response boundary", async () => {
     const requestsAtom = Atom.make<AsyncResult.AsyncResult<PreviewAutomationStreamEvent, Error>>(
       AsyncResult.initial<PreviewAutomationStreamEvent, Error>(false),

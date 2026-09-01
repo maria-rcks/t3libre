@@ -99,6 +99,7 @@ export class DesktopWindow extends Context.Service<
     // produce a stranded window pointing at nothing.
     readonly handleBackendNotReady: Effect.Effect<void>;
     readonly flushMainWindowBounds: Effect.Effect<void>;
+    readonly preparePreviewTeardown: Effect.Effect<void, PreviewManager.PreviewManagerError>;
     readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
     // Zooms the main window's own webContents. The Electron `zoomIn`/`zoomOut`
     // menu roles act on whichever webContents has keyboard focus, so with an
@@ -592,8 +593,30 @@ export const make = Effect.gen(function* () {
     window.on("move", scheduleBoundsPersist);
     window.on("maximize", scheduleBoundsPersist);
     window.on("unmaximize", scheduleBoundsPersist);
-    window.on("close", () => {
+    let closePrepared = false;
+    let closePreparationRunning = false;
+    window.on("close", (event) => {
       runFork(flushBoundsPersist);
+      if (closePrepared || closePreparationRunning) {
+        if (!closePrepared) event.preventDefault();
+        return;
+      }
+      event.preventDefault();
+      closePreparationRunning = true;
+      void runPromise(previewManager.prepareForWindowTeardown).then(
+        () => {
+          closePrepared = true;
+          if (!window.isDestroyed()) window.close();
+        },
+        (error) => {
+          closePreparationRunning = false;
+          void runPromise(
+            logWindowWarning("preview teardown blocked main window close", {
+              message: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        },
+      );
     });
 
     if (environment.platform === "darwin") {
@@ -871,6 +894,7 @@ export const make = Effect.gen(function* () {
     flushMainWindowBounds: Effect.suspend(() => flushMainWindowBounds).pipe(
       Effect.withSpan("desktop.window.flushMainWindowBounds"),
     ),
+    preparePreviewTeardown: previewManager.prepareForWindowTeardown,
     dispatchMenuAction: Effect.fn("desktop.window.dispatchMenuAction")(function* (action) {
       yield* Effect.annotateCurrentSpan({ action });
       const existingWindow = yield* focusedMainWindow;
