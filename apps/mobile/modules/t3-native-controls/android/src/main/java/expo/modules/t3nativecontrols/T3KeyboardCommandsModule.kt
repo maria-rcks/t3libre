@@ -23,7 +23,7 @@ class T3KeyboardCommandsModule : Module() {
 
 class T3KeyboardCommandsView(
   context: Context,
-  appContext: AppContext,
+  appContext: AppContext
 ) : ExpoView(context, appContext) {
   private val onCommand by EventDispatcher()
   var enabledCommands = emptySet<String>()
