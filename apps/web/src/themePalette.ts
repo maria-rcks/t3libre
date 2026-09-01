@@ -405,7 +405,7 @@ const T3_CODE_DARK_THEME_COLORS: ThemeColors = {
   toolbarControl: "#111111",
   toolbarControlForeground: "#f5f5f5",
   toolbarControlHover: "#141414",
-  surface: "#0f0f0f",
+  surface: "#111111",
   surfaceRaised: "#111111",
   surfaceOverlay: "#111111",
   text: "#f5f5f5",

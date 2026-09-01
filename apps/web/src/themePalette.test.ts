@@ -138,7 +138,7 @@ describe("theme files", () => {
   it("keeps stock dark controls in the neutral-black surface hierarchy", () => {
     expectThemeColors(getStandardThemeColors("dark"), {
       canvas: "#0a0a0a",
-      surface: "#0f0f0f",
+      surface: "#111111",
       surfaceRaised: "#111111",
       surfaceOverlay: "#111111",
       toolbarControl: "#111111",
