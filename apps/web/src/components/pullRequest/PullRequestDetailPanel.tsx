@@ -531,7 +531,7 @@ export function PullRequestDetailPanel({
           />
         }
       >
-        <CopyIcon aria-hidden className="size-3" />
+        <CopyIcon aria-hidden />
       </TooltipTrigger>
       <TooltipPopup side="top">Copy {checkoutCommand}</TooltipPopup>
     </Tooltip>
