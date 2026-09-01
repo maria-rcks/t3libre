@@ -4603,14 +4603,14 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const activeThreadReferenceCopyTarget = useMemo(
     () =>
-      activeThreadId === null
+      activeThreadId === null || !isServerThread
         ? null
         : resolveThreadReferenceCopyTarget({
             threadId: activeThreadId,
             linkedPullRequestUrl: linkedThreadPullRequest?.url ?? null,
             detectedPullRequestUrl: activeThreadPr?.url ?? null,
           }),
-    [activeThreadId, activeThreadPr?.url, linkedThreadPullRequest?.url],
+    [activeThreadId, activeThreadPr?.url, isServerThread, linkedThreadPullRequest?.url],
   );
   const copyActiveThreadReference = useCallback(() => {
     const target = activeThreadReferenceCopyTarget;
