@@ -5340,7 +5340,7 @@ function ChatViewContent(props: ChatViewProps) {
       if (command === "thread.copyReference") {
         event.preventDefault();
         event.stopPropagation();
-        copyActiveThreadReference();
+        if (!event.repeat) copyActiveThreadReference();
         return;
       }
 

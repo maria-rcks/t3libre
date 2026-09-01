@@ -119,7 +119,7 @@ export function HardwareKeyboardCommandProvider({
       commands.add("files");
       commands.add("terminal");
       commands.add("review");
-      commands.add("copyThreadReference");
+      if (!/\/terminal(?:\/|$)/.test(pathname)) commands.add("copyThreadReference");
     }
     return [...commands];
   }, [pathname, registrationVersion, navigation]);
