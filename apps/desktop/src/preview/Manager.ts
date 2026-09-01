@@ -47,6 +47,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as SynchronizedRef from "effect/SynchronizedRef";
@@ -3605,15 +3606,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     if (captureRecoveryRetryWebContentsIds.has(wc.id)) return;
     captureRecoveryRetryWebContentsIds.add(wc.id);
     runFork(
-      Effect.gen(function* () {
-        while (true) {
-          yield* Effect.sleep(250);
-          const exit = yield* Effect.exit(recoverCaptureSurfaceOnce(tabId, wc));
-          if (Exit.isSuccess(exit)) return;
-          const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
-          if (!isPreviewAutomationDebuggerDrainTimeoutError(error)) return;
-        }
-      }).pipe(
+      Effect.sleep(250).pipe(
+        Effect.andThen(recoverCaptureSurfaceOnce(tabId, wc)),
+        Effect.retry({
+          schedule: Schedule.spaced("250 millis"),
+          while: (error) => error._tag === "PreviewAutomationDebuggerDrainTimeoutError",
+        }),
+        Effect.ignore,
         Effect.ensuring(
           Effect.sync(() => {
             captureRecoveryRetryWebContentsIds.delete(wc.id);
@@ -3627,13 +3626,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     tabId: string,
     wc: Electron.WebContents,
   ) {
-    const exit = yield* Effect.exit(recoverCaptureSurfaceOnce(tabId, wc));
-    if (Exit.isSuccess(exit)) return;
-    const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
-    if (isPreviewAutomationDebuggerDrainTimeoutError(error)) {
-      scheduleCaptureSurfaceRecovery(tabId, wc);
-    }
-    return yield* Effect.failCause(exit.cause);
+    yield* recoverCaptureSurfaceOnce(tabId, wc).pipe(
+      Effect.catchTags({
+        PreviewAutomationDebuggerDrainTimeoutError: (error) =>
+          Effect.sync(() => {
+            scheduleCaptureSurfaceRecovery(tabId, wc);
+          }).pipe(Effect.andThen(Effect.fail(error))),
+      }),
+    );
   });
 
   const waitForAutomationCaptures = Effect.fn("PreviewManager.waitForAutomationCaptures")(
@@ -4498,10 +4498,6 @@ export class PreviewAutomationDebuggerDrainTimeoutError extends Schema.TaggedErr
     return `Preview debugger teardown timed out during ${this.stage} after ${this.timeoutMs}ms with ${this.pendingCommands} commands pending for WebContents ${this.webContentsId}`;
   }
 }
-export const isPreviewAutomationDebuggerDrainTimeoutError = Schema.is(
-  PreviewAutomationDebuggerDrainTimeoutError,
-);
-
 export class PreviewAutomationEvaluationError extends Schema.TaggedErrorClass<PreviewAutomationEvaluationError>()(
   "PreviewAutomationEvaluationError",
   {

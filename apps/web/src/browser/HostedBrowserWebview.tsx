@@ -184,7 +184,7 @@ export function HostedBrowserWebview(props: {
               ...current,
               {
                 generation: webviewGeneration,
-                src: webview.src,
+                src: webviewGeneration === 0 ? initialSrc : recoverySrc,
                 webContentsId: recovery.webContentsId,
               },
             ],
@@ -193,7 +193,7 @@ export function HostedBrowserWebview(props: {
       setRecoverySrc(latestUrlRef.current ?? initialSrc);
       setWebviewGeneration((generation) => generation + 1);
     });
-  }, [initialSrc, prepareRetiredCaptureWebview, runtimeTabId, webviewGeneration]);
+  }, [initialSrc, prepareRetiredCaptureWebview, recoverySrc, runtimeTabId, webviewGeneration]);
 
   const setWebviewRef = useCallback((node: HTMLElement | null) => {
     if (node) webviewRef.current = node as ElectronWebview;
