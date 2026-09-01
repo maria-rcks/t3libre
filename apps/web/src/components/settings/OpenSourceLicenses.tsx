@@ -12,7 +12,7 @@ import {
 
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { Input } from "../ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 
@@ -147,12 +147,13 @@ function LicenseHeaderAction({
       <div className="hidden sm:block">
         <LicenseCount filteredCount={filteredCount} totalCount={totalCount} />
       </div>
-      <div className="relative">
-        <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground" />
-        <Input
+      <InputGroup className="w-36 sm:w-44">
+        <InputGroupAddon>
+          <SearchIcon aria-hidden className="size-3" />
+        </InputGroupAddon>
+        <InputGroupInput
           aria-label="Search open-source licenses"
           autoFocus
-          className="w-36 [&_[data-slot=input]]:pl-7 sm:w-44"
           onBlur={() => {
             if (query.length === 0) onSearchOpenChange(false);
           }}
@@ -164,11 +165,11 @@ function LicenseHeaderAction({
             onSearchOpenChange(false);
           }}
           placeholder="Search licenses"
-          size="compact"
+          size="sm"
           type="search"
           value={query}
         />
-      </div>
+      </InputGroup>
     </div>
   );
 }
