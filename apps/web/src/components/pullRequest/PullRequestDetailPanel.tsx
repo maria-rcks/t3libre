@@ -469,6 +469,16 @@ export function PullRequestDetailPanel({
     target: "branch name",
     timeout: 1600,
   });
+  const { copyToClipboard: copyCheckoutCommandToClipboard } = useCopyToClipboard({
+    target: "pull request checkout command",
+    onCopy: () => toastManager.add({ type: "success", title: "Checkout command copied" }),
+    onError: (error) =>
+      toastManager.add({
+        type: "error",
+        title: "Could not copy checkout command",
+        description: error.message,
+      }),
+  });
   // The chunk is fetched as soon as the panel exists rather than waiting for the Code tab to be
   // clicked, so a reader who does click it lands on a chunk already in the module cache.
   useEffect(() => {
@@ -517,17 +527,7 @@ export function PullRequestDetailPanel({
             size="icon-micro"
             variant="ghost-muted"
             aria-label={`Copy ${checkoutCommand}`}
-            onClick={() => {
-              void writeTextToClipboard(checkoutCommand, "pull request checkout command").catch(
-                (error: Error) => {
-                  toastManager.add({
-                    type: "error",
-                    title: "Could not copy checkout command",
-                    description: error.message,
-                  });
-                },
-              );
-            }}
+            onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}
           />
         }
       >
