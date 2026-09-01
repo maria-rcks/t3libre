@@ -12,6 +12,7 @@ import { readPreviewAnnotationTheme } from "./annotationTheme";
 import { useBrowserPointerStore } from "./browserPointerStore";
 import { HostedBrowserWebview } from "./HostedBrowserWebview";
 import { previewRuntimeTabId } from "./previewRuntimeTabId";
+import { findActivePreviewWebview } from "./previewWebviewLookup";
 
 export function ElectronBrowserHost() {
   const { resolvedTheme } = useTheme();
@@ -66,11 +67,10 @@ export function ElectronBrowserHost() {
         retirementTimersRef.current.delete(runtimeTabId);
         return;
       }
-      const webview = Array.from(
-        document.querySelectorAll<HTMLElement & { getWebContentsId: () => number }>(
-          "webview[data-preview-tab]",
-        ),
-      ).find((candidate) => candidate.getAttribute("data-preview-tab") === runtimeTabId);
+      const webview = findActivePreviewWebview<HTMLElement & { getWebContentsId: () => number }>(
+        document,
+        runtimeTabId,
+      );
       if (!webview) {
         removeRetired(runtimeTabId);
         return;

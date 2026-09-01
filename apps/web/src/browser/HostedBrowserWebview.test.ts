@@ -30,7 +30,10 @@ vi.mock("./webviewCrashRecovery", () => ({
   planWebviewCrashRecovery: vi.fn(),
 }));
 
-import { hostedBrowserCompositingLayoutKey } from "./HostedBrowserWebview";
+import {
+  hostedBrowserCompositingLayoutKey,
+  hostedBrowserWebviewRenderEntries,
+} from "./HostedBrowserWebview";
 
 describe("hostedBrowserCompositingLayoutKey", () => {
   const layout = {
@@ -47,5 +50,26 @@ describe("hostedBrowserCompositingLayoutKey", () => {
     expect(hostedBrowserCompositingLayoutKey({ ...layout, ...change })).not.toBe(
       hostedBrowserCompositingLayoutKey(layout),
     );
+  });
+});
+
+describe("hostedBrowserWebviewRenderEntries", () => {
+  it("keeps a retired guest and its replacement in one keyed list", () => {
+    const beforeRecovery = hostedBrowserWebviewRenderEntries([], {
+      generation: 0,
+      src: "https://example.test/old",
+    });
+    const afterRecovery = hostedBrowserWebviewRenderEntries(
+      [{ generation: 0, src: "https://example.test/old" }],
+      { generation: 1, src: "https://example.test/new" },
+    );
+
+    expect(beforeRecovery).toEqual([
+      { generation: 0, src: "https://example.test/old", retired: false },
+    ]);
+    expect(afterRecovery).toEqual([
+      { generation: 0, src: "https://example.test/old", retired: true },
+      { generation: 1, src: "https://example.test/new", retired: false },
+    ]);
   });
 });

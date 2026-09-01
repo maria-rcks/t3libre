@@ -13,6 +13,7 @@ import * as DesktopShutdown from "./DesktopShutdown.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import * as PreviewManager from "../preview/Manager.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
@@ -86,7 +87,7 @@ const requestDesktopShutdownAndWait = Effect.fn("desktop.lifecycle.requestShutdo
     afterBoundsFlush: Effect.Effect<void> = Effect.void,
   ): Effect.fn.Return<
     void,
-    DesktopWindow.DesktopWindowError,
+    PreviewManager.PreviewManagerError,
     DesktopShutdown.DesktopShutdown | DesktopWindow.DesktopWindow
   > {
     const shutdown = yield* DesktopShutdown.DesktopShutdown;
@@ -132,7 +133,19 @@ function handleBeforeQuit(
           ),
         ),
       );
-    }).pipe(Effect.withSpan("desktop.lifecycle.beforeQuit")),
+    }).pipe(
+      Effect.tapError((error) =>
+        Effect.gen(function* () {
+          const state = yield* DesktopState.DesktopState;
+          yield* Ref.set(state.quitting, false);
+          yield* logLifecycleError(
+            "preview teardown blocked desktop shutdown",
+            DesktopWindow.previewTeardownErrorLogAnnotations(error),
+          );
+        }).pipe(Effect.withSpan("desktop.lifecycle.quitBlocked")),
+      ),
+      Effect.withSpan("desktop.lifecycle.beforeQuit"),
+    ),
   );
   void quit.then(
     () => {
@@ -144,15 +157,7 @@ function handleBeforeQuit(
         }).pipe(Effect.withSpan("desktop.lifecycle.quitAfterShutdown")),
       );
     },
-    (error) => {
-      void runEffect(
-        Effect.gen(function* () {
-          const state = yield* DesktopState.DesktopState;
-          yield* Ref.set(state.quitting, false);
-          yield* logLifecycleError("preview teardown blocked desktop shutdown", { error });
-        }).pipe(Effect.withSpan("desktop.lifecycle.quitBlocked")),
-      );
-    },
+    () => undefined,
   );
 }
 
@@ -172,20 +177,21 @@ function quitFromSignal(
       yield* logLifecycleInfo("process signal received", { signal });
       yield* requestDesktopShutdownAndWait();
       yield* electronApp.quit;
-    }).pipe(Effect.withSpan("desktop.lifecycle.processSignal")),
-  );
-  void quit.catch((error) =>
-    runEffect(
-      Effect.gen(function* () {
-        const state = yield* DesktopState.DesktopState;
-        yield* Ref.set(state.quitting, false);
-        yield* logLifecycleError("preview teardown blocked process signal shutdown", {
-          error,
-          signal,
-        });
-      }).pipe(Effect.withSpan("desktop.lifecycle.processSignalBlocked")),
+    }).pipe(
+      Effect.tapError((error) =>
+        Effect.gen(function* () {
+          const state = yield* DesktopState.DesktopState;
+          yield* Ref.set(state.quitting, false);
+          yield* logLifecycleError("preview teardown blocked process signal shutdown", {
+            ...DesktopWindow.previewTeardownErrorLogAnnotations(error),
+            signal,
+          });
+        }).pipe(Effect.withSpan("desktop.lifecycle.processSignalBlocked")),
+      ),
+      Effect.withSpan("desktop.lifecycle.processSignal"),
     ),
   );
+  void quit.catch(() => undefined);
 }
 
 export const make = DesktopLifecycle.of({

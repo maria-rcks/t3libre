@@ -220,6 +220,8 @@ const testWebContentsMainFrame = (webContents: unknown): unknown =>
 
 interface TestHostWebContents {
   readonly id: number;
+  readonly mainFrame: unknown;
+  readonly isDestroyed: () => boolean;
   readonly session: {
     readonly setDisplayMediaRequestHandler: ReturnType<typeof vi.fn>;
   };
@@ -230,6 +232,8 @@ const makeTestHostWebContents = (): TestHostWebContents => {
   let handler: TestDisplayMediaHandler | undefined;
   return {
     id: 7,
+    mainFrame: { routingId: 7 },
+    isDestroyed: () => false,
     session: {
       setDisplayMediaRequestHandler: vi.fn((next: TestDisplayMediaHandler) => {
         handler = next;
@@ -303,13 +307,10 @@ const setupRecordingRaceTabs = (manager: PreviewManager.PreviewManager["Service"
       host,
       grants,
       destroy: (id: number) => destroyedIds.add(id),
-      takeGrant: (webContentsId = 42) =>
-        host.displayMediaHandler()?.(
-          { frame: testWebContentsMainFrame(webContentsById.get(webContentsId)) },
-          (value) => {
-            grants.push(value);
-          },
-        ),
+      takeGrant: () =>
+        host.displayMediaHandler()?.({ frame: testWebContentsMainFrame(host) }, (value) => {
+          grants.push(value);
+        }),
     };
   });
 
@@ -2050,10 +2051,7 @@ describe("PreviewManager", () => {
         } as never);
 
         yield* manager.startRecording("tab_capture_throttling_1");
-        host.displayMediaHandler()?.(
-          { frame: testWebContentsMainFrame(webContentsById.get(41)) },
-          () => {},
-        );
+        host.displayMediaHandler()?.({ frame: testWebContentsMainFrame(host) }, () => {});
         yield* manager.startRecording("tab_capture_throttling_2");
         expect(setBackgroundThrottling.mock.calls).toEqual([[false]]);
 
@@ -2302,20 +2300,16 @@ describe("PreviewManager", () => {
         yield* manager.registerWebview("tab_1", 41);
         yield* manager.registerWebview("tab_2", 42);
         const grants: Array<{ video?: unknown }> = [];
-        const takeGrant = (webContentsId: 41 | 42) =>
-          host.displayMediaHandler()?.(
-            { frame: testWebContentsMainFrame(webContentsById.get(webContentsId)) },
-            (value) => {
-              grants.push(value);
-            },
-          );
+        const takeGrant = () =>
+          host.displayMediaHandler()?.({ frame: testWebContentsMainFrame(host) }, (value) => {
+            grants.push(value);
+          });
         yield* manager.startRecording("tab_1");
-        takeGrant(42);
-        takeGrant(41);
+        takeGrant();
         yield* manager.startRecording("tab_2");
-        takeGrant(42);
+        takeGrant();
 
-        expect(grants).toEqual([{}, { video: { routingId: 41 } }, { video: { routingId: 42 } }]);
+        expect(grants).toEqual([{ video: { routingId: 41 } }, { video: { routingId: 42 } }]);
         expect(firstCapturePage).not.toHaveBeenCalled();
         expect(secondCapturePage).not.toHaveBeenCalled();
         expect(firstSendCommand).not.toHaveBeenCalledWith(
@@ -2331,6 +2325,37 @@ describe("PreviewManager", () => {
           concurrency: 2,
           discard: true,
         });
+      }),
+    ),
+  );
+
+  effectIt.effect("denies unrelated request frames without consuming the recording arm", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const capturePage = vi.fn(async () => ({
+          toJPEG: () => Buffer.from("unused-recording-frame"),
+          getSize: () => ({ width: 1280, height: 720 }),
+        }));
+        const host = makeTestHostWebContents();
+        const webContents = makeTestPreviewWebContents(capturePage, 42, host);
+        fromId.mockReturnValue(webContents);
+
+        yield* manager.createTab("tab_recording_frame_auth");
+        yield* manager.registerWebview("tab_recording_frame_auth", 42);
+        yield* manager.startRecording("tab_recording_frame_auth");
+
+        const grants: Array<{ video?: unknown }> = [];
+        const takeGrant = (frame: unknown) =>
+          host.displayMediaHandler()?.({ frame }, (value) => {
+            grants.push(value);
+          });
+        takeGrant(testWebContentsMainFrame(webContents));
+        takeGrant({ routingId: 999 });
+        takeGrant(testWebContentsMainFrame(host));
+        takeGrant(testWebContentsMainFrame(host));
+
+        expect(grants).toEqual([{}, {}, { video: { routingId: 42 } }, {}]);
+        yield* manager.stopRecording("tab_recording_frame_auth");
       }),
     ),
   );
@@ -2351,10 +2376,10 @@ describe("PreviewManager", () => {
         yield* manager.startRecording("tab_recording_warmup_failure");
         expect(capturePage).not.toHaveBeenCalled();
         const grants: Array<{ video?: unknown }> = [];
-        host.displayMediaHandler()?.({ frame: testWebContentsMainFrame(webContents) }, (value) =>
+        host.displayMediaHandler()?.({ frame: testWebContentsMainFrame(host) }, (value) =>
           grants.push(value),
         );
-        host.displayMediaHandler()?.({ frame: testWebContentsMainFrame(webContents) }, (value) =>
+        host.displayMediaHandler()?.({ frame: testWebContentsMainFrame(host) }, (value) =>
           grants.push(value),
         );
         expect(grants).toEqual([{ video: { routingId: 42 } }, {}]);
@@ -2405,7 +2430,7 @@ describe("PreviewManager", () => {
         expect(Option.getOrThrow(Cause.findErrorOption(failed.cause))).toMatchObject({
           _tag: "PreviewRecordingArmConflictError",
         });
-        takeGrant(41);
+        takeGrant();
         expect(grants).toHaveLength(1);
       }),
     ),
@@ -2418,7 +2443,7 @@ describe("PreviewManager", () => {
         yield* manager.startRecording("tab_race_a");
         destroy(41);
         yield* manager.startRecording("tab_race_b");
-        takeGrant(42);
+        takeGrant();
         expect(grants).toEqual([{ video: { routingId: 42 } }]);
         yield* manager.stopRecording("tab_race_b");
       }),

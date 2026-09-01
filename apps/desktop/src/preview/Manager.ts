@@ -406,6 +406,7 @@ interface PictureInPictureSession {
 interface PendingRecording {
   readonly tabId: string;
   readonly webContents: Electron.WebContents;
+  readonly hostWebContents: Electron.WebContents;
   readonly armedAtMillis: number;
 }
 
@@ -3302,6 +3303,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const armPendingRecording = Effect.fn("PreviewManager.armPendingRecording")(function* (
     tabId: string,
     wc: Electron.WebContents,
+    hostWebContents: Electron.WebContents,
   ) {
     const now = yield* Clock.currentTimeMillis;
     const previous = pendingRecording;
@@ -3309,6 +3311,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       previous !== null &&
       previous.tabId !== tabId &&
       !previous.webContents.isDestroyed() &&
+      !previous.hostWebContents.isDestroyed() &&
       now - previous.armedAtMillis < RECORDING_ARM_GRACE_MS
     ) {
       return yield* new PreviewRecordingArmConflictError({
@@ -3317,7 +3320,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         armedTabId: previous.tabId,
       });
     }
-    const armed: PendingRecording = { tabId, webContents: wc, armedAtMillis: now };
+    const armed: PendingRecording = {
+      tabId,
+      webContents: wc,
+      hostWebContents,
+      armedAtMillis: now,
+    };
     pendingRecording = armed;
     yield* Effect.forkIn(
       Effect.sleep(RECORDING_ARM_GRACE_MS).pipe(
@@ -3343,8 +3351,16 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       },
       () =>
         session.setDisplayMediaRequestHandler((request, callback) => {
-          const target = pendingRecording?.webContents;
-          if (!target || target.isDestroyed() || request.frame !== target.mainFrame) {
+          const armed = pendingRecording;
+          const target = armed?.webContents;
+          const hostWebContents = armed?.hostWebContents;
+          if (
+            !target ||
+            !hostWebContents ||
+            target.isDestroyed() ||
+            hostWebContents.isDestroyed() ||
+            request.frame !== hostWebContents.mainFrame
+          ) {
             callback({});
             return;
           }
@@ -3376,7 +3392,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           });
         }
         yield* installDisplayMediaRequestHandler(tabId, wc, requestWebContents.session);
-        yield* armPendingRecording(tabId, wc);
+        yield* armPendingRecording(tabId, wc, requestWebContents);
       }).pipe(
         Effect.onError(() => {
           clearPendingRecording(tabId);

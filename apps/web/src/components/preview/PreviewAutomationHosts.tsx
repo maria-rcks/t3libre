@@ -44,6 +44,7 @@ import {
 import { browserDefaultOpenViewport, resolveBrowserDefaults } from "~/browser/browserDefaults";
 import { runBrowserViewportMutation } from "~/browser/browserViewportActions";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
+import { findActivePreviewWebview } from "~/browser/previewWebviewLookup";
 import { isElectron } from "~/env";
 import { useEnvironments } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
@@ -137,9 +138,7 @@ interface ExecutablePreviewWebview extends Element {
 }
 
 const findPreviewWebview = (tabId: string): ExecutablePreviewWebview | null =>
-  Array.from(document.querySelectorAll<ExecutablePreviewWebview>("webview[data-preview-tab]")).find(
-    (candidate) => candidate.getAttribute("data-preview-tab") === tabId,
-  ) ?? null;
+  findActivePreviewWebview<ExecutablePreviewWebview>(document, tabId);
 
 const isPreviewWebviewRendering = (runtimeTabId: string): boolean => {
   const wrapper = findPreviewWebview(runtimeTabId)?.closest<HTMLElement>("[data-preview-viewport]");

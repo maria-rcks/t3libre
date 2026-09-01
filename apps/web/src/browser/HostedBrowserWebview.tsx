@@ -56,6 +56,16 @@ export function hostedBrowserCompositingLayoutKey(layout: {
   return `${layout.viewportWidth}:${layout.viewportHeight}:${layout.viewportScale}`;
 }
 
+export function hostedBrowserWebviewRenderEntries(
+  retired: ReadonlyArray<Pick<RetiredCaptureWebview, "generation" | "src">>,
+  live: { readonly generation: number; readonly src: string },
+) {
+  return [
+    ...retired.map((entry) => ({ ...entry, retired: true as const })),
+    { ...live, retired: false as const },
+  ];
+}
+
 export function HostedBrowserWebview(props: {
   readonly threadRef: ScopedThreadRef;
   readonly tabId: string;
@@ -442,14 +452,10 @@ export function HostedBrowserWebview(props: {
             onChange={commitViewportChange}
           />
         ) : null}
-        {retiredCaptureWebviews.map((retired) =>
-          renderWebview(retired.generation, retired.src, true),
-        )}
-        {renderWebview(
-          webviewGeneration,
-          webviewGeneration === 0 ? initialSrc : recoverySrc,
-          false,
-        )}
+        {hostedBrowserWebviewRenderEntries(retiredCaptureWebviews, {
+          generation: webviewGeneration,
+          src: webviewGeneration === 0 ? initialSrc : recoverySrc,
+        }).map((entry) => renderWebview(entry.generation, entry.src, entry.retired))}
         {active && effectiveViewport._tag !== "fill" && !fittedSourceViewport ? (
           <>
             <BrowserViewportResizeHandles

@@ -114,6 +114,31 @@ export class DesktopWindow extends Context.Service<
 const { logInfo: logWindowInfo, logWarning: logWindowWarning } =
   makeComponentLogger("desktop-window");
 
+const PREVIEW_TEARDOWN_ERROR_MESSAGE_MAX_LENGTH = 512;
+
+export function previewTeardownErrorLogAnnotations(
+  error: PreviewManager.PreviewManagerError,
+): Record<string, string | number> {
+  const message = error.message.replace(/\s+/g, " ").trim();
+  return {
+    errorTag: error._tag,
+    message: message.slice(0, PREVIEW_TEARDOWN_ERROR_MESSAGE_MAX_LENGTH),
+    ...("stage" in error && typeof error.stage === "string" ? { stage: error.stage } : {}),
+    ...("timeoutMs" in error && typeof error.timeoutMs === "number"
+      ? { timeoutMs: error.timeoutMs }
+      : {}),
+    ...("pendingCommands" in error && typeof error.pendingCommands === "number"
+      ? { pendingCommands: error.pendingCommands }
+      : {}),
+    ...("pendingCaptures" in error && typeof error.pendingCaptures === "number"
+      ? { pendingCaptures: error.pendingCaptures }
+      : {}),
+    ...("webContentsId" in error && typeof error.webContentsId === "number"
+      ? { webContentsId: error.webContentsId }
+      : {}),
+  };
+}
+
 function getIconOption(
   iconPaths: DesktopAssets.DesktopIconPaths,
   platform: NodeJS.Platform,
@@ -603,19 +628,24 @@ export const make = Effect.gen(function* () {
       }
       event.preventDefault();
       closePreparationRunning = true;
-      void runPromise(previewManager.prepareForWindowTeardown).then(
-        () => {
-          closePrepared = true;
-          if (!window.isDestroyed()) window.close();
-        },
-        (error) => {
-          closePreparationRunning = false;
-          void runPromise(
-            logWindowWarning("preview teardown blocked main window close", {
-              message: error instanceof Error ? error.message : String(error),
-            }),
-          );
-        },
+      void runPromise(
+        previewManager.prepareForWindowTeardown.pipe(
+          Effect.matchEffect({
+            onSuccess: () =>
+              Effect.sync(() => {
+                closePrepared = true;
+                if (!window.isDestroyed()) window.close();
+              }),
+            onFailure: (error) =>
+              Effect.gen(function* () {
+                closePreparationRunning = false;
+                yield* logWindowWarning(
+                  "preview teardown blocked main window close",
+                  previewTeardownErrorLogAnnotations(error),
+                );
+              }),
+          }),
+        ),
       );
     });
 

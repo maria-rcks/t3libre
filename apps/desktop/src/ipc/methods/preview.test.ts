@@ -85,7 +85,7 @@ describe("preview IPC methods", () => {
       safeCause.name = "UnknownVizError";
       const unsafeCause = new Error("capture failed at https://preview.example/secret");
       unsafeCause.name = "UnknownVizError";
-      const failures = [safeCause, unsafeCause].map(
+      const failures: PreviewManager.PreviewManagerError[] = [safeCause, unsafeCause].map(
         (cause) =>
           new PreviewManager.PreviewOperationError({
             operation: "automationSnapshot.capturePage",
@@ -93,6 +93,14 @@ describe("preview IPC methods", () => {
             webContentsId: 42,
             cause,
           }),
+      );
+      failures.push(
+        new PreviewManager.PreviewAutomationCaptureTimeoutError({
+          tabId: "tab-1",
+          webContentsId: 42,
+          stage: "capture-page",
+          timeoutMs: 2_500,
+        }),
       );
       let attempt = 0;
       const manager = PreviewManager.PreviewManager.of({
@@ -110,6 +118,14 @@ describe("preview IPC methods", () => {
       expect(yield* run()).toEqual({
         _tag: "Failure",
         error: { name: "UnknownVizError", message: "Preview capture failed." },
+      });
+      expect(yield* run()).toEqual({
+        _tag: "Failure",
+        error: {
+          name: "PreviewAutomationCaptureTimeoutError",
+          message: "Desktop preview snapshot failed during capture-page.",
+          stage: "capture-page",
+        },
       });
     }),
   );

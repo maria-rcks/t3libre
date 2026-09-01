@@ -93,9 +93,8 @@ const snapshotFailure = (
       message: safeNativeCaptureMessage(error.cause.message),
     };
   }
-  const record = error as unknown as Record<string, unknown>;
-  const name = typeof record["_tag"] === "string" ? record["_tag"] : "PreviewAutomationError";
-  const stage = typeof record["stage"] === "string" ? record["stage"] : undefined;
+  const name = error._tag;
+  const stage = "stage" in error && typeof error.stage === "string" ? error.stage : undefined;
   return {
     name,
     message:

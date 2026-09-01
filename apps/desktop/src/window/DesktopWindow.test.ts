@@ -1032,6 +1032,72 @@ describe("DesktopWindow", () => {
     }),
   );
 
+  it.effect("logs typed preview teardown failures without exposing raw causes", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const failure = new PreviewManager.PreviewAutomationDebuggerDrainTimeoutError({
+        webContentsId: 42,
+        pendingCommands: 3,
+        stage: "debugger-drain",
+        timeoutMs: 2_500,
+      });
+      const loggedAnnotations: Array<Record<string, unknown>> = [];
+      const logger = Logger.make(({ fiber }) => {
+        const annotations = fiber.getRef(References.CurrentLogAnnotations);
+        if (annotations.errorTag === failure._tag) {
+          loggedAnnotations.push({ ...annotations });
+        }
+      });
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        preparePreviewTeardown: Effect.fail(failure),
+      }).pipe(Layer.provideMerge(Logger.layer([logger], { mergeWithExisting: false })));
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        const close = fakeWindow.windowListeners.get("close");
+        if (!close) return yield* Effect.die("window close listener was not registered");
+
+        close({ preventDefault: vi.fn() });
+        yield* Effect.promise(() => vi.waitFor(() => assert.equal(loggedAnnotations.length, 1)));
+
+        assert.deepEqual(loggedAnnotations[0], {
+          component: "desktop-window",
+          errorTag: failure._tag,
+          message: failure.message,
+          pendingCommands: 3,
+          stage: "debugger-drain",
+          timeoutMs: 2_500,
+          webContentsId: 42,
+        });
+        assert.equal(fakeWindow.close.mock.calls.length, 0);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it("bounds teardown messages and excludes operation causes", () => {
+    const secret = `https://user:password@example.com/${"s".repeat(600)}`;
+    const error = new PreviewManager.PreviewOperationError({
+      operation: "stopRecording",
+      tabId: "t".repeat(600),
+      webContentsId: 42,
+      cause: new Error(secret),
+    });
+
+    const annotations = DesktopWindow.previewTeardownErrorLogAnnotations(error);
+
+    assert.equal(annotations.errorTag, error._tag);
+    assert.equal(annotations.message, error.message.slice(0, 512));
+    assert.lengthOf(String(annotations.message), 512);
+    assert.notProperty(annotations, "cause");
+    assert.notInclude(Object.values(annotations).map(String).join(" "), secret);
+  });
+
   it.effect("publishes native macOS fullscreen changes to the renderer", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
