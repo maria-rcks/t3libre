@@ -1308,7 +1308,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("tool call failed");
   });
 
-  it("keeps terminal command copy live while the parent turn is active", () => {
+  it("keeps terminal command copy visible while thinking continues", () => {
     const turnId = TurnId.make("turn-live");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -1343,7 +1343,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Running pnpm");
+    expect(markup).toContain("Ran pnpm");
+    expect(markup).toContain("Thinking");
     expect(markup).toContain("tool call failed");
   });
 
