@@ -281,6 +281,57 @@ describe("DesktopLifecycle", () => {
     }),
   );
 
+  it.effect("keeps relaunch failure causes out of log annotations", () =>
+    Effect.gen(function* () {
+      const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
+      const unsafeCause = new Error("https://example.com/private?token=secret");
+      const failure = new PreviewManager.PreviewOperationError({
+        operation: "prepareForWindowTeardown",
+        cause: unsafeCause,
+      });
+      const loggedAnnotations: Array<Record<string, unknown>> = [];
+      const logger = Logger.make(({ fiber }) => {
+        const annotations = fiber.getRef(References.CurrentLogAnnotations);
+        if (annotations.errorTag === "DesktopLifecycleRelaunchError") {
+          loggedAnnotations.push({ ...annotations });
+        }
+      });
+      const environmentLayer = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
+        platform: "darwin",
+        isDevelopment: false,
+      } as DesktopEnvironment.DesktopEnvironment["Service"]);
+      const layer = DesktopLifecycle.layer.pipe(
+        Layer.provideMerge(makeElectronAppLayer(appListeners)),
+        Layer.provideMerge(electronThemeLayer),
+        Layer.provideMerge(
+          makeDesktopWindowLayer({ preparePreviewTeardown: Effect.fail(failure) }),
+        ),
+        Layer.provideMerge(environmentLayer),
+        Layer.provideMerge(DesktopShutdown.layer),
+        Layer.provideMerge(DesktopState.layer),
+        Layer.provideMerge(Logger.layer([logger], { mergeWithExisting: false })),
+      );
+
+      yield* Effect.gen(function* () {
+        const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+        yield* lifecycle.relaunch("update");
+        yield* Effect.promise(() => vi.waitFor(() => assert.equal(loggedAnnotations.length, 1)));
+
+        assert.deepEqual(loggedAnnotations[0], {
+          component: "desktop-lifecycle",
+          errorTag: "DesktopLifecycleRelaunchError",
+          reason: "update",
+        });
+        assert.notInclude(
+          Object.values(loggedAnnotations[0] ?? {})
+            .map(String)
+            .join(" "),
+          unsafeCause.message,
+        );
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect("ignores app activation while quitting", () =>
     Effect.gen(function* () {
       const appListeners = new Map<string, (...args: readonly unknown[]) => void>();

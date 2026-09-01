@@ -218,7 +218,7 @@ export const make = DesktopLifecycle.of({
         Effect.gen(function* () {
           yield* Ref.set(state.quitting, false);
           const error = new DesktopLifecycleRelaunchError({ reason, cause });
-          yield* logLifecycleError(error.message, { error });
+          yield* logLifecycleError(error.message, { errorTag: error._tag, reason });
         }),
       ),
       Effect.forkDetach,

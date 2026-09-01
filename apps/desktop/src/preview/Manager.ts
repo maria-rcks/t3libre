@@ -4295,7 +4295,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       concurrency: "unbounded",
       discard: true,
     });
-  }).pipe(Effect.withSpan("PreviewManager.prepareForWindowTeardown"));
+  }).pipe(
+    Effect.withSpan("PreviewManager.prepareForWindowTeardown"),
+    Effect.onError(() =>
+      Effect.sync(() => {
+        frameCaptureWindowOpen = true;
+      }),
+    ),
+  );
 
   yield* Effect.addFinalizer(() => destroy().pipe(Effect.ignore));
 

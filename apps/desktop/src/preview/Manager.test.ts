@@ -3777,7 +3777,20 @@ describe("PreviewManager", () => {
               finishCapture = resolve;
             }),
         });
-        fromId.mockReturnValue(control.webContents);
+        const replacementImage = {
+          getSize: () => ({ width: 800, height: 600 }),
+          resize: vi.fn(),
+          toPNG: () => Buffer.from("snapshot-after-blocked-teardown"),
+        };
+        const replacement = makeSnapshotWebContents({
+          id: 43,
+          capturePage: async () => replacementImage,
+        });
+        fromId.mockImplementation((id) => {
+          if (id === 42) return control.webContents;
+          if (id === 43) return replacement.webContents;
+          return null;
+        });
         yield* manager.createTab("tab_capture_window_teardown");
         yield* manager.registerWebview("tab_capture_window_teardown", 42);
         const snapshot = yield* manager
@@ -3818,6 +3831,12 @@ describe("PreviewManager", () => {
           });
         }
         expect(control.detach).toHaveBeenCalledOnce();
+
+        yield* manager.registerWebview("tab_capture_window_teardown", 43);
+        const recovered = yield* manager.automationSnapshot("tab_capture_window_teardown");
+        expect(recovered.screenshot.data).toBe(
+          Buffer.from("snapshot-after-blocked-teardown").toString("base64"),
+        );
 
         finishCapture({
           getSize: () => ({ width: 800, height: 600 }),
