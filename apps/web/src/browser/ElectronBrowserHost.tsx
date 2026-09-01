@@ -12,7 +12,7 @@ import { readPreviewAnnotationTheme } from "./annotationTheme";
 import { useBrowserPointerStore } from "./browserPointerStore";
 import { HostedBrowserWebview } from "./HostedBrowserWebview";
 import { previewRuntimeTabId } from "./previewRuntimeTabId";
-import { findActivePreviewWebview } from "./previewWebviewLookup";
+import { findActivePreviewWebContentsId } from "./previewWebviewLookup";
 
 export function ElectronBrowserHost() {
   const { resolvedTheme } = useTheme();
@@ -67,22 +67,12 @@ export function ElectronBrowserHost() {
         retirementTimersRef.current.delete(runtimeTabId);
         return;
       }
-      const webview = findActivePreviewWebview<HTMLElement & { getWebContentsId: () => number }>(
-        document,
-        runtimeTabId,
-      );
-      if (!webview) {
+      const webContentsId = findActivePreviewWebContentsId(document, runtimeTabId);
+      if (webContentsId === null) {
         removeRetired(runtimeTabId);
         return;
       }
       if (!preview.prepareWebviewRemoval) {
-        removeRetired(runtimeTabId);
-        return;
-      }
-      let webContentsId: number;
-      try {
-        webContentsId = webview.getWebContentsId();
-      } catch {
         removeRetired(runtimeTabId);
         return;
       }
@@ -95,6 +85,10 @@ export function ElectronBrowserHost() {
           }
           const restore = () => {
             if (!currentSessionIdsRef.current.has(runtimeTabId)) {
+              removeRetired(runtimeTabId);
+              return;
+            }
+            if (findActivePreviewWebContentsId(document, runtimeTabId) !== webContentsId) {
               removeRetired(runtimeTabId);
               return;
             }

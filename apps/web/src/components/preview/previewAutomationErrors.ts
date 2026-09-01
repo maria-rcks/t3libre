@@ -259,6 +259,8 @@ export type PreviewAutomationHostError = typeof PreviewAutomationHostError.Type;
 export const isPreviewAutomationHostError = Schema.is(PreviewAutomationHostError);
 
 const SAFE_NATIVE_ERROR_NAMES = new Set(["AbortError", "UnknownVizError"]);
+const SAFE_ERROR_STAGE_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
+const SAFE_ERROR_TAG_PATTERN = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 const isPreviewAutomationDesktopFailureError = Schema.is(PreviewAutomationDesktopFailureError);
 
 const timeoutMessage = (stage?: string): string =>
@@ -280,7 +282,9 @@ const safeErrorCause = (
   const record = cause as Record<string, unknown>;
   const name = typeof record["name"] === "string" ? record["name"] : "";
   const message = typeof record["message"] === "string" ? record["message"] : "";
-  const stage = typeof record["stage"] === "string" ? record["stage"] : undefined;
+  const rawStage = typeof record["stage"] === "string" ? record["stage"] : undefined;
+  const stage =
+    rawStage !== undefined && SAFE_ERROR_STAGE_PATTERN.test(rawStage) ? rawStage : undefined;
   if (SAFE_NATIVE_ERROR_NAMES.has(name)) {
     return {
       name,
@@ -289,7 +293,7 @@ const safeErrorCause = (
     };
   }
   const flattenedOwnedTimeout = message.match(
-    /\bPreview[^\n]{0,160}?timed out during ([a-z][a-z0-9-]*) after \d+ms/,
+    /\bPreview[^\n]{0,160}?timed out during ([a-z][a-z0-9-]{0,63}) after \d+ms/,
   );
   if (flattenedOwnedTimeout?.[1]) {
     return {
@@ -298,7 +302,8 @@ const safeErrorCause = (
       stage: flattenedOwnedTimeout[1],
     };
   }
-  const tag = typeof record["_tag"] === "string" ? record["_tag"] : "";
+  const rawTag = typeof record["_tag"] === "string" ? record["_tag"] : "";
+  const tag = SAFE_ERROR_TAG_PATTERN.test(rawTag) ? rawTag : "";
   if (tag.endsWith("TimeoutError") && message.length > 0) {
     return {
       name: tag,

@@ -13,3 +13,19 @@ export function findActivePreviewWebview<T extends Element>(
     ) ?? null
   );
 }
+
+export function findActivePreviewWebContentsId(
+  root: ParentNode,
+  runtimeTabId: string,
+): number | null {
+  const webview = findActivePreviewWebview<Element & { getWebContentsId: () => number }>(
+    root,
+    runtimeTabId,
+  );
+  if (!webview) return null;
+  try {
+    return webview.getWebContentsId();
+  } catch {
+    return null;
+  }
+}

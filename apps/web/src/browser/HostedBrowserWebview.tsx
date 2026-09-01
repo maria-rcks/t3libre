@@ -130,7 +130,11 @@ export function HostedBrowserWebview(props: {
   const prepareRetiredCaptureWebview = useCallback(
     (webContentsId: number) => {
       const prepareWebviewRemoval = previewBridge?.prepareWebviewRemoval;
-      if (!prepareWebviewRemoval || captureRetirementTimersRef.current.has(webContentsId)) {
+      if (captureRetirementTimersRef.current.has(webContentsId)) return;
+      if (!prepareWebviewRemoval) {
+        setRetiredCaptureWebviews((current) =>
+          current.filter((candidate) => candidate.webContentsId !== webContentsId),
+        );
         return;
       }
       const prepare = () => {

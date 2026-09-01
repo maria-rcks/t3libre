@@ -418,6 +418,61 @@ describe("previewAutomationRequestConsumer", () => {
     });
   });
 
+  it("bounds timeout tags and stages from raw failures", () => {
+    const context = {
+      requestId: "request-unbounded-timeout",
+      operation: "snapshot" as const,
+      environmentId,
+      threadId,
+      tabId,
+    };
+    const boundedTag = serializePreviewAutomationError(
+      {
+        _tag: "PreviewAutomationCaptureTimeoutError",
+        message: "capture timed out",
+        stage: "s".repeat(65),
+      },
+      context,
+    );
+    const unboundedTag = serializePreviewAutomationError(
+      {
+        _tag: `${"A".repeat(65)}TimeoutError`,
+        message: "capture timed out",
+        stage: "capture-page",
+      },
+      context,
+    );
+
+    const message =
+      "Preview automation snapshot request request-unbounded-timeout failed on environment environment-1 thread thread-1 (tab tab-1).";
+    expect(boundedTag).toEqual({
+      _tag: "PreviewAutomationExecutionError",
+      message,
+      detail: {
+        requestId: "request-unbounded-timeout",
+        operation: "snapshot",
+        environmentId: "environment-1",
+        threadId: "thread-1",
+        tabId: "tab-1",
+        cause: {
+          name: "PreviewAutomationCaptureTimeoutError",
+          message: "Preview automation timed out.",
+        },
+      },
+    });
+    expect(unboundedTag).toEqual({
+      _tag: "PreviewAutomationExecutionError",
+      message,
+      detail: {
+        requestId: "request-unbounded-timeout",
+        operation: "snapshot",
+        environmentId: "environment-1",
+        threadId: "thread-1",
+        tabId: "tab-1",
+      },
+    });
+  });
+
   it("responds with the host execution deadline before a stuck handler settles", async () => {
     vi.useFakeTimers();
     try {
