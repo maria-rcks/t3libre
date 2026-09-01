@@ -60,6 +60,21 @@ export class PreviewAutomationHostDeadlineError extends Schema.TaggedErrorClass<
   }
 }
 
+export class PreviewAutomationDesktopFailureError extends Schema.TaggedErrorClass<PreviewAutomationDesktopFailureError>()(
+  "PreviewAutomationDesktopFailureError",
+  {
+    nativeName: TrimmedNonEmptyString,
+    safeMessage: TrimmedNonEmptyString,
+    stage: Schema.optional(TrimmedNonEmptyString),
+  },
+) {
+  override get message(): string {
+    return this.stage === undefined
+      ? `Desktop preview failed with ${this.nativeName}.`
+      : `Desktop preview failed with ${this.nativeName} during ${this.stage}.`;
+  }
+}
+
 export class PreviewAutomationNavigationTimeoutError extends Schema.TaggedErrorClass<PreviewAutomationNavigationTimeoutError>()(
   "PreviewAutomationNavigationTimeoutError",
   {
@@ -244,18 +259,7 @@ export type PreviewAutomationHostError = typeof PreviewAutomationHostError.Type;
 export const isPreviewAutomationHostError = Schema.is(PreviewAutomationHostError);
 
 const SAFE_NATIVE_ERROR_NAMES = new Set(["AbortError", "UnknownVizError"]);
-const MAX_SAFE_ERROR_MESSAGE_LENGTH = 512;
-const SAFE_NATIVE_ERROR_MESSAGE_PATTERN = /^[\p{L}\p{N}\s.,:;!?'"()[\]_-]+$/u;
-
-const safeNativeErrorMessage = (message: string): string => {
-  const bounded = message.trim().slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH);
-  return bounded.length > 0 &&
-    !message.includes("\n") &&
-    !message.includes("\r") &&
-    SAFE_NATIVE_ERROR_MESSAGE_PATTERN.test(bounded)
-    ? bounded
-    : "Preview capture failed.";
-};
+const isPreviewAutomationDesktopFailureError = Schema.is(PreviewAutomationDesktopFailureError);
 
 const timeoutMessage = (stage?: string): string =>
   stage === undefined
@@ -265,6 +269,13 @@ const timeoutMessage = (stage?: string): string =>
 const safeErrorCause = (
   cause: unknown,
 ): { readonly name: string; readonly message: string; readonly stage?: string } | null => {
+  if (isPreviewAutomationDesktopFailureError(cause)) {
+    return {
+      name: cause.nativeName,
+      message: cause.safeMessage,
+      ...(cause.stage === undefined ? {} : { stage: cause.stage }),
+    };
+  }
   if (typeof cause !== "object" || cause === null) return null;
   const record = cause as Record<string, unknown>;
   const name = typeof record["name"] === "string" ? record["name"] : "";
@@ -273,35 +284,18 @@ const safeErrorCause = (
   if (SAFE_NATIVE_ERROR_NAMES.has(name)) {
     return {
       name,
-      message: safeNativeErrorMessage(message),
+      message: "Preview capture failed.",
       ...(stage === undefined ? {} : { stage }),
     };
   }
-  const embedded = message.match(/\b(AbortError|UnknownVizError):\s*([^\n]*)/);
-  if (embedded?.[1]) {
-    return {
-      name: embedded[1],
-      message: safeNativeErrorMessage(embedded[2] ?? ""),
-    };
-  }
-  const ownedTimeout = message.match(/\b(Preview[A-Za-z]+TimeoutError):\s*([^\n]*?)(?:\s+at\s|$)/);
-  if (ownedTimeout?.[1]) {
-    const ownedMessage = (ownedTimeout[2] ?? "").slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH);
-    const ownedStage = ownedMessage.match(/\bduring\s+([a-z][a-z0-9-]*)\b/)?.[1];
-    return {
-      name: ownedTimeout[1],
-      message: timeoutMessage(ownedStage),
-      ...(ownedStage === undefined ? {} : { stage: ownedStage }),
-    };
-  }
   const flattenedOwnedTimeout = message.match(
-    /\b(Preview [^\n]{0,160}? timed out during ([a-z][a-z0-9-]*) after \d+ms[^\n]*)/,
+    /\bPreview[^\n]{0,160}?timed out during ([a-z][a-z0-9-]*) after \d+ms/,
   );
-  if (flattenedOwnedTimeout?.[1] && flattenedOwnedTimeout[2]) {
+  if (flattenedOwnedTimeout?.[1]) {
     return {
       name: "PreviewAutomationTimeoutError",
-      message: timeoutMessage(flattenedOwnedTimeout[2]),
-      stage: flattenedOwnedTimeout[2],
+      message: timeoutMessage(flattenedOwnedTimeout[1]),
+      stage: flattenedOwnedTimeout[1],
     };
   }
   const tag = typeof record["_tag"] === "string" ? record["_tag"] : "";

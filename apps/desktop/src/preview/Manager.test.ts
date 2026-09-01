@@ -3582,8 +3582,8 @@ describe("PreviewManager", () => {
           _tag: "PreviewOperationError",
           cause: unknownViz,
         });
-        expect(Option.getOrThrow(Cause.findErrorOption(failed.cause)).message).toContain(
-          "UnknownVizError: software compositor copy failed",
+        expect(Option.getOrThrow(Cause.findErrorOption(failed.cause)).message).not.toContain(
+          unknownViz.message,
         );
         expect(recoveries).toEqual([{ tabId: "tab_unknown_viz", webContentsId: 42 }]);
 
@@ -3591,6 +3591,85 @@ describe("PreviewManager", () => {
         const recovered = yield* manager.automationSnapshot("tab_unknown_viz");
         expect(recovered.screenshot.data).toBe(
           Buffer.from("recovered-after-unknown-viz").toString("base64"),
+        );
+      }),
+    ),
+  );
+
+  effectIt.effect("retries capture recovery after debugger drain times out", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let finishAck!: () => void;
+        let markAckStarted!: () => void;
+        const ackStarted = new Promise<void>((resolve) => {
+          markAckStarted = resolve;
+        });
+        const unknownViz = new Error("software compositor copy failed");
+        unknownViz.name = "UnknownVizError";
+        const control = makeSnapshotWebContents({
+          id: 42,
+          capturePage: () => Promise.reject(unknownViz),
+          sendCommand: (method, params) => {
+            if (method === "Page.screencastFrameAck") {
+              return new Promise<void>((resolve) => {
+                markAckStarted();
+                finishAck = resolve;
+              });
+            }
+            if (method === "Runtime.evaluate") {
+              const expression =
+                typeof params?.["expression"] === "string" ? params.expression : "";
+              return Promise.resolve(
+                expression.includes("document.querySelectorAll")
+                  ? {
+                      result: {
+                        value: {
+                          url: "https://example.com",
+                          title: "Example",
+                          loading: false,
+                          visibleText: "ready",
+                          interactiveElements: [],
+                        },
+                      },
+                    }
+                  : { result: { value: 42 } },
+              );
+            }
+            if (method === "Accessibility.getFullAXTree") {
+              return Promise.resolve({ nodes: [] });
+            }
+            return Promise.resolve(undefined);
+          },
+        });
+        fromId.mockReturnValue(control.webContents);
+        const recoveries: Array<{ tabId: string; webContentsId: number }> = [];
+        yield* manager.subscribeCaptureRecoveries((event) =>
+          Effect.sync(() => {
+            recoveries.push(event);
+          }),
+        );
+        yield* manager.createTab("tab_retry_capture_recovery");
+        yield* manager.registerWebview("tab_retry_capture_recovery", 42);
+        yield* manager.setColorScheme("tab_retry_capture_recovery", "dark");
+        control.emitDebuggerMessage("Page.screencastFrame", { sessionId: 1 });
+        yield* Effect.promise(() => ackStarted);
+
+        const snapshot = yield* manager
+          .automationSnapshot("tab_retry_capture_recovery")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* TestClock.adjust(PreviewManager.PREVIEW_DEBUGGER_DRAIN_TIMEOUT_MS);
+        expect(Exit.isFailure(yield* Fiber.await(snapshot))).toBe(true);
+        expect(recoveries).toEqual([]);
+
+        finishAck();
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust(250);
+        yield* Effect.promise(() =>
+          vi.waitFor(() =>
+            expect(recoveries).toEqual([
+              { tabId: "tab_retry_capture_recovery", webContentsId: 42 },
+            ]),
+          ),
         );
       }),
     ),
@@ -3792,15 +3871,42 @@ describe("PreviewManager", () => {
   effectIt.effect("restores debugger control when a retained webview re-registers", () =>
     withManager((manager) =>
       Effect.gen(function* () {
+        let finishCapture!: (image: unknown) => void;
+        let markCaptureStarted!: () => void;
+        const captureStarted = new Promise<void>((resolve) => {
+          markCaptureStarted = resolve;
+        });
         const control = makeSnapshotWebContents({
           id: 42,
-          capturePage: async () => ({}),
+          capturePage: () =>
+            new Promise((resolve) => {
+              markCaptureStarted();
+              finishCapture = resolve;
+            }),
         });
         fromId.mockReturnValue(control.webContents);
         yield* manager.createTab("tab_retained_webview");
         yield* manager.registerWebview("tab_retained_webview", 42);
         yield* manager.setColorScheme("tab_retained_webview", "dark");
         expect(control.attach).toHaveBeenCalledOnce();
+
+        const snapshot = yield* manager
+          .automationSnapshot("tab_retained_webview")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.promise(() => captureStarted);
+        const staleRemoval = yield* manager
+          .prepareWebviewRemoval("tab_retained_webview", 42)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        yield* manager.registerWebview("tab_retained_webview", 42);
+        finishCapture({
+          getSize: () => ({ width: 800, height: 600 }),
+          resize: vi.fn(),
+          toPNG: () => Buffer.from("retained-webview-snapshot"),
+        });
+        yield* Fiber.join(snapshot);
+        yield* Fiber.join(staleRemoval);
+        expect(control.detach).not.toHaveBeenCalled();
 
         yield* manager.prepareWebviewRemoval("tab_retained_webview", 42);
         yield* manager.registerWebview("tab_retained_webview", 42);
@@ -3891,6 +3997,47 @@ describe("PreviewManager", () => {
       }),
     ),
   );
+
+  effectIt.effect("keeps a tab registered when close cannot drain debugger commands", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let finishAck!: () => void;
+        let markAckStarted!: () => void;
+        const ackStarted = new Promise<void>((resolve) => {
+          markAckStarted = resolve;
+        });
+        const control = makeSnapshotWebContents({
+          id: 42,
+          capturePage: async () => ({}),
+          sendCommand: (method) =>
+            method === "Page.screencastFrameAck"
+              ? new Promise<void>((resolve) => {
+                  markAckStarted();
+                  finishAck = resolve;
+                })
+              : Promise.resolve(undefined),
+        });
+        fromId.mockReturnValue(control.webContents);
+        yield* manager.createTab("tab_close_drain_timeout");
+        yield* manager.registerWebview("tab_close_drain_timeout", 42);
+        yield* manager.setColorScheme("tab_close_drain_timeout", "dark");
+        control.emitDebuggerMessage("Page.screencastFrame", { sessionId: 1 });
+        yield* Effect.promise(() => ackStarted);
+
+        const close = yield* manager
+          .closeTab("tab_close_drain_timeout")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* TestClock.adjust(PreviewManager.PREVIEW_DEBUGGER_DRAIN_TIMEOUT_MS);
+        expect(Exit.isFailure(yield* Fiber.await(close))).toBe(true);
+        expect((yield* manager.automationStatus("tab_close_drain_timeout")).available).toBe(true);
+
+        finishAck();
+        yield* Effect.yieldNow;
+        yield* manager.closeTab("tab_close_drain_timeout");
+        expect((yield* manager.automationStatus("tab_close_drain_timeout")).available).toBe(false);
+      }),
+    ),
+  );
 });
 
 describe("PreviewOperationError", () => {
@@ -3905,33 +4052,6 @@ describe("PreviewOperationError", () => {
 
     expect(error.message).not.toContain(cause.message);
     expect(PreviewManager.PreviewOperationError.toTimelineMessage(error)).toBe(cause.message);
-  });
-
-  it.each(["UnknownVizError", "AbortError"])("includes a bounded %s cause", (name) => {
-    const cause = new Error("capture failed safely");
-    cause.name = name;
-    const error = new PreviewManager.PreviewOperationError({
-      operation: "capturePage",
-      tabId: "tab_1",
-      webContentsId: 42,
-      cause,
-    });
-
-    expect(error.message).toContain(`${name}: capture failed safely`);
-  });
-
-  it("replaces native error text containing a URL", () => {
-    const cause = new Error("capture failed at https://preview.example/secret");
-    cause.name = "UnknownVizError";
-    const error = new PreviewManager.PreviewOperationError({
-      operation: "capturePage",
-      tabId: "tab_1",
-      webContentsId: 42,
-      cause,
-    });
-
-    expect(error.message).toContain("UnknownVizError: Preview capture failed.");
-    expect(error.message).not.toContain("preview.example");
   });
 });
 

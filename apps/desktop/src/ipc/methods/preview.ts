@@ -1,4 +1,5 @@
 import {
+  type DesktopPreviewAutomationFailure,
   DesktopPreviewAnnotationThemeInputSchema,
   DesktopPreviewArtifactInputSchema,
   DesktopPreviewAutomationClickInputSchema,
@@ -8,6 +9,7 @@ import {
   DesktopPreviewAutomationStatusSchema,
   DesktopPreviewAutomationTypeInputSchema,
   DesktopPreviewAutomationWaitForInputSchema,
+  DesktopPreviewAutomationSnapshotResultSchema,
   DesktopPreviewConfigInputSchema,
   DesktopPreviewNavigateInputSchema,
   DesktopPreviewRecordingArtifactSchema,
@@ -20,7 +22,6 @@ import {
   DesktopPreviewTabInputSchema,
   DesktopPreviewWebviewConfigSchema,
   PreviewAnnotationSubmissionResultSchema,
-  PreviewAutomationSnapshot,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -31,6 +32,79 @@ import * as PreviewManager from "../../preview/Manager.ts";
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
+
+const SAFE_NATIVE_CAPTURE_ERROR_NAMES = new Set(["AbortError", "UnknownVizError"]);
+const SAFE_NATIVE_CAPTURE_MESSAGE_WORDS = new Set([
+  "abort",
+  "aborted",
+  "be",
+  "capture",
+  "captured",
+  "compositor",
+  "copy",
+  "could",
+  "error",
+  "failed",
+  "frame",
+  "from",
+  "is",
+  "not",
+  "operation",
+  "page",
+  "preview",
+  "ready",
+  "request",
+  "software",
+  "surface",
+  "the",
+  "this",
+  "to",
+  "unable",
+  "unavailable",
+  "unknown",
+  "view",
+  "viz",
+  "was",
+]);
+
+const safeNativeCaptureMessage = (message: string): string => {
+  const bounded = message.trim().slice(0, 512);
+  const words = bounded.toLowerCase().match(/[a-z]+/g) ?? [];
+  return bounded.length > 0 &&
+    !message.includes("\n") &&
+    !message.includes("\r") &&
+    /^[a-z\s.,:;!?'-]+$/i.test(bounded) &&
+    words.length > 0 &&
+    words.every((word) => SAFE_NATIVE_CAPTURE_MESSAGE_WORDS.has(word))
+    ? bounded
+    : "Preview capture failed.";
+};
+
+const snapshotFailure = (
+  error: PreviewManager.PreviewManagerError,
+): DesktopPreviewAutomationFailure => {
+  if (
+    PreviewManager.isPreviewOperationError(error) &&
+    error.cause instanceof Error &&
+    SAFE_NATIVE_CAPTURE_ERROR_NAMES.has(error.cause.name)
+  ) {
+    return {
+      name: error.cause.name,
+      message: safeNativeCaptureMessage(error.cause.message),
+    };
+  }
+  const record = error as unknown as Record<string, unknown>;
+  const name = typeof record["_tag"] === "string" ? record["_tag"] : "PreviewAutomationError";
+  const stage = typeof record["stage"] === "string" ? record["stage"] : undefined;
+  return {
+    name,
+    message:
+      stage === undefined
+        ? "Desktop preview snapshot failed."
+        : `Desktop preview snapshot failed during ${stage}.`,
+    ...(stage === undefined ? {} : { stage }),
+  };
+};
 
 export const installPreviewEventForwarding = Effect.fn(
   "desktop.ipc.preview.installEventForwarding",
@@ -308,10 +382,19 @@ export const automationStatus = DesktopIpc.makeIpcMethod({
 export const automationSnapshot = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_SNAPSHOT_CHANNEL,
   payload: DesktopPreviewTabInputSchema,
-  result: PreviewAutomationSnapshot,
+  result: DesktopPreviewAutomationSnapshotResultSchema,
   handler: Effect.fn("desktop.ipc.preview.automationSnapshot")(function* ({ tabId }) {
     const manager = yield* PreviewManager.PreviewManager;
-    return yield* manager.automationSnapshot(tabId);
+    return yield* manager.automationSnapshot(tabId).pipe(
+      Effect.map((snapshot) => ({ _tag: "Success" as const, snapshot })),
+      Effect.catch((error) => {
+        const failure = snapshotFailure(error);
+        return Effect.logWarning("Desktop preview snapshot failed.", {
+          tabId,
+          ...failure,
+        }).pipe(Effect.as({ _tag: "Failure" as const, error: failure }));
+      }),
+    );
   }),
 });
 

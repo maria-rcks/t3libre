@@ -730,6 +730,24 @@ export interface DesktopPreviewCaptureRecovery {
   webContentsId: number;
 }
 
+export const DesktopPreviewAutomationFailureSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(128)),
+  message: Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(512)),
+  stage: Schema.optional(Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(64))),
+});
+export type DesktopPreviewAutomationFailure = typeof DesktopPreviewAutomationFailureSchema.Type;
+
+export const DesktopPreviewAutomationSnapshotResultSchema = Schema.Union([
+  Schema.TaggedStruct("Success", {
+    snapshot: PreviewAutomationSnapshot,
+  }),
+  Schema.TaggedStruct("Failure", {
+    error: DesktopPreviewAutomationFailureSchema,
+  }),
+]);
+export type DesktopPreviewAutomationSnapshotResult =
+  typeof DesktopPreviewAutomationSnapshotResultSchema.Type;
+
 export const DesktopPreviewRecordingFrameSchema: Schema.Codec<DesktopPreviewRecordingFrame> =
   Schema.Struct({
     tabId: DesktopPreviewTabIdSchema,
@@ -1232,7 +1250,7 @@ export interface DesktopPreviewBridge {
   };
   automation: {
     status: (tabId: string) => Promise<DesktopPreviewAutomationStatus>;
-    snapshot: (tabId: string) => Promise<PreviewAutomationSnapshot>;
+    snapshot: (tabId: string) => Promise<DesktopPreviewAutomationSnapshotResult>;
     click: (tabId: string, input: PreviewAutomationClickInput) => Promise<void>;
     type: (tabId: string, input: PreviewAutomationTypeInput) => Promise<void>;
     press: (tabId: string, input: PreviewAutomationPressInput) => Promise<void>;

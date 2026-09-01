@@ -52,6 +52,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 
 import { previewBridge } from "./previewBridge";
 import {
+  PreviewAutomationDesktopFailureError,
   PreviewAutomationOperationError,
   PreviewAutomationOverlayTimeoutError,
   PreviewAutomationRecordingNotActiveError,
@@ -624,7 +625,15 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
           case "snapshot": {
             const ready = await requireReadyTab();
-            return await ready.bridge.automation.snapshot(ready.runtimeTabId);
+            const result = await ready.bridge.automation.snapshot(ready.runtimeTabId);
+            if (result._tag === "Failure") {
+              throw new PreviewAutomationDesktopFailureError({
+                nativeName: result.error.name,
+                safeMessage: result.error.message,
+                ...(result.error.stage === undefined ? {} : { stage: result.error.stage }),
+              });
+            }
+            return result.snapshot;
           }
           case "click": {
             const ready = await requireReadyTab();

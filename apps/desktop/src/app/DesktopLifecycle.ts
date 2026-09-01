@@ -208,10 +208,13 @@ export const make = DesktopLifecycle.of({
       });
       yield* electronApp.exit(0);
     }).pipe(
-      Effect.catchCause((cause) => {
-        const error = new DesktopLifecycleRelaunchError({ reason, cause });
-        return logLifecycleError(error.message, { error });
-      }),
+      Effect.catchCause((cause) =>
+        Effect.gen(function* () {
+          yield* Ref.set(state.quitting, false);
+          const error = new DesktopLifecycleRelaunchError({ reason, cause });
+          yield* logLifecycleError(error.message, { error });
+        }),
+      ),
       Effect.forkDetach,
       Effect.asVoid,
     );

@@ -272,13 +272,20 @@ export function HostedBrowserWebview(props: {
     setCompositingReady(false);
     if (!renderingActive) return;
     let secondFrameId: number | null = null;
+    let fallbackId: number | null = window.setTimeout(() => {
+      fallbackId = null;
+      setCompositingReady(true);
+    }, 250);
     const firstFrameId = window.requestAnimationFrame(() => {
       secondFrameId = window.requestAnimationFrame(() => {
         secondFrameId = null;
+        if (fallbackId !== null) window.clearTimeout(fallbackId);
+        fallbackId = null;
         setCompositingReady(true);
       });
     });
     return () => {
+      if (fallbackId !== null) window.clearTimeout(fallbackId);
       window.cancelAnimationFrame(firstFrameId);
       if (secondFrameId !== null) window.cancelAnimationFrame(secondFrameId);
     };

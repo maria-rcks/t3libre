@@ -10,6 +10,7 @@ import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  PreviewAutomationDesktopFailureError,
   PreviewAutomationRecordingNotActiveError,
   PreviewAutomationTargetUnavailableError,
   PreviewAutomationViewportTimeoutError,
@@ -351,10 +352,12 @@ describe("previewAutomationRequestConsumer", () => {
   });
 
   it.each(["UnknownVizError", "AbortError"])(
-    "preserves a bounded %s cause from Electron",
-    (name) => {
-      const cause = new Error("surface capture was aborted");
-      cause.name = name;
+    "preserves a filtered %s snapshot failure from Electron",
+    (nativeName) => {
+      const cause = new PreviewAutomationDesktopFailureError({
+        nativeName,
+        safeMessage: "surface capture was aborted",
+      });
       const response = serializePreviewAutomationError(cause, {
         requestId: "request-native-error",
         operation: "snapshot",
@@ -366,7 +369,7 @@ describe("previewAutomationRequestConsumer", () => {
       expect(response).toMatchObject({
         _tag: "PreviewAutomationExecutionError",
         detail: {
-          cause: { name, message: "surface capture was aborted" },
+          cause: { name: nativeName, message: "surface capture was aborted" },
         },
       });
     },
