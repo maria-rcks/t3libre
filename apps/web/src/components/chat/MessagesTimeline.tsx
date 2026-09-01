@@ -1505,11 +1505,7 @@ function LiveActivityContent({
         <span
           className={cn(
             "flex size-6 shrink-0 items-center justify-center",
-            resolvedIconName === "brain"
-              ? "text-success-foreground"
-              : highlighted
-                ? "text-foreground"
-                : "text-icon-muted",
+            highlighted ? "text-foreground" : "text-icon-muted",
           )}
           role={announceFailure ? "img" : undefined}
           aria-label={announceFailure ? "Tool call failed" : undefined}
