@@ -2224,8 +2224,13 @@ function liveWorkEntryLabel(
   const command = workEntry.command?.trim();
   if (command) {
     const program = commandProgramName(command);
-    if (program) return `${active ? "Running" : "Ran"} ${program}`;
-    return active ? "Running command" : "Ran command";
+    const verb = active
+      ? "Running"
+      : workEntry.toolLifecycleStatus === "declined"
+        ? "Declined"
+        : "Ran";
+    if (program) return `${verb} ${program}`;
+    return `${verb} command`;
   }
 
   return workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry);

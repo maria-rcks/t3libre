@@ -887,18 +887,18 @@ describe("deriveMessagesTimelineRows", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
-          id: "completed-command-entry",
+          id: "running-command-entry",
           kind: "work",
           createdAt: "2026-01-01T00:00:05Z",
           entry: {
-            id: "completed-command",
+            id: "running-command",
             createdAt: "2026-01-01T00:00:05Z",
             turnId: "turn-1" as never,
-            label: "Ran rg",
+            label: "Running rg",
             command: "rg toolCall",
             requestKind: "command",
             tone: "tool" as const,
-            toolLifecycleStatus: "completed" as const,
+            toolLifecycleStatus: "inProgress" as const,
           },
         },
         {
@@ -917,18 +917,18 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
         {
-          id: "running-command-entry",
+          id: "completed-command-entry",
           kind: "work",
           createdAt: "2026-01-01T00:00:07Z",
           entry: {
-            id: "running-command",
+            id: "completed-command",
             createdAt: "2026-01-01T00:00:07Z",
             turnId: "turn-1" as never,
-            label: "Running tests",
+            label: "Ran tests",
             command: "vp test run",
             requestKind: "command",
             tone: "tool" as const,
-            toolLifecycleStatus: "inProgress" as const,
+            toolLifecycleStatus: "completed" as const,
           },
         },
       ],
@@ -949,9 +949,9 @@ describe("deriveMessagesTimelineRows", () => {
     expect(rows.find((row) => row.kind === "work-live")).toMatchObject({
       entry: { id: "running-command" },
       groupedEntries: [
-        { id: "completed-command" },
-        { id: "completed-edit" },
         { id: "running-command" },
+        { id: "completed-edit" },
+        { id: "completed-command" },
       ],
     });
   });
