@@ -1505,14 +1505,23 @@ function LiveActivityContent({
         <span
           className={cn(
             "flex size-6 shrink-0 items-center justify-center",
-            highlighted ? "text-foreground" : "text-icon-muted",
+            resolvedIconName === "brain"
+              ? highlighted
+                ? "text-emerald-500 dark:text-emerald-300"
+                : "text-emerald-600 dark:text-emerald-400"
+              : highlighted
+                ? "text-foreground"
+                : "text-icon-muted",
           )}
           role={announceFailure ? "img" : undefined}
           aria-label={announceFailure ? "Tool call failed" : undefined}
         >
           <WorkEntryIconSvg
             name={resolvedIconName}
-            className={cn("block size-4 shrink-0 stroke-[1.8]", !highlighted && "opacity-70")}
+            className={cn(
+              "block size-4 shrink-0 stroke-[1.8]",
+              !highlighted && resolvedIconName !== "brain" && "opacity-70",
+            )}
           />
         </span>
       ) : null}
