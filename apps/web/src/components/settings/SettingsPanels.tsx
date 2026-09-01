@@ -484,8 +484,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Contrast"]
         : []),
       ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
-      ...(settings.panelAnimationsEnabled !== DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled ||
-      settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
+      ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
         ? ["Panel animations"]
         : []),
       ...(settings.environmentIdentificationMode !==
@@ -582,7 +581,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.fontSizeTerminal,
       settings.glassOpacity,
       settings.panelAnimationDurationMs,
-      settings.panelAnimationsEnabled,
       settings.enableLegacyTokenStreaming,
       settings.enableProviderUpdateChecks,
       settings.sidebarAutoSettleAfterDays,
@@ -669,7 +667,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
-      panelAnimationsEnabled: DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
@@ -1142,71 +1139,6 @@ export function AppearanceSettingsPanel() {
           }
         />
 
-        <SettingsRow
-          {...searchableSetting("panel-animations")}
-          description="Slide the main sidebar and right panel when they open and close. Off by default to reduce rendering work."
-          resetAction={
-            settings.panelAnimationsEnabled !== DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled ||
-            settings.panelAnimationDurationMs !==
-              DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs ? (
-              <SettingResetButton
-                label="panel animations"
-                onClick={() =>
-                  updateSettings({
-                    panelAnimationsEnabled: DEFAULT_UNIFIED_SETTINGS.panelAnimationsEnabled,
-                    panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <div className="flex w-full flex-wrap items-center justify-end gap-3 sm:w-[26rem]">
-              <PanelAnimationsPreview
-                durationMs={settings.panelAnimationDurationMs}
-                enabled={settings.panelAnimationsEnabled}
-              />
-              <div className="flex min-w-44 flex-1 items-center gap-2">
-                <output
-                  className="min-w-14 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
-                  htmlFor="panel-animation-duration"
-                >
-                  {settings.panelAnimationDurationMs} ms
-                </output>
-                <input
-                  aria-label="Panel animation duration"
-                  className="settings-slider min-w-0 flex-1"
-                  disabled={!settings.panelAnimationsEnabled}
-                  id="panel-animation-duration"
-                  max={MAX_PANEL_ANIMATION_DURATION_MS}
-                  min={MIN_PANEL_ANIMATION_DURATION_MS}
-                  onChange={(event) => {
-                    const panelAnimationDurationMs = Number(event.currentTarget.value);
-                    if (
-                      Number.isInteger(panelAnimationDurationMs) &&
-                      panelAnimationDurationMs >= MIN_PANEL_ANIMATION_DURATION_MS &&
-                      panelAnimationDurationMs <= MAX_PANEL_ANIMATION_DURATION_MS
-                    ) {
-                      updateSettings({ panelAnimationDurationMs });
-                    }
-                  }}
-                  step={50}
-                  style={panelAnimationDurationSliderStyle}
-                  type="range"
-                  value={settings.panelAnimationDurationMs}
-                />
-              </div>
-              <Switch
-                checked={settings.panelAnimationsEnabled}
-                onCheckedChange={(checked) =>
-                  updateSettings({ panelAnimationsEnabled: Boolean(checked) })
-                }
-                aria-label="Panel animations"
-              />
-            </div>
-          }
-        />
-
         {showEnvironmentIdentification ? (
           <SettingsRow
             {...searchableSetting("environment-identification")}
@@ -1248,6 +1180,71 @@ export function AppearanceSettingsPanel() {
             }
           />
         ) : null}
+      </SettingsSection>
+
+      <SettingsSection id="motion" title="Motion">
+        <SettingsRow
+          {...searchableSetting("panel-animations")}
+          description="Set how long the main sidebar, right panel, and terminal drawer take to open and close. Choose 0 ms for instant changes."
+          resetAction={
+            settings.panelAnimationDurationMs !==
+            DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs ? (
+              <SettingResetButton
+                label="panel animations"
+                onClick={() =>
+                  updateSettings({
+                    panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
+                  })
+                }
+              />
+            ) : null
+          }
+        >
+          <div className="mt-4 grid gap-5 border-t border-border/60 pt-4 sm:grid-cols-[minmax(12rem,18rem)_minmax(16rem,1fr)] sm:items-center">
+            <PanelAnimationsPreview durationMs={settings.panelAnimationDurationMs} />
+            <div className="min-w-0 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <label
+                  className="text-xs font-medium text-muted-foreground"
+                  htmlFor="panel-animation-duration"
+                >
+                  Duration
+                </label>
+                <output
+                  className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                  htmlFor="panel-animation-duration"
+                >
+                  {settings.panelAnimationDurationMs} ms
+                </output>
+              </div>
+              <input
+                aria-label="Panel animation duration"
+                className="settings-slider w-full"
+                id="panel-animation-duration"
+                max={MAX_PANEL_ANIMATION_DURATION_MS}
+                min={MIN_PANEL_ANIMATION_DURATION_MS}
+                onChange={(event) => {
+                  const panelAnimationDurationMs = Number(event.currentTarget.value);
+                  if (
+                    Number.isInteger(panelAnimationDurationMs) &&
+                    panelAnimationDurationMs >= MIN_PANEL_ANIMATION_DURATION_MS &&
+                    panelAnimationDurationMs <= MAX_PANEL_ANIMATION_DURATION_MS
+                  ) {
+                    updateSettings({ panelAnimationDurationMs });
+                  }
+                }}
+                step={25}
+                style={panelAnimationDurationSliderStyle}
+                type="range"
+                value={settings.panelAnimationDurationMs}
+              />
+              <div className="flex justify-between text-[11px] text-muted-foreground/70">
+                <span>Instant</span>
+                <span>{MAX_PANEL_ANIMATION_DURATION_MS} ms</span>
+              </div>
+            </div>
+          </div>
+        </SettingsRow>
       </SettingsSection>
 
       <TypographySection />

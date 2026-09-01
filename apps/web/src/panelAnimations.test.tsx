@@ -3,15 +3,13 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("./hooks/useMediaQuery", () => ({ useMediaQuery: () => false }));
 vi.mock("./hooks/useSettings", () => ({
-  useClientSettings: (
-    selector: (settings: {
-      panelAnimationsEnabled: boolean;
-      panelAnimationDurationMs: number;
-    }) => unknown,
-  ) => selector({ panelAnimationsEnabled: true, panelAnimationDurationMs: 200 }),
+  useClientSettings: (selector: (settings: { panelAnimationDurationMs: number }) => unknown) =>
+    selector({ panelAnimationDurationMs: 200 }),
 }));
 
-import { PANEL_ANIMATION_DURATION_MS, usePanelPresence } from "./panelAnimations";
+import { usePanelPresence } from "./panelAnimations";
+
+const TEST_ANIMATION_DURATION_MS = 200;
 
 type HarnessProps = {
   readonly open: boolean;
@@ -110,11 +108,23 @@ describe("usePanelPresence", () => {
   it("retains closing content for the animation duration", async () => {
     const harness = await installHarness();
     try {
-      await harness.render({ open: true, value: "diff", animated: true, scopeKey: "thread-a" });
-      await harness.render({ open: false, value: null, animated: true, scopeKey: "thread-a" });
+      await harness.render({
+        open: true,
+        value: "diff",
+        animated: true,
+        scopeKey: "thread-a",
+        durationMs: TEST_ANIMATION_DURATION_MS,
+      });
+      await harness.render({
+        open: false,
+        value: null,
+        animated: true,
+        scopeKey: "thread-a",
+        durationMs: TEST_ANIMATION_DURATION_MS,
+      });
       expect(latestPresence).toEqual({ present: true, value: "diff" });
 
-      await act(() => vi.advanceTimersByTimeAsync(PANEL_ANIMATION_DURATION_MS - 1));
+      await act(() => vi.advanceTimersByTimeAsync(TEST_ANIMATION_DURATION_MS - 1));
       expect(latestPresence).toEqual({ present: true, value: "diff" });
 
       await act(() => vi.advanceTimersByTimeAsync(1));
@@ -167,11 +177,29 @@ describe("usePanelPresence", () => {
   it("cancels a pending unmount when reopened", async () => {
     const harness = await installHarness();
     try {
-      await harness.render({ open: true, value: "files", animated: true, scopeKey: "thread-a" });
-      await harness.render({ open: false, value: null, animated: true, scopeKey: "thread-a" });
-      await act(() => vi.advanceTimersByTimeAsync(PANEL_ANIMATION_DURATION_MS / 2));
-      await harness.render({ open: true, value: "files", animated: true, scopeKey: "thread-a" });
-      await act(() => vi.advanceTimersByTimeAsync(PANEL_ANIMATION_DURATION_MS));
+      await harness.render({
+        open: true,
+        value: "files",
+        animated: true,
+        scopeKey: "thread-a",
+        durationMs: TEST_ANIMATION_DURATION_MS,
+      });
+      await harness.render({
+        open: false,
+        value: null,
+        animated: true,
+        scopeKey: "thread-a",
+        durationMs: TEST_ANIMATION_DURATION_MS,
+      });
+      await act(() => vi.advanceTimersByTimeAsync(TEST_ANIMATION_DURATION_MS / 2));
+      await harness.render({
+        open: true,
+        value: "files",
+        animated: true,
+        scopeKey: "thread-a",
+        durationMs: TEST_ANIMATION_DURATION_MS,
+      });
+      await act(() => vi.advanceTimersByTimeAsync(TEST_ANIMATION_DURATION_MS));
       expect(latestPresence).toEqual({ present: true, value: "files" });
     } finally {
       await harness.cleanup();

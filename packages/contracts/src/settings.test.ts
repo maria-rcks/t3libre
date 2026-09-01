@@ -99,24 +99,17 @@ describe("ClientSettings appearance contrast", () => {
 });
 
 describe("ClientSettings panel animations", () => {
-  it("defaults off at 200ms and accepts explicit motion settings", () => {
-    expect(decodeClientSettings({}).panelAnimationsEnabled).toBe(false);
-    expect(decodeClientSettings({}).panelAnimationDurationMs).toBe(200);
-    expect(decodeClientSettings({ panelAnimationsEnabled: true }).panelAnimationsEnabled).toBe(
-      true,
-    );
-    expect(decodeClientSettingsPatch({ panelAnimationsEnabled: true }).panelAnimationsEnabled).toBe(
-      true,
-    );
+  it("defaults to instant changes and accepts explicit motion durations", () => {
+    expect(decodeClientSettings({}).panelAnimationDurationMs).toBe(0);
     expect(decodeClientSettings({ panelAnimationDurationMs: 350 }).panelAnimationDurationMs).toBe(
       350,
     );
     expect(
-      decodeClientSettingsPatch({ panelAnimationDurationMs: 100 }).panelAnimationDurationMs,
-    ).toBe(100);
+      decodeClientSettingsPatch({ panelAnimationDurationMs: 0 }).panelAnimationDurationMs,
+    ).toBe(0);
   });
 
-  it.each([99, 401, 150.5])("rejects an invalid panel animation duration: %s", (value) => {
+  it.each([-1, 401, 150.5])("rejects an invalid panel animation duration: %s", (value) => {
     expect(() => decodeClientSettings({ panelAnimationDurationMs: value })).toThrow();
     expect(() => decodeClientSettingsPatch({ panelAnimationDurationMs: value })).toThrow();
   });

@@ -13,13 +13,12 @@ export function usePanelAnimationSettings(): {
   active: boolean;
   durationMs: PanelAnimationDurationMs;
 } {
-  const enabled = useClientSettings((settings) => settings.panelAnimationsEnabled);
   const durationMs = useClientSettings((settings) => settings.panelAnimationDurationMs);
   const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-  return { active: enabled && !prefersReducedMotion, durationMs };
+  return { active: durationMs > 0 && !prefersReducedMotion, durationMs };
 }
 
-/** Keeps closing panel content mounted until its opt-in width transition ends. */
+/** Keeps closing panel content mounted until its opt-in transition ends. */
 export function usePanelPresence<T>(
   open: boolean,
   value: T | null,
