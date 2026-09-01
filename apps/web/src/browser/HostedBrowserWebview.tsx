@@ -36,10 +36,24 @@ interface ElectronWebview extends HTMLElement {
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
 }
 
+interface RetiredCaptureWebview {
+  readonly generation: number;
+  readonly src: string;
+  readonly webContentsId: number;
+}
+
 declare global {
   interface HTMLElementTagNameMap {
     webview: ElectronWebview;
   }
+}
+
+export function hostedBrowserCompositingLayoutKey(layout: {
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
+  readonly viewportScale: number;
+}) {
+  return `${layout.viewportWidth}:${layout.viewportHeight}:${layout.viewportScale}`;
 }
 
 export function HostedBrowserWebview(props: {
@@ -93,11 +107,51 @@ export function HostedBrowserWebview(props: {
 
   const [webviewGeneration, setWebviewGeneration] = useState(0);
   const [recoverySrc, setRecoverySrc] = useState(initialSrc);
+  const [retiredCaptureWebviews, setRetiredCaptureWebviews] = useState<
+    ReadonlyArray<RetiredCaptureWebview>
+  >([]);
+  const captureRetirementTimersRef = useRef(new Map<number, number | null>());
   const latestUrlRef = useRef(initialUrl);
 
   useEffect(() => {
     latestUrlRef.current = initialUrl;
   }, [initialUrl]);
+
+  const prepareRetiredCaptureWebview = useCallback(
+    (webContentsId: number) => {
+      const prepareWebviewRemoval = previewBridge?.prepareWebviewRemoval;
+      if (!prepareWebviewRemoval || captureRetirementTimersRef.current.has(webContentsId)) {
+        return;
+      }
+      const prepare = () => {
+        captureRetirementTimersRef.current.set(webContentsId, null);
+        void prepareWebviewRemoval(runtimeTabId, webContentsId).then(
+          () => {
+            captureRetirementTimersRef.current.delete(webContentsId);
+            setRetiredCaptureWebviews((current) =>
+              current.filter((candidate) => candidate.webContentsId !== webContentsId),
+            );
+          },
+          () => {
+            const timerId = window.setTimeout(prepare, 250);
+            captureRetirementTimersRef.current.set(webContentsId, timerId);
+          },
+        );
+      };
+      prepare();
+    },
+    [runtimeTabId],
+  );
+
+  useEffect(
+    () => () => {
+      for (const timerId of captureRetirementTimersRef.current.values()) {
+        if (timerId !== null) window.clearTimeout(timerId);
+      }
+      captureRetirementTimersRef.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     const bridge = previewBridge;
@@ -113,13 +167,26 @@ export function HostedBrowserWebview(props: {
         return;
       }
       setCompositingReady(false);
+      setRetiredCaptureWebviews((current) =>
+        current.some((candidate) => candidate.webContentsId === recovery.webContentsId)
+          ? current
+          : [
+              ...current,
+              {
+                generation: webviewGeneration,
+                src: webview.src,
+                webContentsId: recovery.webContentsId,
+              },
+            ],
+      );
+      prepareRetiredCaptureWebview(recovery.webContentsId);
       setRecoverySrc(latestUrlRef.current ?? initialSrc);
       setWebviewGeneration((generation) => generation + 1);
     });
-  }, [initialSrc, runtimeTabId]);
+  }, [initialSrc, prepareRetiredCaptureWebview, runtimeTabId, webviewGeneration]);
 
   const setWebviewRef = useCallback((node: HTMLElement | null) => {
-    webviewRef.current = node as ElectronWebview | null;
+    if (node) webviewRef.current = node as ElectronWebview;
   }, []);
 
   useEffect(() => {
@@ -267,6 +334,7 @@ export function HostedBrowserWebview(props: {
     rect: lastRect,
     hiddenSize,
   });
+  const compositingLayoutKey = hostedBrowserCompositingLayoutKey(layout);
 
   useEffect(() => {
     setCompositingReady(false);
@@ -291,6 +359,7 @@ export function HostedBrowserWebview(props: {
     };
   }, [
     renderingActive,
+    compositingLayoutKey,
     webviewGeneration,
     wrapperStyle.height,
     wrapperStyle.left,
@@ -300,6 +369,56 @@ export function HostedBrowserWebview(props: {
   ]);
 
   if (!config) return null;
+
+  const renderWebview = (generation: number, src: string, retired: boolean) => (
+    <webview
+      key={generation}
+      ref={retired ? undefined : setWebviewRef}
+      // Must be an attribute on the element itself: Electron reads it when the
+      // guest attaches, so setting it from the ref callback lands too late and
+      // the guest attaches with popups disabled. React types `allowpopups` as a
+      // boolean, but react-dom drops boolean values for unrecognized attributes,
+      // so the literal string has to be spread past the type.
+      {...({ allowpopups: "true" } as unknown as { readonly allowpopups?: boolean })}
+      src={src}
+      partition={config.partition}
+      webpreferences={config.webPreferences}
+      {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
+      data-preview-tab={runtimeTabId}
+      data-preview-server-tab={tabId}
+      data-preview-viewport-mode={effectiveViewport._tag}
+      data-preview-viewport-key={browserViewportSettingKey(effectiveViewport)}
+      data-preview-css-width={
+        fittedSourceViewport
+          ? fittedSourceViewport.width
+          : effectiveViewport._tag === "fill"
+            ? Math.max(1, Math.round(layout.viewportWidth / normalizedZoomFactor))
+            : effectiveViewport.width
+      }
+      data-preview-css-height={
+        fittedSourceViewport
+          ? fittedSourceViewport.height
+          : effectiveViewport._tag === "fill"
+            ? Math.max(1, Math.round(layout.viewportHeight / normalizedZoomFactor))
+            : effectiveViewport.height
+      }
+      data-preview-capture-retired={retired ? "true" : undefined}
+      aria-hidden={retired || !active ? true : undefined}
+      className={cn(
+        "absolute flex overflow-hidden bg-background",
+        !retired && active && !layout.fillsPanel && "ring-1 ring-border/70 shadow-sm",
+      )}
+      style={{
+        left: layout.viewportX,
+        top: layout.viewportY,
+        width: layout.viewportWidth / layout.viewportScale,
+        height: layout.viewportHeight / layout.viewportScale,
+        transform: layout.viewportScale < 1 ? `scale(${layout.viewportScale})` : undefined,
+        transformOrigin: "top left",
+        pointerEvents: retired ? "none" : undefined,
+      }}
+    />
+  );
 
   return (
     <div
@@ -323,51 +442,14 @@ export function HostedBrowserWebview(props: {
             onChange={commitViewportChange}
           />
         ) : null}
-        <webview
-          key={webviewGeneration}
-          ref={setWebviewRef}
-          // Must be an attribute on the element itself: Electron reads it when the
-          // guest attaches, so setting it from the ref callback lands too late and
-          // the guest attaches with popups disabled. React types `allowpopups` as a
-          // boolean, but react-dom drops boolean values for unrecognized attributes,
-          // so the literal string has to be spread past the type.
-          {...({ allowpopups: "true" } as unknown as { readonly allowpopups?: boolean })}
-          src={webviewGeneration === 0 ? initialSrc : recoverySrc}
-          partition={config.partition}
-          webpreferences={config.webPreferences}
-          {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
-          data-preview-tab={runtimeTabId}
-          data-preview-server-tab={tabId}
-          data-preview-viewport-mode={effectiveViewport._tag}
-          data-preview-viewport-key={browserViewportSettingKey(effectiveViewport)}
-          data-preview-css-width={
-            fittedSourceViewport
-              ? fittedSourceViewport.width
-              : effectiveViewport._tag === "fill"
-                ? Math.max(1, Math.round(layout.viewportWidth / normalizedZoomFactor))
-                : effectiveViewport.width
-          }
-          data-preview-css-height={
-            fittedSourceViewport
-              ? fittedSourceViewport.height
-              : effectiveViewport._tag === "fill"
-                ? Math.max(1, Math.round(layout.viewportHeight / normalizedZoomFactor))
-                : effectiveViewport.height
-          }
-          aria-hidden={active ? undefined : true}
-          className={cn(
-            "absolute flex overflow-hidden bg-background",
-            active && !layout.fillsPanel && "ring-1 ring-border/70 shadow-sm",
-          )}
-          style={{
-            left: layout.viewportX,
-            top: layout.viewportY,
-            width: layout.viewportWidth / layout.viewportScale,
-            height: layout.viewportHeight / layout.viewportScale,
-            transform: layout.viewportScale < 1 ? `scale(${layout.viewportScale})` : undefined,
-            transformOrigin: "top left",
-          }}
-        />
+        {retiredCaptureWebviews.map((retired) =>
+          renderWebview(retired.generation, retired.src, true),
+        )}
+        {renderWebview(
+          webviewGeneration,
+          webviewGeneration === 0 ? initialSrc : recoverySrc,
+          false,
+        )}
         {active && effectiveViewport._tag !== "fill" && !fittedSourceViewport ? (
           <>
             <BrowserViewportResizeHandles

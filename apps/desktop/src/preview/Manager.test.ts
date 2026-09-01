@@ -211,9 +211,12 @@ interface TestCapturedPreviewImage {
 }
 
 type TestDisplayMediaHandler = (
-  request: unknown,
+  request: { readonly frame?: unknown },
   callback: (streams: { video?: unknown }) => void,
 ) => void;
+
+const testWebContentsMainFrame = (webContents: unknown): unknown =>
+  (webContents as { readonly mainFrame?: unknown } | null | undefined)?.mainFrame;
 
 interface TestHostWebContents {
   readonly id: number;
@@ -300,10 +303,13 @@ const setupRecordingRaceTabs = (manager: PreviewManager.PreviewManager["Service"
       host,
       grants,
       destroy: (id: number) => destroyedIds.add(id),
-      takeGrant: () =>
-        host.displayMediaHandler()?.({}, (value) => {
-          grants.push(value);
-        }),
+      takeGrant: (webContentsId = 42) =>
+        host.displayMediaHandler()?.(
+          { frame: testWebContentsMainFrame(webContentsById.get(webContentsId)) },
+          (value) => {
+            grants.push(value);
+          },
+        ),
     };
   });
 
@@ -2044,7 +2050,10 @@ describe("PreviewManager", () => {
         } as never);
 
         yield* manager.startRecording("tab_capture_throttling_1");
-        host.displayMediaHandler()?.({}, () => {});
+        host.displayMediaHandler()?.(
+          { frame: testWebContentsMainFrame(webContentsById.get(41)) },
+          () => {},
+        );
         yield* manager.startRecording("tab_capture_throttling_2");
         expect(setBackgroundThrottling.mock.calls).toEqual([[false]]);
 
@@ -2293,16 +2302,20 @@ describe("PreviewManager", () => {
         yield* manager.registerWebview("tab_1", 41);
         yield* manager.registerWebview("tab_2", 42);
         const grants: Array<{ video?: unknown }> = [];
-        const takeGrant = () =>
-          host.displayMediaHandler()?.({}, (value) => {
-            grants.push(value);
-          });
+        const takeGrant = (webContentsId: 41 | 42) =>
+          host.displayMediaHandler()?.(
+            { frame: testWebContentsMainFrame(webContentsById.get(webContentsId)) },
+            (value) => {
+              grants.push(value);
+            },
+          );
         yield* manager.startRecording("tab_1");
-        takeGrant();
+        takeGrant(42);
+        takeGrant(41);
         yield* manager.startRecording("tab_2");
-        takeGrant();
+        takeGrant(42);
 
-        expect(grants).toEqual([{ video: { routingId: 41 } }, { video: { routingId: 42 } }]);
+        expect(grants).toEqual([{}, { video: { routingId: 41 } }, { video: { routingId: 42 } }]);
         expect(firstCapturePage).not.toHaveBeenCalled();
         expect(secondCapturePage).not.toHaveBeenCalled();
         expect(firstSendCommand).not.toHaveBeenCalledWith(
@@ -2338,8 +2351,12 @@ describe("PreviewManager", () => {
         yield* manager.startRecording("tab_recording_warmup_failure");
         expect(capturePage).not.toHaveBeenCalled();
         const grants: Array<{ video?: unknown }> = [];
-        host.displayMediaHandler()?.({}, (value) => grants.push(value));
-        host.displayMediaHandler()?.({}, (value) => grants.push(value));
+        host.displayMediaHandler()?.({ frame: testWebContentsMainFrame(webContents) }, (value) =>
+          grants.push(value),
+        );
+        host.displayMediaHandler()?.({ frame: testWebContentsMainFrame(webContents) }, (value) =>
+          grants.push(value),
+        );
         expect(grants).toEqual([{ video: { routingId: 42 } }, {}]);
 
         yield* manager.stopRecording("tab_recording_warmup_failure");
@@ -2388,7 +2405,7 @@ describe("PreviewManager", () => {
         expect(Option.getOrThrow(Cause.findErrorOption(failed.cause))).toMatchObject({
           _tag: "PreviewRecordingArmConflictError",
         });
-        takeGrant();
+        takeGrant(41);
         expect(grants).toHaveLength(1);
       }),
     ),
@@ -2401,7 +2418,7 @@ describe("PreviewManager", () => {
         yield* manager.startRecording("tab_race_a");
         destroy(41);
         yield* manager.startRecording("tab_race_b");
-        takeGrant();
+        takeGrant(42);
         expect(grants).toEqual([{ video: { routingId: 42 } }]);
         yield* manager.stopRecording("tab_race_b");
       }),
@@ -3722,16 +3739,18 @@ describe("PreviewManager", () => {
   effectIt.effect("waits for bounded snapshot recovery before window teardown", () =>
     withManager((manager) =>
       Effect.gen(function* () {
+        let finishCapture!: (image: unknown) => void;
         let markCaptureStarted!: () => void;
         const captureStarted = new Promise<void>((resolve) => {
           markCaptureStarted = resolve;
         });
         const control = makeSnapshotWebContents({
           id: 42,
-          capturePage: () => {
-            markCaptureStarted();
-            return new Promise(() => {});
-          },
+          capturePage: () =>
+            new Promise((resolve) => {
+              markCaptureStarted();
+              finishCapture = resolve;
+            }),
         });
         fromId.mockReturnValue(control.webContents);
         yield* manager.createTab("tab_capture_window_teardown");
@@ -3750,7 +3769,38 @@ describe("PreviewManager", () => {
 
         const snapshotExit = yield* Fiber.await(snapshot);
         expect(Exit.isFailure(snapshotExit)).toBe(true);
-        yield* Fiber.join(teardown);
+        if (Exit.isFailure(snapshotExit)) {
+          expect(Option.getOrThrow(Cause.findErrorOption(snapshotExit.cause))).toMatchObject({
+            _tag: "PreviewAutomationCaptureTimeoutError",
+            stage: "capture-page",
+            timeoutMs: PreviewManager.PREVIEW_AUTOMATION_CAPTURE_TIMEOUT_MS,
+          });
+        }
+        expect(teardown.pollUnsafe()).toBeUndefined();
+
+        yield* TestClock.adjust(
+          PreviewManager.PREVIEW_AUTOMATION_CAPTURE_DRAIN_TIMEOUT_MS -
+            PreviewManager.PREVIEW_AUTOMATION_CAPTURE_TIMEOUT_MS,
+        );
+        const teardownExit = yield* Fiber.await(teardown);
+        expect(Exit.isFailure(teardownExit)).toBe(true);
+        if (Exit.isFailure(teardownExit)) {
+          expect(Option.getOrThrow(Cause.findErrorOption(teardownExit.cause))).toMatchObject({
+            _tag: "PreviewAutomationCaptureDrainTimeoutError",
+            pendingCaptures: 1,
+            stage: "capture-drain",
+            timeoutMs: PreviewManager.PREVIEW_AUTOMATION_CAPTURE_DRAIN_TIMEOUT_MS,
+          });
+        }
+        expect(control.detach).toHaveBeenCalledOnce();
+
+        finishCapture({
+          getSize: () => ({ width: 800, height: 600 }),
+          resize: vi.fn(),
+          toPNG: () => Buffer.from("late-snapshot"),
+        });
+        yield* Effect.yieldNow;
+        yield* manager.prepareForWindowTeardown;
         expect(control.detach).toHaveBeenCalledOnce();
       }),
     ),
@@ -3868,7 +3918,7 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("restores debugger control when a retained webview re-registers", () =>
+  effectIt.effect("same-guest and failed registrations do not cancel webview removal", () =>
     withManager((manager) =>
       Effect.gen(function* () {
         let finishCapture!: (image: unknown) => void;
@@ -3884,7 +3934,7 @@ describe("PreviewManager", () => {
               finishCapture = resolve;
             }),
         });
-        fromId.mockReturnValue(control.webContents);
+        fromId.mockImplementation((id) => (id === 42 ? control.webContents : null));
         yield* manager.createTab("tab_retained_webview");
         yield* manager.registerWebview("tab_retained_webview", 42);
         yield* manager.setColorScheme("tab_retained_webview", "dark");
@@ -3899,6 +3949,10 @@ describe("PreviewManager", () => {
           .pipe(Effect.forkChild({ startImmediately: true }));
         yield* Effect.yieldNow;
         yield* manager.registerWebview("tab_retained_webview", 42);
+        const failedRegistration = yield* Effect.exit(
+          manager.registerWebview("tab_retained_webview", 999),
+        );
+        expect(Exit.isFailure(failedRegistration)).toBe(true);
         finishCapture({
           getSize: () => ({ width: 800, height: 600 }),
           resize: vi.fn(),
@@ -3906,9 +3960,8 @@ describe("PreviewManager", () => {
         });
         yield* Fiber.join(snapshot);
         yield* Fiber.join(staleRemoval);
-        expect(control.detach).not.toHaveBeenCalled();
+        expect(control.detach).toHaveBeenCalledOnce();
 
-        yield* manager.prepareWebviewRemoval("tab_retained_webview", 42);
         yield* manager.registerWebview("tab_retained_webview", 42);
         yield* Effect.promise(() =>
           vi.waitFor(() => expect(control.attach).toHaveBeenCalledTimes(2)),

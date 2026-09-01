@@ -2230,6 +2230,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       });
       return yield* new PreviewTabNotFoundError({ tabId });
     }
+    webviewRegistrationEpochs.set(tabId, (webviewRegistrationEpochs.get(tabId) ?? 0) + 1);
     const { state: registered, pendingUrl } = registration.value;
     // A zoom or mute action that landed while this attach was in flight
     // addressed the guest this one replaced, so settle the new guest on the
@@ -2272,10 +2273,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const expectedGeneration = tabLifecycleGenerations.get(tabId);
     return yield* withTabLifecycleLock(
       tabId,
-      Effect.gen(function* () {
-        webviewRegistrationEpochs.set(tabId, (webviewRegistrationEpochs.get(tabId) ?? 0) + 1);
-        yield* registerWebviewUnlocked(tabId, webContentsId, expectedGeneration);
-      }),
+      registerWebviewUnlocked(tabId, webContentsId, expectedGeneration),
     );
   });
 
@@ -2287,7 +2285,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       tabId,
       Effect.gen(function* () {
         const current = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
-        if (current?.webContentsId !== webContentsId) return null;
+        const pendingCaptures = automationCaptures.get(webContentsId)?.size ?? 0;
+        if (current?.webContentsId !== webContentsId && pendingCaptures === 0) return null;
         clearPendingRecording(tabId);
         captureQuiescingWebContentsIds.add(webContentsId);
         return webviewRegistrationEpochs.get(tabId) ?? 0;
@@ -2299,11 +2298,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         withTabLifecycleLock(
           tabId,
           Effect.gen(function* () {
-            const current = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
-            if (
-              current?.webContentsId !== webContentsId ||
-              (webviewRegistrationEpochs.get(tabId) ?? 0) !== registrationEpoch
-            ) {
+            if ((webviewRegistrationEpochs.get(tabId) ?? 0) !== registrationEpoch) {
               return;
             }
             yield* detachControlSession(webContentsId);
@@ -3347,13 +3342,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         webContentsId: wc.id,
       },
       () =>
-        session.setDisplayMediaRequestHandler((_request, callback) => {
+        session.setDisplayMediaRequestHandler((request, callback) => {
           const target = pendingRecording?.webContents;
-          pendingRecording = null;
-          if (!target || target.isDestroyed()) {
+          if (!target || target.isDestroyed() || request.frame !== target.mainFrame) {
             callback({});
             return;
           }
+          pendingRecording = null;
           callback({ video: target.mainFrame });
         }),
     );
@@ -3652,6 +3647,16 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         if (!frameCaptureWindowOpen) return yield* new PreviewMainWindowClosedError({ tabId });
         return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId: wc.id });
       }
+      let nativeCaptureStarted = false;
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        const captures = automationCaptures.get(wc.id);
+        captures?.delete(completion);
+        if (captures?.size === 0) automationCaptures.delete(wc.id);
+        Deferred.doneUnsafe(completion, Effect.void);
+      };
       return yield* Effect.gen(function* () {
         const currentBeforeCapture = yield* requireWebContents(tabId);
         if (currentBeforeCapture !== wc) {
@@ -3663,7 +3668,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             tabId,
             webContentsId: wc.id,
           },
-          () => wc.capturePage(),
+          () => {
+            const capture = wc.capturePage();
+            nativeCaptureStarted = true;
+            void capture.then(settle, settle);
+            return capture;
+          },
         ).pipe(
           Effect.timeoutOption(PREVIEW_AUTOMATION_CAPTURE_TIMEOUT_MS),
           Effect.catch((error: PreviewManagerError) =>
@@ -3698,11 +3708,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         };
       }).pipe(
         Effect.ensuring(
-          Effect.gen(function* () {
-            const captures = automationCaptures.get(wc.id);
-            captures?.delete(completion);
-            if (captures?.size === 0) automationCaptures.delete(wc.id);
-            yield* Deferred.succeed(completion, undefined);
+          Effect.sync(() => {
+            if (!nativeCaptureStarted) settle();
           }),
         ),
       );
