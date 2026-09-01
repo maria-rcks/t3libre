@@ -162,7 +162,7 @@ function quitFromSignal(
     effect: Effect.Effect<A, E, DesktopLifecycleRegistrationServices>,
   ) => Promise<A>,
 ): void {
-  void runEffect(
+  const quit = runEffect(
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ signal });
       const electronApp = yield* ElectronApp.ElectronApp;
@@ -173,6 +173,18 @@ function quitFromSignal(
       yield* requestDesktopShutdownAndWait();
       yield* electronApp.quit;
     }).pipe(Effect.withSpan("desktop.lifecycle.processSignal")),
+  );
+  void quit.catch((error) =>
+    runEffect(
+      Effect.gen(function* () {
+        const state = yield* DesktopState.DesktopState;
+        yield* Ref.set(state.quitting, false);
+        yield* logLifecycleError("preview teardown blocked process signal shutdown", {
+          error,
+          signal,
+        });
+      }).pipe(Effect.withSpan("desktop.lifecycle.processSignalBlocked")),
+    ),
   );
 }
 

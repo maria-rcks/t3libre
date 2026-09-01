@@ -319,6 +319,9 @@ const makeSnapshotWebContents = (options: {
   const detach = vi.fn(() => {
     attached = false;
   });
+  const attach = vi.fn(() => {
+    attached = true;
+  });
   const defaultSendCommand = async (method: string, params?: Record<string, unknown>) => {
     if (method === "Runtime.evaluate") {
       const expression = typeof params?.["expression"] === "string" ? params["expression"] : "";
@@ -362,9 +365,7 @@ const makeSnapshotWebContents = (options: {
     setWindowOpenHandler: vi.fn(),
     debugger: {
       isAttached: () => attached,
-      attach: vi.fn(() => {
-        attached = true;
-      }),
+      attach,
       detach,
       sendCommand,
       on: vi.fn(
@@ -384,6 +385,7 @@ const makeSnapshotWebContents = (options: {
     capturePage: options.capturePage,
   } as never;
   return {
+    attach,
     detach,
     sendCommand,
     webContents,
@@ -3787,6 +3789,61 @@ describe("PreviewManager", () => {
     ),
   );
 
+  effectIt.effect("restores debugger control when a retained webview re-registers", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const control = makeSnapshotWebContents({
+          id: 42,
+          capturePage: async () => ({}),
+        });
+        fromId.mockReturnValue(control.webContents);
+        yield* manager.createTab("tab_retained_webview");
+        yield* manager.registerWebview("tab_retained_webview", 42);
+        yield* manager.setColorScheme("tab_retained_webview", "dark");
+        expect(control.attach).toHaveBeenCalledOnce();
+
+        yield* manager.prepareWebviewRemoval("tab_retained_webview", 42);
+        yield* manager.registerWebview("tab_retained_webview", 42);
+        yield* Effect.promise(() =>
+          vi.waitFor(() => expect(control.attach).toHaveBeenCalledTimes(2)),
+        );
+      }),
+    ),
+  );
+
+  effectIt.effect("finalizes an action when debugger session acquisition fails", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let devToolsOpen = true;
+        const image = {
+          getSize: () => ({ width: 800, height: 600 }),
+          resize: vi.fn(),
+          toPNG: () => Buffer.from("snapshot-after-control-failure"),
+        };
+        const control = makeSnapshotWebContents({ id: 42, capturePage: async () => image });
+        Object.assign(control.webContents as object, {
+          isDevToolsOpened: () => devToolsOpen,
+        });
+        fromId.mockReturnValue(control.webContents);
+        yield* manager.createTab("tab_control_acquisition_failure");
+        yield* manager.registerWebview("tab_control_acquisition_failure", 42);
+
+        const failed = yield* Effect.exit(
+          manager.automationEvaluate("tab_control_acquisition_failure", { expression: "6 * 7" }),
+        );
+        expect(Exit.isFailure(failed)).toBe(true);
+        devToolsOpen = false;
+
+        const snapshot = yield* manager.automationSnapshot("tab_control_acquisition_failure");
+        expect(snapshot.actionTimeline).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ action: "evaluate", status: "failed" }),
+          ]),
+        );
+      }),
+    ),
+  );
+
   effectIt.effect("bounds debugger drain and allows a later window teardown retry", () =>
     withManager((manager) =>
       Effect.gen(function* () {
@@ -3861,6 +3918,20 @@ describe("PreviewOperationError", () => {
     });
 
     expect(error.message).toContain(`${name}: capture failed safely`);
+  });
+
+  it("replaces native error text containing a URL", () => {
+    const cause = new Error("capture failed at https://preview.example/secret");
+    cause.name = "UnknownVizError";
+    const error = new PreviewManager.PreviewOperationError({
+      operation: "capturePage",
+      tabId: "tab_1",
+      webContentsId: 42,
+      cause,
+    });
+
+    expect(error.message).toContain("UnknownVizError: Preview capture failed.");
+    expect(error.message).not.toContain("preview.example");
   });
 });
 

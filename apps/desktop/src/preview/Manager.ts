@@ -112,6 +112,8 @@ const MAX_SCREENSHOT_WIDTH = 1280;
 export const PREVIEW_AUTOMATION_CAPTURE_TIMEOUT_MS = 2_500;
 export const PREVIEW_AUTOMATION_CAPTURE_DRAIN_TIMEOUT_MS = 5_000;
 export const PREVIEW_DEBUGGER_DRAIN_TIMEOUT_MS = 2_000;
+const MAX_SAFE_NATIVE_ERROR_MESSAGE_LENGTH = 512;
+const SAFE_NATIVE_ERROR_MESSAGE_PATTERN = /^[\p{L}\p{N}\s.,:;!?'"()[\]_-]+$/u;
 const RECORDING_ARM_GRACE_MS = 10_000;
 const PICTURE_IN_PICTURE_FRAME_INTERVAL_MS = Math.ceil(1_000 / 12);
 const PICTURE_IN_PICTURE_JPEG_QUALITY = 80;
@@ -371,6 +373,16 @@ const nextZoomLevel = (current: number, direction: "in" | "out"): number => {
     return ZOOM_LEVELS[Math.min(step + 1, ZOOM_LEVELS.length - 1)] ?? current;
   }
   return ZOOM_LEVELS[Math.max(step - 1, 0)] ?? current;
+};
+
+const safeNativeErrorMessage = (message: string): string => {
+  const bounded = message.trim().slice(0, MAX_SAFE_NATIVE_ERROR_MESSAGE_LENGTH);
+  return bounded.length > 0 &&
+    !message.includes("\n") &&
+    !message.includes("\r") &&
+    SAFE_NATIVE_ERROR_MESSAGE_PATTERN.test(bounded)
+    ? bounded
+    : "Preview capture failed.";
 };
 
 type Listener = (tabId: string, state: PreviewTabState) => Effect.Effect<void>;
@@ -1401,8 +1413,42 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       startedAt,
     };
     yield* pushAction(tabId, actionEvent);
+    const finalize = Effect.fn("PreviewManager.finalizeControlAction")(function* (
+      exit: Exit.Exit<A, PreviewManagerError>,
+    ) {
+      const completedAt = yield* currentIso;
+      if (exit._tag === "Success") {
+        yield* replaceAction(tabId, {
+          ...actionEvent,
+          status: "succeeded",
+          completedAt,
+        });
+      } else {
+        const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
+        const interrupted = isPreviewAutomationControlInterruptedError(error);
+        const errorMessage = isPreviewOperationError(error)
+          ? PreviewOperationError.toTimelineMessage(error)
+          : isPreviewAutomationEvaluationError(error)
+            ? PreviewAutomationEvaluationError.toTimelineMessage(error)
+            : isPreviewAutomationInvalidSelectorError(error)
+              ? PreviewAutomationInvalidSelectorError.toTimelineMessage(error)
+              : error instanceof Error
+                ? error.message
+                : String(error);
+        yield* replaceAction(tabId, {
+          ...actionEvent,
+          status: interrupted ? "interrupted" : "failed",
+          completedAt,
+          error: errorMessage,
+        });
+      }
+      const tabs = yield* SynchronizedRef.get(tabsRef);
+      if (tabs.has(tabId)) yield* update(tabId, { controller: "none" });
+    });
     const epoch = (yield* Ref.get(controlEpochRef)).get(tabId) ?? 0;
-    const control = yield* ensureControlSession(wc);
+    const control = yield* ensureControlSession(wc).pipe(
+      Effect.onError((cause) => finalize(Exit.failCause(cause))),
+    );
     const execute = Effect.fn("PreviewManager.executeControlAction")(function* () {
       yield* update(tabId, { controller: "agent" });
       const send: SendCommand = Effect.fn("PreviewManager.sendCommand")(
@@ -1448,38 +1494,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         },
       );
       return yield* use(send, sendCleanup);
-    });
-    const finalize = Effect.fn("PreviewManager.finalizeControlAction")(function* (
-      exit: Exit.Exit<A, PreviewManagerError>,
-    ) {
-      const completedAt = yield* currentIso;
-      if (exit._tag === "Success") {
-        yield* replaceAction(tabId, {
-          ...actionEvent,
-          status: "succeeded",
-          completedAt,
-        });
-      } else {
-        const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
-        const interrupted = isPreviewAutomationControlInterruptedError(error);
-        const errorMessage = isPreviewOperationError(error)
-          ? PreviewOperationError.toTimelineMessage(error)
-          : isPreviewAutomationEvaluationError(error)
-            ? PreviewAutomationEvaluationError.toTimelineMessage(error)
-            : isPreviewAutomationInvalidSelectorError(error)
-              ? PreviewAutomationInvalidSelectorError.toTimelineMessage(error)
-              : error instanceof Error
-                ? error.message
-                : String(error);
-        yield* replaceAction(tabId, {
-          ...actionEvent,
-          status: interrupted ? "interrupted" : "failed",
-          completedAt,
-          error: errorMessage,
-        });
-      }
-      const tabs = yield* SynchronizedRef.get(tabsRef);
-      if (tabs.has(tabId)) yield* update(tabId, { controller: "none" });
     });
     return yield* control.semaphore.withPermit(execute().pipe(Effect.onExit(finalize)));
   });
@@ -2139,6 +2153,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       // changed. Only push its zoom back down — Chromium may have just handed
       // this guest the app window's zoom level.
       yield* assertTabZoom(tabId);
+      runFork(restoreControlSession(tabId, wc));
       yield* attempt({ operation: "registerWebview.sendTheme", tabId, webContentsId }, () =>
         wc.send(ANNOTATION_THEME_CHANNEL, annotationTheme),
       );
@@ -4348,7 +4363,7 @@ export class PreviewOperationError extends Schema.TaggedErrorClass<PreviewOperat
   private safeCauseMessage(): string | null {
     if (!(this.cause instanceof Error)) return null;
     if (this.cause.name !== "AbortError" && this.cause.name !== "UnknownVizError") return null;
-    return `${this.cause.name}: ${this.cause.message.slice(0, 512)}`;
+    return `${this.cause.name}: ${safeNativeErrorMessage(this.cause.message)}`;
   }
 
   override get message(): string {

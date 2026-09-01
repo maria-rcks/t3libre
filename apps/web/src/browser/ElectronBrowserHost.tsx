@@ -88,7 +88,27 @@ export function ElectronBrowserHost() {
       }
       retirementTimersRef.current.set(runtimeTabId, null);
       void preview.prepareWebviewRemoval(runtimeTabId, webContentsId).then(
-        () => removeRetired(runtimeTabId),
+        () => {
+          if (!currentSessionIdsRef.current.has(runtimeTabId)) {
+            removeRetired(runtimeTabId);
+            return;
+          }
+          const restore = () => {
+            if (!currentSessionIdsRef.current.has(runtimeTabId)) {
+              removeRetired(runtimeTabId);
+              return;
+            }
+            retirementTimersRef.current.set(runtimeTabId, null);
+            void preview.registerWebview(runtimeTabId, webContentsId).then(
+              () => removeRetired(runtimeTabId),
+              () => {
+                const timerId = window.setTimeout(restore, 250);
+                retirementTimersRef.current.set(runtimeTabId, timerId);
+              },
+            );
+          };
+          restore();
+        },
         () => {
           const timerId = window.setTimeout(() => prepareRemoval(runtimeTabId), 250);
           retirementTimersRef.current.set(runtimeTabId, timerId);

@@ -372,6 +372,25 @@ describe("previewAutomationRequestConsumer", () => {
     },
   );
 
+  it("replaces native error text containing a URL", () => {
+    const cause = new Error("capture failed at https://preview.example/secret");
+    cause.name = "UnknownVizError";
+    const response = serializePreviewAutomationError(cause, {
+      requestId: "request-native-url",
+      operation: "snapshot",
+      environmentId,
+      threadId,
+      tabId,
+    });
+
+    expect(response).toMatchObject({
+      detail: {
+        cause: { name: "UnknownVizError", message: "Preview capture failed." },
+      },
+    });
+    expect(JSON.stringify(response)).not.toContain("preview.example");
+  });
+
   it("preserves the owned timeout stage from a flattened IPC error", () => {
     const response = serializePreviewAutomationError(
       new Error(

@@ -245,6 +245,22 @@ export const isPreviewAutomationHostError = Schema.is(PreviewAutomationHostError
 
 const SAFE_NATIVE_ERROR_NAMES = new Set(["AbortError", "UnknownVizError"]);
 const MAX_SAFE_ERROR_MESSAGE_LENGTH = 512;
+const SAFE_NATIVE_ERROR_MESSAGE_PATTERN = /^[\p{L}\p{N}\s.,:;!?'"()[\]_-]+$/u;
+
+const safeNativeErrorMessage = (message: string): string => {
+  const bounded = message.trim().slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH);
+  return bounded.length > 0 &&
+    !message.includes("\n") &&
+    !message.includes("\r") &&
+    SAFE_NATIVE_ERROR_MESSAGE_PATTERN.test(bounded)
+    ? bounded
+    : "Preview capture failed.";
+};
+
+const timeoutMessage = (stage?: string): string =>
+  stage === undefined
+    ? "Preview automation timed out."
+    : `Preview automation timed out during ${stage}.`;
 
 const safeErrorCause = (
   cause: unknown,
@@ -257,7 +273,7 @@ const safeErrorCause = (
   if (SAFE_NATIVE_ERROR_NAMES.has(name)) {
     return {
       name,
-      message: message.slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH),
+      message: safeNativeErrorMessage(message),
       ...(stage === undefined ? {} : { stage }),
     };
   }
@@ -265,7 +281,7 @@ const safeErrorCause = (
   if (embedded?.[1]) {
     return {
       name: embedded[1],
-      message: (embedded[2] ?? "").slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH),
+      message: safeNativeErrorMessage(embedded[2] ?? ""),
     };
   }
   const ownedTimeout = message.match(/\b(Preview[A-Za-z]+TimeoutError):\s*([^\n]*?)(?:\s+at\s|$)/);
@@ -274,7 +290,7 @@ const safeErrorCause = (
     const ownedStage = ownedMessage.match(/\bduring\s+([a-z][a-z0-9-]*)\b/)?.[1];
     return {
       name: ownedTimeout[1],
-      message: ownedMessage,
+      message: timeoutMessage(ownedStage),
       ...(ownedStage === undefined ? {} : { stage: ownedStage }),
     };
   }
@@ -284,7 +300,7 @@ const safeErrorCause = (
   if (flattenedOwnedTimeout?.[1] && flattenedOwnedTimeout[2]) {
     return {
       name: "PreviewAutomationTimeoutError",
-      message: flattenedOwnedTimeout[1].slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH),
+      message: timeoutMessage(flattenedOwnedTimeout[2]),
       stage: flattenedOwnedTimeout[2],
     };
   }
@@ -292,7 +308,7 @@ const safeErrorCause = (
   if (tag.endsWith("TimeoutError") && message.length > 0) {
     return {
       name: tag,
-      message: message.slice(0, MAX_SAFE_ERROR_MESSAGE_LENGTH),
+      message: timeoutMessage(stage),
       ...(stage === undefined ? {} : { stage }),
     };
   }
