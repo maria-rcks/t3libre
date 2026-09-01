@@ -169,10 +169,10 @@ const STATE_TABS = [
 
 const SORT_OPTIONS = [
   { value: "updated", label: "Recently updated", Icon: ClockIcon },
-  { value: "newest", label: "Newest", Icon: CalendarArrowDownIcon },
-  { value: "oldest", label: "Oldest", Icon: CalendarArrowUpIcon },
-  { value: "largest", label: "Largest change", Icon: Maximize2Icon },
-  { value: "smallest", label: "Smallest change", Icon: Minimize2Icon },
+  { value: "newest", label: "Newest shown", Icon: CalendarArrowDownIcon },
+  { value: "oldest", label: "Oldest shown", Icon: CalendarArrowUpIcon },
+  { value: "largest", label: "Largest shown", Icon: Maximize2Icon },
+  { value: "smallest", label: "Smallest shown", Icon: Minimize2Icon },
 ] as const satisfies ReadonlyArray<PullRequestFilterOption<PullRequestListSort>>;
 
 /** Long enough that a keystroke does not become a request, short enough to feel answered. */
@@ -210,7 +210,11 @@ function pullRequestSearchLabels(raw: unknown): ReadonlyArray<string> | undefine
   const labels = values
     .filter((value): value is string => typeof value === "string")
     .map((value) => value.trim().slice(0, 200))
-    .filter((value, index, all) => value.length > 0 && all.indexOf(value) === index)
+    .filter(
+      (value, index, all) =>
+        value.length > 0 &&
+        all.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index,
+    )
     .slice(0, 10);
   return labels.length === 0 ? undefined : labels;
 }

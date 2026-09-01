@@ -316,7 +316,7 @@ function PullRequestAuthorFilter({
                 <PullRequestActorAvatar actor={option.actor} />
                 <span className="min-w-0 flex-1 truncate">{option.actor.login}</span>
                 <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                  {option.count} shown · {option.mergedCount} merged
+                  {option.mergedCount} merges loaded
                 </span>
               </span>
             </MenuRadioItem>
@@ -338,6 +338,12 @@ function PullRequestLabelFilter({
   onChange: (labels: ReadonlyArray<string>) => void;
 }) {
   const selected = new Set(value.map((name) => name.toLowerCase()));
+  const visible = [
+    ...value
+      .filter((name) => !options.some((option) => option.name.toLowerCase() === name.toLowerCase()))
+      .map((name) => ({ name, color: null, count: 0 })),
+    ...options,
+  ];
   return (
     <MenuSub>
       <MenuSubTrigger>
@@ -348,10 +354,10 @@ function PullRequestLabelFilter({
         </span>
       </MenuSubTrigger>
       <MenuSubPopup className="w-72">
-        {options.length === 0 ? (
+        {visible.length === 0 ? (
           <MenuItem disabled>No labels in this view</MenuItem>
         ) : (
-          options.map((option) => {
+          visible.map((option) => {
             const key = option.name.toLowerCase();
             const checked = selected.has(key);
             const dot = pullRequestLabelColor(option.color);
