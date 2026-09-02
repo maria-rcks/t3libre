@@ -234,6 +234,299 @@ function makeThread(
 }
 
 describe("buildThreadFeed", () => {
+  it("keeps long Claude commands expandable without repeating them in full detail", () => {
+    const command = `printf 'first line\nsecond line'\n&& printf done`;
+    const thread = makeThread({
+      id: ThreadId.make("thread-long-command"),
+      projectId: ProjectId.make("project-1"),
+      title: "Long command",
+      activities: [
+        makeActivity({
+          id: EventId.make("long-command"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Command run",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          payload: {
+            itemType: "command_execution",
+            title: "Command run",
+            detail: `Bash: ${command}`,
+            data: { toolName: "Bash", command },
+          },
+        }),
+      ],
+    });
+
+    const [group] = buildThreadFeed(thread);
+    expect(group?.type).toBe("activity-group");
+    if (group?.type !== "activity-group") return;
+    const [row] = group.activities;
+    expect(row).toMatchObject({ detail: command, canExpand: true });
+    expect(row?.getFullDetail()).toBe(command);
+    expect(row?.getCopyText()).toBe(`Command run\n${command}`);
+  });
+
+  it("keeps command output when it equals the displayed command", () => {
+    const command = "printf hello";
+    const thread = makeThread({
+      id: ThreadId.make("thread-matching-command-output"),
+      projectId: ProjectId.make("project-1"),
+      title: "Matching output",
+      activities: [
+        makeActivity({
+          id: EventId.make("matching-command-output"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Command run",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          payload: {
+            itemType: "command_execution",
+            title: "Command run",
+            detail: `Bash: ${command}`,
+            data: { toolName: "Bash", command, rawOutput: { content: command } },
+          },
+        }),
+      ],
+    });
+
+    const [group] = buildThreadFeed(thread);
+    expect(group?.type).toBe("activity-group");
+    if (group?.type !== "activity-group") return;
+    const [row] = group.activities;
+    expect(row?.detail).toBe(command);
+    expect(row?.getFullDetail()).toBe(`${command}\n\n${command}`);
+    expect(row?.getCopyText()).toBe(`Command run\n${command}\n\n${command}`);
+  });
+
+  it("keeps OpenCode detail-only output when it equals the command", () => {
+    const command = "printf hello";
+    const thread = makeThread({
+      id: ThreadId.make("thread-opencode-detail-output"),
+      projectId: ProjectId.make("project-1"),
+      title: "OpenCode detail output",
+      activities: [
+        makeActivity({
+          id: EventId.make("opencode-detail-output"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "bash",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          payload: {
+            itemType: "command_execution",
+            title: "bash",
+            detail: command,
+            data: { command },
+          },
+        }),
+      ],
+    });
+
+    const [group] = buildThreadFeed(thread);
+    expect(group?.type).toBe("activity-group");
+    if (group?.type !== "activity-group") return;
+    const [row] = group.activities;
+    expect(row?.workEntry.detail).toBe(command);
+    expect(row?.getFullDetail()).toBe(`${command}\n\n${command}`);
+  });
+
+  it("drops a truncated Claude echo of a long command", () => {
+    const command = `git add -A && git commit -m "${"x".repeat(200)}"`;
+    const thread = makeThread({
+      id: ThreadId.make("thread-truncated-echo"),
+      projectId: ProjectId.make("project-1"),
+      title: "Truncated echo",
+      activities: [
+        makeActivity({
+          id: EventId.make("truncated-echo"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Command run",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          payload: {
+            itemType: "command_execution",
+            title: "Command run",
+            detail: `Bash: ${command}`.slice(0, 177) + "...",
+            data: { toolName: "Bash", command },
+          },
+        }),
+      ],
+    });
+
+    const [group] = buildThreadFeed(thread);
+    expect(group?.type).toBe("activity-group");
+    if (group?.type !== "activity-group") return;
+    const [row] = group.activities;
+    expect(row?.workEntry.detail).toBeUndefined();
+    expect(row?.getFullDetail()).toBe(command);
+  });
+
+  it("drops an ACP command echo when the update omits the tool kind", () => {
+    const command = "pnpm test";
+    const thread = makeThread({
+      id: ThreadId.make("thread-acp-no-kind"),
+      projectId: ProjectId.make("project-1"),
+      title: "ACP no kind",
+      activities: [
+        makeActivity({
+          id: EventId.make("acp-no-kind"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Terminal",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          payload: {
+            itemType: "command_execution",
+            title: "Terminal",
+            detail: command,
+            data: { toolCallId: "tool-1", command },
+          },
+        }),
+      ],
+    });
+
+    const [group] = buildThreadFeed(thread);
+    expect(group?.type).toBe("activity-group");
+    if (group?.type !== "activity-group") return;
+    const [row] = group.activities;
+    expect(row?.workEntry.detail).toBeUndefined();
+    expect(row?.getFullDetail()).toBe(command);
+  });
+
+  it("drops ACP command metadata when detail only repeats the command", () => {
+    const command = "printf hello";
+    const thread = makeThread({
+      id: ThreadId.make("thread-acp-command-detail"),
+      projectId: ProjectId.make("project-1"),
+      title: "ACP command detail",
+      activities: [
+        makeActivity({
+          id: EventId.make("acp-command-detail"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Terminal",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          payload: {
+            itemType: "command_execution",
+            title: "Terminal",
+            detail: command,
+            data: { kind: "execute", command },
+          },
+        }),
+      ],
+    });
+
+    const [group] = buildThreadFeed(thread);
+    expect(group?.type).toBe("activity-group");
+    if (group?.type !== "activity-group") return;
+    const [row] = group.activities;
+    expect(row?.workEntry.detail).toBeUndefined();
+    expect(row?.getFullDetail()).toBe(command);
+  });
+
+  it("does not show command output when the command input is missing", () => {
+    const thread = makeThread({
+      id: ThreadId.make("thread-command-without-input"),
+      projectId: ProjectId.make("project-1"),
+      title: "Missing command input",
+      activities: [
+        makeActivity({
+          id: EventId.make("command-without-input"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Command run",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          payload: {
+            itemType: "command_execution",
+            title: "Command run",
+            data: { rawOutput: { content: "output without command metadata" } },
+          },
+        }),
+      ],
+    });
+
+    const [group] = buildThreadFeed(thread);
+    expect(group?.type).toBe("activity-group");
+    if (group?.type !== "activity-group") return;
+    expect(group.activities[0]?.detail).toBeNull();
+    expect(group.activities[0]?.getFullDetail()).toBeNull();
+  });
+
+  it("keeps setup failures visible without routine setup notices before or after a turn", () => {
+    const thread = makeThread({
+      id: ThreadId.make("thread-worktree-setup"),
+      projectId: ProjectId.make("project-1"),
+      title: "Worktree setup",
+      activities: [
+        makeActivity({
+          id: EventId.make("setup-requested"),
+          kind: "setup-script.requested",
+          summary: "Starting setup script",
+          createdAt: "2026-08-30T00:00:00.000Z",
+        }),
+        makeActivity({
+          id: EventId.make("setup-started"),
+          kind: "setup-script.started",
+          summary: "Setup script started",
+          createdAt: "2026-08-30T00:00:01.000Z",
+        }),
+        makeActivity({
+          id: EventId.make("setup-failed"),
+          kind: "setup-script.failed",
+          summary: "Setup script failed to start",
+          createdAt: "2026-08-30T00:00:02.000Z",
+          tone: "error",
+          payload: { detail: "Setup command was not found" },
+        }),
+      ],
+    });
+    const latestTurn = {
+      turnId: TurnId.make("turn-after-setup"),
+      state: "running" as const,
+      requestedAt: "2026-08-30T00:00:03.000Z",
+      startedAt: "2026-08-30T00:00:04.000Z",
+      completedAt: null,
+      assistantMessageId: null,
+    };
+
+    for (const currentTurn of [null, latestTurn]) {
+      const feed = buildThreadFeed({ ...thread, latestTurn: currentTurn });
+      expect(feed).toMatchObject([
+        {
+          type: "activity-group",
+          activities: [{ id: "setup-failed", status: "failure" }],
+        },
+      ]);
+      const group = feed[0];
+      if (group?.type !== "activity-group") throw new Error("Expected the setup failure group");
+      expect(group.activities[0]?.getCopyText()).toContain("Setup command was not found");
+    }
+  });
+
+  it.each(["setup-script.requested", "setup-script.started"])(
+    "keeps error-toned %s notices visible",
+    (kind) => {
+      const feed = buildThreadFeed(
+        makeThread({
+          id: ThreadId.make("thread-setup-error"),
+          projectId: ProjectId.make("project-1"),
+          title: "Setup error",
+          activities: [
+            makeActivity({
+              id: EventId.make("setup-error"),
+              kind,
+              summary: "Setup failed",
+              createdAt: "2026-08-30T00:00:00.000Z",
+              tone: "error",
+            }),
+          ],
+        }),
+      );
+
+      expect(feed).toMatchObject([
+        { type: "activity-group", activities: [{ id: "setup-error", status: "failure" }] },
+      ]);
+    },
+  );
+
   it("keeps older local feedback before newer messages returned by the server", () => {
     const submission = {
       id: MessageId.make("feedback-command-ordering"),
@@ -425,6 +718,61 @@ describe("buildThreadFeed", () => {
     expect(group.activities[0]?.getCopyText()).toBe(
       "Run tests\nbun run test\n/bin/zsh -lc 'bun run test'",
     );
+  });
+
+  it("keeps viewed image metadata while collapsing a streamed Claude Read", () => {
+    const turnId = TurnId.make("turn-image-read");
+    const imagePath = `/workspace/${"nested folder/".repeat(16)}reference image.webp`;
+    const thread = makeThread({
+      id: ThreadId.make("thread-image-read"),
+      projectId: ProjectId.make("project-1"),
+      title: "Image read",
+      activities: [
+        makeActivity({
+          id: EventId.make("image-read-update"),
+          kind: "tool.updated",
+          tone: "tool",
+          summary: "Image view",
+          createdAt: "2026-04-01T00:00:01.000Z",
+          turnId,
+          payload: {
+            toolCallId: "tool-read-image",
+            itemType: "image_view",
+            status: "inProgress",
+            detail: `${imagePath.slice(0, 177)}...`,
+            data: { imagePath },
+          },
+        }),
+        makeActivity({
+          id: EventId.make("image-read-completed"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Image view",
+          createdAt: "2026-04-01T00:00:02.000Z",
+          turnId,
+          payload: {
+            toolCallId: "tool-read-image",
+            itemType: "image_view",
+            status: "completed",
+            detail: `${imagePath.slice(0, 177)}...`,
+            data: {},
+          },
+        }),
+      ],
+    });
+
+    const group = buildThreadFeed(thread)[0];
+    expect(group).toMatchObject({
+      type: "activity-group",
+      activities: [
+        {
+          workEntry: {
+            itemType: "image_view",
+            viewedImagePath: imagePath,
+          },
+        },
+      ],
+    });
   });
 
   it("keeps MCP inputs available to expanded mobile work rows", () => {
@@ -942,8 +1290,27 @@ describe("buildThreadFeed", () => {
       summary: "Running pnpm",
       summaryKind: "command",
       live: true,
-      shimmer: false,
+      shimmer: true,
     });
+    expect(rows[0]).toMatchObject({ live: false, shimmer: false });
+
+    const stoppedRows = deriveThreadFeedPresentation(feed, latestTurn, new Set());
+    expect(stoppedRows.filter((entry) => entry.type === "work-toggle")).toMatchObject([
+      { live: false, shimmer: false },
+      { live: false, shimmer: false },
+    ]);
+
+    const completedRows = deriveThreadFeedPresentation(
+      feed,
+      { ...latestTurn, state: "completed", completedAt: "2026-04-01T00:00:04.000Z" },
+      new Set([turnId]),
+      new Set(),
+      latestTurn.startedAt,
+    );
+    expect(completedRows.filter((entry) => entry.type === "work-toggle")).toMatchObject([
+      { live: false, shimmer: false },
+      { live: false, shimmer: false },
+    ]);
   });
 
   it("does not revive cached in-progress tools after work stops", () => {
