@@ -21,6 +21,7 @@ import {
   omitSupersededLifecycleMarkers,
   resolveWorkEntryToolPresentation,
   summarizeToolGroup,
+  toolGroupAction,
   toolGroupSummaryKind,
   type ToolGroupSummaryKind,
 } from "@t3tools/client-runtime/work-log/presentation";
@@ -1518,6 +1519,21 @@ function appendToolGroupRows(
   const active = latestActiveActivity !== undefined;
   const live = activeTail || active;
   const latestActivity = latestActiveActivity ?? activities.at(-1)!;
+  if (
+    !live &&
+    activities.length === 1 &&
+    latestActivity.toolLike &&
+    toolGroupAction(latestActivity.workEntry) !== "edit"
+  ) {
+    result.push({
+      type: "activity-group",
+      id: latestActivity.id,
+      createdAt: latestActivity.createdAt,
+      turnId: latestActivity.turnId,
+      activities,
+    });
+    return;
+  }
   const summary = live
     ? liveToolActivitySummary(latestActivity, active)
     : activities.length === 1 && !activities[0]!.toolLike
