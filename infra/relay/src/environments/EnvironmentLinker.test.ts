@@ -281,14 +281,14 @@ describe("EnvironmentLinker", () => {
     }),
   );
 
-  it.effect("does not deprovision the permanent endpoint on a durable-link conflict", () => {
-    let deprovisioned = false;
+  it.effect("rolls back its exact endpoint generation on a durable-link conflict", () => {
+    let deprovisionedGeneration: string | null = null;
     return Effect.gen(function* () {
       const { request } = yield* makeRequest;
       const linker = yield* EnvironmentLinker.EnvironmentLinker;
       const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
       expect(error._tag).toBe("ActiveDurableEnvironmentLinkConflict");
-      expect(deprovisioned).toBe(false);
+      expect(deprovisionedGeneration).toBe("provision-generation");
     }).pipe(
       Effect.provide(
         testLayer({
@@ -299,9 +299,9 @@ describe("EnvironmentLinker", () => {
                 environmentId: "env-link-test",
               }),
             ),
-          deprovision: () =>
+          deprovision: (input) =>
             Effect.sync(() => {
-              deprovisioned = true;
+              deprovisionedGeneration = input.target?.generationId ?? null;
             }),
         }),
       ),

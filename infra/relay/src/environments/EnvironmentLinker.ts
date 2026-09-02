@@ -9,7 +9,6 @@ import {
   RELAY_LINK_PROOF_TYP,
   verifyRelayJwt,
 } from "@t3tools/shared/relayJwt";
-import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -77,10 +76,6 @@ export type EnvironmentLinkError =
   | ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaimPersistenceError
   | EnvironmentCredentials.EnvironmentCredentialCreatePersistenceError
   | ManagedEndpointProvider.ManagedEndpointProviderError;
-
-const isActiveDurableEnvironmentLinkConflict = Schema.is(
-  EnvironmentLinks.ActiveDurableEnvironmentLinkConflict,
-);
 
 export class EnvironmentLinker extends Context.Service<
   EnvironmentLinker,
@@ -348,26 +343,6 @@ const make = Effect.gen(function* () {
               Effect.ignore,
             );
         }
-        const provisioned = input.request.managedTunnelsEnabled
-          ? yield* managedEndpointProvider.provision({
-              userId: input.userId,
-              environmentId: verified.environmentId,
-              origin: verified.origin,
-            })
-          : null;
-        const endpoint = provisioned?.endpoint ?? verified.endpoint;
-        // The secure-endpoint requirement only matters when the relay advertises
-        // this endpoint for other devices to reach (managed tunnel). Publish-only
-        // links are reached out of band (e.g. Tailscale) and their stored endpoint
-        // is never used for routing, so a nominal endpoint is acceptable.
-        if (input.request.managedTunnelsEnabled && !isSecureManagedEndpoint(endpoint)) {
-          return yield* new EnvironmentLinkProofInvalid({
-            userId: input.userId,
-            environmentId: verified.environmentId,
-            reason: "endpoint_not_secure",
-            stage: "validate_endpoint",
-          });
-        }
         const temporaryLease =
           input.request.temporary === true
             ? {
@@ -375,14 +350,28 @@ const make = Effect.gen(function* () {
                 expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 10 })),
               }
             : undefined;
-        const persistLink = links.upsert({
-          ...input,
-          proof: verified,
-          endpoint,
-          ...(temporaryLease === undefined ? {} : { temporaryLease }),
-        });
-        const finishLink = Effect.gen(function* () {
-          yield* persistLink;
+        const finishLink = Effect.fnUntraced(function* (
+          provisioned: ManagedEndpointProvider.ManagedEndpointProvisioningResult | null,
+        ) {
+          const endpoint = provisioned?.endpoint ?? verified.endpoint;
+          // The secure-endpoint requirement only matters when the relay advertises
+          // this endpoint for other devices to reach (managed tunnel). Publish-only
+          // links are reached out of band (e.g. Tailscale) and their stored endpoint
+          // is never used for routing, so a nominal endpoint is acceptable.
+          if (input.request.managedTunnelsEnabled && !isSecureManagedEndpoint(endpoint)) {
+            return yield* new EnvironmentLinkProofInvalid({
+              userId: input.userId,
+              environmentId: verified.environmentId,
+              reason: "endpoint_not_secure",
+              stage: "validate_endpoint",
+            });
+          }
+          yield* links.upsert({
+            ...input,
+            proof: verified,
+            endpoint,
+            ...(temporaryLease === undefined ? {} : { temporaryLease }),
+          });
           const environmentCredential = yield* credentials.create({
             environmentId: verified.environmentId,
             environmentPublicKey: verified.environmentPublicKey,
@@ -395,14 +384,15 @@ const make = Effect.gen(function* () {
             ...(temporaryLease === undefined ? {} : { temporaryLease }),
           };
         });
-        if (temporaryLease === undefined) return yield* finishLink;
-
-        const leaseKey = {
-          userId: input.userId,
-          environmentId: verified.environmentId,
-          leaseId: temporaryLease.leaseId,
-        };
-        const rollbackTemporaryLink = Effect.gen(function* () {
+        const rollbackTemporaryLink = Effect.fnUntraced(function* (
+          provisioned: ManagedEndpointProvider.ManagedEndpointProvisioningResult | null,
+        ) {
+          if (temporaryLease === undefined) return;
+          const leaseKey = {
+            userId: input.userId,
+            environmentId: verified.environmentId,
+            leaseId: temporaryLease.leaseId,
+          };
           const claimedLease = yield* temporaryLeases.claimCleanup(leaseKey).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("temporary lease cleanup claim failed", {
@@ -429,16 +419,29 @@ const make = Effect.gen(function* () {
             yield* temporaryLeases.clear(leaseKey).pipe(Effect.catchCause(Effect.logWarning));
           }
         });
-        return yield* finishLink.pipe(
-          Effect.onExit((exit) => {
-            if (Exit.isSuccess(exit)) return Effect.void;
-            const durableConflict = exit.cause.reasons.some(
-              (reason) =>
-                Cause.isFailReason(reason) && isActiveDurableEnvironmentLinkConflict(reason.error),
+        const provisionManagedEndpoint = managedEndpointProvider.provision({
+          userId: input.userId,
+          environmentId: verified.environmentId,
+          origin: verified.origin,
+        });
+        if (temporaryLease !== undefined && input.request.managedTunnelsEnabled) {
+          return yield* Effect.acquireUseRelease(
+            provisionManagedEndpoint,
+            finishLink,
+            (provisioned, exit) =>
+              Exit.isFailure(exit) ? rollbackTemporaryLink(provisioned) : Effect.void,
+          );
+        }
+        const provisioned = input.request.managedTunnelsEnabled
+          ? yield* provisionManagedEndpoint
+          : null;
+        return yield* temporaryLease === undefined
+          ? finishLink(provisioned)
+          : finishLink(provisioned).pipe(
+              Effect.onExit((exit) =>
+                Exit.isFailure(exit) ? rollbackTemporaryLink(provisioned) : Effect.void,
+              ),
             );
-            return durableConflict ? Effect.void : rollbackTemporaryLink;
-          }),
-        );
       });
       return yield* ManagedEndpointProvisionClaims.withManagedEndpointProvisionClaim(
         provisionClaims,
