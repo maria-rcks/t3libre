@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -195,6 +196,45 @@ describe("serverRuntimeState", () => {
         origin: ownedState.origin,
         devUrl: ownedState.devUrl,
       });
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("restores the runtime advertisement when an owned mutation fails", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-mutation-failure-test-",
+      });
+      const statePath = path.join(root, "server.json");
+      const state: ServerRuntimeState.PersistedServerRuntimeState = {
+        version: 1,
+        pid: 456,
+        port: 4_971,
+        origin: "http://127.0.0.1:4971",
+        pairingBaseUrl: "https://owned.tunnels.example.com/",
+        startedAt: "2026-06-20T00:00:00.000Z",
+      };
+      yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state });
+      const failingFileSystem = FileSystem.FileSystem.of({
+        ...fileSystem,
+        readFileString: (filePath, encoding) =>
+          filePath.includes("server.json.mutate.")
+            ? Effect.die(new Error("injected snapshot read failure"))
+            : fileSystem.readFileString(filePath, encoding),
+      });
+
+      const result = yield* ServerRuntimeState.clearOwnedPairingBaseUrl({
+        path: statePath,
+        pid: state.pid,
+        pairingBaseUrl: "https://owned.tunnels.example.com/",
+      }).pipe(Effect.provideService(FileSystem.FileSystem, failingFileSystem), Effect.exit);
+
+      assert.isTrue(Exit.isFailure(result));
+      assert.deepEqual(
+        Option.getOrThrow(yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath)),
+        state,
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

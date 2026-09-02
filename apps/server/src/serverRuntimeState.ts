@@ -1,5 +1,6 @@
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -53,43 +54,81 @@ const mutatePersistedServerRuntimeState = (
   statePath: string,
   mutate: (state: PersistedServerRuntimeState) => Option.Option<PersistedServerRuntimeState>,
 ) =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      yield* fs.makeDirectory(path.dirname(statePath), { recursive: true });
-      const tempDirectory = yield* fs.makeTempDirectoryScoped({
-        directory: path.dirname(statePath),
-        prefix: `${path.basename(statePath)}.mutate.`,
-      });
-      const snapshotPath = path.join(tempDirectory, "snapshot");
-      const moved = yield* fs.rename(statePath, snapshotPath).pipe(
-        Effect.as(true),
-        Effect.catch((error) =>
-          error.reason._tag === "NotFound" ? Effect.succeed(false) : Effect.fail(error),
-        ),
-      );
-      if (!moved) return;
-
-      const raw = yield* fs.readFileString(snapshotPath);
-      const decoded = yield* decodePersistedServerRuntimeState(raw.trim()).pipe(Effect.option);
-      const replacement = Option.isSome(decoded) ? mutate(decoded.value) : Option.none();
-      if (Option.isNone(decoded) || Option.isSome(replacement)) {
-        const sourcePath = Option.isNone(decoded) ? snapshotPath : path.join(tempDirectory, "next");
-        if (Option.isSome(replacement)) {
-          yield* fs.writeFileString(
-            sourcePath,
-            `${encodePersistedServerRuntimeState(replacement.value)}\n`,
-          );
-        }
-        yield* fs
-          .link(sourcePath, statePath)
-          .pipe(
-            Effect.catch((error) => (isAlreadyExists(error) ? Effect.void : Effect.fail(error))),
-          );
-      }
-    }),
-  );
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    return yield* Effect.acquireUseRelease(
+      Effect.gen(function* () {
+        yield* fs.makeDirectory(path.dirname(statePath), { recursive: true });
+        const tempDirectory = yield* fs.makeTempDirectory({
+          directory: path.dirname(statePath),
+          prefix: `${path.basename(statePath)}.mutate.`,
+        });
+        const snapshotPath = path.join(tempDirectory, "snapshot");
+        const moved = yield* fs.rename(statePath, snapshotPath).pipe(
+          Effect.as(true),
+          Effect.catch((error) =>
+            error.reason._tag === "NotFound" ? Effect.succeed(false) : Effect.fail(error),
+          ),
+          Effect.tapError(() => fs.remove(tempDirectory, { recursive: true, force: true })),
+        );
+        return { moved, snapshotPath, tempDirectory };
+      }),
+      ({ moved, snapshotPath, tempDirectory }) =>
+        !moved
+          ? Effect.void
+          : Effect.gen(function* () {
+              const raw = yield* fs.readFileString(snapshotPath);
+              const decoded = yield* decodePersistedServerRuntimeState(raw.trim()).pipe(
+                Effect.option,
+              );
+              const replacement = Option.isSome(decoded) ? mutate(decoded.value) : Option.none();
+              if (Option.isNone(decoded) || Option.isSome(replacement)) {
+                const sourcePath = Option.isNone(decoded)
+                  ? snapshotPath
+                  : path.join(tempDirectory, "next");
+                if (Option.isSome(replacement)) {
+                  yield* fs.writeFileString(
+                    sourcePath,
+                    `${encodePersistedServerRuntimeState(replacement.value)}\n`,
+                  );
+                }
+                yield* fs
+                  .link(sourcePath, statePath)
+                  .pipe(
+                    Effect.catch((error) =>
+                      isAlreadyExists(error) ? Effect.void : Effect.fail(error),
+                    ),
+                  );
+              }
+            }),
+      ({ moved, snapshotPath, tempDirectory }, exit) => {
+        const cleanup = fs.remove(tempDirectory, { recursive: true, force: true }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Failed to clean up a server runtime-state mutation snapshot", {
+              cause,
+              statePath,
+              tempDirectory,
+            }),
+          ),
+        );
+        if (!moved || Exit.isSuccess(exit)) return cleanup;
+        return fs.link(snapshotPath, statePath).pipe(
+          Effect.matchEffect({
+            onFailure: (error) =>
+              isAlreadyExists(error)
+                ? cleanup
+                : Effect.logWarning("Failed to restore a server runtime-state mutation snapshot", {
+                    error,
+                    statePath,
+                    snapshotPath,
+                  }),
+            onSuccess: () => cleanup,
+          }),
+        );
+      },
+    );
+  });
 
 const runtimeOriginForConfig = (
   config: Pick<ServerConfig.ServerConfig["Service"], "host">,
