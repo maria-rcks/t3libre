@@ -236,11 +236,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const revokeMcpCredential =
     options?.revokeMcpCredential ?? McpSessionRegistry.revokeActiveMcpThread;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
-  const pendingFallbackCompactions = new Map<ThreadId, Deferred.Deferred<boolean>>();
-  const settleFallbackCompaction = (threadId: ThreadId, succeeded: boolean) => {
+  const pendingFallbackCompactions = new Map<ThreadId, Deferred.Deferred<string>>();
+  const settleFallbackCompaction = (threadId: ThreadId, terminal: string) => {
     const completion = pendingFallbackCompactions.get(threadId);
     pendingFallbackCompactions.delete(threadId);
-    return completion ? Deferred.succeed(completion, succeeded) : Effect.succeed(false);
+    return completion ? Deferred.succeed(completion, terminal) : Effect.succeed(false);
   };
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   /**
@@ -366,16 +366,17 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       if (!pendingFallbackCompactions.has(canonicalEvent.threadId)) return;
 
       const fallbackCompactionTerminal =
-        canonicalEvent.type === "session.exited" ||
-        canonicalEvent.type === "runtime.error" ||
-        canonicalEvent.type === "turn.aborted" ||
-        canonicalEvent.type === "turn.completed";
-      const fallbackCompactionSucceeded =
-        canonicalEvent.type === "turn.completed" && canonicalEvent.payload.state === "completed";
+        canonicalEvent.type === "turn.completed"
+          ? canonicalEvent.payload.state
+          : canonicalEvent.type === "session.exited" ||
+              canonicalEvent.type === "runtime.error" ||
+              canonicalEvent.type === "turn.aborted"
+            ? canonicalEvent.type
+            : null;
       const fallbackCompactionSettled =
-        fallbackCompactionTerminal &&
-        (yield* settleFallbackCompaction(canonicalEvent.threadId, fallbackCompactionSucceeded));
-      if (!fallbackCompactionSettled || !fallbackCompactionSucceeded) {
+        fallbackCompactionTerminal !== null &&
+        (yield* settleFallbackCompaction(canonicalEvent.threadId, fallbackCompactionTerminal));
+      if (!fallbackCompactionSettled || fallbackCompactionTerminal !== "completed") {
         return;
       }
 
@@ -894,9 +895,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* routed.adapter.compactThread(routed.threadId, modelSelection);
       } else {
         const input = routed.adapter.provider === "cursor" ? "/compress" : "/compact";
-        const completion = yield* Deferred.make<boolean>();
+        const completion = yield* Deferred.make<string>();
         pendingFallbackCompactions.set(threadId, completion);
-        const succeeded = yield* sendTurn({
+        const terminal = yield* sendTurn({
           threadId,
           input,
           ...(modelSelection !== undefined ? { modelSelection } : {}),
@@ -904,11 +905,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           Effect.andThen(Deferred.await(completion)),
           Effect.ensuring(Effect.sync(() => void pendingFallbackCompactions.delete(threadId))),
         );
-        if (!succeeded) {
+        if (terminal !== "completed") {
           return yield* new ProviderAdapterRequestError({
             provider: routed.adapter.provider,
-            method: "thread/compact",
-            detail: "Fallback context compaction failed.",
+            method: "turn/start",
+            detail: `Fallback context compaction ended with ${terminal}.`,
           });
         }
       }
