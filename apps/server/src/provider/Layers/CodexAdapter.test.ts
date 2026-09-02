@@ -466,6 +466,55 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }),
   );
 
+  it.effect("releases compaction waiters on terminal turns and interrupts", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("thread-compact-terminal");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      const compactThread = adapter.compactThread;
+      NodeAssert.ok(compactThread);
+
+      yield* compactThread(threadId);
+      const turnAfterCompletion = yield* adapter
+        .sendTurn({ threadId, input: "after terminal turn", attachments: [] })
+        .pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 0);
+      yield* runtime.emit({
+        id: asEventId("evt-compaction-turn-completed"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "turn/completed",
+        threadId,
+        turnId: asTurnId("provider-compact-turn"),
+        payload: {
+          threadId: "provider-thread-1",
+          turn: { id: "provider-compact-turn", status: "completed", items: [] },
+        },
+      });
+      yield* Fiber.join(turnAfterCompletion);
+      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
+
+      yield* compactThread(threadId);
+      const turnAfterInterrupt = yield* adapter
+        .sendTurn({ threadId, input: "after interrupt", attachments: [] })
+        .pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
+      yield* adapter.interruptTurn(threadId);
+      yield* Fiber.join(turnAfterInterrupt);
+      NodeAssert.equal(runtime.interruptTurnImpl.mock.calls.length, 1);
+      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 2);
+    }),
+  );
+
   it.effect("uploads feedback for the active Codex thread", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;

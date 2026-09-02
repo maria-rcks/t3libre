@@ -1247,6 +1247,14 @@ const make = Effect.gen(function* () {
         );
         const latestThread = yield* resolveThread(event.payload.threadId);
         const latestSession = latestThread?.session;
+        const compactMessageIndex =
+          latestThread?.messages.findIndex((message) => message.id === event.payload.messageId) ??
+          -1;
+        const hasLaterPrompt =
+          compactMessageIndex >= 0 &&
+          latestThread?.messages
+            .slice(compactMessageIndex + 1)
+            .some((message) => message.role === "user" && !isCompactCommandMessage(message));
         const runtimeSessionChanged =
           sessionBeforeCompaction !== undefined &&
           runtimeSession !== undefined &&
@@ -1272,7 +1280,7 @@ const make = Effect.gen(function* () {
             session: latestSession,
             createdAt: event.payload.createdAt,
           });
-        } else if (!latestSessionSettled) {
+        } else if (!latestSessionSettled && !hasLaterPrompt) {
           yield* setThreadSessionErrorOnTurnStartFailure({
             threadId: event.payload.threadId,
             detail,
@@ -1320,15 +1328,26 @@ const make = Effect.gen(function* () {
       );
 
     if (isCompactCommand) {
+      const latestThread = yield* resolveThread(event.payload.threadId);
+      if (latestThread?.session?.status === "starting") {
+        yield* appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.turn.start.failed",
+          summary: "Context compaction failed",
+          detail: "Context compaction is already in progress.",
+          turnId: null,
+          createdAt: event.payload.createdAt,
+        });
+        return;
+      }
       let sessionBeforeCompaction: CompactionRuntimeSessionSnapshot | undefined;
       yield* Effect.gen(function* () {
-        yield* ensureSessionForThread(
-          event.payload.threadId,
-          event.payload.createdAt,
-          event.payload.modelSelection !== undefined
+        yield* ensureSessionForThread(event.payload.threadId, event.payload.createdAt, {
+          ...(event.payload.modelSelection !== undefined
             ? { modelSelection: event.payload.modelSelection }
-            : undefined,
-        );
+            : {}),
+          pendingTurnStart: true,
+        });
         if (event.payload.modelSelection !== undefined) {
           threadModelSelections.set(event.payload.threadId, event.payload.modelSelection);
         }

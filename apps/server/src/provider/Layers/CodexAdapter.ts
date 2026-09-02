@@ -1802,6 +1802,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               (runtimeEvent) =>
                 runtimeEvent.type === "session.exited" || runtimeEvent.type === "runtime.error",
             );
+            const terminalCompactionTurn = runtimeEvents.some(
+              (runtimeEvent) =>
+                runtimeEvent.type === "turn.completed" || runtimeEvent.type === "turn.aborted",
+            );
             const manualCompactionTurnId =
               event.method === "thread/compacted" ? session?.manualCompactionTurnId : undefined;
             if (session && manualCompactionTurnId) {
@@ -1830,7 +1834,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               return;
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
-            if (session && (completedCompactionItem || terminalRuntimeEvent)) {
+            if (
+              session &&
+              (completedCompactionItem || terminalRuntimeEvent || terminalCompactionTurn)
+            ) {
               yield* settleManualCompaction(session);
             }
           }),
@@ -1954,15 +1961,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     return session;
   });
 
-  const interruptTurn: CodexAdapterShape["interruptTurn"] = (threadId, turnId) =>
-    requireSession(threadId).pipe(
-      Effect.flatMap((session) => session.runtime.interruptTurn(turnId)),
-      Effect.mapError((cause) =>
-        cause._tag === "ProviderAdapterSessionNotFoundError"
-          ? cause
-          : mapCodexRuntimeError(threadId, "turn/interrupt", cause),
-      ),
-    );
+  const interruptTurn: CodexAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
+    function* (threadId, turnId) {
+      const session = yield* requireSession(threadId);
+      yield* session.runtime
+        .interruptTurn(turnId)
+        .pipe(Effect.mapError((cause) => mapCodexRuntimeError(threadId, "turn/interrupt", cause)));
+      yield* settleManualCompaction(session);
+    },
+  );
 
   const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = Effect.fn("compactThread")(
     function* (threadId) {

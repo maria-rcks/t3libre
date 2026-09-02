@@ -655,7 +655,133 @@ describe("ProviderCommandReactor", () => {
       expect(harness.sendTurn).not.toHaveBeenCalled();
       const readModel = yield* Effect.promise(() => harness.readModel());
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      expect(thread?.session?.status).toBe("ready");
+      expect(thread?.session?.status).toBe("starting");
+    }),
+  );
+
+  effectIt.effect("rejects another /compact while compaction is starting", () =>
+    Effect.gen(function* () {
+      const releaseCompaction = yield* Deferred.make<void>();
+      const harness = yield* Effect.promise(() =>
+        createHarness({ compactThreadEffect: () => Deferred.await(releaseCompaction) }),
+      );
+
+      const dispatchCompact = (commandId: string, messageId: string, createdAt: string) =>
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(commandId),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId(messageId),
+            role: "user",
+            text: "/compact",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt,
+        });
+
+      yield* dispatchCompact(
+        "cmd-compact-in-progress-first",
+        "user-message-compact-in-progress-first",
+        "2026-01-01T00:00:00.000Z",
+      );
+      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
+      yield* dispatchCompact(
+        "cmd-compact-in-progress-second",
+        "user-message-compact-in-progress-second",
+        "2026-01-01T00:00:01.000Z",
+      );
+      yield* Effect.promise(() =>
+        waitFor(async () => {
+          const readModel = await harness.readModel();
+          return (
+            readModel.threads
+              .find((entry) => entry.id === ThreadId.make("thread-1"))
+              ?.activities.some((activity) => activity.summary === "Context compaction failed") ??
+            false
+          );
+        }),
+      );
+
+      expect(harness.compactThread).toHaveBeenCalledTimes(1);
+      const readModel = yield* Effect.promise(() => harness.readModel());
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      expect(thread?.session?.status).toBe("starting");
+      expect(
+        thread?.activities.find((activity) => activity.summary === "Context compaction failed")
+          ?.payload,
+      ).toEqual({ detail: "Context compaction is already in progress." });
+      yield* Deferred.succeed(releaseCompaction, undefined);
+    }),
+  );
+
+  effectIt.effect("preserves a later starting turn when compaction fails", () =>
+    Effect.gen(function* () {
+      const releaseFailure = yield* Deferred.make<void>();
+      const rejection = new ProviderAdapterRequestError({
+        provider: ProviderDriverKind.make("codex"),
+        method: "thread/compact/start",
+        detail: "Compaction failed before a later turn started.",
+      });
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          compactThreadEffect: () =>
+            Deferred.await(releaseFailure).pipe(Effect.andThen(Effect.fail(rejection))),
+        }),
+      );
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-compact-before-later-turn"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-compact-before-later-turn"),
+          role: "user",
+          text: "/compact",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-later-turn-during-compact"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-later-turn-during-compact"),
+          role: "user",
+          text: "continue after compact",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+      yield* Deferred.succeed(releaseFailure, undefined);
+      yield* Effect.promise(() =>
+        waitFor(async () => {
+          const readModel = await harness.readModel();
+          return (
+            readModel.threads
+              .find((entry) => entry.id === ThreadId.make("thread-1"))
+              ?.activities.some((activity) => activity.summary === "Context compaction failed") ??
+            false
+          );
+        }),
+      );
+
+      const readModel = yield* Effect.promise(() => harness.readModel());
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      expect(thread?.session).toMatchObject({
+        status: "starting",
+        activeTurnId: null,
+        lastError: null,
+      });
     }),
   );
 
@@ -722,6 +848,22 @@ describe("ProviderCommandReactor", () => {
       });
       expect(harness.generateBranchName.mock.calls[0]?.[0]).toMatchObject({
         message: "Fix the reconnect spinner.",
+      });
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-ready-after-real-prompt"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:01.500Z",
+        },
+        createdAt: "2026-01-01T00:00:01.500Z",
       });
 
       yield* harness.engine.dispatch({
