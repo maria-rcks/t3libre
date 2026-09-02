@@ -9,6 +9,85 @@ import { useClientSettings } from "./hooks/useSettings";
 
 export const PANEL_ANIMATION_DURATION_MS = DEFAULT_PANEL_ANIMATION_DURATION_MS;
 
+export function observeResponsiveBreakpointFade(options: {
+  target: HTMLElement;
+  container: HTMLElement;
+  breakpointPx: number;
+  fadeDistancePx?: number;
+}): () => void {
+  const { target, container, breakpointPx, fadeDistancePx = 160 } = options;
+  if (typeof ResizeObserver === "undefined") return () => {};
+
+  let previousWidth = container.getBoundingClientRect().width;
+  let previousSide = previousWidth >= breakpointPx;
+  let crossedBreakpoint = false;
+  let settleTimer: number | null = null;
+  let restoreAnimation: Animation | null = null;
+
+  const restoreOpacity = () => {
+    settleTimer = null;
+    const currentOpacity = getComputedStyle(target).opacity;
+    target.style.removeProperty("opacity");
+    crossedBreakpoint = false;
+    if (currentOpacity === "1") return;
+    const panelDuration = Number.parseFloat(
+      getComputedStyle(target).getPropertyValue("--panel-animation-duration"),
+    );
+    restoreAnimation = target.animate([{ opacity: currentOpacity }, { opacity: 1 }], {
+      duration: Math.min(100, panelDuration / 4),
+      easing: "ease-out",
+    });
+  };
+
+  const observer = new ResizeObserver(([entry]) => {
+    if (!entry) return;
+    const width = entry.contentRect.width;
+    restoreAnimation?.cancel();
+    restoreAnimation = null;
+    if (settleTimer !== null) window.clearTimeout(settleTimer);
+    settleTimer = null;
+    const animationsEnabled =
+      target.closest("[data-panel-animations]")?.getAttribute("data-panel-animations") === "true" &&
+      !matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (!animationsEnabled) {
+      target.style.removeProperty("opacity");
+      previousWidth = width;
+      previousSide = width >= breakpointPx;
+      crossedBreakpoint = false;
+      return;
+    }
+
+    const side = width >= breakpointPx;
+    const crossedOnThisFrame = side !== previousSide;
+    const movingTowardBreakpoint =
+      Math.abs(width - breakpointPx) < Math.abs(previousWidth - breakpointPx);
+    if (crossedOnThisFrame) crossedBreakpoint = true;
+
+    if (crossedOnThisFrame) {
+      target.style.opacity = "0";
+    } else if (movingTowardBreakpoint || crossedBreakpoint) {
+      target.style.opacity = Math.min(1, Math.abs(width - breakpointPx) / fadeDistancePx).toFixed(
+        3,
+      );
+    } else {
+      target.style.removeProperty("opacity");
+    }
+
+    previousWidth = width;
+    previousSide = side;
+    settleTimer = window.setTimeout(restoreOpacity, 80);
+  });
+
+  observer.observe(container);
+  return () => {
+    observer.disconnect();
+    if (settleTimer !== null) window.clearTimeout(settleTimer);
+    restoreAnimation?.cancel();
+    target.style.removeProperty("opacity");
+  };
+}
+
 export function usePanelAnimationSettings(): {
   active: boolean;
   durationMs: PanelAnimationDurationMs;

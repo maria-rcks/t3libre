@@ -37,6 +37,7 @@ import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { observeResponsiveBreakpointFade } from "../../panelAnimations";
 import { ProjectFavicon } from "../ProjectFavicon";
 import {
   WorkspaceBreadcrumb,
@@ -137,6 +138,18 @@ export const ChatHeader = memo(function ChatHeader({
   onUpdateProjectScript,
   onDeleteProjectScript,
 }: ChatHeaderProps) {
+  const headerActionsRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const actions = headerActionsRef.current;
+    const container = actions?.parentElement;
+    if (!actions || !container) return;
+    const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+    return observeResponsiveBreakpointFade({
+      target: actions,
+      container,
+      breakpointPx: 48 * rootFontSize,
+    });
+  }, []);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const fileScripts = useT3ProjectFileScripts(
     activeThreadEnvironmentId,
@@ -372,6 +385,7 @@ export const ChatHeader = memo(function ChatHeader({
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
       <div
+        ref={headerActionsRef}
         data-chat-header-actions
         className={cn(
           "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
