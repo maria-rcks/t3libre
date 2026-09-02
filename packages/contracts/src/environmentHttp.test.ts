@@ -59,4 +59,16 @@ describe("environment HTTP errors", () => {
       expect(error.message).toContain(details[index]);
     });
   });
+
+  it("gives rejected sessions a recovery action", () => {
+    const error = new EnvironmentAuthInvalidError({
+      code: "auth_invalid",
+      reason: "invalid_credential",
+      traceId,
+    });
+
+    expect(error.message).toBe(
+      "This environment session is no longer valid (invalid_credential). Refresh the page or quit and reopen T3 Code.",
+    );
+  });
 });
