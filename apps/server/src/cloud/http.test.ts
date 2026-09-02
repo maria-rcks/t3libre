@@ -203,6 +203,7 @@ describe("reconcileDesiredCloudLink", () => {
           ManagedEndpointRuntime.CloudManagedEndpointRuntime,
           ManagedEndpointRuntime.CloudManagedEndpointRuntime.of({
             applyConfig: unusedSecretStoreOperation,
+            clearConfigIfCurrent: unusedSecretStoreOperation,
           } satisfies ManagedEndpointRuntime.CloudManagedEndpointRuntime["Service"]),
         ),
         Effect.provideService(
@@ -290,6 +291,11 @@ describe("releaseManagedTunnelOnShutdown", () => {
     refreshToken: "cli-refresh-token",
     expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
   };
+  const temporaryEndpointRuntime = {
+    providerKind: "cloudflare_tunnel" as const,
+    connectorToken: "temporary-connector-token",
+    tunnelId: "temporary-tunnel",
+  };
 
   function makeMemorySecretStore(initial: Iterable<readonly [string, string]> = []) {
     const values = new Map<string, Uint8Array>(
@@ -315,6 +321,11 @@ describe("releaseManagedTunnelOnShutdown", () => {
     readonly store: ServerSecretStore.ServerSecretStore["Service"];
     readonly applyConfigCalls: Array<unknown>;
     readonly requests: Array<HttpClientRequest.HttpClientRequest>;
+    readonly clearConfigIfCurrent?: (
+      config: Parameters<
+        ManagedEndpointRuntime.CloudManagedEndpointRuntime["Service"]["clearConfigIfCurrent"]
+      >[0],
+    ) => Effect.Effect<boolean>;
     readonly respond?: () => Response;
   }
 
@@ -356,6 +367,12 @@ describe("releaseManagedTunnelOnShutdown", () => {
                 return {
                   status: "disabled",
                 } satisfies ManagedEndpointRuntime.CloudManagedEndpointRuntimeStatus;
+              }),
+            clearConfigIfCurrent: (config) =>
+              harness.clearConfigIfCurrent?.(config) ??
+              Effect.sync(() => {
+                harness.applyConfigCalls.push(null);
+                return true;
               }),
           }),
         ),
@@ -467,6 +484,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
       const released = yield* releaseTemporaryEnvironmentLease({
         relayUrl: "https://relay.example.test",
         temporaryLease: { leaseId: "lease_123", expiresAt: "2026-09-02T22:00:00.000Z" },
+        endpointRuntime: temporaryEndpointRuntime,
       });
 
       expect(released).toBe(true);
@@ -493,6 +511,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
       const released = yield* releaseTemporaryEnvironmentLease({
         relayUrl: "https://relay.example.test",
         temporaryLease: { leaseId: "stale_lease", expiresAt: "2026-09-02T22:00:00.000Z" },
+        endpointRuntime: temporaryEndpointRuntime,
       });
 
       expect(released).toBe(false);
@@ -500,6 +519,37 @@ describe("releaseManagedTunnelOnShutdown", () => {
       expect(requests).toEqual([]);
       expect(values.has(CLOUD_ENDPOINT_RUNTIME_CONFIG)).toBe(true);
     }).pipe(provideReleaseHarness({ store, applyConfigCalls, requests }));
+  });
+
+  it.effect("does not stop a durable connector installed while release is starting", () => {
+    const { store, values } = makeMemorySecretStore();
+    const applyConfigCalls: Array<unknown> = [];
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    const durableConfig = new TextEncoder().encode("replacement-runtime-config");
+
+    return Effect.gen(function* () {
+      const released = yield* releaseTemporaryEnvironmentLease({
+        relayUrl: "https://relay.example.test",
+        temporaryLease: { leaseId: "stale_lease", expiresAt: "2026-09-02T22:00:00.000Z" },
+        endpointRuntime: temporaryEndpointRuntime,
+      });
+
+      expect(released).toBe(false);
+      expect(applyConfigCalls).toEqual([]);
+      expect(requests).toEqual([]);
+      expect(values.get(CLOUD_ENDPOINT_RUNTIME_CONFIG)).toBe(durableConfig);
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls,
+        requests,
+        clearConfigIfCurrent: () =>
+          Effect.sync(() => {
+            values.set(CLOUD_ENDPOINT_RUNTIME_CONFIG, durableConfig);
+            return false;
+          }),
+      }),
+    );
   });
 
   it.effect("renews a temporary Connect share by its exact relay lease", () => {
@@ -513,7 +563,10 @@ describe("releaseManagedTunnelOnShutdown", () => {
         temporaryLease: { leaseId: "lease_123", expiresAt: "2026-09-02T22:00:00.000Z" },
       });
 
-      expect(renewed).toBe(true);
+      expect(renewed).toEqual({
+        leaseId: "lease_123",
+        expiresAt: "2026-09-02T22:10:00.000Z",
+      });
       expect(requests[0]?.method).toBe("POST");
       expect(requests[0]?.url).toBe(
         "https://relay.example.test/v1/client/environment-links/env_123/temporary-lease",

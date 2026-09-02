@@ -333,6 +333,56 @@ describe("CloudManagedEndpointRuntime", () => {
     }),
   );
 
+  it.effect("does not clear a connector that replaced the expected config", () =>
+    Effect.gen(function* () {
+      const spawned: Array<number> = [];
+      const killed: Array<number> = [];
+      const durableSpawnEntered = yield* Deferred.make<void>();
+      const releaseDurableSpawn = yield* Deferred.make<void>();
+      const spawner = ChildProcessSpawner.make(() =>
+        Effect.gen(function* () {
+          const pid = 600 + spawned.length;
+          spawned.push(pid);
+          if (pid === 601) {
+            yield* Deferred.succeed(durableSpawnEntered, undefined);
+            yield* Deferred.await(releaseDurableSpawn);
+          }
+          const handle = makeHandle({
+            pid,
+            onKill: () => {
+              killed.push(pid);
+            },
+          });
+          yield* Effect.addFinalizer(() => handle.kill().pipe(Effect.ignore));
+          return handle;
+        }),
+      );
+      const runtime = yield* buildCloudManagedEndpointRuntime(spawner);
+      const temporaryConfig = {
+        providerKind: "cloudflare_tunnel" as const,
+        connectorToken: "temporary-token",
+      };
+
+      yield* runtime.applyConfig(temporaryConfig);
+      const durable = yield* runtime
+        .applyConfig({
+          providerKind: "cloudflare_tunnel",
+          connectorToken: "durable-token",
+        })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(durableSpawnEntered);
+      const staleClear = yield* runtime
+        .clearConfigIfCurrent(temporaryConfig)
+        .pipe(Effect.forkChild);
+      yield* Deferred.succeed(releaseDurableSpawn, undefined);
+
+      expect(yield* Fiber.join(staleClear)).toBe(false);
+      expect(yield* Fiber.join(durable)).toMatchObject({ status: "running", pid: 601 });
+      expect(spawned).toEqual([600, 601]);
+      expect(killed).toEqual([600]);
+    }),
+  );
+
   it.effect("reports connector spawn failures", () =>
     Effect.gen(function* () {
       const spawner = ChildProcessSpawner.make(() =>

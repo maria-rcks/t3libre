@@ -1015,6 +1015,7 @@ const buildAppUnderTest = (options?: {
           CloudManagedEndpointRuntime.CloudManagedEndpointRuntime,
           CloudManagedEndpointRuntime.CloudManagedEndpointRuntime.of({
             applyConfig: () => Effect.succeed({ status: "disabled" }),
+            clearConfigIfCurrent: () => Effect.succeed(true),
             ...options?.layers?.cloudManagedEndpointRuntime,
           }),
         ),

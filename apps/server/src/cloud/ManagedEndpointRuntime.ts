@@ -58,6 +58,9 @@ export class CloudManagedEndpointRuntime extends Context.Service<
     readonly applyConfig: (
       config: RelayManagedEndpointRuntimeConfig | null,
     ) => Effect.Effect<CloudManagedEndpointRuntimeStatus>;
+    readonly clearConfigIfCurrent: (
+      config: RelayManagedEndpointRuntimeConfig,
+    ) => Effect.Effect<boolean>;
   }
 >()("t3/cloud/ManagedEndpointRuntime/CloudManagedEndpointRuntime") {}
 
@@ -303,8 +306,24 @@ export const make = Effect.gen(function* () {
       ),
   );
 
+  const clearConfigIfCurrent = Effect.fn("CloudManagedEndpointRuntime.clearConfigIfCurrent")(
+    (config: RelayManagedEndpointRuntimeConfig) =>
+      reconcileSemaphore.withPermits(1)(
+        Effect.gen(function* () {
+          const desiredConfig = yield* Ref.get(desiredConfigRef);
+          if (!desiredConfig || runtimeConfigKey(desiredConfig) !== runtimeConfigKey(config)) {
+            return false;
+          }
+          yield* Ref.set(desiredConfigRef, null);
+          yield* reconcileConfig(null);
+          return true;
+        }),
+      ),
+  );
+
   const runtime = CloudManagedEndpointRuntime.of({
     applyConfig,
+    clearConfigIfCurrent,
   });
 
   const initialConfig = yield* readRuntimeConfig.pipe(

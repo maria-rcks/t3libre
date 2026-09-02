@@ -1,9 +1,11 @@
 import { EnvironmentHttpApi, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import {
@@ -766,11 +768,12 @@ export const makeServerLayer = Layer.unwrap(
               ? Effect.acquireRelease(retryReconcile, (link) =>
                   clearDevSharePairingOrigin(link.endpoint.httpBaseUrl).pipe(
                     Effect.andThen(
-                      link.temporaryLease === undefined
+                      link.temporaryLease === undefined || link.endpointRuntime === null
                         ? Effect.void
                         : releaseTemporaryEnvironmentLease({
                             relayUrl: link.relayUrl,
                             temporaryLease: link.temporaryLease,
+                            endpointRuntime: link.endpointRuntime,
                           }).pipe(
                             Effect.timeout("10 seconds"),
                             Effect.tap((released) =>
@@ -846,26 +849,45 @@ export const makeServerLayer = Layer.unwrap(
             }
             yield* Effect.scoped(
               configureActiveLink.pipe(
-                Effect.flatMap((link) => {
-                  if (link.temporaryLease === undefined) {
-                    return Effect.die(new Error("T3 Connect dev share has no temporary lease."));
-                  }
-                  return Effect.forever(
-                    Effect.sleep("1 minute").pipe(
-                      Effect.andThen(
-                        renewTemporaryEnvironmentLease({
-                          relayUrl: link.relayUrl,
-                          temporaryLease: link.temporaryLease,
-                        }),
+                Effect.flatMap((link) =>
+                  Effect.gen(function* () {
+                    if (link.temporaryLease === undefined || link.endpointRuntime === null) {
+                      return yield* Effect.die(
+                        new Error("T3 Connect dev share has no temporary managed endpoint lease."),
+                      );
+                    }
+                    const leaseRef = yield* Ref.make(link.temporaryLease);
+                    return yield* Effect.forever(
+                      Effect.sleep("1 minute").pipe(
+                        Effect.andThen(Ref.get(leaseRef)),
+                        Effect.flatMap((temporaryLease) =>
+                          renewTemporaryEnvironmentLease({
+                            relayUrl: link.relayUrl,
+                            temporaryLease,
+                          }).pipe(
+                            Effect.catch((error) =>
+                              Clock.currentTimeMillis.pipe(
+                                Effect.flatMap((now) =>
+                                  now < Date.parse(temporaryLease.expiresAt)
+                                    ? Effect.logWarning(
+                                        "Failed to renew the temporary T3 Connect dev-share lease; will retry",
+                                        { error },
+                                      ).pipe(Effect.as(temporaryLease))
+                                    : Effect.die(error),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Effect.flatMap((renewed) =>
+                          renewed
+                            ? Ref.set(leaseRef, renewed)
+                            : Effect.die(new Error("T3 Connect dev-share lease expired.")),
+                        ),
                       ),
-                      Effect.flatMap((renewed) =>
-                        renewed
-                          ? Effect.void
-                          : Effect.die(new Error("T3 Connect dev-share lease expired.")),
-                      ),
-                    ),
-                  );
-                }),
+                    );
+                  }),
+                ),
               ),
             ).pipe(reportLifecycleFailure);
           }),

@@ -28,6 +28,7 @@ import {
   RelayEnvironmentLinkProofPayload,
   RelayLinkProofRequest,
   RelayManagedEndpointOrigin,
+  type RelayManagedEndpointRuntimeConfig,
   RelayOkResponse,
   type RelayTemporaryEnvironmentLease,
   RelayTemporaryEnvironmentLeaseRenewResponse,
@@ -723,6 +724,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
     return {
       ...relayConfig,
       endpoint: link.endpoint,
+      endpointRuntime: link.endpointRuntime,
       endpointRuntimeConfig,
       relayUrl,
       ...(link.temporaryLease === undefined ? {} : { temporaryLease: link.temporaryLease }),
@@ -807,7 +809,9 @@ export const renewTemporaryEnvironmentLease = Effect.fn(
     Effect.flatMap(HttpClientResponse.schemaBodyJson(RelayTemporaryEnvironmentLeaseRenewResponse)),
     withRelayClientTracing,
   );
-  return response.ok;
+  return response.ok && response.expiresAt !== null
+    ? { ...input.temporaryLease, expiresAt: response.expiresAt }
+    : false;
 });
 
 export const releaseTemporaryEnvironmentLease = Effect.fn(
@@ -815,6 +819,7 @@ export const releaseTemporaryEnvironmentLease = Effect.fn(
 )(function* (input: {
   readonly relayUrl: string;
   readonly temporaryLease: RelayTemporaryEnvironmentLease;
+  readonly endpointRuntime: RelayManagedEndpointRuntimeConfig;
 }) {
   const dependencies = yield* cloudHttpDependencies;
   // A durable link may have replaced this process's temporary share. Its
@@ -823,7 +828,8 @@ export const releaseTemporaryEnvironmentLease = Effect.fn(
   const token = yield* dependencies.cliTokenManager.getExisting;
   if (Option.isNone(token)) return false;
   const environmentId = yield* dependencies.environment.getEnvironmentId;
-  yield* dependencies.endpointRuntime.applyConfig(null);
+  const cleared = yield* dependencies.endpointRuntime.clearConfigIfCurrent(input.endpointRuntime);
+  if (!cleared) return false;
   const response = yield* requestTemporaryEnvironmentLeaseRelease(dependencies, {
     relayUrl: input.relayUrl,
     accessToken: token.value.accessToken,
