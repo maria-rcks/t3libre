@@ -305,6 +305,7 @@ export type MessagesTimelineRow =
       expanded: boolean;
       summary: string;
       summaryKind: ToolGroupSummaryKind;
+      summaryToolIcon?: "browser" | "t3-code";
       hasFailure: boolean;
     }
   | {
@@ -852,6 +853,13 @@ export function deriveMessagesTimelineRows(input: {
           const latestToolEntry = visibleGroupedEntries.findLast(workLogEntryIsToolLike);
           const singleEntry =
             visibleGroupedEntries.length === 1 ? (visibleGroupedEntries[0] ?? null) : null;
+          const usesSingleToolCallLabel =
+            singleEntry !== null &&
+            workLogEntryIsToolLike(singleEntry) &&
+            toolGroupAction(singleEntry) !== "edit";
+          const summaryToolIcon = usesSingleToolCallLabel
+            ? resolveWorkEntryToolPresentation(singleEntry, "completed")?.icon
+            : undefined;
           nextRows.push({
             kind: "work-toggle",
             id: `work-toggle:${timelineEntry.id}`,
@@ -859,15 +867,13 @@ export function deriveMessagesTimelineRows(input: {
             groupId,
             hiddenCount: visibleGroupedEntries.length,
             expanded,
-            summary:
-              singleEntry !== null &&
-              workLogEntryIsToolLike(singleEntry) &&
-              toolGroupAction(singleEntry) !== "edit"
-                ? singleToolCallLabel(singleEntry)
-                : singleEntry !== null && !workLogEntryIsToolLike(singleEntry)
-                  ? singleEntry.label
-                  : summarizeToolGroup(visibleGroupedEntries),
+            summary: usesSingleToolCallLabel
+              ? singleToolCallLabel(singleEntry)
+              : singleEntry !== null && !workLogEntryIsToolLike(singleEntry)
+                ? singleEntry.label
+                : summarizeToolGroup(visibleGroupedEntries),
             summaryKind,
+            ...(summaryToolIcon ? { summaryToolIcon } : {}),
             hasFailure:
               latestToolEntry !== undefined &&
               workEntryDisplayIndicatesToolFailure(latestToolEntry),

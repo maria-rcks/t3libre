@@ -1538,7 +1538,11 @@ function appendToolGroupRows(
         : summarizeToolGroup(activities.map((activity) => activity.workEntry));
   const summaryToolIcon = live
     ? resolveWorkEntryToolPresentation(latestActivity.workEntry)?.icon
-    : undefined;
+    : singleActivity !== null &&
+        singleActivity.toolLike &&
+        toolGroupAction(singleActivity.workEntry) !== "edit"
+      ? resolveWorkEntryToolPresentation(singleActivity.workEntry, "completed")?.icon
+      : undefined;
   result.push({
     type: "work-toggle",
     id: `${live ? "work-live" : "work-toggle"}:${groupId}`,

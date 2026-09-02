@@ -964,6 +964,7 @@ describe("buildThreadFeed", () => {
         );
         expect(settledRows.find((entry) => entry.type === "work-toggle")).toMatchObject({
           summary: settledDisplayName,
+          summaryToolIcon: icon,
           live: false,
         });
       }

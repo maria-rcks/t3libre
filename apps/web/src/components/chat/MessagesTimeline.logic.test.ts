@@ -152,29 +152,35 @@ describe("work entry labels", () => {
     },
   );
 
-  it("uses the completed browser call label for a settled legacy tool", () => {
-    const rows = deriveMessagesTimelineRows({
-      timelineEntries: [
-        {
-          id: "browser-entry",
-          kind: "work",
-          createdAt: entry.createdAt,
-          entry: {
-            ...entry,
-            itemType: "mcp_tool_call",
-            toolData: { server: "t3-code", tool: "preview_click" },
+  it.each([
+    ["preview_click", "Clicked in the preview browser", "browser"],
+    ["task_status", "Got delegated task status", "t3-code"],
+  ] as const)(
+    "uses the completed %s call presentation for a settled legacy tool",
+    (tool, summary, summaryToolIcon) => {
+      const rows = deriveMessagesTimelineRows({
+        timelineEntries: [
+          {
+            id: "browser-entry",
+            kind: "work",
+            createdAt: entry.createdAt,
+            entry: {
+              ...entry,
+              itemType: "mcp_tool_call",
+              toolData: { server: "t3-code", tool },
+            },
           },
-        },
-      ],
-      isWorking: false,
-      activeTurnStartedAt: null,
-      turnDiffSummaryByAssistantMessageId: new Map(),
-      revertTurnCountByUserMessageId: new Map(),
-    });
-    expect(rows).toMatchObject([
-      { kind: "work-toggle", hiddenCount: 1, summary: "Clicked in the preview browser" },
-    ]);
-  });
+        ],
+        isWorking: false,
+        activeTurnStartedAt: null,
+        turnDiffSummaryByAssistantMessageId: new Map(),
+        revertTurnCountByUserMessageId: new Map(),
+      });
+      expect(rows).toMatchObject([
+        { kind: "work-toggle", hiddenCount: 1, summary, summaryToolIcon },
+      ]);
+    },
+  );
 });
 
 describe("shouldPreserveAssistantLineBreaks", () => {
