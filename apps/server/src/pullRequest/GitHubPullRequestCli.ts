@@ -360,6 +360,24 @@ export class GitHubPullRequestCli extends Context.Service<
       }>;
     }) => Effect.Effect<ReadonlyArray<GitHubPullRequestStat>, GitHubPullRequestCliError>;
 
+    readonly getPullRequestSummary: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly host: string;
+      readonly number: number;
+    }) => Effect.Effect<
+      {
+        readonly number: number;
+        readonly title: string;
+        readonly url: string;
+        readonly headBranch: string;
+        readonly baseBranch: string;
+        readonly state: "open" | "closed" | "merged";
+        readonly updatedAt: string;
+      },
+      GitHubPullRequestCliError
+    >;
+
     readonly getPullRequestDetail: (input: {
       readonly cwd: string;
       readonly repository: string;
@@ -1325,6 +1343,35 @@ export const make = Effect.gen(function* () {
         { concurrency: STAT_REQUEST_CONCURRENCY },
       ).pipe(Effect.map((results) => results.flat()));
     },
+
+    getPullRequestSummary: (input) =>
+      github
+        .getPullRequest({
+          cwd: input.cwd,
+          reference: `https://${input.host}/${input.repository}/pull/${input.number}`,
+        })
+        .pipe(
+          Effect.flatMap((summary) =>
+            summary.updatedAt === undefined
+              ? Effect.fail(
+                  new GitHubPullRequestReadError({
+                    command: "gh",
+                    cwd: input.cwd,
+                    operation: "getPullRequestSummary",
+                    cause: new Error("GitHub did not report when the pull request was updated."),
+                  }),
+                )
+              : Effect.succeed({
+                  number: summary.number,
+                  title: summary.title,
+                  url: summary.url,
+                  headBranch: summary.headRefName,
+                  baseBranch: summary.baseRefName,
+                  state: summary.state ?? "open",
+                  updatedAt: summary.updatedAt,
+                }),
+          ),
+        ),
 
     getPullRequestDetail: (input) =>
       github

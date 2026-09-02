@@ -69,12 +69,15 @@ export const make = Effect.gen(function* () {
         if (!projects.has(thread.linkedPullRequest.projectId)) {
           return yield* Effect.die(new Error("linked pull request project not found"));
         }
-        const detail = yield* pullRequests.detail({
+        const summary = yield* pullRequests.summary({
           projectId: thread.linkedPullRequest.projectId,
           repository: thread.linkedPullRequest.repository,
           number: thread.linkedPullRequest.number,
         });
-        return { state: detail.state, updatedAt: detail.updatedAt } satisfies SettlementPullRequest;
+        return {
+          state: summary.state,
+          updatedAt: summary.updatedAt,
+        } satisfies SettlementPullRequest;
       }
       if (thread.branch === null) return null;
       const project = projects.get(thread.projectId);

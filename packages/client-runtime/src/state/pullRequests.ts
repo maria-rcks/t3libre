@@ -2,6 +2,7 @@ import {
   WS_METHODS,
   type PullRequestDetail,
   type PullRequestDiffInput,
+  type PullRequestSummary,
   type VcsStatusResult,
 } from "@t3tools/contracts";
 import * as Data from "effect/Data";
@@ -41,8 +42,21 @@ export function createLinkedPullRequestDetailAtomFamily<R, E>(
   });
 }
 
+/** Refresh only the live fields a linked thread renders. */
+export function createLinkedPullRequestSummaryAtomFamily<R, E>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
+) {
+  return createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:pull-requests:linked-summary",
+    tag: WS_METHODS.pullRequestsSummary,
+    staleTimeMs: 60_000,
+    refreshIntervalMs: 60_000,
+    idleTtlMs: LINKED_PULL_REQUEST_DETAIL_IDLE_TTL_MS,
+  });
+}
+
 export function pullRequestDetailToVcsStatus(
-  detail: PullRequestDetail,
+  detail: PullRequestDetail | PullRequestSummary,
 ): NonNullable<VcsStatusResult["pr"]> {
   return {
     number: detail.number,

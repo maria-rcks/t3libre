@@ -2293,6 +2293,105 @@ it.effect("answers a repeated listing from cache, and concurrent readers share o
   }),
 );
 
+it.effect("shares one cold viewer lookup across distinct concurrent lists", () =>
+  Effect.gen(function* () {
+    let viewerCalls = 0;
+    let listCalls = 0;
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getViewer: () =>
+            Effect.sync(() => {
+              viewerCalls += 1;
+            }).pipe(Effect.andThen(Effect.yieldNow), Effect.as("bilal")),
+          listChangeRequests: () =>
+            Effect.sync(() => {
+              listCalls += 1;
+              return { items: [], truncated: false, continues: true };
+            }),
+        }),
+      ],
+    });
+
+    yield* Effect.all(
+      ["all", "authored", "reviewing"].map((involvement) =>
+        service.list({
+          state: "open",
+          involvement: involvement as "all" | "authored" | "reviewing",
+        }),
+      ),
+      { concurrency: "unbounded" },
+    );
+
+    assert.strictEqual(viewerCalls, 1);
+    assert.strictEqual(listCalls, 3);
+  }),
+);
+
+it.effect("uses five host reads for the normal indexed-repository page workflow", () =>
+  Effect.gen(function* () {
+    let viewerCalls = 0;
+    let searchCalls = 0;
+    let fallbackCalls = 0;
+    let statsCalls = 0;
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getViewer: () =>
+            Effect.sync(() => {
+              viewerCalls += 1;
+              return "bilal";
+            }),
+          listChangeRequestsAcross: (input) =>
+            Effect.sync(() => {
+              searchCalls += 1;
+              return {
+                items:
+                  input.involvement === "all"
+                    ? [batchedChangeRequest(1, "acme/web", "2026-07-02T00:00:00Z")]
+                    : [],
+                truncated: false,
+              };
+            }),
+          listChangeRequests: () =>
+            Effect.sync(() => {
+              fallbackCalls += 1;
+              return { items: [], truncated: false, continues: true };
+            }),
+          listChangeRequestStats: () =>
+            Effect.sync(() => {
+              statsCalls += 1;
+              return [{ repository: "acme/web", number: 1, additions: 3, deletions: 1 }];
+            }),
+        }),
+      ],
+    });
+
+    const baseline = yield* service.list({ state: "open", involvement: "all" });
+    yield* Effect.all(
+      [
+        service.list({ state: "open", involvement: "authored" }),
+        service.list({ state: "open", involvement: "reviewing" }),
+      ],
+      { concurrency: "unbounded" },
+    );
+    yield* service.listStats({
+      refs: baseline.entries.map(({ projectId, repository, number }) => ({
+        projectId,
+        repository,
+        number,
+      })),
+    });
+
+    assert.deepStrictEqual(
+      { viewerCalls, searchCalls, fallbackCalls, statsCalls },
+      { viewerCalls: 1, searchCalls: 3, fallbackCalls: 0, statsCalls: 1 },
+    );
+  }),
+);
+
 it.effect("returns the refreshed listing on the first read after its cache expires", () =>
   Effect.gen(function* () {
     let hostCalls = 0;
@@ -2772,6 +2871,7 @@ it.effect(
     Effect.gen(function* () {
       let coreCalls = 0;
       let activityCalls = 0;
+      let summaryCalls = 0;
       const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
       const service = yield* makeService({
         projects: [
@@ -2799,6 +2899,12 @@ it.effect(
                 },
               });
             },
+            getChangeRequestSummary: () => {
+              summaryCalls += 1;
+              return Effect.succeed({
+                ...changeRequest(1, "2026-07-02T00:00:00Z"),
+              });
+            },
             getChangeRequestActivity: () => {
               activityCalls += 1;
               return Effect.succeed({
@@ -2818,6 +2924,10 @@ it.effect(
       assert.strictEqual(coreCalls, 1);
       assert.strictEqual(activityCalls, 0);
 
+      const summary = yield* service.summary(reference);
+      assert.strictEqual(summary.state, "open");
+      assert.strictEqual(summaryCalls, 0);
+
       yield* Effect.all([service.activity(reference), service.activity(reference)], {
         concurrency: 2,
       });
@@ -2827,6 +2937,106 @@ it.effect(
       yield* service.activity(reference);
       assert.strictEqual(activityCalls, 2);
     }),
+);
+
+it.effect("shares linked summaries and keeps the last good value through a transient failure", () =>
+  Effect.gen(function* () {
+    let calls = 0;
+    let failing = false;
+    const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequestSummary: () =>
+            Effect.sync(() => {
+              calls += 1;
+              return failing;
+            }).pipe(
+              Effect.tap(() => Effect.yieldNow),
+              Effect.flatMap((shouldFail) =>
+                shouldFail
+                  ? Effect.fail(
+                      new PullRequestProviderError({
+                        provider: "github",
+                        operation: "getChangeRequestSummary",
+                        reason: "failed",
+                        detail: "HTTP 504",
+                      }),
+                    )
+                  : Effect.succeed(changeRequest(1, "2026-07-02T00:00:00Z")),
+              ),
+            ),
+        }),
+      ],
+    });
+
+    yield* Effect.all([service.summary(reference), service.summary(reference)], {
+      concurrency: "unbounded",
+    });
+    assert.strictEqual(calls, 1);
+
+    yield* TestClock.adjust("61 seconds");
+    failing = true;
+    const stale = yield* service.summary(reference);
+    assert.strictEqual(stale.updatedAt, "2026-07-02T00:00:00Z");
+    assert.strictEqual(calls, 2);
+
+    yield* service.invalidate({ reference });
+    const invalidated = yield* Effect.flip(service.summary(reference));
+    assert.strictEqual(invalidated._tag, "PullRequestOperationError");
+  }),
+);
+
+it.effect("keeps recent detail on a transient refresh failure but not after invalidation", () =>
+  Effect.gen(function* () {
+    let failing = false;
+    const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequest: () =>
+            failing
+              ? Effect.fail(
+                  new PullRequestProviderError({
+                    provider: "github",
+                    operation: "getChangeRequest",
+                    reason: "failed",
+                    detail: "spawn gh EAGAIN",
+                  }),
+                )
+              : Effect.succeed({
+                  ...changeRequest(1, "2026-07-02T00:00:00Z"),
+                  body: "last good body",
+                  changedFiles: 2,
+                  mergedAt: null,
+                  closedAt: null,
+                  reviewers: [],
+                  checks: [],
+                  mergeCapabilities: { merge: true, squash: true, rebase: true },
+                  viewerPermissions: {
+                    actions: ["merge"],
+                    comment: true,
+                    resolve: true,
+                    verdicts: ["comment", "approve", "request-changes"],
+                    requestReviewers: true,
+                  },
+                }),
+        }),
+      ],
+    });
+
+    yield* service.detail(reference);
+    yield* TestClock.adjust("16 seconds");
+    failing = true;
+    const stale = yield* service.detail(reference);
+    assert.strictEqual(stale.body, "last good body");
+
+    yield* service.invalidate({ reference });
+    const invalidated = yield* Effect.flip(service.detail(reference));
+    assert.strictEqual(invalidated._tag, "PullRequestOperationError");
+  }),
 );
 
 it.effect("carries an armed auto-merge through to the detail, and silence as silence", () =>
