@@ -372,7 +372,6 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
           },
         },
       });
-
       const event = Option.getOrThrow(yield* Fiber.join(compactedEventFiber));
       NodeAssert.ok(event.type === "thread.state.changed");
       NodeAssert.equal(event.payload.state, "compacted");
