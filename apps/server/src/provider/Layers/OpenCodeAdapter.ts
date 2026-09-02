@@ -3036,7 +3036,7 @@ export function makeOpenCodeAdapter(
               { signal },
             ),
           ).pipe(
-            Effect.timeout("10 seconds"),
+            Effect.timeout("10 minutes"),
             Effect.catchTags({
               OpenCodeRuntimeError: (cause) => Effect.fail(toRequestError(cause)),
               TimeoutError: (cause) =>
@@ -3044,7 +3044,7 @@ export function makeOpenCodeAdapter(
                   new ProviderAdapterRequestError({
                     provider: PROVIDER,
                     method: "session.summarize",
-                    detail: "OpenCode session compaction did not complete within 10 seconds.",
+                    detail: "OpenCode session compaction did not complete within 10 minutes.",
                     cause,
                   }),
                 ),
