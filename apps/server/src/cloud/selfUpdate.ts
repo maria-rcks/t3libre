@@ -10,10 +10,11 @@ import { HostProcessExecutablePath } from "@t3tools/shared/hostProcess";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as HashSet from "effect/HashSet";
+import * as Ref from "effect/Ref";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as Ref from "effect/Ref";
 
 import * as ServerConfig from "../config.ts";
 import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";
@@ -52,13 +53,26 @@ export class ServerSelfUpdate extends Context.Service<
   }
 >()("t3/cloud/selfUpdate/ServerSelfUpdate") {}
 
-export function withRunningThreadContinuation(input: {
+export const withRunningThreadContinuation = Effect.fn(
+  "cloud.server_self_update.withRunningThreadContinuation",
+)(function* (input: {
   readonly mode: ServerConfig.RuntimeMode;
   readonly selfUpdate: ServerSelfUpdate["Service"];
   readonly prepare: Effect.Effect<ReadonlyArray<ThreadId>, ServerSelfUpdateError>;
-  readonly clear: (threadIds: ReadonlyArray<ThreadId>) => Effect.Effect<void>;
-}): ServerSelfUpdate["Service"] {
-  const desktopContinuationTokens = new Set<string>();
+  readonly clear: (
+    threadIds: ReadonlyArray<ThreadId>,
+  ) => Effect.Effect<void, ServerSelfUpdateError>;
+}) {
+  const desktopContinuationTokens = yield* Ref.make(HashSet.empty<string>());
+  const clearOnError = <A>(
+    effect: Effect.Effect<A, ServerSelfUpdateError>,
+    threadIds: () => ReadonlyArray<ThreadId>,
+  ): Effect.Effect<A, ServerSelfUpdateError> =>
+    effect.pipe(
+      Effect.catchCause((cause) =>
+        input.clear(threadIds()).pipe(Effect.andThen(Effect.failCause(cause))),
+      ),
+    );
 
   const update: ServerSelfUpdate["Service"]["update"] = (
     request,
@@ -66,52 +80,67 @@ export function withRunningThreadContinuation(input: {
   ) => {
     let prepared = false;
     let continuationThreadIds: ReadonlyArray<ThreadId> = [];
-    return input.selfUpdate
-      .update(request, (stage) =>
-        (request.continueRunningThreads === true &&
-        input.mode !== "desktop" &&
-        stage === "installing" &&
-        !prepared
-          ? input.prepare.pipe(
-              Effect.tap((threadIds) =>
-                Effect.sync(() => {
-                  prepared = true;
-                  continuationThreadIds = threadIds;
-                }),
-              ),
-              Effect.asVoid,
-            )
-          : Effect.void
-        ).pipe(Effect.andThen(reportProgress(stage))),
-      )
-      .pipe(
-        Effect.tap((result) =>
-          Effect.sync(() => {
+    return clearOnError(
+      input.selfUpdate
+        .update(request, (stage) =>
+          (request.continueRunningThreads === true &&
+          input.mode !== "desktop" &&
+          stage === "installing" &&
+          !prepared
+            ? input.prepare.pipe(
+                Effect.tap((threadIds) =>
+                  Effect.sync(() => {
+                    prepared = true;
+                    continuationThreadIds = threadIds;
+                  }),
+                ),
+                Effect.asVoid,
+              )
+            : Effect.void
+          ).pipe(Effect.andThen(reportProgress(stage))),
+        )
+        .pipe(
+          Effect.tap((result) => {
             if (
               result.method === "desktop-app" &&
               result.desktopUpdateToken !== undefined &&
               request.continueRunningThreads === true
             ) {
-              desktopContinuationTokens.add(result.desktopUpdateToken);
+              return Ref.update(desktopContinuationTokens, HashSet.add(result.desktopUpdateToken));
             }
+            return Effect.void;
           }),
         ),
-        Effect.onError(() => input.clear(continuationThreadIds)),
-      );
+      () => continuationThreadIds,
+    );
   };
 
   return ServerSelfUpdate.of({
     update,
     commitDesktopUpdate: (requestId) =>
       Effect.gen(function* () {
-        const shouldContinue = desktopContinuationTokens.delete(requestId);
-        const continuationThreadIds = shouldContinue ? yield* input.prepare : [];
-        return yield* input.selfUpdate
-          .commitDesktopUpdate(requestId)
-          .pipe(Effect.onError(() => input.clear(continuationThreadIds)));
+        const shouldContinue = yield* Ref.modify(desktopContinuationTokens, (tokens) => [
+          HashSet.has(tokens, requestId),
+          HashSet.remove(tokens, requestId),
+        ]);
+        let continuationThreadIds: ReadonlyArray<ThreadId> = [];
+        return yield* clearOnError(
+          Effect.gen(function* () {
+            continuationThreadIds = shouldContinue ? yield* input.prepare : [];
+            return yield* input.selfUpdate.commitDesktopUpdate(requestId);
+          }),
+          () => continuationThreadIds,
+        ).pipe(
+          Effect.catchCause((cause) =>
+            (shouldContinue
+              ? Ref.update(desktopContinuationTokens, HashSet.add(requestId))
+              : Effect.void
+            ).pipe(Effect.andThen(Effect.failCause(cause))),
+          ),
+        );
       }),
   });
-}
+});
 
 export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;

@@ -29,10 +29,11 @@ const makeThread = (
   status: "starting" | "running" | "ready" | "stopped" | "error",
   activeTurnId: TurnId | null = null,
   archivedAt: string | null = null,
+  deletedAt: string | null = null,
 ) => ({
   id: ThreadId.make(id),
   archivedAt,
-  deletedAt: null,
+  deletedAt,
   interactionMode: "default" as const,
   session: {
     threadId: ThreadId.make(id),
@@ -103,13 +104,18 @@ it.effect("marks active running sessions that have persisted resume state", () =
     updatedAt,
   );
   const ready = makeThread("thread-mark-ready", "ready");
+  const missingResumeState = makeThread(
+    "thread-mark-missing-resume-state",
+    "running",
+    TurnId.make("turn-mark-missing-resume-state"),
+  );
   const bindingReads: ThreadId[] = [];
   const upserts: ProviderSessionDirectory.ProviderRuntimeBinding[] = [];
 
   return ServerRuntimeStartup.markRunningProviderSessionsForContinuation.pipe(
     Effect.provideService(
       ProjectionSnapshotQuery.ProjectionSnapshotQuery,
-      queryWithThreads([active, archived, ready]),
+      queryWithThreads([active, archived, ready, missingResumeState]),
     ),
     Effect.provideService(ProviderSessionDirectory.ProviderSessionDirectory, {
       getBinding: (threadId) =>
@@ -119,7 +125,7 @@ it.effect("marks active running sessions that have persisted resume state", () =
               threadId,
               provider: ProviderDriverKind.make("codex"),
               providerInstanceId,
-              resumeCursor: { threadId },
+              ...(threadId === active.id ? { resumeCursor: { threadId } } : {}),
               runtimePayload: { activeTurnId: "turn-mark-active" },
             }),
           ),
@@ -131,10 +137,11 @@ it.effect("marks active running sessions that have persisted resume state", () =
     }),
     Effect.tap((marked) =>
       Effect.sync(() => {
-        assert.deepStrictEqual(bindingReads, [active.id]);
+        assert.deepStrictEqual(bindingReads, [active.id, missingResumeState.id]);
         assert.deepStrictEqual(marked, [active.id]);
         assert.deepStrictEqual(upserts[0]?.runtimePayload, {
-          continueAfterServerUpdate: true,
+          activeTurnId: "turn-mark-active",
+          continueAfterServerUpdate: active.session.activeTurnId,
         });
       }),
     ),
@@ -193,7 +200,12 @@ it.effect("continues marked sessions after activation with provider-specific inp
               providerInstanceId:
                 threadId === codex.id ? providerInstanceId : fallbackProviderInstanceId,
               status: "running" as const,
-              runtimePayload: { continueAfterServerUpdate: true },
+              runtimePayload: {
+                continueAfterServerUpdate:
+                  threadId === codex.id
+                    ? codex.session.activeTurnId
+                    : fallback.session.activeTurnId,
+              },
             }),
           ),
         upsert: (binding) => Effect.sync(() => upserts.push(binding)),
@@ -240,6 +252,135 @@ it.effect("continues marked sessions after activation with provider-specific inp
   }),
 );
 
+it.effect("does not continue archived or deleted marked sessions", () => {
+  const archived = makeThread(
+    "thread-continue-archived",
+    "running",
+    TurnId.make("turn-continue-archived"),
+    updatedAt,
+  );
+  const deleted = makeThread(
+    "thread-continue-deleted",
+    "running",
+    TurnId.make("turn-continue-deleted"),
+    null,
+    updatedAt,
+  );
+  const sends: ProviderSendTurnInput[] = [];
+  const dispatched: OrchestrationCommand[] = [];
+
+  return runReconciliation({
+    threads: [archived, deleted],
+    providerService: {
+      ...makeProviderService(),
+      sendTurn: (input) =>
+        Effect.sync(() => {
+          sends.push(input);
+          return {
+            threadId: input.threadId,
+            turnId: TurnId.make("unexpected-archived-turn"),
+          };
+        }),
+    },
+    directory: {
+      getBinding: (threadId) => {
+        const thread = threadId === archived.id ? archived : deleted;
+        return Effect.succeed(
+          Option.some({
+            threadId,
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId,
+            status: "running" as const,
+            resumeCursor: { cursor: threadId },
+            runtimePayload: {
+              continueAfterServerUpdate: thread.session.activeTurnId,
+            },
+          }),
+        );
+      },
+      upsert: () => Effect.void,
+      getProvider: () => Effect.die("unused"),
+      listThreadIds: () => Effect.die("unused"),
+      listBindings: () => Effect.die("unused"),
+    },
+    dispatch: (command) =>
+      Effect.sync(() => dispatched.push(command)).pipe(Effect.as({ sequence: dispatched.length })),
+  }).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(sends, []);
+        assert.deepStrictEqual(
+          dispatched.map((command) =>
+            command.type === "thread.session.set"
+              ? { threadId: command.threadId, status: command.session.status }
+              : null,
+          ),
+          [
+            { threadId: archived.id, status: "error" },
+            { threadId: deleted.id, status: "error" },
+          ],
+        );
+      }),
+    ),
+  );
+});
+
+it.effect("retries continuation preparation before settling a persistent failure", () => {
+  const thread = makeThread(
+    "thread-continuation-preparation-failure",
+    "running",
+    TurnId.make("turn-continuation-preparation-failure"),
+  );
+  const dispatched: OrchestrationCommand[] = [];
+  const failure = new OrchestrationCommandInvariantError({
+    commandType: "thread.session.set",
+    detail: "simulated continuation preparation failure",
+  });
+
+  return runReconciliation({
+    threads: [thread],
+    directory: {
+      getBinding: () =>
+        Effect.succeed(
+          Option.some({
+            threadId: thread.id,
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId,
+            status: "running" as const,
+            resumeCursor: { cursor: thread.id },
+            runtimePayload: {
+              continueAfterServerUpdate: thread.session.activeTurnId,
+            },
+          }),
+        ),
+      upsert: () => Effect.void,
+      getProvider: () => Effect.die("unused"),
+      listThreadIds: () => Effect.die("unused"),
+      listBindings: () => Effect.die("unused"),
+    },
+    dispatch: (command) => {
+      if (command.type !== "thread.session.set") {
+        return Effect.die("unexpected command");
+      }
+      dispatched.push(command);
+      return command.session.status === "starting"
+        ? Effect.fail(failure)
+        : Effect.succeed({ sequence: dispatched.length });
+    },
+  }).pipe(
+    Effect.tap(() =>
+      Effect.sync(() =>
+        assert.deepStrictEqual(
+          dispatched.map(
+            (command) => command.type === "thread.session.set" && command.session.status,
+          ),
+          ["starting", "starting", "error"],
+        ),
+      ),
+    ),
+  );
+});
+
 it.effect("reconciles multiple active and archived orphans but skips live sessions", () => {
   const starting = makeThread("thread-starting", "starting");
   const running = makeThread("thread-running", "running", TurnId.make("turn-running"));
@@ -273,7 +414,13 @@ it.effect("reconciles multiple active and archived orphans but skips live sessio
               providerInstanceId,
               status: "running" as const,
               resumeCursor: { cursor: candidate },
-              runtimePayload: { activeTurnId: "stale", unrelated: candidate },
+              runtimePayload: {
+                activeTurnId: "stale",
+                unrelated: candidate,
+                ...(candidate === staleActiveTurn.id
+                  ? { continueAfterServerUpdate: "turn-from-an-earlier-update" }
+                  : {}),
+              },
             }),
           ),
         ),
@@ -307,7 +454,16 @@ it.effect("reconciles multiple active and archived orphans but skips live sessio
         assert.equal(upserts.length, orphanIds.length);
         for (const binding of upserts) {
           assert.equal(binding.status, "stopped");
-          assert.deepStrictEqual(binding.runtimePayload, { activeTurnId: null });
+          assert.deepStrictEqual(
+            binding.runtimePayload,
+            binding.threadId === staleActiveTurn.id
+              ? {
+                  activeTurnId: null,
+                  unrelated: binding.threadId,
+                  continueAfterServerUpdate: null,
+                }
+              : { activeTurnId: null, unrelated: binding.threadId },
+          );
           assert.deepStrictEqual(binding.resumeCursor, { cursor: binding.threadId });
         }
       }),

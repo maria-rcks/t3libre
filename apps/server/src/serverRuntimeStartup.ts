@@ -6,6 +6,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Console from "effect/Console";
@@ -71,7 +72,7 @@ export class ServerRuntimeStartup extends Context.Service<
     >;
     readonly clearProviderSessionContinuationMarkers: (
       threadIds: ReadonlyArray<ThreadId>,
-    ) => Effect.Effect<void>;
+    ) => Effect.Effect<void, ServerUpdateThreadContinuationError>;
     readonly enqueueCommand: <A, E>(
       effect: Effect.Effect<A, E>,
     ) => Effect.Effect<A, E | ServerRuntimeStartupError>;
@@ -320,24 +321,47 @@ class ProviderSessionContinuationError extends Schema.TaggedErrorClass<ProviderS
 export class ServerUpdateThreadContinuationError extends Schema.TaggedErrorClass<ServerUpdateThreadContinuationError>()(
   "ServerUpdateThreadContinuationError",
   {
-    reason: Schema.String,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return this.reason;
+    return "Could not prepare running threads to continue after the update.";
   }
 }
 
-function hasServerUpdateContinuationMarker(runtimePayload: unknown): boolean {
+function hasServerUpdateContinuationMarker(
+  runtimePayload: unknown,
+): runtimePayload is Record<string, unknown> {
   return (
     runtimePayload !== null &&
     typeof runtimePayload === "object" &&
     !Array.isArray(runtimePayload) &&
-    SERVER_UPDATE_CONTINUATION_KEY in runtimePayload &&
-    runtimePayload[SERVER_UPDATE_CONTINUATION_KEY] === true
+    SERVER_UPDATE_CONTINUATION_KEY in runtimePayload
   );
 }
+
+function readRuntimePayload(runtimePayload: unknown): Record<string, unknown> {
+  return runtimePayload !== null &&
+    typeof runtimePayload === "object" &&
+    !Array.isArray(runtimePayload)
+    ? (runtimePayload as Record<string, unknown>)
+    : {};
+}
+
+const isServerUpdateThreadContinuationError = Schema.is(ServerUpdateThreadContinuationError);
+
+function readServerUpdateContinuationTurnId(runtimePayload: unknown): TurnId | null {
+  if (!hasServerUpdateContinuationMarker(runtimePayload)) {
+    return null;
+  }
+  const value = runtimePayload[SERVER_UPDATE_CONTINUATION_KEY];
+  return typeof value === "string" && value.length > 0 ? TurnId.make(value) : null;
+}
+
+const toServerUpdateThreadContinuationError = (cause: unknown) =>
+  isServerUpdateThreadContinuationError(cause)
+    ? cause
+    : new ServerUpdateThreadContinuationError({ cause });
 
 export const markRunningProviderSessionsForContinuation = Effect.gen(function* () {
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
@@ -354,38 +378,33 @@ export const markRunningProviderSessionsForContinuation = Effect.gen(function* (
   const marked: ThreadId[] = [];
   return yield* Effect.gen(function* () {
     for (const thread of running) {
+      const activeTurnId = thread.session?.activeTurnId;
+      if (activeTurnId === null || activeTurnId === undefined) {
+        continue;
+      }
       const binding = yield* directory.getBinding(thread.id);
       if (Option.isNone(binding)) {
-        return yield* new ProviderSessionContinuationError({
-          threadId: thread.id,
-          reason: "No provider binding is persisted.",
-        });
+        continue;
       }
       if (binding.value.resumeCursor === null || binding.value.resumeCursor === undefined) {
-        return yield* new ProviderSessionContinuationError({
-          threadId: thread.id,
-          reason: "No provider resume state is persisted.",
-        });
+        continue;
       }
       yield* directory.upsert({
         ...binding.value,
-        runtimePayload: { [SERVER_UPDATE_CONTINUATION_KEY]: true },
+        runtimePayload: {
+          ...readRuntimePayload(binding.value.runtimePayload),
+          [SERVER_UPDATE_CONTINUATION_KEY]: activeTurnId,
+        },
       });
       marked.push(thread.id);
     }
     return marked;
   }).pipe(
-    Effect.onError(() => clearProviderSessionContinuationMarkers(marked).pipe(Effect.ignoreCause)),
+    Effect.catchCause((cause) =>
+      clearProviderSessionContinuationMarkers(marked).pipe(Effect.andThen(Effect.failCause(cause))),
+    ),
   );
-}).pipe(
-  Effect.mapError(
-    (cause) =>
-      new ServerUpdateThreadContinuationError({
-        reason: "Could not prepare running threads to continue after the update.",
-        cause,
-      }),
-  ),
-);
+}).pipe(Effect.mapError(toServerUpdateThreadContinuationError));
 
 export const clearProviderSessionContinuationMarkers = (threadIds: ReadonlyArray<ThreadId>) =>
   Effect.gen(function* () {
@@ -400,14 +419,17 @@ export const clearProviderSessionContinuationMarkers = (threadIds: ReadonlyArray
               onSome: (binding) =>
                 directory.upsert({
                   ...binding,
-                  runtimePayload: { [SERVER_UPDATE_CONTINUATION_KEY]: null },
+                  runtimePayload: {
+                    ...readRuntimePayload(binding.runtimePayload),
+                    [SERVER_UPDATE_CONTINUATION_KEY]: null,
+                  },
                 }),
             }),
           ),
         ),
       { concurrency: "unbounded", discard: true },
     );
-  });
+  }).pipe(Effect.mapError(toServerUpdateThreadContinuationError));
 
 export const reconcileProviderSessions = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
@@ -444,8 +466,12 @@ export const reconcileProviderSessions = Effect.gen(function* () {
             }).pipe(Effect.as(Option.none())),
       ),
     );
-    const continuationMarked =
+    const continuationMarkerPresent =
       Option.isSome(binding) && hasServerUpdateContinuationMarker(binding.value.runtimePayload);
+    const continuationMarked =
+      Option.isSome(binding) &&
+      session.activeTurnId !== null &&
+      readServerUpdateContinuationTurnId(binding.value.runtimePayload) === session.activeTurnId;
     const settleAsError = (lastError: string) =>
       Effect.gen(function* () {
         yield* Effect.gen(function* () {
@@ -454,8 +480,9 @@ export const reconcileProviderSessions = Effect.gen(function* () {
               ...binding.value,
               status: "stopped",
               runtimePayload: {
+                ...readRuntimePayload(binding.value.runtimePayload),
                 activeTurnId: null,
-                ...(continuationMarked ? { [SERVER_UPDATE_CONTINUATION_KEY]: null } : {}),
+                ...(continuationMarkerPresent ? { [SERVER_UPDATE_CONTINUATION_KEY]: null } : {}),
               },
             });
           }
@@ -498,11 +525,17 @@ export const reconcileProviderSessions = Effect.gen(function* () {
         );
       });
 
-    if (Option.isSome(binding) && continuationMarked) {
+    if (
+      Option.isSome(binding) &&
+      continuationMarked &&
+      thread.archivedAt === null &&
+      thread.deletedAt === null
+    ) {
       const prepared = yield* Effect.gen(function* () {
         yield* directory.upsert({
           ...binding.value,
           runtimePayload: {
+            ...readRuntimePayload(binding.value.runtimePayload),
             [SERVER_UPDATE_CONTINUATION_KEY]: null,
             activeTurnId: null,
           },
@@ -521,7 +554,7 @@ export const reconcileProviderSessions = Effect.gen(function* () {
           },
           createdAt: resumedAt,
         });
-      }).pipe(Effect.exit);
+      }).pipe(Effect.retry({ times: 1 }), Effect.exit);
       if (Exit.isFailure(prepared)) {
         if (Cause.hasInterrupts(prepared.cause)) {
           return yield* Effect.failCause(prepared.cause);
@@ -799,7 +832,6 @@ export const make = (options?: StartupOptions) =>
             ProviderSessionDirectory.ProviderSessionDirectory,
             providerSessionDirectory,
           ),
-          Effect.ignoreCause({ log: true }),
         ),
       enqueueCommand: commandGate.enqueueCommand,
     } satisfies ServerRuntimeStartup["Service"];

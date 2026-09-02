@@ -511,27 +511,13 @@ const makeWsRpcLayer = (
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
       const providerService = yield* ProviderService.ProviderService;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
-      const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
+      const serverUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
-      const serverUpdate = ServerSelfUpdate.withRunningThreadContinuation({
-        mode: config.mode,
-        selfUpdate: serverSelfUpdate,
-        prepare: startup.markRunningProviderSessionsForContinuation.pipe(
-          Effect.mapError(
-            (cause) =>
-              new ServerSelfUpdateError({
-                reason: "Could not prepare running threads to continue after the update.",
-                cause,
-              }),
-          ),
-        ),
-        clear: startup.clearProviderSessionContinuationMarkers,
-      });
       const canReplayPersistedRange = Effect.fnUntraced(function* (
         afterSequence: number,
         headSequence: number,
@@ -2579,7 +2565,22 @@ const makeWsRpcLayer = (
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
-    const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
+    const baseServerSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
+    const config = yield* ServerConfig.ServerConfig;
+    const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
+    const toServerSelfUpdateError = (cause: Error) =>
+      new ServerSelfUpdateError({ reason: cause.message, cause });
+    const serverSelfUpdate = yield* ServerSelfUpdate.withRunningThreadContinuation({
+      mode: config.mode,
+      selfUpdate: baseServerSelfUpdate,
+      prepare: startup.markRunningProviderSessionsForContinuation.pipe(
+        Effect.mapError(toServerSelfUpdateError),
+      ),
+      clear: (threadIds) =>
+        startup
+          .clearProviderSessionContinuationMarkers(threadIds)
+          .pipe(Effect.mapError(toServerSelfUpdateError)),
+    });
     const pullRequests = yield* PullRequestService.PullRequestService;
     return HttpRouter.add(
       "GET",

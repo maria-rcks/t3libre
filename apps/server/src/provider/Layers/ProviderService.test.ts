@@ -992,8 +992,16 @@ routing.layer("ProviderServiceLive routing", (it) => {
       assert.include(failure.issue, "requires an explicit continuation prompt");
       assert.equal(routing.claude.sendTurn.mock.calls.length, 0);
 
-      yield* provider.stopSession({ threadId: codexThreadId });
       yield* provider.stopSession({ threadId: claudeThreadId });
+      routing.claude.startSession.mockClear();
+      const stoppedFailure = yield* Effect.flip(
+        provider.sendTurn({ threadId: claudeThreadId, continuation: true }),
+      );
+      assert.instanceOf(stoppedFailure, ProviderValidationError);
+      assert.include(stoppedFailure.issue, "requires an explicit continuation prompt");
+      assert.equal(routing.claude.startSession.mock.calls.length, 0);
+
+      yield* provider.stopSession({ threadId: codexThreadId });
       routing.codex.startSession.mockClear();
       routing.codex.sendTurn.mockClear();
       routing.codex.stopSession.mockClear();

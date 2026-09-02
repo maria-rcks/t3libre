@@ -777,10 +777,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     let metricProvider = "unknown";
     let metricModel = input.modelSelection?.model;
     return yield* Effect.gen(function* () {
-      const routed = yield* resolveRoutableSession({
+      let routed = yield* resolveRoutableSession({
         threadId: input.threadId,
         operation: "ProviderService.sendTurn",
-        allowRecovery: true,
+        allowRecovery: false,
       });
       if (
         input.continuation === true &&
@@ -792,6 +792,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "ProviderService.sendTurn",
           `Provider '${routed.adapter.provider}' requires an explicit continuation prompt`,
         );
+      }
+      if (!routed.isActive) {
+        routed = yield* resolveRoutableSession({
+          threadId: input.threadId,
+          operation: "ProviderService.sendTurn",
+          allowRecovery: true,
+        });
       }
       metricProvider = routed.adapter.provider;
       metricModel = input.modelSelection?.model;

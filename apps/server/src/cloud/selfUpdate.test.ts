@@ -108,7 +108,7 @@ it.layer(NodeServices.layer)("server self update", (it) => {
   it.effect("marks running threads at the boot-service handoff", () =>
     Effect.gen(function* () {
       const events: string[] = [];
-      const selfUpdate = ServerSelfUpdate.withRunningThreadContinuation({
+      const selfUpdate = yield* ServerSelfUpdate.withRunningThreadContinuation({
         mode: "web",
         selfUpdate: {
           update: (_input, reportProgress = () => Effect.void) =>
@@ -142,7 +142,7 @@ it.layer(NodeServices.layer)("server self update", (it) => {
       const threadId = ThreadId.make("thread-running-desktop");
       const events: string[] = [];
       const commitError = new ServerSelfUpdateError({ reason: "install failed" });
-      const selfUpdate = ServerSelfUpdate.withRunningThreadContinuation({
+      const selfUpdate = yield* ServerSelfUpdate.withRunningThreadContinuation({
         mode: "desktop",
         selfUpdate: {
           update: (_input, reportProgress = () => Effect.void) =>
@@ -171,6 +171,41 @@ it.layer(NodeServices.layer)("server self update", (it) => {
         commitError,
       );
       expect(events).toEqual(["installing", "prepare", "commit", `clear:${threadId}`]);
+      expect(yield* selfUpdate.commitDesktopUpdate("desktop-token").pipe(Effect.flip)).toBe(
+        commitError,
+      );
+      expect(events).toEqual([
+        "installing",
+        "prepare",
+        "commit",
+        `clear:${threadId}`,
+        "prepare",
+        "commit",
+        `clear:${threadId}`,
+      ]);
+    }),
+  );
+
+  it.effect("reports a failed continuation-marker cleanup", () =>
+    Effect.gen(function* () {
+      const updateError = new ServerSelfUpdateError({ reason: "update failed" });
+      const clearError = new ServerSelfUpdateError({ reason: "marker cleanup failed" });
+      const selfUpdate = yield* ServerSelfUpdate.withRunningThreadContinuation({
+        mode: "web",
+        selfUpdate: {
+          update: (_input, reportProgress = () => Effect.void) =>
+            reportProgress("installing").pipe(Effect.andThen(Effect.fail(updateError))),
+          commitDesktopUpdate: () => Effect.never,
+        },
+        prepare: Effect.succeed([ThreadId.make("thread-cleanup-failure")]),
+        clear: () => Effect.fail(clearError),
+      });
+
+      expect(
+        yield* selfUpdate
+          .update({ targetVersion: "1.1.0", continueRunningThreads: true })
+          .pipe(Effect.flip),
+      ).toBe(clearError);
     }),
   );
 
