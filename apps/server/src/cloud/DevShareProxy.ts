@@ -240,7 +240,7 @@ const proxyWebSocketUpgrade = (
           upstreamSocket.runRaw((data) => writeToClient(data)),
         );
       }),
-    ).pipe(Effect.catchIf(Socket.isSocketError, () => Effect.void));
+    ).pipe(Effect.catchTags({ SocketError: () => Effect.void }));
     return HttpServerResponse.empty();
   }).pipe(
     Effect.provideService(Socket.WebSocketConstructor, globalWebSocketConstructor),
