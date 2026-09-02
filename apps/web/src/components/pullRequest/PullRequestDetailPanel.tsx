@@ -1785,7 +1785,7 @@ export function PullRequestDetailPanel({
                             <Button
                               size="micro"
                               variant="outline"
-                              className="ml-1 min-w-32 max-w-48 shrink gap-1 font-normal text-muted-foreground"
+                              className="ml-1 min-w-0 basis-40 shrink-[0.75] gap-1 font-normal text-muted-foreground"
                               aria-label={`Copy checkout command: ${checkoutCommand}`}
                               onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}
                             />
