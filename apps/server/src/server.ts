@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import {
   FetchHttpClient,
   HttpClient,
@@ -112,6 +113,7 @@ import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts"
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
 import {
+  ConnectDevShareTrust,
   connectDevShareProxyLayer,
   trustConnectDevShareManagedOrigin,
 } from "./cloud/DevShareProxy.ts";
@@ -491,6 +493,18 @@ const commandReadinessLayer = HttpRouter.middleware(
   { global: true },
 );
 
+class ConnectDevShareReadinessError extends Schema.TaggedErrorClass<ConnectDevShareReadinessError>()(
+  "ConnectDevShareReadinessError",
+  {
+    expectedEnvironmentId: Schema.String,
+    actualEnvironmentId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `T3 Connect dev-share origin served environment '${this.actualEnvironmentId}' instead of '${this.expectedEnvironmentId}'`;
+  }
+}
+
 export const makeRoutesLayer = Layer.mergeAll(
   Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
@@ -531,7 +545,10 @@ const awaitConnectDevShareReady = (baseUrl: string) =>
       response,
     );
     if (descriptor.environmentId !== expectedEnvironmentId) {
-      return yield* Effect.fail({ _tag: "ConnectDevShareReadinessError" as const });
+      return yield* new ConnectDevShareReadinessError({
+        expectedEnvironmentId,
+        actualEnvironmentId: descriptor.environmentId,
+      });
     }
   }).pipe(
     Effect.retry({
@@ -884,6 +901,7 @@ export const makeServerLayer = Layer.unwrap(
     );
 
     return serverApplicationLayer.pipe(
+      Layer.provide(ConnectDevShareTrust.layer),
       Layer.provideMerge(runtimeServicesLive),
       Layer.provide(activationLayer),
       Layer.provideMerge(serverRelayBrokerTracingLayer),

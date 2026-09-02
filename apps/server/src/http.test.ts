@@ -3,12 +3,15 @@ import { describe, vi } from "vite-plus/test";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Scope from "effect/Scope";
 import { HttpServerResponse } from "effect/unstable/http";
 import { openMediaFile } from "./assets/MediaFile.ts";
 import {
+  ConnectDevShareTrust,
   filterDevShareRequestHeaders,
   resolveDevShareTargetUrl,
   rewriteDevShareLocation,
@@ -26,6 +29,23 @@ import {
 const fileResponseLayer = Layer.mergeAll(NodeHttpPlatform.layer, NodeServices.layer);
 
 describe("T3 Connect dev sharing", () => {
+  it.effect("keeps a replacement origin when an older trust scope closes", () =>
+    Effect.gen(function* () {
+      const trust = yield* ConnectDevShareTrust;
+      const firstScope = yield* Scope.make();
+      const secondScope = yield* Scope.make();
+      const managedOrigin = new URL("https://environment.tunnels.example.com");
+
+      yield* trust.trust(managedOrigin).pipe(Scope.provide(firstScope));
+      yield* trust.trust(managedOrigin).pipe(Scope.provide(secondScope));
+      yield* Scope.close(firstScope, Exit.void);
+      expect((yield* trust.managedOrigin)?.origin).toBe(managedOrigin.origin);
+
+      yield* Scope.close(secondScope, Exit.void);
+      expect(yield* trust.managedOrigin).toBeUndefined();
+    }).pipe(Effect.provide(ConnectDevShareTrust.layer)),
+  );
+
   it("proxies only public Vite routes", () => {
     const devUrl = new URL("http://localhost:5733/__t3-connect-dev-share/invocation-one/");
     const managedOrigin = new URL("https://environment.tunnels.example.com");

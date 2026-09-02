@@ -118,7 +118,7 @@ import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/provid
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
-import { trustConnectDevShareManagedOrigin } from "./cloud/DevShareProxy.ts";
+import { ConnectDevShareTrust, trustConnectDevShareManagedOrigin } from "./cloud/DevShareProxy.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -432,6 +432,7 @@ const makeBrowserOtlpPayload = (spanName: string) =>
 
 const buildAppUnderTest = (options?: {
   config?: Partial<ServerConfig.ServerConfig["Service"]>;
+  connectDevShareManagedOrigin?: URL;
   layers?: {
     keybindings?: Partial<Keybindings.Keybindings["Service"]>;
     environmentTheme?: Partial<EnvironmentTheme.EnvironmentThemeService["Service"]>;
@@ -1049,7 +1050,16 @@ const buildAppUnderTest = (options?: {
       Layer.provide(layerConfig),
     );
 
-    yield* Layer.build(appLayer);
+    const appWithDevShareTrust = Layer.merge(
+      appLayer,
+      options?.connectDevShareManagedOrigin
+        ? Layer.effectDiscard(
+            trustConnectDevShareManagedOrigin(options.connectDevShareManagedOrigin),
+          )
+        : Layer.empty,
+    ).pipe(Layer.provide(ConnectDevShareTrust.layer));
+
+    yield* Layer.build(appWithDevShareTrust);
     return config;
   });
 
@@ -1535,7 +1545,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-static-" });
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-router-static-",
+      });
       const indexPath = path.join(staticDir, "index.html");
       yield* fileSystem.writeFileString(indexPath, "<html>router-static-ok</html>");
 
@@ -1615,8 +1627,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         }),
         ({ close }) => Effect.promise(close),
       );
-      yield* trustConnectDevShareManagedOrigin(managedOrigin);
       yield* buildAppUnderTest({
+        connectDevShareManagedOrigin: managedOrigin,
         config: {
           devUrl: new URL(shareBasePath, viteServer.origin),
           connectDevShare: true,
@@ -1626,7 +1638,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const NodeHttp = yield* Effect.promise(() => import("node:http"));
       const publicUrl = yield* getHttpServerUrl(`${shareBasePath}assets/index.js?marker=connect`);
       const response = yield* Effect.callback<
-        { readonly body: Uint8Array; readonly headers: NodeJS.Dict<string | string[] | undefined> },
+        {
+          readonly body: Uint8Array;
+          readonly headers: NodeJS.Dict<string | string[] | undefined>;
+        },
         Error
       >((resume) => {
         const request = NodeHttp.get(

@@ -24,8 +24,16 @@ export interface AgentAwarenessDeliveryUserRecord {
   readonly liveActivitiesEnabled: boolean;
 }
 
-export class ActiveDurableEnvironmentLinkConflict extends Error {
-  override readonly name = "ActiveDurableEnvironmentLinkConflict";
+export class ActiveDurableEnvironmentLinkConflict extends Schema.TaggedErrorClass<ActiveDurableEnvironmentLinkConflict>()(
+  "ActiveDurableEnvironmentLinkConflict",
+  {
+    userId: Schema.String,
+    environmentId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Active durable environment link already exists for user '${this.userId}', environment '${this.environmentId}'`;
+  }
 }
 
 export class EnvironmentLinkUpsertPersistenceError extends Schema.TaggedErrorClass<EnvironmentLinkUpsertPersistenceError>()(
@@ -117,7 +125,10 @@ export class EnvironmentLinks extends Context.Service<
         readonly leaseId: string;
         readonly expiresAt: string;
       };
-    }) => Effect.Effect<void, EnvironmentLinkUpsertPersistenceError>;
+    }) => Effect.Effect<
+      void,
+      EnvironmentLinkUpsertPersistenceError | ActiveDurableEnvironmentLinkConflict
+    >;
     readonly listUsersForEnvironment: (input: {
       readonly environmentId: string;
     }) => Effect.Effect<ReadonlyArray<string>, EnvironmentLinkUserListPersistenceError>;
@@ -243,13 +254,9 @@ const make = Effect.gen(function* () {
           ),
         );
       if (input.temporaryLease !== undefined && rows.length === 0) {
-        return yield* new EnvironmentLinkUpsertPersistenceError({
+        return yield* new ActiveDurableEnvironmentLinkConflict({
           userId: input.userId,
           environmentId,
-          ...(request.deviceId === undefined ? {} : { deviceId: request.deviceId }),
-          cause: new ActiveDurableEnvironmentLinkConflict(
-            "An active durable environment link already exists",
-          ),
         });
       }
     }),

@@ -1,9 +1,13 @@
 /** Proxies the public T3 Connect dev origin to Vite while preserving T3 routes. */
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
+import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+import type * as Scope from "effect/Scope";
 import {
   Headers,
   HttpClient,
@@ -35,22 +39,44 @@ const DEV_SHARE_PUBLIC_FILES = new Set([
   "/favicon.ico",
   "/manifest.webmanifest",
 ]);
-let trustedManagedOrigin: { readonly url: URL } | undefined;
 
-function registerConnectDevShareManagedOrigin(origin: URL): () => void {
-  const registered = { url: new URL(origin.origin) };
-  trustedManagedOrigin = registered;
-  return () => {
-    if (trustedManagedOrigin === registered) trustedManagedOrigin = undefined;
-  };
+interface ManagedOriginRegistration {
+  readonly url: URL;
+}
+
+export class ConnectDevShareTrust extends Context.Service<
+  ConnectDevShareTrust,
+  {
+    readonly managedOrigin: Effect.Effect<URL | undefined>;
+    readonly trust: (origin: URL) => Effect.Effect<void, never, Scope.Scope>;
+  }
+>()("t3/cloud/DevShareProxy/ConnectDevShareTrust") {
+  static readonly layer = Layer.effect(
+    ConnectDevShareTrust,
+    Effect.gen(function* () {
+      const current = yield* Ref.make<ManagedOriginRegistration | undefined>(undefined);
+      const trust = Effect.fn("ConnectDevShareTrust.trust")(function* (origin: URL) {
+        const registration = { url: new URL(origin.origin) };
+        yield* Effect.acquireRelease(
+          Ref.set(current, registration).pipe(Effect.as(registration)),
+          (owned) => Ref.update(current, (active) => (active === owned ? undefined : active)),
+        );
+      });
+      return ConnectDevShareTrust.of({
+        managedOrigin: Ref.get(current).pipe(Effect.map((registration) => registration?.url)),
+        trust,
+      });
+    }),
+  );
 }
 
 /** Trust one managed Connect origin for the current scope. */
-export const trustConnectDevShareManagedOrigin = (origin: URL) =>
-  Effect.acquireRelease(
-    Effect.sync(() => registerConnectDevShareManagedOrigin(origin)),
-    (release) => Effect.sync(release),
-  ).pipe(Effect.asVoid);
+export const trustConnectDevShareManagedOrigin = Effect.fn("trustConnectDevShareManagedOrigin")(
+  function* (origin: URL) {
+    const trust = yield* ConnectDevShareTrust;
+    yield* trust.trust(origin);
+  },
+);
 
 function normalizedDevShareBasePath(devUrl: URL): string | undefined {
   const pathname = devUrl.pathname;
@@ -338,11 +364,12 @@ export const connectDevShareProxyLayer = HttpRouter.middleware(
       const requestUrl = HttpServerRequest.toURL(request);
       if (Option.isNone(requestUrl)) return yield* httpEffect;
       const config = yield* ServerConfig.ServerConfig;
+      const trust = yield* ConnectDevShareTrust;
       const selection = {
         enabled: config.connectDevShare === true,
         devUrl: config.devUrl,
         requestUrl: requestUrl.value,
-        managedOrigin: trustedManagedOrigin?.url,
+        managedOrigin: yield* trust.managedOrigin,
         // The tunnel reaches this listener over loopback. Refusing wildcard
         // listeners keeps a LAN caller from spoofing Cloudflare headers to
         // reach the otherwise loopback-only Vite process.

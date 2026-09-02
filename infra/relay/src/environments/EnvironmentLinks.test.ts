@@ -55,8 +55,11 @@ describe("EnvironmentLinks", () => {
         }),
       );
 
-      expect(error._tag).toBe("EnvironmentLinkUpsertPersistenceError");
-      expect(error.cause).toBeInstanceOf(EnvironmentLinks.ActiveDurableEnvironmentLinkConflict);
+      expect(error).toMatchObject({
+        _tag: "ActiveDurableEnvironmentLinkConflict",
+        userId: "user-1",
+        environmentId: "env-1",
+      });
       const query = new PgDialect().sqlToQuery(conflictConfig?.setWhere as never);
       expect(query.sql).toContain('"relay_environment_links"."revoked_at" is not null');
       expect(query.sql).toContain('"relay_environment_links"."temporary_lease_id" is not null');

@@ -66,6 +66,7 @@ export type EnvironmentLinkError =
   | EnvironmentLinkProofExpired
   | EnvironmentLinkProofInvalid
   | DpopProofs.DpopProofReplayPersistenceError
+  | EnvironmentLinks.ActiveDurableEnvironmentLinkConflict
   | EnvironmentLinks.EnvironmentLinkUpsertPersistenceError
   | EnvironmentCredentials.EnvironmentCredentialCreatePersistenceError
   | ManagedEndpointProvider.ManagedEndpointProviderError;
@@ -313,13 +314,9 @@ const make = Effect.gen(function* () {
             ),
           );
         if (durableLink !== null) {
-          return yield* new EnvironmentLinks.EnvironmentLinkUpsertPersistenceError({
+          return yield* new EnvironmentLinks.ActiveDurableEnvironmentLinkConflict({
             userId: input.userId,
             environmentId: verified.environmentId,
-            ...(input.request.deviceId === undefined ? {} : { deviceId: input.request.deviceId }),
-            cause: new EnvironmentLinks.ActiveDurableEnvironmentLinkConflict(
-              "An active durable environment link already exists",
-            ),
           });
         }
       }
@@ -380,22 +377,22 @@ const make = Effect.gen(function* () {
       yield* temporaryLease === undefined
         ? persistLink
         : persistLink.pipe(
-            Effect.catch((error) =>
-              error.cause instanceof EnvironmentLinks.ActiveDurableEnvironmentLinkConflict
-                ? Effect.fail(error)
-                : managedEndpointProvider
-                    .deprovision({ userId: input.userId, environmentId: verified.environmentId })
-                    .pipe(
-                      Effect.tapError((cleanupError) =>
-                        Effect.logWarning("temporary endpoint cleanup after link failure failed", {
-                          environmentId: verified.environmentId,
-                          errorTag: cleanupError._tag,
-                        }),
-                      ),
-                      Effect.ignore,
-                      Effect.andThen(Effect.fail(error)),
+            Effect.catchTags({
+              ActiveDurableEnvironmentLinkConflict: (error) => Effect.fail(error),
+              EnvironmentLinkUpsertPersistenceError: (error) =>
+                managedEndpointProvider
+                  .deprovision({ userId: input.userId, environmentId: verified.environmentId })
+                  .pipe(
+                    Effect.tapError((cleanupError) =>
+                      Effect.logWarning("temporary endpoint cleanup after link failure failed", {
+                        environmentId: verified.environmentId,
+                        errorTag: cleanupError._tag,
+                      }),
                     ),
-            ),
+                    Effect.ignore,
+                    Effect.andThen(Effect.fail(error)),
+                  ),
+            }),
           );
       const environmentCredential = yield* credentials.create({
         environmentId: verified.environmentId,

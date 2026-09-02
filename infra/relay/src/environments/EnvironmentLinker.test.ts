@@ -226,19 +226,16 @@ describe("EnvironmentLinker", () => {
       const { request } = yield* makeRequest;
       const linker = yield* EnvironmentLinker.EnvironmentLinker;
       const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
-      expect(error._tag).toBe("EnvironmentLinkUpsertPersistenceError");
+      expect(error._tag).toBe("ActiveDurableEnvironmentLinkConflict");
       expect(deprovisioned).toBe(false);
     }).pipe(
       Effect.provide(
         testLayer({
           upsert: () =>
             Effect.fail(
-              new EnvironmentLinks.EnvironmentLinkUpsertPersistenceError({
+              new EnvironmentLinks.ActiveDurableEnvironmentLinkConflict({
                 userId: "user_123",
                 environmentId: "env-link-test",
-                cause: new EnvironmentLinks.ActiveDurableEnvironmentLinkConflict(
-                  "active durable link",
-                ),
               }),
             ),
           deprovision: () =>
@@ -256,8 +253,11 @@ describe("EnvironmentLinker", () => {
       const { request } = yield* makeRequest;
       const linker = yield* EnvironmentLinker.EnvironmentLinker;
       const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
-      expect(error._tag).toBe("EnvironmentLinkUpsertPersistenceError");
-      expect(error.cause).toBeInstanceOf(EnvironmentLinks.ActiveDurableEnvironmentLinkConflict);
+      expect(error).toMatchObject({
+        _tag: "ActiveDurableEnvironmentLinkConflict",
+        userId: "user_123",
+        environmentId: "env-link-test",
+      });
       expect(provisioned).toBe(false);
     }).pipe(
       Effect.provide(
