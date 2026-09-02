@@ -1815,7 +1815,7 @@ function PullRequestsRouteView() {
       // back out to the route container, which spans the panel too, so the
       // toggle keeps one fixed top-right anchor and never jumps sideways.
       pullRequestsSupported && !rightPanelPresent ? openPanelControls : null,
-    rightPanelOpen: rightPanelPresent,
+    rightPanelOpen: rightPanelState.isOpen,
     listBody,
     scrollRef,
   };

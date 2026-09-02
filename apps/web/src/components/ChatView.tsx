@@ -1875,7 +1875,7 @@ function ChatViewContent(props: ChatViewProps) {
   const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
     canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
-  const inlineRightPanelOwnsTitleBar = inlineRightPanelPresent && !shouldUseRightPanelSheet;
+  const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUseRightPanelSheet;
 
   useEffect(() => {
     if (!activeThreadRef) return;
