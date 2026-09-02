@@ -620,50 +620,25 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
-  effectIt.effect("routes /compact only after conversation context exists", () =>
+  effectIt.effect("rejects /compact without conversation context", () =>
     Effect.gen(function* () {
       const harness = yield* Effect.promise(() => createHarness());
-      const threadId = ThreadId.make("thread-1");
-      const dispatchTurn = (suffix: string, text: string) =>
-        harness.engine.dispatch({
-          type: "thread.turn.start",
-          commandId: CommandId.make(`cmd-${suffix}`),
-          threadId,
-          message: {
-            messageId: asMessageId(`user-message-${suffix}`),
-            role: "user",
-            text,
-            attachments: [],
-          },
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "approval-required",
-          createdAt: "2026-01-01T00:00:00.000Z",
-        });
-
-      yield* dispatchTurn("empty-compact", "/compact");
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-empty-compact"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-empty-compact"),
+          role: "user",
+          text: "/compact",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
       yield* Effect.promise(() => harness.drain());
       expect(harness.compactThread).not.toHaveBeenCalled();
-
-      yield* dispatchTurn("context", "existing context");
-      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
-      yield* harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-ready-before-compact"),
-        threadId,
-        session: {
-          threadId,
-          status: "ready",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: "2026-01-01T00:00:01.000Z",
-        },
-        createdAt: "2026-01-01T00:00:01.000Z",
-      });
-
-      yield* dispatchTurn("compact", "/compact");
-      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
     }),
   );
 

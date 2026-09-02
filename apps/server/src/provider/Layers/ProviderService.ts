@@ -28,6 +28,7 @@ import {
 } from "@t3tools/contracts";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -234,7 +235,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const revokeMcpCredential =
     options?.revokeMcpCredential ?? McpSessionRegistry.revokeActiveMcpThread;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
-  const pendingFallbackCompactions = new Set<ThreadId>();
+  const pendingFallbackCompactions = new Map<ThreadId, Deferred.Deferred<void>>();
+  const settleFallbackCompaction = (threadId: ThreadId) => {
+    const completion = pendingFallbackCompactions.get(threadId);
+    pendingFallbackCompactions.delete(threadId);
+    return completion
+      ? Deferred.succeed(completion, undefined).pipe(Effect.as(true))
+      : Effect.succeed(false);
+  };
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   /**
    * Attach the `t3-code` MCP server to the session that is about to start.
@@ -358,12 +366,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       yield* publishRuntimeEvent(canonicalEvent);
 
       if (canonicalEvent.type === "session.exited" || canonicalEvent.type === "runtime.error") {
-        pendingFallbackCompactions.delete(canonicalEvent.threadId);
+        yield* settleFallbackCompaction(canonicalEvent.threadId);
       }
 
       const fallbackCompactionSettled =
         (canonicalEvent.type === "turn.completed" || canonicalEvent.type === "turn.aborted") &&
-        pendingFallbackCompactions.delete(canonicalEvent.threadId);
+        (yield* settleFallbackCompaction(canonicalEvent.threadId));
       if (
         !fallbackCompactionSettled ||
         canonicalEvent.type !== "turn.completed" ||
@@ -877,7 +885,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* routed.adapter.compactThread(routed.threadId, modelSelection);
       } else {
         const input = routed.adapter.provider === "cursor" ? "/compress" : "/compact";
-        pendingFallbackCompactions.add(threadId);
+        const completion = yield* Deferred.make<void>();
+        pendingFallbackCompactions.set(threadId, completion);
         const sendExit = yield* sendTurn({
           threadId,
           input,
@@ -887,6 +896,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           pendingFallbackCompactions.delete(threadId);
           return yield* Effect.failCause(sendExit.cause);
         }
+        yield* Deferred.await(completion);
       }
       yield* analytics.record("provider.thread.compacted", {
         provider: routed.adapter.provider,

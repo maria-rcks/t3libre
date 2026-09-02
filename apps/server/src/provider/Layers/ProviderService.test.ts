@@ -1046,9 +1046,8 @@ routing.layer("ProviderServiceLive routing", (it) => {
         Stream.runHead,
         Effect.forkChild,
       );
+      const compactFiber = yield* provider.compactThread(threadId).pipe(Effect.forkChild);
       yield* advanceTestClock(50);
-
-      yield* provider.compactThread(threadId);
       assert.deepEqual(routing.cursor.sendTurn.mock.calls, [[{ threadId, input: "/compress" }]]);
       routing.cursor.emit({
         type: "turn.completed",
@@ -1059,6 +1058,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         turnId: asTurnId(`turn-${threadId}`),
         payload: { state: "completed" },
       });
+      yield* Fiber.join(compactFiber);
 
       const compacted = yield* Fiber.join(compactedEventFiber);
       assert.equal(compacted._tag, "Some");

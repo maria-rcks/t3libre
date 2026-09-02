@@ -1306,6 +1306,17 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    if (compactingThreadIds.has(event.payload.threadId)) {
+      return yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.turn.start.failed",
+        summary: "Provider turn start failed",
+        detail: "Wait for context compaction to finish before sending another message.",
+        turnId: null,
+        createdAt: event.payload.createdAt,
+      });
+    }
+
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
       messageText: message.text,
