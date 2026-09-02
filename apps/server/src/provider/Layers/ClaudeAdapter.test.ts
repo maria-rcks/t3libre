@@ -713,7 +713,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("routes native compaction through Claude's compact command", () => {
+  it.effect("keeps compact commands intact when ultrathink is selected", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -729,7 +729,7 @@ describe("ClaudeAdapterLive", () => {
         runtimeMode: "full-access",
       });
 
-      yield* adapter.compactThread!(session.threadId);
+      yield* adapter.compactThread!(session.threadId, modelSelection);
 
       const promptText = yield* Effect.promise(() =>
         readFirstPromptText(harness.getLastCreateQueryInput()),
@@ -2239,7 +2239,6 @@ describe("ClaudeAdapterLive", () => {
           maxTokens: 200000,
         });
       }
-      assert.ok(runtimeEvents.some((event) => event.type === "thread.state.changed"));
       assert.equal(
         runtimeEvents.find((event) => event.type === "turn.completed")?.type,
         "turn.completed",

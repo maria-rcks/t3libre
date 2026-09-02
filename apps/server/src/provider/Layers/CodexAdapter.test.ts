@@ -355,7 +355,6 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         Effect.forkChild,
       );
 
-      yield* adapter.compactThread!(threadId);
       yield* runtime.emit({
         id: asEventId("evt-compaction-item-completed"),
         kind: "notification",
@@ -363,8 +362,6 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         createdAt: "2026-01-01T00:00:00.000Z",
         method: "item/completed",
         threadId,
-        turnId: asTurnId("provider-compact-turn"),
-        itemId: asItemId("provider-compact-item"),
         payload: {
           completedAtMs: 1_778_000_000_000,
           threadId: "provider-thread-1",

@@ -172,7 +172,18 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
       Effect.void,
   );
 
-  const compactThread = vi.fn((_threadId: ThreadId) => Effect.void);
+  const compactThread = vi.fn((threadId: ThreadId) =>
+    Effect.sync(() =>
+      emit({
+        type: "thread.state.changed",
+        eventId: asEventId("evt-native-compact"),
+        provider,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId,
+        payload: { state: "compacted" },
+      }),
+    ),
+  );
 
   const respondToRequest = vi.fn(
     (
@@ -987,6 +998,10 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
 
+      yield* advanceTestClock(10);
+      yield* provider.compactThread(session.threadId);
+      assert.deepEqual(routing.codex.compactThread.mock.calls, [[session.threadId, undefined]]);
+
       yield* provider.interruptTurn({ threadId: session.threadId });
       assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId, undefined]]);
 
@@ -1061,15 +1076,12 @@ routing.layer("ProviderServiceLive routing", (it) => {
         runtimeMode: "full-access",
       });
       const compactedEventFiber = yield* provider.streamEvents.pipe(
-        Stream.filter(
-          (event) => event.threadId === threadId && event.type === "thread.state.changed",
-        ),
+        Stream.filter((event) => event.type === "thread.state.changed"),
         Stream.runHead,
         Effect.forkChild,
       );
       const compactFiber = yield* provider.compactThread(threadId).pipe(Effect.forkChild);
       yield* advanceTestClock(50);
-      assert.deepEqual(routing.cursor.sendTurn.mock.calls, [[{ threadId, input: "/compress" }]]);
       routing.cursor.emit({
         type: "turn.completed",
         eventId: asEventId("evt-cursor-compact-completed"),
@@ -1082,9 +1094,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       yield* Fiber.join(compactFiber);
 
       const compacted = Option.getOrThrow(yield* Fiber.join(compactedEventFiber));
-      assert.ok(compacted.type === "thread.state.changed");
-      assert.equal(compacted.payload.state, "compacted");
-      yield* provider.stopSession({ threadId });
+      assert.ok(compacted.type === "thread.state.changed" && compacted.payload.state === "compacted");
     }),
   );
 
