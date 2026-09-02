@@ -41,17 +41,18 @@ import type { ReviewCommentContext } from "~/reviewCommentContext";
 
 describe("pull request checkout commands", () => {
   it.each([
-    ["github", "feature", "gh pr checkout 42"],
-    ["gitlab", "feature", "glab mr checkout 42"],
-    ["azure-devops", "feature", "az repos pr checkout --id 42"],
+    ["github", "feature", null, "gh pr checkout 42"],
+    ["gitlab", "feature", null, "glab mr checkout 42"],
+    ["azure-devops", "feature", null, "az repos pr checkout --id 42"],
     [
       "bitbucket",
-      "feature/it's-ready",
-      "git fetch origin '+refs/heads/feature/it'\\''s-ready:refs/remotes/origin/feature/it'\\''s-ready' && git switch --force-create 'feature/it'\\''s-ready' --track 'origin/feature/it'\\''s-ready'",
+      "feature/checkout",
+      "maria/t3code",
+      "git clone --single-branch --branch feature/checkout https://bitbucket.org/maria/t3code.git t3code-pr-42",
     ],
-    ["unknown", "feature", null],
-  ] as const)("builds the %s command", (provider, branch, expected) => {
-    expect(pullRequestCheckoutCommand(provider, 42, branch)).toBe(expected);
+    ["unknown", "feature", null, null],
+  ] as const)("builds the %s command", (provider, branch, repository, expected) => {
+    expect(pullRequestCheckoutCommand(provider, 42, branch, repository)).toBe(expected);
   });
 });
 

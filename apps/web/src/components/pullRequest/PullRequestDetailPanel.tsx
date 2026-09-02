@@ -520,7 +520,12 @@ export function PullRequestDetailPanel({
   );
   const repositoryUrl = detail === null ? null : changeRequestRepositoryUrl(detail.url);
   const checkoutCommand = detail
-    ? pullRequestCheckoutCommand(detail.provider, detail.number, detail.headBranch)
+    ? pullRequestCheckoutCommand(
+        detail.provider,
+        detail.number,
+        detail.headBranch,
+        detail.headRepositoryNameWithOwner,
+      )
     : null;
   const branchRefsQuery = useEnvironmentQuery(
     detail === null
@@ -1473,12 +1478,6 @@ export function PullRequestDetailPanel({
                     <ArrowUpRightIcon className="size-3.5" />
                     {openOnHostLabel(detail.provider)}
                   </MenuItem>
-                  {checkoutCommand ? (
-                    <MenuItem onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}>
-                      <CopyIcon className="size-3.5" />
-                      Copy checkout command
-                    </MenuItem>
-                  ) : null}
                   <MenuItem onClick={() => void writeTextToClipboard(detail.url)}>
                     <LinkIcon className="size-3.5" />
                     Copy link
@@ -1793,6 +1792,19 @@ export function PullRequestDetailPanel({
                     />
                   </span>
                 </div>
+                {checkoutCommand ? (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    className="mt-2 min-w-0 max-w-full gap-1.5 font-normal text-muted-foreground"
+                    aria-label={`Copy checkout command: ${checkoutCommand}`}
+                    title={checkoutCommand}
+                    onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}
+                  >
+                    <code className="min-w-0 truncate text-[11px]">{checkoutCommand}</code>
+                    <CopyIcon aria-hidden className="size-3" />
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </div>

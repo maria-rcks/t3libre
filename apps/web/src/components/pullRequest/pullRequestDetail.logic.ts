@@ -17,12 +17,14 @@ import type {
 
 import { inferReviewCommentFenceLanguage, type ReviewCommentContext } from "~/reviewCommentContext";
 
-const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+const safeShellArgument = /^[A-Za-z0-9._/@+=,-]+$/;
+const bitbucketRepositoryName = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 
 export function pullRequestCheckoutCommand(
   provider: SourceControlProviderKind,
   number: number,
   headBranch: string,
+  headRepositoryNameWithOwner?: string | null,
 ): string | null {
   switch (provider) {
     case "github":
@@ -31,8 +33,16 @@ export function pullRequestCheckoutCommand(
       return `glab mr checkout ${number}`;
     case "azure-devops":
       return `az repos pr checkout --id ${number}`;
-    case "bitbucket":
-      return `git fetch origin ${shellQuote(`+refs/heads/${headBranch}:refs/remotes/origin/${headBranch}`)} && git switch --force-create ${shellQuote(headBranch)} --track ${shellQuote(`origin/${headBranch}`)}`;
+    case "bitbucket": {
+      if (
+        !headRepositoryNameWithOwner ||
+        !bitbucketRepositoryName.test(headRepositoryNameWithOwner) ||
+        !safeShellArgument.test(headBranch)
+      ) {
+        return null;
+      }
+      return `git clone --single-branch --branch ${headBranch} https://bitbucket.org/${headRepositoryNameWithOwner}.git t3code-pr-${number}`;
+    }
     case "unknown":
       return null;
   }
