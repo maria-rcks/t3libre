@@ -29,9 +29,9 @@ export function formatCount(value: number): string {
  */
 export function formatTokens(value: number): string {
   const abs = Math.abs(value);
-  if (abs >= 1e12) return `${trim(value / 1e12)}T`;
-  if (abs >= 1e9) return `${trim(value / 1e9)}B`;
-  if (abs >= 1e6) return `${trim(value / 1e6)}M`;
+  if (abs >= 999.5e9) return `${trim(value / 1e12)}T`;
+  if (abs >= 999.5e6) return `${trim(value / 1e9)}B`;
+  if (abs >= 999.5e3) return `${trim(value / 1e6)}M`;
   if (abs >= 1e3) return `${trim(value / 1e3)}K`;
   return INTEGER.format(Math.round(value));
 }
