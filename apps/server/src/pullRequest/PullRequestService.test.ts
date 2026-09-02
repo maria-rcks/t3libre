@@ -2966,9 +2966,13 @@ it.effect("shares linked summaries and only recovers transient failures for disp
       ],
     });
 
-    yield* Effect.all([service.summary(reference), service.summary(reference)], {
-      concurrency: "unbounded",
-    });
+    yield* Effect.all(
+      [
+        service.summary(reference, { recoverTransientFailure: false }),
+        service.summary(reference, { recoverTransientFailure: false }),
+      ],
+      { concurrency: "unbounded" },
+    );
     assert.strictEqual(calls, 1);
 
     yield* TestClock.adjust("61 seconds");

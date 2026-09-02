@@ -2048,7 +2048,9 @@ export const make = Effect.gen(function* () {
   const summary: PullRequestService["Service"]["summary"] = (input, options) => {
     const key = refCacheKey(input);
     const cached = Cache.get(summaryCache, key);
-    return options?.recoverTransientFailure === false ? cached : lastGoodSummary.read(key, cached);
+    return options?.recoverTransientFailure === false
+      ? cached.pipe(Effect.tap((value) => lastGoodSummary.record(key, value)))
+      : lastGoodSummary.read(key, cached);
   };
 
   // Keys serialize positionally and parse back in the lookup, so the cache is the only holder
