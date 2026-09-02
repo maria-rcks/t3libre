@@ -11,6 +11,7 @@ import { openMediaFile } from "./assets/MediaFile.ts";
 import {
   filterDevShareRequestHeaders,
   prepareDevShareHtml,
+  resolveDevShareTargetUrl,
   shouldProxyConnectDevRequest,
   stripDevShareAssetPrefix,
 } from "./cloud/DevShareProxy.ts";
@@ -51,6 +52,7 @@ describe("T3 Connect dev sharing", () => {
         devUrl,
         requestUrl: new URL("https://environment.tunnels.example.com/src/main.tsx"),
         hasCloudflareRay: true,
+        listenerIsLoopback: true,
       }),
     ).toBe(true);
     for (const requestUrl of [
@@ -64,6 +66,7 @@ describe("T3 Connect dev sharing", () => {
           devUrl,
           requestUrl,
           hasCloudflareRay: true,
+          listenerIsLoopback: true,
         }),
       ).toBe(false);
     }
@@ -73,8 +76,28 @@ describe("T3 Connect dev sharing", () => {
         devUrl,
         requestUrl: new URL("https://rebound.example/src/main.tsx"),
         hasCloudflareRay: false,
+        listenerIsLoopback: true,
       }),
     ).toBe(false);
+    expect(
+      shouldProxyConnectDevRequest({
+        enabled: true,
+        devUrl,
+        requestUrl: new URL("https://environment.tunnels.example.com/src/main.tsx"),
+        hasCloudflareRay: true,
+        listenerIsLoopback: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps scheme-relative request paths on the configured Vite origin", () => {
+    expect(
+      resolveDevShareTargetUrl(
+        new URL("http://127.0.0.1:5733/"),
+        new URL("https://environment.tunnels.example.com//attacker.example/path?x=1"),
+        "http",
+      ),
+    ).toBe("http://127.0.0.1:5733//attacker.example/path?x=1");
   });
 
   it("does not forward T3 credentials or connection-scoped headers to Vite", () => {
@@ -85,11 +108,10 @@ describe("T3 Connect dev sharing", () => {
         "x-private-hop": "secret",
         authorization: "Bearer environment-token",
         dpop: "proof",
-        cookie: "vite-session=kept",
+        cookie: "t3_session_environment=secret",
         origin: "https://environment.tunnels.example.com",
       }),
     ).toEqual({
-      cookie: "vite-session=kept",
       origin: "https://environment.tunnels.example.com",
     });
   });

@@ -78,6 +78,7 @@ export function filterDevShareRequestHeaders(
       normalized === "content-length" ||
       normalized === "accept-encoding" ||
       normalized === "authorization" ||
+      normalized === "cookie" ||
       normalized === "dpop"
     ) {
       continue;
@@ -102,9 +103,15 @@ function responseConnectionHeaderNames(
   return names;
 }
 
-function targetUrl(devUrl: URL, requestUrl: URL, protocol: "http" | "ws"): string {
+export function resolveDevShareTargetUrl(
+  devUrl: URL,
+  requestUrl: URL,
+  protocol: "http" | "ws",
+): string {
   const pathname = stripDevShareAssetPrefix(requestUrl.pathname, DEV_SHARE_CACHE_KEY);
-  const target = new URL(`${pathname}${requestUrl.search}`, devUrl);
+  const target = new URL(devUrl);
+  target.pathname = pathname;
+  target.search = requestUrl.search;
   if (protocol === "ws") target.protocol = target.protocol === "https:" ? "wss:" : "ws:";
   return target.toString();
 }
@@ -114,16 +121,19 @@ export function shouldProxyConnectDevRequest(input: {
   readonly devUrl: URL | undefined;
   readonly requestUrl: URL;
   readonly hasCloudflareRay: boolean;
+  readonly listenerIsLoopback: boolean;
 }): input is {
   readonly enabled: true;
   readonly devUrl: URL;
   readonly requestUrl: URL;
   readonly hasCloudflareRay: true;
+  readonly listenerIsLoopback: true;
 } {
   return (
     input.enabled &&
     input.devUrl !== undefined &&
     input.hasCloudflareRay &&
+    input.listenerIsLoopback &&
     !isLoopbackHost(input.requestUrl.hostname) &&
     !isDevProxiedPath(input.requestUrl.pathname)
   );
@@ -139,7 +149,7 @@ const proxyHttpRequest = (
     const headers = filterDevShareRequestHeaders(request.headers);
     const hasBody = request.method !== "GET" && request.method !== "HEAD";
     const upstreamRequest = HttpClientRequest.make(request.method)(
-      targetUrl(devUrl, requestUrl, "http"),
+      resolveDevShareTargetUrl(devUrl, requestUrl, "http"),
       { headers },
     ).pipe(hasBody ? HttpClientRequest.bodyStream(request.stream) : (self) => self);
     const response = yield* httpClient
@@ -214,10 +224,13 @@ const proxyWebSocketUpgrade = (
       .map((value) => value.trim())
       .filter(Boolean);
     const clientSocket = yield* request.upgrade;
-    const upstreamSocket = yield* Socket.makeWebSocket(targetUrl(devUrl, requestUrl, "ws"), {
-      ...(protocols && protocols.length > 0 ? { protocols } : {}),
-      openTimeout: "5 seconds",
-    });
+    const upstreamSocket = yield* Socket.makeWebSocket(
+      resolveDevShareTargetUrl(devUrl, requestUrl, "ws"),
+      {
+        ...(protocols && protocols.length > 0 ? { protocols } : {}),
+        openTimeout: "5 seconds",
+      },
+    );
     yield* Effect.scoped(
       Effect.gen(function* () {
         const writeToClient = yield* clientSocket.writer;
@@ -251,6 +264,10 @@ export const connectDevShareProxyLayer = HttpRouter.middleware(
         enabled: config.connectDevShare === true,
         devUrl: config.devUrl,
         requestUrl: requestUrl.value,
+        // The tunnel reaches this listener over loopback. Refusing wildcard
+        // listeners keeps a LAN caller from spoofing Cloudflare headers to
+        // reach the otherwise loopback-only Vite process.
+        listenerIsLoopback: isLoopbackHost(config.host ?? "127.0.0.1"),
         // Managed T3 Connect traffic always passes Cloudflare. Requiring its
         // injected request id prevents a DNS-rebinding hostname from turning
         // this loopback server into a general Vite proxy.

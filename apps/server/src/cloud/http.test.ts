@@ -30,7 +30,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { CLOUD_CLI_DESIRED_LINK_SECRET } from "./CliState.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 import type { RelayLinkProofRequest } from "@t3tools/contracts/relay";
-import { CLOUD_ENDPOINT_RUNTIME_CONFIG, RELAY_URL_SECRET } from "./config.ts";
+import { CLOUD_ENDPOINT_RUNTIME_CONFIG, CLOUD_LINKED_USER_ID, RELAY_URL_SECRET } from "./config.ts";
 import {
   consumeCloudReplayGuards,
   isSupportedLinkProviderKind,
@@ -185,45 +185,47 @@ describe("relay request tracing", () => {
 });
 
 describe("reconcileDesiredCloudLink", () => {
-  const provideMissingAuthorization = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(
-      Effect.provideService(
-        ServerSecretStore.ServerSecretStore,
-        makeSecretStore(unusedSecretStoreOperation),
-      ),
-      Effect.provideService(
-        ServerEnvironment.ServerEnvironment,
-        ServerEnvironment.ServerEnvironment.of({
-          getEnvironmentId: unusedSecretStoreOperation(),
-          getDescriptor: unusedSecretStoreOperation(),
-        }),
-      ),
-      Effect.provideService(
-        ManagedEndpointRuntime.CloudManagedEndpointRuntime,
-        ManagedEndpointRuntime.CloudManagedEndpointRuntime.of({
-          applyConfig: unusedSecretStoreOperation,
-        } satisfies ManagedEndpointRuntime.CloudManagedEndpointRuntime["Service"]),
-      ),
-      Effect.provideService(
-        EnvironmentAuth.EnvironmentAuth,
-        EnvironmentAuth.EnvironmentAuth.of({} as EnvironmentAuth.EnvironmentAuth["Service"]),
-      ),
-      Effect.provideService(
-        CliTokenManager.CloudCliTokenManager,
-        CliTokenManager.CloudCliTokenManager.of({
-          get: unusedSecretStoreOperation(),
-          getExisting: Effect.succeed(Option.none()),
-          hasCredential: unusedSecretStoreOperation(),
-          store: () => unusedSecretStoreOperation(),
-          clear: unusedSecretStoreOperation(),
-        }),
-      ),
-      Effect.provideService(
-        HttpClient.HttpClient,
-        HttpClient.make(() => unusedSecretStoreOperation()),
-      ),
-      Effect.provide(NodeServices.layer),
-    );
+  const provideAuthorizationContext =
+    (store: ServerSecretStore.ServerSecretStore["Service"]) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(
+        Effect.provideService(ServerSecretStore.ServerSecretStore, store),
+        Effect.provideService(
+          ServerEnvironment.ServerEnvironment,
+          ServerEnvironment.ServerEnvironment.of({
+            getEnvironmentId: unusedSecretStoreOperation(),
+            getDescriptor: unusedSecretStoreOperation(),
+          }),
+        ),
+        Effect.provideService(
+          ManagedEndpointRuntime.CloudManagedEndpointRuntime,
+          ManagedEndpointRuntime.CloudManagedEndpointRuntime.of({
+            applyConfig: unusedSecretStoreOperation,
+          } satisfies ManagedEndpointRuntime.CloudManagedEndpointRuntime["Service"]),
+        ),
+        Effect.provideService(
+          EnvironmentAuth.EnvironmentAuth,
+          EnvironmentAuth.EnvironmentAuth.of({} as EnvironmentAuth.EnvironmentAuth["Service"]),
+        ),
+        Effect.provideService(
+          CliTokenManager.CloudCliTokenManager,
+          CliTokenManager.CloudCliTokenManager.of({
+            get: unusedSecretStoreOperation(),
+            getExisting: Effect.succeed(Option.none()),
+            hasCredential: unusedSecretStoreOperation(),
+            store: () => unusedSecretStoreOperation(),
+            clear: unusedSecretStoreOperation(),
+          }),
+        ),
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make(() => unusedSecretStoreOperation()),
+        ),
+        Effect.provide(NodeServices.layer),
+      );
+  const provideMissingAuthorization = provideAuthorizationContext(
+    makeSecretStore(unusedSecretStoreOperation),
+  );
 
   it.effect("requires stored CLI authorization without exposing an HTTP endpoint", () =>
     Effect.gen(function* () {
@@ -248,6 +250,32 @@ describe("reconcileDesiredCloudLink", () => {
       });
     }).pipe(provideMissingAuthorization),
   );
+
+  it.effect("refuses to replace an existing environment link for an ephemeral share", () => {
+    const store = {
+      ...makeSecretStore(unusedSecretStoreOperation),
+      get: (name: string) =>
+        Effect.succeed(
+          name === CLOUD_LINKED_USER_ID
+            ? Option.some(new TextEncoder().encode("user_123"))
+            : Option.none(),
+        ),
+    };
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        reconcileDesiredCloudLink("http://127.0.0.1:3774", {
+          persistDesired: false,
+          requireUnlinked: true,
+          forceManaged: true,
+        }),
+      );
+
+      expect(error).toMatchObject({
+        _tag: "EnvironmentHttpConflictError",
+        message: expect.stringContaining("unlinked worktree home"),
+      });
+    }).pipe(provideAuthorizationContext(store));
+  });
 });
 
 describe("releaseManagedTunnelOnShutdown", () => {
@@ -282,7 +310,6 @@ describe("releaseManagedTunnelOnShutdown", () => {
     readonly applyConfigCalls: Array<unknown>;
     readonly requests: Array<HttpClientRequest.HttpClientRequest>;
     readonly respond?: () => Response;
-    readonly connectDevShare?: boolean;
   }
 
   // Writes the launcher's durable state file into this test's baseDir with
@@ -355,16 +382,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
         // The release consults the launcher state file under the configured
         // baseDir, so every harness run gets a scoped temp baseDir.
         Effect.provide(
-          Layer.effect(
-            ServerConfigModule.ServerConfig,
-            Effect.map(ServerConfigModule.ServerConfig, (config) =>
-              ServerConfigModule.make({
-                ...config,
-                connectDevShare: harness.connectDevShare ?? false,
-              }),
-            ),
-          ).pipe(
-            Layer.provide(ServerConfigModule.layerTest("/", { prefix: "t3-http-release-test-" })),
+          ServerConfigModule.layerTest("/", { prefix: "t3-http-release-test-" }).pipe(
             Layer.provideMerge(NodeServices.layer),
           ),
         ),
@@ -435,29 +453,41 @@ describe("releaseManagedTunnelOnShutdown", () => {
   });
 
   it.effect("releases an ephemeral Connect dev-share tunnel without durable intent", () => {
-    const { store, values } = makeMemorySecretStore([
-      [CLOUD_ENDPOINT_RUNTIME_CONFIG, "runtime-config"],
-      [RELAY_URL_SECRET, "https://relay.example.test"],
-    ]);
+    const { store, values } = makeMemorySecretStore();
     const applyConfigCalls: Array<unknown> = [];
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
 
     return Effect.gen(function* () {
-      const released = yield* releaseManagedTunnelOnShutdown();
+      const released = yield* releaseManagedTunnelOnShutdown({
+        ephemeralRelayUrl: "https://relay.example.test",
+      });
 
       expect(released).toBe(true);
       expect(applyConfigCalls).toEqual([null]);
       expect(requests).toHaveLength(1);
       expect(values.has(CLOUD_ENDPOINT_RUNTIME_CONFIG)).toBe(false);
       expect(values.has(CLOUD_CLI_DESIRED_LINK_SECRET)).toBe(false);
-    }).pipe(
-      provideReleaseHarness({
-        store,
-        applyConfigCalls,
-        requests,
-        connectDevShare: true,
-      }),
-    );
+    }).pipe(provideReleaseHarness({ store, applyConfigCalls, requests }));
+  });
+
+  it.effect("does not release a tunnel that an ephemeral share does not own", () => {
+    const { store, values } = makeMemorySecretStore([
+      [CLOUD_ENDPOINT_RUNTIME_CONFIG, "existing-runtime-config"],
+      [RELAY_URL_SECRET, "https://relay.example.test"],
+    ]);
+    const applyConfigCalls: Array<unknown> = [];
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      const released = yield* releaseManagedTunnelOnShutdown({
+        ephemeralRelayUrl: "https://relay.example.test",
+      });
+
+      expect(released).toBe(false);
+      expect(applyConfigCalls).toEqual([]);
+      expect(requests).toEqual([]);
+      expect(values.has(CLOUD_ENDPOINT_RUNTIME_CONFIG)).toBe(true);
+    }).pipe(provideReleaseHarness({ store, applyConfigCalls, requests }));
   });
 
   it.effect("leaves the tunnel of a publish-only desired link untouched", () => {

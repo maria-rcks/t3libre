@@ -1038,6 +1038,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
           Effect.provideService(HostProcessPlatform, "linux"),
           Effect.provideService(HostProcessEnvironment, {
+            T3CODE_CONNECT_DEV_SHARE: "1",
             VITE_CLERK_PUBLISHABLE_KEY: "pk_parent",
             VITE_CLERK_JWT_TEMPLATE: "template_parent",
             VITE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_parent",
@@ -1055,6 +1056,72 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(spawnedEnv?.VITE_T3CODE_RELAY_URL, undefined);
       });
     });
+
+    it.effect("does not inherit T3 Connect sharing into a normal run", () => {
+      let spawnedEnv: Record<string, string | undefined> | undefined;
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          const spawned = command as unknown as {
+            readonly options?: { readonly env?: Record<string, string | undefined> };
+          };
+          spawnedEnv = spawned.options?.env;
+          return Effect.succeed(mockProcess(0));
+        }),
+      );
+
+      return Effect.gen(function* () {
+        yield* runDevRunnerWithInput({
+          ...devServerInput,
+          mode: "dev",
+          port: undefined,
+        }).pipe(
+          Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
+          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcessEnvironment, {
+            T3CODE_CONNECT_DEV_SHARE: "1",
+            T3CODE_HOST: "0.0.0.0",
+          }),
+        );
+
+        assert.equal(spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, undefined);
+        assert.equal(spawnedEnv?.T3CODE_HOST, undefined);
+      });
+    });
+
+    it.effect("requires the full IPv4-loopback stack for T3 Connect sharing", () =>
+      Effect.gen(function* () {
+        for (const input of [
+          {
+            ...devServerInput,
+            mode: "dev:web" as const,
+            share: true,
+            shareVia: "t3-connect" as const,
+          },
+          {
+            ...devServerInput,
+            mode: "dev" as const,
+            host: "::1",
+            share: true,
+            shareVia: "t3-connect" as const,
+          },
+          {
+            ...devServerInput,
+            mode: "dev" as const,
+            host: "0.0.0.0",
+            share: true,
+            shareVia: "t3-connect" as const,
+          },
+        ]) {
+          const error = yield* runDevRunnerWithInput(input).pipe(
+            Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer)),
+            Effect.provideService(HostProcessPlatform, "linux"),
+            Effect.flip,
+          );
+          assert.equal(error._tag, "DevRunnerConnectShareUnsupportedError");
+        }
+      }),
+    );
 
     // A shared origin means a remote browser, where unbundled dev's
     // per-module waterfall pays a tailnet round trip per import level. The

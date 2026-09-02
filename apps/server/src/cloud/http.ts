@@ -453,6 +453,7 @@ const cloudLinkProofHandler = Effect.fn("environment.cloud.linkProof")(
 const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConfig")(function* (
   dependencies: CloudHttpDependencies,
   payload: RelayEnvironmentConfigRequest,
+  options: { readonly persist?: boolean } = {},
 ) {
   yield* validateRelayConfigPayload(payload);
   yield* validateLinkedCloudUser({
@@ -470,6 +471,9 @@ const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConfig")(fu
       message: "Managed endpoint runtime could not be started.",
       endpointRuntimeStatus,
     });
+  }
+  if (options.persist === false) {
+    return { ok, endpointRuntimeStatus } satisfies EnvironmentCloudRelayConfigResult;
   }
 
   yield* dependencies.secrets.set(RELAY_URL_SECRET, stringToBytes(payload.relayUrl));
@@ -541,7 +545,11 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
   function* (
     dependencies: CloudHttpDependencies,
     localOrigin: string,
-    options: { readonly persistDesired?: boolean } = {},
+    options: {
+      readonly persistDesired?: boolean;
+      readonly requireUnlinked?: boolean;
+      readonly forceManaged?: boolean;
+    } = {},
   ) {
     const localUrl = yield* Effect.try({
       try: () => new URL(localOrigin),
@@ -554,6 +562,18 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
       return yield* new EnvironmentHttpBadRequestError({
         message: "Could not resolve local environment origin.",
       });
+    }
+    if (options.requireUnlinked === true) {
+      const [linkedUser, runtimeConfig] = yield* Effect.all([
+        dependencies.secrets.get(CLOUD_LINKED_USER_ID),
+        dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG),
+      ]);
+      if (Option.isSome(linkedUser) || Option.isSome(runtimeConfig)) {
+        return yield* new EnvironmentHttpConflictError({
+          message:
+            "T3 Connect dev sharing requires an unlinked worktree home so it cannot replace an existing environment link.",
+        });
+      }
     }
     const localWsOrigin = localOrigin.replace(/^http/u, "ws");
     const token = yield* dependencies.cliTokenManager.getExisting.pipe(
@@ -572,7 +592,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
         }),
       ),
     );
-    const mode = yield* readCliDesiredLinkMode;
+    const mode = options.forceManaged === true ? "managed" : yield* readCliDesiredLinkMode;
     const managedTunnelsEnabled = mode !== "publish_only";
     const relayUrl = yield* requireRelayUrl;
     const challenge = yield* relayClientRequest(dependencies, {
@@ -616,15 +636,22 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
     if (options.persistDesired !== false) {
       yield* setCliDesiredCloudLink(true, mode);
     }
-    const relayConfig = yield* applyCloudRelayConfig(dependencies, {
-      relayUrl,
-      relayIssuer: link.relayIssuer,
-      cloudUserId: link.cloudUserId,
-      environmentCredential: link.environmentCredential,
-      cloudMintPublicKey: link.cloudMintPublicKey,
-      endpointRuntime: link.endpointRuntime,
-    });
-    return { ...relayConfig, endpoint: link.endpoint };
+    const relayConfig = yield* applyCloudRelayConfig(
+      dependencies,
+      {
+        relayUrl,
+        relayIssuer: link.relayIssuer,
+        cloudUserId: link.cloudUserId,
+        environmentCredential: link.environmentCredential,
+        cloudMintPublicKey: link.cloudMintPublicKey,
+        endpointRuntime: link.endpointRuntime,
+      },
+      { persist: options.persistDesired !== false },
+    );
+    const endpointRuntimeConfig = link.endpointRuntime
+      ? yield* encodeEndpointRuntimeConfigJson(link.endpointRuntime)
+      : null;
+    return { ...relayConfig, endpoint: link.endpoint, endpointRuntimeConfig, relayUrl };
   },
   Effect.catchIf(
     ServerSecretStore.isSecretStoreError,
@@ -640,7 +667,14 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
 );
 
 export const reconcileDesiredCloudLink = Effect.fn("environment.cloud.reconcileDesiredLink")(
-  function* (localOrigin: string, options?: { readonly persistDesired?: boolean }) {
+  function* (
+    localOrigin: string,
+    options?: {
+      readonly persistDesired?: boolean;
+      readonly requireUnlinked?: boolean;
+      readonly forceManaged?: boolean;
+    },
+  ) {
     return yield* reconcileDesiredCloudLinkWith(yield* cloudHttpDependencies, localOrigin, options);
   },
 );
@@ -683,20 +717,24 @@ const pendingUpdateHandoffExists = Effect.gen(function* () {
 // link reconcile provisions a replacement tunnel under the same URL.
 export const releaseManagedTunnelOnShutdown = Effect.fn(
   "environment.cloud.releaseManagedTunnelOnShutdown",
-)(function* () {
+)(function* (options: { readonly ephemeralRelayUrl?: string } = {}) {
   const dependencies = yield* cloudHttpDependencies;
-  const config = yield* ServerConfig.ServerConfig;
-  // Only a managed link stores a runtime config; publish-only links have no
-  // tunnel to release.
+  const ephemeral = options.ephemeralRelayUrl !== undefined;
+  // Ephemeral shares deliberately persist no runtime config. If one exists,
+  // another link owns it and this process must leave both its connector and
+  // tunnel alone. Normal managed links require the stored config.
   const runtimeConfig = yield* dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG);
-  if (Option.isNone(runtimeConfig)) {
+  if ((ephemeral && Option.isSome(runtimeConfig)) || (!ephemeral && Option.isNone(runtimeConfig))) {
     return false;
   }
-  // CLI-desired links and ephemeral dev shares both release on shutdown.
-  // A link installed by a web/mobile client comes back after a restart by
-  // reapplying the stored connector token, so its tunnel must survive.
+  const runtimeConfigText = Option.isSome(runtimeConfig)
+    ? bytesToString(runtimeConfig.value)
+    : undefined;
+  // A normal shutdown only owns CLI-desired managed links. Web/mobile links
+  // survive; an ephemeral caller proves ownership by supplying the relay URL
+  // returned by its non-persisting reconcile above.
   if (
-    config.connectDevShare !== true &&
+    !ephemeral &&
     (!(yield* readCliDesiredCloudLink) || (yield* readCliDesiredLinkMode) !== "managed")
   ) {
     return false;
@@ -720,15 +758,18 @@ export const releaseManagedTunnelOnShutdown = Effect.fn(
   }
   // The link belongs to the relay it was installed against, so target the
   // persisted URL: T3CODE_RELAY_URL may have changed since the link was made.
-  const relayUrl = yield* dependencies.secrets.get(RELAY_URL_SECRET);
-  if (Option.isNone(relayUrl)) {
+  const storedRelayUrl = yield* dependencies.secrets.get(RELAY_URL_SECRET);
+  const relayUrl =
+    options.ephemeralRelayUrl ??
+    (Option.isSome(storedRelayUrl) ? bytesToString(storedRelayUrl.value) : undefined);
+  if (relayUrl === undefined) {
     return false;
   }
   const environmentId = yield* dependencies.environment.getEnvironmentId;
   // Stop the local connector before the relay deletes the tunnel it serves.
   yield* dependencies.endpointRuntime.applyConfig(null);
   const response = yield* HttpClientRequest.delete(
-    `${bytesToString(relayUrl.value)}/v1/client/environment-links/${encodeURIComponent(environmentId)}/tunnel`,
+    `${relayUrl}/v1/client/environment-links/${encodeURIComponent(environmentId)}/tunnel`,
   ).pipe(
     HttpClientRequest.bearerToken(token.value.accessToken),
     dependencies.httpClient.execute,
@@ -750,8 +791,9 @@ export const releaseManagedTunnelOnShutdown = Effect.fn(
   // replacement tunnel, and that one must survive this finalizer.
   const storedConfig = yield* dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG);
   if (
+    runtimeConfigText !== undefined &&
     Option.isSome(storedConfig) &&
-    bytesToString(storedConfig.value) === bytesToString(runtimeConfig.value)
+    bytesToString(storedConfig.value) === runtimeConfigText
   ) {
     yield* dependencies.secrets.remove(CLOUD_ENDPOINT_RUNTIME_CONFIG);
   }

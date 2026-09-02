@@ -192,8 +192,24 @@ export class DevRunnerHostNotProxiableError extends Schema.TaggedErrorClass<DevR
   }
 }
 
+export class DevRunnerConnectShareUnsupportedError extends Schema.TaggedErrorClass<DevRunnerConnectShareUnsupportedError>()(
+  "DevRunnerConnectShareUnsupportedError",
+  {
+    mode: Schema.Literals(["dev", "dev:server", "dev:web", "dev:desktop"]),
+    host: Schema.optional(Schema.String),
+  },
+) {
+  override get message(): string {
+    if (this.mode !== "dev") {
+      return `T3 Connect sharing requires the full dev stack; use \`vp run dev --share --share-via=t3-connect\` instead of ${this.mode}.`;
+    }
+    return `T3 Connect sharing requires a backend reachable at IPv4 loopback; remove --host ${this.host ?? ""} or use --host 127.0.0.1.`;
+  }
+}
+
 export const DevRunnerError = Schema.Union([
   DevRunnerConfigurationError,
+  DevRunnerConnectShareUnsupportedError,
   DevRunnerHostNotProxiableError,
   DevRunnerInvalidPortOffsetError,
   DevRunnerPortExhaustedError,
@@ -354,6 +370,10 @@ export function createDevRunnerEnv({
       // apps/web/vite.config.ts. Over a shared origin that is invisible: the
       // page loads and only HMR quietly dials the wrong machine.
       delete output.HOST;
+      // The agent shell commonly inherits the parent T3 server's wildcard
+      // listener. A child dev server must remain loopback-only unless this
+      // invocation explicitly selects another host.
+      delete output.T3CODE_HOST;
       if (mode === "dev" || mode === "dev:web") {
         // Browser dev is single-origin: everything (including /ws) is proxied
         // through Vite, so the client must resolve its backend from
@@ -630,6 +650,16 @@ interface DevRunnerCliInput {
 
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
+    const shareVia = input.shareVia ?? "tailscale";
+    if (input.share && shareVia === "t3-connect") {
+      if (input.mode !== "dev") {
+        return yield* new DevRunnerConnectShareUnsupportedError({ mode: input.mode });
+      }
+      const host = input.host?.trim();
+      if (host !== undefined && host !== "" && host !== "localhost" && host !== "127.0.0.1") {
+        return yield* new DevRunnerConnectShareUnsupportedError({ mode: input.mode, host });
+      }
+    }
     const { portOffset, devInstance } = yield* OffsetConfig.pipe(
       Effect.mapError(
         (cause) =>
@@ -696,6 +726,10 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       port: input.port,
       devUrl: input.devUrl,
     });
+    // A runner launched from another dev server must not inherit that
+    // server's ephemeral sharing mode. Only this invocation's share flag may
+    // opt the spawned backend into a managed tunnel.
+    delete env.T3CODE_CONNECT_DEV_SHARE;
 
     const selectionSuffix =
       serverOffset !== offset || webOffset !== offset
@@ -716,7 +750,6 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
 
     const sharedWebPort = BASE_WEB_PORT + webOffset;
     if (input.share) {
-      const shareVia = input.shareVia ?? "tailscale";
       if (input.mode === "dev:server") {
         yield* Effect.logInfo("[dev-runner] --share has no effect for dev:server (no web server).");
       } else if (input.mode === "dev:desktop") {
@@ -900,8 +933,11 @@ const devRunnerCli = Command.make("dev-runner", {
     Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_LOG_WS_EVENTS")),
   ),
   host: Flag.string("host").pipe(
-    Flag.withDescription("Server host/interface override (forwards to T3CODE_HOST)."),
-    Flag.withFallbackConfig(optionalStringConfig("T3CODE_HOST")),
+    Flag.withDescription(
+      "Server host/interface override. Ambient T3CODE_HOST is ignored so a parent T3 server cannot widen this child runner's listener.",
+    ),
+    Flag.optional,
+    Flag.map(Option.getOrUndefined),
   ),
   port: Flag.integer("port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),

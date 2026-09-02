@@ -622,19 +622,22 @@ export const makeServerLayer = Layer.unwrap(
           yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
           return;
         }
-        const releaseManagedTunnel = releaseManagedTunnelOnShutdown().pipe(
-          Effect.timeout("10 seconds"),
-          Effect.tap((released) =>
-            released ? Effect.logInfo("Released the managed tunnel on shutdown") : Effect.void,
-          ),
-          Effect.catchCause((cause) =>
-            Effect.logWarning(
-              "Failed to release the managed tunnel on shutdown; the next link reuses it",
-              { cause },
+        const releaseManagedTunnel = (ephemeralRelayUrl?: string) =>
+          releaseManagedTunnelOnShutdown(
+            ephemeralRelayUrl === undefined ? {} : { ephemeralRelayUrl },
+          ).pipe(
+            Effect.timeout("10 seconds"),
+            Effect.tap((released) =>
+              released ? Effect.logInfo("Released the managed tunnel on shutdown") : Effect.void,
             ),
-          ),
-          Effect.asVoid,
-        );
+            Effect.catchCause((cause) =>
+              Effect.logWarning(
+                "Failed to release the managed tunnel on shutdown; the next link reuses it",
+                { cause },
+              ),
+            ),
+            Effect.asVoid,
+          );
         // A launcher trial can be stopped before activation. The previous
         // server is already gone, so the trial owns cleanup immediately; the
         // pending-state check keeps the tunnel for normal commit or rollback,
@@ -642,16 +645,16 @@ export const makeServerLayer = Layer.unwrap(
         // Other runtimes wait for activation so a failed standby cannot tear
         // down the active runtime's tunnel.
         const cleanupBeforeActivation = yield* pendingServiceUpdateExists;
-        if (cleanupBeforeActivation) {
-          yield* Effect.addFinalizer(() => releaseManagedTunnel);
+        if (cleanupBeforeActivation && config.connectDevShare !== true) {
+          yield* Effect.addFinalizer(() => releaseManagedTunnel());
         }
         yield* forkParked(
           Effect.gen(function* () {
-            if (!cleanupBeforeActivation) {
-              yield* Effect.addFinalizer(() => releaseManagedTunnel);
-            }
             const connectDevShare = config.connectDevShare === true;
             if (!connectDevShare && !(yield* CloudCliState.readCliDesiredCloudLink)) return;
+            if (!connectDevShare && !cleanupBeforeActivation) {
+              yield* Effect.addFinalizer(() => releaseManagedTunnel());
+            }
             const server = yield* HttpServer.HttpServer;
             const address = server.address;
             if (typeof address === "string" || !("port" in address)) return;
@@ -674,9 +677,11 @@ export const makeServerLayer = Layer.unwrap(
               }
               return yield* reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`, {
                 persistDesired: !connectDevShare,
+                requireUnlinked: connectDevShare,
+                forceManaged: connectDevShare,
               });
             });
-            yield* reconcileCloudLink.pipe(
+            const retryReconcile = reconcileCloudLink.pipe(
               Effect.retry({
                 while: (error) =>
                   error._tag !== "EnvironmentHttpBadRequestError" &&
@@ -689,6 +694,16 @@ export const makeServerLayer = Layer.unwrap(
                   Schedule.upTo({ duration: "10 minutes" }),
                 ),
               }),
+            );
+            yield* (
+              connectDevShare
+                ? Effect.acquireRelease(retryReconcile, (link) =>
+                    link.endpointRuntimeConfig === null
+                      ? Effect.void
+                      : releaseManagedTunnel(link.relayUrl),
+                  )
+                : retryReconcile
+            ).pipe(
               Effect.tap((link) =>
                 connectDevShare
                   ? Effect.gen(function* () {
