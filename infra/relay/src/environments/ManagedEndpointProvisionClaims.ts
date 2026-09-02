@@ -28,7 +28,7 @@ export class ManagedEndpointProvisionClaimPersistenceError extends Schema.Tagged
     operation: Schema.Literals(["acquire", "release"]),
     userId: Schema.String,
     environmentId: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
@@ -122,6 +122,29 @@ export const make = Effect.gen(function* () {
         );
     }),
   });
+});
+
+export const withManagedEndpointProvisionClaim = Effect.fn(
+  "relay.managed_endpoint_provision_claims.with_claim",
+)(function* <A, E, R>(
+  claims: ManagedEndpointProvisionClaims["Service"],
+  input: { readonly userId: string; readonly environmentId: string },
+  effect: Effect.Effect<A, E, R>,
+) {
+  const claimId = yield* claims.acquire(input);
+  return yield* effect.pipe(
+    Effect.ensuring(
+      Effect.suspend(() => claims.release({ ...input, claimId })).pipe(
+        Effect.retry({ times: 2 }),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("managed endpoint provision claim release failed", {
+            environmentId: input.environmentId,
+            cause,
+          }),
+        ),
+      ),
+    ),
+  );
 });
 
 export const layer = Layer.effect(ManagedEndpointProvisionClaims, make);

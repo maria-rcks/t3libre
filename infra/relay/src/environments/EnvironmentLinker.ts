@@ -22,6 +22,7 @@ import * as EnvironmentLinks from "./EnvironmentLinks.ts";
 import * as ManagedEndpointProvider from "./ManagedEndpointProvider.ts";
 import * as ManagedEndpointProvisionClaims from "./ManagedEndpointProvisionClaims.ts";
 import * as RelayConfiguration from "../Config.ts";
+import * as TemporaryEnvironmentLeases from "./TemporaryEnvironmentLeases.ts";
 
 export class EnvironmentLinkProofExpired extends Schema.TaggedErrorClass<EnvironmentLinkProofExpired>()(
   "EnvironmentLinkProofExpired",
@@ -68,6 +69,7 @@ export type EnvironmentLinkError =
   | EnvironmentLinkProofInvalid
   | DpopProofs.DpopProofReplayPersistenceError
   | EnvironmentLinks.ActiveDurableEnvironmentLinkConflict
+  | EnvironmentLinks.EnvironmentLinkLookupPersistenceError
   | EnvironmentLinks.EnvironmentLinkUpsertPersistenceError
   | ManagedEndpointProvisionClaims.ManagedEndpointProvisionInProgress
   | ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaimPersistenceError
@@ -154,6 +156,7 @@ const make = Effect.gen(function* () {
   const proofReplay = yield* DpopProofs.DpopProofReplay;
   const relayTokens = yield* RelayTokens.RelayTokens;
   const config = yield* RelayConfiguration.RelayConfiguration;
+  const temporaryLeases = yield* TemporaryEnvironmentLeases.TemporaryEnvironmentLeases;
 
   return EnvironmentLinker.of({
     link: Effect.fn("relay.environment_linker.link")(function* (input) {
@@ -301,27 +304,16 @@ const make = Effect.gen(function* () {
           stage: "validate_origin",
         });
       }
-      const provisionClaimId = yield* provisionClaims.acquire({
+      const provisionClaimKey = {
         userId: input.userId,
         environmentId: verified.environmentId,
-      });
-      return yield* Effect.gen(function* () {
+      };
+      const link = Effect.gen(function* () {
         if (input.request.temporary === true) {
-          const durableLink = yield* links
-            .getForUser({ userId: input.userId, environmentId: verified.environmentId })
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new EnvironmentLinks.EnvironmentLinkUpsertPersistenceError({
-                    userId: input.userId,
-                    environmentId: verified.environmentId,
-                    ...(input.request.deviceId === undefined
-                      ? {}
-                      : { deviceId: input.request.deviceId }),
-                    cause,
-                  }),
-              ),
-            );
+          const durableLink = yield* links.getForUser({
+            userId: input.userId,
+            environmentId: verified.environmentId,
+          });
           if (durableLink !== null) {
             return yield* new EnvironmentLinks.ActiveDurableEnvironmentLinkConflict({
               userId: input.userId,
@@ -407,10 +399,45 @@ const make = Effect.gen(function* () {
                     ),
               }),
             );
-        const environmentCredential = yield* credentials.create({
-          environmentId: verified.environmentId,
-          environmentPublicKey: verified.environmentPublicKey,
-        });
+        const environmentCredential = yield* credentials
+          .create({
+            environmentId: verified.environmentId,
+            environmentPublicKey: verified.environmentPublicKey,
+          })
+          .pipe(
+            temporaryLease === undefined
+              ? (effect) => effect
+              : Effect.catchTag("EnvironmentCredentialCreatePersistenceError", (error) => {
+                  const leaseKey = {
+                    userId: input.userId,
+                    environmentId: verified.environmentId,
+                    leaseId: temporaryLease.leaseId,
+                  };
+                  return Effect.gen(function* () {
+                    if (!(yield* temporaryLeases.claimCleanup(leaseKey))) return;
+                    yield* credentials.revokeForEnvironmentPublicKey({
+                      environmentId: verified.environmentId,
+                      environmentPublicKey: verified.environmentPublicKey,
+                    });
+                    yield* managedEndpointProvider.deprovision({
+                      ...leaseKey,
+                      target: provisioned?.deprovisionTarget ?? null,
+                    });
+                    yield* temporaryLeases.clear(leaseKey);
+                  }).pipe(
+                    Effect.catchCause((cleanupCause) =>
+                      Effect.logWarning(
+                        "temporary endpoint cleanup after credential failure failed",
+                        {
+                          environmentId: verified.environmentId,
+                          cleanupCause,
+                        },
+                      ),
+                    ),
+                    Effect.andThen(Effect.fail(error)),
+                  );
+                }),
+          );
         return {
           environmentId: verified.environmentId,
           endpoint,
@@ -418,16 +445,11 @@ const make = Effect.gen(function* () {
           environmentCredential,
           ...(temporaryLease === undefined ? {} : { temporaryLease }),
         };
-      }).pipe(
-        Effect.ensuring(
-          provisionClaims
-            .release({
-              userId: input.userId,
-              environmentId: verified.environmentId,
-              claimId: provisionClaimId,
-            })
-            .pipe(Effect.catchCause(Effect.logWarning)),
-        ),
+      });
+      return yield* ManagedEndpointProvisionClaims.withManagedEndpointProvisionClaim(
+        provisionClaims,
+        provisionClaimKey,
+        link,
       );
     }),
   });

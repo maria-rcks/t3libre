@@ -66,6 +66,7 @@ import * as EnvironmentConnector from "../environments/EnvironmentConnector.ts";
 import * as EnvironmentLinker from "../environments/EnvironmentLinker.ts";
 import * as ManagedEndpointProvider from "../environments/ManagedEndpointProvider.ts";
 import * as ManagedEndpointAllocations from "../environments/ManagedEndpointAllocations.ts";
+import * as ManagedEndpointProvisionClaims from "../environments/ManagedEndpointProvisionClaims.ts";
 import * as TemporaryEnvironmentLeases from "../environments/TemporaryEnvironmentLeases.ts";
 import * as EnvironmentPublishSignatures from "../environments/EnvironmentPublishSignatures.ts";
 import * as MobileRegistrations from "../agentActivity/MobileRegistrations.ts";
@@ -436,33 +437,41 @@ export const unlinkEnvironmentRecord = Effect.fn("relay.api.client.unlinkEnviron
   function* (input: { readonly userId: string; readonly environmentId: string }) {
     const links = yield* EnvironmentLinks.EnvironmentLinks;
     const managedEndpointProvider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
-    const deprovisionTarget = yield* managedEndpointProvider.prepareDeprovision({
-      userId: input.userId,
-      environmentId: input.environmentId,
-    });
-    const link = yield* links.getForUser({
-      userId: input.userId,
-      environmentId: input.environmentId,
-    });
-    const unlinked =
-      link === null
-        ? false
-        : yield* revokeEnvironmentLinkRecord({
-            userId: input.userId,
-            environmentId: link.environmentId,
-            environmentPublicKey: link.environmentPublicKey,
-          });
+    const provisionClaims = yield* ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims;
+    const unlink = Effect.gen(function* () {
+      const deprovisionTarget = yield* managedEndpointProvider.prepareDeprovision({
+        userId: input.userId,
+        environmentId: input.environmentId,
+      });
+      const link = yield* links.getForUser({
+        userId: input.userId,
+        environmentId: input.environmentId,
+      });
+      const unlinked =
+        link === null
+          ? false
+          : yield* revokeEnvironmentLinkRecord({
+              userId: input.userId,
+              environmentId: link.environmentId,
+              environmentPublicKey: link.environmentPublicKey,
+            });
 
-    // External teardown cannot share the SQL transaction. Run it only after
-    // revocation commits so a database failure leaves a fully usable active
-    // link. Still run teardown when the link is already revoked, allowing a
-    // retry to finish cleanup after an earlier Cloudflare failure.
-    yield* managedEndpointProvider.deprovision({
-      userId: input.userId,
-      environmentId: input.environmentId,
-      target: deprovisionTarget,
+      // External teardown cannot share the SQL transaction. Run it only after
+      // revocation commits so a database failure leaves a fully usable active
+      // link. Still run teardown when the link is already revoked, allowing a
+      // retry to finish cleanup after an earlier Cloudflare failure.
+      yield* managedEndpointProvider.deprovision({
+        userId: input.userId,
+        environmentId: input.environmentId,
+        target: deprovisionTarget,
+      });
+      return unlinked;
     });
-    return unlinked;
+    return yield* ManagedEndpointProvisionClaims.withManagedEndpointProvisionClaim(
+      provisionClaims,
+      input,
+      unlink,
+    );
   },
 );
 
@@ -533,6 +542,7 @@ export const clientApi = HttpApiBuilder.group(
     const linker = yield* EnvironmentLinker.EnvironmentLinker;
     const links = yield* EnvironmentLinks.EnvironmentLinks;
     const managedEndpointProvider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+    const provisionClaims = yield* ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims;
     const temporaryLeases = yield* TemporaryEnvironmentLeases.TemporaryEnvironmentLeases;
     const devices = yield* Devices.Devices;
     return handlers
@@ -627,6 +637,12 @@ export const clientApi = HttpApiBuilder.group(
                 reason: "link_persistence_failed",
                 traceId,
               }),
+            EnvironmentLinkLookupPersistenceError: (_error, traceId) =>
+              new RelayEnvironmentLinkFailedError({
+                code: "environment_link_failed",
+                reason: "link_persistence_failed",
+                traceId,
+              }),
             ActiveDurableEnvironmentLinkConflict: (_error, traceId) =>
               new RelayEnvironmentLinkFailedError({
                 code: "environment_link_failed",
@@ -684,6 +700,8 @@ export const clientApi = HttpApiBuilder.group(
               SqlError: () => relayInternalErrorResponse("internal_error"),
               ManagedEndpointDeprovisioningFailed: () =>
                 relayInternalErrorResponse("upstream_unavailable"),
+              ManagedEndpointProvisionInProgress: () =>
+                relayInternalErrorResponse("upstream_unavailable"),
             }),
           );
           return { ok: unlinked };
@@ -697,12 +715,15 @@ export const clientApi = HttpApiBuilder.group(
           // ok mirrors whether the connector token is now dead: false means a
           // concurrent provision kept the recorded tunnel alive, so the caller
           // must not discard its runtime config.
-          const released = yield* managedEndpointProvider
-            .release({
-              userId,
-              environmentId: params.environmentId,
-            })
-            .pipe(Effect.catch(() => relayInternalErrorResponse("upstream_unavailable")));
+          const claimKey = {
+            userId,
+            environmentId: params.environmentId,
+          };
+          const released = yield* ManagedEndpointProvisionClaims.withManagedEndpointProvisionClaim(
+            provisionClaims,
+            claimKey,
+            managedEndpointProvider.release(claimKey),
+          ).pipe(Effect.catch(() => relayInternalErrorResponse("upstream_unavailable")));
           return { ok: released };
         }, mapRelayCommonApiErrors("not_authorized")),
       )
@@ -1067,6 +1088,7 @@ const RelayCommonPersistenceError = Schema.Union([
   EnvironmentLinks.EnvironmentLinkLookupPersistenceError,
   EnvironmentLinks.EnvironmentLinkRevokePersistenceError,
   ManagedEndpointAllocations.ManagedEndpointAllocationPersistenceError,
+  ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaimPersistenceError,
   EnvironmentCredentials.EnvironmentCredentialAuthenticatePersistenceError,
   EnvironmentCredentials.EnvironmentCredentialRevokePersistenceError,
   DpopProofs.DpopProofReplayPersistenceError,

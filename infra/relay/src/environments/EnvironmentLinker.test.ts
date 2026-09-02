@@ -20,6 +20,7 @@ import * as RelayConfiguration from "../Config.ts";
 import * as EnvironmentLinker from "./EnvironmentLinker.ts";
 import * as ManagedEndpointProvider from "./ManagedEndpointProvider.ts";
 import * as ManagedEndpointProvisionClaims from "./ManagedEndpointProvisionClaims.ts";
+import * as TemporaryEnvironmentLeases from "./TemporaryEnvironmentLeases.ts";
 
 const relayKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
   privateKeyEncoding: { format: "pem", type: "pkcs8" },
@@ -115,6 +116,11 @@ function testLayer(input?: {
   readonly consume?: DpopProofs.DpopProofReplay["Service"]["consume"];
   readonly provision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["provision"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
+  readonly releaseProvisionClaim?: ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims["Service"]["release"];
+  readonly createCredential?: EnvironmentCredentials.EnvironmentCredentials["Service"]["create"];
+  readonly revokeCredential?: EnvironmentCredentials.EnvironmentCredentials["Service"]["revokeForEnvironmentPublicKey"];
+  readonly claimTemporaryCleanup?: TemporaryEnvironmentLeases.TemporaryEnvironmentLeases["Service"]["claimCleanup"];
+  readonly clearTemporaryLease?: TemporaryEnvironmentLeases.TemporaryEnvironmentLeases["Service"]["clear"];
 }) {
   return EnvironmentLinker.layer.pipe(
     Layer.provideMerge(RelayTokens.layer),
@@ -136,9 +142,9 @@ function testLayer(input?: {
           revokeForUser: () => Effect.succeed(false),
         }),
         Layer.succeed(EnvironmentCredentials.EnvironmentCredentials, {
-          create: () => Effect.succeed("t3env_credential_secret"),
+          create: input?.createCredential ?? (() => Effect.succeed("t3env_credential_secret")),
           authenticate: () => Effect.succeedNone,
-          revokeForEnvironmentPublicKey: () => Effect.succeed(false),
+          revokeForEnvironmentPublicKey: input?.revokeCredential ?? (() => Effect.succeed(false)),
         }),
         Layer.succeed(ManagedEndpointProvider.ManagedEndpointProvider, {
           prepareDeprovision: () => Effect.succeed(null),
@@ -172,7 +178,14 @@ function testLayer(input?: {
         }),
         Layer.succeed(ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims, {
           acquire: () => Effect.succeed("provision-claim"),
-          release: () => Effect.void,
+          release: input?.releaseProvisionClaim ?? (() => Effect.void),
+        }),
+        Layer.succeed(TemporaryEnvironmentLeases.TemporaryEnvironmentLeases, {
+          get: () => Effect.succeed(null),
+          renew: () => Effect.succeed(null),
+          claimCleanup: input?.claimTemporaryCleanup ?? (() => Effect.succeed(true)),
+          clear: input?.clearTemporaryLease ?? (() => Effect.succeed(true)),
+          listExpired: Effect.succeed([]),
         }),
       ),
     ),
@@ -301,6 +314,150 @@ describe("EnvironmentLinker", () => {
       ),
     );
   });
+
+  it.effect("preserves a durable-link lookup persistence error", () => {
+    let provisioned = false;
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
+      expect(error).toMatchObject({
+        _tag: "EnvironmentLinkLookupPersistenceError",
+        userId: "user_123",
+        environmentId: "env-link-test",
+      });
+      expect(provisioned).toBe(false);
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          getForUser: () =>
+            Effect.fail(
+              new EnvironmentLinks.EnvironmentLinkLookupPersistenceError({
+                userId: "user_123",
+                environmentId: "env-link-test",
+                cause: new Error("database unavailable"),
+              }),
+            ),
+          provision: () => {
+            provisioned = true;
+            return Effect.die("temporary endpoint must not be provisioned");
+          },
+        }),
+      ),
+    );
+  });
+
+  it.effect("retries provision claim release before relying on expiry recovery", () => {
+    let releaseAttempts = 0;
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const result = yield* linker.link({ userId: "user_123", request });
+      expect(result.environmentId).toBe("env-link-test");
+      expect(releaseAttempts).toBe(3);
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          releaseProvisionClaim: () =>
+            Effect.suspend(() => {
+              releaseAttempts += 1;
+              return releaseAttempts < 3
+                ? Effect.fail(
+                    new ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaimPersistenceError(
+                      {
+                        operation: "release",
+                        userId: "user_123",
+                        environmentId: "env-link-test",
+                        cause: new Error("database unavailable"),
+                      },
+                    ),
+                  )
+                : Effect.void;
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("cleans up the exact temporary lease when credential creation fails", () => {
+    let claimedLeaseId: string | null = null;
+    let revokedEnvironmentPublicKey: string | null = null;
+    let deprovisionedGeneration: string | null = null;
+    let clearedLeaseId: string | null = null;
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
+      expect(error._tag).toBe("EnvironmentCredentialCreatePersistenceError");
+      expect(claimedLeaseId).toBe("link-proof-jti");
+      expect(revokedEnvironmentPublicKey).toBe(environmentKeyPair.publicKey.trim());
+      expect(deprovisionedGeneration).toBe("provision-generation");
+      expect(clearedLeaseId).toBe("link-proof-jti");
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          createCredential: () =>
+            Effect.fail(
+              new EnvironmentCredentials.EnvironmentCredentialCreatePersistenceError({
+                stage: "insert-credential",
+                environmentId: "env-link-test",
+                cause: new Error("database unavailable"),
+              }),
+            ),
+          claimTemporaryCleanup: (input) =>
+            Effect.sync(() => {
+              claimedLeaseId = input.leaseId;
+              return true;
+            }),
+          revokeCredential: (input) =>
+            Effect.sync(() => {
+              revokedEnvironmentPublicKey = input.environmentPublicKey;
+              return true;
+            }),
+          deprovision: (input) =>
+            Effect.sync(() => {
+              deprovisionedGeneration = input.target?.generationId ?? null;
+            }),
+          clearTemporaryLease: (input) =>
+            Effect.sync(() => {
+              clearedLeaseId = input.leaseId;
+              return true;
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("preserves the link failure when provision claim release also fails", () =>
+    Effect.gen(function* () {
+      const { request } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
+      expect(error._tag).toBe("EnvironmentLinkUpsertPersistenceError");
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          upsert: () =>
+            Effect.fail(
+              new EnvironmentLinks.EnvironmentLinkUpsertPersistenceError({
+                userId: "user_123",
+                environmentId: "env-link-test",
+                cause: new Error("link database unavailable"),
+              }),
+            ),
+          releaseProvisionClaim: () =>
+            Effect.fail(
+              new ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaimPersistenceError({
+                operation: "release",
+                userId: "user_123",
+                environmentId: "env-link-test",
+                cause: new Error("claim database unavailable"),
+              }),
+            ),
+        }),
+      ),
+    ),
+  );
 
   it.effect("links a publish-only environment with a non-secure nominal endpoint", () => {
     let persistedEndpoint: string | null = null;

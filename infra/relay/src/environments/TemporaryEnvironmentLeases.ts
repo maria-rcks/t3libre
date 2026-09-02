@@ -9,6 +9,7 @@ import * as RelayDb from "../db.ts";
 import { relayEnvironmentLinks } from "../persistence/schema.ts";
 import * as EnvironmentCredentials from "./EnvironmentCredentials.ts";
 import * as ManagedEndpointProvider from "./ManagedEndpointProvider.ts";
+import * as ManagedEndpointProvisionClaims from "./ManagedEndpointProvisionClaims.ts";
 
 export const TEMPORARY_ENVIRONMENT_LEASE_TTL_MINUTES = 10;
 
@@ -238,23 +239,35 @@ export const releaseTemporaryEnvironmentLease = Effect.fn(
   const leases = yield* TemporaryEnvironmentLeases;
   const credentials = yield* EnvironmentCredentials.EnvironmentCredentials;
   const managedEndpointProvider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+  const provisionClaims = yield* ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims;
+  const provisionClaimKey = {
+    userId: input.userId,
+    environmentId: input.environmentId,
+  };
   const leaseKey = {
     userId: input.userId,
     environmentId: input.environmentId,
     leaseId: input.leaseId,
   };
-  const lease = yield* leases.get(leaseKey);
-  if (lease === null) return false;
+  const release = Effect.gen(function* () {
+    const lease = yield* leases.get(leaseKey);
+    if (lease === null) return false;
 
-  const target = yield* managedEndpointProvider.prepareDeprovision(leaseKey);
-  if (lease.revokedAt === null && !(yield* leases.claimCleanup(input))) return false;
-  yield* credentials.revokeForEnvironmentPublicKey({
-    environmentId: lease.environmentId,
-    environmentPublicKey: lease.environmentPublicKey,
+    const target = yield* managedEndpointProvider.prepareDeprovision(leaseKey);
+    if (lease.revokedAt === null && !(yield* leases.claimCleanup(input))) return false;
+    yield* credentials.revokeForEnvironmentPublicKey({
+      environmentId: lease.environmentId,
+      environmentPublicKey: lease.environmentPublicKey,
+    });
+    yield* managedEndpointProvider.deprovision({ ...leaseKey, target });
+    yield* leases.clear(leaseKey);
+    return true;
   });
-  yield* managedEndpointProvider.deprovision({ ...leaseKey, target });
-  yield* leases.clear(leaseKey);
-  return true;
+  return yield* ManagedEndpointProvisionClaims.withManagedEndpointProvisionClaim(
+    provisionClaims,
+    provisionClaimKey,
+    release,
+  );
 });
 
 export const pruneExpiredTemporaryEnvironmentLeases = Effect.fn(

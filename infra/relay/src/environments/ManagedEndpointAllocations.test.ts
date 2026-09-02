@@ -65,6 +65,80 @@ describe("ManagedEndpointAllocations", () => {
     }).pipe(Effect.provide(layerWithDb(fakeDb)));
   });
 
+  it.effect("rejects a tunnel recorded after its reservation was superseded", () => {
+    const fakeDb = {
+      update: (table: unknown) => {
+        expect(table).toBe(relayManagedEndpointAllocations);
+        return {
+          set: () => ({
+            where: () => ({
+              returning: () => Effect.succeed([]),
+            }),
+          }),
+        };
+      },
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    return Effect.gen(function* () {
+      const allocations = yield* ManagedEndpointAllocations.ManagedEndpointAllocations;
+      const error = yield* Effect.flip(
+        allocations.recordTunnel({
+          userId: "user-1",
+          environmentId: "environment-1",
+          tunnelId: "tunnel-1",
+          generationId: "outdated-generation",
+        }),
+      );
+
+      expect(error).toMatchObject({
+        _tag: "ManagedEndpointAllocationPersistenceError",
+        operation: "record-tunnel",
+        stage: "resolve-reservation",
+        userId: "user-1",
+        environmentId: "environment-1",
+        tunnelId: "tunnel-1",
+      });
+      expect(error.cause).toBeUndefined();
+    }).pipe(Effect.provide(layerWithDb(fakeDb)));
+  });
+
+  it.effect("rejects DNS recorded after its reservation was superseded", () => {
+    const fakeDb = {
+      update: (table: unknown) => {
+        expect(table).toBe(relayManagedEndpointAllocations);
+        return {
+          set: () => ({
+            where: () => ({
+              returning: () => Effect.succeed([]),
+            }),
+          }),
+        };
+      },
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    return Effect.gen(function* () {
+      const allocations = yield* ManagedEndpointAllocations.ManagedEndpointAllocations;
+      const error = yield* Effect.flip(
+        allocations.recordDns({
+          userId: "user-1",
+          environmentId: "environment-1",
+          dnsRecordId: "dns-record-1",
+          generationId: "outdated-generation",
+        }),
+      );
+
+      expect(error).toMatchObject({
+        _tag: "ManagedEndpointAllocationPersistenceError",
+        operation: "record-dns",
+        stage: "resolve-reservation",
+        userId: "user-1",
+        environmentId: "environment-1",
+        dnsRecordId: "dns-record-1",
+      });
+      expect(error.cause).toBeUndefined();
+    }).pipe(Effect.provide(layerWithDb(fakeDb)));
+  });
+
   it.effect("retains database failures with allocation operation and identity", () => {
     const cause = new Error("database unavailable");
     const fakeDb = {

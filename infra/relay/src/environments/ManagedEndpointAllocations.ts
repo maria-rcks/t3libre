@@ -254,7 +254,7 @@ export const make = Effect.gen(function* () {
     recordTunnel: Effect.fn("relay.managed_endpoint_allocations.record_tunnel")(function* (
       input: RecordManagedEndpointTunnelInput,
     ) {
-      yield* db
+      const recorded = yield* db
         .update(relayManagedEndpointAllocations)
         .set({
           tunnelId: input.tunnelId,
@@ -266,6 +266,7 @@ export const make = Effect.gen(function* () {
             eq(relayManagedEndpointAllocations.generationId, input.generationId),
           ),
         )
+        .returning({ userId: relayManagedEndpointAllocations.userId })
         .pipe(
           Effect.mapError(
             (cause) =>
@@ -277,11 +278,19 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
+
+      if (recorded.length === 0) {
+        return yield* new ManagedEndpointAllocationPersistenceError({
+          operation: "record-tunnel",
+          stage: "resolve-reservation",
+          ...input,
+        });
+      }
     }),
     recordDns: Effect.fn("relay.managed_endpoint_allocations.record_dns")(function* (
       input: RecordManagedEndpointDnsInput,
     ) {
-      yield* db
+      const recorded = yield* db
         .update(relayManagedEndpointAllocations)
         .set({
           dnsRecordId: input.dnsRecordId,
@@ -293,6 +302,7 @@ export const make = Effect.gen(function* () {
             eq(relayManagedEndpointAllocations.generationId, input.generationId),
           ),
         )
+        .returning({ userId: relayManagedEndpointAllocations.userId })
         .pipe(
           Effect.mapError(
             (cause) =>
@@ -304,6 +314,14 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
+
+      if (recorded.length === 0) {
+        return yield* new ManagedEndpointAllocationPersistenceError({
+          operation: "record-dns",
+          stage: "resolve-reservation",
+          ...input,
+        });
+      }
     }),
     markReady: Effect.fn("relay.managed_endpoint_allocations.mark_ready")(function* (
       input: ManagedEndpointAllocationKey & { readonly generationId: string },

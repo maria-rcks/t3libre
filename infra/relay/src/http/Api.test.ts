@@ -35,6 +35,7 @@ import * as RelayDb from "../db.ts";
 import * as EnvironmentCredentials from "../environments/EnvironmentCredentials.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as ManagedEndpointProvider from "../environments/ManagedEndpointProvider.ts";
+import * as ManagedEndpointProvisionClaims from "../environments/ManagedEndpointProvisionClaims.ts";
 import * as TemporaryEnvironmentLeases from "../environments/TemporaryEnvironmentLeases.ts";
 
 vi.mock("@clerk/backend", () => ({
@@ -191,6 +192,8 @@ function relayUnlinkTestLayer(input?: {
   readonly revokeCredential?: EnvironmentCredentials.EnvironmentCredentials["Service"]["revokeForEnvironmentPublicKey"];
   readonly prepareDeprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["prepareDeprovision"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
+  readonly acquireProvisionClaim?: ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims["Service"]["acquire"];
+  readonly releaseProvisionClaim?: ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims["Service"]["release"];
 }) {
   return Layer.mergeAll(
     Layer.succeed(
@@ -226,6 +229,13 @@ function relayUnlinkTestLayer(input?: {
         prepareDeprovision: input?.prepareDeprovision ?? (() => Effect.succeed(null)),
         deprovision: input?.deprovision ?? (() => Effect.void),
         release: () => Effect.die("unused release"),
+      }),
+    ),
+    Layer.succeed(
+      ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims,
+      ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims.of({
+        acquire: input?.acquireProvisionClaim ?? (() => Effect.succeed("provision-claim")),
+        release: input?.releaseProvisionClaim ?? (() => Effect.void),
       }),
     ),
   );
@@ -299,16 +309,23 @@ describe("relay environment unlink", () => {
         }),
       ).toBe(true);
       expect(calls).toEqual([
+        "acquire-provision-claim",
         "prepare",
         "lookup",
         "transaction",
         "link",
         "credential",
         "deprovision",
+        "release-provision-claim",
       ]);
     }).pipe(
       Effect.provide(
         relayUnlinkTestLayer({
+          acquireProvisionClaim: () =>
+            Effect.sync(() => {
+              calls.push("acquire-provision-claim");
+              return "provision-claim";
+            }),
           withTransaction: (effect) => {
             calls.push("transaction");
             return effect;
@@ -337,6 +354,11 @@ describe("relay environment unlink", () => {
             Effect.sync(() => {
               expect(request.target).toBe(deprovisionTarget);
               calls.push("deprovision");
+            }),
+          releaseProvisionClaim: (request) =>
+            Effect.sync(() => {
+              expect(request.claimId).toBe("provision-claim");
+              calls.push("release-provision-claim");
             }),
         }),
       ),
@@ -436,6 +458,8 @@ function temporaryLeaseTestLayer(input: {
   readonly revokeCredential?: EnvironmentCredentials.EnvironmentCredentials["Service"]["revokeForEnvironmentPublicKey"];
   readonly prepareDeprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["prepareDeprovision"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
+  readonly acquireProvisionClaim?: ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims["Service"]["acquire"];
+  readonly releaseProvisionClaim?: ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims["Service"]["release"];
 }) {
   return Layer.mergeAll(
     Layer.succeed(
@@ -465,6 +489,13 @@ function temporaryLeaseTestLayer(input: {
         release: () => Effect.die("unused release"),
       }),
     ),
+    Layer.succeed(
+      ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims,
+      ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims.of({
+        acquire: input.acquireProvisionClaim ?? (() => Effect.succeed("provision-claim")),
+        release: input.releaseProvisionClaim ?? (() => Effect.void),
+      }),
+    ),
   );
 }
 
@@ -479,10 +510,24 @@ describe("temporary environment leases", () => {
           leaseId: "lease-current",
         }),
       ).toBe(true);
-      expect(calls).toEqual(["lookup", "prepare", "claim", "credential", "deprovision", "clear"]);
+      expect(calls).toEqual([
+        "acquire-provision-claim",
+        "lookup",
+        "prepare",
+        "claim",
+        "credential",
+        "deprovision",
+        "clear",
+        "release-provision-claim",
+      ]);
     }).pipe(
       Effect.provide(
         temporaryLeaseTestLayer({
+          acquireProvisionClaim: () =>
+            Effect.sync(() => {
+              calls.push("acquire-provision-claim");
+              return "provision-claim";
+            }),
           get: (input) =>
             Effect.sync(() => {
               expect(input.leaseId).toBe("lease-current");
@@ -511,6 +556,40 @@ describe("temporary environment leases", () => {
               calls.push("clear");
               return true;
             }),
+          releaseProvisionClaim: () =>
+            Effect.sync(() => {
+              calls.push("release-provision-claim");
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("bounds and swallows provision claim release failures", () => {
+    let releaseAttempts = 0;
+    return Effect.gen(function* () {
+      expect(
+        yield* TemporaryEnvironmentLeases.releaseTemporaryEnvironmentLease({
+          userId: "user-1",
+          environmentId: "environment-1",
+          leaseId: "lease-current",
+        }),
+      ).toBe(true);
+      expect(releaseAttempts).toBe(3);
+    }).pipe(
+      Effect.provide(
+        temporaryLeaseTestLayer({
+          releaseProvisionClaim: () => {
+            releaseAttempts += 1;
+            return Effect.fail(
+              new ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaimPersistenceError({
+                operation: "release",
+                userId: "user-1",
+                environmentId: "environment-1",
+                cause: new Error("database unavailable"),
+              }),
+            );
+          },
         }),
       ),
     );
