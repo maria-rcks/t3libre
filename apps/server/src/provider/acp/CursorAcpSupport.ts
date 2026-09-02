@@ -19,6 +19,17 @@ import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 
 type CursorAcpRuntimeCursorSettings = Pick<CursorSettings, "apiEndpoint" | "binaryPath">;
 
+function cursorAcpPermissionArgs(runtimeMode?: RuntimeMode): ReadonlyArray<string> {
+  switch (runtimeMode) {
+    case "auto":
+      return ["--auto-review"];
+    case "full-access":
+      return ["--force"];
+    default:
+      return [];
+  }
+}
+
 export interface CursorAcpRuntimeInput extends Omit<
   AcpSessionRuntime.AcpSessionRuntimeOptions,
   "authMethodId" | "clientCapabilities" | "spawn"
@@ -45,7 +56,7 @@ export function buildCursorAcpSpawnInput(
     command: cursorSettings?.binaryPath || "cursor-agent",
     args: [
       ...(cursorSettings?.apiEndpoint ? (["-e", cursorSettings.apiEndpoint] as const) : []),
-      ...(runtimeMode === "full-access" ? (["--force"] as const) : []),
+      ...cursorAcpPermissionArgs(runtimeMode),
       "acp",
     ],
     cwd,

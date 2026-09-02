@@ -83,8 +83,16 @@ describe("buildCursorAcpSpawnInput", () => {
     });
   });
 
-  it.each(["approval-required", "auto-accept-edits", "auto"] as const)(
-    "does not force approval in %s mode",
+  it("uses Cursor auto-review in auto mode", () => {
+    expect(buildCursorAcpSpawnInput(undefined, "/tmp/project", undefined, "auto")).toEqual({
+      command: "cursor-agent",
+      args: ["--auto-review", "acp"],
+      cwd: "/tmp/project",
+    });
+  });
+
+  it.each(["approval-required", "auto-accept-edits"] as const)(
+    "does not relax approval in %s mode",
     (runtimeMode) => {
       expect(buildCursorAcpSpawnInput(undefined, "/tmp/project", undefined, runtimeMode)).toEqual({
         command: "cursor-agent",
