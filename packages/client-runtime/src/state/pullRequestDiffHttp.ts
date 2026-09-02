@@ -1,13 +1,13 @@
-import type {
+import {
   EnvironmentAuthInvalidError,
-  PullRequestDiffInput,
-  PullRequestDiffResult,
+  type PullRequestDiffInput,
+  type PullRequestDiffResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 
 import type { PreparedConnection } from "../connection/model.ts";
@@ -22,9 +22,15 @@ import { buildEnvironmentAuthHeaders, withEnvironmentCredentials } from "./envir
 
 const DEFAULT_PULL_REQUEST_DIFF_TIMEOUT_MS = 60_000;
 
-export class PullRequestDiffCredentialRejectedError extends Data.TaggedError(
+export class PullRequestDiffCredentialRejectedError extends Schema.TaggedErrorClass<PullRequestDiffCredentialRejectedError>()(
   "PullRequestDiffCredentialRejectedError",
-)<{ readonly cause: EnvironmentAuthInvalidError }> {
+  {
+    repository: Schema.String,
+    number: Schema.Number,
+    traceId: Schema.String,
+    cause: EnvironmentAuthInvalidError,
+  },
+) {
   override get message(): string {
     return "This environment session is no longer valid (invalid_credential). Refresh the page or quit and reopen T3 Code.";
   }
@@ -62,7 +68,12 @@ export const fetchEnvironmentPullRequestDiff = Effect.fn(
   ).pipe(
     Effect.mapError((error) =>
       error._tag === "EnvironmentAuthInvalidError" && error.reason === "invalid_credential"
-        ? new PullRequestDiffCredentialRejectedError({ cause: error })
+        ? new PullRequestDiffCredentialRejectedError({
+            repository: input.diff.repository,
+            number: input.diff.number,
+            traceId: error.traceId,
+            cause: error,
+          })
         : error,
     ),
   );
