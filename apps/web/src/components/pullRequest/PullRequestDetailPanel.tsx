@@ -1243,26 +1243,6 @@ export function PullRequestDetailPanel({
         <div className="mr-4 flex h-7 min-w-0 flex-nowrap items-center justify-end gap-1">
           {detail ? (
             <>
-              {checkoutCommand ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        aria-label={`Copy checkout command: ${checkoutCommand}`}
-                        onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}
-                      />
-                    }
-                  >
-                    <CopyIcon aria-hidden className="size-3.5" />
-                    Copy checkout command
-                  </TooltipTrigger>
-                  <TooltipPopup side="bottom">
-                    <code>{checkoutCommand}</code>
-                  </TooltipPopup>
-                </Tooltip>
-              ) : null}
               {/* Checking a pull request out is the reason to open one here at all, so it is a
                   button of its own rather than a side effect of asking an agent for something.
                   It asks where, because the two answers are not interchangeable: one leaves your
@@ -1493,6 +1473,12 @@ export function PullRequestDetailPanel({
                     <ArrowUpRightIcon className="size-3.5" />
                     {openOnHostLabel(detail.provider)}
                   </MenuItem>
+                  {checkoutCommand ? (
+                    <MenuItem onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}>
+                      <CopyIcon className="size-3.5" />
+                      Copy checkout command
+                    </MenuItem>
+                  ) : null}
                   <MenuItem onClick={() => void writeTextToClipboard(detail.url)}>
                     <LinkIcon className="size-3.5" />
                     Copy link
