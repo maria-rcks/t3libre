@@ -3058,6 +3058,7 @@ export function makeOpenCodeAdapter(
             });
           }
           const turnId = TurnId.make(`opencode-compact-${yield* randomUUIDv4}`);
+          const startedEventBase = yield* buildEventBase({ threadId, turnId });
           context.promptGeneration += 1;
           context.activeTurnId = turnId;
           context.manualCompactionTurnId = turnId;
@@ -3067,7 +3068,7 @@ export function makeOpenCodeAdapter(
             { clearLastError: true },
           );
           yield* emit({
-            ...(yield* buildEventBase({ threadId, turnId })),
+            ...startedEventBase,
             type: "turn.started",
             payload: { model: context.session.model },
           });

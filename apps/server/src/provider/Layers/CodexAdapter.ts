@@ -1780,7 +1780,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                   type: "turn.started",
                   payload: {},
                 },
-                ...runtimeEvents,
+                ...runtimeEvents.map((runtimeEvent) => ({
+                  ...runtimeEvent,
+                  turnId: manualCompactionTurnId,
+                })),
                 {
                   ...base,
                   eventId: EventId.make(`${event.id}:compact-completed`),

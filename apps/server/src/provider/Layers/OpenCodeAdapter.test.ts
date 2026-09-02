@@ -1015,6 +1015,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       NodeAssert.equal(compacted?.type, "thread.state.changed");
       if (compacted?.type === "thread.state.changed") {
         NodeAssert.equal(compacted.payload.state, "compacted");
+        NodeAssert.equal(compacted.turnId, events[0]?.turnId);
       }
       yield* adapter.stopSession(threadId);
     }),

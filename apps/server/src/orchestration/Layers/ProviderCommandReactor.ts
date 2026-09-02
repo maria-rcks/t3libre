@@ -1164,7 +1164,7 @@ const make = Effect.gen(function* () {
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user" && !isCompactCommandMessage(entry))
         .length === 1;
-    if (isFirstUserMessageTurn) {
+    if (isFirstUserMessageTurn && !isCompactCommand) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
         resolveThreadWorkspaceCwd({
@@ -1235,11 +1235,23 @@ const make = Effect.gen(function* () {
       }
       const detail = formatFailureDetail(cause);
       return Effect.gen(function* () {
-        const latestThread = yield* resolveThread(event.payload.threadId);
-        const latestSession = latestThread?.session;
         const runtimeSession = (yield* providerService.listSessions()).find(
           (session) => session.threadId === event.payload.threadId,
         );
+        const latestThread = yield* resolveThread(event.payload.threadId);
+        const latestSession = latestThread?.session;
+        const latestTurnSettledAfterRequest =
+          latestThread?.latestTurn !== null &&
+          latestThread?.latestTurn !== undefined &&
+          latestThread.latestTurn.state !== "running" &&
+          latestThread.latestTurn.completedAt !== null &&
+          latestThread.latestTurn.completedAt >= event.payload.createdAt;
+        const latestSessionSettled =
+          latestSession !== null &&
+          latestSession !== undefined &&
+          latestSession.status !== "starting" &&
+          latestSession.status !== "running" &&
+          latestSession.status !== "ready";
         if (
           latestSession?.status === "running" &&
           latestSession.activeTurnId !== null &&
@@ -1253,7 +1265,7 @@ const make = Effect.gen(function* () {
             session: latestSession,
             createdAt: event.payload.createdAt,
           });
-        } else {
+        } else if (!latestTurnSettledAfterRequest && !latestSessionSettled) {
           yield* setThreadSessionErrorOnTurnStartFailure({
             threadId: event.payload.threadId,
             detail,

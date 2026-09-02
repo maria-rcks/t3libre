@@ -375,6 +375,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         ["turn.started", "thread.state.changed", "turn.completed"],
       );
       NodeAssert.equal(events[0]?.turnId, events[2]?.turnId);
+      NodeAssert.equal(events[1]?.turnId, events[0]?.turnId);
       NodeAssert.match(String(events[0]?.turnId), /^codex-compact-/);
       NodeAssert.equal(new Set(events.map((event) => event.eventId)).size, 3);
       if (events[1]?.type === "thread.state.changed") {

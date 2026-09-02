@@ -161,6 +161,9 @@ describe("ProviderCommandReactor", () => {
       void,
       ProviderAdapterRequestError | ProviderAdapterValidationError
     >;
+    readonly listSessionsEffect?: (
+      sessions: Array<ProviderSession>,
+    ) => Effect.Effect<Array<ProviderSession>>;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -337,7 +340,8 @@ describe("ProviderCommandReactor", () => {
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       stopSession: stopSession as ProviderServiceShape["stopSession"],
-      listSessions: () => Effect.succeed(runtimeSessions),
+      listSessions: () =>
+        input?.listSessionsEffect?.(runtimeSessions) ?? Effect.succeed(runtimeSessions),
       getCapabilities: (_provider) =>
         Effect.succeed({
           sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
@@ -719,6 +723,25 @@ describe("ProviderCommandReactor", () => {
       expect(harness.generateBranchName.mock.calls[0]?.[0]).toMatchObject({
         message: "Fix the reconnect spinner.",
       });
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-compact-after-real-prompt"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-compact-after-real-prompt"),
+          role: "user",
+          text: "/compact",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:02.000Z",
+      });
+      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 2));
+      yield* Effect.promise(() => harness.drain());
+      expect(harness.generateThreadTitle).toHaveBeenCalledTimes(1);
+      expect(harness.generateBranchName).toHaveBeenCalledTimes(1);
     }),
   );
 
@@ -869,9 +892,12 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
-  effectIt.effect("does not restore a compact turn the provider already cleared", () =>
+  effectIt.effect("does not overwrite a compact turn that settles during recovery", () =>
     Effect.gen(function* () {
       const releaseFailure = yield* Deferred.make<void>();
+      const recoveryInventoryStarted = yield* Deferred.make<void>();
+      const releaseRecoveryInventory = yield* Deferred.make<void>();
+      let blockRecoveryInventory = false;
       const rejection = new ProviderAdapterRequestError({
         provider: ProviderDriverKind.make("codex"),
         method: "thread/compact/start",
@@ -881,6 +907,13 @@ describe("ProviderCommandReactor", () => {
         createHarness({
           compactThreadEffect: () =>
             Deferred.await(releaseFailure).pipe(Effect.andThen(Effect.fail(rejection))),
+          listSessionsEffect: (sessions) =>
+            blockRecoveryInventory
+              ? Deferred.succeed(recoveryInventoryStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseRecoveryInventory)),
+                  Effect.as(sessions),
+                )
+              : Effect.succeed(sessions),
         }),
       );
       const now = "2026-01-01T00:00:00.000Z";
@@ -901,7 +934,7 @@ describe("ProviderCommandReactor", () => {
       yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
       yield* harness.engine.dispatch({
         type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-set-stale-compact-turn"),
+        commandId: CommandId.make("cmd-session-set-running-compact-turn"),
         threadId: ThreadId.make("thread-1"),
         session: {
           threadId: ThreadId.make("thread-1"),
@@ -915,7 +948,26 @@ describe("ProviderCommandReactor", () => {
         },
         createdAt: now,
       });
+      blockRecoveryInventory = true;
       yield* Deferred.succeed(releaseFailure, undefined);
+      yield* Deferred.await(recoveryInventoryStarted);
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-settled-compact-turn"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      });
+      yield* Deferred.succeed(releaseRecoveryInventory, undefined);
 
       yield* Effect.promise(() =>
         waitFor(async () => {
@@ -931,9 +983,9 @@ describe("ProviderCommandReactor", () => {
       const readModel = yield* Effect.promise(() => harness.readModel());
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
       expect(thread?.session).toMatchObject({
-        status: "error",
+        status: "ready",
         activeTurnId: null,
-        lastError: rejection.detail,
+        lastError: null,
       });
     }),
   );
