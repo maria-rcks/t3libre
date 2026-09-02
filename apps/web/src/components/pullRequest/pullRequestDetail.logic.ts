@@ -11,10 +11,32 @@ import type {
   PullRequestReviewThread,
   PullRequestState,
   PullRequestUpdateMethod,
+  SourceControlProviderKind,
   VcsRef,
 } from "@t3tools/contracts";
 
 import { inferReviewCommentFenceLanguage, type ReviewCommentContext } from "~/reviewCommentContext";
+
+const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+
+export function pullRequestCheckoutCommand(
+  provider: SourceControlProviderKind,
+  number: number,
+  headBranch: string,
+): string | null {
+  switch (provider) {
+    case "github":
+      return `gh pr checkout ${number}`;
+    case "gitlab":
+      return `glab mr checkout ${number}`;
+    case "azure-devops":
+      return `az repos pr checkout --id ${number}`;
+    case "bitbucket":
+      return `git fetch --all && git switch ${shellQuote(headBranch)}`;
+    case "unknown":
+      return null;
+  }
+}
 
 /** Activity changes only when the same host resource reports a newer revision. */
 export function shouldRefreshPullRequestActivity(

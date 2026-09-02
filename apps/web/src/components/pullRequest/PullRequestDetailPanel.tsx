@@ -115,6 +115,7 @@ import {
   pullRequestActionMenuHasGroup,
   pullRequestActionNeedsHostRefresh,
   pullRequestComposerTarget,
+  pullRequestCheckoutCommand,
   pullRequestFindingKey,
   pullRequestHandoffLabels,
   readableFailure,
@@ -518,24 +519,9 @@ export function PullRequestDetailPanel({
     [activity, coreDetail],
   );
   const repositoryUrl = detail === null ? null : changeRequestRepositoryUrl(detail.url);
-  const checkoutCommand = detail?.provider === "github" ? `gh pr checkout ${detail.number}` : null;
-  const checkoutCommandCopyButton = checkoutCommand ? (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            size="icon-micro"
-            variant="ghost-muted"
-            aria-label={`Copy ${checkoutCommand}`}
-            onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}
-          />
-        }
-      >
-        <CopyIcon aria-hidden className="size-3" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">Copy {checkoutCommand}</TooltipPopup>
-    </Tooltip>
-  ) : null;
+  const checkoutCommand = detail
+    ? pullRequestCheckoutCommand(detail.provider, detail.number, detail.headBranch)
+    : null;
   const branchRefsQuery = useEnvironmentQuery(
     detail === null
       ? null
@@ -1257,6 +1243,26 @@ export function PullRequestDetailPanel({
         <div className="mr-4 flex h-7 min-w-0 flex-nowrap items-center justify-end gap-1">
           {detail ? (
             <>
+              {checkoutCommand ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        aria-label={`Copy checkout command: ${checkoutCommand}`}
+                        onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}
+                      />
+                    }
+                  >
+                    <CopyIcon aria-hidden className="size-3.5" />
+                    Copy checkout command
+                  </TooltipTrigger>
+                  <TooltipPopup side="bottom">
+                    <code>{checkoutCommand}</code>
+                  </TooltipPopup>
+                </Tooltip>
+              ) : null}
               {/* Checking a pull request out is the reason to open one here at all, so it is a
                   button of its own rather than a side effect of asking an agent for something.
                   It asks where, because the two answers are not interchangeable: one leaves your
@@ -1608,7 +1614,6 @@ export function PullRequestDetailPanel({
                       />
                       <TooltipPopup side="top">{detail.headBranch}</TooltipPopup>
                     </Tooltip>
-                    {checkoutCommandCopyButton}
                   </span>
                   <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2 text-[11px]">
                     <span
@@ -1788,7 +1793,6 @@ export function PullRequestDetailPanel({
                         {`${isBranchCopied ? "Copied" : "Copy pull request branch"}: ${detail.headBranch}`}
                       </TooltipPopup>
                     </Tooltip>
-                    {checkoutCommandCopyButton}
                   </span>
                   <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2">
                     <span className="inline-flex items-center gap-1.5 tabular-nums">

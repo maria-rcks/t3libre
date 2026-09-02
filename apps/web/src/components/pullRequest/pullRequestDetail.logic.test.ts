@@ -25,6 +25,7 @@ import {
   orderPullRequestComments,
   pullRequestActionMenuHasGroup,
   pullRequestActionNeedsHostRefresh,
+  pullRequestCheckoutCommand,
   pullRequestComposerTarget,
   pullRequestFindingKey,
   pullRequestHandoffLabels,
@@ -37,6 +38,18 @@ import {
   editPullRequestThreadComment,
 } from "./pullRequestDetail.logic";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
+
+describe("pull request checkout commands", () => {
+  it.each([
+    ["github", "feature", "gh pr checkout 42"],
+    ["gitlab", "feature", "glab mr checkout 42"],
+    ["azure-devops", "feature", "az repos pr checkout --id 42"],
+    ["bitbucket", "feature/it's-ready", "git fetch --all && git switch 'feature/it'\\''s-ready'"],
+    ["unknown", "feature", null],
+  ] as const)("builds the %s command", (provider, branch, expected) => {
+    expect(pullRequestCheckoutCommand(provider, 42, branch)).toBe(expected);
+  });
+});
 
 const TIMELINE_SOURCE: Pick<
   PullRequestDetailView,
