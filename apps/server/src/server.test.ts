@@ -118,6 +118,7 @@ import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/provid
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
+import { trustConnectDevShareManagedOrigin } from "./cloud/DevShareProxy.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -1562,6 +1563,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
   it.effect("proxies public T3 Connect dev requests to Vite and keeps T3 routes local", () =>
     Effect.gen(function* () {
+      const shareBasePath = "/__t3-connect-dev-share/integration-test/";
+      const managedOrigin = new URL("https://environment.tunnels.example.com");
+      const moduleBody = `export const connectDevShare = "${"shared".repeat(400)}";`;
       const upstreamRequests: Array<{
         readonly url: string | undefined;
         readonly authorization: string | undefined;
@@ -1578,8 +1582,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 url: request.url,
                 authorization: request.headers.authorization,
               });
-              response.writeHead(200, { "content-type": "application/javascript" });
-              response.end("export const connectDevShare = true;");
+              response.writeHead(200, {
+                "content-type": "application/javascript",
+                "set-cookie": "vite-only=must-not-cross-origins",
+              });
+              response.end(moduleBody);
             });
             const socketServer = new NodeSocket.NodeWS.WebSocketServer({ server });
             socketServer.on("connection", (socket) => {
@@ -1608,19 +1615,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         }),
         ({ close }) => Effect.promise(close),
       );
+      yield* trustConnectDevShareManagedOrigin(managedOrigin);
       yield* buildAppUnderTest({
         config: {
-          devUrl: new URL(viteServer.origin),
+          devUrl: new URL(shareBasePath, viteServer.origin),
           connectDevShare: true,
         },
       });
 
       const NodeHttp = yield* Effect.promise(() => import("node:http"));
-      const publicUrl = yield* getHttpServerUrl(
-        `/__t3-connect-dev-share/${String(process.pid)}/src/main.ts?marker=connect`,
-      );
+      const publicUrl = yield* getHttpServerUrl(`${shareBasePath}assets/index.js?marker=connect`);
       const response = yield* Effect.callback<
-        { readonly body: string; readonly headers: NodeJS.Dict<string | string[] | undefined> },
+        { readonly body: Uint8Array; readonly headers: NodeJS.Dict<string | string[] | undefined> },
         Error
       >((resume) => {
         const request = NodeHttp.get(
@@ -1632,6 +1638,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               connection: "keep-alive, x-private-hop",
               "x-private-hop": "secret",
               authorization: "Bearer environment-token",
+              "accept-encoding": "gzip",
             },
           },
           (incoming) => {
@@ -1641,7 +1648,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             incoming.once("end", () =>
               resume(
                 Effect.succeed({
-                  body: Buffer.concat(chunks).toString("utf8"),
+                  body: Buffer.concat(chunks),
                   headers: incoming.headers,
                 }),
               ),
@@ -1655,11 +1662,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "cache-control": "no-store",
         "cloudflare-cdn-cache-control": "no-store",
         "x-t3-connect-dev-share": "vite",
+        "content-encoding": "gzip",
+        vary: "Accept-Encoding",
       });
-      assert.equal(response.body, "export const connectDevShare = true;");
+      assert.isUndefined(response.headers["set-cookie"]);
+      const NodeZlib = yield* Effect.promise(() => import("node:zlib"));
+      assert.equal(NodeZlib.gunzipSync(response.body).toString("utf8"), moduleBody);
       assert.deepEqual(upstreamRequests, [
         {
-          url: "/src/main.ts?marker=connect",
+          url: `${shareBasePath}assets/index.js?marker=connect`,
           authorization: undefined,
         },
       ]);
@@ -1670,10 +1681,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(descriptor.status, 200);
       assert.equal(upstreamRequests.length, 1);
 
-      const socketUrl = (yield* getHttpServerUrl("/hmr")).replace(/^http:/u, "ws:");
+      const socketUrl = (yield* getHttpServerUrl(shareBasePath)).replace(/^http:/u, "ws:");
       const echoed = yield* Effect.acquireUseRelease(
         Effect.callback<NodeSocket.NodeWS.WebSocket, Error>((resume) => {
-          const socket = new NodeSocket.NodeWS.WebSocket(socketUrl, {
+          const socket = new NodeSocket.NodeWS.WebSocket(socketUrl, "vite-hmr", {
             headers: { host: "environment.tunnels.example.com", "cf-ray": "test-ray" },
           });
           socket.on("open", () => resume(Effect.succeed(socket)));

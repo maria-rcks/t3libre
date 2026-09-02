@@ -1,15 +1,23 @@
-import { EnvironmentHttpApi } from "@t3tools/contracts";
+import { EnvironmentHttpApi, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
-import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientResponse,
+  HttpRouter,
+  HttpServer,
+} from "effect/unstable/http";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
 import * as ServerConfig from "./config.ts";
+import { buildPairingUrl } from "./startupAccess.ts";
 import {
   otlpTracesProxyRouteLayer,
   assetRouteLayer,
@@ -96,12 +104,17 @@ import {
   pendingServiceUpdateExists,
   reconcileDesiredCloudLink,
   releaseManagedTunnelOnShutdown,
+  releaseTemporaryEnvironmentLease,
+  renewTemporaryEnvironmentLease,
 } from "./cloud/http.ts";
 import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
-import { connectDevShareProxyLayer } from "./cloud/DevShareProxy.ts";
+import {
+  connectDevShareProxyLayer,
+  trustConnectDevShareManagedOrigin,
+} from "./cloud/DevShareProxy.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as DesktopAppUpdate from "./desktopUpdate/DesktopAppUpdate.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
@@ -116,9 +129,10 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
-  clearPersistedServerRuntimeState,
+  clearOwnedPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
+  readPersistedServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
@@ -505,6 +519,30 @@ export const makeRoutesLayer = Layer.mergeAll(
   Layer.provide(httpCompressionLayer),
 );
 
+const awaitConnectDevShareReady = (baseUrl: string) =>
+  Effect.gen(function* () {
+    const environment = yield* ServerEnvironment.ServerEnvironment;
+    const expectedEnvironmentId = yield* environment.getEnvironmentId;
+    const response = yield* HttpClient.get(
+      new URL("/.well-known/t3/environment", baseUrl).toString(),
+    ).pipe(Effect.flatMap(HttpClientResponse.filterStatusOk));
+    const descriptor = yield* HttpClientResponse.schemaBodyJson(ExecutionEnvironmentDescriptor)(
+      response,
+    );
+    if (descriptor.environmentId !== expectedEnvironmentId) {
+      return yield* Effect.fail({ _tag: "ConnectDevShareReadinessError" as const });
+    }
+  }).pipe(
+    Effect.retry({
+      schedule: Schedule.exponential("250 millis").pipe(
+        Schedule.modifyDelay(({ duration }) =>
+          Effect.succeed(Duration.min(duration, Duration.seconds(5))),
+        ),
+        Schedule.upTo({ duration: "2 minutes" }),
+      ),
+    }),
+  );
+
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
@@ -512,6 +550,7 @@ export const makeServerLayer = Layer.unwrap(
     const awaitActivation = Deferred.await(activation);
     const activationLayer = Layer.succeed(ServerActivation, awaitActivation);
     const runtimeStateParked = yield* Deferred.make<void>();
+    const runtimeStateReady = yield* Deferred.make<void>();
     const tailscaleParked = yield* Deferred.make<void>();
     const cloudLinkParked = yield* Deferred.make<void>();
     const routesReady = yield* Deferred.make<void>();
@@ -533,9 +572,7 @@ export const makeServerLayer = Layer.unwrap(
           yield* awaitActivation;
           const server = yield* HttpServer.HttpServer;
           const address = server.address;
-          if (typeof address === "string" || !("port" in address)) {
-            return;
-          }
+          if (typeof address === "string" || !("port" in address)) return;
 
           const state = yield* makePersistedServerRuntimeState({
             config,
@@ -549,9 +586,9 @@ export const makeServerLayer = Layer.unwrap(
               Effect.logWarning("Failed to persist server runtime state", { cause }),
             ),
           );
-        }),
+        }).pipe(Effect.ensuring(Deferred.succeed(runtimeStateReady, undefined).pipe(Effect.orDie))),
         () =>
-          clearPersistedServerRuntimeState(config.serverRuntimeStatePath).pipe(
+          clearOwnedPersistedServerRuntimeState(config.serverRuntimeStatePath, process.pid).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Failed to clear server runtime state", { cause }),
             ),
@@ -622,10 +659,8 @@ export const makeServerLayer = Layer.unwrap(
           yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
           return;
         }
-        const releaseManagedTunnel = (ephemeralRelayUrl?: string) =>
-          releaseManagedTunnelOnShutdown(
-            ephemeralRelayUrl === undefined ? {} : { ephemeralRelayUrl },
-          ).pipe(
+        const releaseManagedTunnel = () =>
+          releaseManagedTunnelOnShutdown().pipe(
             Effect.timeout("10 seconds"),
             Effect.tap((released) =>
               released ? Effect.logInfo("Released the managed tunnel on shutdown") : Effect.void,
@@ -679,6 +714,7 @@ export const makeServerLayer = Layer.unwrap(
                 persistDesired: !connectDevShare,
                 requireUnlinked: connectDevShare,
                 forceManaged: connectDevShare,
+                ...(connectDevShare ? { authorizationBaseDir: config.baseDir } : {}),
               });
             });
             const retryReconcile = reconcileCloudLink.pipe(
@@ -695,32 +731,108 @@ export const makeServerLayer = Layer.unwrap(
                 ),
               }),
             );
-            yield* (
-              connectDevShare
-                ? Effect.acquireRelease(retryReconcile, (link) =>
-                    link.endpointRuntimeConfig === null
-                      ? Effect.void
-                      : releaseManagedTunnel(link.relayUrl),
-                  )
-                : retryReconcile
-            ).pipe(
+            const activeLink = connectDevShare
+              ? Effect.acquireRelease(retryReconcile, (link) =>
+                  link.temporaryLease === undefined
+                    ? Effect.void
+                    : releaseTemporaryEnvironmentLease({
+                        relayUrl: link.relayUrl,
+                        temporaryLease: link.temporaryLease,
+                      }).pipe(
+                        Effect.timeout("10 seconds"),
+                        Effect.tap((released) =>
+                          released
+                            ? Effect.logInfo(
+                                "Released the temporary T3 Connect dev share on shutdown",
+                              )
+                            : Effect.void,
+                        ),
+                        Effect.catchCause((cause) =>
+                          Effect.logWarning(
+                            "Failed to release the temporary T3 Connect dev share; its relay lease will expire",
+                            { cause },
+                          ),
+                        ),
+                        Effect.asVoid,
+                      ),
+                ).pipe(
+                  Effect.tap((link) =>
+                    trustConnectDevShareManagedOrigin(new URL(link.endpoint.httpBaseUrl)),
+                  ),
+                )
+              : retryReconcile;
+            const configureActiveLink = activeLink.pipe(
               Effect.tap((link) =>
                 connectDevShare
                   ? Effect.gen(function* () {
+                      yield* Deferred.await(runtimeStateReady);
+                      yield* awaitConnectDevShareReady(link.endpoint.httpBaseUrl);
+                      const runtimeState = yield* readPersistedServerRuntimeState(
+                        config.serverRuntimeStatePath,
+                      );
+                      if (Option.isSome(runtimeState) && runtimeState.value.pid === process.pid) {
+                        yield* persistServerRuntimeState({
+                          path: config.serverRuntimeStatePath,
+                          state: {
+                            ...runtimeState.value,
+                            pairingBaseUrl: link.endpoint.httpBaseUrl,
+                          },
+                        });
+                      }
                       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-                      const pairingUrl = yield* serverAuth.issueStartupPairingUrl(
+                      const pairing = yield* Effect.acquireRelease(
+                        serverAuth.issueStartupPairingCredential(),
+                        (issued) =>
+                          serverAuth.revokePairingLink(issued.id).pipe(
+                            Effect.catchCause((cause) =>
+                              Effect.logWarning(
+                                "Failed to revoke the T3 Connect dev-share pairing link",
+                                { cause },
+                              ),
+                            ),
+                            Effect.asVoid,
+                          ),
+                      );
+                      const pairingUrl = buildPairingUrl(
                         link.endpoint.httpBaseUrl,
+                        pairing.credential,
                       );
                       yield* Effect.logInfo("T3 Connect dev server ready", { pairingUrl });
                     })
                   : Effect.logInfo("T3 Connect desired link reconciled on startup"),
               ),
-              Effect.catch((cause) =>
-                Effect.logWarning("Failed to reconcile T3 Connect desired link on startup", {
-                  cause,
+            );
+            const reportLifecycleFailure = Effect.catchCause((cause) =>
+              Effect.logWarning("T3 Connect link lifecycle failed", { cause }),
+            );
+            if (!connectDevShare) {
+              yield* configureActiveLink.pipe(reportLifecycleFailure);
+              return;
+            }
+            yield* Effect.scoped(
+              configureActiveLink.pipe(
+                Effect.flatMap((link) => {
+                  if (link.temporaryLease === undefined) {
+                    return Effect.die(new Error("T3 Connect dev share has no temporary lease."));
+                  }
+                  return Effect.forever(
+                    Effect.sleep("1 minute").pipe(
+                      Effect.andThen(
+                        renewTemporaryEnvironmentLease({
+                          relayUrl: link.relayUrl,
+                          temporaryLease: link.temporaryLease,
+                        }),
+                      ),
+                      Effect.flatMap((renewed) =>
+                        renewed
+                          ? Effect.void
+                          : Effect.die(new Error("T3 Connect dev-share lease expired.")),
+                      ),
+                    ),
+                  );
                 }),
               ),
-            );
+            ).pipe(reportLifecycleFailure);
           }),
         );
         yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);

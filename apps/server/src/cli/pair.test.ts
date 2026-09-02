@@ -43,6 +43,16 @@ const baseState = {
 } as const satisfies PersistedServerRuntimeState;
 
 describe("pair base URL selection", () => {
+  it("prefers a ready public pairing origin", () => {
+    expect(
+      resolveDirectPairingBaseUrl({
+        ...baseState,
+        devUrl: "http://localhost:5733/",
+        pairingBaseUrl: "https://environment.tunnels.example.com/",
+      }),
+    ).toBe("https://environment.tunnels.example.com/");
+  });
+
   it("pairs through the dev web origin when the server fronts a dev server", () => {
     expect(resolveDirectPairingBaseUrl({ ...baseState, devUrl: "http://localhost:5733/" })).toBe(
       "http://localhost:5733/",
@@ -213,6 +223,28 @@ describe("t3 pair", () => {
         const output = yield* captureStdout(runCli(["pair", "--base-dir", baseDir]));
 
         assert.include(output, "Pairing URL: http://localhost:5733/pair#token=");
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("pairs through a ready T3 Connect dev-share origin without restarting", () =>
+    withDescriptorServer((origin) =>
+      Effect.gen(function* () {
+        const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-connect-test-"));
+        const port = Number(new URL(origin).port);
+        const statePath = NodePath.join(baseDir, "dev", "server-runtime.json");
+        yield* persistServerRuntimeState({
+          path: statePath,
+          state: yield* makePersistedServerRuntimeState({
+            config: { host: undefined, devUrl: new URL("http://localhost:5733") },
+            port,
+            pairingBaseUrl: "https://environment.tunnels.example.com/",
+          }),
+        });
+
+        const output = yield* captureStdout(runCli(["pair", "--base-dir", baseDir]));
+
+        assert.include(output, "Pairing URL: https://environment.tunnels.example.com/pair#token=");
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );

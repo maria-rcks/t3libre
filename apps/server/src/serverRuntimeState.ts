@@ -17,6 +17,9 @@ export const PersistedServerRuntimeState = Schema.Struct({
   // Present when the server fronts a dev web server (VITE_DEV_SERVER_URL).
   // Dev is single-origin: browsers must pair through this URL, not `origin`.
   devUrl: Schema.optional(Schema.String),
+  // Present while a public endpoint is ready. `t3 pair` prefers it so a
+  // replacement credential remains usable from the remote client.
+  pairingBaseUrl: Schema.optional(Schema.String),
   startedAt: Schema.String,
 });
 export type PersistedServerRuntimeState = typeof PersistedServerRuntimeState.Type;
@@ -50,6 +53,7 @@ const runtimeOriginForConfig = (
 export const makePersistedServerRuntimeState = (input: {
   readonly config: Pick<ServerConfig.ServerConfig["Service"], "host" | "devUrl">;
   readonly port: number;
+  readonly pairingBaseUrl?: string;
 }): Effect.Effect<PersistedServerRuntimeState> =>
   Effect.map(DateTime.now, (now) => ({
     version: 1,
@@ -58,6 +62,7 @@ export const makePersistedServerRuntimeState = (input: {
     port: input.port,
     origin: runtimeOriginForConfig(input.config, input.port),
     ...(input.config.devUrl ? { devUrl: input.config.devUrl.toString() } : {}),
+    ...(input.pairingBaseUrl ? { pairingBaseUrl: input.pairingBaseUrl } : {}),
     startedAt: DateTime.formatIso(now),
   }));
 
@@ -169,4 +174,16 @@ export const readPersistedServerRuntimeState = (path: string) =>
           Effect.as(Option.none<PersistedServerRuntimeState>()),
         ),
     }),
+  );
+
+/** Clear a runtime advertisement only while it still belongs to this process. */
+export const clearOwnedPersistedServerRuntimeState = (path: string, pid: number) =>
+  readPersistedServerRuntimeState(path).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.void,
+        onSome: (state) =>
+          state.pid === pid ? clearPersistedServerRuntimeState(path) : Effect.void,
+      }),
+    ),
   );

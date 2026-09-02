@@ -38,6 +38,8 @@ import {
   pendingServiceUpdateExists,
   reconcileDesiredCloudLink,
   releaseManagedTunnelOnShutdown,
+  releaseTemporaryEnvironmentLease,
+  renewTemporaryEnvironmentLease,
 } from "./http.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
 import { traceAuthenticatedRelayRequest, traceRelayRequest } from "./traceRelayRequest.ts";
@@ -241,12 +243,16 @@ describe("reconcileDesiredCloudLink", () => {
   it.effect("points an ephemeral dev share at one-time Connect login", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(
-        reconcileDesiredCloudLink("http://127.0.0.1:3774", { persistDesired: false }),
+        reconcileDesiredCloudLink("http://127.0.0.1:3774", {
+          persistDesired: false,
+          authorizationBaseDir: "/tmp/worktree/.t3",
+        }),
       );
 
       expect(error).toMatchObject({
         _tag: "EnvironmentHttpUnauthorizedError",
-        message: "Run `t3 connect login --base-dir <worktree>/.t3` once, then retry the dev share.",
+        message:
+          'Run `node apps/server/src/bin.ts connect login --base-dir "/tmp/worktree/.t3"` once, then retry the dev share.',
       });
     }).pipe(provideMissingAuthorization),
   );
@@ -452,25 +458,30 @@ describe("releaseManagedTunnelOnShutdown", () => {
     }).pipe(provideReleaseHarness({ store, applyConfigCalls, requests }));
   });
 
-  it.effect("releases an ephemeral Connect dev-share tunnel without durable intent", () => {
+  it.effect("releases a temporary Connect share by its exact relay lease", () => {
     const { store, values } = makeMemorySecretStore();
     const applyConfigCalls: Array<unknown> = [];
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
 
     return Effect.gen(function* () {
-      const released = yield* releaseManagedTunnelOnShutdown({
-        ephemeralRelayUrl: "https://relay.example.test",
+      const released = yield* releaseTemporaryEnvironmentLease({
+        relayUrl: "https://relay.example.test",
+        temporaryLease: { leaseId: "lease_123", expiresAt: "2026-09-02T22:00:00.000Z" },
       });
 
       expect(released).toBe(true);
       expect(applyConfigCalls).toEqual([null]);
       expect(requests).toHaveLength(1);
+      expect(requests[0]?.method).toBe("DELETE");
+      expect(requests[0]?.url).toBe(
+        "https://relay.example.test/v1/client/environment-links/env_123/temporary-lease",
+      );
       expect(values.has(CLOUD_ENDPOINT_RUNTIME_CONFIG)).toBe(false);
       expect(values.has(CLOUD_CLI_DESIRED_LINK_SECRET)).toBe(false);
     }).pipe(provideReleaseHarness({ store, applyConfigCalls, requests }));
   });
 
-  it.effect("does not release a tunnel that an ephemeral share does not own", () => {
+  it.effect("does not stop a durable connector that replaced a temporary share", () => {
     const { store, values } = makeMemorySecretStore([
       [CLOUD_ENDPOINT_RUNTIME_CONFIG, "existing-runtime-config"],
       [RELAY_URL_SECRET, "https://relay.example.test"],
@@ -479,8 +490,9 @@ describe("releaseManagedTunnelOnShutdown", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
 
     return Effect.gen(function* () {
-      const released = yield* releaseManagedTunnelOnShutdown({
-        ephemeralRelayUrl: "https://relay.example.test",
+      const released = yield* releaseTemporaryEnvironmentLease({
+        relayUrl: "https://relay.example.test",
+        temporaryLease: { leaseId: "stale_lease", expiresAt: "2026-09-02T22:00:00.000Z" },
       });
 
       expect(released).toBe(false);
@@ -488,6 +500,32 @@ describe("releaseManagedTunnelOnShutdown", () => {
       expect(requests).toEqual([]);
       expect(values.has(CLOUD_ENDPOINT_RUNTIME_CONFIG)).toBe(true);
     }).pipe(provideReleaseHarness({ store, applyConfigCalls, requests }));
+  });
+
+  it.effect("renews a temporary Connect share by its exact relay lease", () => {
+    const { store } = makeMemorySecretStore();
+    const applyConfigCalls: Array<unknown> = [];
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      const renewed = yield* renewTemporaryEnvironmentLease({
+        relayUrl: "https://relay.example.test",
+        temporaryLease: { leaseId: "lease_123", expiresAt: "2026-09-02T22:00:00.000Z" },
+      });
+
+      expect(renewed).toBe(true);
+      expect(requests[0]?.method).toBe("POST");
+      expect(requests[0]?.url).toBe(
+        "https://relay.example.test/v1/client/environment-links/env_123/temporary-lease",
+      );
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls,
+        requests,
+        respond: () => Response.json({ ok: true, expiresAt: "2026-09-02T22:10:00.000Z" }),
+      }),
+    );
   });
 
   it.effect("leaves the tunnel of a publish-only desired link untouched", () => {

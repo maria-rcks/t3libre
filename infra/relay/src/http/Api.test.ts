@@ -35,6 +35,7 @@ import * as RelayDb from "../db.ts";
 import * as EnvironmentCredentials from "../environments/EnvironmentCredentials.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as ManagedEndpointProvider from "../environments/ManagedEndpointProvider.ts";
+import * as TemporaryEnvironmentLeases from "../environments/TemporaryEnvironmentLeases.ts";
 
 vi.mock("@clerk/backend", () => ({
   createClerkClient: vi.fn(),
@@ -410,6 +411,218 @@ describe("relay environment unlink", () => {
           deprovision: () =>
             Effect.sync(() => {
               calls.push("deprovision");
+            }),
+        }),
+      ),
+    );
+  });
+});
+
+const temporaryLeaseRecord = {
+  userId: "user-1",
+  environmentId: "environment-1",
+  environmentPublicKey: "public-key",
+  leaseId: "lease-current",
+  expiresAt: "2026-09-02T22:00:00.000Z",
+  revokedAt: null,
+} as const;
+
+function temporaryLeaseTestLayer(input: {
+  readonly get?: TemporaryEnvironmentLeases.TemporaryEnvironmentLeases["Service"]["get"];
+  readonly claimCleanup?: TemporaryEnvironmentLeases.TemporaryEnvironmentLeases["Service"]["claimCleanup"];
+  readonly clear?: TemporaryEnvironmentLeases.TemporaryEnvironmentLeases["Service"]["clear"];
+  readonly listExpired?: TemporaryEnvironmentLeases.TemporaryEnvironmentLeases["Service"]["listExpired"];
+  readonly revokeCredential?: EnvironmentCredentials.EnvironmentCredentials["Service"]["revokeForEnvironmentPublicKey"];
+  readonly prepareDeprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["prepareDeprovision"];
+  readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
+}) {
+  return Layer.mergeAll(
+    Layer.succeed(
+      TemporaryEnvironmentLeases.TemporaryEnvironmentLeases,
+      TemporaryEnvironmentLeases.TemporaryEnvironmentLeases.of({
+        get: input.get ?? (() => Effect.succeed(temporaryLeaseRecord)),
+        renew: () => Effect.die("unused renew"),
+        claimCleanup: input.claimCleanup ?? (() => Effect.succeed(true)),
+        clear: input.clear ?? (() => Effect.succeed(true)),
+        listExpired: input.listExpired ?? Effect.succeed([]),
+      }),
+    ),
+    Layer.succeed(
+      EnvironmentCredentials.EnvironmentCredentials,
+      EnvironmentCredentials.EnvironmentCredentials.of({
+        create: () => Effect.die("unused create"),
+        authenticate: () => Effect.die("unused authenticate"),
+        revokeForEnvironmentPublicKey: input.revokeCredential ?? (() => Effect.succeed(true)),
+      }),
+    ),
+    Layer.succeed(
+      ManagedEndpointProvider.ManagedEndpointProvider,
+      ManagedEndpointProvider.ManagedEndpointProvider.of({
+        provision: () => Effect.die("unused provision"),
+        prepareDeprovision: input.prepareDeprovision ?? (() => Effect.succeed(null)),
+        deprovision: input.deprovision ?? (() => Effect.void),
+        release: () => Effect.die("unused release"),
+      }),
+    ),
+  );
+}
+
+describe("temporary environment leases", () => {
+  it.effect("uses the lease id as a CAS guard before full deprovision", () => {
+    const calls: Array<string> = [];
+    return Effect.gen(function* () {
+      expect(
+        yield* TemporaryEnvironmentLeases.releaseTemporaryEnvironmentLease({
+          userId: "user-1",
+          environmentId: "environment-1",
+          leaseId: "lease-current",
+        }),
+      ).toBe(true);
+      expect(calls).toEqual(["lookup", "prepare", "claim", "credential", "deprovision", "clear"]);
+    }).pipe(
+      Effect.provide(
+        temporaryLeaseTestLayer({
+          get: (input) =>
+            Effect.sync(() => {
+              expect(input.leaseId).toBe("lease-current");
+              calls.push("lookup");
+              return temporaryLeaseRecord;
+            }),
+          prepareDeprovision: () =>
+            Effect.sync(() => {
+              calls.push("prepare");
+              return null;
+            }),
+          claimCleanup: (input) =>
+            Effect.sync(() => {
+              expect(input.leaseId).toBe("lease-current");
+              calls.push("claim");
+              return true;
+            }),
+          revokeCredential: () =>
+            Effect.sync(() => {
+              calls.push("credential");
+              return true;
+            }),
+          deprovision: () => Effect.sync(() => calls.push("deprovision")),
+          clear: () =>
+            Effect.sync(() => {
+              calls.push("clear");
+              return true;
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("does not let a stale lease release its replacement", () => {
+    let deprovisioned = false;
+    return Effect.gen(function* () {
+      expect(
+        yield* TemporaryEnvironmentLeases.releaseTemporaryEnvironmentLease({
+          userId: "user-1",
+          environmentId: "environment-1",
+          leaseId: "lease-stale",
+        }),
+      ).toBe(false);
+      expect(deprovisioned).toBe(false);
+    }).pipe(
+      Effect.provide(
+        temporaryLeaseTestLayer({
+          get: () => Effect.succeed(null),
+          deprovision: () =>
+            Effect.sync(() => {
+              deprovisioned = true;
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("sweeps expired leases through full deprovision", () => {
+    const released: Array<string> = [];
+    return Effect.gen(function* () {
+      yield* TemporaryEnvironmentLeases.pruneExpiredTemporaryEnvironmentLeases();
+      expect(released).toEqual(["environment-1"]);
+    }).pipe(
+      Effect.provide(
+        temporaryLeaseTestLayer({
+          listExpired: Effect.succeed([temporaryLeaseRecord]),
+          deprovision: (input) =>
+            Effect.sync(() => {
+              released.push(input.environmentId);
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("does not sweep a lease renewed after the expiry scan", () => {
+    let deprovisioned = false;
+    return Effect.gen(function* () {
+      yield* TemporaryEnvironmentLeases.pruneExpiredTemporaryEnvironmentLeases();
+      expect(deprovisioned).toBe(false);
+    }).pipe(
+      Effect.provide(
+        temporaryLeaseTestLayer({
+          listExpired: Effect.succeed([temporaryLeaseRecord]),
+          get: () =>
+            Effect.succeed({
+              ...temporaryLeaseRecord,
+              expiresAt: "2026-09-02T22:10:00.000Z",
+            }),
+          claimCleanup: (input) => {
+            expect(input.expectedExpiresAt).toBe(temporaryLeaseRecord.expiresAt);
+            return Effect.succeed(false);
+          },
+          deprovision: () =>
+            Effect.sync(() => {
+              deprovisioned = true;
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("retries an expired lease after deprovision fails", () => {
+    let deprovisionAttempts = 0;
+    let clearCalls = 0;
+    return Effect.gen(function* () {
+      yield* TemporaryEnvironmentLeases.pruneExpiredTemporaryEnvironmentLeases();
+      expect(deprovisionAttempts).toBe(1);
+      expect(clearCalls).toBe(0);
+
+      yield* TemporaryEnvironmentLeases.pruneExpiredTemporaryEnvironmentLeases();
+      expect(deprovisionAttempts).toBe(2);
+      expect(clearCalls).toBe(1);
+    }).pipe(
+      Effect.provide(
+        temporaryLeaseTestLayer({
+          listExpired: Effect.succeed([
+            { ...temporaryLeaseRecord, revokedAt: "2026-09-02T22:00:00.000Z" },
+          ]),
+          get: () =>
+            Effect.succeed({
+              ...temporaryLeaseRecord,
+              revokedAt: "2026-09-02T22:00:00.000Z",
+            }),
+          deprovision: () => {
+            deprovisionAttempts += 1;
+            return deprovisionAttempts === 1
+              ? Effect.fail(
+                  new ManagedEndpointProvider.ManagedEndpointDeprovisioningFailed({
+                    stage: "delete-tunnel",
+                    userId: "user-1",
+                    environmentId: "environment-1",
+                    cause: new Error("cloudflare unavailable"),
+                  }),
+                )
+              : Effect.void;
+          },
+          clear: () =>
+            Effect.sync(() => {
+              clearCalls += 1;
+              return true;
             }),
         }),
       ),

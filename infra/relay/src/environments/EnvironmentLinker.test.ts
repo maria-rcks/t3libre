@@ -65,6 +65,7 @@ const makeRequest = Effect.gen(function* () {
       notificationsEnabled: true,
       liveActivitiesEnabled: true,
       managedTunnelsEnabled: true,
+      temporary: true,
     },
     jti: "challenge-jti",
     issuedAtEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
@@ -100,7 +101,8 @@ const makeRequest = Effect.gen(function* () {
       proof: signTestJwt(payload, RELAY_LINK_PROOF_TYP, environmentKeyPair.privateKey),
       notificationsEnabled: true,
       liveActivitiesEnabled: true,
-      managedTunnelsEnabled: false,
+      managedTunnelsEnabled: true,
+      temporary: true,
     } satisfies RelayEnvironmentLinkRequest,
     payload,
   };
@@ -155,8 +157,9 @@ function testLayer(input?: {
 }
 
 describe("EnvironmentLinker", () => {
-  it.effect("uses verified JWT claims when linking an environment", () => {
+  it.effect("returns and persists a proof-owned temporary lease", () => {
     let persistedEnvironmentId: string | null = null;
+    let persistedLease: { readonly leaseId: string; readonly expiresAt: string } | undefined;
     return Effect.gen(function* () {
       const { request, payload } = yield* makeRequest;
       const linker = yield* EnvironmentLinker.EnvironmentLinker;
@@ -164,12 +167,46 @@ describe("EnvironmentLinker", () => {
       expect(result.environmentId).toBe(payload.environmentId);
       expect(result.environmentCredential).toBe("t3env_credential_secret");
       expect(persistedEnvironmentId).toBe(payload.environmentId);
+      expect(result.temporaryLease).toEqual(persistedLease);
+      expect(result.temporaryLease?.leaseId).toBe(payload.jti);
+      expect(Date.parse(result.temporaryLease?.expiresAt ?? "")).toBe(
+        payload.iat * 1_000 + 600_000,
+      );
     }).pipe(
       Effect.provide(
         testLayer({
           upsert: (input) =>
             Effect.sync(() => {
               persistedEnvironmentId = input.proof.environmentId;
+              persistedLease = input.temporaryLease;
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("deprovisions a temporary endpoint when link persistence fails", () => {
+    let deprovisionedEnvironmentId: string | null = null;
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
+      expect(error._tag).toBe("EnvironmentLinkUpsertPersistenceError");
+      expect(deprovisionedEnvironmentId).toBe("env-link-test");
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          upsert: () =>
+            Effect.fail(
+              new EnvironmentLinks.EnvironmentLinkUpsertPersistenceError({
+                userId: "user_123",
+                environmentId: "env-link-test",
+                cause: new Error("database unavailable"),
+              }),
+            ),
+          deprovision: (input) =>
+            Effect.sync(() => {
+              deprovisionedEnvironmentId = input.environmentId;
             }),
         }),
       ),

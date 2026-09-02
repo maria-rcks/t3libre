@@ -56,6 +56,7 @@ import * as EnvironmentLinker from "./environments/EnvironmentLinker.ts";
 import * as EnvironmentPublishSignatures from "./environments/EnvironmentPublishSignatures.ts";
 import * as ManagedEndpointProvider from "./environments/ManagedEndpointProvider.ts";
 import * as ManagedTunnelLimits from "./environments/ManagedTunnelLimits.ts";
+import * as TemporaryEnvironmentLeases from "./environments/TemporaryEnvironmentLeases.ts";
 import * as MobileRegistrations from "./agentActivity/MobileRegistrations.ts";
 
 const webcryptoLayer = Layer.succeed(
@@ -217,6 +218,7 @@ export const ApiLive = Api.make(
           EnvironmentLinks.layer,
           ManagedEndpointAllocations.layer,
           ManagedTunnelLimits.layer,
+          TemporaryEnvironmentLeases.layer,
         ),
       ),
       Layer.provideMerge(LiveActivities.layer),
@@ -274,6 +276,7 @@ export const ApiLive = Api.make(
             ),
           ),
         ),
+        Effect.andThen(TemporaryEnvironmentLeases.pruneExpiredTemporaryEnvironmentLeases()),
         Effect.withSpan("relay.cron.prune_expired_state"),
         Effect.provide(runtimeLayer),
       ),

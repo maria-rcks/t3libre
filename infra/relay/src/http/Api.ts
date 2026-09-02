@@ -66,6 +66,7 @@ import * as EnvironmentConnector from "../environments/EnvironmentConnector.ts";
 import * as EnvironmentLinker from "../environments/EnvironmentLinker.ts";
 import * as ManagedEndpointProvider from "../environments/ManagedEndpointProvider.ts";
 import * as ManagedEndpointAllocations from "../environments/ManagedEndpointAllocations.ts";
+import * as TemporaryEnvironmentLeases from "../environments/TemporaryEnvironmentLeases.ts";
 import * as EnvironmentPublishSignatures from "../environments/EnvironmentPublishSignatures.ts";
 import * as MobileRegistrations from "../agentActivity/MobileRegistrations.ts";
 import { withSpanAttributes } from "../observability.ts";
@@ -532,6 +533,7 @@ export const clientApi = HttpApiBuilder.group(
     const linker = yield* EnvironmentLinker.EnvironmentLinker;
     const links = yield* EnvironmentLinks.EnvironmentLinks;
     const managedEndpointProvider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+    const temporaryLeases = yield* TemporaryEnvironmentLeases.TemporaryEnvironmentLeases;
     const devices = yield* Devices.Devices;
     return handlers
       .handle(
@@ -566,6 +568,9 @@ export const clientApi = HttpApiBuilder.group(
               relayIssuer: config.relayIssuer,
               environmentCredential: result.environmentCredential,
               cloudMintPublicKey: config.cloudMintPublicKey,
+              ...(result.temporaryLease === undefined
+                ? {}
+                : { temporaryLease: result.temporaryLease }),
             };
           },
           mapErrorTags({
@@ -680,6 +685,32 @@ export const clientApi = HttpApiBuilder.group(
               environmentId: params.environmentId,
             })
             .pipe(Effect.catch(() => relayInternalErrorResponse("upstream_unavailable")));
+          return { ok: released };
+        }, mapRelayCommonApiErrors("not_authorized")),
+      )
+      .handle(
+        "renewTemporaryEnvironmentLease",
+        Effect.fn("relay.api.client.renewTemporaryEnvironmentLease")(function* (args) {
+          const { userId } = yield* RelayClientPrincipal;
+          const expiresAt = yield* temporaryLeases
+            .renew({
+              userId,
+              environmentId: args.params.environmentId,
+              leaseId: args.payload.leaseId,
+            })
+            .pipe(Effect.catch(() => relayInternalErrorResponse("internal_error")));
+          return { ok: expiresAt !== null, expiresAt };
+        }, mapRelayCommonApiErrors("not_authorized")),
+      )
+      .handle(
+        "releaseTemporaryEnvironmentLease",
+        Effect.fn("relay.api.client.releaseTemporaryEnvironmentLease")(function* (args) {
+          const { userId } = yield* RelayClientPrincipal;
+          const released = yield* TemporaryEnvironmentLeases.releaseTemporaryEnvironmentLease({
+            userId,
+            environmentId: args.params.environmentId,
+            leaseId: args.payload.leaseId,
+          }).pipe(Effect.catch(() => relayInternalErrorResponse("upstream_unavailable")));
           return { ok: released };
         }, mapRelayCommonApiErrors("not_authorized")),
       );

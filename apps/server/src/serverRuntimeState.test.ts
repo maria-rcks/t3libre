@@ -34,6 +34,7 @@ describe("serverRuntimeState", () => {
         port: 4_971,
         origin: "http://127.0.0.1:4971",
         devUrl: "http://localhost:5733/",
+        pairingBaseUrl: "https://environment.tunnels.example.com/",
         startedAt: "2026-06-20T00:00:00.000Z",
       };
 
@@ -49,10 +50,12 @@ describe("serverRuntimeState", () => {
       const state = yield* ServerRuntimeState.makePersistedServerRuntimeState({
         config: { host: undefined, devUrl: new URL("http://localhost:5733") },
         port: 13_773,
+        pairingBaseUrl: "https://environment.tunnels.example.com/",
       });
 
       assert.equal(state.devUrl, "http://localhost:5733/");
       assert.equal(state.origin, "http://127.0.0.1:13773");
+      assert.equal(state.pairingBaseUrl, "https://environment.tunnels.example.com/");
 
       const withoutDev = yield* ServerRuntimeState.makePersistedServerRuntimeState({
         config: { host: undefined, devUrl: undefined },
@@ -75,6 +78,35 @@ describe("serverRuntimeState", () => {
       );
 
       assert.isTrue(Option.isNone(restored));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("only clears runtime state owned by the expected process", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-state-owner-test-",
+      });
+      const statePath = path.join(root, "server.json");
+      const state: ServerRuntimeState.PersistedServerRuntimeState = {
+        version: 1,
+        pid: 456,
+        port: 4_971,
+        origin: "http://127.0.0.1:4971",
+        startedAt: "2026-06-20T00:00:00.000Z",
+      };
+      yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state });
+
+      yield* ServerRuntimeState.clearOwnedPersistedServerRuntimeState(statePath, 123);
+      assert.isTrue(
+        Option.isSome(yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath)),
+      );
+
+      yield* ServerRuntimeState.clearOwnedPersistedServerRuntimeState(statePath, 456);
+      assert.isTrue(
+        Option.isNone(yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath)),
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

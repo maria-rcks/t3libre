@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import * as NodeCrypto from "node:crypto";
 import * as NodeOS from "node:os";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -29,6 +30,7 @@ const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
 const DESKTOP_DEV_LOOPBACK_HOST = "127.0.0.1";
+const CONNECT_DEV_SHARE_PREFIX = "/__t3-connect-dev-share/";
 // HTTP(S) requests to these ports are blocked by the Fetch standard before a
 // browser reaches the network. Keep the complete list here so explicit or
 // future wider offsets cannot produce a URL that curl accepts but browsers
@@ -730,6 +732,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     // server's ephemeral sharing mode. Only this invocation's share flag may
     // opt the spawned backend into a managed tunnel.
     delete env.T3CODE_CONNECT_DEV_SHARE;
+    delete env.T3CODE_CONNECT_DEV_SHARE_BASE;
 
     const selectionSuffix =
       serverOffset !== offset || webOffset !== offset
@@ -770,6 +773,12 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         // intact. A stored `t3 connect login` credential is required; startup
         // reports a direct remedy when it is absent.
         env.T3CODE_CONNECT_DEV_SHARE = "1";
+        const devShareBase = `${CONNECT_DEV_SHARE_PREFIX}${NodeCrypto.randomUUID()}/`;
+        env.T3CODE_CONNECT_DEV_SHARE_BASE = devShareBase;
+        env.VITE_DEV_SERVER_URL = new URL(
+          devShareBase,
+          `http://localhost:${String(sharedWebPort)}`,
+        ).toString();
         // loadRepoEnv runs once before CLI parsing, so remove any browser-side
         // cloud aliases it already projected. Vite calls the loader again and
         // uses the marker above to keep them absent on config reloads.
@@ -777,9 +786,9 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         delete env.VITE_CLERK_JWT_TEMPLATE;
         delete env.VITE_CLERK_CLI_OAUTH_CLIENT_ID;
         delete env.VITE_T3CODE_RELAY_URL;
-        if (env.T3CODE_BUNDLED_DEV === undefined) {
-          env.T3CODE_BUNDLED_DEV = "1";
-        }
+        // The base owns every browser-visible Vite URL. Requiring bundled dev
+        // keeps source and /@fs paths out of the public tunnel entirely.
+        env.T3CODE_BUNDLED_DEV = "1";
         yield* Effect.logInfo(
           "[dev-runner] sharing through T3 Connect; the managed pairing URL will follow after startup",
         );

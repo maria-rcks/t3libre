@@ -133,7 +133,7 @@ export class ServePortOccupiedError extends Schema.TaggedErrorClass<ServePortOcc
 
 /** The URL a browser or phone should pair through, absent Tailscale. */
 export const resolveDirectPairingBaseUrl = (state: PersistedServerRuntimeState): string =>
-  state.devUrl ?? resolveHeadlessConnectionString(state.host, state.port);
+  state.pairingBaseUrl ?? state.devUrl ?? resolveHeadlessConnectionString(state.host, state.port);
 
 export class DevServerNotProxiableError extends Schema.TaggedErrorClass<DevServerNotProxiableError>()(
   "DevServerNotProxiableError",

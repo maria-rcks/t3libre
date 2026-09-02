@@ -10,10 +10,9 @@ import { HttpServerResponse } from "effect/unstable/http";
 import { openMediaFile } from "./assets/MediaFile.ts";
 import {
   filterDevShareRequestHeaders,
-  prepareDevShareHtml,
   resolveDevShareTargetUrl,
+  rewriteDevShareLocation,
   shouldProxyConnectDevRequest,
-  stripDevShareAssetPrefix,
 } from "./cloud/DevShareProxy.ts";
 
 import {
@@ -27,44 +26,54 @@ import {
 const fileResponseLayer = Layer.mergeAll(NodeHttpPlatform.layer, NodeServices.layer);
 
 describe("T3 Connect dev sharing", () => {
-  it("prepares bundled-dev HTML for React refresh and edge-cache isolation", () => {
-    const html = prepareDevShareHtml(
-      '<html><head></head><body><script type="module" crossorigin src="/assets/index.js"></script><script src="/hmr.js?v=1#boot"></script><script src="https://cdn.example/app.js"></script></body></html>',
-      "session one",
-    );
-    expect(html).toContain("window.$RefreshReg$ = () => {};");
-    expect(html).toContain('src="/__t3-connect-dev-share/session%20one/assets/index.js"');
-    expect(html).toContain('src="/__t3-connect-dev-share/session%20one/hmr.js?v=1#boot"');
-    expect(html).toContain('src="https://cdn.example/app.js"');
-    expect(
-      stripDevShareAssetPrefix(
-        "/__t3-connect-dev-share/session%20one/assets/index.js",
-        "session one",
-      ),
-    ).toBe("/assets/index.js");
-  });
-
   it("proxies only public Vite routes", () => {
-    const devUrl = new URL("http://localhost:5733/");
-    expect(
-      shouldProxyConnectDevRequest({
-        enabled: true,
-        devUrl,
-        requestUrl: new URL("https://environment.tunnels.example.com/src/main.tsx"),
-        hasCloudflareRay: true,
-        listenerIsLoopback: true,
-      }),
-    ).toBe(true);
+    const devUrl = new URL("http://localhost:5733/__t3-connect-dev-share/invocation-one/");
+    const managedOrigin = new URL("https://environment.tunnels.example.com");
     for (const requestUrl of [
-      new URL("https://environment.tunnels.example.com/api/auth/session"),
-      new URL("https://environment.tunnels.example.com/ws"),
-      new URL("http://localhost:13773/"),
+      new URL("https://environment.tunnels.example.com/"),
+      new URL(
+        "https://environment.tunnels.example.com/__t3-connect-dev-share/invocation-one/assets/index.js",
+      ),
+      new URL(
+        "https://environment.tunnels.example.com/__t3-connect-dev-share/invocation-one/manifest.webmanifest",
+      ),
     ]) {
       expect(
         shouldProxyConnectDevRequest({
           enabled: true,
           devUrl,
           requestUrl,
+          managedOrigin,
+          hasCloudflareRay: true,
+          listenerIsLoopback: true,
+        }),
+      ).toBe(true);
+    }
+    for (const requestUrl of [
+      new URL("https://environment.tunnels.example.com/api/auth/session"),
+      new URL("https://environment.tunnels.example.com/ws"),
+      new URL("https://environment.tunnels.example.com/src/main.tsx"),
+      new URL("https://environment.tunnels.example.com/@fs/etc/passwd"),
+      new URL(
+        "https://environment.tunnels.example.com/__t3-connect-dev-share/invocation-one/src/main.tsx",
+      ),
+      new URL(
+        "https://environment.tunnels.example.com/__t3-connect-dev-share/invocation-one/@fs/etc/passwd",
+      ),
+      new URL(
+        "https://environment.tunnels.example.com/__t3-connect-dev-share/invocation-one/@id/react",
+      ),
+      new URL("http://localhost:13773/"),
+      new URL(
+        "https://other.tunnels.example.com/__t3-connect-dev-share/invocation-one/assets/index.js",
+      ),
+    ]) {
+      expect(
+        shouldProxyConnectDevRequest({
+          enabled: true,
+          devUrl,
+          requestUrl,
+          managedOrigin,
           hasCloudflareRay: true,
           listenerIsLoopback: true,
         }),
@@ -74,7 +83,10 @@ describe("T3 Connect dev sharing", () => {
       shouldProxyConnectDevRequest({
         enabled: true,
         devUrl,
-        requestUrl: new URL("https://rebound.example/src/main.tsx"),
+        requestUrl: new URL(
+          "https://environment.tunnels.example.com/__t3-connect-dev-share/invocation-one/assets/index.js",
+        ),
+        managedOrigin,
         hasCloudflareRay: false,
         listenerIsLoopback: true,
       }),
@@ -83,9 +95,22 @@ describe("T3 Connect dev sharing", () => {
       shouldProxyConnectDevRequest({
         enabled: true,
         devUrl,
-        requestUrl: new URL("https://environment.tunnels.example.com/src/main.tsx"),
+        requestUrl: new URL(
+          "https://environment.tunnels.example.com/__t3-connect-dev-share/invocation-one/assets/index.js",
+        ),
+        managedOrigin,
         hasCloudflareRay: true,
         listenerIsLoopback: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldProxyConnectDevRequest({
+        enabled: true,
+        devUrl: new URL("http://localhost:5733/"),
+        requestUrl: new URL("https://environment.tunnels.example.com/"),
+        managedOrigin,
+        hasCloudflareRay: true,
+        listenerIsLoopback: true,
       }),
     ).toBe(false);
   });
@@ -93,11 +118,46 @@ describe("T3 Connect dev sharing", () => {
   it("keeps scheme-relative request paths on the configured Vite origin", () => {
     expect(
       resolveDevShareTargetUrl(
-        new URL("http://127.0.0.1:5733/"),
-        new URL("https://environment.tunnels.example.com//attacker.example/path?x=1"),
+        new URL("http://127.0.0.1:5733/__t3-connect-dev-share/invocation-one/"),
+        new URL(
+          "https://environment.tunnels.example.com/__t3-connect-dev-share/invocation-one//attacker.example/path?x=1",
+        ),
         "http",
       ),
-    ).toBe("http://127.0.0.1:5733//attacker.example/path?x=1");
+    ).toBe(
+      "http://127.0.0.1:5733/__t3-connect-dev-share/invocation-one//attacker.example/path?x=1",
+    );
+    expect(
+      resolveDevShareTargetUrl(
+        new URL("http://127.0.0.1:5733/__t3-connect-dev-share/invocation-one/"),
+        new URL("https://environment.tunnels.example.com/?x=1"),
+        "http",
+      ),
+    ).toBe("http://127.0.0.1:5733/__t3-connect-dev-share/invocation-one/?x=1");
+  });
+
+  it("rewrites only same-Vite-origin redirects to the managed origin", () => {
+    const devUrl = new URL("http://127.0.0.1:5733/__t3-connect-dev-share/invocation-one/");
+    const upstreamRequestUrl = new URL(`${devUrl.origin}${devUrl.pathname}redirect`);
+    const managedOrigin = new URL("https://environment.tunnels.example.com");
+    expect(
+      rewriteDevShareLocation(
+        `${devUrl.origin}${devUrl.pathname}next?x=1#result`,
+        upstreamRequestUrl,
+        devUrl,
+        managedOrigin,
+      ),
+    ).toBe(
+      "https://environment.tunnels.example.com/__t3-connect-dev-share/invocation-one/next?x=1#result",
+    );
+    expect(
+      rewriteDevShareLocation(
+        "https://accounts.example.com/login",
+        upstreamRequestUrl,
+        devUrl,
+        managedOrigin,
+      ),
+    ).toBe("https://accounts.example.com/login");
   });
 
   it("does not forward T3 credentials or connection-scoped headers to Vite", () => {

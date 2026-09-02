@@ -1,11 +1,13 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
 import { PgDialect } from "drizzle-orm/pg-core";
 
 import * as RelayDb from "../db.ts";
 import { relayEnvironmentLinks } from "../persistence/schema.ts";
 import * as EnvironmentLinks from "./EnvironmentLinks.ts";
+import * as TemporaryEnvironmentLeases from "./TemporaryEnvironmentLeases.ts";
 
 describe("EnvironmentLinks", () => {
   it.effect("retains link lookup failures with user and environment identity", () => {
@@ -105,6 +107,7 @@ describe("EnvironmentLinks", () => {
       const query = new PgDialect().sqlToQuery(whereConditions[0] as never);
       expect(query.sql).toContain('"relay_environment_links"."environment_id" = $1');
       expect(query.sql).toContain('"relay_environment_links"."revoked_at" is null');
+      expect(query.sql).toContain('"relay_environment_links"."temporary_lease_id" is null');
       expect(query.sql).toContain('"relay_environment_links"."notifications_enabled" = $2');
       expect(query.sql).toContain('"relay_environment_links"."live_activities_enabled" = $3');
       expect(query.sql).toContain(" or ");
@@ -112,6 +115,87 @@ describe("EnvironmentLinks", () => {
     }).pipe(
       Effect.provide(
         EnvironmentLinks.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb))),
+      ),
+    );
+  });
+
+  it.effect("keeps temporary links out of account discovery", () => {
+    let whereCondition: unknown;
+    const fakeDb = {
+      select: () => ({
+        from: (table: unknown) => {
+          expect(table).toBe(relayEnvironmentLinks);
+          return {
+            where: (condition: unknown) => {
+              whereCondition = condition;
+              return Effect.succeed([]);
+            },
+          };
+        },
+      }),
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    return Effect.gen(function* () {
+      const links = yield* EnvironmentLinks.EnvironmentLinks;
+      expect(yield* links.listForUser({ userId: "user-1" })).toEqual([]);
+      const query = new PgDialect().sqlToQuery(whereCondition as never);
+      expect(query.sql).toContain('"relay_environment_links"."temporary_lease_id" is null');
+      expect(query.params).toEqual(["user-1"]);
+    }).pipe(
+      Effect.provide(
+        EnvironmentLinks.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb))),
+      ),
+    );
+  });
+
+  it.effect("renews only the live matching temporary lease", () => {
+    let whereCondition: unknown;
+    let updateValues: Record<string, unknown> | undefined;
+    const fakeDb = {
+      update: (table: unknown) => {
+        expect(table).toBe(relayEnvironmentLinks);
+        return {
+          set: (values: Record<string, unknown>) => {
+            updateValues = values;
+            return {
+              where: (condition: unknown) => {
+                whereCondition = condition;
+                return {
+                  returning: () =>
+                    Effect.succeed([{ expiresAt: values.temporaryLeaseExpiresAt as string }]),
+                };
+              },
+            };
+          },
+        };
+      },
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-09-02T21:00:00.000Z"));
+      const leases = yield* TemporaryEnvironmentLeases.TemporaryEnvironmentLeases;
+      const expiresAt = yield* leases.renew({
+        userId: "user-1",
+        environmentId: "env-1",
+        leaseId: "lease-current",
+      });
+      expect(expiresAt).toBe("2026-09-02T21:10:00.000Z");
+      expect(updateValues?.temporaryLeaseExpiresAt).toBe(expiresAt);
+      const query = new PgDialect().sqlToQuery(whereCondition as never);
+      expect(query.sql).toContain('"temporary_lease_id" = $3');
+      expect(query.sql).toContain('"revoked_at" is null');
+      expect(query.sql).toContain('"temporary_lease_expires_at" >= $4');
+      expect(query.params).toEqual([
+        "user-1",
+        "env-1",
+        "lease-current",
+        "2026-09-02T21:00:00.000Z",
+      ]);
+    }).pipe(
+      Effect.provide(
+        TemporaryEnvironmentLeases.layer.pipe(
+          Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb)),
+        ),
       ),
     );
   });

@@ -109,6 +109,10 @@ export class EnvironmentLinks extends Context.Service<
       readonly request: RelayEnvironmentLinkRequest;
       readonly proof: RelayEnvironmentLinkProofPayload;
       readonly endpoint: RelayManagedEndpoint;
+      readonly temporaryLease?: {
+        readonly leaseId: string;
+        readonly expiresAt: string;
+      };
     }) => Effect.Effect<void, EnvironmentLinkUpsertPersistenceError>;
     readonly listUsersForEnvironment: (input: {
       readonly environmentId: string;
@@ -144,6 +148,7 @@ function agentAwarenessDeliveryUserCondition(environmentId: string) {
   return and(
     eq(relayEnvironmentLinks.environmentId, environmentId),
     isNull(relayEnvironmentLinks.revokedAt),
+    isNull(relayEnvironmentLinks.temporaryLeaseId),
     or(
       eq(relayEnvironmentLinks.notificationsEnabled, true),
       eq(relayEnvironmentLinks.liveActivitiesEnabled, true),
@@ -186,6 +191,8 @@ const make = Effect.gen(function* () {
           notificationsEnabled: request.notificationsEnabled,
           liveActivitiesEnabled: request.liveActivitiesEnabled,
           managedTunnelsEnabled: request.managedTunnelsEnabled,
+          temporaryLeaseId: input.temporaryLease?.leaseId ?? null,
+          temporaryLeaseExpiresAt: input.temporaryLease?.expiresAt ?? null,
           createdByDeviceId: request.deviceId ?? null,
           revokedAt: null,
           createdAt: now,
@@ -202,6 +209,8 @@ const make = Effect.gen(function* () {
             notificationsEnabled: request.notificationsEnabled,
             liveActivitiesEnabled: request.liveActivitiesEnabled,
             managedTunnelsEnabled: request.managedTunnelsEnabled,
+            temporaryLeaseId: input.temporaryLease?.leaseId ?? null,
+            temporaryLeaseExpiresAt: input.temporaryLease?.expiresAt ?? null,
             createdByDeviceId: request.deviceId ?? null,
             revokedAt: null,
             updatedAt: now,
@@ -283,6 +292,7 @@ const make = Effect.gen(function* () {
           and(
             eq(relayEnvironmentLinks.environmentId, input.environmentId),
             isNull(relayEnvironmentLinks.revokedAt),
+            isNull(relayEnvironmentLinks.temporaryLeaseId),
           ),
         )
         .pipe(
@@ -314,6 +324,7 @@ const make = Effect.gen(function* () {
           and(
             eq(relayEnvironmentLinks.userId, input.userId),
             isNull(relayEnvironmentLinks.revokedAt),
+            isNull(relayEnvironmentLinks.temporaryLeaseId),
           ),
         )
         .pipe(
@@ -361,6 +372,7 @@ const make = Effect.gen(function* () {
             eq(relayEnvironmentLinks.userId, input.userId),
             eq(relayEnvironmentLinks.environmentId, input.environmentId),
             isNull(relayEnvironmentLinks.revokedAt),
+            isNull(relayEnvironmentLinks.temporaryLeaseId),
           ),
         )
         .limit(1)

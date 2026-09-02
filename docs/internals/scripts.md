@@ -30,8 +30,11 @@ authenticated.
 - `vp run dev --share --share-via=t3-connect`: Publishes the same single-origin dev stack through
   T3 Connect without Tailscale. Run `node apps/server/src/bin.ts connect login --base-dir .t3`
   once for the worktree first. The managed tunnel terminates at the backend: T3 routes stay there,
-  while other HTTP requests and WebSocket upgrades are proxied to Vite. The tunnel is removed on
-  exit, and the worktree remains authorized for the next run.
+  while the invocation-prefixed Vite bundle and HMR socket are proxied from there. Connect sharing
+  requires bundled dev mode and keeps source, `/@fs`, cookies, and T3 credentials outside the public
+  proxy. Its temporary relay lease is removed on exit and expires after an unclean stop. The
+  worktree's login remains authorized for the next run. While the share is reachable, `node
+apps/server/src/bin.ts pair` prints a replacement public pairing URL without a restart.
 - `vp run dev --browser`: Auto-opens a browser. Off by default. The dev runner writes
   `T3CODE_NO_BROWSER` itself from this flag, so setting `T3CODE_NO_BROWSER=0` in your environment has
   no effect; use `--browser`.

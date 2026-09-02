@@ -62,6 +62,25 @@ const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
 // round trip per import level in unbundled dev); T3CODE_BUNDLED_DEV=0 opts out.
 const bundledDevEnv = process.env.T3CODE_BUNDLED_DEV?.trim().toLowerCase();
 const bundledDev = bundledDevEnv === "1" || bundledDevEnv === "true";
+const connectDevShare = process.env.T3CODE_CONNECT_DEV_SHARE === "1";
+const connectDevShareBase = process.env.T3CODE_CONNECT_DEV_SHARE_BASE?.trim();
+
+if (connectDevShare && !bundledDev) {
+  throw new Error("T3 Connect dev sharing requires T3CODE_BUNDLED_DEV=1.");
+}
+if (connectDevShare && !connectDevShareBase?.match(/^\/__t3-connect-dev-share\/[0-9a-f-]+\/$/u)) {
+  throw new Error("T3 Connect dev sharing requires a valid invocation base.");
+}
+
+const viteBase = connectDevShare ? connectDevShareBase : undefined;
+const viteDefaultFsDeny = [
+  ".env",
+  ".env.*",
+  "*.{crt,pem,key,p12,pfx,cer,der}",
+  ".npmrc",
+  ".yarnrc.yml",
+  "**/.git/**",
+];
 
 const buildSourcemap: boolean | "hidden" =
   sourcemapEnv === "0" || sourcemapEnv === "false"
@@ -141,6 +160,31 @@ function devCompressionPlugin(): Plugin {
   };
 }
 
+function connectDevReactRefreshGuardPlugin(base: string): Plugin {
+  return {
+    name: "t3code:connect-dev-react-refresh-guard",
+    apply: "serve",
+    // plugin-react includes the configured base in its bundled-dev preamble,
+    // while its virtual runtime is registered at the root-only public id.
+    // Normalize that generated import before Rolldown resolves the bundle.
+    resolveId: {
+      order: "pre",
+      handler: (source) => (source === `${base}@react-refresh` ? "/@react-refresh" : undefined),
+    },
+    transformIndexHtml: {
+      order: "post",
+      handler: () => [
+        {
+          tag: "script",
+          children: `window.$RefreshReg$ = () => {};
+window.$RefreshSig$ = () => (type) => type;`,
+          injectTo: "head-prepend",
+        },
+      ],
+    },
+  };
+}
+
 // Vite rejects requests whose Host header isn't localhost, which blocks sharing
 // a dev server over Tailscale/LAN. Tailnet names are safe to allow wholesale:
 // the DNS is controlled by tailscale, so they can't be rebound by an attacker.
@@ -153,9 +197,11 @@ const allowedHosts = [".ts.net", ...configuredAllowedHosts];
 
 export default defineConfig(() => {
   return {
+    ...(viteBase ? { base: viteBase } : {}),
     assetsInclude: ["**/*.wasm"],
     plugins: [
       devCompressionPlugin(),
+      ...(viteBase ? [connectDevReactRefreshGuardPlugin(viteBase)] : []),
       // Route components load as split chunks so settings, pull-request, and
       // usage code stay out of the cold-start payload; the router prefetches
       // them on navigation intent (see getRouter's defaultPreload).
@@ -218,6 +264,9 @@ export default defineConfig(() => {
       port,
       strictPort: true,
       allowedHosts,
+      fs: {
+        deny: [...viteDefaultFsDeny, "**/.t3/**"],
+      },
       // Transform the whole module graph at server start instead of on the
       // first request. Without this, a cold worktree discovers and transforms
       // modules one import-level at a time while the browser waits — which

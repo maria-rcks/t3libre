@@ -120,13 +120,16 @@ t3 connect logout
 
 `vp run dev --share --share-via=t3-connect` is the ephemeral development counterpart to
 `vp run dev --share`. It uses the worktree's isolated `.t3` state and requires a stored CLI OAuth
-credential from `t3 connect login --base-dir .t3`. The run does not record durable link intent.
+credential from `t3 connect login --base-dir .t3`. With a custom `--home-dir`, use that same
+absolute path for login. The run does not record durable link intent.
 
 The managed tunnel continues to target the backend port. When Connect dev sharing is enabled, the
-backend keeps `/api`, `/ws`, `/oauth`, and `/.well-known` and proxies every other public HTTP or
-WebSocket request to Vite. This preserves one origin for pairing, API calls, and HMR without
-allowing the managed hostname through Vite's host check. Shutdown removes the managed tunnel but
-keeps the worktree authorization.
+backend keeps `/api`, `/ws`, `/oauth`, and `/.well-known` and proxies only the root document and the
+invocation-prefixed bundled assets and HMR socket to Vite. This preserves one origin for pairing,
+API calls, and HMR without publishing Vite source or filesystem routes. The relay owns a temporary
+lease: shutdown removes the link, tunnel, DNS record, and allocation; an expiry sweep performs the
+same cleanup after an unclean stop. `t3 pair` uses the ready managed origin for replacement pairing
+URLs without restarting the server. The worktree authorization remains local for the next run.
 
 `t3 connect login` opens the Clerk authorization flow and stores the CLI credential without enabling
 cloud exposure. `t3 connect link` installs the pinned managed `cloudflared` binary when needed,

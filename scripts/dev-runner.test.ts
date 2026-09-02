@@ -1049,7 +1049,14 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.deepStrictEqual(spawnedCommands, ["vp"]);
         assert.equal(spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, "1");
         assert.equal(spawnedEnv?.T3CODE_BUNDLED_DEV, "1");
-        assert.match(spawnedEnv?.VITE_DEV_SERVER_URL ?? "", /^http:\/\/localhost:/u);
+        assert.match(
+          spawnedEnv?.T3CODE_CONNECT_DEV_SHARE_BASE ?? "",
+          /^\/__t3-connect-dev-share\/[0-9a-f-]+\/$/u,
+        );
+        assert.equal(
+          spawnedEnv?.VITE_DEV_SERVER_URL,
+          `http://localhost:${spawnedEnv?.PORT ?? ""}${spawnedEnv?.T3CODE_CONNECT_DEV_SHARE_BASE ?? ""}`,
+        );
         assert.equal(spawnedEnv?.VITE_CLERK_PUBLISHABLE_KEY, undefined);
         assert.equal(spawnedEnv?.VITE_CLERK_JWT_TEMPLATE, undefined);
         assert.equal(spawnedEnv?.VITE_CLERK_CLI_OAUTH_CLIENT_ID, undefined);
@@ -1080,12 +1087,43 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           Effect.provideService(HostProcessPlatform, "linux"),
           Effect.provideService(HostProcessEnvironment, {
             T3CODE_CONNECT_DEV_SHARE: "1",
+            T3CODE_CONNECT_DEV_SHARE_BASE: "/__t3-connect-dev-share/parent/",
             T3CODE_HOST: "0.0.0.0",
           }),
         );
 
         assert.equal(spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, undefined);
+        assert.equal(spawnedEnv?.T3CODE_CONNECT_DEV_SHARE_BASE, undefined);
         assert.equal(spawnedEnv?.T3CODE_HOST, undefined);
+      });
+    });
+
+    it.effect("requires bundled dev for T3 Connect sharing", () => {
+      let spawnedEnv: Record<string, string | undefined> | undefined;
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          spawnedEnv = (
+            command as { readonly options?: { readonly env?: Record<string, string | undefined> } }
+          ).options?.env;
+          return Effect.succeed(mockProcess(0));
+        }),
+      );
+
+      return Effect.gen(function* () {
+        yield* runDevRunnerWithInput({
+          ...devServerInput,
+          mode: "dev",
+          port: undefined,
+          share: true,
+          shareVia: "t3-connect",
+        }).pipe(
+          Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
+          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcessEnvironment, { T3CODE_BUNDLED_DEV: "0" }),
+        );
+
+        assert.equal(spawnedEnv?.T3CODE_BUNDLED_DEV, "1");
       });
     });
 

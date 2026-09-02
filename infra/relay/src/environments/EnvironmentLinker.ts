@@ -84,6 +84,10 @@ export class EnvironmentLinker extends Context.Service<
           | ManagedEndpointProvider.ManagedEndpointProvisioningResult["runtime"]
           | null;
         readonly environmentCredential: string;
+        readonly temporaryLease?: {
+          readonly leaseId: string;
+          readonly expiresAt: string;
+        };
       },
       EnvironmentLinkError
     >;
@@ -98,6 +102,9 @@ function proofAuthorizesRequestedCapabilities(
 ): boolean {
   const scopes = new Set(proof.scopes);
   if (request.managedTunnelsEnabled && !scopes.has("managed_tunnels")) {
+    return false;
+  }
+  if (request.temporary === true && !request.managedTunnelsEnabled) {
     return false;
   }
   return !(
@@ -175,6 +182,7 @@ const make = Effect.gen(function* () {
         "relay.link.notifications_enabled": input.request.notificationsEnabled,
         "relay.link.live_activities_enabled": input.request.liveActivitiesEnabled,
         "relay.link.managed_tunnels_enabled": input.request.managedTunnelsEnabled,
+        "relay.link.temporary": input.request.temporary === true,
       });
       if (candidate.exp <= nowSeconds) {
         return yield* new EnvironmentLinkProofExpired({
@@ -231,6 +239,7 @@ const make = Effect.gen(function* () {
           notificationsEnabled: input.request.notificationsEnabled,
           liveActivitiesEnabled: input.request.liveActivitiesEnabled,
           managedTunnelsEnabled: input.request.managedTunnelsEnabled,
+          ...(input.request.temporary === undefined ? {} : { temporary: input.request.temporary }),
         },
         nowEpochSeconds: nowSeconds,
       });
@@ -328,7 +337,37 @@ const make = Effect.gen(function* () {
           stage: "validate_endpoint",
         });
       }
-      yield* links.upsert({ ...input, proof: verified, endpoint });
+      const temporaryLease =
+        input.request.temporary === true
+          ? {
+              leaseId: verified.jti,
+              expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 10 })),
+            }
+          : undefined;
+      const persistLink = links.upsert({
+        ...input,
+        proof: verified,
+        endpoint,
+        ...(temporaryLease === undefined ? {} : { temporaryLease }),
+      });
+      yield* temporaryLease === undefined
+        ? persistLink
+        : persistLink.pipe(
+            Effect.catch((error) =>
+              managedEndpointProvider
+                .deprovision({ userId: input.userId, environmentId: verified.environmentId })
+                .pipe(
+                  Effect.tapError((cleanupError) =>
+                    Effect.logWarning("temporary endpoint cleanup after link failure failed", {
+                      environmentId: verified.environmentId,
+                      errorTag: cleanupError._tag,
+                    }),
+                  ),
+                  Effect.ignore,
+                  Effect.andThen(Effect.fail(error)),
+                ),
+            ),
+          );
       const environmentCredential = yield* credentials.create({
         environmentId: verified.environmentId,
         environmentPublicKey: verified.environmentPublicKey,
@@ -338,6 +377,7 @@ const make = Effect.gen(function* () {
         endpoint,
         endpointRuntime: provisioned?.runtime ?? null,
         environmentCredential,
+        ...(temporaryLease === undefined ? {} : { temporaryLease }),
       };
     }),
   });

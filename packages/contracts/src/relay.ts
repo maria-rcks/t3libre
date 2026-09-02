@@ -242,6 +242,11 @@ export const RelayEnvironmentLinkChallengeRequest = Schema.Struct({
   managedTunnelsEnabled: Schema.Boolean.annotate({
     description: "Whether the relay should provision a managed tunnel for this environment.",
   }),
+  temporary: Schema.optional(
+    Schema.Boolean.annotate({
+      description: "Whether the resulting link should be owned by a temporary lease.",
+    }),
+  ),
 }).annotate({ description: "Requested capabilities for a new environment-link challenge." });
 export type RelayEnvironmentLinkChallengeRequest = typeof RelayEnvironmentLinkChallengeRequest.Type;
 
@@ -264,8 +269,33 @@ export const RelayEnvironmentLinkRequest = Schema.Struct({
   notificationsEnabled: Schema.Boolean,
   liveActivitiesEnabled: Schema.Boolean,
   managedTunnelsEnabled: Schema.Boolean,
+  temporary: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "Whether this link is an undiscoverable, lease-owned temporary environment exposure.",
+    }),
+  ),
 }).annotate({ description: "Links an authenticated cloud user to a T3 environment." });
 export type RelayEnvironmentLinkRequest = typeof RelayEnvironmentLinkRequest.Type;
+
+export const RelayTemporaryEnvironmentLease = Schema.Struct({
+  leaseId: TrimmedNonEmptyString,
+  expiresAt: TrimmedNonEmptyString,
+});
+export type RelayTemporaryEnvironmentLease = typeof RelayTemporaryEnvironmentLease.Type;
+
+export const RelayTemporaryEnvironmentLeaseRequest = Schema.Struct({
+  leaseId: TrimmedNonEmptyString,
+});
+export type RelayTemporaryEnvironmentLeaseRequest =
+  typeof RelayTemporaryEnvironmentLeaseRequest.Type;
+
+export const RelayTemporaryEnvironmentLeaseRenewResponse = Schema.Struct({
+  ok: Schema.Boolean,
+  expiresAt: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type RelayTemporaryEnvironmentLeaseRenewResponse =
+  typeof RelayTemporaryEnvironmentLeaseRenewResponse.Type;
 
 export const RelayEnvironmentLinkResponse = Schema.Struct({
   ok: Schema.Boolean,
@@ -276,6 +306,7 @@ export const RelayEnvironmentLinkResponse = Schema.Struct({
   relayIssuer: TrimmedNonEmptyString,
   environmentCredential: TrimmedNonEmptyString,
   cloudMintPublicKey: TrimmedNonEmptyString,
+  temporaryLease: Schema.optional(RelayTemporaryEnvironmentLease),
 });
 export type RelayEnvironmentLinkResponse = typeof RelayEnvironmentLinkResponse.Type;
 
@@ -1005,6 +1036,28 @@ export const RelayClientGroup = HttpApiGroup.make("client")
         OpenApi.Description,
         "Deletes the provisioned Cloudflare tunnel while keeping the environment link and its hostname reservation, so a later link re-provisions the tunnel under the same URL. Environments call this when they shut down; Cloudflare bills per provisioned tunnel, so idle tunnels should not outlive their environment.",
       ),
+    HttpApiEndpoint.post(
+      "renewTemporaryEnvironmentLease",
+      "/v1/client/environment-links/:environmentId/temporary-lease",
+      {
+        headers: RelayBearerRequestHeaders,
+        params: RelayEnvironmentUnlinkParams,
+        payload: RelayTemporaryEnvironmentLeaseRequest,
+        success: RelayTemporaryEnvironmentLeaseRenewResponse,
+        error: RelayAuthAndInternalErrors,
+      },
+    ).annotate(OpenApi.Summary, "Renew a temporary environment lease"),
+    HttpApiEndpoint.delete(
+      "releaseTemporaryEnvironmentLease",
+      "/v1/client/environment-links/:environmentId/temporary-lease",
+      {
+        headers: RelayBearerRequestHeaders,
+        params: RelayEnvironmentUnlinkParams,
+        payload: RelayTemporaryEnvironmentLeaseRequest,
+        success: RelayOkResponse,
+        error: RelayAuthAndInternalErrors,
+      },
+    ).annotate(OpenApi.Summary, "Release a temporary environment lease"),
   )
   .annotate(OpenApi.Description, "Cloud-user environment links and registered devices.")
   .middleware(RelayClientAuth);

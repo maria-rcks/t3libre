@@ -72,6 +72,8 @@ export const relayEnvironmentLinks = pgTable(
     notificationsEnabled: boolean("notifications_enabled").notNull().default(true),
     liveActivitiesEnabled: boolean("live_activities_enabled").notNull().default(true),
     managedTunnelsEnabled: boolean("managed_tunnels_enabled").notNull().default(false),
+    temporaryLeaseId: varchar("temporary_lease_id", { length: 191 }),
+    temporaryLeaseExpiresAt: varchar("temporary_lease_expires_at", { length: 64 }),
     createdByDeviceId: varchar("created_by_device_id", { length: 191 }),
     revokedAt: varchar("revoked_at", { length: 64 }),
     createdAt: varchar("created_at", { length: 64 }).notNull(),
@@ -80,6 +82,7 @@ export const relayEnvironmentLinks = pgTable(
   (table) => [
     primaryKey({ columns: [table.userId, table.environmentId] }),
     index("idx_relay_environment_links_environment").on(table.environmentId, table.revokedAt),
+    index("idx_relay_environment_links_temporary_expiry").on(table.temporaryLeaseExpiresAt),
   ],
 );
 

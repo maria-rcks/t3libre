@@ -54,7 +54,7 @@ Keep pairing URLs out of screenshots, committed files, and durable logs. When th
 
 ## Recover a consumed or expired pairing token
 
-Run `node apps/server/src/bin.ts pair` from the repository root for local or Tailscale sharing. A T3 Connect dev share prints its managed pairing URL during startup; restart it for another administrative token. Pass `--base-dir <base-dir>` only when the server was started with `--home-dir`, using the identical path.
+Run `node apps/server/src/bin.ts pair` from the repository root. It uses the active local, Tailscale, or T3 Connect origin and does not restart the server. Pass `--base-dir <base-dir>` only when the server was started with `--home-dir`, using the identical path.
 
 Tokens from `pair` carry standard client scopes. The startup pairing URL carries admin scopes; if the user needs Settings → Connections management (`access:write`), restart the server and hand over the new startup URL instead.
 
