@@ -156,6 +156,16 @@ function testLayer(input?: {
                   providerKind: "cloudflare_tunnel",
                   connectorToken: "connector-token",
                 },
+                deprovisionTarget: {
+                  userId: "user_123",
+                  environmentId: "env-link-test",
+                  hostname: "managed.example.test",
+                  tunnelId: "tunnel-id",
+                  tunnelName: "tunnel-name",
+                  dnsRecordId: "dns-record-id",
+                  readyAt: "2026-09-02T22:00:00.000Z",
+                  updatedAt: "provision-generation",
+                },
               })),
         }),
       ),
@@ -194,12 +204,14 @@ describe("EnvironmentLinker", () => {
 
   it.effect("deprovisions a temporary endpoint when link persistence fails", () => {
     let deprovisionedEnvironmentId: string | null = null;
+    let deprovisionedGeneration: string | null = null;
     return Effect.gen(function* () {
       const { request } = yield* makeRequest;
       const linker = yield* EnvironmentLinker.EnvironmentLinker;
       const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
       expect(error._tag).toBe("EnvironmentLinkUpsertPersistenceError");
       expect(deprovisionedEnvironmentId).toBe("env-link-test");
+      expect(deprovisionedGeneration).toBe("provision-generation");
     }).pipe(
       Effect.provide(
         testLayer({
@@ -214,6 +226,7 @@ describe("EnvironmentLinker", () => {
           deprovision: (input) =>
             Effect.sync(() => {
               deprovisionedEnvironmentId = input.environmentId;
+              deprovisionedGeneration = input.target?.updatedAt ?? null;
             }),
         }),
       ),

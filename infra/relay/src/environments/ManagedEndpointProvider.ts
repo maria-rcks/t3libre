@@ -122,6 +122,7 @@ export type ManagedEndpointProviderError =
 export interface ManagedEndpointProvisioningResult {
   readonly endpoint: RelayManagedEndpoint;
   readonly runtime: RelayManagedEndpointRuntimeConfig;
+  readonly deprovisionTarget: ManagedEndpointDeprovisionTarget;
 }
 
 export type ManagedEndpointDeprovisionTarget = ManagedEndpointAllocations.ManagedEndpointAllocation;
@@ -823,7 +824,7 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
-      yield* allocations
+      const deprovisionTarget = yield* allocations
         .markReady({
           userId: input.userId,
           environmentId: input.environmentId,
@@ -846,6 +847,7 @@ export const make = Effect.gen(function* () {
 
       return {
         endpoint: managedEndpointForHostname(hostname),
+        deprovisionTarget,
         runtime: {
           providerKind: "cloudflare_tunnel",
           connectorToken,

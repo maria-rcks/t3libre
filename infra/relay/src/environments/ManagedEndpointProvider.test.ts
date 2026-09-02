@@ -168,8 +168,11 @@ function makeAllocations(calls: AllocationCall[] = []) {
   ) => {
     const allocation = allocations.get(key);
     if (allocation !== undefined) {
-      allocations.set(key, { ...change(allocation), updatedAt: `generation-${++generation}` });
+      const updated = { ...change(allocation), updatedAt: `generation-${++generation}` };
+      allocations.set(key, updated);
+      return updated;
     }
+    return undefined;
   };
   return ManagedEndpointAllocations.ManagedEndpointAllocations.of({
     get: (input) =>
@@ -209,10 +212,12 @@ function makeAllocations(calls: AllocationCall[] = []) {
     markReady: (input) =>
       Effect.sync(() => {
         calls.push({ operation: "markReady", input });
-        mutate(allocationKey(input), (allocation) => ({
+        const allocation = mutate(allocationKey(input), (allocation) => ({
           ...allocation,
           readyAt: "2026-06-02T00:00:00.000Z",
         }));
+        if (allocation === undefined) throw new Error("missing allocation");
+        return allocation;
       }),
     claimRelease: (input) =>
       Effect.sync(() => {
@@ -359,7 +364,7 @@ describe("ManagedEndpointProvider", () => {
         origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
       });
 
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         endpoint: {
           httpBaseUrl: `https://${hostname}/`,
           wsBaseUrl: `wss://${hostname}/ws`,

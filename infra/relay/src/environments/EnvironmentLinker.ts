@@ -381,7 +381,11 @@ const make = Effect.gen(function* () {
               ActiveDurableEnvironmentLinkConflict: (error) => Effect.fail(error),
               EnvironmentLinkUpsertPersistenceError: (error) =>
                 managedEndpointProvider
-                  .deprovision({ userId: input.userId, environmentId: verified.environmentId })
+                  .deprovision({
+                    userId: input.userId,
+                    environmentId: verified.environmentId,
+                    target: provisioned?.deprovisionTarget ?? null,
+                  })
                   .pipe(
                     Effect.tapError((cleanupError) =>
                       Effect.logWarning("temporary endpoint cleanup after link failure failed", {

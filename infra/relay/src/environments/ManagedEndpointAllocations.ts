@@ -118,7 +118,7 @@ export class ManagedEndpointAllocations extends Context.Service<
     ) => Effect.Effect<void, ManagedEndpointAllocationPersistenceError>;
     readonly markReady: (
       input: ManagedEndpointAllocationKey,
-    ) => Effect.Effect<void, ManagedEndpointAllocationPersistenceError>;
+    ) => Effect.Effect<ManagedEndpointAllocation, ManagedEndpointAllocationPersistenceError>;
     /**
      * Atomically claims the right to delete the allocation's tunnel: succeeds
      * only while the recorded tunnel and generation still match what the
@@ -293,13 +293,14 @@ export const make = Effect.gen(function* () {
       input: ManagedEndpointAllocationKey,
     ) {
       const now = DateTime.formatIso(yield* DateTime.now);
-      yield* db
+      const rows = yield* db
         .update(relayManagedEndpointAllocations)
         .set({
           readyAt: now,
           updatedAt: now,
         })
         .where(whereAllocation(input))
+        .returning(allocationSelection)
         .pipe(
           Effect.mapError(
             (cause) =>
@@ -311,6 +312,15 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
+      const allocation = rows[0];
+      if (allocation === undefined) {
+        return yield* new ManagedEndpointAllocationPersistenceError({
+          operation: "mark-ready",
+          stage: "resolve-reservation",
+          ...input,
+        });
+      }
+      return allocation;
     }),
     claimRelease: Effect.fn("relay.managed_endpoint_allocations.claim_release")(function* (
       input: ClaimManagedEndpointReleaseInput,
