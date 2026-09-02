@@ -157,14 +157,33 @@ it.effect("continues marked sessions after activation with provider-specific inp
     );
     const fallback = makeThread(
       "thread-continue-fallback",
-      "running",
+      "starting",
       TurnId.make("turn-continue-fallback"),
     );
     const fallbackProviderInstanceId = ProviderInstanceId.make("claudeAgent");
     const continuationSent = yield* Deferred.make<void>();
+    const continuationCleared = yield* Deferred.make<void>();
     const sends: ProviderSendTurnInput[] = [];
     const dispatched: OrchestrationCommand[] = [];
     const upserts: ProviderSessionDirectory.ProviderRuntimeBinding[] = [];
+    const bindings = new Map<ThreadId, ProviderSessionDirectory.ProviderRuntimeBinding>(
+      [codex, fallback].map((thread) => [
+        thread.id,
+        {
+          threadId: thread.id,
+          provider:
+            thread.id === codex.id
+              ? ProviderDriverKind.make("codex")
+              : ProviderDriverKind.make("claudeAgent"),
+          providerInstanceId:
+            thread.id === codex.id ? providerInstanceId : fallbackProviderInstanceId,
+          status: "running" as const,
+          runtimePayload: {
+            continueAfterServerUpdate: thread.session.activeTurnId,
+          },
+        },
+      ]),
+    );
     const providerService: ProviderService.ProviderService["Service"] = {
       ...makeProviderService(),
       getCapabilities: (instanceId) =>
@@ -190,25 +209,30 @@ it.effect("continues marked sessions after activation with provider-specific inp
       providerService,
       directory: {
         getBinding: (threadId) =>
-          Effect.succeed(
-            Option.some({
-              threadId,
-              provider:
-                threadId === codex.id
-                  ? ProviderDriverKind.make("codex")
-                  : ProviderDriverKind.make("claudeAgent"),
-              providerInstanceId:
-                threadId === codex.id ? providerInstanceId : fallbackProviderInstanceId,
-              status: "running" as const,
-              runtimePayload: {
-                continueAfterServerUpdate:
-                  threadId === codex.id
-                    ? codex.session.activeTurnId
-                    : fallback.session.activeTurnId,
-              },
-            }),
+          Effect.sync(() => {
+            const binding = bindings.get(threadId);
+            return binding === undefined ? Option.none() : Option.some(binding);
+          }),
+        upsert: (binding) =>
+          Effect.sync(() => {
+            bindings.set(binding.threadId, binding);
+            upserts.push(binding);
+            const clearedCount = upserts.filter((candidate) => {
+              const payload = candidate.runtimePayload;
+              return (
+                payload !== null &&
+                typeof payload === "object" &&
+                !Array.isArray(payload) &&
+                "continueAfterServerUpdate" in payload &&
+                payload.continueAfterServerUpdate === null
+              );
+            }).length;
+            return clearedCount === 1;
+          }).pipe(
+            Effect.flatMap((firstMarkerCleared) =>
+              firstMarkerCleared ? Deferred.succeed(continuationCleared, undefined) : Effect.void,
+            ),
           ),
-        upsert: (binding) => Effect.sync(() => upserts.push(binding)),
         getProvider: () => Effect.die("unused"),
         listThreadIds: () => Effect.die("unused"),
         listBindings: () => Effect.die("unused"),
@@ -219,6 +243,7 @@ it.effect("continues marked sessions after activation with provider-specific inp
         ),
     });
     yield* Deferred.await(continuationSent);
+    yield* Deferred.await(continuationCleared);
 
     assert.deepStrictEqual(
       sends.toSorted((left, right) => String(left.threadId).localeCompare(String(right.threadId))),
@@ -234,20 +259,49 @@ it.effect("continues marked sessions after activation with provider-specific inp
     assert.deepStrictEqual(
       dispatched.map((command) =>
         command.type === "thread.session.set"
-          ? { threadId: command.threadId, status: command.session.status }
+          ? {
+              threadId: command.threadId,
+              status: command.session.status,
+              activeTurnId: command.session.activeTurnId,
+            }
           : null,
       ),
       [
-        { threadId: codex.id, status: "starting" },
-        { threadId: fallback.id, status: "starting" },
+        {
+          threadId: codex.id,
+          status: "starting",
+          activeTurnId: codex.session.activeTurnId,
+        },
+        {
+          threadId: fallback.id,
+          status: "starting",
+          activeTurnId: fallback.session.activeTurnId,
+        },
       ],
     );
-    assert.deepStrictEqual(
-      upserts.map((binding) => binding.runtimePayload),
-      [
-        { continueAfterServerUpdate: null, activeTurnId: null },
-        { continueAfterServerUpdate: null, activeTurnId: null },
-      ],
+    for (const thread of [codex, fallback]) {
+      assert.deepStrictEqual(
+        upserts
+          .filter((binding) => binding.threadId === thread.id)
+          .map((binding) => binding.runtimePayload)[0],
+        {
+          continueAfterServerUpdate: thread.session.activeTurnId,
+          activeTurnId: thread.session.activeTurnId,
+        },
+      );
+    }
+    assert.equal(
+      upserts.some((binding) => {
+        const payload = binding.runtimePayload;
+        return (
+          payload !== null &&
+          typeof payload === "object" &&
+          !Array.isArray(payload) &&
+          "continueAfterServerUpdate" in payload &&
+          payload.continueAfterServerUpdate === null
+        );
+      }),
+      true,
     );
   }),
 );

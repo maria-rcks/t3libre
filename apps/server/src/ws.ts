@@ -2568,18 +2568,28 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     const baseServerSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const config = yield* ServerConfig.ServerConfig;
     const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
-    const toServerSelfUpdateError = (cause: Error) =>
-      new ServerSelfUpdateError({ reason: cause.message, cause });
     const serverSelfUpdate = yield* ServerSelfUpdate.withRunningThreadContinuation({
       mode: config.mode,
       selfUpdate: baseServerSelfUpdate,
       prepare: startup.markRunningProviderSessionsForContinuation.pipe(
-        Effect.mapError(toServerSelfUpdateError),
+        Effect.mapError(
+          (cause) =>
+            new ServerSelfUpdateError({
+              reason: "Could not prepare running threads to continue after the update.",
+              cause,
+            }),
+        ),
       ),
       clear: (threadIds) =>
-        startup
-          .clearProviderSessionContinuationMarkers(threadIds)
-          .pipe(Effect.mapError(toServerSelfUpdateError)),
+        startup.clearProviderSessionContinuationMarkers(threadIds).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServerSelfUpdateError({
+                reason: "Could not clear thread continuation markers after the update failed.",
+                cause,
+              }),
+          ),
+        ),
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
     return HttpRouter.add(

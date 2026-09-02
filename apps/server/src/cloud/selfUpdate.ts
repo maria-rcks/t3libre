@@ -46,9 +46,11 @@ export class ServerSelfUpdate extends Context.Service<
       reportProgress?: (
         stage: ServerSelfUpdateProgressStage,
       ) => Effect.Effect<void, ServerSelfUpdateError>,
+      onHandoffAccepted?: () => Effect.Effect<void>,
     ) => Effect.Effect<ServerSelfUpdateResult, ServerSelfUpdateError>;
     readonly commitDesktopUpdate: (
       requestId: string,
+      onHandoffAccepted?: () => Effect.Effect<void>,
     ) => Effect.Effect<never, ServerSelfUpdateError>;
   }
 >()("t3/cloud/selfUpdate/ServerSelfUpdate") {}
@@ -67,10 +69,13 @@ export const withRunningThreadContinuation = Effect.fn(
   const clearOnError = <A>(
     effect: Effect.Effect<A, ServerSelfUpdateError>,
     threadIds: () => ReadonlyArray<ThreadId>,
+    shouldClear: () => boolean,
   ): Effect.Effect<A, ServerSelfUpdateError> =>
     effect.pipe(
       Effect.catchCause((cause) =>
-        input.clear(threadIds()).pipe(Effect.andThen(Effect.failCause(cause))),
+        (shouldClear() ? input.clear(threadIds()) : Effect.void).pipe(
+          Effect.andThen(Effect.failCause(cause)),
+        ),
       ),
     );
 
@@ -79,25 +84,32 @@ export const withRunningThreadContinuation = Effect.fn(
     reportProgress = () => Effect.void,
   ) => {
     let prepared = false;
+    let handoffAccepted = false;
     let continuationThreadIds: ReadonlyArray<ThreadId> = [];
     return clearOnError(
       input.selfUpdate
-        .update(request, (stage) =>
-          (request.continueRunningThreads === true &&
-          input.mode !== "desktop" &&
-          stage === "installing" &&
-          !prepared
-            ? input.prepare.pipe(
-                Effect.tap((threadIds) =>
-                  Effect.sync(() => {
-                    prepared = true;
-                    continuationThreadIds = threadIds;
-                  }),
-                ),
-                Effect.asVoid,
-              )
-            : Effect.void
-          ).pipe(Effect.andThen(reportProgress(stage))),
+        .update(
+          request,
+          (stage) =>
+            (request.continueRunningThreads === true &&
+            input.mode !== "desktop" &&
+            stage === "installing" &&
+            !prepared
+              ? input.prepare.pipe(
+                  Effect.tap((threadIds) =>
+                    Effect.sync(() => {
+                      prepared = true;
+                      continuationThreadIds = threadIds;
+                    }),
+                  ),
+                  Effect.asVoid,
+                )
+              : Effect.void
+            ).pipe(Effect.andThen(reportProgress(stage))),
+          () =>
+            Effect.sync(() => {
+              handoffAccepted = true;
+            }),
         )
         .pipe(
           Effect.tap((result) => {
@@ -112,6 +124,7 @@ export const withRunningThreadContinuation = Effect.fn(
           }),
         ),
       () => continuationThreadIds,
+      () => !handoffAccepted,
     );
   };
 
@@ -123,16 +136,22 @@ export const withRunningThreadContinuation = Effect.fn(
           HashSet.has(tokens, requestId),
           HashSet.remove(tokens, requestId),
         ]);
+        let handoffAccepted = false;
         let continuationThreadIds: ReadonlyArray<ThreadId> = [];
         return yield* clearOnError(
           Effect.gen(function* () {
             continuationThreadIds = shouldContinue ? yield* input.prepare : [];
-            return yield* input.selfUpdate.commitDesktopUpdate(requestId);
+            return yield* input.selfUpdate.commitDesktopUpdate(requestId, () =>
+              Effect.sync(() => {
+                handoffAccepted = true;
+              }),
+            );
           }),
           () => continuationThreadIds,
+          () => !handoffAccepted,
         ).pipe(
           Effect.catchCause((cause) =>
-            (shouldContinue
+            (shouldContinue && !handoffAccepted
               ? Ref.update(desktopContinuationTokens, HashSet.add(requestId))
               : Effect.void
             ).pipe(Effect.andThen(Effect.failCause(cause))),
@@ -161,7 +180,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
 
   const update: ServerSelfUpdate["Service"]["update"] = Effect.fn(
     "cloud.server_self_update.update",
-  )(function* (input, reportProgress = () => Effect.void) {
+  )(function* (input, reportProgress = () => Effect.void, onHandoffAccepted = () => Effect.void) {
     if (capability === "desktop-managed") {
       // input.targetVersion is meaningless here: the desktop app's own
       // update feed decides what it downloads, and the result carries what
@@ -273,9 +292,8 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
       );
 
       yield* reportProgress("installing");
-      const updateId = yield* launcher
-        .requestUpdate({ targetVersion, dbPath: serverConfig.dbPath })
-        .pipe(
+      const updateId = yield* Effect.uninterruptible(
+        launcher.requestUpdate({ targetVersion, dbPath: serverConfig.dbPath }).pipe(
           Effect.mapError((error) =>
             failWith(
               error._tag === "ServiceLauncherRejectedError"
@@ -284,7 +302,9 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
               error,
             ),
           ),
-        );
+          Effect.tap(() => onHandoffAccepted()),
+        ),
+      );
 
       yield* Effect.logInfo("Server update prepared; handing off to the service launcher.", {
         updateId,
@@ -297,7 +317,8 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
 
   return ServerSelfUpdate.of({
     update,
-    commitDesktopUpdate: (requestId) => desktopAppUpdate.commit(requestId),
+    commitDesktopUpdate: (requestId, onHandoffAccepted) =>
+      desktopAppUpdate.commit(requestId, onHandoffAccepted),
   });
 });
 

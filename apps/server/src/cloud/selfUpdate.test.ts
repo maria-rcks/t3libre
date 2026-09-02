@@ -209,6 +209,74 @@ it.layer(NodeServices.layer)("server self update", (it) => {
     }),
   );
 
+  it.effect("keeps continuation markers after the boot-service handoff is accepted", () =>
+    Effect.gen(function* () {
+      const events: string[] = [];
+      const selfUpdate = yield* ServerSelfUpdate.withRunningThreadContinuation({
+        mode: "web",
+        selfUpdate: {
+          update: (
+            _input,
+            reportProgress = () => Effect.void,
+            onHandoffAccepted = () => Effect.void,
+          ) =>
+            reportProgress("installing").pipe(
+              Effect.andThen(onHandoffAccepted()),
+              Effect.andThen(Effect.interrupt),
+            ),
+          commitDesktopUpdate: () => Effect.never,
+        },
+        prepare: Effect.sync(() => {
+          events.push("prepare");
+          return [ThreadId.make("thread-accepted-boot-handoff")];
+        }),
+        clear: () => Effect.sync(() => void events.push("clear")),
+      });
+
+      const exit = yield* selfUpdate
+        .update({ targetVersion: "1.1.0", continueRunningThreads: true })
+        .pipe(Effect.exit);
+
+      expect(exit._tag).toBe("Failure");
+      expect(events).toEqual(["prepare"]);
+    }),
+  );
+
+  it.effect("keeps continuation markers after the desktop handoff is accepted", () =>
+    Effect.gen(function* () {
+      const events: string[] = [];
+      const selfUpdate = yield* ServerSelfUpdate.withRunningThreadContinuation({
+        mode: "desktop",
+        selfUpdate: {
+          update: () =>
+            Effect.succeed({
+              targetVersion: "1.2.0",
+              method: "desktop-app" as const,
+              desktopUpdateToken: "accepted-desktop-token",
+            }),
+          commitDesktopUpdate: (_requestId, onHandoffAccepted = () => Effect.void) =>
+            onHandoffAccepted().pipe(Effect.andThen(Effect.interrupt)),
+        },
+        prepare: Effect.sync(() => {
+          events.push("prepare");
+          return [ThreadId.make("thread-accepted-desktop-handoff")];
+        }),
+        clear: () => Effect.sync(() => void events.push("clear")),
+      });
+
+      yield* selfUpdate.update({
+        targetVersion: "1.2.0",
+        continueRunningThreads: true,
+      });
+      const exit = yield* selfUpdate
+        .commitDesktopUpdate("accepted-desktop-token")
+        .pipe(Effect.exit);
+
+      expect(exit._tag).toBe("Failure");
+      expect(events).toEqual(["prepare"]);
+    }),
+  );
+
   it.effect("stages and preflights before asking the launcher for an update ID", () =>
     Effect.gen(function* () {
       const { selfUpdate, order } = yield* makeHarness();

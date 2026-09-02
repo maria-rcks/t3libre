@@ -310,11 +310,10 @@ class ProviderSessionContinuationError extends Schema.TaggedErrorClass<ProviderS
   "ProviderSessionContinuationError",
   {
     threadId: ThreadId,
-    reason: Schema.String,
   },
 ) {
   override get message(): string {
-    return `Could not continue thread '${this.threadId}': ${this.reason}`;
+    return `Could not continue thread '${this.threadId}': the provider instance is missing.`;
   }
 }
 
@@ -406,29 +405,35 @@ export const markRunningProviderSessionsForContinuation = Effect.gen(function* (
   );
 }).pipe(Effect.mapError(toServerUpdateThreadContinuationError));
 
+const clearContinuationMarkers = (
+  directory: ProviderSessionDirectory.ProviderSessionDirectory["Service"],
+  threadIds: ReadonlyArray<ThreadId>,
+) =>
+  Effect.forEach(
+    threadIds,
+    (threadId) =>
+      directory.getBinding(threadId).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.void,
+            onSome: (binding) =>
+              directory.upsert({
+                ...binding,
+                runtimePayload: {
+                  ...readRuntimePayload(binding.runtimePayload),
+                  [SERVER_UPDATE_CONTINUATION_KEY]: null,
+                },
+              }),
+          }),
+        ),
+      ),
+    { concurrency: "unbounded", discard: true },
+  );
+
 export const clearProviderSessionContinuationMarkers = (threadIds: ReadonlyArray<ThreadId>) =>
   Effect.gen(function* () {
     const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
-    yield* Effect.forEach(
-      threadIds,
-      (threadId) =>
-        directory.getBinding(threadId).pipe(
-          Effect.flatMap(
-            Option.match({
-              onNone: () => Effect.void,
-              onSome: (binding) =>
-                directory.upsert({
-                  ...binding,
-                  runtimePayload: {
-                    ...readRuntimePayload(binding.runtimePayload),
-                    [SERVER_UPDATE_CONTINUATION_KEY]: null,
-                  },
-                }),
-            }),
-          ),
-        ),
-      { concurrency: "unbounded", discard: true },
-    );
+    yield* clearContinuationMarkers(directory, threadIds);
   }).pipe(Effect.mapError(toServerUpdateThreadContinuationError));
 
 export const reconcileProviderSessions = Effect.gen(function* () {
@@ -534,10 +539,10 @@ export const reconcileProviderSessions = Effect.gen(function* () {
       const prepared = yield* Effect.gen(function* () {
         yield* directory.upsert({
           ...binding.value,
+          status: "starting",
           runtimePayload: {
             ...readRuntimePayload(binding.value.runtimePayload),
-            [SERVER_UPDATE_CONTINUATION_KEY]: null,
-            activeTurnId: null,
+            activeTurnId: session.activeTurnId,
           },
         });
         const resumedAt = DateTime.formatIso(yield* DateTime.now);
@@ -548,7 +553,7 @@ export const reconcileProviderSessions = Effect.gen(function* () {
           session: {
             ...session,
             status: "starting",
-            activeTurnId: null,
+            activeTurnId: session.activeTurnId,
             lastError: null,
             updatedAt: resumedAt,
           },
@@ -574,7 +579,6 @@ export const reconcileProviderSessions = Effect.gen(function* () {
             if (providerInstanceId === undefined) {
               return yield* new ProviderSessionContinuationError({
                 threadId: thread.id,
-                reason: "The provider instance is missing.",
               });
             }
             const capabilities = yield* providerService.getCapabilities(providerInstanceId);
@@ -588,6 +592,17 @@ export const reconcileProviderSessions = Effect.gen(function* () {
           });
           const continuationExit = yield* Effect.exit(continuation);
           if (Exit.isSuccess(continuationExit) || Cause.hasInterrupts(continuationExit.cause)) {
+            if (Exit.isSuccess(continuationExit)) {
+              yield* clearContinuationMarkers(directory, [thread.id]).pipe(
+                Effect.uninterruptible,
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("failed to clear completed provider session continuation", {
+                    threadId: thread.id,
+                    cause,
+                  }),
+                ),
+              );
+            }
             return;
           }
           yield* Effect.logWarning("failed to continue provider session after server update", {
