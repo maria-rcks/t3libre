@@ -74,7 +74,7 @@ export const withRunningThreadContinuation = Effect.fn(
   ): Effect.Effect<A, ServerSelfUpdateError> =>
     effect.pipe(
       Effect.catchCause((cause) =>
-        (handoffAccepted() && Cause.hasInterrupts(cause)
+        (handoffAccepted() && Cause.hasInterruptsOnly(cause)
           ? Effect.void
           : input.clear(threadIds())
         ).pipe(Effect.andThen(Effect.failCause(cause))),

@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { ServerSelfUpdateError, ThreadId } from "@t3tools/contracts";
 import { HostProcessExecutablePath } from "@t3tools/shared/hostProcess";
+import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -277,7 +278,7 @@ it.layer(NodeServices.layer)("server self update", (it) => {
     }),
   );
 
-  it.effect("clears continuation markers when an accepted desktop install fails", () =>
+  it.effect("clears continuation markers for mixed failure and interrupt causes", () =>
     Effect.gen(function* () {
       const events: string[] = [];
       const commitError = new ServerSelfUpdateError({ reason: "install failed" });
@@ -291,7 +292,16 @@ it.layer(NodeServices.layer)("server self update", (it) => {
               desktopUpdateToken: "failed-desktop-token",
             }),
           commitDesktopUpdate: (_requestId, onHandoffAccepted = () => Effect.void) =>
-            onHandoffAccepted().pipe(Effect.andThen(Effect.fail(commitError))),
+            onHandoffAccepted().pipe(
+              Effect.andThen(
+                Effect.failCause(
+                  Cause.fromReasons([
+                    Cause.makeFailReason(commitError),
+                    Cause.makeInterruptReason(),
+                  ]),
+                ),
+              ),
+            ),
         },
         prepare: Effect.sync(() => [ThreadId.make("thread-failed-desktop-install")]),
         clear: () => Effect.sync(() => void events.push("clear")),
@@ -301,9 +311,12 @@ it.layer(NodeServices.layer)("server self update", (it) => {
         targetVersion: "1.2.0",
         continueRunningThreads: true,
       });
-      expect(yield* selfUpdate.commitDesktopUpdate("failed-desktop-token").pipe(Effect.flip)).toBe(
-        commitError,
-      );
+      const exit = yield* selfUpdate.commitDesktopUpdate("failed-desktop-token").pipe(Effect.exit);
+      expect(exit._tag).toBe("Failure");
+      if (exit._tag === "Failure") {
+        expect(Cause.hasInterrupts(exit.cause)).toBe(true);
+        expect(Cause.hasInterruptsOnly(exit.cause)).toBe(false);
+      }
       expect(events).toEqual(["clear"]);
     }),
   );
