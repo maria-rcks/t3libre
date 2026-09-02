@@ -63,7 +63,6 @@ function SheetPopup({
   children,
   showCloseButton = true,
   keepMounted = false,
-  animated = true,
   transitionDurationMs,
   side = "right",
   variant = "default",
@@ -72,7 +71,6 @@ function SheetPopup({
 }: SheetPrimitive.Popup.Props & {
   showCloseButton?: boolean;
   keepMounted?: boolean;
-  animated?: boolean;
   transitionDurationMs?: number;
   side?: "right" | "left" | "top" | "bottom";
   variant?: "default" | "inset";
@@ -81,14 +79,15 @@ function SheetPopup({
     transitionDurationMs === undefined
       ? undefined
       : ({ transitionDuration: `${transitionDurationMs}ms` } satisfies CSSProperties);
+  const instant = transitionDurationMs === 0;
 
   return (
     <SheetPortal keepMounted={keepMounted}>
       <SheetBackdrop
         className={
-          animated
-            ? undefined
-            : "transition-none! data-ending-style:opacity-100! data-starting-style:opacity-100!"
+          instant
+            ? "transition-none! data-ending-style:opacity-100! data-starting-style:opacity-100!"
+            : undefined
         }
         style={transitionStyle}
       />
@@ -106,7 +105,7 @@ function SheetPopup({
               "col-start-2 w-[calc(100%-(--spacing(12)))] max-w-md border-s data-ending-style:translate-x-8 data-starting-style:translate-x-8",
             variant === "inset" &&
               "before:hidden sm:rounded-2xl sm:border sm:before:rounded-[calc(var(--radius-2xl)-1px)] sm:**:data-[slot=sheet-footer]:rounded-b-[calc(var(--radius-2xl)-1px)]",
-            !animated &&
+            instant &&
               "transition-none! will-change-auto! data-ending-style:translate-x-0! data-starting-style:translate-x-0! data-ending-style:translate-y-0! data-starting-style:translate-y-0! data-ending-style:opacity-100! data-starting-style:opacity-100!",
             className,
           )}

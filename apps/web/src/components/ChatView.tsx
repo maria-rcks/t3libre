@@ -742,8 +742,6 @@ interface PersistentThreadTerminalDrawerProps {
   threadRef: { environmentId: EnvironmentId; threadId: ThreadId };
   threadId: ThreadId;
   active: boolean;
-  animated: boolean;
-  animationDurationMs: number;
   launchContext: PersistentTerminalLaunchContext | null;
   focusRequestId: number;
   splitShortcutLabel: string | undefined;
@@ -758,8 +756,6 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   threadRef,
   threadId,
   active,
-  animated,
-  animationDurationMs,
   launchContext,
   focusRequestId,
   splitShortcutLabel,
@@ -1078,11 +1074,9 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         "grid shrink-0 overflow-clip",
         active ? (visible ? "grid-rows-[1fr]" : "grid-rows-[0fr]") : "hidden",
         active &&
-          animated &&
-          "transition-[grid-template-rows] ease-out motion-reduce:transition-none",
-        active && animated && visible && "starting:grid-rows-[0fr]!",
+          "[[data-panel-animations=true]_&]:transition-[grid-template-rows] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-out",
+        active && visible && "[[data-panel-animations=true]_&]:starting:grid-rows-[0fr]!",
       )}
-      style={active && animated ? { transitionDuration: `${animationDurationMs}ms` } : undefined}
     >
       <div className="min-h-0 overflow-clip">
         <ThreadTerminalDrawer
@@ -1851,27 +1845,18 @@ function ChatViewContent(props: ChatViewProps) {
     }),
     [activeRightPanelSurface, rightPanelState.surfaces],
   );
-  const inlineRightPanelPresence = usePanelPresence(
-    rightPanelOpen && !shouldUseRightPanelSheet && activeThreadRef !== null,
+  const rightPanelPresence = usePanelPresence(
+    rightPanelOpen && activeThreadRef !== null,
     rightPanelPresenceValue,
-    panelAnimationsActive && !shouldUseRightPanelSheet,
+    panelAnimationsActive,
     activeThreadKey,
     panelAnimationDurationMs,
   );
-  const sheetRightPanelPresence = usePanelPresence(
-    rightPanelOpen && shouldUseRightPanelSheet && activeThreadRef !== null,
-    rightPanelPresenceValue,
-    panelAnimationsActive && shouldUseRightPanelSheet,
-    activeThreadKey,
-    panelAnimationDurationMs,
-  );
-  const inlineRightPanelPresent = inlineRightPanelPresence.present;
-  const sheetRightPanelPresent = sheetRightPanelPresence.present;
+  const rightPanelPresent = rightPanelPresence.present;
   const rightPanelControlsInPanel =
-    inlineRightPanelPresent || (sheetRightPanelPresent && rightPanelOpen);
-  const renderedRightPanelValue = inlineRightPanelPresence.value ?? sheetRightPanelPresence.value;
-  const renderedRightPanelSurface = renderedRightPanelValue?.activeSurface ?? null;
-  const renderedRightPanelSurfaces = renderedRightPanelValue?.surfaces ?? [];
+    rightPanelPresent && (!shouldUseRightPanelSheet || rightPanelOpen);
+  const renderedRightPanelSurface = rightPanelPresence.value?.activeSurface ?? null;
+  const renderedRightPanelSurfaces = rightPanelPresence.value?.surfaces ?? [];
   const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
     canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
@@ -7103,10 +7088,9 @@ function ChatViewContent(props: ChatViewProps) {
   const panelLayoutControls = (
     <div
       className={cn(
-        // One inset in both states: the controls move between containers when
-        // the right panel opens, and a different right offset made them jump
-        // sideways on every toggle.
-        "pointer-events-none absolute top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] z-50 mr-px flex h-[var(--workspace-topbar-height)] items-center gap-1 [-webkit-app-region:no-drag]",
+        // Keep one viewport anchor inside the header's no-drag region. The
+        // header can shrink behind the right panel without moving the controls.
+        "pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] z-50 mr-px flex h-[var(--workspace-topbar-height)] items-center gap-1 [-webkit-app-region:no-drag]",
       )}
       data-workspace-titlebar-controls
     >
@@ -7266,7 +7250,6 @@ function ChatViewContent(props: ChatViewProps) {
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      {!shouldUseRightPanelSheet ? panelLayoutControls : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
@@ -7281,7 +7264,7 @@ function ChatViewContent(props: ChatViewProps) {
           reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
           className="relative bg-background"
         >
-          {shouldUseRightPanelSheet && !rightPanelControlsInPanel ? panelLayoutControls : null}
+          {!shouldUseRightPanelSheet || !rightPanelControlsInPanel ? panelLayoutControls : null}
           <ChatHeader
             {...(!supportsPullRequests || activeProjectRepository === null
               ? {}
@@ -7667,8 +7650,6 @@ function ChatViewContent(props: ChatViewProps) {
             threadRef={mountedThreadRef}
             threadId={mountedThreadRef.threadId}
             active={mountedThreadKey === activeThreadKey}
-            animated={panelAnimationsActive}
-            animationDurationMs={panelAnimationDurationMs}
             launchContext={
               mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
             }
@@ -7683,11 +7664,9 @@ function ChatViewContent(props: ChatViewProps) {
         ))}
       </div>
 
-      {inlineRightPanelPresent && activeThreadRef ? (
+      {rightPanelPresent && !shouldUseRightPanelSheet && activeThreadRef ? (
         <RightPanelTabs
           mode="inline"
-          animated={panelAnimationsActive}
-          animationDurationMs={panelAnimationDurationMs}
           open={rightPanelOpen}
           maximized={rightPanelMaximized}
           surfaces={renderedRightPanelSurfaces}
@@ -7721,10 +7700,9 @@ function ChatViewContent(props: ChatViewProps) {
           {rightPanelContent}
         </RightPanelTabs>
       ) : null}
-      {sheetRightPanelPresent && activeThreadRef ? (
+      {rightPanelPresent && shouldUseRightPanelSheet && activeThreadRef ? (
         <RightPanelSheet
-          animated={panelAnimationsActive}
-          animationDurationMs={panelAnimationDurationMs}
+          animationDurationMs={panelAnimationsActive ? panelAnimationDurationMs : 0}
           open={rightPanelOpen}
           onClose={closePreviewPanel}
         >

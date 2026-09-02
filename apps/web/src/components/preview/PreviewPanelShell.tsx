@@ -1,7 +1,4 @@
-import { DEFAULT_PANEL_ANIMATION_DURATION_MS } from "@t3tools/contracts/settings";
 import {
-  type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
   useEffect,
@@ -36,13 +33,6 @@ const PREVIEW_PANEL_DEFAULT_WIDTH = 540;
  */
 const SIBLING_COLUMN_MIN_WIDTH = 360;
 
-export function shouldSuppressPanelWidthTransition(
-  previous: { open: boolean; width: number },
-  next: { open: boolean; width: number },
-): boolean {
-  return previous.open === next.open && previous.width !== next.width;
-}
-
 export function getPreviewPanelMaxWidth(viewportWidth: number, containerWidth?: number): number {
   const fractionCap = Math.floor(viewportWidth * PREVIEW_PANEL_MAX_WIDTH_FRACTION);
   const containerCap =
@@ -62,8 +52,6 @@ export function getPreviewPanelMaxWidth(viewportWidth: number, containerWidth?: 
 export function PreviewPanelShell(props: {
   mode: PreviewPanelMode;
   maximized?: boolean;
-  animated?: boolean;
-  animationDurationMs?: number;
   open?: boolean;
   /**
    * Overrides the localStorage key used to persist the panel width. Callers
@@ -78,7 +66,7 @@ export function PreviewPanelShell(props: {
 }) {
   const useDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
   const isInline = props.mode === "inline";
-  const animated = isInline && props.animated === true && !props.maximized;
+  const collapsible = isInline && props.open !== undefined;
   const open = props.open ?? true;
   const hostRef = useRef<HTMLDivElement | null>(null);
   // Only inline non-maximized mode applies `width`/`maxWidth`; skip the
@@ -91,15 +79,13 @@ export function PreviewPanelShell(props: {
     maxWidth,
     edge: "left",
   });
-  const [resizing, setResizing] = useState(false);
   const previousLayoutRef = useRef({ open, width });
   useLayoutEffect(() => {
     const previous = previousLayoutRef.current;
-    const next = { open, width };
-    previousLayoutRef.current = next;
-    if (!animated || !shouldSuppressPanelWidthTransition(previous, next)) return;
+    previousLayoutRef.current = { open, width };
+    if (!collapsible || previous.open !== open || previous.width === width) return;
     const host = hostRef.current;
-    if (!host) return;
+    if (!host?.closest("[data-panel-animations=true]")) return;
     host.style.setProperty("transition-duration", "0ms");
     let restoreFrame = 0;
     const paintFrame = window.requestAnimationFrame(() => {
@@ -112,25 +98,7 @@ export function PreviewPanelShell(props: {
       window.cancelAnimationFrame(restoreFrame);
       host.style.removeProperty("transition-duration");
     };
-  }, [animated, open, width]);
-  const resizeHandlers = {
-    onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
-      handlers.onPointerDown(event);
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        setResizing(true);
-      }
-    },
-    onPointerMove: handlers.onPointerMove,
-    onPointerUp: (event: ReactPointerEvent<HTMLElement>) => {
-      handlers.onPointerUp(event);
-      setResizing(false);
-    },
-    onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => {
-      handlers.onPointerCancel(event);
-      setResizing(false);
-    },
-  };
-
+  }, [collapsible, open, width]);
   return (
     <div
       ref={hostRef}
@@ -141,28 +109,24 @@ export function PreviewPanelShell(props: {
             ? "flex-1 border-l border-border"
             : "shrink-0 border-l border-border"
           : "w-full",
-        animated &&
-          !resizing &&
-          "transition-[width] [transition-duration:var(--panel-animation-duration)] ease-out motion-reduce:transition-none",
-        animated && open && "starting:w-0!",
-        animated && !open && "pointer-events-none",
+        collapsible &&
+          "[[data-panel-animations=true]_&]:transition-[width] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-out",
+        collapsible && open && "[[data-panel-animations=true]_&]:starting:w-0!",
+        collapsible && !open && "pointer-events-none",
       )}
       style={
-        isInline && !props.maximized
-          ? ({
-              "--panel-animation-duration": `${props.animationDurationMs ?? DEFAULT_PANEL_ANIMATION_DURATION_MS}ms`,
-              width: animated && !open ? "0px" : `${width}px`,
-            } as CSSProperties)
+        isInline
+          ? { width: props.maximized ? "100%" : collapsible && !open ? "0px" : `${width}px` }
           : undefined
       }
       data-preview-panel-mode={props.mode}
       data-preview-panel-maximized={props.maximized ? "true" : "false"}
     >
-      {isInline && !props.maximized ? <RightPanelResizeHandle handlers={resizeHandlers} /> : null}
-      <div className={cn("h-full min-h-0 w-full", animated && "overflow-clip")}>
+      {isInline && !props.maximized ? <RightPanelResizeHandle handlers={handlers} /> : null}
+      <div className={cn("h-full min-h-0 w-full", collapsible && "overflow-clip")}>
         <div
           className="flex h-full min-h-0 min-w-0 flex-col"
-          style={animated ? { width: `calc(${width}px - 1px)` } : undefined}
+          style={collapsible && !props.maximized ? { width: `calc(${width}px - 1px)` } : undefined}
         >
           {useDragRegion ? <div className="electron-drag-region h-0 w-full" aria-hidden /> : null}
           {props.children}

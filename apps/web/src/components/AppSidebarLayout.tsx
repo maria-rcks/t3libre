@@ -230,8 +230,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     >
       <ProjectProjectionRetention />
       <Sidebar
-        animated={panelAnimationsActive}
-        animationDurationMs={panelAnimationDurationMs}
         side="left"
         collapsible="offcanvas"
         data-app-sidebar=""

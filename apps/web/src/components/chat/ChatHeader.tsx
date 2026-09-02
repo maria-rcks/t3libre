@@ -95,7 +95,7 @@ export function resolveRenameCommit(input: {
 // events (the second click dismisses it and dblclick still fires), so it
 // opens immediately.
 const TITLE_MENU_OPEN_DELAY_MS = 500;
-// Matches the explicit @min-[48rem]/header-actions variants owned by this header.
+// Matches the @3xl/header-actions container breakpoint owned by this header.
 const HEADER_ACTIONS_EXPANDED_BREAKPOINT_REM = 48;
 
 export function shouldShowOpenInPicker(input: {
@@ -393,7 +393,7 @@ export const ChatHeader = memo(function ChatHeader({
         ref={headerActionsRef}
         data-chat-header-actions
         className={cn(
-          "flex shrink-0 items-center justify-end gap-2 @min-[48rem]/header-actions:gap-3",
+          "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
           rightPanelOpen ? "pr-0" : "pr-16",
           "[[data-panel-animations=true]_&]:motion-safe:transition-[padding-right] [[data-panel-animations=true]_&]:motion-safe:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:motion-safe:ease-out",
         )}

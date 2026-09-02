@@ -1811,10 +1811,19 @@ function PullRequestsRouteView() {
     titlebarControls:
       // While the panel is closed the strip lives inside the header: a no-drag
       // descendant beats the header's desktop drag-region, where a floating
-      // sibling loses (app-region hit-testing ignores z-index). Open, it moves
-      // back out to the route container, which spans the panel too, so the
-      // toggle keeps one fixed top-right anchor and never jumps sideways.
-      pullRequestsSupported && !rightPanelPresent ? openPanelControls : null,
+      // sibling loses (app-region hit-testing ignores z-index). While the
+      // floating strip crosses the header during motion, the narrow extension
+      // keeps that overlap non-draggable without moving the toggle.
+      pullRequestsSupported ? (
+        rightPanelPresent ? (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 left-full w-7 [-webkit-app-region:no-drag]"
+          />
+        ) : (
+          openPanelControls
+        )
+      ) : null,
     rightPanelOpen: rightPanelState.isOpen,
     listBody,
     scrollRef,
@@ -1863,8 +1872,6 @@ function PullRequestsRouteView() {
         {rightPanelPresent && renderedPullRequestSurface && panelEnvironmentId !== null ? (
           <RightPanelTabs
             mode="inline"
-            animated={panelAnimationsActive}
-            animationDurationMs={panelAnimationDurationMs}
             open={rightPanelState.isOpen}
             widthStorageKey="t3code:pull-request-panel-width"
             // Default to roughly half the viewport: the PR list needs more

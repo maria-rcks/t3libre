@@ -1719,7 +1719,7 @@ export default function GitActionsControl({
                   quickAction={quickAction}
                   SourceControlIcon={SourceControlIcon}
                 />
-                <span className="sr-only @min-[48rem]/header-actions:not-sr-only @min-[48rem]/header-actions:ml-0.5">
+                <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
                   {quickAction.label}
                 </span>
               </PopoverTrigger>
@@ -1736,12 +1736,12 @@ export default function GitActionsControl({
               onClick={runQuickAction}
             >
               <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
-              <span className="sr-only @min-[48rem]/header-actions:not-sr-only @min-[48rem]/header-actions:ml-0.5">
+              <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
                 {quickAction.label}
               </span>
             </Button>
           )}
-          <GroupSeparator className="hidden @min-[48rem]/header-actions:block" />
+          <GroupSeparator className="hidden @3xl/header-actions:block" />
           <Menu
             onOpenChange={(open) => {
               if (open) {

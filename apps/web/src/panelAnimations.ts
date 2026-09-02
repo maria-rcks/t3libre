@@ -1,13 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  DEFAULT_PANEL_ANIMATION_DURATION_MS,
-  type PanelAnimationDurationMs,
-} from "@t3tools/contracts/settings";
+import { type PanelAnimationDurationMs } from "@t3tools/contracts/settings";
 
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useClientSettings } from "./hooks/useSettings";
-
-export const PANEL_ANIMATION_DURATION_MS = DEFAULT_PANEL_ANIMATION_DURATION_MS;
 
 export function observeResponsiveBreakpointFade(options: {
   target: HTMLElement;
@@ -15,70 +10,34 @@ export function observeResponsiveBreakpointFade(options: {
   active: boolean;
   durationMs: PanelAnimationDurationMs;
   breakpoint: { value: number; unit: "px" | "rem" };
-  fadeDistancePx?: number;
 }): () => void {
-  const { target, container, active, durationMs, breakpoint, fadeDistancePx = 160 } = options;
+  const { target, container, active, durationMs, breakpoint } = options;
   if (!active || typeof ResizeObserver === "undefined") return () => {};
 
-  const resolveBreakpointPx = () => {
-    if (breakpoint.unit === "px") return breakpoint.value;
-    const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
-    return breakpoint.value * (Number.isFinite(rootFontSize) ? rootFontSize : 16);
-  };
-
-  let previousWidth = container.getBoundingClientRect().width;
-  let previousSide = previousWidth >= resolveBreakpointPx();
-  let crossedBreakpoint = false;
-  let settleTimer: number | null = null;
-  let restoreAnimation: Animation | null = null;
-
-  const restoreOpacity = () => {
-    settleTimer = null;
-    const currentOpacity = getComputedStyle(target).opacity;
-    target.style.removeProperty("opacity");
-    crossedBreakpoint = false;
-    if (currentOpacity === "1") return;
-    restoreAnimation = target.animate([{ opacity: currentOpacity }, { opacity: 1 }], {
-      duration: Math.min(100, durationMs / 4),
-      easing: "ease-out",
-    });
-  };
+  const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+  const breakpointPx =
+    breakpoint.unit === "px"
+      ? breakpoint.value
+      : breakpoint.value * (Number.isFinite(rootFontSize) ? rootFontSize : 16);
+  let expanded = container.getBoundingClientRect().width >= breakpointPx;
+  let animation: Animation | null = null;
 
   const observer = new ResizeObserver(([entry]) => {
     if (!entry) return;
-    const width = entry.contentRect.width;
-    restoreAnimation?.cancel();
-    restoreAnimation = null;
-    if (settleTimer !== null) window.clearTimeout(settleTimer);
-    settleTimer = null;
-    const breakpointPx = resolveBreakpointPx();
-    const side = width >= breakpointPx;
-    const crossedOnThisFrame = side !== previousSide;
-    const movingTowardBreakpoint =
-      Math.abs(width - breakpointPx) < Math.abs(previousWidth - breakpointPx);
-    if (crossedOnThisFrame) crossedBreakpoint = true;
-
-    if (crossedOnThisFrame) {
-      target.style.opacity = "0";
-    } else if (movingTowardBreakpoint || crossedBreakpoint) {
-      target.style.opacity = Math.min(1, Math.abs(width - breakpointPx) / fadeDistancePx).toFixed(
-        3,
-      );
-    } else {
-      target.style.removeProperty("opacity");
-    }
-
-    previousWidth = width;
-    previousSide = side;
-    settleTimer = window.setTimeout(restoreOpacity, 80);
+    const nextExpanded = entry.contentRect.width >= breakpointPx;
+    if (nextExpanded === expanded) return;
+    expanded = nextExpanded;
+    animation?.cancel();
+    animation = target.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: Math.min(100, durationMs),
+      easing: "ease-out",
+    });
   });
 
   observer.observe(container);
   return () => {
     observer.disconnect();
-    if (settleTimer !== null) window.clearTimeout(settleTimer);
-    restoreAnimation?.cancel();
-    target.style.removeProperty("opacity");
+    animation?.cancel();
   };
 }
 
@@ -97,7 +56,7 @@ export function usePanelPresence<T>(
   value: T | null,
   animated: boolean,
   scopeKey: string | null,
-  durationMs = PANEL_ANIMATION_DURATION_MS,
+  durationMs: PanelAnimationDurationMs,
 ): { present: boolean; value: T | null } {
   const [present, setPresent] = useState(open);
   const retainedRef = useRef<{ scopeKey: string | null; value: T | null } | null>(
@@ -110,12 +69,12 @@ export function usePanelPresence<T>(
 
   useEffect(() => {
     if (open) {
-      const frame = window.requestAnimationFrame(() => setPresent(true));
-      return () => window.cancelAnimationFrame(frame);
+      setPresent(true);
+      return;
     }
     if (!animated) {
-      const timeout = window.setTimeout(() => setPresent(false), 0);
-      return () => window.clearTimeout(timeout);
+      setPresent(false);
+      return;
     }
 
     const timeout = window.setTimeout(() => setPresent(false), durationMs);
