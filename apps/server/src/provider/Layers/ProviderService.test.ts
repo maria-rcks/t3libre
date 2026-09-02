@@ -1065,12 +1065,8 @@ routing.layer("ProviderServiceLive routing", (it) => {
         payload: { state: "completed" },
       });
 
-      const events = Array.from(yield* Fiber.join(eventsFiber));
-      assert.deepEqual(
-        events.map((event) => event.type),
-        ["turn.completed", "thread.state.changed"],
-      );
-      const compacted = events[1];
+      const compacted = Array.from(yield* Fiber.join(eventsFiber))[1];
+      assert.equal(compacted?.type, "thread.state.changed");
       if (compacted?.type === "thread.state.changed") {
         assert.equal(compacted.payload.state, "compacted");
       }

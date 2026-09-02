@@ -1161,9 +1161,10 @@ const make = Effect.gen(function* () {
     yield* ensureThreadWorktree(thread);
 
     const isCompactCommand = isCompactCommandMessage(message);
-    const isFirstUserMessageTurn =
-      thread.messages.filter((entry) => entry.role === "user" && !isCompactCommandMessage(entry))
-        .length === 1;
+    const nonCompactUserMessageCount = thread.messages.filter(
+      (entry) => entry.role === "user" && !isCompactCommandMessage(entry),
+    ).length;
+    const isFirstUserMessageTurn = nonCompactUserMessageCount === 1;
     if (isFirstUserMessageTurn && !isCompactCommand) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
@@ -1257,6 +1258,16 @@ const make = Effect.gen(function* () {
       );
 
     if (isCompactCommand) {
+      if (nonCompactUserMessageCount === 0) {
+        return yield* appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.turn.start.failed",
+          summary: "Context compaction failed",
+          detail: "Context compaction requires an existing conversation.",
+          turnId: null,
+          createdAt: event.payload.createdAt,
+        });
+      }
       const latestThread = yield* resolveThread(event.payload.threadId);
       if (
         latestThread?.session?.status === "starting" ||
