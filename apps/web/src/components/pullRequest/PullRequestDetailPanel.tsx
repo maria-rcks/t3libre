@@ -1778,6 +1778,27 @@ export function PullRequestDetailPanel({
                         {`${isBranchCopied ? "Copied" : "Copy pull request branch"}: ${detail.headBranch}`}
                       </TooltipPopup>
                     </Tooltip>
+                    {checkoutCommand ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              size="micro"
+                              variant="outline"
+                              className="ml-1 min-w-32 max-w-48 shrink gap-1 font-normal text-muted-foreground"
+                              aria-label={`Copy checkout command: ${checkoutCommand}`}
+                              onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}
+                            />
+                          }
+                        >
+                          <code className="min-w-0 truncate">{checkoutCommand}</code>
+                          <CopyIcon aria-hidden />
+                        </TooltipTrigger>
+                        <TooltipPopup className="max-w-96 wrap-anywhere font-mono" side="bottom">
+                          {checkoutCommand}
+                        </TooltipPopup>
+                      </Tooltip>
+                    ) : null}
                   </span>
                   <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2">
                     <span className="inline-flex items-center gap-1.5 tabular-nums">
@@ -1792,27 +1813,6 @@ export function PullRequestDetailPanel({
                     />
                   </span>
                 </div>
-                {checkoutCommand ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          className="mt-2 min-w-0 max-w-full gap-1.5 font-normal text-muted-foreground"
-                          aria-label={`Copy checkout command: ${checkoutCommand}`}
-                          onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}
-                        />
-                      }
-                    >
-                      <code className="min-w-0 truncate text-[11px]">{checkoutCommand}</code>
-                      <CopyIcon aria-hidden className="size-3" />
-                    </TooltipTrigger>
-                    <TooltipPopup className="max-w-96 wrap-anywhere font-mono" side="bottom">
-                      {checkoutCommand}
-                    </TooltipPopup>
-                  </Tooltip>
-                ) : null}
               </div>
             ) : null}
           </div>
