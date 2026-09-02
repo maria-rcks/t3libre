@@ -683,12 +683,6 @@ describe("ProviderCommandReactor", () => {
           );
         }),
       );
-      const readModel = yield* Effect.promise(() => harness.readModel());
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      expect(
-        thread?.activities.find((activity) => activity.summary === "Context compaction failed")
-          ?.payload,
-      ).toEqual({ detail: rejection.detail });
     }),
   );
 

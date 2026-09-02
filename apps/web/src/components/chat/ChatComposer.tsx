@@ -1297,6 +1297,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const compactSlashCommandAvailable =
     composerTrigger?.kind === "slash-command" &&
+    routeKind === "server" &&
+    activeThread !== undefined &&
+    !isPreparingWorktree &&
+    environmentUnavailable === null &&
+    !projectSelectionRequired &&
+    !showPlanFollowUpPrompt &&
+    !isSendBusy &&
+    !isConnecting &&
     phase !== "running" &&
     activePendingApproval === null &&
     pendingUserInputs.length === 0 &&

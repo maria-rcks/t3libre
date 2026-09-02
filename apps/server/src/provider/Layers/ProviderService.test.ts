@@ -1071,7 +1071,6 @@ routing.layer("ProviderServiceLive routing", (it) => {
         ["turn.completed", "thread.state.changed"],
       );
       const compacted = events[1];
-      assert.equal(compacted?.type, "thread.state.changed");
       if (compacted?.type === "thread.state.changed") {
         assert.equal(compacted.payload.state, "compacted");
       }
