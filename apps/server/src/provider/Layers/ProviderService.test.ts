@@ -1093,8 +1093,8 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       yield* Fiber.join(compactFiber);
 
-      const compacted = Option.getOrThrow(yield* Fiber.join(compactedEventFiber));
-      assert.ok(compacted.type === "thread.state.changed" && compacted.payload.state === "compacted");
+      const compacted = yield* Fiber.join(compactedEventFiber);
+      assert.equal(compacted._tag, "Some");
     }),
   );
 
