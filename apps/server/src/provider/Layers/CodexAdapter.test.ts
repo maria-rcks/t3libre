@@ -63,18 +63,17 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   private readonly eventQueue = Effect.runSync(Queue.unbounded<ProviderEvent>());
   private readonly now = "2026-01-01T00:00:00.000Z";
 
-  public readonly startImpl = vi.fn(
-    (): Promise<ProviderSession> =>
-      Promise.resolve({
-        provider: ProviderDriverKind.make("codex"),
-        status: "ready" as const,
-        runtimeMode: this.options.runtimeMode,
-        threadId: this.options.threadId,
-        cwd: this.options.cwd,
-        ...(this.options.model ? { model: this.options.model } : {}),
-        createdAt: this.now,
-        updatedAt: this.now,
-      } satisfies ProviderSession),
+  public readonly startImpl = vi.fn(() =>
+    Promise.resolve({
+      provider: ProviderDriverKind.make("codex"),
+      status: "ready" as const,
+      runtimeMode: this.options.runtimeMode,
+      threadId: this.options.threadId,
+      cwd: this.options.cwd,
+      ...(this.options.model ? { model: this.options.model } : {}),
+      createdAt: this.now,
+      updatedAt: this.now,
+    } satisfies ProviderSession),
   );
 
   public readonly sendTurnImpl = vi.fn(
@@ -481,16 +480,6 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       const compactThread = adapter.compactThread;
       NodeAssert.ok(compactThread);
 
-      runtime.startImpl.mockResolvedValueOnce({
-        provider: ProviderDriverKind.make("codex"),
-        status: "running",
-        runtimeMode: "full-access",
-        threadId,
-        cwd: process.cwd(),
-        activeTurnId: asTurnId("provider-active-turn"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      });
       yield* compactThread(threadId);
       const turnAfterCompletion = yield* adapter
         .sendTurn({ threadId, input: "after terminal turn", attachments: [] })
@@ -498,23 +487,39 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       yield* Effect.yieldNow;
       NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 0);
       yield* runtime.emit({
-        id: asEventId("evt-active-turn-completed"),
+        id: asEventId("evt-queued-turn-completed"),
         kind: "notification",
         provider: ProviderDriverKind.make("codex"),
         createdAt: "2026-01-01T00:00:00.000Z",
         method: "turn/completed",
         threadId,
-        turnId: asTurnId("provider-active-turn"),
+        turnId: asTurnId("provider-queued-turn"),
         payload: {
           threadId: "provider-thread-1",
-          turn: { id: "provider-active-turn", status: "completed", items: [] },
+          turn: { id: "provider-queued-turn", status: "completed", items: [] },
         },
       });
       yield* Effect.yieldNow;
       NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 0);
-      yield* adapter.interruptTurn(threadId, asTurnId("provider-active-turn"));
-      yield* Effect.yieldNow;
-      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 0);
+      yield* runtime.emit({
+        id: asEventId("evt-compaction-item-started"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/started",
+        threadId,
+        turnId: asTurnId("provider-compact-turn"),
+        itemId: asItemId("provider-compact-item"),
+        payload: {
+          startedAtMs: 1_778_000_000_000,
+          threadId: "provider-thread-1",
+          turnId: "provider-compact-turn",
+          item: {
+            id: "provider-compact-item",
+            type: "contextCompaction",
+          },
+        },
+      });
       yield* runtime.emit({
         id: asEventId("evt-compaction-turn-completed"),
         kind: "notification",
@@ -539,7 +544,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
       yield* adapter.interruptTurn(threadId);
       yield* Fiber.join(turnAfterInterrupt);
-      NodeAssert.equal(runtime.interruptTurnImpl.mock.calls.length, 2);
+      NodeAssert.equal(runtime.interruptTurnImpl.mock.calls.length, 1);
       NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 2);
     }),
   );
