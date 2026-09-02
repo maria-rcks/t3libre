@@ -382,12 +382,12 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
  * sites pipe through this in `Effect.mapError` so they never build the error
  * shape by hand.
  */
-const toRequestError = (cause: unknown, method = "opencode"): ProviderAdapterRequestError =>
+const toRequestError = (cause: OpenCodeRuntimeError): ProviderAdapterRequestError =>
   new ProviderAdapterRequestError({
     provider: PROVIDER,
-    method: OpenCodeRuntimeError.is(cause) ? cause.operation : method,
-    detail: openCodeRuntimeErrorDetail(cause),
-    cause: OpenCodeRuntimeError.is(cause) ? cause.cause : cause,
+    method: cause.operation,
+    detail: cause.detail,
+    cause: cause.cause,
   });
 
 /**
@@ -3037,7 +3037,18 @@ export function makeOpenCodeAdapter(
             ),
           ).pipe(
             Effect.timeout("10 seconds"),
-            Effect.mapError((cause) => toRequestError(cause, "session.summarize")),
+            Effect.catchTags({
+              OpenCodeRuntimeError: (cause) => Effect.fail(toRequestError(cause)),
+              TimeoutError: (cause) =>
+                Effect.fail(
+                  new ProviderAdapterRequestError({
+                    provider: PROVIDER,
+                    method: "session.summarize",
+                    detail: "OpenCode session compaction did not complete within 10 seconds.",
+                    cause,
+                  }),
+                ),
+            }),
             Effect.asVoid,
           );
         }),

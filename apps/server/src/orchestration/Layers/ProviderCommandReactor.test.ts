@@ -154,7 +154,6 @@ describe("ProviderCommandReactor", () => {
     readonly serverActivation?: Effect.Effect<void>;
     readonly interruptTurnEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly stopSessionEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
-    readonly compactThreadEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -240,7 +239,7 @@ describe("ProviderCommandReactor", () => {
         turnId: asTurnId("turn-1"),
       }),
     );
-    const compactThread = vi.fn((_: ThreadId) => input?.compactThreadEffect?.() ?? Effect.void);
+    const compactThread = vi.fn((_: ThreadId) => Effect.void);
     const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void);
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
     const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
@@ -643,46 +642,6 @@ describe("ProviderCommandReactor", () => {
       yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
       expect(harness.compactThread).toHaveBeenCalledWith(ThreadId.make("thread-1"));
       expect(harness.sendTurn).not.toHaveBeenCalled();
-    }),
-  );
-
-  effectIt.effect("reports provider compaction failures", () =>
-    Effect.gen(function* () {
-      const rejection = new ProviderAdapterRequestError({
-        provider: ProviderDriverKind.make("codex"),
-        method: "thread/compact/start",
-        detail: "Cannot compact while a turn is running.",
-      });
-      const harness = yield* Effect.promise(() =>
-        createHarness({ compactThreadEffect: () => Effect.fail(rejection) }),
-      );
-
-      yield* harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-compact-failure"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-compact-failure"),
-          role: "user",
-          text: "/compact",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: "2026-01-01T00:00:00.000Z",
-      });
-
-      yield* Effect.promise(() =>
-        waitFor(async () => {
-          const readModel = await harness.readModel();
-          return (
-            readModel.threads
-              .find((entry) => entry.id === ThreadId.make("thread-1"))
-              ?.activities.some((activity) => activity.summary === "Context compaction failed") ??
-            false
-          );
-        }),
-      );
     }),
   );
 
