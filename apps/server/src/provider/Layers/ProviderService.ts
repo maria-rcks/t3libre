@@ -30,7 +30,6 @@ import { causeErrorTag } from "@t3tools/shared/observability";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
@@ -887,16 +886,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const input = routed.adapter.provider === "cursor" ? "/compress" : "/compact";
         const completion = yield* Deferred.make<void>();
         pendingFallbackCompactions.set(threadId, completion);
-        const sendExit = yield* sendTurn({
+        yield* sendTurn({
           threadId,
           input,
           ...(modelSelection !== undefined ? { modelSelection } : {}),
-        }).pipe(Effect.exit);
-        if (Exit.isFailure(sendExit)) {
-          pendingFallbackCompactions.delete(threadId);
-          return yield* Effect.failCause(sendExit.cause);
-        }
-        yield* Deferred.await(completion);
+        }).pipe(
+          Effect.flatMap(() => Deferred.await(completion)),
+          Effect.ensuring(Effect.sync(() => void pendingFallbackCompactions.delete(threadId))),
+        );
       }
       yield* analytics.record("provider.thread.compacted", {
         provider: routed.adapter.provider,
