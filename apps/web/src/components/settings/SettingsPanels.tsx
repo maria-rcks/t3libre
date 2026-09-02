@@ -1199,24 +1199,9 @@ export function AppearanceSettingsPanel() {
       <SettingsSection id="motion" title="Motion">
         <SettingsRow
           {...searchableSetting("panel-animations")}
-          description="Set how long the main sidebar, right panel, and terminal drawer take to open and close. Choose 0 ms for instant changes."
-          resetAction={
-            settings.panelAnimationDurationMs !==
-            DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs ? (
-              <SettingResetButton
-                label="panel animations"
-                onClick={() =>
-                  updateSettings({
-                    panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
-                  })
-                }
-              />
-            ) : null
-          }
-        >
-          <div className="mt-4 grid gap-5 border-t border-border/60 pt-4 sm:grid-cols-[minmax(12rem,18rem)_minmax(16rem,1fr)] sm:items-center">
-            <PanelAnimationsPreview durationMs={settings.panelAnimationDurationMs} />
-            <div className="min-w-0 space-y-3">
+          description="Set how fast panels open and close."
+          control={
+            <div className="w-full space-y-3 sm:w-72">
               <div className="flex items-center justify-between gap-3">
                 <label
                   className="text-xs font-medium text-muted-foreground"
@@ -1257,6 +1242,23 @@ export function AppearanceSettingsPanel() {
                 <span>{MAX_PANEL_ANIMATION_DURATION_MS} ms</span>
               </div>
             </div>
+          }
+          resetAction={
+            settings.panelAnimationDurationMs !==
+            DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs ? (
+              <SettingResetButton
+                label="panel animations"
+                onClick={() =>
+                  updateSettings({
+                    panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
+                  })
+                }
+              />
+            ) : null
+          }
+        >
+          <div className="mt-4 border-t border-border/60 pt-4">
+            <PanelAnimationsPreview durationMs={settings.panelAnimationDurationMs} />
           </div>
         </SettingsRow>
       </SettingsSection>
