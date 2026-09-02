@@ -9,9 +9,11 @@ import {
   RELAY_LINK_PROOF_TYP,
   verifyRelayJwt,
 } from "@t3tools/shared/relayJwt";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
@@ -75,6 +77,10 @@ export type EnvironmentLinkError =
   | ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaimPersistenceError
   | EnvironmentCredentials.EnvironmentCredentialCreatePersistenceError
   | ManagedEndpointProvider.ManagedEndpointProviderError;
+
+const isActiveDurableEnvironmentLinkConflict = Schema.is(
+  EnvironmentLinks.ActiveDurableEnvironmentLinkConflict,
+);
 
 export class EnvironmentLinker extends Context.Service<
   EnvironmentLinker,
@@ -375,78 +381,64 @@ const make = Effect.gen(function* () {
           endpoint,
           ...(temporaryLease === undefined ? {} : { temporaryLease }),
         });
-        yield* temporaryLease === undefined
-          ? persistLink
-          : persistLink.pipe(
-              Effect.catchTags({
-                ActiveDurableEnvironmentLinkConflict: (error) => Effect.fail(error),
-                EnvironmentLinkUpsertPersistenceError: (error) =>
-                  managedEndpointProvider
-                    .deprovision({
-                      userId: input.userId,
-                      environmentId: verified.environmentId,
-                      target: provisioned?.deprovisionTarget ?? null,
-                    })
-                    .pipe(
-                      Effect.tapError((cleanupError) =>
-                        Effect.logWarning("temporary endpoint cleanup after link failure failed", {
-                          environmentId: verified.environmentId,
-                          errorTag: cleanupError._tag,
-                        }),
-                      ),
-                      Effect.ignore,
-                      Effect.andThen(Effect.fail(error)),
-                    ),
-              }),
-            );
-        const environmentCredential = yield* credentials
-          .create({
+        const finishLink = Effect.gen(function* () {
+          yield* persistLink;
+          const environmentCredential = yield* credentials.create({
             environmentId: verified.environmentId,
             environmentPublicKey: verified.environmentPublicKey,
-          })
-          .pipe(
-            temporaryLease === undefined
-              ? (effect) => effect
-              : Effect.catchTags({
-                  EnvironmentCredentialCreatePersistenceError: (error) => {
-                    const leaseKey = {
-                      userId: input.userId,
-                      environmentId: verified.environmentId,
-                      leaseId: temporaryLease.leaseId,
-                    };
-                    return Effect.gen(function* () {
-                      if (!(yield* temporaryLeases.claimCleanup(leaseKey))) return;
-                      yield* credentials.revokeForEnvironmentPublicKey({
-                        environmentId: verified.environmentId,
-                        environmentPublicKey: verified.environmentPublicKey,
-                      });
-                      yield* managedEndpointProvider.deprovision({
-                        ...leaseKey,
-                        target: provisioned?.deprovisionTarget ?? null,
-                      });
-                      yield* temporaryLeases.clear(leaseKey);
-                    }).pipe(
-                      Effect.catchCause((cleanupCause) =>
-                        Effect.logWarning(
-                          "temporary endpoint cleanup after credential failure failed",
-                          {
-                            environmentId: verified.environmentId,
-                            cleanupCause,
-                          },
-                        ),
-                      ),
-                      Effect.andThen(Effect.fail(error)),
-                    );
-                  },
-                }),
-          );
-        return {
+          });
+          return {
+            environmentId: verified.environmentId,
+            endpoint,
+            endpointRuntime: provisioned?.runtime ?? null,
+            environmentCredential,
+            ...(temporaryLease === undefined ? {} : { temporaryLease }),
+          };
+        });
+        if (temporaryLease === undefined) return yield* finishLink;
+
+        const leaseKey = {
+          userId: input.userId,
           environmentId: verified.environmentId,
-          endpoint,
-          endpointRuntime: provisioned?.runtime ?? null,
-          environmentCredential,
-          ...(temporaryLease === undefined ? {} : { temporaryLease }),
+          leaseId: temporaryLease.leaseId,
         };
+        const rollbackTemporaryLink = Effect.gen(function* () {
+          const claimedLease = yield* temporaryLeases.claimCleanup(leaseKey).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("temporary lease cleanup claim failed", {
+                environmentId: verified.environmentId,
+                cause,
+              }).pipe(Effect.as(false)),
+            ),
+          );
+          if (claimedLease) {
+            yield* credentials
+              .revokeForEnvironmentPublicKey({
+                environmentId: verified.environmentId,
+                environmentPublicKey: verified.environmentPublicKey,
+              })
+              .pipe(Effect.catchCause(Effect.logWarning));
+          }
+          yield* managedEndpointProvider
+            .deprovision({
+              ...leaseKey,
+              target: provisioned?.deprovisionTarget ?? null,
+            })
+            .pipe(Effect.catchCause(Effect.logWarning));
+          if (claimedLease) {
+            yield* temporaryLeases.clear(leaseKey).pipe(Effect.catchCause(Effect.logWarning));
+          }
+        });
+        return yield* finishLink.pipe(
+          Effect.onExit((exit) => {
+            if (Exit.isSuccess(exit)) return Effect.void;
+            const durableConflict = exit.cause.reasons.some(
+              (reason) =>
+                Cause.isFailReason(reason) && isActiveDurableEnvironmentLinkConflict(reason.error),
+            );
+            return durableConflict ? Effect.void : rollbackTemporaryLink;
+          }),
+        );
       });
       return yield* ManagedEndpointProvisionClaims.withManagedEndpointProvisionClaim(
         provisionClaims,

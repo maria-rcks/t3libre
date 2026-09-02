@@ -6,7 +6,9 @@ import type {
 import { RELAY_LINK_PROOF_TYP } from "@t3tools/shared/relayJwt";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
@@ -251,6 +253,33 @@ describe("EnvironmentLinker", () => {
       ),
     );
   });
+
+  it.effect("deprovisions a temporary endpoint when interrupted before lease persistence", () =>
+    Effect.gen(function* () {
+      const enteredUpsert = yield* Deferred.make<void>();
+      let deprovisionedGeneration: string | null = null;
+      yield* Effect.gen(function* () {
+        const { request } = yield* makeRequest;
+        const linker = yield* EnvironmentLinker.EnvironmentLinker;
+        const fiber = yield* linker.link({ userId: "user_123", request }).pipe(Effect.forkChild);
+        yield* Deferred.await(enteredUpsert);
+        yield* Fiber.interrupt(fiber);
+      }).pipe(
+        Effect.provide(
+          testLayer({
+            upsert: () =>
+              Deferred.succeed(enteredUpsert, undefined).pipe(Effect.andThen(Effect.never)),
+            claimTemporaryCleanup: () => Effect.succeed(false),
+            deprovision: (input) =>
+              Effect.sync(() => {
+                deprovisionedGeneration = input.target?.generationId ?? null;
+              }),
+          }),
+        ),
+      );
+      expect(deprovisionedGeneration).toBe("provision-generation");
+    }),
+  );
 
   it.effect("does not deprovision the permanent endpoint on a durable-link conflict", () => {
     let deprovisioned = false;
