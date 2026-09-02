@@ -951,6 +951,11 @@ describe("ProviderCommandReactor", () => {
       blockRecoveryInventory = true;
       yield* Deferred.succeed(releaseFailure, undefined);
       yield* Deferred.await(recoveryInventoryStarted);
+      Object.assign(harness.runtimeSessions[0]!, {
+        status: "ready",
+        activeTurnId: undefined,
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      });
       yield* harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-session-set-settled-compact-turn"),
@@ -963,7 +968,7 @@ describe("ProviderCommandReactor", () => {
           runtimeMode: "approval-required",
           activeTurnId: null,
           lastError: null,
-          updatedAt: now,
+          updatedAt: "2026-01-01T00:00:01.000Z",
         },
         createdAt: now,
       });

@@ -1368,6 +1368,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         {
           isAtPromptStart: composerTrigger.rangeStart === 0,
           compactCommandIsWholeMessage:
+            phase !== "running" &&
+            activePendingApproval === null &&
+            pendingUserInputs.length === 0 &&
             prompt.slice(0, composerTrigger.rangeStart).trim().length === 0 &&
             prompt.slice(composerTrigger.rangeEnd).trim().length === 0 &&
             composerImages.length === 0 &&
@@ -1397,6 +1400,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     return [];
   }, [
+    activePendingApproval,
     composerElementContexts.length,
     composerFiles.length,
     composerImages.length,
@@ -1405,7 +1409,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerSendState.sendableTerminalContexts.length,
     composerTrigger,
     planModeUiEnabled,
+    phase,
     prompt,
+    pendingUserInputs.length,
     selectedProvider,
     selectedProviderStatus,
     settings.showSkillsInSlashMenu,
