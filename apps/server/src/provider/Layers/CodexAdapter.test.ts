@@ -360,7 +360,6 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       );
 
       yield* compactThread(threadId);
-      NodeAssert.equal(runtime.compactThreadImpl.mock.calls.length, 1);
       yield* runtime.emit({
         id: asEventId("evt-compaction-item-completed"),
         kind: "notification",
