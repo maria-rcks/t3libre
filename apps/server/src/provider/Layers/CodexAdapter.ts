@@ -97,6 +97,7 @@ interface CodexAdapterSessionContext {
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
   manualCompactionTurnId: TurnId | undefined;
+  manualCompactionPreviousTurnId: TurnId | undefined;
   manualCompactionCompletion: Deferred.Deferred<void> | undefined;
   stopped: boolean;
 }
@@ -1698,9 +1699,17 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     }
     const completion = session.manualCompactionCompletion;
     session.manualCompactionTurnId = undefined;
+    session.manualCompactionPreviousTurnId = undefined;
     session.manualCompactionCompletion = undefined;
     return completion ? Deferred.succeed(completion, undefined).pipe(Effect.asVoid) : Effect.void;
   };
+  const isManualCompactionTurn = (
+    session: CodexAdapterSessionContext,
+    providerTurnId: TurnId | undefined,
+  ) =>
+    session.manualCompactionTurnId !== undefined &&
+    (session.manualCompactionPreviousTurnId === undefined ||
+      (providerTurnId !== undefined && providerTurnId !== session.manualCompactionPreviousTurnId));
 
   const startSession: CodexAdapterShape["startSession"] = (input) =>
     Effect.scoped(
@@ -1836,7 +1845,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
             if (
               session &&
-              (completedCompactionItem || terminalRuntimeEvent || terminalCompactionTurn)
+              (completedCompactionItem ||
+                terminalRuntimeEvent ||
+                (terminalCompactionTurn && isManualCompactionTurn(session, event.turnId)))
             ) {
               yield* settleManualCompaction(session);
             }
@@ -1868,6 +1879,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           runtime,
           eventFiber,
           manualCompactionTurnId: undefined,
+          manualCompactionPreviousTurnId: undefined,
           manualCompactionCompletion: undefined,
           stopped: false,
         });
@@ -1964,10 +1976,13 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const interruptTurn: CodexAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
     function* (threadId, turnId) {
       const session = yield* requireSession(threadId);
+      const interruptedTurnId = turnId ?? (yield* session.runtime.getSession).activeTurnId;
       yield* session.runtime
         .interruptTurn(turnId)
         .pipe(Effect.mapError((cause) => mapCodexRuntimeError(threadId, "turn/interrupt", cause)));
-      yield* settleManualCompaction(session);
+      if (isManualCompactionTurn(session, interruptedTurnId ?? undefined)) {
+        yield* settleManualCompaction(session);
+      }
     },
   );
 
@@ -1982,8 +1997,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         });
       }
 
+      const previousTurnId = (yield* session.runtime.getSession).activeTurnId ?? undefined;
       const turnId = TurnId.make(`codex-compact-${yield* randomUUIDv4}`);
       session.manualCompactionTurnId = turnId;
+      session.manualCompactionPreviousTurnId = previousTurnId;
       session.manualCompactionCompletion = yield* Deferred.make<void>();
       yield* session.runtime.compactThread.pipe(
         Effect.mapError((cause) => mapCodexRuntimeError(threadId, "thread/compact/start", cause)),
