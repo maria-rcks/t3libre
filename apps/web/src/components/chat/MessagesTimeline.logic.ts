@@ -35,6 +35,15 @@ export const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
 export const TIMELINE_CONTENT_MAX_WIDTH = 768;
 export const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
 
+function singleToolCallLabel(entry: WorkLogEntry): string {
+  const toolPresentation = resolveWorkEntryToolPresentation(entry);
+  if (toolPresentation) return toolPresentation.displayName;
+  const command = entry.command?.trim();
+  if (command) return command;
+  const heading = normalizeCompactToolLabel(entry.toolTitle || entry.label);
+  return `${heading.charAt(0).toUpperCase()}${heading.slice(1)}`;
+}
+
 export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string | undefined) {
   const toolPresentation = resolveWorkEntryToolPresentation(entry);
   if (toolPresentation) return toolPresentation.displayName;
@@ -854,7 +863,7 @@ export function deriveMessagesTimelineRows(input: {
               singleEntry !== null &&
               workLogEntryIsToolLike(singleEntry) &&
               toolGroupAction(singleEntry) !== "edit"
-                ? workEntryDisplayLabel(singleEntry, undefined)
+                ? singleToolCallLabel(singleEntry)
                 : singleEntry !== null && !workLogEntryIsToolLike(singleEntry)
                   ? singleEntry.label
                   : summarizeToolGroup(visibleGroupedEntries),

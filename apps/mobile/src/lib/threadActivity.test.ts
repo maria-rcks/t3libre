@@ -1762,7 +1762,11 @@ describe("buildThreadFeed", () => {
       const stoppedRows = deriveThreadFeedPresentation(feed, latestTurn, new Set());
       expect(stoppedRows.filter((entry) => entry.type === "work-toggle")).toMatchObject([
         { live: false, shimmer: false },
-        { live: false, shimmer: false },
+        {
+          live: false,
+          shimmer: false,
+          summary: lifecycleStatus === "inProgress" ? "printf done" : command,
+        },
       ]);
 
       const completedRows = deriveThreadFeedPresentation(

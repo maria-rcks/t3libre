@@ -838,6 +838,13 @@ function workEntryHeading(workEntry: WorkLogEntry): string {
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
 
+function singleToolCallLabel(activity: ThreadFeedActivity): string {
+  const presentation = resolveWorkEntryToolPresentation(activity.workEntry);
+  if (presentation) return presentation.displayName;
+  const command = activity.workEntry.command?.trim();
+  return command || activity.summary;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
@@ -1525,7 +1532,7 @@ function appendToolGroupRows(
     : singleActivity !== null &&
         singleActivity.toolLike &&
         toolGroupAction(singleActivity.workEntry) !== "edit"
-      ? singleActivity.summary
+      ? singleToolCallLabel(singleActivity)
       : singleActivity !== null && !singleActivity.toolLike
         ? singleActivity.workEntry.label
         : summarizeToolGroup(activities.map((activity) => activity.workEntry));
