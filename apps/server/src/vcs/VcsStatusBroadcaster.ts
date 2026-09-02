@@ -379,14 +379,18 @@ export const make = Effect.gen(function* () {
   const maybeAutoPull = Effect.fn("VcsStatusBroadcaster.maybeAutoPull")(function* (
     cwd: string,
     remote: VcsStatusRemoteResult | null,
+    policyCwds: ReadonlyArray<string>,
   ) {
     return yield* Effect.gen(function* () {
+      const autoPullEnabled = (yield* Effect.forEach(policyCwds, autoPullPolicy.isEnabled, {
+        concurrency: "unbounded",
+      })).some(Boolean);
       if (
         remote === null ||
         !remote.hasUpstream ||
         remote.aheadCount > 0 ||
         remote.behindCount <= 0 ||
-        !(yield* autoPullPolicy.isEnabled(cwd))
+        !autoPullEnabled
       ) {
         return null;
       }
@@ -412,13 +416,16 @@ export const make = Effect.gen(function* () {
 
   const refreshRemoteStatus = Effect.fn("VcsStatusBroadcaster.refreshRemoteStatus")(function* (
     cwd: string,
-    options?: { readonly refreshUpstream?: boolean },
+    options?: {
+      readonly refreshUpstream?: boolean;
+      readonly policyCwds?: ReadonlyArray<string>;
+    },
   ) {
     if (options?.refreshUpstream !== false) {
       yield* workflow.invalidateRemoteStatus(cwd);
     }
     const remote = yield* workflow.remoteStatus({ cwd }, options);
-    const pulled = yield* maybeAutoPull(cwd, remote);
+    const pulled = yield* maybeAutoPull(cwd, remote, options?.policyCwds ?? [cwd]);
     if (pulled !== null) return pulled.remote;
     return yield* updateCachedRemoteStatus(cwd, remote, { publish: true });
   });
@@ -434,7 +441,7 @@ export const make = Effect.gen(function* () {
       [workflow.localStatus({ cwd }), workflow.remoteStatus({ cwd })],
       { concurrency: "unbounded" },
     );
-    const pulled = yield* maybeAutoPull(cwd, remote);
+    const pulled = yield* maybeAutoPull(cwd, remote, [rawCwd]);
     if (pulled !== null) return mergeGitStatusParts(pulled.local, pulled.remote);
     return yield* updateCachedStatus(cwd, local, remote, { publish: true });
   });
@@ -476,6 +483,7 @@ export const make = Effect.gen(function* () {
 
         const exit = yield* refreshRemoteStatus(cwd, {
           refreshUpstream: !Duration.isZero(configuredInterval),
+          policyCwds: [...demandCwds.keys()],
         }).pipe(Effect.exit);
         if (Exit.isSuccess(exit)) {
           yield* Ref.set(needsInitialRefreshRef, false);

@@ -147,6 +147,7 @@ describe("VcsStatusBroadcaster", () => {
     () => {
       let remoteStatus: VcsStatusRemoteResult = { ...baseRemoteStatus, behindCount: 2 };
       let pullCalls = 0;
+      let configuredWorkspaceRoot = "";
       const localStatus: VcsStatusLocalResult = {
         ...baseLocalStatus,
         isDefaultRef: true,
@@ -157,7 +158,7 @@ describe("VcsStatusBroadcaster", () => {
         Layer.provide(makeBackgroundPolicyLayer(() => true)),
         Layer.provide(
           Layer.succeed(VcsStatusBroadcaster.VcsAutoPullPolicy, {
-            isEnabled: () => Effect.succeed(true),
+            isEnabled: (cwd) => Effect.succeed(cwd === configuredWorkspaceRoot),
           }),
         ),
         Layer.provide(
@@ -182,8 +183,19 @@ describe("VcsStatusBroadcaster", () => {
       );
 
       return Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const realDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-vcs-auto-pull-real-",
+        });
+        const linkParent = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-vcs-auto-pull-link-",
+        });
+        configuredWorkspaceRoot = path.join(linkParent, "repo-link");
+        yield* fileSystem.symlink(realDir, configuredWorkspaceRoot);
+
         const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
-        const status = yield* broadcaster.refreshStatus("/repo");
+        const status = yield* broadcaster.refreshStatus(configuredWorkspaceRoot);
 
         assert.equal(pullCalls, 1);
         assert.equal(status.behindCount, 0);
