@@ -154,6 +154,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
       readonly number: number;
     }>
   >([]);
+  const summaryRecovery = yield* Ref.make<ReadonlyArray<boolean | undefined>>([]);
 
   const updateSettings = (patch: ServerSettingsPatch) =>
     Effect.gen(function* () {
@@ -168,18 +169,23 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
       Effect.andThen(options.branchPullRequest?.(input) ?? Effect.succeed(null)),
     );
 
-  const pullRequestSummary: PullRequestService["Service"]["summary"] = (input) =>
-    Ref.update(summaryCalls, (calls) => [...calls, input]).pipe(
-      Effect.andThen(
-        options.pullRequestSummary?.(input) ??
+  const pullRequestSummary: PullRequestService["Service"]["summary"] = (input, readOptions) =>
+    Effect.gen(function* () {
+      yield* Ref.update(summaryCalls, (calls) => [...calls, input]);
+      yield* Ref.update(summaryRecovery, (values) => [
+        ...values,
+        readOptions?.recoverTransientFailure,
+      ]);
+      return yield* (
+        options.pullRequestSummary?.(input, readOptions) ??
           Effect.succeed(
             makePullRequestSummary({
               ...input,
               state: "open",
             }),
-          ),
-      ),
-    );
+          )
+      );
+    });
 
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) => {
     if (command.type !== "thread.auto-settle") {
@@ -231,6 +237,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     commands,
     branchCalls,
     summaryCalls,
+    summaryRecovery,
     updateSettings,
     layer: ThreadSettlementReactor.layer.pipe(Layer.provide(dependencies)),
   };
@@ -313,6 +320,7 @@ describe("ThreadSettlementReactor", () => {
           assert.deepStrictEqual(yield* Ref.get(fixture.summaryCalls), [
             { projectId: LINKED_PROJECT_ID, repository: "owner/repository", number: 42 },
           ]);
+          assert.deepStrictEqual(yield* Ref.get(fixture.summaryRecovery), [false]);
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

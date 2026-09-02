@@ -27,20 +27,7 @@ export class EnvironmentHttpConnectionNotReadyError extends Data.TaggedError(
   "EnvironmentHttpConnectionNotReadyError",
 )<{ readonly message: string }> {}
 
-export const LINKED_PULL_REQUEST_DETAIL_IDLE_TTL_MS = 5_000;
-
-/** Refresh a linked PR while its thread is visible so merges update the sidebar. */
-export function createLinkedPullRequestDetailAtomFamily<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
-) {
-  return createEnvironmentRpcQueryAtomFamily(runtime, {
-    label: "environment-data:pull-requests:linked-detail",
-    tag: WS_METHODS.pullRequestsDetail,
-    staleTimeMs: 15_000,
-    refreshIntervalMs: 30_000,
-    idleTtlMs: LINKED_PULL_REQUEST_DETAIL_IDLE_TTL_MS,
-  });
-}
+export const LINKED_PULL_REQUEST_IDLE_TTL_MS = 5_000;
 
 /** Refresh only the live fields a linked thread renders. */
 export function createLinkedPullRequestSummaryAtomFamily<R, E>(
@@ -51,7 +38,7 @@ export function createLinkedPullRequestSummaryAtomFamily<R, E>(
     tag: WS_METHODS.pullRequestsSummary,
     staleTimeMs: 60_000,
     refreshIntervalMs: 60_000,
-    idleTtlMs: LINKED_PULL_REQUEST_DETAIL_IDLE_TTL_MS,
+    idleTtlMs: LINKED_PULL_REQUEST_IDLE_TTL_MS,
   });
 }
 

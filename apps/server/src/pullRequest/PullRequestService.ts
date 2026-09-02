@@ -131,6 +131,7 @@ export class PullRequestService extends Context.Service<
     ) => Effect.Effect<PullRequestListStatsResult, PullRequestError>;
     readonly summary: (
       input: PullRequestRef,
+      options?: { readonly recoverTransientFailure?: boolean },
     ) => Effect.Effect<PullRequestSummary, PullRequestError>;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
     readonly activity: (
@@ -1073,6 +1074,11 @@ export const make = Effect.gen(function* () {
           Effect.flatMap((page) =>
             Effect.flatMap(Clock.currentTimeMillis, (now) => {
               const rows = new Map<string, Array<ProviderChangeRequest>>();
+              for (const [key, visibleAt] of searchVisibleAt) {
+                if (now - visibleAt > Duration.toMillis(SEARCH_VISIBILITY_TTL)) {
+                  searchVisibleAt.delete(key);
+                }
+              }
               for (const item of page.items) {
                 const key = item.repository.trim().toLowerCase();
                 const held = rows.get(key);
@@ -2039,9 +2045,10 @@ export const make = Effect.gen(function* () {
       timeToLive: (exit) => (Exit.isSuccess(exit) ? SUMMARY_CACHE_TTL : Duration.zero),
     },
   );
-  const summary: PullRequestService["Service"]["summary"] = (input) => {
+  const summary: PullRequestService["Service"]["summary"] = (input, options) => {
     const key = refCacheKey(input);
-    return lastGoodSummary.read(key, Cache.get(summaryCache, key));
+    const cached = Cache.get(summaryCache, key);
+    return options?.recoverTransientFailure === false ? cached : lastGoodSummary.read(key, cached);
   };
 
   // Keys serialize positionally and parse back in the lookup, so the cache is the only holder

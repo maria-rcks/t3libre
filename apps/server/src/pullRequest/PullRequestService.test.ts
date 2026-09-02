@@ -2934,7 +2934,7 @@ it.effect(
     }),
 );
 
-it.effect("shares linked summaries and keeps the last good value through a transient failure", () =>
+it.effect("shares linked summaries and only recovers transient failures for display reads", () =>
   Effect.gen(function* () {
     let calls = 0;
     let failing = false;
@@ -2973,9 +2973,14 @@ it.effect("shares linked summaries and keeps the last good value through a trans
 
     yield* TestClock.adjust("61 seconds");
     failing = true;
+    const strict = yield* Effect.flip(
+      service.summary(reference, { recoverTransientFailure: false }),
+    );
+    assert.strictEqual(strict._tag, "PullRequestOperationError");
+
     const stale = yield* service.summary(reference);
     assert.strictEqual(stale.updatedAt, "2026-07-02T00:00:00Z");
-    assert.strictEqual(calls, 2);
+    assert.strictEqual(calls, 3);
 
     yield* service.invalidate({ reference });
     const invalidated = yield* Effect.flip(service.summary(reference));

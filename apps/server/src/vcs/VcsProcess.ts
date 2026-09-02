@@ -55,6 +55,9 @@ const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
 const OUTPUT_TRUNCATED_MARKER = "\n\n[truncated]";
 const VCS_PROCESS_CONCURRENCY = 8;
 const GITHUB_PROCESS_CONCURRENCY = 4;
+// These limits protect the Node process, including independently built server layer branches.
+const vcsProcesses = Semaphore.makeUnsafe(VCS_PROCESS_CONCURRENCY);
+const githubProcesses = Semaphore.makeUnsafe(GITHUB_PROCESS_CONCURRENCY);
 
 const classifyNonZeroExit = (command: string, stderr: string): VcsProcessExitFailureKind => {
   const normalized = stderr.toLowerCase();
@@ -104,8 +107,6 @@ const classifyNonZeroExit = (command: string, stderr: string): VcsProcessExitFai
 
 export const make = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner.ProcessRunner;
-  const vcsProcesses = yield* Semaphore.make(VCS_PROCESS_CONCURRENCY);
-  const githubProcesses = yield* Semaphore.make(GITHUB_PROCESS_CONCURRENCY);
 
   const runUnbounded = Effect.fn("VcsProcess.runUnbounded")(function* (input: VcsProcessInput) {
     const baseError = {
