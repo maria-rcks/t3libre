@@ -407,35 +407,37 @@ const make = Effect.gen(function* () {
           .pipe(
             temporaryLease === undefined
               ? (effect) => effect
-              : Effect.catchTag("EnvironmentCredentialCreatePersistenceError", (error) => {
-                  const leaseKey = {
-                    userId: input.userId,
-                    environmentId: verified.environmentId,
-                    leaseId: temporaryLease.leaseId,
-                  };
-                  return Effect.gen(function* () {
-                    if (!(yield* temporaryLeases.claimCleanup(leaseKey))) return;
-                    yield* credentials.revokeForEnvironmentPublicKey({
+              : Effect.catchTags({
+                  EnvironmentCredentialCreatePersistenceError: (error) => {
+                    const leaseKey = {
+                      userId: input.userId,
                       environmentId: verified.environmentId,
-                      environmentPublicKey: verified.environmentPublicKey,
-                    });
-                    yield* managedEndpointProvider.deprovision({
-                      ...leaseKey,
-                      target: provisioned?.deprovisionTarget ?? null,
-                    });
-                    yield* temporaryLeases.clear(leaseKey);
-                  }).pipe(
-                    Effect.catchCause((cleanupCause) =>
-                      Effect.logWarning(
-                        "temporary endpoint cleanup after credential failure failed",
-                        {
-                          environmentId: verified.environmentId,
-                          cleanupCause,
-                        },
+                      leaseId: temporaryLease.leaseId,
+                    };
+                    return Effect.gen(function* () {
+                      if (!(yield* temporaryLeases.claimCleanup(leaseKey))) return;
+                      yield* credentials.revokeForEnvironmentPublicKey({
+                        environmentId: verified.environmentId,
+                        environmentPublicKey: verified.environmentPublicKey,
+                      });
+                      yield* managedEndpointProvider.deprovision({
+                        ...leaseKey,
+                        target: provisioned?.deprovisionTarget ?? null,
+                      });
+                      yield* temporaryLeases.clear(leaseKey);
+                    }).pipe(
+                      Effect.catchCause((cleanupCause) =>
+                        Effect.logWarning(
+                          "temporary endpoint cleanup after credential failure failed",
+                          {
+                            environmentId: verified.environmentId,
+                            cleanupCause,
+                          },
+                        ),
                       ),
-                    ),
-                    Effect.andThen(Effect.fail(error)),
-                  );
+                      Effect.andThen(Effect.fail(error)),
+                    );
+                  },
                 }),
           );
         return {
