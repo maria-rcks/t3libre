@@ -656,7 +656,6 @@ describe("ProviderCommandReactor", () => {
       expect(harness.compactThread).not.toHaveBeenCalled();
     }),
   );
-
   effectIt.effect("projects starting before a slow provider session finishes", () =>
     Effect.gen(function* () {
       const releaseStart = yield* Deferred.make<void>();

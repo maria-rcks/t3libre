@@ -760,7 +760,6 @@ export function runtimeEventToActivities(
         beforeTokens !== undefined && afterTokens !== undefined
           ? `Compacted context ${formatTokens(beforeTokens)} → ${formatTokens(afterTokens)} tokens`
           : "Context compacted";
-
       return [
         {
           id: event.eventId,

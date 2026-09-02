@@ -184,7 +184,6 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
       }),
     ),
   );
-
   const respondToRequest = vi.fn(
     (
       _threadId: ThreadId,

@@ -80,7 +80,6 @@ const isCompactCommandMessage = (message: ThreadTitleMessage): boolean =>
   message.role === "user" &&
   (message.attachments?.length ?? 0) === 0 &&
   message.text.trim().toLowerCase() === "/compact";
-
 function mapProviderSessionStatusToOrchestrationStatus(
   status: "connecting" | "ready" | "running" | "error" | "closed",
 ): OrchestrationSession["status"] {
@@ -1240,7 +1239,6 @@ const make = Effect.gen(function* () {
       const detail = formatFailureDetail(cause);
       return appendTurnStartFailure("Context compaction failed", detail).pipe(Effect.asVoid);
     };
-
     const recoverCompactionFailure = (cause: Cause.Cause<unknown>) =>
       handleCompactionFailure(cause).pipe(
         Effect.catchCause((recoveryCause) =>
@@ -1252,7 +1250,6 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
-
     if (isCompactCommand) {
       if (nonCompactUserMessageCount === 0) {
         return yield* appendTurnStartFailure(
@@ -1292,14 +1289,12 @@ const make = Effect.gen(function* () {
       );
       return;
     }
-
     if (compactingThreadIds.has(event.payload.threadId)) {
       return yield* appendTurnStartFailure(
         "Provider turn start failed",
         "Wait for context compaction to finish before sending another message.",
       );
     }
-
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
       messageText: message.text,

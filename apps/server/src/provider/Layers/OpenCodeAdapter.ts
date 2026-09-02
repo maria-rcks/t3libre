@@ -2014,7 +2014,6 @@ export function makeOpenCodeAdapter(
           }
           break;
         }
-
         case "session.compacted": {
           yield* emit({
             ...(yield* buildEventBase({
@@ -3025,7 +3024,6 @@ export function makeOpenCodeAdapter(
           issue: "OpenCode compaction requires an active 'provider/model' selection.",
         });
       }
-
       yield* context.promptSemaphore.withPermit(
         Effect.gen(function* () {
           if (sessions.get(threadId) !== context || (yield* Ref.get(context.stopped))) {
@@ -3066,7 +3064,6 @@ export function makeOpenCodeAdapter(
         }),
       );
     });
-
     const interruptTurn: OpenCodeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
       function* (threadId, turnId) {
         const context = yield* ensureSessionContext(sessions, threadId);

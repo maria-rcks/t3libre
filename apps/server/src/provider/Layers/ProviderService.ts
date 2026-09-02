@@ -378,7 +378,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* settleCompaction(canonicalEvent.threadId, "completed");
         return;
       }
-
       const compactionTerminal =
         canonicalEvent.type === "turn.completed"
           ? canonicalEvent.payload.state
@@ -397,7 +396,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       ) {
         return;
       }
-
       const compactedEvent = {
         ...canonicalEvent,
         eventId: EventId.make(`${canonicalEvent.eventId}:context-compaction`),
