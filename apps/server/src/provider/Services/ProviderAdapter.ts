@@ -65,7 +65,6 @@ export interface ProviderAdapterShape<TError> {
     input: ProviderSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, TError>;
 
-  /** Compact the active provider conversation through its native harness API. */
   readonly compactThread?: (threadId: ThreadId) => Effect.Effect<void, TError>;
 
   /**

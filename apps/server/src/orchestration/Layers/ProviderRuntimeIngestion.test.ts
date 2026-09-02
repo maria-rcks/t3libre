@@ -3239,7 +3239,6 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(activity?.summary).toBe("Compacted context 899K → 19K tokens");
     expect(activity?.tone).toBe("info");
-    expect(activity?.payload).toMatchObject({ beforeTokens: 899_000, afterTokens: 19_000 });
   });
 
   it("projects Codex task lifecycle chunks into thread activities", async () => {

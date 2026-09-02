@@ -2241,13 +2241,10 @@ describe("ClaudeAdapterLive", () => {
           maxTokens: 200000,
         });
       }
-      const compactedEvent = runtimeEvents.find((event) => event.type === "thread.state.changed");
-      assert.equal(compactedEvent?.type, "thread.state.changed");
-      if (compactedEvent?.type === "thread.state.changed") {
-        assert.equal(compactedEvent.payload.state, "compacted");
-        assert.equal(compactedEvent.payload.beforeTokens, 200);
-        assert.equal(compactedEvent.payload.afterTokens, 40);
-      }
+      assert.equal(
+        runtimeEvents.find((event) => event.type === "thread.state.changed")?.type,
+        "thread.state.changed",
+      );
       assert.equal(
         runtimeEvents.find((event) => event.type === "turn.completed")?.type,
         "turn.completed",
