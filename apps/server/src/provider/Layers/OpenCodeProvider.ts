@@ -209,9 +209,7 @@ function openCodeCapabilitiesForModel(input: {
   // covers the common OpenCode variant spectrum; `inferDefaultVariant`
   // picks the provider-appropriate default (e.g. medium for openai/opencode).
   const variantValues =
-    rawVariantValues.length > 0
-      ? rawVariantValues
-      : ["low", "medium", "high", "xhigh"];
+    rawVariantValues.length > 0 ? rawVariantValues : ["low", "medium", "high", "xhigh"];
   const defaultVariant = inferDefaultVariant(input.providerID, variantValues);
   const variantOptions = variantValues.map((value) =>
     defaultVariant === value
