@@ -353,11 +353,26 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       NodeAssert.ok(runtime);
       const compactThread = adapter.compactThread;
       NodeAssert.ok(compactThread);
-      const itemEventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+      const itemEventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 3)).pipe(
         Effect.forkChild,
       );
 
       yield* compactThread(threadId);
+      const queuedTurn = yield* adapter
+        .sendTurn({ threadId, input: "after compact", attachments: [] })
+        .pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 0);
+      yield* runtime.emit({
+        id: asEventId("evt-compaction-turn-started"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "turn/started",
+        threadId,
+        turnId: asTurnId("provider-compact-turn"),
+        payload: {},
+      });
       yield* runtime.emit({
         id: asEventId("evt-compaction-item-completed"),
         kind: "notification",
@@ -381,13 +396,16 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       const itemEvents = Array.from(yield* Fiber.join(itemEventsFiber));
       NodeAssert.deepStrictEqual(
         itemEvents.map((event) => event.type),
-        ["item.completed", "thread.state.changed"],
+        ["turn.started", "item.completed", "thread.state.changed"],
       );
       NodeAssert.equal(itemEvents[0]?.turnId, "provider-compact-turn");
       NodeAssert.equal(itemEvents[1]?.turnId, "provider-compact-turn");
-      if (itemEvents[1]?.type === "thread.state.changed") {
-        NodeAssert.equal(itemEvents[1].payload.state, "compacted");
+      NodeAssert.equal(itemEvents[2]?.turnId, "provider-compact-turn");
+      if (itemEvents[2]?.type === "thread.state.changed") {
+        NodeAssert.equal(itemEvents[2].payload.state, "compacted");
       }
+      yield* Fiber.join(queuedTurn);
+      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
 
       const legacyEventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 3)).pipe(
         Effect.forkChild,

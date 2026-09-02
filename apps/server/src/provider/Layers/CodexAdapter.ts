@@ -30,6 +30,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
+import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -96,6 +97,7 @@ interface CodexAdapterSessionContext {
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
   manualCompactionTurnId: TurnId | undefined;
+  manualCompactionCompletion: Deferred.Deferred<void> | undefined;
   stopped: boolean;
 }
 
@@ -1690,6 +1692,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         }),
     ),
   );
+  const settleManualCompaction = (session: CodexAdapterSessionContext, expectedTurnId?: TurnId) => {
+    if (expectedTurnId !== undefined && session.manualCompactionTurnId !== expectedTurnId) {
+      return Effect.void;
+    }
+    const completion = session.manualCompactionCompletion;
+    session.manualCompactionTurnId = undefined;
+    session.manualCompactionCompletion = undefined;
+    return completion ? Deferred.succeed(completion, undefined).pipe(Effect.asVoid) : Effect.void;
+  };
 
   const startSession: CodexAdapterShape["startSession"] = (input) =>
     Effect.scoped(
@@ -1811,12 +1822,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                   payload: { state: "completed" },
                 },
               ]);
-              session.manualCompactionTurnId = undefined;
+              yield* settleManualCompaction(session, manualCompactionTurnId);
               return;
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
             if (session && completedCompactionItem) {
-              session.manualCompactionTurnId = undefined;
+              yield* settleManualCompaction(session);
             }
           }),
         ).pipe(Effect.forkIn(sessionScope));
@@ -1846,6 +1857,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           runtime,
           eventFiber,
           manualCompactionTurnId: undefined,
+          manualCompactionCompletion: undefined,
           stopped: false,
         });
         sessionScopeTransferred = true;
@@ -1896,6 +1908,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       { concurrency: 1 },
     );
 
+    const initialSession = yield* requireSession(input.threadId);
+    if (initialSession.manualCompactionCompletion) {
+      yield* Deferred.await(initialSession.manualCompactionCompletion);
+    }
     const session = yield* requireSession(input.threadId);
     const reasoningEffort =
       input.modelSelection?.instanceId === boundInstanceId
@@ -1957,15 +1973,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
       const turnId = TurnId.make(`codex-compact-${yield* randomUUIDv4}`);
       session.manualCompactionTurnId = turnId;
+      session.manualCompactionCompletion = yield* Deferred.make<void>();
       yield* session.runtime.compactThread.pipe(
         Effect.mapError((cause) => mapCodexRuntimeError(threadId, "thread/compact/start", cause)),
-        Effect.tapError(() =>
-          Effect.sync(() => {
-            if (session.manualCompactionTurnId === turnId) {
-              session.manualCompactionTurnId = undefined;
-            }
-          }),
-        ),
+        Effect.tapError(() => settleManualCompaction(session, turnId)),
       );
     },
   );
@@ -2059,6 +2070,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     }
     session.stopped = true;
     sessions.delete(session.threadId);
+    yield* settleManualCompaction(session);
     yield* session.runtime.close.pipe(Effect.ignore);
     yield* Effect.ignore(Scope.close(session.scope, Exit.void));
     yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore);
