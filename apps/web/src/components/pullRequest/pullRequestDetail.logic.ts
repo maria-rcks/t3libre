@@ -32,7 +32,7 @@ export function pullRequestCheckoutCommand(
     case "azure-devops":
       return `az repos pr checkout --id ${number}`;
     case "bitbucket":
-      return `git fetch --all && git switch ${shellQuote(headBranch)}`;
+      return `git fetch origin ${shellQuote(`+refs/heads/${headBranch}:refs/remotes/origin/${headBranch}`)} && git switch --force-create ${shellQuote(headBranch)} --track ${shellQuote(`origin/${headBranch}`)}`;
     case "unknown":
       return null;
   }
