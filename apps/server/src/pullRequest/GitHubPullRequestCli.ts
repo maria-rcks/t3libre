@@ -123,6 +123,25 @@ export class GitHubViewerLoginUnavailableError extends Schema.TaggedErrorClass<G
   }
 }
 
+/** Not a decode failure: gh answered, but the pull request carried no update time. */
+export class GitHubPullRequestUpdatedAtUnavailableError extends Schema.TaggedErrorClass<GitHubPullRequestUpdatedAtUnavailableError>()(
+  "GitHubPullRequestUpdatedAtUnavailableError",
+  {
+    command: Schema.Literal("gh"),
+    cwd: Schema.String,
+    repository: Schema.String,
+    number: Schema.Int,
+  },
+) {
+  get detail(): string {
+    return `Pull request ${this.repository}#${this.number} reported no update time.`;
+  }
+
+  override get message(): string {
+    return `GitHub CLI failed in getPullRequestSummary: ${this.detail}`;
+  }
+}
+
 /** Not a decode failure: the reader asked to carry on from a cursor this walk never handed out. */
 export class GitHubDiffCursorError extends Schema.TaggedErrorClass<GitHubDiffCursorError>()(
   "GitHubDiffCursorError",
@@ -250,7 +269,8 @@ export type GitHubPullRequestCliError =
   | GitHubRepositorySelectorError
   | GitHubSubjectScopeError
   | SourceControlRateLimit.SourceControlRateLimitPausedError
-  | GitHubViewerLoginUnavailableError;
+  | GitHubViewerLoginUnavailableError
+  | GitHubPullRequestUpdatedAtUnavailableError;
 
 /** A large pull request can produce a multi-megabyte patch; past this it is truncated. */
 const DIFF_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -1354,11 +1374,11 @@ export const make = Effect.gen(function* () {
           Effect.flatMap((summary) =>
             summary.updatedAt === undefined
               ? Effect.fail(
-                  new GitHubPullRequestReadError({
+                  new GitHubPullRequestUpdatedAtUnavailableError({
                     command: "gh",
                     cwd: input.cwd,
-                    operation: "getPullRequestSummary",
-                    cause: new Error("GitHub did not report when the pull request was updated."),
+                    repository: input.repository,
+                    number: input.number,
                   }),
                 )
               : Effect.succeed({

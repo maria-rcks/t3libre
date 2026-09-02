@@ -2470,10 +2470,15 @@ it.effect("a listing narrowed to some projects is its own cache entry", () =>
 it.effect("an explicit invalidation makes the next listing ask the host again", () =>
   Effect.gen(function* () {
     let hostCalls = 0;
+    let viewerCalls = 0;
     const service = yield* makeService({
       projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
       providers: [
         fakeProvider("github", {
+          getViewer: () => {
+            viewerCalls += 1;
+            return Effect.succeed("bilal");
+          },
           listChangeRequests: () => {
             hostCalls += 1;
             return Effect.succeed({ items: [], truncated: false, continues: false });
@@ -2486,6 +2491,7 @@ it.effect("an explicit invalidation makes the next listing ask the host again", 
     yield* service.invalidate({});
     yield* service.list({ state: "open" });
     assert.strictEqual(hostCalls, 2);
+    assert.strictEqual(viewerCalls, 2);
 
     // Forgetting one change request leaves the listings shared.
     yield* service.invalidate({
@@ -2871,7 +2877,6 @@ it.effect(
     Effect.gen(function* () {
       let coreCalls = 0;
       let activityCalls = 0;
-      let summaryCalls = 0;
       const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
       const service = yield* makeService({
         projects: [
@@ -2899,12 +2904,6 @@ it.effect(
                 },
               });
             },
-            getChangeRequestSummary: () => {
-              summaryCalls += 1;
-              return Effect.succeed({
-                ...changeRequest(1, "2026-07-02T00:00:00Z"),
-              });
-            },
             getChangeRequestActivity: () => {
               activityCalls += 1;
               return Effect.succeed({
@@ -2923,10 +2922,6 @@ it.effect(
       assert.strictEqual(core.body, "Ready before the conversation");
       assert.strictEqual(coreCalls, 1);
       assert.strictEqual(activityCalls, 0);
-
-      const summary = yield* service.summary(reference);
-      assert.strictEqual(summary.state, "open");
-      assert.strictEqual(summaryCalls, 0);
 
       yield* Effect.all([service.activity(reference), service.activity(reference)], {
         concurrency: 2,

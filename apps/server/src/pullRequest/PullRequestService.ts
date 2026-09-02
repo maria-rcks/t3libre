@@ -5,7 +5,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
   PullRequestOperationError,
@@ -715,34 +714,32 @@ export const make = Effect.gen(function* () {
   // "is this host set up" answer the provider switcher shows, and holding it would keep saying
   // signed-out after the reader has signed in.
   const viewersByHost = new Map<string, { readonly at: number; readonly result: ResolvedViewer }>();
-  const viewerLookups = new Map<
-    string,
-    {
-      readonly host: string;
-      readonly kind: SourceControlProviderKind;
-      readonly api: PullRequestProviderApi;
-      readonly roots: ReadonlyArray<string>;
-    }
-  >();
   const viewerFlights = yield* Cache.makeWith(
     (key: string): Effect.Effect<ResolvedViewer> => {
-      const lookup = viewerLookups.get(key)!;
-      return Effect.firstSuccessOf(lookup.roots.map((cwd) => lookup.api.getViewer({ cwd }))).pipe(
+      const [host, kind, roots] = JSON.parse(key) as [
+        string,
+        SourceControlProviderKind,
+        ReadonlyArray<string>,
+      ];
+      const registered = registry.get(kind);
+      if (registered === null) {
+        return Effect.die(new Error(`Missing pull request provider: ${kind}`));
+      }
+      const api = withRateLimitBackoff(registered, host, rateLimits);
+      return Effect.firstSuccessOf(roots.map((cwd) => api.getViewer({ cwd }))).pipe(
         Effect.map((viewer) => ({
-          host: lookup.host,
-          kind: lookup.kind,
+          host,
+          kind,
           viewer: viewer as string | null,
           error: null as PullRequestProviderError | null,
         })),
         Effect.tap((result) =>
-          Effect.map(Clock.currentTimeMillis, (at) =>
-            viewersByHost.set(lookup.host, { at, result }),
-          ),
+          Effect.map(Clock.currentTimeMillis, (at) => viewersByHost.set(host, { at, result })),
         ),
         Effect.catch((error) =>
           Effect.succeed({
-            host: lookup.host,
-            kind: lookup.kind,
+            host,
+            kind,
             viewer: null,
             error,
           }),
@@ -777,11 +774,6 @@ export const make = Effect.gen(function* () {
           const roots =
             viewerRoots.get(host) ?? forHost.map(({ project }) => project.workspaceRoot);
           const key = JSON.stringify([host, api.kind, [...new Set(roots)].sort()]);
-          if (!viewerLookups.has(key) && viewerLookups.size >= VIEWER_CACHE_CAPACITY) {
-            const oldest = viewerLookups.keys().next().value;
-            if (oldest !== undefined) viewerLookups.delete(oldest);
-          }
-          viewerLookups.set(key, { host, kind: api.kind, api, roots });
           return Cache.get(viewerFlights, key);
         }),
       { concurrency: REPOSITORY_CONCURRENCY },
@@ -1109,6 +1101,7 @@ export const make = Effect.gen(function* () {
                     searchVisibilityKey(project.host, project.repository),
                   );
                   const searchIsKnownVisible =
+                    !page.truncated &&
                     lastVisible !== undefined &&
                     now - lastVisible <= Duration.toMillis(SEARCH_VISIBILITY_TTL);
                   if (
@@ -1960,30 +1953,29 @@ export const make = Effect.gen(function* () {
     const read = (key: string, effect: Effect.Effect<A, PullRequestError>) =>
       effect.pipe(
         Effect.tap((value) => record(key, value)),
-        Effect.catch((error) => {
-          if (
-            error._tag !== "PullRequestOperationError" ||
-            !isPullRequestProviderError(error.cause)
-          ) {
-            return Effect.fail(error);
-          }
-          const provider = error.cause;
-          if (provider.reason !== "failed" && provider.reason !== "rate-limited") {
-            return Effect.fail(error);
-          }
-          return Effect.flatMap(Clock.currentTimeMillis, (now) => {
-            const snapshot = held.get(key);
-            if (
-              snapshot === undefined ||
-              now - snapshot.at > Duration.toMillis(STALE_DETAIL_WINDOW)
-            ) {
+        Effect.catchTags({
+          PullRequestOperationError: (error) => {
+            if (!isPullRequestProviderError(error.cause)) {
               return Effect.fail(error);
             }
-            return Effect.logWarning("using recent pull request data after a failed refresh", {
-              operation: error.operation,
-              reason: provider.reason,
-            }).pipe(Effect.as(snapshot.value));
-          });
+            const provider = error.cause;
+            if (provider.reason !== "failed" && provider.reason !== "rate-limited") {
+              return Effect.fail(error);
+            }
+            return Effect.flatMap(Clock.currentTimeMillis, (now) => {
+              const snapshot = held.get(key);
+              if (
+                snapshot === undefined ||
+                now - snapshot.at > Duration.toMillis(STALE_DETAIL_WINDOW)
+              ) {
+                return Effect.fail(error);
+              }
+              return Effect.logWarning("using recent pull request data after a failed refresh", {
+                operation: error.operation,
+                reason: provider.reason,
+              }).pipe(Effect.as(snapshot.value));
+            });
+          },
         }),
       );
     return { read, record };
@@ -2042,18 +2034,6 @@ export const make = Effect.gen(function* () {
   const summary: PullRequestService["Service"]["summary"] = (input) => {
     const key = refCacheKey(input);
     return lastGoodSummary.read(key, Cache.get(summaryCache, key));
-  };
-  const seedSummary = (value: PullRequestSummary) => {
-    const key = refCacheKey(value);
-    return Cache.getOption(summaryCache, key).pipe(
-      Effect.flatMap((held) =>
-        Option.isSome(held) && held.value.updatedAt > value.updatedAt
-          ? Effect.void
-          : Cache.set(summaryCache, key, value).pipe(
-              Effect.andThen(lastGoodSummary.record(key, value)),
-            ),
-      ),
-    );
   };
 
   // Keys serialize positionally and parse back in the lookup, so the cache is the only holder
@@ -2145,22 +2125,7 @@ export const make = Effect.gen(function* () {
   );
   const detail: PullRequestService["Service"]["detail"] = (input) => {
     const key = refCacheKey(input);
-    return lastGoodDetail.read(key, Cache.get(detailCache, key)).pipe(
-      Effect.tap((value) =>
-        seedSummary({
-          provider: value.provider,
-          projectId: value.projectId,
-          repository: value.repository,
-          number: value.number,
-          title: value.title,
-          url: value.url,
-          state: value.state,
-          headBranch: value.headBranch,
-          baseBranch: value.baseBranch,
-          updatedAt: value.updatedAt,
-        }),
-      ),
-    );
+    return lastGoodDetail.read(key, Cache.get(detailCache, key));
   };
 
   const activityCache = yield* Cache.makeWith(
@@ -2246,14 +2211,16 @@ export const make = Effect.gen(function* () {
     return Cache.get(listStatsCache, key);
   };
 
-  const invalidate: PullRequestService["Service"]["invalidate"] = (input) =>
-    Effect.sync(() => {
-      if (input.reference === undefined) {
-        listingsEpoch = ++epochCounter;
-        return;
-      }
-      bumpRefEpoch(input.reference);
-    });
+  const invalidate: PullRequestService["Service"]["invalidate"] = (input) => {
+    const reference = input.reference;
+    if (reference !== undefined) {
+      return Effect.sync(() => bumpRefEpoch(reference));
+    }
+    return Effect.sync(() => {
+      listingsEpoch = ++epochCounter;
+      viewersByHost.clear();
+    }).pipe(Effect.andThen(Cache.invalidateAll(viewerFlights)));
+  };
 
   // A mutation's own client re-reads right after it, and every other client's next read must
   // see the action too — so a write forgets the change request it touched and the listings its
