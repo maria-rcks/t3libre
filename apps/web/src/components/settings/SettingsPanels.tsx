@@ -1201,45 +1201,44 @@ export function AppearanceSettingsPanel() {
           {...searchableSetting("panel-animations")}
           description="Set how fast panels open and close."
           control={
-            <div className="w-full space-y-3 sm:w-72">
-              <div className="flex items-center justify-between gap-3">
-                <label
-                  className="text-xs font-medium text-muted-foreground"
-                  htmlFor="panel-animation-duration"
-                >
-                  Duration
-                </label>
-                <output
-                  className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
-                  htmlFor="panel-animation-duration"
-                >
-                  {settings.panelAnimationDurationMs} ms
-                </output>
-              </div>
-              <input
-                aria-label="Panel animation duration"
-                className="settings-slider w-full"
-                id="panel-animation-duration"
-                max={MAX_PANEL_ANIMATION_DURATION_MS}
-                min={MIN_PANEL_ANIMATION_DURATION_MS}
-                onChange={(event) => {
-                  const panelAnimationDurationMs = Number(event.currentTarget.value);
-                  if (
-                    Number.isInteger(panelAnimationDurationMs) &&
-                    panelAnimationDurationMs >= MIN_PANEL_ANIMATION_DURATION_MS &&
-                    panelAnimationDurationMs <= MAX_PANEL_ANIMATION_DURATION_MS
-                  ) {
-                    updateSettings({ panelAnimationDurationMs });
-                  }
-                }}
-                step={25}
-                style={panelAnimationDurationSliderStyle}
-                type="range"
-                value={settings.panelAnimationDurationMs}
-              />
-              <div className="flex justify-between text-[11px] text-muted-foreground/70">
-                <span>Instant</span>
-                <span>{MAX_PANEL_ANIMATION_DURATION_MS} ms</span>
+            <div className="grid w-full gap-4 sm:w-48 xl:w-auto xl:grid-cols-[12rem_16rem] xl:items-center">
+              <PanelAnimationsPreview durationMs={settings.panelAnimationDurationMs} />
+              <div className="w-full space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <label
+                    className="text-xs font-medium text-muted-foreground"
+                    htmlFor="panel-animation-duration"
+                  >
+                    Duration
+                  </label>
+                  <output
+                    className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                    htmlFor="panel-animation-duration"
+                  >
+                    {settings.panelAnimationDurationMs} ms
+                  </output>
+                </div>
+                <input
+                  aria-label="Panel animation duration"
+                  className="settings-slider w-full"
+                  id="panel-animation-duration"
+                  max={MAX_PANEL_ANIMATION_DURATION_MS}
+                  min={MIN_PANEL_ANIMATION_DURATION_MS}
+                  onChange={(event) => {
+                    const panelAnimationDurationMs = Number(event.currentTarget.value);
+                    if (
+                      Number.isInteger(panelAnimationDurationMs) &&
+                      panelAnimationDurationMs >= MIN_PANEL_ANIMATION_DURATION_MS &&
+                      panelAnimationDurationMs <= MAX_PANEL_ANIMATION_DURATION_MS
+                    ) {
+                      updateSettings({ panelAnimationDurationMs });
+                    }
+                  }}
+                  step={25}
+                  style={panelAnimationDurationSliderStyle}
+                  type="range"
+                  value={settings.panelAnimationDurationMs}
+                />
               </div>
             </div>
           }
@@ -1256,11 +1255,7 @@ export function AppearanceSettingsPanel() {
               />
             ) : null
           }
-        >
-          <div className="mt-4 border-t border-border/60 pt-4">
-            <PanelAnimationsPreview durationMs={settings.panelAnimationDurationMs} />
-          </div>
-        </SettingsRow>
+        />
       </SettingsSection>
 
       <TypographySection />
