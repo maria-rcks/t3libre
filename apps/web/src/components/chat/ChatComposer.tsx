@@ -1295,6 +1295,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     cwd: isPathTrigger ? gitCwd : null,
     query: isPathTrigger ? pathTriggerQuery : null,
   });
+  const compactSlashCommandAvailable =
+    composerTrigger?.kind === "slash-command" &&
+    phase !== "running" &&
+    activePendingApproval === null &&
+    pendingUserInputs.length === 0 &&
+    prompt.slice(composerTrigger.rangeEnd).trim() === "" &&
+    composerImages.length + composerFiles.length === 0 &&
+    composerSendState.sendableTerminalContexts.length === 0 &&
+    composerElementContexts.length +
+      composerPreviewAnnotations.length +
+      composerReviewComments.length ===
+      0;
 
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
@@ -1363,8 +1375,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           skill.description ??
           (skill.scope ? `${skill.scope} skill` : ""),
       }));
+      const visibleProviderSlashCommandItems = providerSlashCommandItems.filter(
+        (item) => item.command.name !== "compact" || compactSlashCommandAvailable,
+      );
       const slashCommandItems = slashCommandItemsForPromptPosition(
-        [...builtInSlashCommandItems, ...providerSlashCommandItems, ...skillItems],
+        [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
         composerTrigger.rangeStart === 0,
       );
       return searchSlashCommandItems(slashCommandItems, query);
@@ -1386,6 +1401,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     return [];
   }, [
+    compactSlashCommandAvailable,
     composerTrigger,
     planModeUiEnabled,
     selectedProvider,

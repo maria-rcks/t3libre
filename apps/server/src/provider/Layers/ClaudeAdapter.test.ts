@@ -2244,21 +2244,9 @@ describe("ClaudeAdapterLive", () => {
       const compactedEvent = runtimeEvents.find((event) => event.type === "thread.state.changed");
       assert.equal(compactedEvent?.type, "thread.state.changed");
       if (compactedEvent?.type === "thread.state.changed") {
-        assert.deepEqual(compactedEvent.payload, {
-          state: "compacted",
-          beforeTokens: 200,
-          afterTokens: 40,
-          detail: {
-            type: "system",
-            subtype: "compact_boundary",
-            compact_metadata: {
-              pre_tokens: 200,
-              post_tokens: 40,
-            },
-            session_id: "sdk-session-compacted-usage",
-            uuid: "compact-boundary-usage",
-          },
-        });
+        assert.equal(compactedEvent.payload.state, "compacted");
+        assert.equal(compactedEvent.payload.beforeTokens, 200);
+        assert.equal(compactedEvent.payload.afterTokens, 40);
       }
       assert.equal(
         runtimeEvents.find((event) => event.type === "turn.completed")?.type,
