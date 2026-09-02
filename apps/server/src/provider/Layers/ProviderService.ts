@@ -50,6 +50,7 @@ import {
   providerTurnMetricAttributes,
   withMetrics,
 } from "../../observability/Metrics.ts";
+import { ProviderAdapterRequestError } from "../Errors.ts";
 import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
@@ -234,13 +235,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const revokeMcpCredential =
     options?.revokeMcpCredential ?? McpSessionRegistry.revokeActiveMcpThread;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
-  const pendingFallbackCompactions = new Map<ThreadId, Deferred.Deferred<void>>();
-  const settleFallbackCompaction = (threadId: ThreadId) => {
+  const pendingFallbackCompactions = new Map<ThreadId, Deferred.Deferred<boolean>>();
+  const settleFallbackCompaction = (threadId: ThreadId, succeeded: boolean) => {
     const completion = pendingFallbackCompactions.get(threadId);
     pendingFallbackCompactions.delete(threadId);
-    return completion
-      ? Deferred.succeed(completion, undefined).pipe(Effect.as(true))
-      : Effect.succeed(false);
+    return completion ? Deferred.succeed(completion, succeeded) : Effect.succeed(false);
   };
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   /**
@@ -363,19 +362,19 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         eventType: canonicalEvent.type,
       });
       yield* publishRuntimeEvent(canonicalEvent);
+      if (!pendingFallbackCompactions.has(canonicalEvent.threadId)) return;
 
-      if (canonicalEvent.type === "session.exited" || canonicalEvent.type === "runtime.error") {
-        yield* settleFallbackCompaction(canonicalEvent.threadId);
-      }
-
+      const fallbackCompactionTerminal =
+        canonicalEvent.type === "session.exited" ||
+        canonicalEvent.type === "runtime.error" ||
+        canonicalEvent.type === "turn.aborted" ||
+        canonicalEvent.type === "turn.completed";
+      const fallbackCompactionSucceeded =
+        canonicalEvent.type === "turn.completed" && canonicalEvent.payload.state === "completed";
       const fallbackCompactionSettled =
-        (canonicalEvent.type === "turn.completed" || canonicalEvent.type === "turn.aborted") &&
-        (yield* settleFallbackCompaction(canonicalEvent.threadId));
-      if (
-        !fallbackCompactionSettled ||
-        canonicalEvent.type !== "turn.completed" ||
-        canonicalEvent.payload.state !== "completed"
-      ) {
+        fallbackCompactionTerminal &&
+        (yield* settleFallbackCompaction(canonicalEvent.threadId, fallbackCompactionSucceeded));
+      if (!fallbackCompactionSettled || !fallbackCompactionSucceeded) {
         return;
       }
 
@@ -884,16 +883,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* routed.adapter.compactThread(routed.threadId, modelSelection);
       } else {
         const input = routed.adapter.provider === "cursor" ? "/compress" : "/compact";
-        const completion = yield* Deferred.make<void>();
+        const completion = yield* Deferred.make<boolean>();
         pendingFallbackCompactions.set(threadId, completion);
-        yield* sendTurn({
+        const succeeded = yield* sendTurn({
           threadId,
           input,
           ...(modelSelection !== undefined ? { modelSelection } : {}),
         }).pipe(
-          Effect.flatMap(() => Deferred.await(completion)),
+          Effect.andThen(Deferred.await(completion)),
           Effect.ensuring(Effect.sync(() => void pendingFallbackCompactions.delete(threadId))),
         );
+        if (!succeeded) {
+          return yield* new ProviderAdapterRequestError({
+            provider: routed.adapter.provider,
+            method: "thread/compact",
+            detail: "Fallback context compaction failed.",
+          });
+        }
       }
       yield* analytics.record("provider.thread.compacted", {
         provider: routed.adapter.provider,

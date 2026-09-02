@@ -25,12 +25,7 @@ function claudeProvider(input: {
     auth: { status: "authenticated" },
     checkedAt: "2026-08-24T12:00:00.000Z",
     models: [],
-    slashCommands: [
-      {
-        name: "compact",
-        description: "Summarize the conversation and reduce context usage",
-      },
-    ],
+    slashCommands: [{ name: "compact", description: "" }],
     skills: [],
   };
 }
