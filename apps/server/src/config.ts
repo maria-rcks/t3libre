@@ -77,6 +77,8 @@ export class ServerConfig extends Context.Service<
     readonly baseDir: string;
     readonly staticDir: string | undefined;
     readonly devUrl: URL | undefined;
+    /** Route public dev requests through the backend to Vite for T3 Connect sharing. */
+    readonly connectDevShare?: boolean;
     readonly devAllowedOrigins: ReadonlyArray<string>;
     readonly noBrowser: boolean;
     readonly startupPresentation: StartupPresentation;

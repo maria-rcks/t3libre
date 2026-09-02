@@ -1560,6 +1560,137 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("proxies public T3 Connect dev requests to Vite and keeps T3 routes local", () =>
+    Effect.gen(function* () {
+      const upstreamRequests: Array<{
+        readonly url: string | undefined;
+        readonly authorization: string | undefined;
+      }> = [];
+      const viteServer = yield* Effect.acquireRelease(
+        Effect.promise(async () => {
+          const NodeHttp = await import("node:http");
+          return await new Promise<{
+            readonly origin: string;
+            readonly close: () => Promise<void>;
+          }>((resolve, reject) => {
+            const server = NodeHttp.createServer((request, response) => {
+              upstreamRequests.push({
+                url: request.url,
+                authorization: request.headers.authorization,
+              });
+              response.writeHead(200, { "content-type": "application/javascript" });
+              response.end("export const connectDevShare = true;");
+            });
+            const socketServer = new NodeSocket.NodeWS.WebSocketServer({ server });
+            socketServer.on("connection", (socket) => {
+              socket.on("message", (message) => socket.send(`vite:${message.toString()}`));
+            });
+            server.on("error", reject);
+            server.listen(0, "127.0.0.1", () => {
+              const address = server.address();
+              if (address === null || typeof address === "string") {
+                reject(new Error("Expected Vite test server to listen on TCP"));
+                return;
+              }
+              resolve({
+                origin: `http://127.0.0.1:${String(address.port)}`,
+                close: () =>
+                  new Promise<void>((resolveClose, rejectClose) => {
+                    socketServer.close();
+                    server.close((error) => {
+                      if (error) rejectClose(error);
+                      else resolveClose();
+                    });
+                  }),
+              });
+            });
+          });
+        }),
+        ({ close }) => Effect.promise(close),
+      );
+      yield* buildAppUnderTest({
+        config: {
+          devUrl: new URL(viteServer.origin),
+          connectDevShare: true,
+        },
+      });
+
+      const NodeHttp = yield* Effect.promise(() => import("node:http"));
+      const publicUrl = yield* getHttpServerUrl(
+        `/__t3-connect-dev-share/${String(process.pid)}/src/main.ts?marker=connect`,
+      );
+      const response = yield* Effect.callback<
+        { readonly body: string; readonly headers: NodeJS.Dict<string | string[] | undefined> },
+        Error
+      >((resume) => {
+        const request = NodeHttp.get(
+          publicUrl,
+          {
+            headers: {
+              host: "environment.tunnels.example.com",
+              "cf-ray": "test-ray",
+              connection: "keep-alive, x-private-hop",
+              "x-private-hop": "secret",
+              authorization: "Bearer environment-token",
+            },
+          },
+          (incoming) => {
+            const chunks: Array<Uint8Array> = [];
+            incoming.on("data", (chunk: Uint8Array) => chunks.push(chunk));
+            incoming.once("error", (error) => resume(Effect.fail(error)));
+            incoming.once("end", () =>
+              resume(
+                Effect.succeed({
+                  body: Buffer.concat(chunks).toString("utf8"),
+                  headers: incoming.headers,
+                }),
+              ),
+            );
+          },
+        );
+        request.once("error", (error) => resume(Effect.fail(error)));
+        return Effect.sync(() => request.destroy());
+      });
+      assert.deepInclude(response.headers, {
+        "cache-control": "no-store",
+        "cloudflare-cdn-cache-control": "no-store",
+        "x-t3-connect-dev-share": "vite",
+      });
+      assert.equal(response.body, "export const connectDevShare = true;");
+      assert.deepEqual(upstreamRequests, [
+        {
+          url: "/src/main.ts?marker=connect",
+          authorization: undefined,
+        },
+      ]);
+
+      const descriptor = yield* HttpClient.get("/.well-known/t3/environment", {
+        headers: { host: "environment.tunnels.example.com", "cf-ray": "test-ray" },
+      });
+      assert.equal(descriptor.status, 200);
+      assert.equal(upstreamRequests.length, 1);
+
+      const socketUrl = (yield* getHttpServerUrl("/hmr")).replace(/^http:/u, "ws:");
+      const echoed = yield* Effect.acquireUseRelease(
+        Effect.callback<NodeSocket.NodeWS.WebSocket, Error>((resume) => {
+          const socket = new NodeSocket.NodeWS.WebSocket(socketUrl, {
+            headers: { host: "environment.tunnels.example.com", "cf-ray": "test-ray" },
+          });
+          socket.on("open", () => resume(Effect.succeed(socket)));
+          socket.on("error", (error) => resume(Effect.fail(error)));
+        }),
+        (socket) =>
+          Effect.callback<string, Error>((resume) => {
+            socket.once("message", (message) => resume(Effect.succeed(message.toString())));
+            socket.once("error", (error) => resume(Effect.fail(error)));
+            socket.send("ping");
+          }),
+        (socket) => Effect.sync(() => socket.close()),
+      );
+      assert.equal(echoed, "vite:ping");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("serves the public environment descriptor without requiring auth", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();

@@ -27,6 +27,11 @@ authenticated.
   Shared runs default to Vite's bundled dev mode (`T3CODE_BUNDLED_DEV=1`): a remote browser pays a
   network round trip per import level in unbundled dev, which turns a cold module graph into
   minutes of waterfall. Set `T3CODE_BUNDLED_DEV=0` to opt a shared run back out.
+- `vp run dev --share --share-via=t3-connect`: Publishes the same single-origin dev stack through
+  T3 Connect without Tailscale. Run `node apps/server/src/bin.ts connect login --base-dir .t3`
+  once for the worktree first. The managed tunnel terminates at the backend: T3 routes stay there,
+  while other HTTP requests and WebSocket upgrades are proxied to Vite. The tunnel is removed on
+  exit, and the worktree remains authorized for the next run.
 - `vp run dev --browser`: Auto-opens a browser. Off by default. The dev runner writes
   `T3CODE_NO_BROWSER` itself from this flag, so setting `T3CODE_NO_BROWSER=0` in your environment has
   no effect; use `--browser`.

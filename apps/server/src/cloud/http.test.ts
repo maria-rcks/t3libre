@@ -185,15 +185,8 @@ describe("relay request tracing", () => {
 });
 
 describe("reconcileDesiredCloudLink", () => {
-  it.effect("requires stored CLI authorization without exposing an HTTP endpoint", () =>
-    Effect.gen(function* () {
-      const error = yield* Effect.flip(reconcileDesiredCloudLink("http://127.0.0.1:3774"));
-
-      expect(error).toMatchObject({
-        _tag: "EnvironmentHttpUnauthorizedError",
-        message: "Run `t3 connect link` to authorize this environment.",
-      });
-    }).pipe(
+  const provideMissingAuthorization = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
       Effect.provideService(
         ServerSecretStore.ServerSecretStore,
         makeSecretStore(unusedSecretStoreOperation),
@@ -230,7 +223,30 @@ describe("reconcileDesiredCloudLink", () => {
         HttpClient.make(() => unusedSecretStoreOperation()),
       ),
       Effect.provide(NodeServices.layer),
-    ),
+    );
+
+  it.effect("requires stored CLI authorization without exposing an HTTP endpoint", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(reconcileDesiredCloudLink("http://127.0.0.1:3774"));
+
+      expect(error).toMatchObject({
+        _tag: "EnvironmentHttpUnauthorizedError",
+        message: "Run `t3 connect link` to authorize this environment.",
+      });
+    }).pipe(provideMissingAuthorization),
+  );
+
+  it.effect("points an ephemeral dev share at one-time Connect login", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        reconcileDesiredCloudLink("http://127.0.0.1:3774", { persistDesired: false }),
+      );
+
+      expect(error).toMatchObject({
+        _tag: "EnvironmentHttpUnauthorizedError",
+        message: "Run `t3 connect login --base-dir <worktree>/.t3` once, then retry the dev share.",
+      });
+    }).pipe(provideMissingAuthorization),
   );
 });
 
@@ -266,6 +282,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
     readonly applyConfigCalls: Array<unknown>;
     readonly requests: Array<HttpClientRequest.HttpClientRequest>;
     readonly respond?: () => Response;
+    readonly connectDevShare?: boolean;
   }
 
   // Writes the launcher's durable state file into this test's baseDir with
@@ -338,7 +355,16 @@ describe("releaseManagedTunnelOnShutdown", () => {
         // The release consults the launcher state file under the configured
         // baseDir, so every harness run gets a scoped temp baseDir.
         Effect.provide(
-          ServerConfigModule.layerTest("/", { prefix: "t3-http-release-test-" }).pipe(
+          Layer.effect(
+            ServerConfigModule.ServerConfig,
+            Effect.map(ServerConfigModule.ServerConfig, (config) =>
+              ServerConfigModule.make({
+                ...config,
+                connectDevShare: harness.connectDevShare ?? false,
+              }),
+            ),
+          ).pipe(
+            Layer.provide(ServerConfigModule.layerTest("/", { prefix: "t3-http-release-test-" })),
             Layer.provideMerge(NodeServices.layer),
           ),
         ),
@@ -406,6 +432,32 @@ describe("releaseManagedTunnelOnShutdown", () => {
       expect(requests).toEqual([]);
       expect(values.has(CLOUD_ENDPOINT_RUNTIME_CONFIG)).toBe(true);
     }).pipe(provideReleaseHarness({ store, applyConfigCalls, requests }));
+  });
+
+  it.effect("releases an ephemeral Connect dev-share tunnel without durable intent", () => {
+    const { store, values } = makeMemorySecretStore([
+      [CLOUD_ENDPOINT_RUNTIME_CONFIG, "runtime-config"],
+      [RELAY_URL_SECRET, "https://relay.example.test"],
+    ]);
+    const applyConfigCalls: Array<unknown> = [];
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      const released = yield* releaseManagedTunnelOnShutdown();
+
+      expect(released).toBe(true);
+      expect(applyConfigCalls).toEqual([null]);
+      expect(requests).toHaveLength(1);
+      expect(values.has(CLOUD_ENDPOINT_RUNTIME_CONFIG)).toBe(false);
+      expect(values.has(CLOUD_CLI_DESIRED_LINK_SECRET)).toBe(false);
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls,
+        requests,
+        connectDevShare: true,
+      }),
+    );
   });
 
   it.effect("leaves the tunnel of a publish-only desired link untouched", () => {

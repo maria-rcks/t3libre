@@ -24,7 +24,8 @@ If no server is running, `t3 pair` says so and points you at `npx t3 serve` or `
 
 ## Recommended Setup
 
-Use a trusted private network that meshes your devices together, such as a tailnet.
+Use T3 Connect for account-authenticated remote access without configuring a private network. Use
+a trusted private network such as a tailnet when you want access limited to that network.
 
 That gives you:
 
@@ -34,8 +35,15 @@ That gives you:
 
 ## Enabling Network Access
 
-There are three ways to reach your server from another device: expose the desktop app's backend,
-run a headless server from the CLI, or have the desktop app launch T3 Code over SSH.
+There are four ways to reach your server from another device: T3 Connect, expose the desktop app's
+backend, run a headless server from the CLI, or have the desktop app launch T3 Code over SSH.
+
+### T3 Connect
+
+T3 Connect provisions an authenticated HTTPS/WSS endpoint and does not require Tailscale. Open
+**Settings** → **Connections** and enable T3 Connect, or use `npx t3 connect link` on a headless
+machine. Clients signed in to the same account discover the environment through the relay, while
+application traffic travels directly through its managed tunnel.
 
 ### Option 1: Desktop App
 
@@ -76,7 +84,8 @@ on the **Tailscale HTTPS** row in **Settings** → **Connections**. The desktop 
 backend with the same server-side behavior as `t3 serve --tailscale-serve`, then the server asks
 Tailscale Serve to proxy HTTPS traffic to the local backend. Turn the same switch off to stop it.
 
-The Tailscale support is an endpoint provider add-on. The core remote model still works without Tailscale: LAN HTTP endpoints, custom HTTPS endpoints, future tunnels, and SSH-launched environments all use the same saved environment and pairing flow.
+The Tailscale support is an endpoint provider add-on. The core remote model also works with T3
+Connect managed tunnels, LAN HTTP endpoints, custom HTTPS endpoints, and SSH-launched environments.
 
 For `https://app.t3.codes`, prefer an HTTPS Tailnet or other HTTPS endpoint. A plain `http://100.x.y.z:3773` endpoint can still work from a desktop client or another browser page served over HTTP, but it will not work from the hosted HTTPS app because of browser mixed-content rules.
 

@@ -101,6 +101,7 @@ import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
+import { connectDevShareProxyLayer } from "./cloud/DevShareProxy.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as DesktopAppUpdate from "./desktopUpdate/DesktopAppUpdate.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
@@ -493,6 +494,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   ),
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
 ).pipe(
+  Layer.provide(connectDevShareProxyLayer),
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(PullRequestServiceLive),
@@ -612,6 +614,11 @@ export const makeServerLayer = Layer.unwrap(
     const cloudDesiredLinkReconcileLayer = Layer.effectDiscard(
       Effect.gen(function* () {
         if (!hasCloudPublicConfig) {
+          if (config.connectDevShare === true) {
+            yield* Effect.logWarning(
+              "T3 Connect dev sharing is unavailable because this source build has no public Connect configuration. Copy .env.example to .env and retry.",
+            );
+          }
           yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
           return;
         }
@@ -643,7 +650,8 @@ export const makeServerLayer = Layer.unwrap(
             if (!cleanupBeforeActivation) {
               yield* Effect.addFinalizer(() => releaseManagedTunnel);
             }
-            if (!(yield* CloudCliState.readCliDesiredCloudLink)) return;
+            const connectDevShare = config.connectDevShare === true;
+            if (!connectDevShare && !(yield* CloudCliState.readCliDesiredCloudLink)) return;
             const server = yield* HttpServer.HttpServer;
             const address = server.address;
             if (typeof address === "string" || !("port" in address)) return;
@@ -653,7 +661,22 @@ export const makeServerLayer = Layer.unwrap(
             // covers anything this sleep used to hedge against. Every
             // millisecond here is dead time on the path to remote
             // reachability after a restart.
-            yield* reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`).pipe(
+            const reconcileCloudLink = Effect.gen(function* () {
+              if (connectDevShare) {
+                const relayClient = yield* RelayClient.RelayClient;
+                const executable = yield* relayClient.resolve;
+                if (executable.status !== "available") {
+                  const installed = yield* relayClient.install;
+                  yield* Effect.logInfo("Relay client installed for T3 Connect dev sharing", {
+                    version: installed.version,
+                  });
+                }
+              }
+              return yield* reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`, {
+                persistDesired: !connectDevShare,
+              });
+            });
+            yield* reconcileCloudLink.pipe(
               Effect.retry({
                 while: (error) =>
                   error._tag !== "EnvironmentHttpBadRequestError" &&
@@ -666,7 +689,17 @@ export const makeServerLayer = Layer.unwrap(
                   Schedule.upTo({ duration: "10 minutes" }),
                 ),
               }),
-              Effect.tap(() => Effect.logInfo("T3 Connect desired link reconciled on startup")),
+              Effect.tap((link) =>
+                connectDevShare
+                  ? Effect.gen(function* () {
+                      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+                      const pairingUrl = yield* serverAuth.issueStartupPairingUrl(
+                        link.endpoint.httpBaseUrl,
+                      );
+                      yield* Effect.logInfo("T3 Connect dev server ready", { pairingUrl });
+                    })
+                  : Effect.logInfo("T3 Connect desired link reconciled on startup"),
+              ),
               Effect.catch((cause) =>
                 Effect.logWarning("Failed to reconcile T3 Connect desired link on startup", {
                   cause,

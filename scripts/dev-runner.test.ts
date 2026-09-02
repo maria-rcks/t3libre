@@ -1011,6 +1011,51 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       });
     });
 
+    it.effect("shares through T3 Connect without invoking Tailscale", () => {
+      const spawnedCommands: Array<string> = [];
+      let spawnedEnv: Record<string, string | undefined> | undefined;
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          const spawned = command as unknown as {
+            readonly command: string;
+            readonly options?: { readonly env?: Record<string, string | undefined> };
+          };
+          spawnedCommands.push(spawned.command);
+          spawnedEnv = spawned.options?.env;
+          return Effect.succeed(mockProcess(0));
+        }),
+      );
+
+      return Effect.gen(function* () {
+        yield* runDevRunnerWithInput({
+          ...devServerInput,
+          mode: "dev",
+          port: undefined,
+          share: true,
+          shareVia: "t3-connect",
+        }).pipe(
+          Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
+          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcessEnvironment, {
+            VITE_CLERK_PUBLISHABLE_KEY: "pk_parent",
+            VITE_CLERK_JWT_TEMPLATE: "template_parent",
+            VITE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_parent",
+            VITE_T3CODE_RELAY_URL: "https://relay.example.test",
+          }),
+        );
+
+        assert.deepStrictEqual(spawnedCommands, ["vp"]);
+        assert.equal(spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, "1");
+        assert.equal(spawnedEnv?.T3CODE_BUNDLED_DEV, "1");
+        assert.match(spawnedEnv?.VITE_DEV_SERVER_URL ?? "", /^http:\/\/localhost:/u);
+        assert.equal(spawnedEnv?.VITE_CLERK_PUBLISHABLE_KEY, undefined);
+        assert.equal(spawnedEnv?.VITE_CLERK_JWT_TEMPLATE, undefined);
+        assert.equal(spawnedEnv?.VITE_CLERK_CLI_OAUTH_CLIENT_ID, undefined);
+        assert.equal(spawnedEnv?.VITE_T3CODE_RELAY_URL, undefined);
+      });
+    });
+
     // A shared origin means a remote browser, where unbundled dev's
     // per-module waterfall pays a tailnet round trip per import level. The
     // runner defaults bundled dev on for the spawned stack, but only

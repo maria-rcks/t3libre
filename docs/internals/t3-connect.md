@@ -116,6 +116,18 @@ t3 connect logout
 
 `t3 serve` is a separate top-level command, not a connect subcommand.
 
+### Dev sharing
+
+`vp run dev --share --share-via=t3-connect` is the ephemeral development counterpart to
+`vp run dev --share`. It uses the worktree's isolated `.t3` state and requires a stored CLI OAuth
+credential from `t3 connect login --base-dir .t3`. The run does not record durable link intent.
+
+The managed tunnel continues to target the backend port. When Connect dev sharing is enabled, the
+backend keeps `/api`, `/ws`, `/oauth`, and `/.well-known` and proxies every other public HTTP or
+WebSocket request to Vite. This preserves one origin for pairing, API calls, and HMR without
+allowing the managed hostname through Vite's host check. Shutdown removes the managed tunnel but
+keeps the worktree authorization.
+
 `t3 connect login` opens the Clerk authorization flow and stores the CLI credential without enabling
 cloud exposure. `t3 connect link` installs the pinned managed `cloudflared` binary when needed,
 authorizes when needed, and records durable intent to expose the environment. It works without a

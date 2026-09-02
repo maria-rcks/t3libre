@@ -86,6 +86,8 @@ const MODE_ARGS = {
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
 type DevMode = keyof typeof MODE_ARGS;
+const DEV_SHARE_PROVIDERS = ["tailscale", "t3-connect"] as const;
+type DevShareProvider = (typeof DEV_SHARE_PROVIDERS)[number];
 /**
  * `role` matters because only the backend honours `--host`/`T3CODE_HOST`; the
  * web port is always loopback. Passed explicitly rather than inferred from the
@@ -208,11 +210,6 @@ const optionalStringConfig = (name: string): Config.Config<string | undefined> =
   );
 const optionalBooleanConfig = (name: string): Config.Config<boolean | undefined> =>
   Config.boolean(name).pipe(
-    Config.option,
-    Config.map((value) => Option.getOrUndefined(value)),
-  );
-const optionalPortConfig = (name: string): Config.Config<number | undefined> =>
-  Config.port(name).pipe(
     Config.option,
     Config.map((value) => Option.getOrUndefined(value)),
   );
@@ -627,6 +624,7 @@ interface DevRunnerCliInput {
   readonly devUrl: URL | undefined;
   readonly dryRun: boolean;
   readonly share: boolean;
+  readonly shareVia?: DevShareProvider;
   readonly runArgs: ReadonlyArray<string>;
 }
 
@@ -718,6 +716,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
 
     const sharedWebPort = BASE_WEB_PORT + webOffset;
     if (input.share) {
+      const shareVia = input.shareVia ?? "tailscale";
       if (input.mode === "dev:server") {
         yield* Effect.logInfo("[dev-runner] --share has no effect for dev:server (no web server).");
       } else if (input.mode === "dev:desktop") {
@@ -729,6 +728,27 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         // a URL that is broken in a way the user cannot see.
         yield* Effect.logWarning(
           "[dev-runner] --share is not supported for dev:desktop (the renderer is pinned to loopback). Use `dev`, which runs the whole browser stack.",
+        );
+      } else if (shareVia === "t3-connect") {
+        // The backend remains the managed tunnel target so T3's authenticated
+        // API and WebSocket routes terminate normally. Public non-T3 requests
+        // are forwarded from there to Vite by the server-side dev-share proxy.
+        // This avoids exposing a second port and keeps Vite's Host validation
+        // intact. A stored `t3 connect login` credential is required; startup
+        // reports a direct remedy when it is absent.
+        env.T3CODE_CONNECT_DEV_SHARE = "1";
+        // loadRepoEnv runs once before CLI parsing, so remove any browser-side
+        // cloud aliases it already projected. Vite calls the loader again and
+        // uses the marker above to keep them absent on config reloads.
+        delete env.VITE_CLERK_PUBLISHABLE_KEY;
+        delete env.VITE_CLERK_JWT_TEMPLATE;
+        delete env.VITE_CLERK_CLI_OAUTH_CLIENT_ID;
+        delete env.VITE_T3CODE_RELAY_URL;
+        if (env.T3CODE_BUNDLED_DEV === undefined) {
+          env.T3CODE_BUNDLED_DEV = "1";
+        }
+        yield* Effect.logInfo(
+          "[dev-runner] sharing through T3 Connect; the managed pairing URL will follow after startup",
         );
       } else {
         // acquireRelease, not share-then-addFinalizer: the mapping outlives this
@@ -885,8 +905,11 @@ const devRunnerCli = Command.make("dev-runner", {
   ),
   port: Flag.integer("port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-    Flag.withDescription("Server port override (forwards to T3CODE_PORT)."),
-    Flag.withFallbackConfig(optionalPortConfig("T3CODE_PORT")),
+    Flag.withDescription(
+      "Server port override. Ambient T3CODE_PORT is ignored so a parent T3 server cannot pin this child runner to its own port.",
+    ),
+    Flag.optional,
+    Flag.map(Option.getOrUndefined),
   ),
   devUrl: Flag.string("dev-url").pipe(
     Flag.withSchema(Schema.URLFromString),
@@ -902,9 +925,15 @@ const devRunnerCli = Command.make("dev-runner", {
   ),
   share: Flag.boolean("share").pipe(
     Flag.withDescription(
-      "Publish the web dev server on this machine's tailnet over HTTPS (via `tailscale serve`) and print the pairing URL for it. Removed again on exit.",
+      "Publish the web dev server over HTTPS and print a pairing URL. Uses Tailscale unless --share-via is set.",
     ),
     Flag.withDefault(false),
+  ),
+  shareVia: Flag.choice("share-via", DEV_SHARE_PROVIDERS).pipe(
+    Flag.withDescription(
+      "Sharing transport: tailscale uses private tailnet Serve; t3-connect uses an authenticated managed tunnel.",
+    ),
+    Flag.withDefault("tailscale"),
   ),
   runArgs: Argument.string("run-arg").pipe(
     Argument.withDescription("Additional Vite+ run args (pass after `--`)."),

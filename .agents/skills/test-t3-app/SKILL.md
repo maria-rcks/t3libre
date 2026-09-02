@@ -13,7 +13,7 @@ Use this skill for the web client. For iOS Simulator, Android Emulator, or physi
 2. Choose a base directory that belongs only to the current worktree or test:
    - Use the repository's ignored `.t3` directory for reusable worktree-local state.
    - Use `mktemp -d /tmp/t3code-test.XXXXXX` for disposable state and retain the printed absolute path.
-3. Start the full web stack with `vp run dev`. Add `--share` when the user needs to open it from another tailnet device. In a linked worktree it defaults to that worktree's gitignored `.t3`; pass `--home-dir <base-dir>` only when the test needs a different isolated directory.
+3. Start the full web stack with `vp run dev`. For remote access without a tailnet, authorize once with `node apps/server/src/bin.ts connect login --base-dir .t3`, then add `--share --share-via=t3-connect`. Plain `--share` uses Tailscale. In a linked worktree it defaults to that worktree's gitignored `.t3`; pass `--home-dir <base-dir>` only when the test needs a different isolated directory.
 4. Keep the terminal session alive and read the selected server port, web port, base directory, and pairing URL from its output.
 
 Treat a base directory as disposable only when it was created or deliberately selected for the current test. Never delete or directly seed the shared `~/.t3` directory. Prefer starting with a new temporary base directory over clearing state of uncertain ownership.
@@ -54,7 +54,7 @@ Keep pairing URLs out of screenshots, committed files, and durable logs. When th
 
 ## Recover a consumed or expired pairing token
 
-Run `node apps/server/src/bin.ts pair` from the repository root. It discovers the running dev server (worktree `.t3` first, same precedence as the dev runner) and prints a fresh `Pair URL` against the server's current web origin, including a `--share` tailnet origin. Pass `--base-dir <base-dir>` only when the server was started with `--home-dir`, using the identical path.
+Run `node apps/server/src/bin.ts pair` from the repository root for local or Tailscale sharing. A T3 Connect dev share prints its managed pairing URL during startup; restart it for another administrative token. Pass `--base-dir <base-dir>` only when the server was started with `--home-dir`, using the identical path.
 
 Tokens from `pair` carry standard client scopes. The startup pairing URL carries admin scopes; if the user needs Settings → Connections management (`access:write`), restart the server and hand over the new startup URL instead.
 

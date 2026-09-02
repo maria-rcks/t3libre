@@ -100,6 +100,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   T3CODE_HOST: "0.0.0.0",
                   T3CODE_HOME: baseDir,
                   VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
+                  T3CODE_CONNECT_DEV_SHARE: "true",
                   T3CODE_DEV_ALLOWED_ORIGINS:
                     "https://host.example.ts.net, https://phone.example.ts.net ",
                   T3CODE_NO_BROWSER: "true",
@@ -124,6 +125,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         host: "0.0.0.0",
         staticDir: undefined,
         devUrl: new URL("http://127.0.0.1:5173"),
+        connectDevShare: true,
         devAllowedOrigins: ["https://host.example.ts.net", "https://phone.example.ts.net"],
         noBrowser: true,
         startupPresentation: "browser",

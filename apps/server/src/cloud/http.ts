@@ -538,7 +538,11 @@ const relayClientRequest = <A>(
   );
 
 const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesiredLinkWith")(
-  function* (dependencies: CloudHttpDependencies, localOrigin: string) {
+  function* (
+    dependencies: CloudHttpDependencies,
+    localOrigin: string,
+    options: { readonly persistDesired?: boolean } = {},
+  ) {
     const localUrl = yield* Effect.try({
       try: () => new URL(localOrigin),
       catch: () =>
@@ -558,7 +562,10 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
           onNone: () =>
             Effect.fail(
               new EnvironmentHttpUnauthorizedError({
-                message: "Run `t3 connect link` to authorize this environment.",
+                message:
+                  options.persistDesired === false
+                    ? "Run `t3 connect login --base-dir <worktree>/.t3` once, then retry the dev share."
+                    : "Run `t3 connect link` to authorize this environment.",
               }),
             ),
           onSome: Effect.succeed,
@@ -606,8 +613,10 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
       },
       schema: RelayEnvironmentLinkResponse,
     });
-    yield* setCliDesiredCloudLink(true, mode);
-    return yield* applyCloudRelayConfig(dependencies, {
+    if (options.persistDesired !== false) {
+      yield* setCliDesiredCloudLink(true, mode);
+    }
+    const relayConfig = yield* applyCloudRelayConfig(dependencies, {
       relayUrl,
       relayIssuer: link.relayIssuer,
       cloudUserId: link.cloudUserId,
@@ -615,6 +624,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
       cloudMintPublicKey: link.cloudMintPublicKey,
       endpointRuntime: link.endpointRuntime,
     });
+    return { ...relayConfig, endpoint: link.endpoint };
   },
   Effect.catchIf(
     ServerSecretStore.isSecretStoreError,
@@ -630,8 +640,8 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
 );
 
 export const reconcileDesiredCloudLink = Effect.fn("environment.cloud.reconcileDesiredLink")(
-  function* (localOrigin: string) {
-    return yield* reconcileDesiredCloudLinkWith(yield* cloudHttpDependencies, localOrigin);
+  function* (localOrigin: string, options?: { readonly persistDesired?: boolean }) {
+    return yield* reconcileDesiredCloudLinkWith(yield* cloudHttpDependencies, localOrigin, options);
   },
 );
 
@@ -675,18 +685,20 @@ export const releaseManagedTunnelOnShutdown = Effect.fn(
   "environment.cloud.releaseManagedTunnelOnShutdown",
 )(function* () {
   const dependencies = yield* cloudHttpDependencies;
+  const config = yield* ServerConfig.ServerConfig;
   // Only a managed link stores a runtime config; publish-only links have no
   // tunnel to release.
   const runtimeConfig = yield* dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG);
   if (Option.isNone(runtimeConfig)) {
     return false;
   }
-  // Only CLI-desired managed links release on shutdown, because the startup
-  // reconcile that provisions the replacement tunnel only runs for them. A
-  // link installed by a web/mobile client comes back after a restart by
-  // reapplying the stored connector token — it has no boot-time re-provision
-  // path — so its tunnel must survive the restart. (Unlink still deletes it.)
-  if (!(yield* readCliDesiredCloudLink) || (yield* readCliDesiredLinkMode) !== "managed") {
+  // CLI-desired links and ephemeral dev shares both release on shutdown.
+  // A link installed by a web/mobile client comes back after a restart by
+  // reapplying the stored connector token, so its tunnel must survive.
+  if (
+    config.connectDevShare !== true &&
+    (!(yield* readCliDesiredCloudLink) || (yield* readCliDesiredLinkMode) !== "managed")
+  ) {
     return false;
   }
   // A shutdown that hands off to a pending remote update is not the

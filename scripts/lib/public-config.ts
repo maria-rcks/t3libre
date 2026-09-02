@@ -34,7 +34,7 @@ export function loadRepoEnv({
   const localEnv = readEnvFile(NodePath.join(repoRoot, ".env.local"));
   const config = resolvePublicConfig(baseEnv, localEnv, rootEnv);
 
-  return {
+  const environment = {
     ...rootEnv,
     ...localEnv,
     ...baseEnv,
@@ -101,6 +101,20 @@ export function loadRepoEnv({
         }
       : {}),
   };
+
+  // A Connect dev share still needs the canonical cloud values on the server
+  // to create its tunnel, but the browser is paired directly with that server.
+  // Projecting Clerk and relay aliases into Vite would switch the UI into the
+  // hosted sign-in flow, where Clerk correctly rejects the ephemeral relay
+  // hostname. Keep this browser build in ordinary local-pairing mode instead.
+  if (baseEnv.T3CODE_CONNECT_DEV_SHARE === "1") {
+    delete environment.VITE_CLERK_PUBLISHABLE_KEY;
+    delete environment.VITE_CLERK_JWT_TEMPLATE;
+    delete environment.VITE_CLERK_CLI_OAUTH_CLIENT_ID;
+    delete environment.VITE_T3CODE_RELAY_URL;
+  }
+
+  return environment;
 }
 
 export function resolvePublicConfig(...sources: readonly Environment[]): T3CodePublicConfig {

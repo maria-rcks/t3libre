@@ -8,6 +8,12 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import { HttpServerResponse } from "effect/unstable/http";
 import { openMediaFile } from "./assets/MediaFile.ts";
+import {
+  filterDevShareRequestHeaders,
+  prepareDevShareHtml,
+  shouldProxyConnectDevRequest,
+  stripDevShareAssetPrefix,
+} from "./cloud/DevShareProxy.ts";
 
 import {
   assetResponseHeaders,
@@ -18,6 +24,76 @@ import {
 } from "./http.ts";
 
 const fileResponseLayer = Layer.mergeAll(NodeHttpPlatform.layer, NodeServices.layer);
+
+describe("T3 Connect dev sharing", () => {
+  it("prepares bundled-dev HTML for React refresh and edge-cache isolation", () => {
+    const html = prepareDevShareHtml(
+      '<html><head></head><body><script type="module" crossorigin src="/assets/index.js"></script><script src="/hmr.js?v=1#boot"></script><script src="https://cdn.example/app.js"></script></body></html>',
+      "session one",
+    );
+    expect(html).toContain("window.$RefreshReg$ = () => {};");
+    expect(html).toContain('src="/__t3-connect-dev-share/session%20one/assets/index.js"');
+    expect(html).toContain('src="/__t3-connect-dev-share/session%20one/hmr.js?v=1#boot"');
+    expect(html).toContain('src="https://cdn.example/app.js"');
+    expect(
+      stripDevShareAssetPrefix(
+        "/__t3-connect-dev-share/session%20one/assets/index.js",
+        "session one",
+      ),
+    ).toBe("/assets/index.js");
+  });
+
+  it("proxies only public Vite routes", () => {
+    const devUrl = new URL("http://localhost:5733/");
+    expect(
+      shouldProxyConnectDevRequest({
+        enabled: true,
+        devUrl,
+        requestUrl: new URL("https://environment.tunnels.example.com/src/main.tsx"),
+        hasCloudflareRay: true,
+      }),
+    ).toBe(true);
+    for (const requestUrl of [
+      new URL("https://environment.tunnels.example.com/api/auth/session"),
+      new URL("https://environment.tunnels.example.com/ws"),
+      new URL("http://localhost:13773/"),
+    ]) {
+      expect(
+        shouldProxyConnectDevRequest({
+          enabled: true,
+          devUrl,
+          requestUrl,
+          hasCloudflareRay: true,
+        }),
+      ).toBe(false);
+    }
+    expect(
+      shouldProxyConnectDevRequest({
+        enabled: true,
+        devUrl,
+        requestUrl: new URL("https://rebound.example/src/main.tsx"),
+        hasCloudflareRay: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not forward T3 credentials or connection-scoped headers to Vite", () => {
+    expect(
+      filterDevShareRequestHeaders({
+        host: "environment.tunnels.example.com",
+        connection: "keep-alive, x-private-hop",
+        "x-private-hop": "secret",
+        authorization: "Bearer environment-token",
+        dpop: "proof",
+        cookie: "vite-session=kept",
+        origin: "https://environment.tunnels.example.com",
+      }),
+    ).toEqual({
+      cookie: "vite-session=kept",
+      origin: "https://environment.tunnels.example.com",
+    });
+  });
+});
 
 describe("video asset byte ranges", () => {
   it.effect("uses current descriptor metadata after an in-place truncate or extension", () =>
