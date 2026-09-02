@@ -30,7 +30,7 @@ export class PullRequestDiffCredentialRejectedError extends Data.TaggedError(
   }
 }
 
-type PullRequestDiffLoadError =
+export type PullRequestDiffLoadError =
   | RemoteEnvironmentRequestError
   | PullRequestDiffCredentialRejectedError;
 
