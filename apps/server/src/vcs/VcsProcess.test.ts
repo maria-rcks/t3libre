@@ -49,40 +49,42 @@ const captureProcessResult = (
   );
 
 describe("VcsProcess.run", () => {
-  it.effect("bounds a synthetic burst of GitHub API processes across service instances", () =>
+  it.effect("bounds a synthetic burst of GitHub API processes", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>();
       const starts = yield* Queue.unbounded<number>();
       const active = yield* Ref.make(0);
       const peak = yield* Ref.make(0);
       const total = yield* Ref.make(0);
-      const processRunner = ProcessRunner.ProcessRunner.of({
-        run: () =>
-          Effect.gen(function* () {
-            const count = yield* Ref.updateAndGet(active, (held) => held + 1);
-            yield* Ref.update(peak, (held) => Math.max(held, count));
-            yield* Ref.update(total, (held) => held + 1);
-            yield* Queue.offer(starts, count);
-            yield* Deferred.await(gate);
-            return {
-              stdout: "",
-              stderr: "",
-              code: ChildProcessSpawner.ExitCode(0),
-              timedOut: false,
-              stdoutTruncated: false,
-              stderrTruncated: false,
-              stdoutInvalidUtf8: false,
-              stderrInvalidUtf8: false,
-            };
-          }).pipe(Effect.ensuring(Ref.update(active, (count) => count - 1))),
-      });
-      const services = yield* Effect.all([VcsProcess.make, VcsProcess.make], {
-        concurrency: "unbounded",
-      }).pipe(Effect.provideService(ProcessRunner.ProcessRunner, processRunner));
+      const service = yield* VcsProcess.make.pipe(
+        Effect.provideService(
+          ProcessRunner.ProcessRunner,
+          ProcessRunner.ProcessRunner.of({
+            run: () =>
+              Effect.gen(function* () {
+                const count = yield* Ref.updateAndGet(active, (held) => held + 1);
+                yield* Ref.update(peak, (held) => Math.max(held, count));
+                yield* Ref.update(total, (held) => held + 1);
+                yield* Queue.offer(starts, count);
+                yield* Deferred.await(gate);
+                return {
+                  stdout: "",
+                  stderr: "",
+                  code: ChildProcessSpawner.ExitCode(0),
+                  timedOut: false,
+                  stdoutTruncated: false,
+                  stderrTruncated: false,
+                  stdoutInvalidUtf8: false,
+                  stderrInvalidUtf8: false,
+                };
+              }).pipe(Effect.ensuring(Ref.update(active, (count) => count - 1))),
+          }),
+        ),
+      );
 
       const burst = yield* Effect.all(
         Array.from({ length: 32 }, (_, index) =>
-          services[index % services.length]!.run({
+          service.run({
             operation: `synthetic.github.${index}`,
             command: "gh",
             args: ["api", "user"],

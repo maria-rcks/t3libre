@@ -33,7 +33,6 @@ import {
   type OrchestrationEvent,
   type OrchestrationShellStreamEvent,
   type OrchestrationShellStreamItem,
-  type OrchestrationThreadStreamItem,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
@@ -137,7 +136,6 @@ import * as SourceControlProviderRegistry from "./sourceControl/SourceControlPro
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
-import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
@@ -2633,7 +2631,6 @@ export const websocketRpcRouteLayer = Layer.unwrap(
                       ),
                     ),
                   ),
-                  Layer.provide(VcsProcess.layer),
                 ),
               ),
             ),
