@@ -1154,7 +1154,21 @@ function mapToRuntimeEvents(
       ];
     }
     const completed = mapItemLifecycle(event, canonicalThreadId, "item.completed");
-    return completed ? [completed] : [];
+    if (!completed) {
+      return [];
+    }
+    if (itemType !== "context_compaction") {
+      return [completed];
+    }
+    return [
+      completed,
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        eventId: EventId.make(`${event.id}:thread-compacted`),
+        type: "thread.state.changed",
+        payload: { state: "compacted" },
+      },
+    ];
   }
 
   if (
@@ -1768,6 +1782,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               return;
             }
             const session = sessions.get(event.threadId);
+            const completedCompactionItem = runtimeEvents.some(
+              (runtimeEvent) =>
+                runtimeEvent.type === "thread.state.changed" &&
+                runtimeEvent.payload.state === "compacted",
+            );
             const manualCompactionTurnId =
               event.method === "thread/compacted" ? session?.manualCompactionTurnId : undefined;
             if (session && manualCompactionTurnId) {
@@ -1796,6 +1815,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               return;
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
+            if (session && completedCompactionItem) {
+              session.manualCompactionTurnId = undefined;
+            }
           }),
         ).pipe(Effect.forkIn(sessionScope));
 

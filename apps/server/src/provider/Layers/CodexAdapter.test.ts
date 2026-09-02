@@ -340,7 +340,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }),
   );
 
-  it.effect("routes compaction through the Codex app-server runtime", () =>
+  it.effect("settles compaction from current and legacy Codex lifecycle events", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
       const threadId = asThreadId("thread-compact");
@@ -353,36 +353,71 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       NodeAssert.ok(runtime);
       const compactThread = adapter.compactThread;
       NodeAssert.ok(compactThread);
-      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 3)).pipe(
+      const itemEventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
         Effect.forkChild,
       );
 
       yield* compactThread(threadId);
       yield* runtime.emit({
-        id: asEventId("evt-thread-compacted"),
+        id: asEventId("evt-compaction-item-completed"),
         kind: "notification",
         provider: ProviderDriverKind.make("codex"),
         createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/completed",
+        threadId,
+        turnId: asTurnId("provider-compact-turn"),
+        itemId: asItemId("provider-compact-item"),
+        payload: {
+          completedAtMs: 1_778_000_000_000,
+          threadId: "provider-thread-1",
+          turnId: "provider-compact-turn",
+          item: {
+            id: "provider-compact-item",
+            type: "contextCompaction",
+          },
+        },
+      });
+
+      const itemEvents = Array.from(yield* Fiber.join(itemEventsFiber));
+      NodeAssert.deepStrictEqual(
+        itemEvents.map((event) => event.type),
+        ["item.completed", "thread.state.changed"],
+      );
+      NodeAssert.equal(itemEvents[0]?.turnId, "provider-compact-turn");
+      NodeAssert.equal(itemEvents[1]?.turnId, "provider-compact-turn");
+      if (itemEvents[1]?.type === "thread.state.changed") {
+        NodeAssert.equal(itemEvents[1].payload.state, "compacted");
+      }
+
+      const legacyEventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 3)).pipe(
+        Effect.forkChild,
+      );
+      yield* compactThread(threadId);
+      yield* runtime.emit({
+        id: asEventId("evt-thread-compacted"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:01.000Z",
         method: "thread/compacted",
         threadId,
         payload: { threadId: "provider-thread-1" },
       });
 
-      NodeAssert.equal(runtime.compactThreadImpl.mock.calls.length, 1);
-      const events = Array.from(yield* Fiber.join(eventsFiber));
+      NodeAssert.equal(runtime.compactThreadImpl.mock.calls.length, 2);
+      const legacyEvents = Array.from(yield* Fiber.join(legacyEventsFiber));
       NodeAssert.deepStrictEqual(
-        events.map((event) => event.type),
+        legacyEvents.map((event) => event.type),
         ["turn.started", "thread.state.changed", "turn.completed"],
       );
-      NodeAssert.equal(events[0]?.turnId, events[2]?.turnId);
-      NodeAssert.equal(events[1]?.turnId, events[0]?.turnId);
-      NodeAssert.match(String(events[0]?.turnId), /^codex-compact-/);
-      NodeAssert.equal(new Set(events.map((event) => event.eventId)).size, 3);
-      if (events[1]?.type === "thread.state.changed") {
-        NodeAssert.equal(events[1].payload.state, "compacted");
+      NodeAssert.equal(legacyEvents[0]?.turnId, legacyEvents[2]?.turnId);
+      NodeAssert.equal(legacyEvents[1]?.turnId, legacyEvents[0]?.turnId);
+      NodeAssert.match(String(legacyEvents[0]?.turnId), /^codex-compact-/);
+      NodeAssert.equal(new Set(legacyEvents.map((event) => event.eventId)).size, 3);
+      if (legacyEvents[1]?.type === "thread.state.changed") {
+        NodeAssert.equal(legacyEvents[1].payload.state, "compacted");
       }
-      if (events[2]?.type === "turn.completed") {
-        NodeAssert.equal(events[2].payload.state, "completed");
+      if (legacyEvents[2]?.type === "turn.completed") {
+        NodeAssert.equal(legacyEvents[2].payload.state, "completed");
       }
     }),
   );
