@@ -1294,7 +1294,7 @@ const make = Effect.gen(function* () {
         if (event.payload.modelSelection !== undefined) {
           threadModelSelections.set(event.payload.threadId, event.payload.modelSelection);
         }
-        yield* providerService.compactThread(event.payload.threadId);
+        yield* providerService.compactThread(event.payload.threadId, event.payload.modelSelection);
       }).pipe(Effect.catchCause(recoverCompactionFailure), Effect.forkScoped);
       return;
     }

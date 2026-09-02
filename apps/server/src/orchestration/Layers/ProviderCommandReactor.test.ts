@@ -661,11 +661,10 @@ describe("ProviderCommandReactor", () => {
         },
         createdAt: "2026-01-01T00:00:01.000Z",
       });
-      harness.sendTurn.mockClear();
 
       yield* dispatchTurn("compact", "/compact");
       yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
-      expect(harness.compactThread).toHaveBeenCalledWith(threadId);
+      expect(harness.compactThread).toHaveBeenCalledWith(threadId, undefined);
     }),
   );
 

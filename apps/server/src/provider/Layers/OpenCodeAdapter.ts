@@ -3002,10 +3002,22 @@ export function makeOpenCodeAdapter(
 
     const compactThread: NonNullable<OpenCodeAdapterShape["compactThread"]> = Effect.fn(
       "compactThread",
-    )(function* (threadId) {
+    )(function* (threadId, requestedModelSelection) {
       const context = yield* ensureSessionContext(sessions, threadId);
       yield* awaitOpenCodeContextReady(context);
-      const parsedModel = parseOpenCodeModelSlug(context.session.model);
+      const modelSelection =
+        requestedModelSelection ??
+        (context.session.model
+          ? { instanceId: boundInstanceId, model: context.session.model }
+          : undefined);
+      if (modelSelection !== undefined && modelSelection.instanceId !== boundInstanceId) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "compactThread",
+          issue: `OpenCode model selection is bound to instance '${modelSelection.instanceId}', expected '${boundInstanceId}'.`,
+        });
+      }
+      const parsedModel = parseOpenCodeModelSlug(modelSelection?.model);
       if (!parsedModel) {
         return yield* new ProviderAdapterValidationError({
           provider: PROVIDER,

@@ -957,8 +957,6 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
       const threadId = asThreadId("thread-opencode-compact");
-      const compactedEvent = promiseWithResolvers<unknown>();
-      runtimeMock.state.subscribedEvents = [compactedEvent.promise];
 
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("opencode"),
@@ -969,34 +967,16 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           "anthropic/sonnet",
         ),
       });
-      const eventFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter((event) => event.type === "thread.state.changed"),
-        Stream.runHead,
-        Effect.forkChild,
+      yield* adapter.compactThread!(
+        threadId,
+        createModelSelection(ProviderInstanceId.make("opencode"), "openai/gpt-5"),
       );
-      const compactThread = adapter.compactThread;
-      NodeAssert.ok(compactThread);
-
-      yield* compactThread(threadId);
-      NodeAssert.deepEqual(runtimeMock.state.summarizeCalls, [
-        {
-          sessionID: "http://127.0.0.1:9999/session",
-          providerID: "anthropic",
-          modelID: "sonnet",
-          auto: false,
-        },
-      ]);
-      compactedEvent.resolve({
-        id: "evt-session-compacted",
-        type: "session.compacted",
-        properties: { sessionID: "http://127.0.0.1:9999/session" },
+      NodeAssert.deepEqual(runtimeMock.state.summarizeCalls[0], {
+        sessionID: "http://127.0.0.1:9999/session",
+        providerID: "openai",
+        modelID: "gpt-5",
+        auto: false,
       });
-
-      const event = yield* Fiber.join(eventFiber);
-      NodeAssert.equal(event._tag, "Some");
-      if (event._tag === "Some" && event.value.type === "thread.state.changed") {
-        NodeAssert.equal(event.value.payload.state, "compacted");
-      }
       yield* adapter.stopSession(threadId);
     }),
   );

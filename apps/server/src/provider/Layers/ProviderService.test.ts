@@ -144,9 +144,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
       Effect.void,
   );
 
-  const compactThread = vi.fn(
-    (_threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> => Effect.void,
-  );
+  const compactThread = vi.fn((_threadId: ThreadId) => Effect.void);
 
   const respondToRequest = vi.fn(
     (
@@ -966,7 +964,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
 
       yield* provider.compactThread(session.threadId);
-      assert.deepEqual(routing.codex.compactThread.mock.calls, [[session.threadId]]);
+      assert.deepEqual(routing.codex.compactThread.mock.calls, [[session.threadId, undefined]]);
 
       yield* provider.interruptTurn({ threadId: session.threadId });
       assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId, undefined]]);
@@ -1041,14 +1039,11 @@ routing.layer("ProviderServiceLive routing", (it) => {
         threadId,
         runtimeMode: "full-access",
       });
-      const eventsFiber = yield* provider.streamEvents.pipe(
+      const compactedEventFiber = yield* provider.streamEvents.pipe(
         Stream.filter(
-          (event) =>
-            event.threadId === threadId &&
-            (event.type === "turn.completed" || event.type === "thread.state.changed"),
+          (event) => event.threadId === threadId && event.type === "thread.state.changed",
         ),
-        Stream.take(2),
-        Stream.runCollect,
+        Stream.runHead,
         Effect.forkChild,
       );
       yield* advanceTestClock(50);
@@ -1065,10 +1060,10 @@ routing.layer("ProviderServiceLive routing", (it) => {
         payload: { state: "completed" },
       });
 
-      const compacted = Array.from(yield* Fiber.join(eventsFiber))[1];
-      assert.equal(compacted?.type, "thread.state.changed");
-      if (compacted?.type === "thread.state.changed") {
-        assert.equal(compacted.payload.state, "compacted");
+      const compacted = yield* Fiber.join(compactedEventFiber);
+      assert.equal(compacted._tag, "Some");
+      if (compacted._tag === "Some" && compacted.value.type === "thread.state.changed") {
+        assert.equal(compacted.value.payload.state, "compacted");
       }
       yield* provider.stopSession({ threadId });
     }),

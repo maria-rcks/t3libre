@@ -861,7 +861,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   });
 
   const compactThread: ProviderServiceMethod<"compactThread"> = Effect.fn("compactThread")(
-    function* (threadId) {
+    function* (threadId, modelSelection) {
       const routed = yield* resolveRoutableSession({
         threadId,
         operation: "ProviderService.compactThread",
@@ -874,11 +874,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       });
       yield* McpSessionRegistry.touchActiveMcpThread(threadId);
       if (routed.adapter.compactThread) {
-        yield* routed.adapter.compactThread(routed.threadId);
+        yield* routed.adapter.compactThread(routed.threadId, modelSelection);
       } else {
         const input = routed.adapter.provider === "cursor" ? "/compress" : "/compact";
         pendingFallbackCompactions.add(threadId);
-        const sendExit = yield* sendTurn({ threadId, input }).pipe(Effect.exit);
+        const sendExit = yield* sendTurn({
+          threadId,
+          input,
+          ...(modelSelection !== undefined ? { modelSelection } : {}),
+        }).pipe(Effect.exit);
         if (Exit.isFailure(sendExit)) {
           pendingFallbackCompactions.delete(threadId);
           return yield* Effect.failCause(sendExit.cause);
