@@ -7,6 +7,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { HostProcessExecutablePath } from "@t3tools/shared/hostProcess";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -69,13 +70,14 @@ export const withRunningThreadContinuation = Effect.fn(
   const clearOnError = <A>(
     effect: Effect.Effect<A, ServerSelfUpdateError>,
     threadIds: () => ReadonlyArray<ThreadId>,
-    shouldClear: () => boolean,
+    handoffAccepted: () => boolean,
   ): Effect.Effect<A, ServerSelfUpdateError> =>
     effect.pipe(
       Effect.catchCause((cause) =>
-        (shouldClear() ? input.clear(threadIds()) : Effect.void).pipe(
-          Effect.andThen(Effect.failCause(cause)),
-        ),
+        (handoffAccepted() && Cause.hasInterrupts(cause)
+          ? Effect.void
+          : input.clear(threadIds())
+        ).pipe(Effect.andThen(Effect.failCause(cause))),
       ),
     );
 
@@ -124,7 +126,7 @@ export const withRunningThreadContinuation = Effect.fn(
           }),
         ),
       () => continuationThreadIds,
-      () => !handoffAccepted,
+      () => handoffAccepted,
     );
   };
 
@@ -148,7 +150,7 @@ export const withRunningThreadContinuation = Effect.fn(
             );
           }),
           () => continuationThreadIds,
-          () => !handoffAccepted,
+          () => handoffAccepted,
         ).pipe(
           Effect.catchCause((cause) =>
             (shouldContinue && !handoffAccepted

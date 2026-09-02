@@ -277,6 +277,37 @@ it.layer(NodeServices.layer)("server self update", (it) => {
     }),
   );
 
+  it.effect("clears continuation markers when an accepted desktop install fails", () =>
+    Effect.gen(function* () {
+      const events: string[] = [];
+      const commitError = new ServerSelfUpdateError({ reason: "install failed" });
+      const selfUpdate = yield* ServerSelfUpdate.withRunningThreadContinuation({
+        mode: "desktop",
+        selfUpdate: {
+          update: () =>
+            Effect.succeed({
+              targetVersion: "1.2.0",
+              method: "desktop-app" as const,
+              desktopUpdateToken: "failed-desktop-token",
+            }),
+          commitDesktopUpdate: (_requestId, onHandoffAccepted = () => Effect.void) =>
+            onHandoffAccepted().pipe(Effect.andThen(Effect.fail(commitError))),
+        },
+        prepare: Effect.sync(() => [ThreadId.make("thread-failed-desktop-install")]),
+        clear: () => Effect.sync(() => void events.push("clear")),
+      });
+
+      yield* selfUpdate.update({
+        targetVersion: "1.2.0",
+        continueRunningThreads: true,
+      });
+      expect(yield* selfUpdate.commitDesktopUpdate("failed-desktop-token").pipe(Effect.flip)).toBe(
+        commitError,
+      );
+      expect(events).toEqual(["clear"]);
+    }),
+  );
+
   it.effect("stages and preflights before asking the launcher for an update ID", () =>
     Effect.gen(function* () {
       const { selfUpdate, order } = yield* makeHarness();

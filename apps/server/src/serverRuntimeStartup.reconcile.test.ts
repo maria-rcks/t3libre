@@ -155,11 +155,8 @@ it.effect("continues marked sessions after activation with provider-specific inp
       "running",
       TurnId.make("turn-continue-codex"),
     );
-    const fallback = makeThread(
-      "thread-continue-fallback",
-      "starting",
-      TurnId.make("turn-continue-fallback"),
-    );
+    const fallback = makeThread("thread-continue-fallback", "starting");
+    const fallbackContinuationTurnId = TurnId.make("turn-continue-fallback");
     const fallbackProviderInstanceId = ProviderInstanceId.make("claudeAgent");
     const continuationSent = yield* Deferred.make<void>();
     const continuationCleared = yield* Deferred.make<void>();
@@ -179,7 +176,8 @@ it.effect("continues marked sessions after activation with provider-specific inp
             thread.id === codex.id ? providerInstanceId : fallbackProviderInstanceId,
           status: "running" as const,
           runtimePayload: {
-            continueAfterServerUpdate: thread.session.activeTurnId,
+            continueAfterServerUpdate:
+              thread.id === codex.id ? codex.session.activeTurnId : fallbackContinuationTurnId,
           },
         },
       ]),
@@ -270,7 +268,7 @@ it.effect("continues marked sessions after activation with provider-specific inp
         {
           threadId: codex.id,
           status: "starting",
-          activeTurnId: codex.session.activeTurnId,
+          activeTurnId: null,
         },
         {
           threadId: fallback.id,
@@ -279,14 +277,17 @@ it.effect("continues marked sessions after activation with provider-specific inp
         },
       ],
     );
-    for (const thread of [codex, fallback]) {
+    for (const [thread, continuationTurnId] of [
+      [codex, codex.session.activeTurnId],
+      [fallback, fallbackContinuationTurnId],
+    ] as const) {
       assert.deepStrictEqual(
         upserts
           .filter((binding) => binding.threadId === thread.id)
           .map((binding) => binding.runtimePayload)[0],
         {
-          continueAfterServerUpdate: thread.session.activeTurnId,
-          activeTurnId: thread.session.activeTurnId,
+          continueAfterServerUpdate: continuationTurnId,
+          activeTurnId: null,
         },
       );
     }

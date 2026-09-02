@@ -473,10 +473,12 @@ export const reconcileProviderSessions = Effect.gen(function* () {
     );
     const continuationMarkerPresent =
       Option.isSome(binding) && hasServerUpdateContinuationMarker(binding.value.runtimePayload);
+    const continuationTurnId = Option.isSome(binding)
+      ? readServerUpdateContinuationTurnId(binding.value.runtimePayload)
+      : null;
     const continuationMarked =
-      Option.isSome(binding) &&
-      session.activeTurnId !== null &&
-      readServerUpdateContinuationTurnId(binding.value.runtimePayload) === session.activeTurnId;
+      continuationTurnId !== null &&
+      (session.activeTurnId === null || continuationTurnId === session.activeTurnId);
     const settleAsError = (lastError: string) =>
       Effect.gen(function* () {
         yield* Effect.gen(function* () {
@@ -542,7 +544,7 @@ export const reconcileProviderSessions = Effect.gen(function* () {
           status: "starting",
           runtimePayload: {
             ...readRuntimePayload(binding.value.runtimePayload),
-            activeTurnId: session.activeTurnId,
+            activeTurnId: null,
           },
         });
         const resumedAt = DateTime.formatIso(yield* DateTime.now);
@@ -553,7 +555,7 @@ export const reconcileProviderSessions = Effect.gen(function* () {
           session: {
             ...session,
             status: "starting",
-            activeTurnId: session.activeTurnId,
+            activeTurnId: null,
             lastError: null,
             updatedAt: resumedAt,
           },
