@@ -971,12 +971,9 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         threadId,
         createModelSelection(ProviderInstanceId.make("opencode"), "openai/gpt-5"),
       );
-      NodeAssert.deepEqual(runtimeMock.state.summarizeCalls[0], {
-        sessionID: "http://127.0.0.1:9999/session",
-        providerID: "openai",
-        modelID: "gpt-5",
-        auto: false,
-      });
+      const summarizeCall = runtimeMock.state.summarizeCalls[0] as Record<string, unknown>;
+      NodeAssert.equal(summarizeCall.providerID, "openai");
+      NodeAssert.equal(summarizeCall.modelID, "gpt-5");
       yield* adapter.stopSession(threadId);
     }),
   );

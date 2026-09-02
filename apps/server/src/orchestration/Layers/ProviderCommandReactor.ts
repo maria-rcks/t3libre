@@ -347,6 +347,7 @@ const make = Effect.gen(function* () {
     );
 
   const threadModelSelections = new Map<string, ModelSelection>();
+  const compactingThreadIds = new Set<ThreadId>();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -1270,6 +1271,7 @@ const make = Effect.gen(function* () {
       }
       const latestThread = yield* resolveThread(event.payload.threadId);
       if (
+        compactingThreadIds.has(event.payload.threadId) ||
         latestThread?.session?.status === "starting" ||
         latestThread?.session?.status === "running"
       ) {
@@ -1283,6 +1285,7 @@ const make = Effect.gen(function* () {
         });
         return;
       }
+      compactingThreadIds.add(event.payload.threadId);
       yield* Effect.gen(function* () {
         yield* ensureSessionForThread(
           event.payload.threadId,
@@ -1295,7 +1298,11 @@ const make = Effect.gen(function* () {
           threadModelSelections.set(event.payload.threadId, event.payload.modelSelection);
         }
         yield* providerService.compactThread(event.payload.threadId, event.payload.modelSelection);
-      }).pipe(Effect.catchCause(recoverCompactionFailure), Effect.forkScoped);
+      }).pipe(
+        Effect.catchCause(recoverCompactionFailure),
+        Effect.ensuring(Effect.sync(() => void compactingThreadIds.delete(event.payload.threadId))),
+        Effect.forkScoped,
+      );
       return;
     }
 

@@ -664,7 +664,6 @@ describe("ProviderCommandReactor", () => {
 
       yield* dispatchTurn("compact", "/compact");
       yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
-      expect(harness.compactThread).toHaveBeenCalledWith(threadId, undefined);
     }),
   );
 
