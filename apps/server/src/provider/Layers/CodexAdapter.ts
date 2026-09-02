@@ -1152,11 +1152,8 @@ function mapToRuntimeEvents(
       ];
     }
     const completed = mapItemLifecycle(event, canonicalThreadId, "item.completed");
-    if (!completed) {
-      return [];
-    }
-    if (itemType !== "context_compaction") {
-      return [completed];
+    if (!completed || itemType !== "context_compaction") {
+      return completed ? [completed] : [];
     }
     return [
       completed,

@@ -2239,10 +2239,7 @@ describe("ClaudeAdapterLive", () => {
           maxTokens: 200000,
         });
       }
-      assert.equal(
-        runtimeEvents.find((event) => event.type === "thread.state.changed")?.type,
-        "thread.state.changed",
-      );
+      assert.ok(runtimeEvents.some((event) => event.type === "thread.state.changed"));
       assert.equal(
         runtimeEvents.find((event) => event.type === "turn.completed")?.type,
         "turn.completed",

@@ -4694,8 +4694,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     };
   });
 
-  const compactThread: NonNullable<ClaudeAdapterShape["compactThread"]> = (threadId) =>
-    sendTurn({ threadId, input: "/compact" }).pipe(Effect.asVoid);
+  const compactThread: NonNullable<ClaudeAdapterShape["compactThread"]> = (
+    threadId,
+    modelSelection,
+  ) =>
+    sendTurn({
+      threadId,
+      input: "/compact",
+      ...(modelSelection !== undefined ? { modelSelection } : {}),
+    }).pipe(Effect.asVoid);
 
   const interruptTurn: ClaudeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
     function* (threadId, _turnId) {

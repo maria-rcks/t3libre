@@ -376,11 +376,9 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         },
       });
 
-      const event = yield* Fiber.join(compactedEventFiber);
-      NodeAssert.equal(event._tag, "Some");
-      if (event._tag === "Some" && event.value.type === "thread.state.changed") {
-        NodeAssert.equal(event.value.payload.state, "compacted");
-      }
+      const event = Option.getOrThrow(yield* Fiber.join(compactedEventFiber));
+      NodeAssert.ok(event.type === "thread.state.changed");
+      NodeAssert.equal(event.payload.state, "compacted");
     }),
   );
 

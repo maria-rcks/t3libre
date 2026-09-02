@@ -7440,8 +7440,7 @@ function ChatViewContent(props: ChatViewProps) {
                             }
                             activeThreadModelSelection={activeThread?.modelSelection}
                             activeContextWindow={activeContextWindow}
-                            compactThreadUnavailable={compactThreadUnavailable}
-                            compactDisabled={compactDisabled}
+                            compactDisabled={compactThreadUnavailable}
                             compactDisabledReason={compactDisabledReason}
                             resolvedTheme={resolvedTheme}
                             settings={settings}

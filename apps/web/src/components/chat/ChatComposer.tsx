@@ -691,7 +691,6 @@ export interface ChatComposerProps {
 
   // Context window
   activeContextWindow: ContextWindowSnapshot | null;
-  compactThreadUnavailable: boolean;
   compactDisabled: boolean;
   compactDisabledReason: string | null;
 
@@ -788,7 +787,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProjectDefaultModelSelection,
     activeThreadModelSelection,
     activeContextWindow,
-    compactThreadUnavailable,
     compactDisabled,
     compactDisabledReason,
     resolvedTheme,
@@ -1363,7 +1361,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const compactSlashCommandAvailable =
     composerTrigger?.kind === "slash-command" &&
-    !compactThreadUnavailable &&
+    !compactDisabled &&
     phase !== "running" &&
     activePendingApproval === null &&
     pendingUserInputs.length === 0 &&

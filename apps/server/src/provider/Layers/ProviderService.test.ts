@@ -987,9 +987,6 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
 
-      yield* provider.compactThread(session.threadId);
-      assert.deepEqual(routing.codex.compactThread.mock.calls, [[session.threadId, undefined]]);
-
       yield* provider.interruptTurn({ threadId: session.threadId });
       assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId, undefined]]);
 
@@ -1084,11 +1081,9 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       yield* Fiber.join(compactFiber);
 
-      const compacted = yield* Fiber.join(compactedEventFiber);
-      assert.equal(compacted._tag, "Some");
-      if (compacted._tag === "Some" && compacted.value.type === "thread.state.changed") {
-        assert.equal(compacted.value.payload.state, "compacted");
-      }
+      const compacted = Option.getOrThrow(yield* Fiber.join(compactedEventFiber));
+      assert.ok(compacted.type === "thread.state.changed");
+      assert.equal(compacted.payload.state, "compacted");
       yield* provider.stopSession({ threadId });
     }),
   );

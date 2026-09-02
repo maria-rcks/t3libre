@@ -1154,7 +1154,6 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
-
     const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
     if (!message || message.role !== "user") {
       yield* appendProviderFailureActivity({
@@ -1168,6 +1167,16 @@ const make = Effect.gen(function* () {
       });
       return;
     }
+    const appendTurnStartFailure = (summary: string, detail: string) =>
+      appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.turn.start.failed",
+        summary,
+        detail,
+        turnId: null,
+        createdAt: event.payload.createdAt,
+        requestId: event.payload.messageId,
+      });
 
     yield* ensureThreadWorktree(thread);
 
@@ -1175,8 +1184,7 @@ const make = Effect.gen(function* () {
     const nonCompactUserMessageCount = thread.messages.filter(
       (entry) => entry.role === "user" && !isCompactCommandMessage(entry),
     ).length;
-    const isFirstUserMessageTurn = nonCompactUserMessageCount === 1;
-    if (isFirstUserMessageTurn && !isCompactCommand) {
+    if (nonCompactUserMessageCount === 1 && !isCompactCommand) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
         resolveThreadWorkspaceCwd({
@@ -1215,17 +1223,7 @@ const make = Effect.gen(function* () {
         detail,
         createdAt: event.payload.createdAt,
       }).pipe(
-        Effect.flatMap(() =>
-          appendProviderFailureActivity({
-            threadId: event.payload.threadId,
-            kind: "provider.turn.start.failed",
-            summary: "Provider turn start failed",
-            detail,
-            turnId: null,
-            createdAt: event.payload.createdAt,
-            requestId: event.payload.messageId,
-          }),
-        ),
+        Effect.flatMap(() => appendTurnStartFailure("Provider turn start failed", detail)),
         Effect.asVoid,
       );
     };
@@ -1247,15 +1245,7 @@ const make = Effect.gen(function* () {
         return Effect.void;
       }
       const detail = formatFailureDetail(cause);
-      return appendProviderFailureActivity({
-        threadId: event.payload.threadId,
-        kind: "provider.turn.start.failed",
-        summary: "Context compaction failed",
-        detail,
-        turnId: null,
-        createdAt: event.payload.createdAt,
-        requestId: event.payload.messageId,
-      }).pipe(Effect.asVoid);
+      return appendTurnStartFailure("Context compaction failed", detail).pipe(Effect.asVoid);
     };
 
     const recoverCompactionFailure = (cause: Cause.Cause<unknown>) =>
@@ -1272,15 +1262,10 @@ const make = Effect.gen(function* () {
 
     if (isCompactCommand) {
       if (nonCompactUserMessageCount === 0) {
-        return yield* appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: "provider.turn.start.failed",
-          summary: "Context compaction failed",
-          detail: "Context compaction requires an existing conversation.",
-          turnId: null,
-          createdAt: event.payload.createdAt,
-          requestId: event.payload.messageId,
-        });
+        return yield* appendTurnStartFailure(
+          "Context compaction failed",
+          "Context compaction requires an existing conversation.",
+        );
       }
       const latestThread = yield* resolveThread(event.payload.threadId);
       if (
@@ -1288,15 +1273,10 @@ const make = Effect.gen(function* () {
         latestThread?.session?.status === "starting" ||
         latestThread?.session?.status === "running"
       ) {
-        yield* appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: "provider.turn.start.failed",
-          summary: "Context compaction failed",
-          detail: "Context compaction is unavailable while a provider turn is running.",
-          turnId: null,
-          createdAt: event.payload.createdAt,
-          requestId: event.payload.messageId,
-        });
+        yield* appendTurnStartFailure(
+          "Context compaction failed",
+          "Context compaction is unavailable while a provider turn is running.",
+        );
         return;
       }
       compactingThreadIds.add(event.payload.threadId);
@@ -1321,15 +1301,10 @@ const make = Effect.gen(function* () {
     }
 
     if (compactingThreadIds.has(event.payload.threadId)) {
-      return yield* appendProviderFailureActivity({
-        threadId: event.payload.threadId,
-        kind: "provider.turn.start.failed",
-        summary: "Provider turn start failed",
-        detail: "Wait for context compaction to finish before sending another message.",
-        turnId: null,
-        createdAt: event.payload.createdAt,
-        requestId: event.payload.messageId,
-      });
+      return yield* appendTurnStartFailure(
+        "Provider turn start failed",
+        "Wait for context compaction to finish before sending another message.",
+      );
     }
 
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
