@@ -1206,26 +1206,18 @@ export function AppearanceSettingsPanel() {
           {...searchableSetting("panel-animations")}
           description="Set how fast panels open and close."
           control={
-            <div className="grid w-full gap-4 sm:w-48 xl:w-auto xl:grid-cols-[12rem_16rem] xl:items-center">
+            <div className="grid w-full grid-cols-[5rem_minmax(0,1fr)] items-center gap-3 sm:w-auto sm:grid-cols-[7rem_13rem] sm:gap-4">
               <PanelAnimationsPreview durationMs={settings.panelAnimationDurationMs} />
-              <div className="w-full space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <label
-                    className="text-xs font-medium text-muted-foreground"
-                    htmlFor="panel-animation-duration"
-                  >
-                    Duration
-                  </label>
-                  <output
-                    className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
-                    htmlFor="panel-animation-duration"
-                  >
-                    {settings.panelAnimationDurationMs} ms
-                  </output>
-                </div>
+              <div className="flex w-full items-center gap-3">
+                <output
+                  className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                  htmlFor="panel-animation-duration"
+                >
+                  {settings.panelAnimationDurationMs} ms
+                </output>
                 <input
                   aria-label="Panel animation duration"
-                  className="settings-slider w-full"
+                  className="settings-slider min-w-0 flex-1"
                   disabled={!clientSettingsHydrated}
                   id="panel-animation-duration"
                   max={MAX_PANEL_ANIMATION_DURATION_MS}
