@@ -40,8 +40,8 @@ function expectResponsiveXsControl(markup: string | undefined) {
   expect(markup).toContain("w-7");
   expect(markup).toContain("px-0");
   expect(markup).toContain("sm:w-6");
-  expect(markup).toContain("@3xl/header-actions:w-auto!");
-  expect(markup).toContain("@3xl/header-actions:px-[calc(--spacing(2)-1px)]");
+  expect(markup).toContain("@min-[48rem]/header-actions:w-auto!");
+  expect(markup).toContain("@min-[48rem]/header-actions:px-[calc(--spacing(2)-1px)]");
 }
 
 describe("ProjectScriptsControl compact controls", () => {
@@ -50,7 +50,7 @@ describe("ProjectScriptsControl compact controls", () => {
 
     expectResponsiveXsControl(buttonTag(html, "Run Dev"));
     expect(html).toContain(
-      'class="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"',
+      'class="sr-only @min-[48rem]/header-actions:not-sr-only @min-[48rem]/header-actions:ml-0.5"',
     );
   });
 
@@ -59,7 +59,7 @@ describe("ProjectScriptsControl compact controls", () => {
 
     expectResponsiveXsControl(buttonTag(html, "Add action"));
     expect(html).toContain(
-      'class="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"',
+      'class="sr-only @min-[48rem]/header-actions:not-sr-only @min-[48rem]/header-actions:ml-0.5"',
     );
   });
 });

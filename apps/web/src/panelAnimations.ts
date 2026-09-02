@@ -12,14 +12,22 @@ export const PANEL_ANIMATION_DURATION_MS = DEFAULT_PANEL_ANIMATION_DURATION_MS;
 export function observeResponsiveBreakpointFade(options: {
   target: HTMLElement;
   container: HTMLElement;
-  breakpointPx: number;
+  active: boolean;
+  durationMs: PanelAnimationDurationMs;
+  breakpoint: { value: number; unit: "px" | "rem" };
   fadeDistancePx?: number;
 }): () => void {
-  const { target, container, breakpointPx, fadeDistancePx = 160 } = options;
-  if (typeof ResizeObserver === "undefined") return () => {};
+  const { target, container, active, durationMs, breakpoint, fadeDistancePx = 160 } = options;
+  if (!active || typeof ResizeObserver === "undefined") return () => {};
+
+  const resolveBreakpointPx = () => {
+    if (breakpoint.unit === "px") return breakpoint.value;
+    const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+    return breakpoint.value * (Number.isFinite(rootFontSize) ? rootFontSize : 16);
+  };
 
   let previousWidth = container.getBoundingClientRect().width;
-  let previousSide = previousWidth >= breakpointPx;
+  let previousSide = previousWidth >= resolveBreakpointPx();
   let crossedBreakpoint = false;
   let settleTimer: number | null = null;
   let restoreAnimation: Animation | null = null;
@@ -30,11 +38,8 @@ export function observeResponsiveBreakpointFade(options: {
     target.style.removeProperty("opacity");
     crossedBreakpoint = false;
     if (currentOpacity === "1") return;
-    const panelDuration = Number.parseFloat(
-      getComputedStyle(target).getPropertyValue("--panel-animation-duration"),
-    );
     restoreAnimation = target.animate([{ opacity: currentOpacity }, { opacity: 1 }], {
-      duration: Math.min(100, panelDuration / 4),
+      duration: Math.min(100, durationMs / 4),
       easing: "ease-out",
     });
   };
@@ -46,18 +51,7 @@ export function observeResponsiveBreakpointFade(options: {
     restoreAnimation = null;
     if (settleTimer !== null) window.clearTimeout(settleTimer);
     settleTimer = null;
-    const animationsEnabled =
-      target.closest("[data-panel-animations]")?.getAttribute("data-panel-animations") === "true" &&
-      !matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    if (!animationsEnabled) {
-      target.style.removeProperty("opacity");
-      previousWidth = width;
-      previousSide = width >= breakpointPx;
-      crossedBreakpoint = false;
-      return;
-    }
-
+    const breakpointPx = resolveBreakpointPx();
     const side = width >= breakpointPx;
     const crossedOnThisFrame = side !== previousSide;
     const movingTowardBreakpoint =
