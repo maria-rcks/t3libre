@@ -10,6 +10,105 @@ import * as EnvironmentLinks from "./EnvironmentLinks.ts";
 import * as TemporaryEnvironmentLeases from "./TemporaryEnvironmentLeases.ts";
 
 describe("EnvironmentLinks", () => {
+  it.effect("does not let a temporary upsert overwrite an active durable link", () => {
+    let conflictConfig: { readonly setWhere?: unknown } | undefined;
+    const fakeDb = {
+      insert: (table: unknown) => {
+        expect(table).toBe(relayEnvironmentLinks);
+        return {
+          values: () => ({
+            onConflictDoUpdate: (config: { readonly setWhere?: unknown }) => {
+              conflictConfig = config;
+              return { returning: () => Effect.succeed([]) };
+            },
+          }),
+        };
+      },
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    return Effect.gen(function* () {
+      const links = yield* EnvironmentLinks.EnvironmentLinks;
+      const error = yield* Effect.flip(
+        links.upsert({
+          userId: "user-1",
+          request: {
+            proof: "proof",
+            notificationsEnabled: false,
+            liveActivitiesEnabled: false,
+            managedTunnelsEnabled: true,
+            temporary: true,
+          },
+          proof: {
+            environmentId: "env-1",
+            descriptor: { label: "Environment" },
+            environmentPublicKey: "public-key",
+          } as never,
+          endpoint: {
+            httpBaseUrl: "https://env.example.test/",
+            wsBaseUrl: "wss://env.example.test/ws",
+            providerKind: "cloudflare_tunnel",
+          },
+          temporaryLease: {
+            leaseId: "lease-1",
+            expiresAt: "2026-09-02T22:10:00.000Z",
+          },
+        }),
+      );
+
+      expect(error._tag).toBe("EnvironmentLinkUpsertPersistenceError");
+      expect(error.cause).toBeInstanceOf(EnvironmentLinks.ActiveDurableEnvironmentLinkConflict);
+      const query = new PgDialect().sqlToQuery(conflictConfig?.setWhere as never);
+      expect(query.sql).toContain('"relay_environment_links"."revoked_at" is not null');
+      expect(query.sql).toContain('"relay_environment_links"."temporary_lease_id" is not null');
+    }).pipe(
+      Effect.provide(
+        EnvironmentLinks.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb))),
+      ),
+    );
+  });
+
+  it.effect("keeps durable upserts unconditional", () => {
+    let conflictConfig: { readonly setWhere?: unknown } | undefined;
+    const fakeDb = {
+      insert: () => ({
+        values: () => ({
+          onConflictDoUpdate: (config: { readonly setWhere?: unknown }) => {
+            conflictConfig = config;
+            return { returning: () => Effect.succeed([{ environmentId: "env-1" }]) };
+          },
+        }),
+      }),
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    return Effect.gen(function* () {
+      const links = yield* EnvironmentLinks.EnvironmentLinks;
+      yield* links.upsert({
+        userId: "user-1",
+        request: {
+          proof: "proof",
+          notificationsEnabled: true,
+          liveActivitiesEnabled: true,
+          managedTunnelsEnabled: false,
+        },
+        proof: {
+          environmentId: "env-1",
+          descriptor: { label: "Environment" },
+          environmentPublicKey: "public-key",
+        } as never,
+        endpoint: {
+          httpBaseUrl: "http://127.0.0.1:3773/",
+          wsBaseUrl: "ws://127.0.0.1:3773/ws",
+          providerKind: "manual",
+        },
+      });
+      expect(conflictConfig).not.toHaveProperty("setWhere");
+    }).pipe(
+      Effect.provide(
+        EnvironmentLinks.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb))),
+      ),
+    );
+  });
+
   it.effect("retains link lookup failures with user and environment identity", () => {
     const cause = new Error("database unavailable");
     const fakeDb = {

@@ -187,3 +187,25 @@ export const clearOwnedPersistedServerRuntimeState = (path: string, pid: number)
       }),
     ),
   );
+
+/** Remove a public pairing origin only while this process still owns that exact advertisement. */
+export const clearOwnedPairingBaseUrl = (input: {
+  readonly path: string;
+  readonly pid: number;
+  readonly pairingBaseUrl: string;
+}) =>
+  readPersistedServerRuntimeState(input.path).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.void,
+        onSome: (state) => {
+          if (state.pid !== input.pid || state.pairingBaseUrl !== input.pairingBaseUrl) {
+            return Effect.void;
+          }
+          const localState = { ...state };
+          delete localState.pairingBaseUrl;
+          return persistServerRuntimeState({ path: input.path, state: localState });
+        },
+      }),
+    ),
+  );

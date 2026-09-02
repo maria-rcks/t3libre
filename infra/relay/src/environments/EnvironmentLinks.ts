@@ -9,7 +9,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
 
 import * as RelayDb from "../db.ts";
 import { relayEnvironmentLinks } from "../persistence/schema.ts";
@@ -22,6 +22,10 @@ export interface AgentAwarenessDeliveryUserRecord {
   readonly userId: string;
   readonly notificationsEnabled: boolean;
   readonly liveActivitiesEnabled: boolean;
+}
+
+export class ActiveDurableEnvironmentLinkConflict extends Error {
+  override readonly name = "ActiveDurableEnvironmentLinkConflict";
 }
 
 export class EnvironmentLinkUpsertPersistenceError extends Schema.TaggedErrorClass<EnvironmentLinkUpsertPersistenceError>()(
@@ -178,44 +182,55 @@ const make = Effect.gen(function* () {
       const { request, proof } = input;
       const environmentId = proof.environmentId;
       const { endpoint } = input;
-      yield* db
-        .insert(relayEnvironmentLinks)
-        .values({
-          userId: input.userId,
-          environmentId,
-          environmentLabel: proof.descriptor.label,
-          environmentPublicKey: proof.environmentPublicKey,
-          endpointHttpBaseUrl: endpoint.httpBaseUrl,
-          endpointWsBaseUrl: endpoint.wsBaseUrl,
-          endpointProviderKind: endpoint.providerKind,
-          notificationsEnabled: request.notificationsEnabled,
-          liveActivitiesEnabled: request.liveActivitiesEnabled,
-          managedTunnelsEnabled: request.managedTunnelsEnabled,
-          temporaryLeaseId: input.temporaryLease?.leaseId ?? null,
-          temporaryLeaseExpiresAt: input.temporaryLease?.expiresAt ?? null,
-          createdByDeviceId: request.deviceId ?? null,
-          revokedAt: null,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: [relayEnvironmentLinks.userId, relayEnvironmentLinks.environmentId],
-          set: {
-            environmentPublicKey: proof.environmentPublicKey,
-            environmentLabel: proof.descriptor.label,
-            endpointHttpBaseUrl: endpoint.httpBaseUrl,
-            endpointWsBaseUrl: endpoint.wsBaseUrl,
-            endpointProviderKind: endpoint.providerKind,
-            notificationsEnabled: request.notificationsEnabled,
-            liveActivitiesEnabled: request.liveActivitiesEnabled,
-            managedTunnelsEnabled: request.managedTunnelsEnabled,
-            temporaryLeaseId: input.temporaryLease?.leaseId ?? null,
-            temporaryLeaseExpiresAt: input.temporaryLease?.expiresAt ?? null,
-            createdByDeviceId: request.deviceId ?? null,
-            revokedAt: null,
-            updatedAt: now,
-          },
-        })
+      const insert = db.insert(relayEnvironmentLinks).values({
+        userId: input.userId,
+        environmentId,
+        environmentLabel: proof.descriptor.label,
+        environmentPublicKey: proof.environmentPublicKey,
+        endpointHttpBaseUrl: endpoint.httpBaseUrl,
+        endpointWsBaseUrl: endpoint.wsBaseUrl,
+        endpointProviderKind: endpoint.providerKind,
+        notificationsEnabled: request.notificationsEnabled,
+        liveActivitiesEnabled: request.liveActivitiesEnabled,
+        managedTunnelsEnabled: request.managedTunnelsEnabled,
+        temporaryLeaseId: input.temporaryLease?.leaseId ?? null,
+        temporaryLeaseExpiresAt: input.temporaryLease?.expiresAt ?? null,
+        createdByDeviceId: request.deviceId ?? null,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const updateSet = {
+        environmentPublicKey: proof.environmentPublicKey,
+        environmentLabel: proof.descriptor.label,
+        endpointHttpBaseUrl: endpoint.httpBaseUrl,
+        endpointWsBaseUrl: endpoint.wsBaseUrl,
+        endpointProviderKind: endpoint.providerKind,
+        notificationsEnabled: request.notificationsEnabled,
+        liveActivitiesEnabled: request.liveActivitiesEnabled,
+        managedTunnelsEnabled: request.managedTunnelsEnabled,
+        temporaryLeaseId: input.temporaryLease?.leaseId ?? null,
+        temporaryLeaseExpiresAt: input.temporaryLease?.expiresAt ?? null,
+        createdByDeviceId: request.deviceId ?? null,
+        revokedAt: null,
+        updatedAt: now,
+      };
+      const upsert =
+        input.temporaryLease === undefined
+          ? insert.onConflictDoUpdate({
+              target: [relayEnvironmentLinks.userId, relayEnvironmentLinks.environmentId],
+              set: updateSet,
+            })
+          : insert.onConflictDoUpdate({
+              target: [relayEnvironmentLinks.userId, relayEnvironmentLinks.environmentId],
+              setWhere: or(
+                isNotNull(relayEnvironmentLinks.revokedAt),
+                isNotNull(relayEnvironmentLinks.temporaryLeaseId),
+              )!,
+              set: updateSet,
+            });
+      const rows = yield* upsert
+        .returning({ environmentId: relayEnvironmentLinks.environmentId })
         .pipe(
           Effect.mapError(
             (cause) =>
@@ -227,6 +242,16 @@ const make = Effect.gen(function* () {
               }),
           ),
         );
+      if (input.temporaryLease !== undefined && rows.length === 0) {
+        return yield* new EnvironmentLinkUpsertPersistenceError({
+          userId: input.userId,
+          environmentId,
+          ...(request.deviceId === undefined ? {} : { deviceId: request.deviceId }),
+          cause: new ActiveDurableEnvironmentLinkConflict(
+            "An active durable environment link already exists",
+          ),
+        });
+      }
     }),
 
     listUsersForEnvironment: Effect.fn("relay.environment_links.list_users_for_environment")(

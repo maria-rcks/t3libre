@@ -110,6 +110,73 @@ describe("serverRuntimeState", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("only clears the exact pairing origin owned by the expected process", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-pairing-owner-test-",
+      });
+      const statePath = path.join(root, "server.json");
+      const ownedPairingBaseUrl = "https://owned.tunnels.example.com/";
+      const ownedState: ServerRuntimeState.PersistedServerRuntimeState = {
+        version: 1,
+        pid: 456,
+        port: 4_971,
+        origin: "http://127.0.0.1:4971",
+        devUrl: "http://localhost:5733/__t3-connect-dev-share/owned/",
+        pairingBaseUrl: ownedPairingBaseUrl,
+        startedAt: "2026-06-20T00:00:00.000Z",
+      };
+      yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state: ownedState });
+
+      yield* ServerRuntimeState.clearOwnedPairingBaseUrl({
+        path: statePath,
+        pid: 456,
+        pairingBaseUrl: "https://replacement.tunnels.example.com/",
+      });
+      assert.deepEqual(
+        Option.getOrThrow(yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath)),
+        ownedState,
+      );
+
+      const replacementState = {
+        ...ownedState,
+        pid: 789,
+        pairingBaseUrl: "https://replacement.tunnels.example.com/",
+      };
+      yield* ServerRuntimeState.persistServerRuntimeState({
+        path: statePath,
+        state: replacementState,
+      });
+      yield* ServerRuntimeState.clearOwnedPairingBaseUrl({
+        path: statePath,
+        pid: 456,
+        pairingBaseUrl: ownedPairingBaseUrl,
+      });
+      assert.deepEqual(
+        Option.getOrThrow(yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath)),
+        replacementState,
+      );
+
+      yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state: ownedState });
+      yield* ServerRuntimeState.clearOwnedPairingBaseUrl({
+        path: statePath,
+        pid: 456,
+        pairingBaseUrl: ownedPairingBaseUrl,
+      });
+      const cleared = Option.getOrThrow(
+        yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath),
+      );
+      assert.isFalse("pairingBaseUrl" in cleared);
+      assert.deepInclude(cleared, {
+        pid: ownedState.pid,
+        origin: ownedState.origin,
+        devUrl: ownedState.devUrl,
+      });
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("preserves malformed state decode failures", () => {
     const logs: CapturedLog[] = [];
     const logger = Logger.make(({ fiber, message }) => {

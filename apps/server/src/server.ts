@@ -129,6 +129,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
+  clearOwnedPairingBaseUrl,
   clearOwnedPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
@@ -673,6 +674,19 @@ export const makeServerLayer = Layer.unwrap(
             ),
             Effect.asVoid,
           );
+        const clearDevSharePairingOrigin = (pairingBaseUrl: string) =>
+          clearOwnedPairingBaseUrl({
+            path: config.serverRuntimeStatePath,
+            pid: process.pid,
+            pairingBaseUrl,
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Failed to clear the T3 Connect dev-share pairing origin", {
+                cause,
+              }),
+            ),
+            Effect.asVoid,
+          );
         // A launcher trial can be stopped before activation. The previous
         // server is already gone, so the trial owns cleanup immediately; the
         // pending-state check keeps the tunnel for normal commit or rollback,
@@ -733,28 +747,32 @@ export const makeServerLayer = Layer.unwrap(
             );
             const activeLink = connectDevShare
               ? Effect.acquireRelease(retryReconcile, (link) =>
-                  link.temporaryLease === undefined
-                    ? Effect.void
-                    : releaseTemporaryEnvironmentLease({
-                        relayUrl: link.relayUrl,
-                        temporaryLease: link.temporaryLease,
-                      }).pipe(
-                        Effect.timeout("10 seconds"),
-                        Effect.tap((released) =>
-                          released
-                            ? Effect.logInfo(
-                                "Released the temporary T3 Connect dev share on shutdown",
-                              )
-                            : Effect.void,
-                        ),
-                        Effect.catchCause((cause) =>
-                          Effect.logWarning(
-                            "Failed to release the temporary T3 Connect dev share; its relay lease will expire",
-                            { cause },
+                  clearDevSharePairingOrigin(link.endpoint.httpBaseUrl).pipe(
+                    Effect.andThen(
+                      link.temporaryLease === undefined
+                        ? Effect.void
+                        : releaseTemporaryEnvironmentLease({
+                            relayUrl: link.relayUrl,
+                            temporaryLease: link.temporaryLease,
+                          }).pipe(
+                            Effect.timeout("10 seconds"),
+                            Effect.tap((released) =>
+                              released
+                                ? Effect.logInfo(
+                                    "Released the temporary T3 Connect dev share on shutdown",
+                                  )
+                                : Effect.void,
+                            ),
+                            Effect.catchCause((cause) =>
+                              Effect.logWarning(
+                                "Failed to release the temporary T3 Connect dev share; its relay lease will expire",
+                                { cause },
+                              ),
+                            ),
+                            Effect.asVoid,
                           ),
-                        ),
-                        Effect.asVoid,
-                      ),
+                    ),
+                  ),
                 ).pipe(
                   Effect.tap((link) =>
                     trustConnectDevShareManagedOrigin(new URL(link.endpoint.httpBaseUrl)),

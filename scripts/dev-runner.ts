@@ -199,11 +199,15 @@ export class DevRunnerConnectShareUnsupportedError extends Schema.TaggedErrorCla
   {
     mode: Schema.Literals(["dev", "dev:server", "dev:web", "dev:desktop"]),
     host: Schema.optional(Schema.String),
+    devUrl: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
     if (this.mode !== "dev") {
-      return `T3 Connect sharing requires the full dev stack; use \`vp run dev --share --share-via=t3-connect\` instead of ${this.mode}.`;
+      return `T3 Connect sharing requires the full dev stack; use \`vp run dev --home-dir .t3 --share --share-via=t3-connect\` instead of ${this.mode}.`;
+    }
+    if (this.devUrl !== undefined) {
+      return "T3 Connect sharing owns its local Vite server; remove --dev-url and retry.";
     }
     return `T3 Connect sharing requires a backend reachable at IPv4 loopback; remove --host ${this.host ?? ""} or use --host 127.0.0.1.`;
   }
@@ -653,12 +657,18 @@ interface DevRunnerCliInput {
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
     const shareVia = input.shareVia ?? "tailscale";
+    const host = input.host?.trim() || undefined;
     if (input.share && shareVia === "t3-connect") {
       if (input.mode !== "dev") {
         return yield* new DevRunnerConnectShareUnsupportedError({ mode: input.mode });
       }
-      const host = input.host?.trim();
-      if (host !== undefined && host !== "" && host !== "localhost" && host !== "127.0.0.1") {
+      if (input.devUrl !== undefined) {
+        return yield* new DevRunnerConnectShareUnsupportedError({
+          mode: input.mode,
+          devUrl: input.devUrl.toString(),
+        });
+      }
+      if (host !== undefined && host !== "localhost" && host !== "127.0.0.1") {
         return yield* new DevRunnerConnectShareUnsupportedError({ mode: input.mode, host });
       }
     }
@@ -679,10 +689,10 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     // front instead. (dev:server and dev:desktop don't proxy — untouched.)
     if (
       (input.mode === "dev" || input.mode === "dev:web") &&
-      input.host !== undefined &&
-      !isProxiableBindHost(input.host)
+      host !== undefined &&
+      !isProxiableBindHost(host)
     ) {
-      return yield* new DevRunnerHostNotProxiableError({ mode: input.mode, host: input.host });
+      return yield* new DevRunnerHostNotProxiableError({ mode: input.mode, host });
     }
 
     const worktreePath = yield* resolveGitWorktreePath(yield* HostProcessWorkingDirectory);
@@ -700,7 +710,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       hasExplicitDevUrl: input.devUrl !== undefined,
       // A non-loopback bind host decides whether the backend can actually take
       // the port, so it has to be probed alongside loopback.
-      checkPortAvailability: makeDefaultCheckPortAvailability(input.host),
+      checkPortAvailability: makeDefaultCheckPortAvailability(host),
     });
 
     const hostEnvironment = yield* HostProcessEnvironment;
@@ -724,7 +734,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       browser: input.browser,
       autoBootstrapProjectFromCwd: input.autoBootstrapProjectFromCwd,
       logWebSocketEvents: input.logWebSocketEvents,
-      host: input.host,
+      host,
       port: input.port,
       devUrl: input.devUrl,
     });

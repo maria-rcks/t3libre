@@ -13,7 +13,7 @@ Use this skill for the web client. For iOS Simulator, Android Emulator, or physi
 2. Choose a base directory that belongs only to the current worktree or test:
    - Use the repository's ignored `.t3` directory for reusable worktree-local state.
    - Use `mktemp -d /tmp/t3code-test.XXXXXX` for disposable state and retain the printed absolute path.
-3. Start the full web stack with `vp run dev`. For remote access without a tailnet, authorize once with `node apps/server/src/bin.ts connect login --base-dir .t3`, then add `--share --share-via=t3-connect`. Plain `--share` uses Tailscale. In a linked worktree it defaults to that worktree's gitignored `.t3`; pass `--home-dir <base-dir>` only when the test needs a different isolated directory.
+3. Start the full web stack with `vp run dev`. For remote access without a tailnet, authorize once with `node apps/server/src/bin.ts connect login --base-dir .t3`, then add `--share --share-via=t3-connect --home-dir .t3`. Plain `--share` uses Tailscale. Passing the same directory explicitly keeps login and runtime state aligned in both the main checkout and linked worktrees.
 4. Keep the terminal session alive and read the selected server port, web port, base directory, and pairing URL from its output.
 
 Treat a base directory as disposable only when it was created or deliberately selected for the current test. Never delete or directly seed the shared `~/.t3` directory. Prefer starting with a new temporary base directory over clearing state of uncertain ownership.

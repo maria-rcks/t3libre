@@ -1,6 +1,5 @@
 /** Proxies the public T3 Connect dev origin to Vite while preserving T3 routes. */
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
-import { isLoopbackHost } from "@t3tools/shared/preview";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -347,7 +346,8 @@ export const connectDevShareProxyLayer = HttpRouter.middleware(
         // The tunnel reaches this listener over loopback. Refusing wildcard
         // listeners keeps a LAN caller from spoofing Cloudflare headers to
         // reach the otherwise loopback-only Vite process.
-        listenerIsLoopback: isLoopbackHost(config.host ?? "127.0.0.1"),
+        listenerIsLoopback:
+          config.host === undefined || config.host === "localhost" || config.host === "127.0.0.1",
         // Managed T3 Connect traffic always passes Cloudflare. Its request id
         // must accompany the exact origin registered by the link lifecycle.
         hasCloudflareRay: typeof request.headers["cf-ray"] === "string",

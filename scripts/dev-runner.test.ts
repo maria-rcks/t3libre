@@ -963,10 +963,14 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     // LAN interface and the browser proxy at once.
     it.effect("still spawns the stack for a wildcard --host in dev mode", () => {
       let spawnCount = 0;
+      let spawnedEnv: Record<string, string | undefined> | undefined;
       const spawnerLayer = Layer.succeed(
         ChildProcessSpawner.ChildProcessSpawner,
-        ChildProcessSpawner.make(() => {
+        ChildProcessSpawner.make((command) => {
           spawnCount += 1;
+          spawnedEnv = (
+            command as { readonly options?: { readonly env?: Record<string, string | undefined> } }
+          ).options?.env;
           return Effect.succeed(mockProcess(0));
         }),
       );
@@ -976,13 +980,14 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           ...devServerInput,
           mode: "dev",
           port: undefined,
-          host: "0.0.0.0",
+          host: " 0.0.0.0 ",
         }).pipe(
           Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
           Effect.provideService(HostProcessPlatform, "linux"),
         );
 
         assert.equal(spawnCount, 1);
+        assert.equal(spawnedEnv?.T3CODE_HOST, "0.0.0.0");
       });
     });
 
@@ -1127,7 +1132,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       });
     });
 
-    it.effect("requires the full IPv4-loopback stack for T3 Connect sharing", () =>
+    it.effect("requires the owned full IPv4-loopback stack for T3 Connect sharing", () =>
       Effect.gen(function* () {
         for (const input of [
           {
@@ -1150,6 +1155,13 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             share: true,
             shareVia: "t3-connect" as const,
           },
+          {
+            ...devServerInput,
+            mode: "dev" as const,
+            devUrl: new URL("http://localhost:7331"),
+            share: true,
+            shareVia: "t3-connect" as const,
+          },
         ]) {
           const error = yield* runDevRunnerWithInput(input).pipe(
             Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer)),
@@ -1157,6 +1169,12 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             Effect.flip,
           );
           assert.equal(error._tag, "DevRunnerConnectShareUnsupportedError");
+          if (input.mode !== "dev") {
+            assert.include(
+              error.message,
+              "vp run dev --home-dir .t3 --share --share-via=t3-connect",
+            );
+          }
         }
       }),
     );

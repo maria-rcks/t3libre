@@ -110,7 +110,9 @@ const makeRequest = Effect.gen(function* () {
 
 function testLayer(input?: {
   readonly upsert?: EnvironmentLinks.EnvironmentLinks["Service"]["upsert"];
+  readonly getForUser?: EnvironmentLinks.EnvironmentLinks["Service"]["getForUser"];
   readonly consume?: DpopProofs.DpopProofReplay["Service"]["consume"];
+  readonly provision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["provision"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
 }) {
   return EnvironmentLinker.layer.pipe(
@@ -129,7 +131,7 @@ function testLayer(input?: {
           listDeliveryUsersForEnvironment: () => Effect.succeed([]),
           listPublicKeysForEnvironment: () => Effect.succeed([]),
           listForUser: () => Effect.succeed([]),
-          getForUser: () => Effect.succeed(null),
+          getForUser: input?.getForUser ?? (() => Effect.succeed(null)),
           revokeForUser: () => Effect.succeed(false),
         }),
         Layer.succeed(EnvironmentCredentials.EnvironmentCredentials, {
@@ -141,15 +143,20 @@ function testLayer(input?: {
           prepareDeprovision: () => Effect.succeed(null),
           deprovision: input?.deprovision ?? (() => Effect.void),
           release: () => Effect.succeed(true),
-          provision: () =>
-            Effect.succeed({
-              endpoint: {
-                httpBaseUrl: "https://managed.example.test/",
-                wsBaseUrl: "wss://managed.example.test/ws",
-                providerKind: "cloudflare_tunnel",
-              },
-              runtime: { providerKind: "cloudflare_tunnel", connectorToken: "connector-token" },
-            }),
+          provision:
+            input?.provision ??
+            (() =>
+              Effect.succeed({
+                endpoint: {
+                  httpBaseUrl: "https://managed.example.test/",
+                  wsBaseUrl: "wss://managed.example.test/ws",
+                  providerKind: "cloudflare_tunnel",
+                },
+                runtime: {
+                  providerKind: "cloudflare_tunnel",
+                  connectorToken: "connector-token",
+                },
+              })),
         }),
       ),
     ),
@@ -208,6 +215,69 @@ describe("EnvironmentLinker", () => {
             Effect.sync(() => {
               deprovisionedEnvironmentId = input.environmentId;
             }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("does not deprovision the permanent endpoint on a durable-link conflict", () => {
+    let deprovisioned = false;
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
+      expect(error._tag).toBe("EnvironmentLinkUpsertPersistenceError");
+      expect(deprovisioned).toBe(false);
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          upsert: () =>
+            Effect.fail(
+              new EnvironmentLinks.EnvironmentLinkUpsertPersistenceError({
+                userId: "user_123",
+                environmentId: "env-link-test",
+                cause: new EnvironmentLinks.ActiveDurableEnvironmentLinkConflict(
+                  "active durable link",
+                ),
+              }),
+            ),
+          deprovision: () =>
+            Effect.sync(() => {
+              deprovisioned = true;
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("rejects an active durable link before provisioning a temporary endpoint", () => {
+    let provisioned = false;
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
+      expect(error._tag).toBe("EnvironmentLinkUpsertPersistenceError");
+      expect(error.cause).toBeInstanceOf(EnvironmentLinks.ActiveDurableEnvironmentLinkConflict);
+      expect(provisioned).toBe(false);
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          getForUser: () =>
+            Effect.succeed({
+              environmentId: "env-link-test" as RelayEnvironmentLinkProofPayload["environmentId"],
+              label: "Durable Environment",
+              endpoint: {
+                httpBaseUrl: "https://durable.example.test/",
+                wsBaseUrl: "wss://durable.example.test/ws",
+                providerKind: "cloudflare_tunnel",
+              },
+              environmentPublicKey: "durable-public-key",
+              linkedAt: "2026-09-02T20:00:00.000Z",
+            }),
+          provision: () => {
+            provisioned = true;
+            return Effect.die("temporary endpoint must not be provisioned");
+          },
         }),
       ),
     );

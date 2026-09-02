@@ -118,9 +118,10 @@ t3 connect logout
 
 ### Dev sharing
 
-`vp run dev --share --share-via=t3-connect` is the ephemeral development counterpart to
+`vp run dev --share --share-via=t3-connect --home-dir .t3` is the ephemeral development counterpart to
 `vp run dev --share`. It uses the worktree's isolated `.t3` state and requires a stored CLI OAuth
-credential from `t3 connect login --base-dir .t3`. With a custom `--home-dir`, use that same
+credential from `t3 connect login --base-dir .t3`. The matching explicit directories also work from
+the main checkout, whose default development home differs. With another `--home-dir`, use that same
 absolute path for login. The run does not record durable link intent.
 
 The managed tunnel continues to target the backend port. When Connect dev sharing is enabled, the
