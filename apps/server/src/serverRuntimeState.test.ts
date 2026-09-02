@@ -107,6 +107,27 @@ describe("serverRuntimeState", () => {
       assert.isTrue(
         Option.isNone(yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath)),
       );
+
+      const replacementState = { ...state, pid: 789 };
+      yield* Effect.forEach(Array.from({ length: 25 }), () =>
+        Effect.gen(function* () {
+          yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state });
+          yield* Effect.all(
+            [
+              ServerRuntimeState.clearOwnedPersistedServerRuntimeState(statePath, state.pid),
+              ServerRuntimeState.persistServerRuntimeState({
+                path: statePath,
+                state: replacementState,
+              }),
+            ],
+            { concurrency: "unbounded" },
+          );
+          assert.deepEqual(
+            Option.getOrThrow(yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath)),
+            replacementState,
+          );
+        }),
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

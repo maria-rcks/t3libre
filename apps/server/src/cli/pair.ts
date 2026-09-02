@@ -133,7 +133,7 @@ export class ServePortOccupiedError extends Schema.TaggedErrorClass<ServePortOcc
 
 /** The URL a browser or phone should pair through, absent Tailscale. */
 export const resolveDirectPairingBaseUrl = (state: PersistedServerRuntimeState): string =>
-  state.pairingBaseUrl ?? state.devUrl ?? resolveHeadlessConnectionString(state.host, state.port);
+  state.devUrl ?? resolveHeadlessConnectionString(state.host, state.port);
 
 export class DevServerNotProxiableError extends Schema.TaggedErrorClass<DevServerNotProxiableError>()(
   "DevServerNotProxiableError",
@@ -236,6 +236,22 @@ interface DiscoveredPairTarget {
   readonly state: PersistedServerRuntimeState;
   readonly descriptor: ExecutionEnvironmentDescriptor;
 }
+
+const resolveReachableDirectPairingBaseUrl = Effect.fn("pair.resolveReachableDirectPairingBaseUrl")(
+  function* (target: DiscoveredPairTarget) {
+    const candidate = target.state.pairingBaseUrl;
+    if (candidate !== undefined) {
+      const probed = yield* probeEnvironmentDescriptor(candidate);
+      if (
+        probed._tag === "descriptor" &&
+        probed.descriptor.environmentId === target.descriptor.environmentId
+      ) {
+        return candidate;
+      }
+    }
+    return resolveDirectPairingBaseUrl(target.state);
+  },
+);
 
 const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
   explicitBaseDir: string | undefined,
@@ -500,7 +516,7 @@ export const pairCommand = Command.make("pair", {
         pairingBaseUrl = resolved.baseUrl;
         notes.push(...resolved.notes);
       } else {
-        pairingBaseUrl = resolveDirectPairingBaseUrl(target.state);
+        pairingBaseUrl = yield* resolveReachableDirectPairingBaseUrl(target);
         if (isLoopbackHost(new URL(pairingBaseUrl).hostname)) {
           notes.push(
             "This URL is only reachable from this machine. Re-run with --tailscale, or restart the server with a reachable --host.",

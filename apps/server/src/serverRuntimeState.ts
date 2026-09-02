@@ -2,6 +2,8 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import type * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
 import { writeFileStringAtomically } from "./atomicWrite.ts";
@@ -37,9 +39,57 @@ export class ServerRuntimeStateError extends Schema.TaggedErrorClass<ServerRunti
   }
 }
 
+const PersistedServerRuntimeStateJson = Schema.fromJsonString(PersistedServerRuntimeState);
 const decodePersistedServerRuntimeState = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(PersistedServerRuntimeState),
+  PersistedServerRuntimeStateJson,
 );
+const encodePersistedServerRuntimeState = Schema.encodeSync(PersistedServerRuntimeStateJson);
+
+const isAlreadyExists = (error: PlatformError.PlatformError): boolean =>
+  error.reason._tag === "AlreadyExists";
+
+/** Atomically take the current state and reinstall it only if no replacement won the path. */
+const mutatePersistedServerRuntimeState = (
+  statePath: string,
+  mutate: (state: PersistedServerRuntimeState) => Option.Option<PersistedServerRuntimeState>,
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      yield* fs.makeDirectory(path.dirname(statePath), { recursive: true });
+      const tempDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: path.dirname(statePath),
+        prefix: `${path.basename(statePath)}.mutate.`,
+      });
+      const snapshotPath = path.join(tempDirectory, "snapshot");
+      const moved = yield* fs.rename(statePath, snapshotPath).pipe(
+        Effect.as(true),
+        Effect.catch((error) =>
+          error.reason._tag === "NotFound" ? Effect.succeed(false) : Effect.fail(error),
+        ),
+      );
+      if (!moved) return;
+
+      const raw = yield* fs.readFileString(snapshotPath);
+      const decoded = yield* decodePersistedServerRuntimeState(raw.trim()).pipe(Effect.option);
+      const replacement = Option.isSome(decoded) ? mutate(decoded.value) : Option.none();
+      if (Option.isNone(decoded) || Option.isSome(replacement)) {
+        const sourcePath = Option.isNone(decoded) ? snapshotPath : path.join(tempDirectory, "next");
+        if (Option.isSome(replacement)) {
+          yield* fs.writeFileString(
+            sourcePath,
+            `${encodePersistedServerRuntimeState(replacement.value)}\n`,
+          );
+        }
+        yield* fs
+          .link(sourcePath, statePath)
+          .pipe(
+            Effect.catch((error) => (isAlreadyExists(error) ? Effect.void : Effect.fail(error))),
+          );
+      }
+    }),
+  );
 
 const runtimeOriginForConfig = (
   config: Pick<ServerConfig.ServerConfig["Service"], "host">,
@@ -178,14 +228,8 @@ export const readPersistedServerRuntimeState = (path: string) =>
 
 /** Clear a runtime advertisement only while it still belongs to this process. */
 export const clearOwnedPersistedServerRuntimeState = (path: string, pid: number) =>
-  readPersistedServerRuntimeState(path).pipe(
-    Effect.flatMap(
-      Option.match({
-        onNone: () => Effect.void,
-        onSome: (state) =>
-          state.pid === pid ? clearPersistedServerRuntimeState(path) : Effect.void,
-      }),
-    ),
+  mutatePersistedServerRuntimeState(path, (state) =>
+    state.pid === pid ? Option.none() : Option.some(state),
   );
 
 /** Remove a public pairing origin only while this process still owns that exact advertisement. */
@@ -194,18 +238,11 @@ export const clearOwnedPairingBaseUrl = (input: {
   readonly pid: number;
   readonly pairingBaseUrl: string;
 }) =>
-  readPersistedServerRuntimeState(input.path).pipe(
-    Effect.flatMap(
-      Option.match({
-        onNone: () => Effect.void,
-        onSome: (state) => {
-          if (state.pid !== input.pid || state.pairingBaseUrl !== input.pairingBaseUrl) {
-            return Effect.void;
-          }
-          const localState = { ...state };
-          delete localState.pairingBaseUrl;
-          return persistServerRuntimeState({ path: input.path, state: localState });
-        },
-      }),
-    ),
-  );
+  mutatePersistedServerRuntimeState(input.path, (state) => {
+    if (state.pid !== input.pid || state.pairingBaseUrl !== input.pairingBaseUrl) {
+      return Option.some(state);
+    }
+    const localState = { ...state };
+    delete localState.pairingBaseUrl;
+    return Option.some(localState);
+  });

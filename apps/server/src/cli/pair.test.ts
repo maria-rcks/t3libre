@@ -43,14 +43,14 @@ const baseState = {
 } as const satisfies PersistedServerRuntimeState;
 
 describe("pair base URL selection", () => {
-  it("prefers a ready public pairing origin", () => {
+  it("uses the local fallback independently of a recorded public origin", () => {
     expect(
       resolveDirectPairingBaseUrl({
         ...baseState,
         devUrl: "http://localhost:5733/",
         pairingBaseUrl: "https://environment.tunnels.example.com/",
       }),
-    ).toBe("https://environment.tunnels.example.com/");
+    ).toBe("http://localhost:5733/");
   });
 
   it("pairs through the dev web origin when the server fronts a dev server", () => {
@@ -129,18 +129,13 @@ const testDescriptor = {
   capabilities: { repositoryIdentity: true },
 };
 
-const withDescriptorServer = <A, E, R>(run: (origin: string) => Effect.Effect<A, E, R>) =>
+const withHttpServer = <A, E, R>(
+  handler: NodeHttp.RequestListener,
+  run: (origin: string) => Effect.Effect<A, E, R>,
+) =>
   Effect.acquireUseRelease(
     Effect.callback<NodeHttp.Server>((resume) => {
-      const server = NodeHttp.createServer((request, response) => {
-        if (request.url === "/.well-known/t3/environment") {
-          response.writeHead(200, { "content-type": "application/json" });
-          response.end(JSON.stringify(testDescriptor));
-          return;
-        }
-        response.writeHead(404);
-        response.end();
-      });
+      const server = NodeHttp.createServer(handler);
       server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
     }),
     (server) => {
@@ -152,6 +147,20 @@ const withDescriptorServer = <A, E, R>(run: (origin: string) => Effect.Effect<A,
     },
     (server) => Effect.sync(() => server.close()),
   );
+
+const withDescriptorServer = <A, E, R>(
+  run: (origin: string) => Effect.Effect<A, E, R>,
+  descriptor = testDescriptor,
+) =>
+  withHttpServer((request, response) => {
+    if (request.url === "/.well-known/t3/environment") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(descriptor));
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  }, run);
 
 describe("t3 pair", () => {
   it.effect("mints a token and prints a QR pairing URL for a live server", () =>
@@ -238,14 +247,93 @@ describe("t3 pair", () => {
           state: yield* makePersistedServerRuntimeState({
             config: { host: undefined, devUrl: new URL("http://localhost:5733") },
             port,
-            pairingBaseUrl: "https://environment.tunnels.example.com/",
+            pairingBaseUrl: origin,
           }),
         });
 
         const output = yield* captureStdout(runCli(["pair", "--base-dir", baseDir]));
 
-        assert.include(output, "Pairing URL: https://environment.tunnels.example.com/pair#token=");
+        assert.include(output, `Pairing URL: ${origin}/pair#token=`);
       }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("falls back when a recorded T3 Connect pairing origin is stale", () =>
+    withDescriptorServer((origin) =>
+      Effect.gen(function* () {
+        const baseDir = NodeFS.mkdtempSync(
+          NodePath.join(NodeOS.tmpdir(), "t3-pair-stale-connect-test-"),
+        );
+        const port = Number(new URL(origin).port);
+        const statePath = NodePath.join(baseDir, "dev", "server-runtime.json");
+        yield* persistServerRuntimeState({
+          path: statePath,
+          state: yield* makePersistedServerRuntimeState({
+            config: { host: undefined, devUrl: new URL("http://localhost:5733") },
+            port,
+            pairingBaseUrl: "http://127.0.0.1:1/",
+          }),
+        });
+
+        const output = yield* captureStdout(runCli(["pair", "--base-dir", baseDir]));
+
+        assert.include(output, "Pairing URL: http://localhost:5733/pair#token=");
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("falls back when a recorded pairing origin serves another environment", () =>
+    withDescriptorServer((origin) =>
+      withDescriptorServer(
+        (wrongOrigin) =>
+          Effect.gen(function* () {
+            const baseDir = NodeFS.mkdtempSync(
+              NodePath.join(NodeOS.tmpdir(), "t3-pair-wrong-connect-test-"),
+            );
+            const statePath = NodePath.join(baseDir, "dev", "server-runtime.json");
+            yield* persistServerRuntimeState({
+              path: statePath,
+              state: yield* makePersistedServerRuntimeState({
+                config: { host: undefined, devUrl: new URL("http://localhost:5733") },
+                port: Number(new URL(origin).port),
+                pairingBaseUrl: wrongOrigin,
+              }),
+            });
+
+            const output = yield* captureStdout(runCli(["pair", "--base-dir", baseDir]));
+            assert.include(output, "Pairing URL: http://localhost:5733/pair#token=");
+          }),
+        { ...testDescriptor, environmentId: "another-environment" },
+      ),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("falls back when a recorded pairing origin is not a T3 server", () =>
+    withDescriptorServer((origin) =>
+      withHttpServer(
+        (_request, response) => {
+          response.writeHead(200, { "content-type": "text/plain" });
+          response.end("not t3");
+        },
+        (wrongOrigin) =>
+          Effect.gen(function* () {
+            const baseDir = NodeFS.mkdtempSync(
+              NodePath.join(NodeOS.tmpdir(), "t3-pair-non-t3-connect-test-"),
+            );
+            const statePath = NodePath.join(baseDir, "dev", "server-runtime.json");
+            yield* persistServerRuntimeState({
+              path: statePath,
+              state: yield* makePersistedServerRuntimeState({
+                config: { host: undefined, devUrl: new URL("http://localhost:5733") },
+                port: Number(new URL(origin).port),
+                pairingBaseUrl: wrongOrigin,
+              }),
+            });
+
+            const output = yield* captureStdout(runCli(["pair", "--base-dir", baseDir]));
+            assert.include(output, "Pairing URL: http://localhost:5733/pair#token=");
+          }),
+      ),
     ).pipe(Effect.provide(NodeServices.layer)),
   );
 
