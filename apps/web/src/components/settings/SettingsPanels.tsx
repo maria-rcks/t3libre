@@ -67,7 +67,11 @@ import {
   useTheme,
 } from "../../hooks/useTheme";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import {
+  useClientSettingsHydrated,
+  usePrimarySettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
@@ -1014,6 +1018,7 @@ export function AppearanceSettingsPanel() {
   } = useTheme();
   const customThemes = useCustomThemes();
   const [isImportThemeOpen, setIsImportThemeOpen] = useState(false);
+  const clientSettingsHydrated = useClientSettingsHydrated();
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const environmentStageLabel = useEnvironmentStageLabel();
@@ -1221,6 +1226,7 @@ export function AppearanceSettingsPanel() {
                 <input
                   aria-label="Panel animation duration"
                   className="settings-slider w-full"
+                  disabled={!clientSettingsHydrated}
                   id="panel-animation-duration"
                   max={MAX_PANEL_ANIMATION_DURATION_MS}
                   min={MIN_PANEL_ANIMATION_DURATION_MS}
