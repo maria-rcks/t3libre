@@ -1,5 +1,10 @@
-import type { PullRequestDiffInput, PullRequestDiffResult } from "@t3tools/contracts";
+import type {
+  EnvironmentAuthInvalidError,
+  PullRequestDiffInput,
+  PullRequestDiffResult,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -16,6 +21,18 @@ import {
 import { buildEnvironmentAuthHeaders, withEnvironmentCredentials } from "./environmentHttpAuth.ts";
 
 const DEFAULT_PULL_REQUEST_DIFF_TIMEOUT_MS = 60_000;
+
+export class PullRequestDiffCredentialRejectedError extends Data.TaggedError(
+  "PullRequestDiffCredentialRejectedError",
+)<{ readonly cause: EnvironmentAuthInvalidError }> {
+  override get message(): string {
+    return "This environment session is no longer valid (invalid_credential). Refresh the page or quit and reopen T3 Code.";
+  }
+}
+
+type PullRequestDiffLoadError =
+  | RemoteEnvironmentRequestError
+  | PullRequestDiffCredentialRejectedError;
 
 export const fetchEnvironmentPullRequestDiff = Effect.fn(
   "clientRuntime.state.fetchEnvironmentPullRequestDiff",
@@ -42,6 +59,12 @@ export const fetchEnvironmentPullRequestDiff = Effect.fn(
       input.prepared.httpAuthorization,
       client.pullRequests.diff({ payload: input.diff, headers }),
     ),
+  ).pipe(
+    Effect.mapError((error) =>
+      error._tag === "EnvironmentAuthInvalidError" && error.reason === "invalid_credential"
+        ? new PullRequestDiffCredentialRejectedError({ cause: error })
+        : error,
+    ),
   );
 });
 
@@ -51,7 +74,7 @@ export class PullRequestDiffLoader extends Context.Service<
     readonly load: (
       prepared: PreparedConnection,
       input: PullRequestDiffInput,
-    ) => Effect.Effect<PullRequestDiffResult, RemoteEnvironmentRequestError>;
+    ) => Effect.Effect<PullRequestDiffResult, PullRequestDiffLoadError>;
   }
 >()("@t3tools/client-runtime/state/pullRequestDiffHttp/PullRequestDiffLoader") {}
 

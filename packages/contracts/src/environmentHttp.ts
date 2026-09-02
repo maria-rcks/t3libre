@@ -133,9 +133,6 @@ export class EnvironmentAuthInvalidError extends Schema.TaggedErrorClass<Environ
   }
 
   override get message(): string {
-    if (this.reason === "invalid_credential") {
-      return "This environment session is no longer valid (invalid_credential). Refresh the page or quit and reopen T3 Code.";
-    }
     return `The environment rejected this client's credentials (${this.reason}).`;
   }
 }
