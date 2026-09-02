@@ -5016,7 +5016,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeThread && activeContextWindow
       ? `${activeThread.id}:${activeContextWindow.updatedAt}`
       : null;
-  const compactDisabled =
+  const compactThreadUnavailable =
     !activeThread ||
     !activeProject ||
     !isServerThread ||
@@ -5028,8 +5028,8 @@ function ChatViewContent(props: ChatViewProps) {
     feedbackUploading ||
     pendingApprovals.length > 0 ||
     pendingUserInputs.length > 0 ||
-    showPlanFollowUpPrompt ||
-    composerHasUnsentContent;
+    showPlanFollowUpPrompt;
+  const compactDisabled = compactThreadUnavailable || composerHasUnsentContent;
   const compactDisabledReason = compactDisabled
     ? composerHasUnsentContent
       ? "Send or clear your draft before compacting"
@@ -7393,7 +7393,7 @@ function ChatViewContent(props: ChatViewProps) {
                             }
                             activeThreadModelSelection={activeThread?.modelSelection}
                             activeContextWindow={activeContextWindow}
-                            compactDisabled={compactDisabled}
+                            compactDisabled={compactThreadUnavailable}
                             compactDisabledReason={compactDisabledReason}
                             resolvedTheme={resolvedTheme}
                             settings={settings}
