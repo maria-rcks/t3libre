@@ -437,6 +437,32 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       if (legacyEvents[2]?.type === "turn.completed") {
         NodeAssert.equal(legacyEvents[2].payload.state, "completed");
       }
+
+      const exitEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      yield* compactThread(threadId);
+      const turnAfterExit = yield* adapter
+        .sendTurn({ threadId, input: "after process exit", attachments: [] })
+        .pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
+      yield* runtime.emit({
+        id: asEventId("evt-session-exited-during-compaction"),
+        kind: "session",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:02.000Z",
+        method: "session/exited",
+        threadId,
+        message: "Codex App Server exited with code 1.",
+      });
+
+      const exitEvent = yield* Fiber.join(exitEventFiber);
+      NodeAssert.equal(exitEvent._tag, "Some");
+      NodeAssert.equal(
+        exitEvent._tag === "Some" ? exitEvent.value.type : undefined,
+        "session.exited",
+      );
+      yield* Fiber.join(turnAfterExit);
+      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 2);
     }),
   );
 

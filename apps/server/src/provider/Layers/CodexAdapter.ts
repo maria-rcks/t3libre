@@ -1798,6 +1798,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                 runtimeEvent.type === "thread.state.changed" &&
                 runtimeEvent.payload.state === "compacted",
             );
+            const terminalRuntimeEvent = runtimeEvents.some(
+              (runtimeEvent) =>
+                runtimeEvent.type === "session.exited" || runtimeEvent.type === "runtime.error",
+            );
             const manualCompactionTurnId =
               event.method === "thread/compacted" ? session?.manualCompactionTurnId : undefined;
             if (session && manualCompactionTurnId) {
@@ -1826,7 +1830,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               return;
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
-            if (session && completedCompactionItem) {
+            if (session && (completedCompactionItem || terminalRuntimeEvent)) {
               yield* settleManualCompaction(session);
             }
           }),
