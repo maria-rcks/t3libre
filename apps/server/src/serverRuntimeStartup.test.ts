@@ -50,17 +50,14 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
     const project = (workspaceRoot: string, autoPull = true) =>
       ({ workspaceRoot, autoPull }) as never;
 
-    yield* ServerRuntimeStartup.autoPullProjects(
-      [
-        project("/clean"),
-        project("/current"),
-        project("/dirty"),
-        project("/ahead"),
-        project("/feature"),
-        project("/disabled", false),
-      ],
-      git,
-    );
+    yield* ServerRuntimeStartup.autoPullProjects([
+      project("/clean"),
+      project("/current"),
+      project("/dirty"),
+      project("/ahead"),
+      project("/feature"),
+      project("/disabled", false),
+    ]).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
 
     assert.deepStrictEqual(pulled, ["/clean"]);
   }),

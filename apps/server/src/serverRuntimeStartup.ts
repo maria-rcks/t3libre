@@ -638,8 +638,8 @@ interface StartupOptions {
 
 export const autoPullProjects = Effect.fn("autoPullProjects")(function* (
   projects: ReadonlyArray<OrchestrationProjectShell>,
-  git: GitVcsDriver.GitVcsDriver["Service"],
 ) {
+  const git = yield* GitVcsDriver.GitVcsDriver;
   const workspaceRoots = [
     ...new Set(
       projects
@@ -708,14 +708,13 @@ export const make = (options?: StartupOptions) =>
     const providerSessionDirectory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
     const crypto = yield* Crypto.Crypto;
     const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
-    const git = yield* GitVcsDriver.GitVcsDriver;
 
     const commandGate = yield* makeCommandGate;
     const httpListening = yield* Deferred.make<void>();
     const reactorScope = yield* Scope.make("sequential");
 
     const syncAutoPullProjects = projectionSnapshotQuery.getShellSnapshot().pipe(
-      Effect.flatMap((snapshot) => autoPullProjects(snapshot.projects, git)),
+      Effect.flatMap((snapshot) => autoPullProjects(snapshot.projects)),
       Effect.catch((cause) =>
         Effect.logWarning("Failed to load projects for automatic pull", { cause }),
       ),
