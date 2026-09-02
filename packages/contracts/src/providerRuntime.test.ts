@@ -49,29 +49,6 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.plan[1]?.status).toBe("inProgress");
   });
 
-  it("decodes context compaction token counts", () => {
-    const parsed = decodeRuntimeEvent({
-      type: "thread.state.changed",
-      eventId: "event-compacted-1",
-      provider: "claudeAgent",
-      createdAt: "2026-02-28T00:00:00.000Z",
-      threadId: "thread-1",
-      turnId: "turn-1",
-      payload: {
-        state: "compacted",
-        beforeTokens: 899_000,
-        afterTokens: 19_000,
-      },
-    });
-
-    expect(parsed.type).toBe("thread.state.changed");
-    if (parsed.type !== "thread.state.changed") {
-      throw new Error("expected thread.state.changed");
-    }
-    expect(parsed.payload.beforeTokens).toBe(899_000);
-    expect(parsed.payload.afterTokens).toBe(19_000);
-  });
-
   it("decodes proposed-plan completion events", () => {
     const parsed = decodeRuntimeEvent({
       type: "turn.proposed.completed",

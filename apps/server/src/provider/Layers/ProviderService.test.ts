@@ -1031,7 +1031,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
-  it.effect("falls back to the provider's native slash command for compaction", () =>
+  it.effect("marks a successful fallback compaction as compacted", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
       const threadId = asThreadId("thread-compact-cursor");
@@ -1041,26 +1041,20 @@ routing.layer("ProviderServiceLive routing", (it) => {
         threadId,
         runtimeMode: "full-access",
       });
-      routing.cursor.sendTurn.mockClear();
       const eventsFiber = yield* provider.streamEvents.pipe(
-        Stream.take(3),
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "turn.completed" || event.type === "thread.state.changed"),
+        ),
+        Stream.take(2),
         Stream.runCollect,
         Effect.forkChild,
       );
       yield* advanceTestClock(50);
 
       yield* provider.compactThread(threadId);
-
       assert.deepEqual(routing.cursor.sendTurn.mock.calls, [[{ threadId, input: "/compress" }]]);
-      routing.cursor.emit({
-        type: "turn.completed",
-        eventId: asEventId("evt-cursor-unrelated-completed"),
-        provider: CURSOR_DRIVER,
-        createdAt: "2026-01-01T00:00:00.500Z",
-        threadId,
-        turnId: asTurnId("turn-unrelated"),
-        payload: { state: "completed" },
-      });
       routing.cursor.emit({
         type: "turn.completed",
         eventId: asEventId("evt-cursor-compact-completed"),
@@ -1070,75 +1064,16 @@ routing.layer("ProviderServiceLive routing", (it) => {
         turnId: asTurnId(`turn-${threadId}`),
         payload: { state: "completed" },
       });
-      const events = Array.from(yield* Fiber.join(eventsFiber));
-      assert.deepEqual(
-        events.map((event) => event.type),
-        ["turn.completed", "turn.completed", "thread.state.changed"],
-      );
-      const compactedEvent = events[2];
-      assert.equal(compactedEvent?.type, "thread.state.changed");
-      if (compactedEvent?.type === "thread.state.changed") {
-        assert.equal(compactedEvent.payload.state, "compacted");
-      }
-      yield* provider.stopSession({ threadId });
-    }),
-  );
-
-  it.effect("correlates fallback completion emitted before sendTurn returns", () =>
-    Effect.gen(function* () {
-      const provider = yield* ProviderService.ProviderService;
-      const threadId = asThreadId("thread-compact-cursor-inline-completion");
-      const turnId = asTurnId(`turn-${threadId}`);
-      yield* provider.startSession(threadId, {
-        provider: CURSOR_DRIVER,
-        providerInstanceId: ProviderInstanceId.make("cursor"),
-        threadId,
-        runtimeMode: "full-access",
-      });
-      const canonicalCompletionObserved = yield* Deferred.make<void>();
-      const eventsFiber = yield* provider.streamEvents.pipe(
-        Stream.filter(
-          (event) =>
-            event.threadId === threadId &&
-            (event.type === "turn.completed" || event.type === "thread.state.changed"),
-        ),
-        Stream.tap((event) =>
-          event.type === "turn.completed"
-            ? Deferred.succeed(canonicalCompletionObserved, undefined)
-            : Effect.void,
-        ),
-        Stream.take(2),
-        Stream.runCollect,
-        Effect.forkChild,
-      );
-      yield* advanceTestClock(50);
-      routing.cursor.sendTurn.mockImplementationOnce((input) =>
-        Effect.gen(function* () {
-          routing.cursor.emit({
-            type: "turn.completed",
-            eventId: asEventId("evt-cursor-inline-compact-completed"),
-            provider: CURSOR_DRIVER,
-            createdAt: "2026-01-01T00:00:01.000Z",
-            threadId,
-            turnId,
-            payload: { state: "completed" },
-          });
-          yield* Deferred.await(canonicalCompletionObserved);
-          return { threadId: input.threadId, turnId };
-        }),
-      );
-
-      yield* provider.compactThread(threadId);
 
       const events = Array.from(yield* Fiber.join(eventsFiber));
       assert.deepEqual(
         events.map((event) => event.type),
         ["turn.completed", "thread.state.changed"],
       );
-      const compactedEvent = events[1];
-      assert.equal(compactedEvent?.type, "thread.state.changed");
-      if (compactedEvent?.type === "thread.state.changed") {
-        assert.equal(compactedEvent.payload.state, "compacted");
+      const compacted = events[1];
+      assert.equal(compacted?.type, "thread.state.changed");
+      if (compacted?.type === "thread.state.changed") {
+        assert.equal(compacted.payload.state, "compacted");
       }
       yield* provider.stopSession({ threadId });
     }),

@@ -80,8 +80,6 @@ const runtimeMock = {
     messageFailures: 0,
     promptCalls: [] as Array<unknown>,
     summarizeCalls: [] as Array<unknown>,
-    summarizeSignals: [] as AbortSignal[],
-    summarizeImplementation: null as ((signal?: AbortSignal) => Promise<void>) | null,
     promptAsyncError: null as Error | null,
     promptAsyncImplementation: null as (() => Promise<void>) | null,
     autoPromptEcho: true,
@@ -133,8 +131,6 @@ const runtimeMock = {
     this.state.messageFailures = 0;
     this.state.promptCalls.length = 0;
     this.state.summarizeCalls.length = 0;
-    this.state.summarizeSignals.length = 0;
-    this.state.summarizeImplementation = null;
     this.state.promptAsyncError = null;
     this.state.promptAsyncImplementation = null;
     this.state.autoPromptEcho = true;
@@ -319,12 +315,8 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             });
           }
         },
-        summarize: async (input: unknown, options?: { signal?: AbortSignal }) => {
+        summarize: async (input: unknown) => {
           runtimeMock.state.summarizeCalls.push(input);
-          if (options?.signal) {
-            runtimeMock.state.summarizeSignals.push(options.signal);
-          }
-          await runtimeMock.state.summarizeImplementation?.(options?.signal);
           return { data: true };
         },
         messages: async () => ({ data: runtimeMock.state.messages }),
@@ -977,15 +969,9 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           "anthropic/sonnet",
         ),
       });
-      const eventsFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter(
-          (event) =>
-            event.type === "thread.state.changed" ||
-            ((event.type === "turn.started" || event.type === "turn.completed") &&
-              event.turnId?.startsWith("opencode-compact-") === true),
-        ),
-        Stream.take(3),
-        Stream.runCollect,
+      const eventFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "thread.state.changed"),
+        Stream.runHead,
         Effect.forkChild,
       );
       const compactThread = adapter.compactThread;
@@ -1006,354 +992,11 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         properties: { sessionID: "http://127.0.0.1:9999/session" },
       });
 
-      const events = Array.from(yield* Fiber.join(eventsFiber));
-      NodeAssert.deepEqual(
-        events.map((event) => event.type),
-        ["turn.started", "thread.state.changed", "turn.completed"],
-      );
-      const compacted = events.find((event) => event.type === "thread.state.changed");
-      NodeAssert.equal(compacted?.type, "thread.state.changed");
-      if (compacted?.type === "thread.state.changed") {
-        NodeAssert.equal(compacted.payload.state, "compacted");
-        NodeAssert.equal(compacted.turnId, events[0]?.turnId);
+      const event = yield* Fiber.join(eventFiber);
+      NodeAssert.equal(event._tag, "Some");
+      if (event._tag === "Some" && event.value.type === "thread.state.changed") {
+        NodeAssert.equal(event.value.payload.state, "compacted");
       }
-      yield* adapter.stopSession(threadId);
-    }),
-  );
-
-  it.effect("does not compact a stopped context after waiting for the prompt permit", () =>
-    Effect.gen(function* () {
-      const adapter = yield* OpenCodeAdapter;
-      const threadId = asThreadId("thread-opencode-compact-stopped-context");
-      const promptStarted = promiseWithResolvers<void>();
-      const promptRelease = promiseWithResolvers<void>();
-      runtimeMock.state.promptAsyncImplementation = async () => {
-        promptStarted.resolve(undefined);
-        await promptRelease.promise;
-      };
-
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make("opencode"),
-        threadId,
-        runtimeMode: "full-access",
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("opencode"),
-          "anthropic/sonnet",
-        ),
-      });
-      const sendFiber = yield* adapter
-        .sendTurn({
-          threadId,
-          input: "Hold the prompt permit",
-          modelSelection: createModelSelection(
-            ProviderInstanceId.make("opencode"),
-            "anthropic/sonnet",
-          ),
-        })
-        .pipe(Effect.exit, Effect.forkChild);
-      yield* Effect.promise(() => promptStarted.promise);
-      const compactThread = adapter.compactThread;
-      NodeAssert.ok(compactThread);
-      const compactFiber = yield* compactThread(threadId).pipe(Effect.exit, Effect.forkChild);
-      yield* Effect.yieldNow;
-      NodeAssert.equal(runtimeMock.state.summarizeCalls.length, 0);
-
-      yield* adapter.stopSession(threadId);
-      promptRelease.resolve(undefined);
-      const compactExit = yield* Fiber.join(compactFiber);
-      yield* Fiber.join(sendFiber);
-
-      NodeAssert.equal(Exit.isFailure(compactExit), true);
-      NodeAssert.equal(runtimeMock.state.summarizeCalls.length, 0);
-      NodeAssert.equal(yield* adapter.hasSession(threadId), false);
-    }),
-  );
-
-  it.effect("times out a stalled native compaction and releases the prompt permit", () =>
-    Effect.gen(function* () {
-      const adapter = yield* OpenCodeAdapter;
-      const threadId = asThreadId("thread-opencode-compact-timeout");
-      const summarizeStarted = promiseWithResolvers<void>();
-      runtimeMock.state.summarizeImplementation = async () => {
-        summarizeStarted.resolve(undefined);
-        await new Promise<void>(() => {});
-      };
-
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make("opencode"),
-        threadId,
-        runtimeMode: "full-access",
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("opencode"),
-          "anthropic/sonnet",
-        ),
-      });
-      const eventsFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter(
-          (event) =>
-            event.threadId === threadId &&
-            (event.type === "turn.started" || event.type === "turn.aborted"),
-        ),
-        Stream.take(2),
-        Stream.runCollect,
-        Effect.forkChild,
-      );
-      const compactThread = adapter.compactThread;
-      NodeAssert.ok(compactThread);
-      const compactFiber = yield* compactThread(threadId).pipe(Effect.flip, Effect.forkChild);
-      yield* Effect.promise(() => summarizeStarted.promise);
-
-      yield* advanceTestClock(9_999);
-      NodeAssert.equal(compactFiber.pollUnsafe(), undefined);
-      NodeAssert.equal(runtimeMock.state.summarizeSignals[0]?.aborted, false);
-      yield* advanceTestClock(1);
-
-      const error = yield* Fiber.join(compactFiber);
-      NodeAssert.equal(error._tag, "ProviderAdapterRequestError");
-      if (error._tag !== "ProviderAdapterRequestError") {
-        throw new Error("Unexpected error type");
-      }
-      NodeAssert.equal(
-        error.detail,
-        "OpenCode session compaction did not complete within 10 seconds.",
-      );
-      NodeAssert.equal(runtimeMock.state.summarizeSignals[0]?.aborted, true);
-      const events = Array.from(yield* Fiber.join(eventsFiber));
-      NodeAssert.deepEqual(
-        events.map((event) => event.type),
-        ["turn.started", "turn.aborted"],
-      );
-      const sessions = yield* adapter.listSessions();
-      const session = sessions.find((candidate) => candidate.threadId === threadId);
-      NodeAssert.equal(session?.status, "ready");
-      NodeAssert.equal(session?.activeTurnId, undefined);
-
-      const nextTurn = yield* adapter.sendTurn({
-        threadId,
-        input: "Continue after compaction timeout",
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("opencode"),
-          "anthropic/sonnet",
-        ),
-      });
-      NodeAssert.equal(nextTurn.threadId, threadId);
-      yield* adapter.stopSession(threadId);
-    }),
-  );
-
-  it.effect("keeps a prompt active when manual compaction completes late", () =>
-    Effect.gen(function* () {
-      const adapter = yield* OpenCodeAdapter;
-      const threadId = asThreadId("thread-opencode-late-manual-compact");
-      const compactedEvent = promiseWithResolvers<unknown>();
-      runtimeMock.state.subscribedEvents = [compactedEvent.promise];
-
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make("opencode"),
-        threadId,
-        runtimeMode: "full-access",
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("opencode"),
-          "anthropic/sonnet",
-        ),
-      });
-      const eventsFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter(
-          (event) =>
-            event.threadId === threadId &&
-            (event.type === "turn.started" ||
-              event.type === "turn.completed" ||
-              event.type === "thread.state.changed"),
-        ),
-        Stream.take(4),
-        Stream.runCollect,
-        Effect.forkChild,
-      );
-      const compactThread = adapter.compactThread;
-      NodeAssert.ok(compactThread);
-      yield* compactThread(threadId);
-      const promptTurn = yield* adapter.sendTurn({
-        threadId,
-        input: "Continue after compaction",
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("opencode"),
-          "anthropic/sonnet",
-        ),
-      });
-
-      compactedEvent.resolve({
-        id: "evt-session-compacted-after-prompt",
-        type: "session.compacted",
-        properties: { sessionID: "http://127.0.0.1:9999/session" },
-      });
-
-      const events = Array.from(yield* Fiber.join(eventsFiber));
-      NodeAssert.deepEqual(
-        events.map((event) => event.type),
-        ["turn.started", "turn.started", "thread.state.changed", "turn.completed"],
-      );
-      const compactTurnId = events[0]?.turnId;
-      NodeAssert.ok(compactTurnId);
-      NodeAssert.notEqual(promptTurn.turnId, compactTurnId);
-      NodeAssert.equal(events[1]?.turnId, promptTurn.turnId);
-      NodeAssert.equal(events[2]?.turnId, compactTurnId);
-      NodeAssert.equal(events[3]?.turnId, compactTurnId);
-      const sessions = yield* adapter.listSessions();
-      const session = sessions.find((candidate) => candidate.threadId === threadId);
-      NodeAssert.equal(session?.status, "running");
-      NodeAssert.equal(session?.activeTurnId, promptTurn.turnId);
-
-      yield* adapter.stopSession(threadId);
-    }),
-  );
-
-  it.effect("does not complete a failed manual compaction twice", () =>
-    Effect.gen(function* () {
-      const adapter = yield* OpenCodeAdapter;
-      const threadId = asThreadId("thread-opencode-failed-manual-compact");
-      const errorEvent = promiseWithResolvers<unknown>();
-      const compactedEvent = promiseWithResolvers<unknown>();
-      runtimeMock.state.subscribedEvents = [errorEvent.promise, compactedEvent.promise];
-
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make("opencode"),
-        threadId,
-        runtimeMode: "full-access",
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("opencode"),
-          "anthropic/sonnet",
-        ),
-      });
-      const eventsFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter(
-          (event) =>
-            event.threadId === threadId &&
-            (event.type === "turn.started" ||
-              event.type === "turn.completed" ||
-              event.type === "thread.state.changed" ||
-              event.type === "runtime.error"),
-        ),
-        Stream.take(5),
-        Stream.runCollect,
-        Effect.forkChild,
-      );
-      const compactThread = adapter.compactThread;
-      NodeAssert.ok(compactThread);
-      yield* compactThread(threadId);
-      errorEvent.resolve({
-        id: "evt-manual-compact-failed",
-        type: "session.error",
-        properties: {
-          sessionID: "http://127.0.0.1:9999/session",
-          error: { name: "UnknownError", data: { message: "Compaction failed" } },
-        },
-      });
-      yield* Effect.yieldNow;
-
-      const promptTurn = yield* adapter.sendTurn({
-        threadId,
-        input: "Continue after failed compaction",
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("opencode"),
-          "anthropic/sonnet",
-        ),
-      });
-      compactedEvent.resolve({
-        id: "evt-session-compacted-after-failure",
-        type: "session.compacted",
-        properties: { sessionID: "http://127.0.0.1:9999/session" },
-      });
-
-      const events = Array.from(yield* Fiber.join(eventsFiber));
-      const compactTurnId = events[0]?.turnId;
-      NodeAssert.ok(compactTurnId);
-      NodeAssert.deepEqual(
-        events.map((event) => event.type),
-        ["turn.started", "turn.completed", "runtime.error", "turn.started", "thread.state.changed"],
-      );
-      NodeAssert.deepEqual(
-        events.filter((event) => event.type === "turn.completed").map((event) => event.turnId),
-        [compactTurnId],
-      );
-      NodeAssert.equal(events[4]?.turnId, promptTurn.turnId);
-      const sessions = yield* adapter.listSessions();
-      const session = sessions.find((candidate) => candidate.threadId === threadId);
-      NodeAssert.equal(session?.status, "running");
-      NodeAssert.equal(session?.activeTurnId, promptTurn.turnId);
-
-      yield* adapter.stopSession(threadId);
-    }),
-  );
-
-  it.effect("keeps manual compaction correlated through a turnless abort acknowledgment", () =>
-    Effect.gen(function* () {
-      const adapter = yield* OpenCodeAdapter;
-      const threadId = asThreadId("thread-opencode-compact-after-turnless-abort");
-      const abortEvent = promiseWithResolvers<unknown>();
-      const compactedEvent = promiseWithResolvers<unknown>();
-      const abortStarted = promiseWithResolvers<void>();
-      const abortRelease = promiseWithResolvers<void>();
-      runtimeMock.state.subscribedEvents = [abortEvent.promise, compactedEvent.promise];
-      runtimeMock.state.abortImplementation = async () => {
-        abortStarted.resolve(undefined);
-        await abortRelease.promise;
-      };
-
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make("opencode"),
-        threadId,
-        runtimeMode: "full-access",
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("opencode"),
-          "anthropic/sonnet",
-        ),
-      });
-      const eventsFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter(
-          (event) =>
-            event.threadId === threadId &&
-            (event.type === "turn.started" ||
-              event.type === "turn.completed" ||
-              event.type === "thread.state.changed"),
-        ),
-        Stream.take(3),
-        Stream.runCollect,
-        Effect.forkChild,
-      );
-      const interruptFiber = yield* adapter.interruptTurn(threadId).pipe(Effect.forkChild);
-      yield* Effect.promise(() => abortStarted.promise);
-      const compactThread = adapter.compactThread;
-      NodeAssert.ok(compactThread);
-      yield* compactThread(threadId);
-
-      abortEvent.resolve({
-        id: "evt-turnless-abort-during-manual-compact",
-        type: "session.error",
-        properties: {
-          sessionID: "http://127.0.0.1:9999/session",
-          error: { name: "MessageAbortedError", data: { message: "Aborted" } },
-        },
-      });
-      yield* Fiber.join(interruptFiber);
-      abortRelease.resolve(undefined);
-      compactedEvent.resolve({
-        id: "evt-session-compacted-after-turnless-abort",
-        type: "session.compacted",
-        properties: { sessionID: "http://127.0.0.1:9999/session" },
-      });
-
-      const events = Array.from(yield* Fiber.join(eventsFiber));
-      const compactTurnId = events[0]?.turnId;
-      NodeAssert.ok(compactTurnId);
-      NodeAssert.deepEqual(
-        events.map((event) => event.type),
-        ["turn.started", "thread.state.changed", "turn.completed"],
-      );
-      NodeAssert.deepEqual(
-        events.map((event) => event.turnId),
-        [compactTurnId, compactTurnId, compactTurnId],
-      );
-
       yield* adapter.stopSession(threadId);
     }),
   );

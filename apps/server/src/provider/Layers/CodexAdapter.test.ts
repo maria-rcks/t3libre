@@ -340,7 +340,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }),
   );
 
-  it.effect("settles compaction from current and legacy Codex lifecycle events", () =>
+  it.effect("compacts the active Codex thread and emits compacted state", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
       const threadId = asThreadId("thread-compact");
@@ -353,26 +353,14 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       NodeAssert.ok(runtime);
       const compactThread = adapter.compactThread;
       NodeAssert.ok(compactThread);
-      const itemEventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 3)).pipe(
+      const compactedEventFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "thread.state.changed"),
+        Stream.runHead,
         Effect.forkChild,
       );
 
       yield* compactThread(threadId);
-      const queuedTurn = yield* adapter
-        .sendTurn({ threadId, input: "after compact", attachments: [] })
-        .pipe(Effect.forkChild);
-      yield* Effect.yieldNow;
-      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 0);
-      yield* runtime.emit({
-        id: asEventId("evt-compaction-turn-started"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "turn/started",
-        threadId,
-        turnId: asTurnId("provider-compact-turn"),
-        payload: {},
-      });
+      NodeAssert.equal(runtime.compactThreadImpl.mock.calls.length, 1);
       yield* runtime.emit({
         id: asEventId("evt-compaction-item-completed"),
         kind: "notification",
@@ -393,184 +381,12 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         },
       });
 
-      const itemEvents = Array.from(yield* Fiber.join(itemEventsFiber));
-      NodeAssert.deepStrictEqual(
-        itemEvents.map((event) => event.type),
-        ["turn.started", "item.completed", "thread.state.changed"],
-      );
-      NodeAssert.equal(itemEvents[0]?.turnId, "provider-compact-turn");
-      NodeAssert.equal(itemEvents[1]?.turnId, "provider-compact-turn");
-      NodeAssert.equal(itemEvents[2]?.turnId, "provider-compact-turn");
-      if (itemEvents[2]?.type === "thread.state.changed") {
-        NodeAssert.equal(itemEvents[2].payload.state, "compacted");
+      const event = yield* Fiber.join(compactedEventFiber);
+      NodeAssert.equal(event._tag, "Some");
+      if (event._tag === "Some" && event.value.type === "thread.state.changed") {
+        NodeAssert.equal(event.value.turnId, "provider-compact-turn");
+        NodeAssert.equal(event.value.payload.state, "compacted");
       }
-      yield* Fiber.join(queuedTurn);
-      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
-
-      const legacyEventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 3)).pipe(
-        Effect.forkChild,
-      );
-      yield* compactThread(threadId);
-      yield* runtime.emit({
-        id: asEventId("evt-thread-compacted"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        createdAt: "2026-01-01T00:00:01.000Z",
-        method: "thread/compacted",
-        threadId,
-        payload: { threadId: "provider-thread-1" },
-      });
-
-      NodeAssert.equal(runtime.compactThreadImpl.mock.calls.length, 2);
-      const legacyEvents = Array.from(yield* Fiber.join(legacyEventsFiber));
-      NodeAssert.deepStrictEqual(
-        legacyEvents.map((event) => event.type),
-        ["turn.started", "thread.state.changed", "turn.completed"],
-      );
-      NodeAssert.equal(legacyEvents[0]?.turnId, legacyEvents[2]?.turnId);
-      NodeAssert.equal(legacyEvents[1]?.turnId, legacyEvents[0]?.turnId);
-      NodeAssert.match(String(legacyEvents[0]?.turnId), /^codex-compact-/);
-      NodeAssert.equal(new Set(legacyEvents.map((event) => event.eventId)).size, 3);
-      if (legacyEvents[1]?.type === "thread.state.changed") {
-        NodeAssert.equal(legacyEvents[1].payload.state, "compacted");
-      }
-      if (legacyEvents[2]?.type === "turn.completed") {
-        NodeAssert.equal(legacyEvents[2].payload.state, "completed");
-      }
-
-      const exitEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
-      yield* compactThread(threadId);
-      const turnAfterExit = yield* adapter
-        .sendTurn({ threadId, input: "after process exit", attachments: [] })
-        .pipe(Effect.forkChild);
-      yield* Effect.yieldNow;
-      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
-      yield* runtime.emit({
-        id: asEventId("evt-session-exited-during-compaction"),
-        kind: "session",
-        provider: ProviderDriverKind.make("codex"),
-        createdAt: "2026-01-01T00:00:02.000Z",
-        method: "session/exited",
-        threadId,
-        message: "Codex App Server exited with code 1.",
-      });
-
-      const exitEvent = yield* Fiber.join(exitEventFiber);
-      NodeAssert.equal(exitEvent._tag, "Some");
-      NodeAssert.equal(
-        exitEvent._tag === "Some" ? exitEvent.value.type : undefined,
-        "session.exited",
-      );
-      yield* Fiber.join(turnAfterExit);
-      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 2);
-    }),
-  );
-
-  it.effect("releases compaction waiters on terminal turns and interrupts", () =>
-    Effect.gen(function* () {
-      const adapter = yield* CodexAdapter;
-      const threadId = asThreadId("thread-compact-terminal");
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make("codex"),
-        threadId,
-        runtimeMode: "full-access",
-      });
-      const runtime = sessionRuntimeFactory.lastRuntime;
-      NodeAssert.ok(runtime);
-      const compactThread = adapter.compactThread;
-      NodeAssert.ok(compactThread);
-
-      yield* compactThread(threadId);
-      const turnAfterCompletion = yield* adapter
-        .sendTurn({ threadId, input: "after terminal turn", attachments: [] })
-        .pipe(Effect.forkChild);
-      yield* Effect.yieldNow;
-      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 0);
-      yield* runtime.emit({
-        id: asEventId("evt-queued-turn-completed"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "turn/completed",
-        threadId,
-        turnId: asTurnId("provider-queued-turn"),
-        payload: {
-          threadId: "provider-thread-1",
-          turn: { id: "provider-queued-turn", status: "completed", items: [] },
-        },
-      });
-      yield* Effect.yieldNow;
-      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 0);
-      yield* runtime.emit({
-        id: asEventId("evt-compaction-item-started"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "item/started",
-        threadId,
-        turnId: asTurnId("provider-compact-turn"),
-        itemId: asItemId("provider-compact-item"),
-        payload: {
-          startedAtMs: 1_778_000_000_000,
-          threadId: "provider-thread-1",
-          turnId: "provider-compact-turn",
-          item: {
-            id: "provider-compact-item",
-            type: "contextCompaction",
-          },
-        },
-      });
-      yield* runtime.emit({
-        id: asEventId("evt-compaction-turn-completed"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "turn/completed",
-        threadId,
-        turnId: asTurnId("provider-compact-turn"),
-        payload: {
-          threadId: "provider-thread-1",
-          turn: { id: "provider-compact-turn", status: "completed", items: [] },
-        },
-      });
-      yield* Fiber.join(turnAfterCompletion);
-      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
-
-      yield* compactThread(threadId);
-      const turnAfterInterrupt = yield* adapter
-        .sendTurn({ threadId, input: "after interrupt", attachments: [] })
-        .pipe(Effect.forkChild);
-      yield* Effect.yieldNow;
-      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
-      yield* adapter.interruptTurn(threadId);
-      yield* Effect.yieldNow;
-      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
-      yield* runtime.emit({
-        id: asEventId("evt-interrupted-compaction-item-started"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "item/started",
-        threadId,
-        turnId: asTurnId("provider-interrupted-compact-turn"),
-        itemId: asItemId("provider-interrupted-compact-item"),
-        payload: {
-          startedAtMs: 1_778_000_000_000,
-          threadId: "provider-thread-1",
-          turnId: "provider-interrupted-compact-turn",
-          item: {
-            id: "provider-interrupted-compact-item",
-            type: "contextCompaction",
-          },
-        },
-      });
-      yield* adapter.interruptTurn(threadId, asTurnId("provider-interrupted-compact-turn"));
-      yield* Fiber.join(turnAfterInterrupt);
-      NodeAssert.deepStrictEqual(runtime.interruptTurnImpl.mock.calls, [
-        [undefined],
-        [asTurnId("provider-interrupted-compact-turn")],
-      ]);
-      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 2);
     }),
   );
 

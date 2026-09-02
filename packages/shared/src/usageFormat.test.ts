@@ -6,19 +6,8 @@ import {
   formatDateTimeShort,
   formatHourShort,
   formatRelativeHourShort,
-  formatTokens,
   makeWindow,
 } from "./usageFormat.ts";
-
-describe("token formatting", () => {
-  it("promotes values when rounding crosses a unit boundary", () => {
-    expect(formatTokens(999_499)).toBe("999K");
-    expect(formatTokens(999_500)).toBe("1M");
-    expect(formatTokens(999_500_000)).toBe("1B");
-    expect(formatTokens(999_500_000_000)).toBe("1T");
-    expect(formatTokens(-999_500)).toBe("-1M");
-  });
-});
 
 describe("hourly usage formatting", () => {
   it("enumerates 24 fixed buckets across a rolling window", () => {

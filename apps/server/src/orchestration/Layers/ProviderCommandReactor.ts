@@ -1229,94 +1229,23 @@ const make = Effect.gen(function* () {
         ),
       );
 
-    type CompactionRuntimeSessionSnapshot = Pick<
-      ProviderSession,
-      "status" | "activeTurnId" | "updatedAt"
-    >;
-    const handleCompactionFailure = (
-      cause: Cause.Cause<unknown>,
-      sessionBeforeCompaction: CompactionRuntimeSessionSnapshot | undefined,
-    ) => {
+    const handleCompactionFailure = (cause: Cause.Cause<unknown>) => {
       if (Cause.hasInterruptsOnly(cause)) {
         return Effect.void;
       }
       const detail = formatFailureDetail(cause);
-      return Effect.gen(function* () {
-        const runtimeSession = (yield* providerService.listSessions()).find(
-          (session) => session.threadId === event.payload.threadId,
-        );
-        const latestThread = yield* resolveThread(event.payload.threadId);
-        const latestSession = latestThread?.session;
-        const compactMessageIndex =
-          latestThread?.messages.findIndex((message) => message.id === event.payload.messageId) ??
-          -1;
-        const hasLaterPrompt =
-          compactMessageIndex >= 0 &&
-          latestThread?.messages
-            .slice(compactMessageIndex + 1)
-            .some((message) => message.role === "user" && !isCompactCommandMessage(message));
-        const runtimeSessionChanged =
-          sessionBeforeCompaction !== undefined &&
-          runtimeSession !== undefined &&
-          (runtimeSession.status !== sessionBeforeCompaction.status ||
-            runtimeSession.activeTurnId !== sessionBeforeCompaction.activeTurnId ||
-            runtimeSession.updatedAt !== sessionBeforeCompaction.updatedAt);
-        const latestSessionSettled =
-          latestSession !== null &&
-          latestSession !== undefined &&
-          latestSession.status !== "starting" &&
-          latestSession.status !== "running" &&
-          latestSession.status !== "ready";
-        if (
-          latestSession?.status === "running" &&
-          latestSession.activeTurnId !== null &&
-          runtimeSession?.status === "running" &&
-          runtimeSession.activeTurnId === latestSession.activeTurnId
-        ) {
-          // Consume the pending turn-start projection without disturbing the
-          // provider turn that rejected compaction because it is still live.
-          yield* setThreadSession({
-            threadId: event.payload.threadId,
-            session: latestSession,
-            createdAt: event.payload.createdAt,
-          });
-        } else if (!latestSessionSettled && !hasLaterPrompt) {
-          yield* setThreadSessionErrorOnTurnStartFailure({
-            threadId: event.payload.threadId,
-            detail,
-            createdAt: event.payload.createdAt,
-          });
-          if (
-            runtimeSessionChanged &&
-            runtimeSession?.status === "ready" &&
-            latestSession?.status === "ready"
-          ) {
-            // The provider settled while recovery was reading its inventory.
-            // Clear the pending compact request through the error projection,
-            // then restore the provider's newer ready state.
-            yield* setThreadSession({
-              threadId: event.payload.threadId,
-              session: latestSession,
-              createdAt: event.payload.createdAt,
-            });
-          }
-        }
-        yield* appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: "provider.turn.start.failed",
-          summary: "Context compaction failed",
-          detail,
-          turnId: latestSession?.activeTurnId ?? null,
-          createdAt: event.payload.createdAt,
-        });
-      });
+      return appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.turn.start.failed",
+        summary: "Context compaction failed",
+        detail,
+        turnId: null,
+        createdAt: event.payload.createdAt,
+      }).pipe(Effect.asVoid);
     };
 
-    const recoverCompactionFailure = (
-      cause: Cause.Cause<unknown>,
-      sessionBeforeCompaction: CompactionRuntimeSessionSnapshot | undefined,
-    ) =>
-      handleCompactionFailure(cause, sessionBeforeCompaction).pipe(
+    const recoverCompactionFailure = (cause: Cause.Cause<unknown>) =>
+      handleCompactionFailure(cause).pipe(
         Effect.catchCause((recoveryCause) =>
           Effect.logWarning("provider command reactor failed to recover compaction failure", {
             eventType: event.type,
@@ -1329,43 +1258,33 @@ const make = Effect.gen(function* () {
 
     if (isCompactCommand) {
       const latestThread = yield* resolveThread(event.payload.threadId);
-      if (latestThread?.session?.status === "starting") {
+      if (
+        latestThread?.session?.status === "starting" ||
+        latestThread?.session?.status === "running"
+      ) {
         yield* appendProviderFailureActivity({
           threadId: event.payload.threadId,
           kind: "provider.turn.start.failed",
           summary: "Context compaction failed",
-          detail: "Context compaction is already in progress.",
+          detail: "Context compaction is unavailable while a provider turn is running.",
           turnId: null,
           createdAt: event.payload.createdAt,
         });
         return;
       }
-      let sessionBeforeCompaction: CompactionRuntimeSessionSnapshot | undefined;
       yield* Effect.gen(function* () {
-        yield* ensureSessionForThread(event.payload.threadId, event.payload.createdAt, {
-          ...(event.payload.modelSelection !== undefined
+        yield* ensureSessionForThread(
+          event.payload.threadId,
+          event.payload.createdAt,
+          event.payload.modelSelection !== undefined
             ? { modelSelection: event.payload.modelSelection }
-            : {}),
-          pendingTurnStart: true,
-        });
+            : undefined,
+        );
         if (event.payload.modelSelection !== undefined) {
           threadModelSelections.set(event.payload.threadId, event.payload.modelSelection);
         }
-        const runtimeSession = (yield* providerService.listSessions()).find(
-          (session) => session.threadId === event.payload.threadId,
-        );
-        sessionBeforeCompaction = runtimeSession
-          ? {
-              status: runtimeSession.status,
-              activeTurnId: runtimeSession.activeTurnId,
-              updatedAt: runtimeSession.updatedAt,
-            }
-          : undefined;
         yield* providerService.compactThread(event.payload.threadId);
-      }).pipe(
-        Effect.catchCause((cause) => recoverCompactionFailure(cause, sessionBeforeCompaction)),
-        Effect.forkScoped,
-      );
+      }).pipe(Effect.catchCause(recoverCompactionFailure), Effect.forkScoped);
       return;
     }
 

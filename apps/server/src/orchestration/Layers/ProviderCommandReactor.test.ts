@@ -34,10 +34,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "@t3tools/contracts";
-import {
-  ProviderAdapterRequestError,
-  ProviderAdapterValidationError,
-} from "../../provider/Errors.ts";
+import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -157,13 +154,7 @@ describe("ProviderCommandReactor", () => {
     readonly serverActivation?: Effect.Effect<void>;
     readonly interruptTurnEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly stopSessionEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
-    readonly compactThreadEffect?: () => Effect.Effect<
-      void,
-      ProviderAdapterRequestError | ProviderAdapterValidationError
-    >;
-    readonly listSessionsEffect?: (
-      sessions: Array<ProviderSession>,
-    ) => Effect.Effect<Array<ProviderSession>>;
+    readonly compactThreadEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -340,8 +331,7 @@ describe("ProviderCommandReactor", () => {
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       stopSession: stopSession as ProviderServiceShape["stopSession"],
-      listSessions: () =>
-        input?.listSessionsEffect?.(runtimeSessions) ?? Effect.succeed(runtimeSessions),
+      listSessions: () => Effect.succeed(runtimeSessions),
       getCapabilities: (_provider) =>
         Effect.succeed({
           sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
@@ -631,16 +621,16 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
-  effectIt.effect("routes /compact through the provider compaction operation", () =>
+  effectIt.effect("routes standalone /compact to the provider", () =>
     Effect.gen(function* () {
       const harness = yield* Effect.promise(() => createHarness());
 
       yield* harness.engine.dispatch({
         type: "thread.turn.start",
-        commandId: CommandId.make("cmd-compact-1"),
+        commandId: CommandId.make("cmd-compact"),
         threadId: ThreadId.make("thread-1"),
         message: {
-          messageId: asMessageId("user-message-compact-1"),
+          messageId: asMessageId("user-message-compact"),
           role: "user",
           text: "/compact",
           attachments: [],
@@ -653,291 +643,10 @@ describe("ProviderCommandReactor", () => {
       yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
       expect(harness.compactThread).toHaveBeenCalledWith(ThreadId.make("thread-1"));
       expect(harness.sendTurn).not.toHaveBeenCalled();
-      const readModel = yield* Effect.promise(() => harness.readModel());
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      expect(thread?.session?.status).toBe("starting");
     }),
   );
 
-  effectIt.effect("rejects another /compact while compaction is starting", () =>
-    Effect.gen(function* () {
-      const releaseCompaction = yield* Deferred.make<void>();
-      const harness = yield* Effect.promise(() =>
-        createHarness({ compactThreadEffect: () => Deferred.await(releaseCompaction) }),
-      );
-
-      const dispatchCompact = (commandId: string, messageId: string, createdAt: string) =>
-        harness.engine.dispatch({
-          type: "thread.turn.start",
-          commandId: CommandId.make(commandId),
-          threadId: ThreadId.make("thread-1"),
-          message: {
-            messageId: asMessageId(messageId),
-            role: "user",
-            text: "/compact",
-            attachments: [],
-          },
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "approval-required",
-          createdAt,
-        });
-
-      yield* dispatchCompact(
-        "cmd-compact-in-progress-first",
-        "user-message-compact-in-progress-first",
-        "2026-01-01T00:00:00.000Z",
-      );
-      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
-      yield* dispatchCompact(
-        "cmd-compact-in-progress-second",
-        "user-message-compact-in-progress-second",
-        "2026-01-01T00:00:01.000Z",
-      );
-      yield* Effect.promise(() =>
-        waitFor(async () => {
-          const readModel = await harness.readModel();
-          return (
-            readModel.threads
-              .find((entry) => entry.id === ThreadId.make("thread-1"))
-              ?.activities.some((activity) => activity.summary === "Context compaction failed") ??
-            false
-          );
-        }),
-      );
-
-      expect(harness.compactThread).toHaveBeenCalledTimes(1);
-      const readModel = yield* Effect.promise(() => harness.readModel());
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      expect(thread?.session?.status).toBe("starting");
-      expect(
-        thread?.activities.find((activity) => activity.summary === "Context compaction failed")
-          ?.payload,
-      ).toEqual({ detail: "Context compaction is already in progress." });
-      yield* Deferred.succeed(releaseCompaction, undefined);
-    }),
-  );
-
-  effectIt.effect("preserves a later starting turn when compaction fails", () =>
-    Effect.gen(function* () {
-      const releaseFailure = yield* Deferred.make<void>();
-      const rejection = new ProviderAdapterRequestError({
-        provider: ProviderDriverKind.make("codex"),
-        method: "thread/compact/start",
-        detail: "Compaction failed before a later turn started.",
-      });
-      const harness = yield* Effect.promise(() =>
-        createHarness({
-          compactThreadEffect: () =>
-            Deferred.await(releaseFailure).pipe(Effect.andThen(Effect.fail(rejection))),
-        }),
-      );
-
-      yield* harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-compact-before-later-turn"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-compact-before-later-turn"),
-          role: "user",
-          text: "/compact",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: "2026-01-01T00:00:00.000Z",
-      });
-      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
-      yield* harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-later-turn-during-compact"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-later-turn-during-compact"),
-          role: "user",
-          text: "continue after compact",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: "2026-01-01T00:00:01.000Z",
-      });
-      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
-      yield* Deferred.succeed(releaseFailure, undefined);
-      yield* Effect.promise(() =>
-        waitFor(async () => {
-          const readModel = await harness.readModel();
-          return (
-            readModel.threads
-              .find((entry) => entry.id === ThreadId.make("thread-1"))
-              ?.activities.some((activity) => activity.summary === "Context compaction failed") ??
-            false
-          );
-        }),
-      );
-
-      const readModel = yield* Effect.promise(() => harness.readModel());
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      expect(thread?.session).toMatchObject({
-        status: "starting",
-        activeTurnId: null,
-        lastError: null,
-      });
-    }),
-  );
-
-  effectIt.effect("keeps the first real prompt eligible for title and branch generation", () =>
-    Effect.gen(function* () {
-      const harness = yield* Effect.promise(() => createHarness());
-      const now = "2026-01-01T00:00:00.000Z";
-      yield* harness.engine.dispatch({
-        type: "thread.meta.update",
-        commandId: CommandId.make("cmd-thread-compact-first-metadata"),
-        threadId: ThreadId.make("thread-1"),
-        title: "/compact",
-        branch: "t3code/1234abcd",
-        worktreePath: "/tmp/provider-project-worktree",
-      });
-      harness.generateThreadTitle.mockReturnValue(Effect.succeed({ title: "Real prompt title" }));
-      harness.generateBranchName.mockReturnValue(Effect.succeed({ branch: "feature/real-prompt" }));
-
-      yield* harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-compact-first"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-compact-first"),
-          role: "user",
-          text: "/compact",
-          attachments: [],
-        },
-        titleSeed: "/compact",
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: now,
-      });
-      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
-      yield* Effect.promise(() => harness.drain());
-      expect(harness.generateThreadTitle).not.toHaveBeenCalled();
-      expect(harness.generateBranchName).not.toHaveBeenCalled();
-
-      yield* harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-real-prompt-after-compact"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-real-prompt-after-compact"),
-          role: "user",
-          text: "Fix the reconnect spinner.",
-          attachments: [],
-        },
-        titleSeed: "/compact",
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: "2026-01-01T00:00:01.000Z",
-      });
-
-      yield* Effect.promise(() =>
-        waitFor(
-          () =>
-            harness.generateThreadTitle.mock.calls.length === 1 &&
-            harness.generateBranchName.mock.calls.length === 1,
-        ),
-      );
-      expect(harness.generateThreadTitle.mock.calls[0]?.[0]).toMatchObject({
-        message: "Fix the reconnect spinner.",
-      });
-      expect(harness.generateBranchName.mock.calls[0]?.[0]).toMatchObject({
-        message: "Fix the reconnect spinner.",
-      });
-      yield* harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-ready-after-real-prompt"),
-        threadId: ThreadId.make("thread-1"),
-        session: {
-          threadId: ThreadId.make("thread-1"),
-          status: "ready",
-          providerName: "codex",
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: "2026-01-01T00:00:01.500Z",
-        },
-        createdAt: "2026-01-01T00:00:01.500Z",
-      });
-
-      yield* harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-compact-after-real-prompt"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-compact-after-real-prompt"),
-          role: "user",
-          text: "/compact",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: "2026-01-01T00:00:02.000Z",
-      });
-      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 2));
-      yield* Effect.promise(() => harness.drain());
-      expect(harness.generateThreadTitle).toHaveBeenCalledTimes(1);
-      expect(harness.generateBranchName).toHaveBeenCalledTimes(1);
-    }),
-  );
-
-  effectIt.effect("reports provider compaction validation issues without encoded causes", () =>
-    Effect.gen(function* () {
-      const rejection = new ProviderAdapterValidationError({
-        provider: ProviderDriverKind.make("opencode"),
-        operation: "compactThread",
-        issue: "OpenCode compaction requires an active 'provider/model' selection.",
-      });
-      const harness = yield* Effect.promise(() =>
-        createHarness({ compactThreadEffect: () => Effect.fail(rejection) }),
-      );
-
-      yield* harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-compact-validation-failure"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-compact-validation-failure"),
-          role: "user",
-          text: "/compact",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: "2026-01-01T00:00:00.000Z",
-      });
-
-      yield* Effect.promise(() =>
-        waitFor(async () => {
-          const readModel = await harness.readModel();
-          return (
-            readModel.threads
-              .find((entry) => entry.id === ThreadId.make("thread-1"))
-              ?.activities.some((activity) => activity.summary === "Context compaction failed") ??
-            false
-          );
-        }),
-      );
-      const readModel = yield* Effect.promise(() => harness.readModel());
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      expect(thread?.session).toMatchObject({
-        status: "error",
-        lastError: rejection.issue,
-      });
-      expect(
-        thread?.activities.find((activity) => activity.summary === "Context compaction failed")
-          ?.payload,
-      ).toEqual({ detail: rejection.issue });
-    }),
-  );
-
-  effectIt.effect("preserves a running turn when /compact is rejected", () =>
+  effectIt.effect("reports provider compaction failures", () =>
     Effect.gen(function* () {
       const rejection = new ProviderAdapterRequestError({
         provider: ProviderDriverKind.make("codex"),
@@ -947,62 +656,20 @@ describe("ProviderCommandReactor", () => {
       const harness = yield* Effect.promise(() =>
         createHarness({ compactThreadEffect: () => Effect.fail(rejection) }),
       );
-      const now = "2026-01-01T00:00:00.000Z";
-      yield* harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-turn-before-compact-rejection"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-before-compact-rejection"),
-          role: "user",
-          text: "Keep this turn running",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: now,
-      });
-      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
-      yield* harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-set-running-before-compact"),
-        threadId: ThreadId.make("thread-1"),
-        session: {
-          threadId: ThreadId.make("thread-1"),
-          status: "running",
-          providerName: "codex",
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          runtimeMode: "approval-required",
-          activeTurnId: asTurnId("turn-running"),
-          lastError: null,
-          updatedAt: now,
-        },
-        createdAt: now,
-      });
-      const runtimeSession = harness.runtimeSessions.find(
-        (session) => session.threadId === ThreadId.make("thread-1"),
-      );
-      expect(runtimeSession).toBeDefined();
-      if (runtimeSession) {
-        Object.assign(runtimeSession, {
-          status: "running",
-          activeTurnId: asTurnId("turn-running"),
-        });
-      }
 
       yield* harness.engine.dispatch({
         type: "thread.turn.start",
-        commandId: CommandId.make("cmd-compact-while-running"),
+        commandId: CommandId.make("cmd-compact-failure"),
         threadId: ThreadId.make("thread-1"),
         message: {
-          messageId: asMessageId("user-message-compact-while-running"),
+          messageId: asMessageId("user-message-compact-failure"),
           role: "user",
           text: "/compact",
           attachments: [],
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
-        createdAt: now,
+        createdAt: "2026-01-01T00:00:00.000Z",
       });
 
       yield* Effect.promise(() =>
@@ -1018,122 +685,10 @@ describe("ProviderCommandReactor", () => {
       );
       const readModel = yield* Effect.promise(() => harness.readModel());
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      expect(thread?.session).toMatchObject({
-        status: "running",
-        activeTurnId: asTurnId("turn-running"),
-        lastError: null,
-      });
-      expect(thread?.latestTurn).toMatchObject({
-        turnId: asTurnId("turn-running"),
-        state: "running",
-      });
       expect(
         thread?.activities.find((activity) => activity.summary === "Context compaction failed")
           ?.payload,
       ).toEqual({ detail: rejection.detail });
-    }),
-  );
-
-  effectIt.effect("does not overwrite a compact turn that settles during recovery", () =>
-    Effect.gen(function* () {
-      const releaseFailure = yield* Deferred.make<void>();
-      const recoveryInventoryStarted = yield* Deferred.make<void>();
-      const releaseRecoveryInventory = yield* Deferred.make<void>();
-      let blockRecoveryInventory = false;
-      const rejection = new ProviderAdapterRequestError({
-        provider: ProviderDriverKind.make("codex"),
-        method: "thread/compact/start",
-        detail: "Compaction failed after its turn started.",
-      });
-      const harness = yield* Effect.promise(() =>
-        createHarness({
-          compactThreadEffect: () =>
-            Deferred.await(releaseFailure).pipe(Effect.andThen(Effect.fail(rejection))),
-          listSessionsEffect: (sessions) =>
-            blockRecoveryInventory
-              ? Deferred.succeed(recoveryInventoryStarted, undefined).pipe(
-                  Effect.andThen(Deferred.await(releaseRecoveryInventory)),
-                  Effect.as(sessions),
-                )
-              : Effect.succeed(sessions),
-        }),
-      );
-      const now = "2026-01-01T00:00:00.000Z";
-      yield* harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-compact-with-stale-projection"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-compact-with-stale-projection"),
-          role: "user",
-          text: "/compact",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: now,
-      });
-      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
-      yield* harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-set-running-compact-turn"),
-        threadId: ThreadId.make("thread-1"),
-        session: {
-          threadId: ThreadId.make("thread-1"),
-          status: "running",
-          providerName: "codex",
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          runtimeMode: "approval-required",
-          activeTurnId: asTurnId("turn-compact-cleared-by-provider"),
-          lastError: null,
-          updatedAt: now,
-        },
-        createdAt: now,
-      });
-      blockRecoveryInventory = true;
-      yield* Deferred.succeed(releaseFailure, undefined);
-      yield* Deferred.await(recoveryInventoryStarted);
-      Object.assign(harness.runtimeSessions[0]!, {
-        status: "ready",
-        activeTurnId: undefined,
-        updatedAt: "2026-01-01T00:00:01.000Z",
-      });
-      yield* harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-set-settled-compact-turn"),
-        threadId: ThreadId.make("thread-1"),
-        session: {
-          threadId: ThreadId.make("thread-1"),
-          status: "ready",
-          providerName: "codex",
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: "2026-01-01T00:00:01.000Z",
-        },
-        createdAt: now,
-      });
-      yield* Deferred.succeed(releaseRecoveryInventory, undefined);
-
-      yield* Effect.promise(() =>
-        waitFor(async () => {
-          const readModel = await harness.readModel();
-          return (
-            readModel.threads
-              .find((entry) => entry.id === ThreadId.make("thread-1"))
-              ?.activities.some((activity) => activity.summary === "Context compaction failed") ??
-            false
-          );
-        }),
-      );
-      const readModel = yield* Effect.promise(() => harness.readModel());
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      expect(thread?.session).toMatchObject({
-        status: "ready",
-        activeTurnId: null,
-        lastError: null,
-      });
     }),
   );
 

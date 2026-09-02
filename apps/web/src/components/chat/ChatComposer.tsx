@@ -1365,21 +1365,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }));
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [...builtInSlashCommandItems, ...providerSlashCommandItems, ...skillItems],
-        {
-          isAtPromptStart: composerTrigger.rangeStart === 0,
-          compactCommandIsWholeMessage:
-            phase !== "running" &&
-            activePendingApproval === null &&
-            pendingUserInputs.length === 0 &&
-            prompt.slice(0, composerTrigger.rangeStart).trim().length === 0 &&
-            prompt.slice(composerTrigger.rangeEnd).trim().length === 0 &&
-            composerImages.length === 0 &&
-            composerFiles.length === 0 &&
-            composerSendState.sendableTerminalContexts.length === 0 &&
-            composerElementContexts.length === 0 &&
-            composerPreviewAnnotations.length === 0 &&
-            composerReviewComments.length === 0,
-        },
+        composerTrigger.rangeStart === 0,
       );
       return searchSlashCommandItems(slashCommandItems, query);
     }
@@ -1400,18 +1386,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     return [];
   }, [
-    activePendingApproval,
-    composerElementContexts.length,
-    composerFiles.length,
-    composerImages.length,
-    composerPreviewAnnotations.length,
-    composerReviewComments.length,
-    composerSendState.sendableTerminalContexts.length,
     composerTrigger,
     planModeUiEnabled,
-    phase,
-    prompt,
-    pendingUserInputs.length,
     selectedProvider,
     selectedProviderStatus,
     settings.showSkillsInSlashMenu,
