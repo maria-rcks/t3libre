@@ -543,8 +543,33 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       yield* Effect.yieldNow;
       NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
       yield* adapter.interruptTurn(threadId);
+      yield* Effect.yieldNow;
+      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 1);
+      yield* runtime.emit({
+        id: asEventId("evt-interrupted-compaction-item-started"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/started",
+        threadId,
+        turnId: asTurnId("provider-interrupted-compact-turn"),
+        itemId: asItemId("provider-interrupted-compact-item"),
+        payload: {
+          startedAtMs: 1_778_000_000_000,
+          threadId: "provider-thread-1",
+          turnId: "provider-interrupted-compact-turn",
+          item: {
+            id: "provider-interrupted-compact-item",
+            type: "contextCompaction",
+          },
+        },
+      });
+      yield* adapter.interruptTurn(threadId, asTurnId("provider-interrupted-compact-turn"));
       yield* Fiber.join(turnAfterInterrupt);
-      NodeAssert.equal(runtime.interruptTurnImpl.mock.calls.length, 1);
+      NodeAssert.deepStrictEqual(runtime.interruptTurnImpl.mock.calls, [
+        [undefined],
+        [asTurnId("provider-interrupted-compact-turn")],
+      ]);
       NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 2);
     }),
   );

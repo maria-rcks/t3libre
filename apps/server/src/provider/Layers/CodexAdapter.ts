@@ -1983,10 +1983,17 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const interruptTurn: CodexAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
     function* (threadId, turnId) {
       const session = yield* requireSession(threadId);
+      const providerTurnId =
+        turnId ?? (yield* session.runtime.getSession).activeTurnId ?? undefined;
       yield* session.runtime
-        .interruptTurn(turnId)
+        .interruptTurn(providerTurnId)
         .pipe(Effect.mapError((cause) => mapCodexRuntimeError(threadId, "turn/interrupt", cause)));
-      yield* settleManualCompaction(session);
+      if (
+        providerTurnId !== undefined &&
+        providerTurnId === session.manualCompactionProviderTurnId
+      ) {
+        yield* settleManualCompaction(session);
+      }
     },
   );
 
