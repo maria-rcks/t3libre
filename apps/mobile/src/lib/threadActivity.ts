@@ -1519,26 +1519,16 @@ function appendToolGroupRows(
   const active = latestActiveActivity !== undefined;
   const live = activeTail || active;
   const latestActivity = latestActiveActivity ?? activities.at(-1)!;
-  if (
-    !live &&
-    activities.length === 1 &&
-    latestActivity.toolLike &&
-    toolGroupAction(latestActivity.workEntry) !== "edit"
-  ) {
-    result.push({
-      type: "activity-group",
-      id: latestActivity.id,
-      createdAt: latestActivity.createdAt,
-      turnId: latestActivity.turnId,
-      activities,
-    });
-    return;
-  }
+  const singleActivity = activities.length === 1 ? latestActivity : null;
   const summary = live
     ? liveToolActivitySummary(latestActivity, active)
-    : activities.length === 1 && !activities[0]!.toolLike
-      ? activities[0]!.workEntry.label
-      : summarizeToolGroup(activities.map((activity) => activity.workEntry));
+    : singleActivity !== null &&
+        singleActivity.toolLike &&
+        toolGroupAction(singleActivity.workEntry) !== "edit"
+      ? singleActivity.summary
+      : singleActivity !== null && !singleActivity.toolLike
+        ? singleActivity.workEntry.label
+        : summarizeToolGroup(activities.map((activity) => activity.workEntry));
   const summaryToolIcon = live
     ? resolveWorkEntryToolPresentation(latestActivity.workEntry)?.icon
     : undefined;

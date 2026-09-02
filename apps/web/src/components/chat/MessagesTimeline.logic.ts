@@ -836,23 +836,13 @@ export function deriveMessagesTimelineRows(input: {
               expandedWorkGroupRow(groupId, timelineEntry.createdAt, visibleGroupedEntries),
             );
           }
-        } else if (
-          visibleGroupedEntries.length === 1 &&
-          workLogEntryIsToolLike(visibleGroupedEntries[0]!) &&
-          toolGroupAction(visibleGroupedEntries[0]!) !== "edit"
-        ) {
-          nextRows.push({
-            kind: "work",
-            id: timelineEntry.id,
-            createdAt: timelineEntry.createdAt,
-            groupedEntries: visibleGroupedEntries,
-            isExpandedToolGroup: false,
-          });
         } else {
           const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
           const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
           const summaryKind = toolGroupSummaryKind(visibleGroupedEntries);
           const latestToolEntry = visibleGroupedEntries.findLast(workLogEntryIsToolLike);
+          const singleEntry =
+            visibleGroupedEntries.length === 1 ? (visibleGroupedEntries[0] ?? null) : null;
           nextRows.push({
             kind: "work-toggle",
             id: `work-toggle:${timelineEntry.id}`,
@@ -861,10 +851,13 @@ export function deriveMessagesTimelineRows(input: {
             hiddenCount: visibleGroupedEntries.length,
             expanded,
             summary:
-              visibleGroupedEntries.length === 1 &&
-              !workLogEntryIsToolLike(visibleGroupedEntries[0]!)
-                ? visibleGroupedEntries[0]!.label
-                : summarizeToolGroup(visibleGroupedEntries),
+              singleEntry !== null &&
+              workLogEntryIsToolLike(singleEntry) &&
+              toolGroupAction(singleEntry) !== "edit"
+                ? workEntryDisplayLabel(singleEntry, undefined)
+                : singleEntry !== null && !workLogEntryIsToolLike(singleEntry)
+                  ? singleEntry.label
+                  : summarizeToolGroup(visibleGroupedEntries),
             summaryKind,
             hasFailure:
               latestToolEntry !== undefined &&

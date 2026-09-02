@@ -152,7 +152,7 @@ describe("work entry labels", () => {
     },
   );
 
-  it("renders one completed browser call without a group summary", () => {
+  it("uses the completed browser call label instead of a group summary", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -173,11 +173,7 @@ describe("work entry labels", () => {
       revertTurnCountByUserMessageId: new Map(),
     });
     expect(rows).toMatchObject([
-      {
-        kind: "work",
-        groupedEntries: [{ id: "tool-1" }],
-        isExpandedToolGroup: false,
-      },
+      { kind: "work-toggle", hiddenCount: 1, summary: "Clicked in the preview browser" },
     ]);
   });
 });
@@ -736,7 +732,7 @@ describe("deriveMessagesTimelineRows", () => {
       "user-entry",
       "turn-fold:turn-1",
       "assistant-first-entry",
-      "work-entry-1",
+      "work-toggle:work-entry-1",
       "assistant-final-entry",
     ]);
     expect(
@@ -1130,7 +1126,7 @@ describe("deriveMessagesTimelineRows", () => {
     });
   });
 
-  it("renders a single completed tool call without summarizing it", () => {
+  it("labels a single completed tool call without summarizing it", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -1190,10 +1186,10 @@ describe("deriveMessagesTimelineRows", () => {
       revertTurnCountByUserMessageId: new Map(),
     });
 
-    expect(rows.map((row) => row.kind)).toEqual(["working", "work", "message", "work-live"]);
-    expect(rows.find((row) => row.kind === "work")).toMatchObject({
-      groupedEntries: [{ id: "completed-command" }],
-      isExpandedToolGroup: false,
+    expect(rows.map((row) => row.kind)).toEqual(["working", "work-toggle", "message", "work-live"]);
+    expect(rows.find((row) => row.kind === "work-toggle")).toMatchObject({
+      hiddenCount: 1,
+      summary: "rg toolCall",
     });
   });
 

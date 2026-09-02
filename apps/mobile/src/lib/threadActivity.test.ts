@@ -1041,7 +1041,7 @@ describe("buildThreadFeed", () => {
       hasFailure: true,
     },
   ])(
-    "renders a direct browser row once its action settles as $status",
+    "uses the browser call label once its action settles as $status",
     ({ status, displayName, detail, hasFailure }) => {
       const turnId = TurnId.make("turn-preview-lifecycle");
       const toolCallId = "preview-click";
@@ -1172,10 +1172,18 @@ describe("buildThreadFeed", () => {
           completedAt: "2026-04-01T00:00:04.000Z",
         },
       });
-      expect(settledRows.some((entry) => entry.type === "work-toggle")).toBe(false);
+      expect(settledRows.find((entry) => entry.type === "work-toggle")).toMatchObject({
+        groupId,
+        hiddenCount: 1,
+        expanded: true,
+        summary: displayName,
+        summaryKind: "browser",
+        hasFailure,
+        live: false,
+      });
       expect(settledRows.find((entry) => entry.type === "activity-group")).toMatchObject({
-        id: "preview-click-started",
-        activities: [{ id: "preview-click-started", summary: displayName }],
+        id: `work-details:${groupId}`,
+        activities: [{ id: "preview-click-started", summary: displayName, live: false }],
       });
     },
   );
@@ -1350,7 +1358,7 @@ describe("buildThreadFeed", () => {
     expect(expanded.map((entry) => entry.id)).toEqual([
       "assistant-first",
       "turn-fold:turn-1",
-      "tool-completed",
+      "work-toggle:work-group:tool-completed",
       "assistant-final",
     ]);
   });
@@ -1734,7 +1742,7 @@ describe("buildThreadFeed", () => {
         latestTurn.startedAt,
       );
       expect(rows.slice(0, 3).map((entry) => [entry.id, entry.type])).toEqual([
-        ["activity-1", "activity-group"],
+        ["work-toggle:work-group:activity-1", "work-toggle"],
         ["activity-2", "activity-group"],
         ["work-live:work-group:activity-3", "work-toggle"],
       ]);
@@ -1749,10 +1757,13 @@ describe("buildThreadFeed", () => {
         live: true,
         shimmer,
       });
-      expect(rows[0]).toMatchObject({ type: "activity-group" });
+      expect(rows[0]).toMatchObject({ live: false, shimmer: false });
 
       const stoppedRows = deriveThreadFeedPresentation(feed, latestTurn, new Set());
-      expect(stoppedRows.every((entry) => entry.type === "activity-group")).toBe(true);
+      expect(stoppedRows.filter((entry) => entry.type === "work-toggle")).toMatchObject([
+        { live: false, shimmer: false },
+        { live: false, shimmer: false },
+      ]);
 
       const completedRows = deriveThreadFeedPresentation(
         feed,
@@ -1761,11 +1772,10 @@ describe("buildThreadFeed", () => {
         new Set(),
         latestTurn.startedAt,
       );
-      expect(
-        completedRows
-          .filter((entry) => entry.type !== "turn-fold")
-          .every((entry) => entry.type === "activity-group"),
-      ).toBe(true);
+      expect(completedRows.filter((entry) => entry.type === "work-toggle")).toMatchObject([
+        { live: false, shimmer: false },
+        { live: false, shimmer: false },
+      ]);
     },
   );
 
