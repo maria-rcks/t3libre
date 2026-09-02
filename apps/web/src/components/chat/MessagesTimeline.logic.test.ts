@@ -152,7 +152,7 @@ describe("work entry labels", () => {
     },
   );
 
-  it("uses the completed browser call label instead of a group summary", () => {
+  it("uses the completed browser call label for a settled legacy tool", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -162,7 +162,6 @@ describe("work entry labels", () => {
           entry: {
             ...entry,
             itemType: "mcp_tool_call",
-            toolLifecycleStatus: "completed",
             toolData: { server: "t3-code", tool: "preview_click" },
           },
         },

@@ -839,7 +839,7 @@ function workEntryHeading(workEntry: WorkLogEntry): string {
 }
 
 function singleToolCallLabel(activity: ThreadFeedActivity): string {
-  const presentation = resolveWorkEntryToolPresentation(activity.workEntry);
+  const presentation = resolveWorkEntryToolPresentation(activity.workEntry, "completed");
   if (presentation) return presentation.displayName;
   const command = activity.workEntry.command?.trim();
   return command || activity.summary;

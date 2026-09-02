@@ -870,6 +870,7 @@ describe("buildThreadFeed", () => {
       status: undefined,
       displayName: "Click in the preview browser",
       liveDisplayName: "Clicking in the preview browser",
+      settledDisplayName: "Clicked in the preview browser",
       icon: "browser",
     },
     {
@@ -880,11 +881,12 @@ describe("buildThreadFeed", () => {
       status: undefined,
       displayName: "Get delegated task status",
       liveDisplayName: "Getting delegated task status",
+      settledDisplayName: "Got delegated task status",
       icon: "t3-code",
     },
   ])(
     "uses friendly row and running labels from $source",
-    ({ label, title, item, status, displayName, liveDisplayName, icon }) => {
+    ({ label, title, item, status, displayName, liveDisplayName, settledDisplayName, icon }) => {
       const turnId = TurnId.make("turn-friendly-mcp");
       const rawCommand = "node mcp-call.js";
       const rawDetail = '{"provider":"raw MCP output"}';
@@ -949,6 +951,22 @@ describe("buildThreadFeed", () => {
           live: true,
         },
       ]);
+      if (settledDisplayName) {
+        const settledRows = deriveThreadFeedPresentation(
+          feed,
+          {
+            ...thread.latestTurn!,
+            state: "completed",
+            completedAt: "2026-04-01T00:00:03.000Z",
+          },
+          new Set([turnId]),
+          new Set(),
+        );
+        expect(settledRows.find((entry) => entry.type === "work-toggle")).toMatchObject({
+          summary: settledDisplayName,
+          live: false,
+        });
+      }
     },
   );
 
