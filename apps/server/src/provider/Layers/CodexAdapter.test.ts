@@ -354,7 +354,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         Stream.runHead,
         Effect.forkChild,
       );
-
+      yield* adapter.compactThread!(threadId);
       yield* runtime.emit({
         id: asEventId("evt-compaction-item-completed"),
         kind: "notification",
@@ -376,6 +376,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       const event = Option.getOrThrow(yield* Fiber.join(compactedEventFiber));
       NodeAssert.ok(event.type === "thread.state.changed");
       NodeAssert.equal(event.payload.state, "compacted");
+      yield* adapter.stopSession(threadId);
     }),
   );
 

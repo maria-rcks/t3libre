@@ -1095,6 +1095,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       const compacted = yield* Fiber.join(compactedEventFiber);
       assert.equal(compacted._tag, "Some");
+      yield* provider.stopSession({ threadId });
     }),
   );
 

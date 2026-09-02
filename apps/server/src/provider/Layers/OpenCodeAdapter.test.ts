@@ -971,6 +971,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       );
       const summarizeCall = runtimeMock.state.summarizeCalls[0] as Record<string, unknown>;
       NodeAssert.equal(summarizeCall.modelID, "gpt-5");
+      yield* adapter.stopSession(threadId);
     }),
   );
 

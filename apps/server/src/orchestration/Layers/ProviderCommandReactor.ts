@@ -76,17 +76,10 @@ function toNonEmptyProviderInput(value: string | undefined): string | undefined 
   return normalized && normalized.length > 0 ? normalized : undefined;
 }
 
-function isCompactCommandMessage(message: {
-  readonly role: string;
-  readonly text: string;
-  readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
-}): boolean {
-  return (
-    message.role === "user" &&
-    (message.attachments?.length ?? 0) === 0 &&
-    message.text.trim().toLowerCase() === "/compact"
-  );
-}
+const isCompactCommandMessage = (message: ThreadTitleMessage): boolean =>
+  message.role === "user" &&
+  (message.attachments?.length ?? 0) === 0 &&
+  message.text.trim().toLowerCase() === "/compact";
 
 function mapProviderSessionStatusToOrchestrationStatus(
   status: "connecting" | "ready" | "running" | "error" | "closed",

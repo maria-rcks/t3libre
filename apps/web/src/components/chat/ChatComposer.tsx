@@ -691,6 +691,7 @@ export interface ChatComposerProps {
 
   // Context window
   activeContextWindow: ContextWindowSnapshot | null;
+  compactThreadUnavailable: boolean;
   compactDisabled: boolean;
   compactDisabledReason: string | null;
 
@@ -787,6 +788,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProjectDefaultModelSelection,
     activeThreadModelSelection,
     activeContextWindow,
+    compactThreadUnavailable,
     compactDisabled,
     compactDisabledReason,
     resolvedTheme,
@@ -1346,8 +1348,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       prompt,
     ],
   );
-  const compactActionDisabled = compactDisabled || composerSendState.hasSendableContent;
-
   // ------------------------------------------------------------------
   // Derived: composer trigger / menu
   // ------------------------------------------------------------------
@@ -1361,10 +1361,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const compactSlashCommandAvailable =
     composerTrigger?.kind === "slash-command" &&
-    !compactDisabled &&
-    phase !== "running" &&
-    activePendingApproval === null &&
-    pendingUserInputs.length === 0 &&
+    !compactThreadUnavailable &&
     prompt.slice(composerTrigger.rangeEnd).trim() === "" &&
     composerImages.length + composerFiles.length === 0 &&
     composerSendState.sendableTerminalContexts.length === 0 &&
@@ -2287,7 +2284,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const compactThreadContext = useCallback(() => {
     if (
-      compactActionDisabled ||
+      compactDisabled ||
       noProviderAvailable ||
       activePendingApproval !== null ||
       pendingUserInputs.length > 0 ||
@@ -2324,7 +2321,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     activePendingApproval,
     activeThreadId,
-    compactActionDisabled,
+    compactDisabled,
     composerDraftTarget,
     isConnecting,
     isSendBusy,
@@ -4382,7 +4379,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                     compactDisabled={
-                      compactActionDisabled || noProviderAvailable || isSendBusy || isConnecting
+                      compactDisabled || noProviderAvailable || isSendBusy || isConnecting
                     }
                     compactDisabledReason={resolvedCompactDisabledReason}
                     {...(compactCommandAvailable ? { onCompactContext: compactThreadContext } : {})}
