@@ -1793,17 +1793,25 @@ export function PullRequestDetailPanel({
                   </span>
                 </div>
                 {checkoutCommand ? (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    className="mt-2 min-w-0 max-w-full gap-1.5 font-normal text-muted-foreground"
-                    aria-label={`Copy checkout command: ${checkoutCommand}`}
-                    title={checkoutCommand}
-                    onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}
-                  >
-                    <code className="min-w-0 truncate text-[11px]">{checkoutCommand}</code>
-                    <CopyIcon aria-hidden className="size-3" />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          className="mt-2 min-w-0 max-w-full gap-1.5 font-normal text-muted-foreground"
+                          aria-label={`Copy checkout command: ${checkoutCommand}`}
+                          onClick={() => copyCheckoutCommandToClipboard(checkoutCommand)}
+                        />
+                      }
+                    >
+                      <code className="min-w-0 truncate text-[11px]">{checkoutCommand}</code>
+                      <CopyIcon aria-hidden className="size-3" />
+                    </TooltipTrigger>
+                    <TooltipPopup className="max-w-96 wrap-anywhere font-mono" side="bottom">
+                      {checkoutCommand}
+                    </TooltipPopup>
+                  </Tooltip>
                 ) : null}
               </div>
             ) : null}
