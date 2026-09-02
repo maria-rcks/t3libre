@@ -3904,14 +3904,22 @@ function ChatViewContent(props: ChatViewProps) {
       setActivePreviewTab(activeThreadRef, nextActiveSurface.resourceId);
     }
   }, [activeThreadRef]);
+  const finishRightPanelSurfaceClose = useCallback(
+    (surfaces: readonly RightPanelSurface[]) => {
+      if (!activeThreadRef) return;
+      cleanupRightPanelSurfaces(surfaces);
+      const store = useRightPanelStore.getState();
+      for (const surface of surfaces) {
+        store.closeSurface(activeThreadRef, surface.id);
+      }
+      syncActivePreviewSurface();
+    },
+    [activeThreadRef, cleanupRightPanelSurfaces, syncActivePreviewSurface],
+  );
   const closeRightPanelSurface = useCallback(
     (surface: RightPanelSurface) => {
       if (!activeThreadRef) return;
-      const finishClose = () => {
-        cleanupRightPanelSurfaces([surface]);
-        useRightPanelStore.getState().closeSurface(activeThreadRef, surface.id);
-        syncActivePreviewSurface();
-      };
+      const finishClose = () => finishRightPanelSurfaceClose([surface]);
       if (surface.kind === "preview") {
         closeAfterAgentBrowserConfirmation([surface], finishClose);
         return;
@@ -3936,27 +3944,21 @@ function ChatViewContent(props: ChatViewProps) {
       activeThreadRef,
       activeTerminalLabelsById,
       closeAfterAgentBrowserConfirmation,
-      cleanupRightPanelSurfaces,
-      syncActivePreviewSurface,
+      finishRightPanelSurfaceClose,
     ],
   );
   const closeOtherRightPanelSurfaces = useCallback(
     (surface: RightPanelSurface) => {
       if (!activeThreadRef) return;
       const surfaces = rightPanelState.surfaces.filter((entry) => entry.id !== surface.id);
-      const finishClose = () => {
-        cleanupRightPanelSurfaces(surfaces);
-        useRightPanelStore.getState().closeOtherSurfaces(activeThreadRef, surface.id);
-        syncActivePreviewSurface();
-      };
+      const finishClose = () => finishRightPanelSurfaceClose(surfaces);
       closeAfterAgentBrowserConfirmation(surfaces, finishClose);
     },
     [
       activeThreadRef,
       closeAfterAgentBrowserConfirmation,
-      cleanupRightPanelSurfaces,
+      finishRightPanelSurfaceClose,
       rightPanelState.surfaces,
-      syncActivePreviewSurface,
     ],
   );
   const closeRightPanelSurfacesToRight = useCallback(
@@ -3965,32 +3967,24 @@ function ChatViewContent(props: ChatViewProps) {
       const surfaceIndex = rightPanelState.surfaces.findIndex((entry) => entry.id === surface.id);
       if (surfaceIndex < 0) return;
       const surfaces = rightPanelState.surfaces.slice(surfaceIndex + 1);
-      const finishClose = () => {
-        cleanupRightPanelSurfaces(surfaces);
-        useRightPanelStore.getState().closeSurfacesToRight(activeThreadRef, surface.id);
-        syncActivePreviewSurface();
-      };
+      const finishClose = () => finishRightPanelSurfaceClose(surfaces);
       closeAfterAgentBrowserConfirmation(surfaces, finishClose);
     },
     [
       activeThreadRef,
       closeAfterAgentBrowserConfirmation,
-      cleanupRightPanelSurfaces,
+      finishRightPanelSurfaceClose,
       rightPanelState.surfaces,
-      syncActivePreviewSurface,
     ],
   );
   const closeAllRightPanelSurfaces = useCallback(() => {
     if (!activeThreadRef) return;
-    const finishClose = () => {
-      cleanupRightPanelSurfaces(rightPanelState.surfaces);
-      useRightPanelStore.getState().closeAllSurfaces(activeThreadRef);
-    };
+    const finishClose = () => finishRightPanelSurfaceClose(rightPanelState.surfaces);
     closeAfterAgentBrowserConfirmation(rightPanelState.surfaces, finishClose);
   }, [
     activeThreadRef,
     closeAfterAgentBrowserConfirmation,
-    cleanupRightPanelSurfaces,
+    finishRightPanelSurfaceClose,
     rightPanelState.surfaces,
   ]);
   const copyRightPanelFilePath = useCallback((relativePath: string) => {
