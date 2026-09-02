@@ -19,6 +19,7 @@ import * as EnvironmentLinks from "./EnvironmentLinks.ts";
 import * as RelayConfiguration from "../Config.ts";
 import * as EnvironmentLinker from "./EnvironmentLinker.ts";
 import * as ManagedEndpointProvider from "./ManagedEndpointProvider.ts";
+import * as ManagedEndpointProvisionClaims from "./ManagedEndpointProvisionClaims.ts";
 
 const relayKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
   privateKeyEncoding: { format: "pem", type: "pkcs8" },
@@ -163,10 +164,15 @@ function testLayer(input?: {
                   tunnelId: "tunnel-id",
                   tunnelName: "tunnel-name",
                   dnsRecordId: "dns-record-id",
+                  generationId: "provision-generation",
                   readyAt: "2026-09-02T22:00:00.000Z",
-                  updatedAt: "provision-generation",
+                  updatedAt: "2026-09-02T22:00:00.000Z",
                 },
               })),
+        }),
+        Layer.succeed(ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims, {
+          acquire: () => Effect.succeed("provision-claim"),
+          release: () => Effect.void,
         }),
       ),
     ),
@@ -226,7 +232,7 @@ describe("EnvironmentLinker", () => {
           deprovision: (input) =>
             Effect.sync(() => {
               deprovisionedEnvironmentId = input.environmentId;
-              deprovisionedGeneration = input.target?.updatedAt ?? null;
+              deprovisionedGeneration = input.target?.generationId ?? null;
             }),
         }),
       ),

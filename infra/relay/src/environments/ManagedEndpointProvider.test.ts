@@ -183,13 +183,18 @@ function makeAllocations(calls: AllocationCall[] = []) {
     reserve: (input) =>
       Effect.sync(() => {
         calls.push({ operation: "reserve", input });
-        const allocation = allocations.get(allocationKey(input)) ?? {
-          ...input,
-          tunnelId: null,
-          dnsRecordId: null,
-          readyAt: null,
-          updatedAt: `generation-${++generation}`,
-        };
+        const previous = allocations.get(allocationKey(input));
+        const allocation =
+          previous === undefined
+            ? {
+                ...input,
+                tunnelId: null,
+                dnsRecordId: null,
+                generationId: `allocation-${++generation}`,
+                readyAt: null,
+                updatedAt: "2026-06-02T00:00:00.000Z",
+              }
+            : { ...previous, generationId: `allocation-${++generation}` };
         allocations.set(allocationKey(input), allocation);
         return allocation;
       }),
@@ -226,22 +231,28 @@ function makeAllocations(calls: AllocationCall[] = []) {
         if (
           allocation === undefined ||
           allocation.tunnelId !== input.tunnelId ||
-          allocation.updatedAt !== input.updatedAt
+          allocation.generationId !== input.generationId
         ) {
           return false;
         }
-        mutate(allocationKey(input), (current) => current);
+        mutate(allocationKey(input), (current) => ({
+          ...current,
+          generationId: `allocation-${++generation}`,
+        }));
         return true;
       }),
     claimDeprovision: (input) =>
       Effect.sync(() => {
         calls.push({ operation: "claimDeprovision", input });
         const allocation = allocations.get(allocationKey(input));
-        if (allocation === undefined || allocation.updatedAt !== input.updatedAt) {
+        if (allocation === undefined || allocation.generationId !== input.generationId) {
           return null;
         }
-        mutate(allocationKey(input), (current) => current);
-        return allocations.get(allocationKey(input))?.updatedAt ?? null;
+        mutate(allocationKey(input), (current) => ({
+          ...current,
+          generationId: `allocation-${++generation}`,
+        }));
+        return allocations.get(allocationKey(input))?.generationId ?? null;
       }),
     remove: (input) =>
       Effect.sync(() => {
@@ -252,7 +263,7 @@ function makeAllocations(calls: AllocationCall[] = []) {
       Effect.sync(() => {
         calls.push({ operation: "removeClaimed", input });
         const allocation = allocations.get(allocationKey(input));
-        if (allocation === undefined || allocation.updatedAt !== input.updatedAt) {
+        if (allocation === undefined || allocation.generationId !== input.generationId) {
           return false;
         }
         allocations.delete(allocationKey(input));

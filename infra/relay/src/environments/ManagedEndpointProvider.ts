@@ -472,7 +472,7 @@ export const make = Effect.gen(function* () {
         .claimDeprovision({
           userId: input.userId,
           environmentId: input.environmentId,
-          updatedAt: allocation.updatedAt,
+          generationId: allocation.generationId,
         })
         .pipe(
           Effect.mapError(
@@ -521,7 +521,7 @@ export const make = Effect.gen(function* () {
         .removeClaimed({
           userId: input.userId,
           environmentId: input.environmentId,
-          updatedAt: claimedAt,
+          generationId: claimedAt,
         })
         .pipe(
           Effect.mapError(
@@ -557,7 +557,7 @@ export const make = Effect.gen(function* () {
       }
       // Claim the release against the allocation's current generation before
       // touching Cloudflare. A provision racing this release (fast environment
-      // restart) rewrites updatedAt when it records its tunnel, so a stale
+      // restart) rotates generationId before touching the tunnel, so a stale
       // claim means the recorded tunnel may already back a fresh connector and
       // must be left alive. A provision that starts after the claim instead
       // fails loudly on the deleted tunnel and the client-side retry
@@ -567,7 +567,7 @@ export const make = Effect.gen(function* () {
           userId: input.userId,
           environmentId: input.environmentId,
           tunnelId,
-          updatedAt: allocation.updatedAt,
+          generationId: allocation.generationId,
         })
         .pipe(
           Effect.mapError(
@@ -684,6 +684,7 @@ export const make = Effect.gen(function* () {
           ),
         );
       const { hostname, tunnelName } = allocation;
+      const { generationId } = allocation;
 
       const tunnelResponse = yield* tunnels.list({ name: tunnelName, isDeleted: false }).pipe(
         Effect.map((tunnels) => tunnels.result),
@@ -723,6 +724,7 @@ export const make = Effect.gen(function* () {
           userId: input.userId,
           environmentId: input.environmentId,
           tunnelId: tunnel.id,
+          generationId,
         })
         .pipe(
           Effect.mapError(
@@ -792,6 +794,7 @@ export const make = Effect.gen(function* () {
           userId: input.userId,
           environmentId: input.environmentId,
           dnsRecordId,
+          generationId,
         })
         .pipe(
           Effect.mapError(
@@ -828,6 +831,7 @@ export const make = Effect.gen(function* () {
         .markReady({
           userId: input.userId,
           environmentId: input.environmentId,
+          generationId,
         })
         .pipe(
           Effect.mapError(

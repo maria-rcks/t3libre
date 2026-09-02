@@ -609,6 +609,18 @@ export const clientApi = HttpApiBuilder.group(
                 maxTunnels: limitError.maxTunnels,
                 traceId,
               }),
+            ManagedEndpointProvisionInProgress: (_error, traceId) =>
+              new RelayEnvironmentLinkUnavailableError({
+                code: "environment_link_unavailable",
+                reason: "managed_endpoint_provisioning_failed",
+                traceId,
+              }),
+            ManagedEndpointProvisionClaimPersistenceError: (_error, traceId) =>
+              new RelayEnvironmentLinkFailedError({
+                code: "environment_link_failed",
+                reason: "link_persistence_failed",
+                traceId,
+              }),
             EnvironmentLinkUpsertPersistenceError: (_error, traceId) =>
               new RelayEnvironmentLinkFailedError({
                 code: "environment_link_failed",

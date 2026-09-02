@@ -1,5 +1,5 @@
 import type { RelayManagedEndpoint } from "@t3tools/contracts/relay";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -17,11 +17,8 @@ export interface ManagedEndpointAllocation {
   readonly tunnelId: string | null;
   readonly tunnelName: string;
   readonly dnsRecordId: string | null;
+  readonly generationId: string;
   readonly readyAt: string | null;
-  /**
-   * Doubles as the allocation's generation marker: every mutation rewrites it,
-   * so `claimRelease` can detect a provision that raced a release.
-   */
   readonly updatedAt: string;
 }
 
@@ -82,23 +79,25 @@ interface ReserveManagedEndpointAllocationInput extends ManagedEndpointAllocatio
 
 interface RecordManagedEndpointTunnelInput extends ManagedEndpointAllocationKey {
   readonly tunnelId: string;
+  readonly generationId: string;
 }
 
 interface RecordManagedEndpointDnsInput extends ManagedEndpointAllocationKey {
   readonly dnsRecordId: string;
+  readonly generationId: string;
 }
 
 interface ClaimManagedEndpointReleaseInput extends ManagedEndpointAllocationKey {
   readonly tunnelId: string;
-  readonly updatedAt: string;
+  readonly generationId: string;
 }
 
 interface ClaimManagedEndpointDeprovisionInput extends ManagedEndpointAllocationKey {
-  readonly updatedAt: string;
+  readonly generationId: string;
 }
 
 interface RemoveClaimedManagedEndpointAllocationInput extends ManagedEndpointAllocationKey {
-  readonly updatedAt: string;
+  readonly generationId: string;
 }
 
 export class ManagedEndpointAllocations extends Context.Service<
@@ -117,13 +116,13 @@ export class ManagedEndpointAllocations extends Context.Service<
       input: RecordManagedEndpointDnsInput,
     ) => Effect.Effect<void, ManagedEndpointAllocationPersistenceError>;
     readonly markReady: (
-      input: ManagedEndpointAllocationKey,
+      input: ManagedEndpointAllocationKey & { readonly generationId: string },
     ) => Effect.Effect<ManagedEndpointAllocation, ManagedEndpointAllocationPersistenceError>;
     /**
      * Atomically claims the right to delete the allocation's tunnel: succeeds
      * only while the recorded tunnel and generation still match what the
-     * caller loaded. A concurrent provision rewrites `updatedAt` when it
-     * records its tunnel, which makes a stale claim fail and keeps the freshly
+     * caller loaded. A concurrent provision rotates `generationId`, which
+     * makes a stale claim fail and keeps the freshly
      * issued tunnel alive.
      */
     readonly claimRelease: (
@@ -155,6 +154,7 @@ const allocationSelection = {
   tunnelId: relayManagedEndpointAllocations.tunnelId,
   tunnelName: relayManagedEndpointAllocations.tunnelName,
   dnsRecordId: relayManagedEndpointAllocations.dnsRecordId,
+  generationId: relayManagedEndpointAllocations.generationId,
   readyAt: relayManagedEndpointAllocations.readyAt,
   updatedAt: relayManagedEndpointAllocations.updatedAt,
 };
@@ -201,7 +201,13 @@ export const make = Effect.gen(function* () {
           createdAt: now,
           updatedAt: now,
         })
-        .onConflictDoNothing()
+        .onConflictDoUpdate({
+          target: [
+            relayManagedEndpointAllocations.userId,
+            relayManagedEndpointAllocations.environmentId,
+          ],
+          set: { generationId: sql`gen_random_uuid()`, updatedAt: now },
+        })
         .returning(allocationSelection)
         .pipe(
           Effect.mapError(
@@ -254,7 +260,12 @@ export const make = Effect.gen(function* () {
           tunnelId: input.tunnelId,
           updatedAt: DateTime.formatIso(yield* DateTime.now),
         })
-        .where(whereAllocation(input))
+        .where(
+          and(
+            whereAllocation(input),
+            eq(relayManagedEndpointAllocations.generationId, input.generationId),
+          ),
+        )
         .pipe(
           Effect.mapError(
             (cause) =>
@@ -276,7 +287,12 @@ export const make = Effect.gen(function* () {
           dnsRecordId: input.dnsRecordId,
           updatedAt: DateTime.formatIso(yield* DateTime.now),
         })
-        .where(whereAllocation(input))
+        .where(
+          and(
+            whereAllocation(input),
+            eq(relayManagedEndpointAllocations.generationId, input.generationId),
+          ),
+        )
         .pipe(
           Effect.mapError(
             (cause) =>
@@ -290,7 +306,7 @@ export const make = Effect.gen(function* () {
         );
     }),
     markReady: Effect.fn("relay.managed_endpoint_allocations.mark_ready")(function* (
-      input: ManagedEndpointAllocationKey,
+      input: ManagedEndpointAllocationKey & { readonly generationId: string },
     ) {
       const now = DateTime.formatIso(yield* DateTime.now);
       const rows = yield* db
@@ -299,7 +315,12 @@ export const make = Effect.gen(function* () {
           readyAt: now,
           updatedAt: now,
         })
-        .where(whereAllocation(input))
+        .where(
+          and(
+            whereAllocation(input),
+            eq(relayManagedEndpointAllocations.generationId, input.generationId),
+          ),
+        )
         .returning(allocationSelection)
         .pipe(
           Effect.mapError(
@@ -328,18 +349,18 @@ export const make = Effect.gen(function* () {
       const claimed = yield* db
         .update(relayManagedEndpointAllocations)
         .set({
+          generationId: sql`gen_random_uuid()`,
           updatedAt: DateTime.formatIso(yield* DateTime.now),
         })
         .where(
           and(
             whereAllocation(input),
             eq(relayManagedEndpointAllocations.tunnelId, input.tunnelId),
-            eq(relayManagedEndpointAllocations.updatedAt, input.updatedAt),
+            eq(relayManagedEndpointAllocations.generationId, input.generationId),
           ),
         )
         .returning({ userId: relayManagedEndpointAllocations.userId })
         .pipe(
-          Effect.map((rows) => rows.length > 0),
           Effect.mapError(
             (cause) =>
               new ManagedEndpointAllocationPersistenceError({
@@ -352,7 +373,7 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
-      return claimed;
+      return claimed.length > 0;
     }),
     claimDeprovision: Effect.fn("relay.managed_endpoint_allocations.claim_deprovision")(function* (
       input: ClaimManagedEndpointDeprovisionInput,
@@ -360,16 +381,15 @@ export const make = Effect.gen(function* () {
       const claimedAt = DateTime.formatIso(yield* DateTime.now);
       const claimed = yield* db
         .update(relayManagedEndpointAllocations)
-        .set({ updatedAt: claimedAt })
+        .set({ generationId: sql`gen_random_uuid()`, updatedAt: claimedAt })
         .where(
           and(
             whereAllocation(input),
-            eq(relayManagedEndpointAllocations.updatedAt, input.updatedAt),
+            eq(relayManagedEndpointAllocations.generationId, input.generationId),
           ),
         )
-        .returning({ userId: relayManagedEndpointAllocations.userId })
+        .returning({ generationId: relayManagedEndpointAllocations.generationId })
         .pipe(
-          Effect.map((rows) => rows.length > 0),
           Effect.mapError(
             (cause) =>
               new ManagedEndpointAllocationPersistenceError({
@@ -381,7 +401,7 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
-      return claimed ? claimedAt : null;
+      return claimed[0]?.generationId ?? null;
     }),
     remove: Effect.fn("relay.managed_endpoint_allocations.remove")(function* (
       input: ManagedEndpointAllocationKey,
@@ -409,7 +429,7 @@ export const make = Effect.gen(function* () {
         .where(
           and(
             whereAllocation(input),
-            eq(relayManagedEndpointAllocations.updatedAt, input.updatedAt),
+            eq(relayManagedEndpointAllocations.generationId, input.generationId),
           ),
         )
         .returning({ userId: relayManagedEndpointAllocations.userId })

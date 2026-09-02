@@ -55,6 +55,7 @@ import * as EnvironmentConnector from "./environments/EnvironmentConnector.ts";
 import * as EnvironmentLinker from "./environments/EnvironmentLinker.ts";
 import * as EnvironmentPublishSignatures from "./environments/EnvironmentPublishSignatures.ts";
 import * as ManagedEndpointProvider from "./environments/ManagedEndpointProvider.ts";
+import * as ManagedEndpointProvisionClaims from "./environments/ManagedEndpointProvisionClaims.ts";
 import * as ManagedTunnelLimits from "./environments/ManagedTunnelLimits.ts";
 import * as TemporaryEnvironmentLeases from "./environments/TemporaryEnvironmentLeases.ts";
 import * as MobileRegistrations from "./agentActivity/MobileRegistrations.ts";
@@ -217,6 +218,7 @@ export const ApiLive = Api.make(
         Layer.mergeAll(
           EnvironmentLinks.layer,
           ManagedEndpointAllocations.layer,
+          ManagedEndpointProvisionClaims.layer,
           ManagedTunnelLimits.layer,
           TemporaryEnvironmentLeases.layer,
         ),

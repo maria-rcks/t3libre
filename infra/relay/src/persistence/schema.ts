@@ -12,6 +12,7 @@ import {
   primaryKey,
   text,
   uniqueIndex,
+  uuid,
   varchar,
 } from "drizzle-orm/pg-core";
 
@@ -95,6 +96,7 @@ export const relayManagedEndpointAllocations = pgTable(
     tunnelId: varchar("tunnel_id", { length: 191 }),
     tunnelName: text("tunnel_name").notNull(),
     dnsRecordId: varchar("dns_record_id", { length: 191 }),
+    generationId: uuid("generation_id").defaultRandom().notNull(),
     readyAt: varchar("ready_at", { length: 64 }),
     createdAt: varchar("created_at", { length: 64 }).notNull(),
     updatedAt: varchar("updated_at", { length: 64 }).notNull(),
@@ -104,6 +106,18 @@ export const relayManagedEndpointAllocations = pgTable(
     uniqueIndex("idx_relay_managed_endpoint_allocations_hostname").on(table.hostname),
     uniqueIndex("idx_relay_managed_endpoint_allocations_tunnel_name").on(table.tunnelName),
   ],
+);
+
+export const relayManagedEndpointProvisionClaims = pgTable(
+  "relay_managed_endpoint_provision_claims",
+  {
+    userId: varchar("user_id", { length: 191 }).notNull(),
+    environmentId: varchar("environment_id", { length: 191 }).notNull(),
+    claimId: uuid("claim_id").notNull(),
+    expiresAt: varchar("expires_at", { length: 64 }).notNull(),
+    createdAt: varchar("created_at", { length: 64 }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.environmentId] })],
 );
 
 export const relayManagedTunnelLimits = pgTable("relay_managed_tunnel_limits", {

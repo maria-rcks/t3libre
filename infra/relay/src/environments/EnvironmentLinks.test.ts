@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
@@ -8,8 +9,46 @@ import * as RelayDb from "../db.ts";
 import { relayEnvironmentLinks } from "../persistence/schema.ts";
 import * as EnvironmentLinks from "./EnvironmentLinks.ts";
 import * as TemporaryEnvironmentLeases from "./TemporaryEnvironmentLeases.ts";
+import * as ManagedEndpointProvisionClaims from "./ManagedEndpointProvisionClaims.ts";
 
 describe("EnvironmentLinks", () => {
+  it.effect("allows only one live managed-endpoint provision claim", () => {
+    let takeoverCondition: unknown;
+    const fakeDb = {
+      insert: () => ({
+        values: () => ({
+          onConflictDoUpdate: (config: { readonly setWhere: unknown }) => {
+            takeoverCondition = config.setWhere;
+            return { returning: () => Effect.succeed([]) };
+          },
+        }),
+      }),
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-09-02T21:00:00.000Z"));
+      const claims = yield* ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims;
+      const error = yield* Effect.flip(
+        claims.acquire({ userId: "user-1", environmentId: "env-1" }),
+      );
+      expect(error).toMatchObject({
+        _tag: "ManagedEndpointProvisionInProgress",
+        userId: "user-1",
+        environmentId: "env-1",
+      });
+      const query = new PgDialect().sqlToQuery(takeoverCondition as never);
+      expect(query.sql).toContain('"expires_at" <= $1');
+      expect(query.params).toEqual(["2026-09-02T21:00:00.000Z"]);
+    }).pipe(
+      Effect.provide(
+        ManagedEndpointProvisionClaims.layer.pipe(
+          Layer.provideMerge(NodeServices.layer),
+          Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb)),
+        ),
+      ),
+    );
+  });
+
   it.effect("does not let a temporary upsert overwrite an active durable link", () => {
     let conflictConfig: { readonly setWhere?: unknown } | undefined;
     const fakeDb = {

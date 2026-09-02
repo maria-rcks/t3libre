@@ -20,6 +20,7 @@ import * as RelayTokens from "../auth/RelayTokens.ts";
 import * as EnvironmentCredentials from "./EnvironmentCredentials.ts";
 import * as EnvironmentLinks from "./EnvironmentLinks.ts";
 import * as ManagedEndpointProvider from "./ManagedEndpointProvider.ts";
+import * as ManagedEndpointProvisionClaims from "./ManagedEndpointProvisionClaims.ts";
 import * as RelayConfiguration from "../Config.ts";
 
 export class EnvironmentLinkProofExpired extends Schema.TaggedErrorClass<EnvironmentLinkProofExpired>()(
@@ -68,6 +69,8 @@ export type EnvironmentLinkError =
   | DpopProofs.DpopProofReplayPersistenceError
   | EnvironmentLinks.ActiveDurableEnvironmentLinkConflict
   | EnvironmentLinks.EnvironmentLinkUpsertPersistenceError
+  | ManagedEndpointProvisionClaims.ManagedEndpointProvisionInProgress
+  | ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaimPersistenceError
   | EnvironmentCredentials.EnvironmentCredentialCreatePersistenceError
   | ManagedEndpointProvider.ManagedEndpointProviderError;
 
@@ -147,6 +150,7 @@ const make = Effect.gen(function* () {
   const links = yield* EnvironmentLinks.EnvironmentLinks;
   const credentials = yield* EnvironmentCredentials.EnvironmentCredentials;
   const managedEndpointProvider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+  const provisionClaims = yield* ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims;
   const proofReplay = yield* DpopProofs.DpopProofReplay;
   const relayTokens = yield* RelayTokens.RelayTokens;
   const config = yield* RelayConfiguration.RelayConfiguration;
@@ -297,118 +301,134 @@ const make = Effect.gen(function* () {
           stage: "validate_origin",
         });
       }
-      if (input.request.temporary === true) {
-        const durableLink = yield* links
-          .getForUser({ userId: input.userId, environmentId: verified.environmentId })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new EnvironmentLinks.EnvironmentLinkUpsertPersistenceError({
-                  userId: input.userId,
-                  environmentId: verified.environmentId,
-                  ...(input.request.deviceId === undefined
-                    ? {}
-                    : { deviceId: input.request.deviceId }),
-                  cause,
-                }),
-            ),
-          );
-        if (durableLink !== null) {
-          return yield* new EnvironmentLinks.ActiveDurableEnvironmentLinkConflict({
-            userId: input.userId,
-            environmentId: verified.environmentId,
-          });
-        }
-      }
-      // Downgrading a managed link to publish-only must release the tunnel and
-      // DNS that were provisioned for it — nothing else cleans them up until a
-      // full unlink. Best effort: a cleanup failure must not block the link
-      // itself, and the provider treats an absent allocation as already
-      // deprovisioned, so retrying on every non-tunnel link is cheap.
-      if (!input.request.managedTunnelsEnabled) {
-        yield* managedEndpointProvider
-          .deprovision({
-            userId: input.userId,
-            environmentId: verified.environmentId,
-          })
-          .pipe(
-            Effect.tapError((error) =>
-              Effect.logWarning("managed endpoint deprovision on publish-only link failed", {
-                environmentId: verified.environmentId,
-                errorTag: error._tag,
-              }),
-            ),
-            Effect.ignore,
-          );
-      }
-      const provisioned = input.request.managedTunnelsEnabled
-        ? yield* managedEndpointProvider.provision({
-            userId: input.userId,
-            environmentId: verified.environmentId,
-            origin: verified.origin,
-          })
-        : null;
-      const endpoint = provisioned?.endpoint ?? verified.endpoint;
-      // The secure-endpoint requirement only matters when the relay advertises
-      // this endpoint for other devices to reach (managed tunnel). Publish-only
-      // links are reached out of band (e.g. Tailscale) and their stored endpoint
-      // is never used for routing, so a nominal endpoint is acceptable.
-      if (input.request.managedTunnelsEnabled && !isSecureManagedEndpoint(endpoint)) {
-        return yield* new EnvironmentLinkProofInvalid({
-          userId: input.userId,
-          environmentId: verified.environmentId,
-          reason: "endpoint_not_secure",
-          stage: "validate_endpoint",
-        });
-      }
-      const temporaryLease =
-        input.request.temporary === true
-          ? {
-              leaseId: verified.jti,
-              expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 10 })),
-            }
-          : undefined;
-      const persistLink = links.upsert({
-        ...input,
-        proof: verified,
-        endpoint,
-        ...(temporaryLease === undefined ? {} : { temporaryLease }),
+      const provisionClaimId = yield* provisionClaims.acquire({
+        userId: input.userId,
+        environmentId: verified.environmentId,
       });
-      yield* temporaryLease === undefined
-        ? persistLink
-        : persistLink.pipe(
-            Effect.catchTags({
-              ActiveDurableEnvironmentLinkConflict: (error) => Effect.fail(error),
-              EnvironmentLinkUpsertPersistenceError: (error) =>
-                managedEndpointProvider
-                  .deprovision({
+      return yield* Effect.gen(function* () {
+        if (input.request.temporary === true) {
+          const durableLink = yield* links
+            .getForUser({ userId: input.userId, environmentId: verified.environmentId })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new EnvironmentLinks.EnvironmentLinkUpsertPersistenceError({
                     userId: input.userId,
                     environmentId: verified.environmentId,
-                    target: provisioned?.deprovisionTarget ?? null,
-                  })
-                  .pipe(
-                    Effect.tapError((cleanupError) =>
-                      Effect.logWarning("temporary endpoint cleanup after link failure failed", {
-                        environmentId: verified.environmentId,
-                        errorTag: cleanupError._tag,
-                      }),
+                    ...(input.request.deviceId === undefined
+                      ? {}
+                      : { deviceId: input.request.deviceId }),
+                    cause,
+                  }),
+              ),
+            );
+          if (durableLink !== null) {
+            return yield* new EnvironmentLinks.ActiveDurableEnvironmentLinkConflict({
+              userId: input.userId,
+              environmentId: verified.environmentId,
+            });
+          }
+        }
+        // Downgrading a managed link to publish-only must release the tunnel and
+        // DNS that were provisioned for it — nothing else cleans them up until a
+        // full unlink. Best effort: a cleanup failure must not block the link
+        // itself, and the provider treats an absent allocation as already
+        // deprovisioned, so retrying on every non-tunnel link is cheap.
+        if (!input.request.managedTunnelsEnabled) {
+          yield* managedEndpointProvider
+            .deprovision({
+              userId: input.userId,
+              environmentId: verified.environmentId,
+            })
+            .pipe(
+              Effect.tapError((error) =>
+                Effect.logWarning("managed endpoint deprovision on publish-only link failed", {
+                  environmentId: verified.environmentId,
+                  errorTag: error._tag,
+                }),
+              ),
+              Effect.ignore,
+            );
+        }
+        const provisioned = input.request.managedTunnelsEnabled
+          ? yield* managedEndpointProvider.provision({
+              userId: input.userId,
+              environmentId: verified.environmentId,
+              origin: verified.origin,
+            })
+          : null;
+        const endpoint = provisioned?.endpoint ?? verified.endpoint;
+        // The secure-endpoint requirement only matters when the relay advertises
+        // this endpoint for other devices to reach (managed tunnel). Publish-only
+        // links are reached out of band (e.g. Tailscale) and their stored endpoint
+        // is never used for routing, so a nominal endpoint is acceptable.
+        if (input.request.managedTunnelsEnabled && !isSecureManagedEndpoint(endpoint)) {
+          return yield* new EnvironmentLinkProofInvalid({
+            userId: input.userId,
+            environmentId: verified.environmentId,
+            reason: "endpoint_not_secure",
+            stage: "validate_endpoint",
+          });
+        }
+        const temporaryLease =
+          input.request.temporary === true
+            ? {
+                leaseId: verified.jti,
+                expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 10 })),
+              }
+            : undefined;
+        const persistLink = links.upsert({
+          ...input,
+          proof: verified,
+          endpoint,
+          ...(temporaryLease === undefined ? {} : { temporaryLease }),
+        });
+        yield* temporaryLease === undefined
+          ? persistLink
+          : persistLink.pipe(
+              Effect.catchTags({
+                ActiveDurableEnvironmentLinkConflict: (error) => Effect.fail(error),
+                EnvironmentLinkUpsertPersistenceError: (error) =>
+                  managedEndpointProvider
+                    .deprovision({
+                      userId: input.userId,
+                      environmentId: verified.environmentId,
+                      target: provisioned?.deprovisionTarget ?? null,
+                    })
+                    .pipe(
+                      Effect.tapError((cleanupError) =>
+                        Effect.logWarning("temporary endpoint cleanup after link failure failed", {
+                          environmentId: verified.environmentId,
+                          errorTag: cleanupError._tag,
+                        }),
+                      ),
+                      Effect.ignore,
+                      Effect.andThen(Effect.fail(error)),
                     ),
-                    Effect.ignore,
-                    Effect.andThen(Effect.fail(error)),
-                  ),
-            }),
-          );
-      const environmentCredential = yield* credentials.create({
-        environmentId: verified.environmentId,
-        environmentPublicKey: verified.environmentPublicKey,
-      });
-      return {
-        environmentId: verified.environmentId,
-        endpoint,
-        endpointRuntime: provisioned?.runtime ?? null,
-        environmentCredential,
-        ...(temporaryLease === undefined ? {} : { temporaryLease }),
-      };
+              }),
+            );
+        const environmentCredential = yield* credentials.create({
+          environmentId: verified.environmentId,
+          environmentPublicKey: verified.environmentPublicKey,
+        });
+        return {
+          environmentId: verified.environmentId,
+          endpoint,
+          endpointRuntime: provisioned?.runtime ?? null,
+          environmentCredential,
+          ...(temporaryLease === undefined ? {} : { temporaryLease }),
+        };
+      }).pipe(
+        Effect.ensuring(
+          provisionClaims
+            .release({
+              userId: input.userId,
+              environmentId: verified.environmentId,
+              claimId: provisionClaimId,
+            })
+            .pipe(Effect.catchCause(Effect.logWarning)),
+        ),
+      );
     }),
   });
 });

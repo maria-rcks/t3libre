@@ -286,6 +286,7 @@ describe("relay environment unlink", () => {
       tunnelId: "tunnel-1",
       tunnelName: "environment-1-tunnel",
       dnsRecordId: "dns-1",
+      generationId: "allocation-generation",
       readyAt: "2026-07-28T00:00:00.000Z",
       updatedAt: "generation-before-unlink",
     } satisfies ManagedEndpointProvider.ManagedEndpointDeprovisionTarget;

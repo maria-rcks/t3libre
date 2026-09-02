@@ -16,11 +16,11 @@ describe("ManagedEndpointAllocations", () => {
       update: (table: unknown) => {
         expect(table).toBe(relayManagedEndpointAllocations);
         return {
-          set: (values: { readonly updatedAt: string }) => {
-            claimedAt = values.updatedAt;
+          set: (_values: { readonly updatedAt: string }) => {
+            claimedAt = "claimed-generation";
             return {
               where: () => ({
-                returning: () => Effect.succeed([{ userId: "user-1" }]),
+                returning: () => Effect.succeed([{ generationId: claimedAt }]),
               }),
             };
           },
@@ -33,7 +33,7 @@ describe("ManagedEndpointAllocations", () => {
       const generation = yield* allocations.claimDeprovision({
         userId: "user-1",
         environmentId: "environment-1",
-        updatedAt: "captured-generation",
+        generationId: "captured-generation",
       });
 
       expect(generation).toBe(claimedAt);
@@ -59,7 +59,7 @@ describe("ManagedEndpointAllocations", () => {
         yield* allocations.removeClaimed({
           userId: "user-1",
           environmentId: "environment-1",
-          updatedAt: "outdated-claim-generation",
+          generationId: "outdated-claim-generation",
         }),
       ).toBe(false);
     }).pipe(Effect.provide(layerWithDb(fakeDb)));
@@ -103,7 +103,7 @@ describe("ManagedEndpointAllocations", () => {
         expect(table).toBe(relayManagedEndpointAllocations);
         return {
           values: () => ({
-            onConflictDoNothing: () => ({
+            onConflictDoUpdate: () => ({
               returning: () => Effect.succeed([]),
             }),
           }),
