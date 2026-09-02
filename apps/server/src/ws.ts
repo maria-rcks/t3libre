@@ -51,7 +51,7 @@ import {
   ProviderUploadFeedbackError,
   RelayClientInstallFailedError,
   type RelayClientInstallProgressEvent,
-  type ServerSelfUpdateError,
+  ServerSelfUpdateError,
   type ServerSelfUpdateProgressEvent,
   type FilesystemBrowseFailure,
   FilesystemBrowseError,
@@ -518,6 +518,20 @@ const makeWsRpcLayer = (
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+      const serverUpdate = ServerSelfUpdate.withRunningThreadContinuation({
+        mode: config.mode,
+        selfUpdate: serverSelfUpdate,
+        prepare: startup.markRunningProviderSessionsForContinuation.pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServerSelfUpdateError({
+                reason: "Could not prepare running threads to continue after the update.",
+                cause,
+              }),
+          ),
+        ),
+        clear: startup.clearProviderSessionContinuationMarkers,
+      });
       const canReplayPersistedRange = Effect.fnUntraced(function* (
         afterSequence: number,
         headSequence: number,
@@ -1691,14 +1705,14 @@ const makeWsRpcLayer = (
             },
           ),
         [WS_METHODS.serverUpdateServer]: (input) =>
-          observeRpcEffect(WS_METHODS.serverUpdateServer, serverSelfUpdate.update(input), {
+          observeRpcEffect(WS_METHODS.serverUpdateServer, serverUpdate.update(input), {
             "rpc.aggregate": "server",
           }),
         [WS_METHODS.serverUpdateServerWithProgress]: (input) =>
           observeRpcStream(
             WS_METHODS.serverUpdateServerWithProgress,
             Stream.callback<ServerSelfUpdateProgressEvent, ServerSelfUpdateError>((queue) =>
-              serverSelfUpdate
+              serverUpdate
                 .update(input, (stage) =>
                   Queue.offer(queue, {
                     type: "progress",
@@ -1724,7 +1738,7 @@ const makeWsRpcLayer = (
         [WS_METHODS.serverCommitDesktopUpdate]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverCommitDesktopUpdate,
-            serverSelfUpdate.commitDesktopUpdate(input.requestId),
+            serverUpdate.commitDesktopUpdate(input.requestId),
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverUpsertKeybinding]: (rule) =>

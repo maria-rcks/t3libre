@@ -65,6 +65,13 @@ export class ServerRuntimeStartup extends Context.Service<
   {
     readonly awaitCommandReady: Effect.Effect<void, ServerRuntimeStartupError>;
     readonly markHttpListening: Effect.Effect<void>;
+    readonly markRunningProviderSessionsForContinuation: Effect.Effect<
+      ReadonlyArray<ThreadId>,
+      ServerUpdateThreadContinuationError
+    >;
+    readonly clearProviderSessionContinuationMarkers: (
+      threadIds: ReadonlyArray<ThreadId>,
+    ) => Effect.Effect<void>;
     readonly enqueueCommand: <A, E>(
       effect: Effect.Effect<A, E>,
     ) => Effect.Effect<A, E | ServerRuntimeStartupError>;
@@ -295,6 +302,112 @@ const runStartupPhase = <A, E, R>(phase: string, effect: Effect.Effect<A, E, R>)
 
 const ORPHANED_PROVIDER_SESSION_ERROR =
   "Provider session did not survive a server restart. Send a new message to continue.";
+const SERVER_UPDATE_CONTINUATION_KEY = "continueAfterServerUpdate";
+const SERVER_UPDATE_CONTINUATION_PROMPT = "Continue where you left off.";
+
+class ProviderSessionContinuationError extends Schema.TaggedErrorClass<ProviderSessionContinuationError>()(
+  "ProviderSessionContinuationError",
+  {
+    threadId: ThreadId,
+    reason: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Could not continue thread '${this.threadId}': ${this.reason}`;
+  }
+}
+
+export class ServerUpdateThreadContinuationError extends Schema.TaggedErrorClass<ServerUpdateThreadContinuationError>()(
+  "ServerUpdateThreadContinuationError",
+  {
+    reason: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return this.reason;
+  }
+}
+
+function hasServerUpdateContinuationMarker(runtimePayload: unknown): boolean {
+  return (
+    runtimePayload !== null &&
+    typeof runtimePayload === "object" &&
+    !Array.isArray(runtimePayload) &&
+    SERVER_UPDATE_CONTINUATION_KEY in runtimePayload &&
+    runtimePayload[SERVER_UPDATE_CONTINUATION_KEY] === true
+  );
+}
+
+export const markRunningProviderSessionsForContinuation = Effect.gen(function* () {
+  const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+  const query = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const { threads } = yield* query.getCommandReadModel();
+  const running = threads.filter(
+    (thread) =>
+      thread.archivedAt === null &&
+      thread.deletedAt === null &&
+      thread.session?.status === "running" &&
+      thread.session.activeTurnId !== null,
+  );
+
+  const marked: ThreadId[] = [];
+  return yield* Effect.gen(function* () {
+    for (const thread of running) {
+      const binding = yield* directory.getBinding(thread.id);
+      if (Option.isNone(binding)) {
+        return yield* new ProviderSessionContinuationError({
+          threadId: thread.id,
+          reason: "No provider binding is persisted.",
+        });
+      }
+      if (binding.value.resumeCursor === null || binding.value.resumeCursor === undefined) {
+        return yield* new ProviderSessionContinuationError({
+          threadId: thread.id,
+          reason: "No provider resume state is persisted.",
+        });
+      }
+      yield* directory.upsert({
+        ...binding.value,
+        runtimePayload: { [SERVER_UPDATE_CONTINUATION_KEY]: true },
+      });
+      marked.push(thread.id);
+    }
+    return marked;
+  }).pipe(
+    Effect.onError(() => clearProviderSessionContinuationMarkers(marked).pipe(Effect.ignoreCause)),
+  );
+}).pipe(
+  Effect.mapError(
+    (cause) =>
+      new ServerUpdateThreadContinuationError({
+        reason: "Could not prepare running threads to continue after the update.",
+        cause,
+      }),
+  ),
+);
+
+export const clearProviderSessionContinuationMarkers = (threadIds: ReadonlyArray<ThreadId>) =>
+  Effect.gen(function* () {
+    const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+    yield* Effect.forEach(
+      threadIds,
+      (threadId) =>
+        directory.getBinding(threadId).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => Effect.void,
+              onSome: (binding) =>
+                directory.upsert({
+                  ...binding,
+                  runtimePayload: { [SERVER_UPDATE_CONTINUATION_KEY]: null },
+                }),
+            }),
+          ),
+        ),
+      { concurrency: "unbounded", discard: true },
+    );
+  });
 
 export const reconcileProviderSessions = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
@@ -321,52 +434,142 @@ export const reconcileProviderSessions = Effect.gen(function* () {
     if (session === null) {
       continue;
     }
-    yield* Effect.gen(function* () {
-      const binding = yield* directory.getBinding(thread.id);
-      if (Option.isSome(binding)) {
+    const binding = yield* directory.getBinding(thread.id).pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterrupts(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("failed to read orphaned provider session directory binding", {
+              threadId: thread.id,
+              cause,
+            }).pipe(Effect.as(Option.none())),
+      ),
+    );
+    const continuationMarked =
+      Option.isSome(binding) && hasServerUpdateContinuationMarker(binding.value.runtimePayload);
+    const settleAsError = (lastError: string) =>
+      Effect.gen(function* () {
+        yield* Effect.gen(function* () {
+          if (Option.isSome(binding)) {
+            yield* directory.upsert({
+              ...binding.value,
+              status: "stopped",
+              runtimePayload: {
+                activeTurnId: null,
+                ...(continuationMarked ? { [SERVER_UPDATE_CONTINUATION_KEY]: null } : {}),
+              },
+            });
+          }
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterrupts(cause)
+              ? Effect.failCause(cause)
+              : Effect.logWarning(
+                  "failed to reconcile orphaned provider session directory binding",
+                  { threadId: thread.id, cause },
+                ),
+          ),
+        );
+
+        yield* Effect.gen(function* () {
+          const reconciledAt = DateTime.formatIso(yield* DateTime.now);
+          yield* orchestrationEngine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.make(yield* crypto.randomUUIDv4),
+            threadId: thread.id,
+            session: {
+              ...session,
+              status: "error",
+              activeTurnId: null,
+              lastError,
+              updatedAt: reconciledAt,
+            },
+            createdAt: reconciledAt,
+          });
+        }).pipe(
+          Effect.retry({ times: 1 }),
+          Effect.catchCause((cause) =>
+            Cause.hasInterrupts(cause)
+              ? Effect.failCause(cause)
+              : Effect.logWarning("failed to settle orphaned provider session projection", {
+                  threadId: thread.id,
+                  cause,
+                }),
+          ),
+        );
+      });
+
+    if (Option.isSome(binding) && continuationMarked) {
+      const prepared = yield* Effect.gen(function* () {
         yield* directory.upsert({
           ...binding.value,
-          status: "stopped",
-          runtimePayload: { activeTurnId: null },
+          runtimePayload: {
+            [SERVER_UPDATE_CONTINUATION_KEY]: null,
+            activeTurnId: null,
+          },
         });
+        const resumedAt = DateTime.formatIso(yield* DateTime.now);
+        yield* orchestrationEngine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make(yield* crypto.randomUUIDv4),
+          threadId: thread.id,
+          session: {
+            ...session,
+            status: "starting",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: resumedAt,
+          },
+          createdAt: resumedAt,
+        });
+      }).pipe(Effect.exit);
+      if (Exit.isFailure(prepared)) {
+        if (Cause.hasInterrupts(prepared.cause)) {
+          return yield* Effect.failCause(prepared.cause);
+        }
+        yield* Effect.logWarning("failed to prepare provider session continuation", {
+          threadId: thread.id,
+          cause: prepared.cause,
+        });
+        yield* settleAsError(ORPHANED_PROVIDER_SESSION_ERROR);
+        continue;
       }
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterrupts(cause)
-          ? Effect.failCause(cause)
-          : Effect.logWarning("failed to reconcile orphaned provider session directory binding", {
-              threadId: thread.id,
-              cause,
-            }),
-      ),
-    );
 
-    yield* Effect.gen(function* () {
-      const reconciledAt = DateTime.formatIso(yield* DateTime.now);
-      yield* orchestrationEngine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make(yield* crypto.randomUUIDv4),
-        threadId: thread.id,
-        session: {
-          ...session,
-          status: "error",
-          activeTurnId: null,
-          lastError: ORPHANED_PROVIDER_SESSION_ERROR,
-          updatedAt: reconciledAt,
-        },
-        createdAt: reconciledAt,
-      });
-    }).pipe(
-      Effect.retry({ times: 1 }),
-      Effect.catchCause((cause) =>
-        Cause.hasInterrupts(cause)
-          ? Effect.failCause(cause)
-          : Effect.logWarning("failed to settle orphaned provider session projection", {
+      yield* forkParked(
+        Effect.gen(function* () {
+          const continuation = Effect.gen(function* () {
+            const providerInstanceId = binding.value.providerInstanceId;
+            if (providerInstanceId === undefined) {
+              return yield* new ProviderSessionContinuationError({
+                threadId: thread.id,
+                reason: "The provider instance is missing.",
+              });
+            }
+            const capabilities = yield* providerService.getCapabilities(providerInstanceId);
+            yield* providerService.sendTurn({
               threadId: thread.id,
-              cause,
-            }),
-      ),
-    );
+              ...(capabilities.promptlessTurnContinuation === true
+                ? { continuation: true }
+                : { input: SERVER_UPDATE_CONTINUATION_PROMPT }),
+              interactionMode: thread.interactionMode,
+            });
+          });
+          const continuationExit = yield* Effect.exit(continuation);
+          if (Exit.isSuccess(continuationExit) || Cause.hasInterrupts(continuationExit.cause)) {
+            return;
+          }
+          yield* Effect.logWarning("failed to continue provider session after server update", {
+            threadId: thread.id,
+            cause: continuationExit.cause,
+          });
+          yield* settleAsError(
+            "Could not continue this thread after the server update. Send a new message to continue.",
+          ).pipe(Effect.ignoreCause);
+        }),
+      );
+      continue;
+    }
+
+    yield* settleAsError(ORPHANED_PROVIDER_SESSION_ERROR);
   }
 }).pipe(
   Effect.catchCause((cause) =>
@@ -391,6 +594,8 @@ export const make = (options?: StartupOptions) =>
     const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+    const providerSessionDirectory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
     const crypto = yield* Crypto.Crypto;
     const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
 
@@ -578,6 +783,24 @@ export const make = (options?: StartupOptions) =>
     return {
       awaitCommandReady: commandGate.awaitCommandReady,
       markHttpListening: Deferred.succeed(httpListening, undefined),
+      markRunningProviderSessionsForContinuation: markRunningProviderSessionsForContinuation.pipe(
+        Effect.provideService(
+          ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+          projectionSnapshotQuery,
+        ),
+        Effect.provideService(
+          ProviderSessionDirectory.ProviderSessionDirectory,
+          providerSessionDirectory,
+        ),
+      ),
+      clearProviderSessionContinuationMarkers: (threadIds) =>
+        clearProviderSessionContinuationMarkers(threadIds).pipe(
+          Effect.provideService(
+            ProviderSessionDirectory.ProviderSessionDirectory,
+            providerSessionDirectory,
+          ),
+          Effect.ignoreCause({ log: true }),
+        ),
       enqueueCommand: commandGate.enqueueCommand,
     } satisfies ServerRuntimeStartup["Service"];
   });

@@ -49,7 +49,9 @@ export class DesktopAppUpdate extends Context.Service<
     /** Checks and downloads through the desktop app, then returns a token
         while this server is still connected. `commit` starts installation. */
     readonly run: (
-      reportProgress: (stage: ServerSelfUpdateProgressStage) => Effect.Effect<void>,
+      reportProgress: (
+        stage: ServerSelfUpdateProgressStage,
+      ) => Effect.Effect<void, ServerSelfUpdateError>,
     ) => Effect.Effect<ServerSelfUpdateResult, ServerSelfUpdateError>;
     /** Starts the prepared install. Success stops this server, so this effect
         returns only when installation fails or times out. */
@@ -72,11 +74,15 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
   const consumeReports = (
     requestId: string,
     changes: Stream.Stream<DesktopUpdateStatusReport>,
-    reportProgress: (stage: ServerSelfUpdateProgressStage) => Effect.Effect<void>,
+    reportProgress: (
+      stage: ServerSelfUpdateProgressStage,
+    ) => Effect.Effect<void, ServerSelfUpdateError>,
   ) =>
     Effect.gen(function* () {
       const lastStage = yield* Ref.make<ServerSelfUpdateProgressStage | null>(null);
-      const emitStage = (stage: ServerSelfUpdateProgressStage | null): Effect.Effect<void> =>
+      const emitStage = (
+        stage: ServerSelfUpdateProgressStage | null,
+      ): Effect.Effect<void, ServerSelfUpdateError> =>
         stage === null
           ? Effect.void
           : Ref.get(lastStage).pipe(
@@ -90,7 +96,9 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
       const terminal = yield* changes.pipe(
         Stream.filter((report) => report.requestId === requestId),
         Stream.mapEffect(
-          (report): Effect.Effect<Option.Option<DesktopUpdateStatusReport>> =>
+          (
+            report,
+          ): Effect.Effect<Option.Option<DesktopUpdateStatusReport>, ServerSelfUpdateError> =>
             report.outcome === undefined
               ? emitStage(desktopUpdateProgressStage(report.state)).pipe(
                   Effect.as(Option.none<DesktopUpdateStatusReport>()),

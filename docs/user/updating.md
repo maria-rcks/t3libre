@@ -15,8 +15,11 @@ update the server, and the version difference remains visible in Connections.
 
 ## Before You Update
 
-Let active agent work and terminal commands finish first. Updating restarts the server, so the
-connection will disappear briefly and work that is still running may be interrupted.
+Updating restarts the server, so the connection will disappear briefly. **Settings** → **General**
+has a **Continue threads after server updates** preference. It is off by default. When enabled, the
+update buttons automatically resume active work after the replacement server is ready. Providers
+with native promptless continuation use it; other providers receive a short instruction to continue
+where they left off.
 
 The update does not remove saved threads, settings, or project files.
 

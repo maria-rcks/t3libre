@@ -2167,6 +2167,34 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          {...searchableSetting("continue-threads-after-server-update")}
+          description="Automatically resume active threads after a server update restarts the environment."
+          resetAction={
+            settings.continueThreadsAfterServerUpdate !==
+            DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate ? (
+              <SettingResetButton
+                label="continue threads after server updates"
+                onClick={() =>
+                  updateSettings({
+                    continueThreadsAfterServerUpdate:
+                      DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.continueThreadsAfterServerUpdate}
+              onCheckedChange={(checked) =>
+                updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
+              }
+              aria-label="Continue threads after server updates"
+            />
+          }
+        />
+
+        <SettingsRow
           serverScoped
           id={searchableSetting("background-activity").id}
           title={

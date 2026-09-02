@@ -723,7 +723,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     });
 
     const attachments = parsed.attachments ?? [];
-    if (!parsed.input && attachments.length === 0) {
+    if (!parsed.input && attachments.length === 0 && parsed.continuation !== true) {
       return yield* toValidationError(
         "ProviderService.sendTurn",
         "Either input text or at least one attachment is required",
@@ -782,6 +782,17 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         operation: "ProviderService.sendTurn",
         allowRecovery: true,
       });
+      if (
+        input.continuation === true &&
+        !input.input &&
+        attachments.length === 0 &&
+        routed.adapter.capabilities.promptlessTurnContinuation !== true
+      ) {
+        return yield* toValidationError(
+          "ProviderService.sendTurn",
+          `Provider '${routed.adapter.provider}' requires an explicit continuation prompt`,
+        );
+      }
       metricProvider = routed.adapter.provider;
       metricModel = input.modelSelection?.model;
       yield* Effect.annotateCurrentSpan({

@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import { ServerSelfUpdateError, ThreadId } from "@t3tools/contracts";
 import { HostProcessExecutablePath } from "@t3tools/shared/hostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -104,6 +105,75 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
 });
 
 it.layer(NodeServices.layer)("server self update", (it) => {
+  it.effect("marks running threads at the boot-service handoff", () =>
+    Effect.gen(function* () {
+      const events: string[] = [];
+      const selfUpdate = ServerSelfUpdate.withRunningThreadContinuation({
+        mode: "web",
+        selfUpdate: {
+          update: (_input, reportProgress = () => Effect.void) =>
+            reportProgress("downloading").pipe(
+              Effect.andThen(reportProgress("installing")),
+              Effect.as({
+                targetVersion: "1.1.0",
+                method: "boot-service" as const,
+                updateId: "update-id",
+              }),
+            ),
+          commitDesktopUpdate: () => Effect.never,
+        },
+        prepare: Effect.sync(() => {
+          events.push("prepare");
+          return [ThreadId.make("thread-running")];
+        }),
+        clear: () => Effect.sync(() => void events.push("clear")),
+      });
+
+      yield* selfUpdate.update({ targetVersion: "1.1.0", continueRunningThreads: true }, (stage) =>
+        Effect.sync(() => void events.push(stage)),
+      );
+
+      expect(events).toEqual(["downloading", "prepare", "installing"]);
+    }),
+  );
+
+  it.effect("marks desktop threads only when the prepared update commits", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-running-desktop");
+      const events: string[] = [];
+      const commitError = new ServerSelfUpdateError({ reason: "install failed" });
+      const selfUpdate = ServerSelfUpdate.withRunningThreadContinuation({
+        mode: "desktop",
+        selfUpdate: {
+          update: (_input, reportProgress = () => Effect.void) =>
+            reportProgress("installing").pipe(
+              Effect.as({
+                targetVersion: "1.2.0",
+                method: "desktop-app" as const,
+                desktopUpdateToken: "desktop-token",
+              }),
+            ),
+          commitDesktopUpdate: () =>
+            Effect.sync(() => events.push("commit")).pipe(Effect.andThen(Effect.fail(commitError))),
+        },
+        prepare: Effect.sync(() => {
+          events.push("prepare");
+          return [threadId];
+        }),
+        clear: (threadIds) => Effect.sync(() => void events.push(`clear:${threadIds.join(",")}`)),
+      });
+
+      yield* selfUpdate.update({ targetVersion: "1.2.0", continueRunningThreads: true }, (stage) =>
+        Effect.sync(() => void events.push(stage)),
+      );
+      expect(events).toEqual(["installing"]);
+      expect(yield* selfUpdate.commitDesktopUpdate("desktop-token").pipe(Effect.flip)).toBe(
+        commitError,
+      );
+      expect(events).toEqual(["installing", "prepare", "commit", `clear:${threadId}`]);
+    }),
+  );
+
   it.effect("stages and preflights before asking the launcher for an update ID", () =>
     Effect.gen(function* () {
       const { selfUpdate, order } = yield* makeHarness();
