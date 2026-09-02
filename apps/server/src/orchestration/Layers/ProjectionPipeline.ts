@@ -1275,6 +1275,16 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
         case "thread.activity-appended":
           if (event.payload.activity.kind !== "provider.turn.start.failed") return;
+          const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId(
+            event.payload,
+          );
+          if (
+            Option.isNone(pendingTurnStart) ||
+            String(pendingTurnStart.value.messageId) !==
+              extractActivityRequestId(event.payload.activity.payload)
+          ) {
+            return;
+          }
           yield* projectionTurnRepository.deletePendingTurnStartByThreadId(event.payload);
           return;
 

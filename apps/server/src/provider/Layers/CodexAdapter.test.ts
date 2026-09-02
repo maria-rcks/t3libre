@@ -84,7 +84,7 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
       }),
   );
 
-  public readonly compactThreadImpl = vi.fn((): Promise<void> => Promise.resolve(undefined));
+  public readonly compactThread = Effect.void;
 
   public readonly interruptTurnImpl = vi.fn(
     (_turnId?: TurnId): Promise<void> => Promise.resolve(undefined),
@@ -137,8 +137,6 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   sendTurn(input: CodexSessionRuntimeSendTurnInput) {
     return Effect.promise(() => this.sendTurnImpl(input));
   }
-
-  compactThread = Effect.promise(() => this.compactThreadImpl());
 
   interruptTurn(turnId?: TurnId) {
     return Effect.promise(() => this.interruptTurnImpl(turnId));
@@ -351,15 +349,13 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       });
       const runtime = sessionRuntimeFactory.lastRuntime;
       NodeAssert.ok(runtime);
-      const compactThread = adapter.compactThread;
-      NodeAssert.ok(compactThread);
       const compactedEventFiber = yield* adapter.streamEvents.pipe(
         Stream.filter((event) => event.type === "thread.state.changed"),
         Stream.runHead,
         Effect.forkChild,
       );
 
-      yield* compactThread(threadId);
+      yield* adapter.compactThread!(threadId);
       yield* runtime.emit({
         id: asEventId("evt-compaction-item-completed"),
         kind: "notification",

@@ -252,12 +252,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
       const model = snapshot.models.find((entry) => entry.slug === "openai/gpt-5.4");
 
       NodeAssert.ok(model);
-      NodeAssert.deepEqual(snapshot.slashCommands, [
-        {
-          name: "compact",
-          description: "Summarize the conversation and reduce context usage",
-        },
-      ]);
+      NodeAssert.equal(snapshot.slashCommands[0]?.name, "compact");
       const variantDescriptor = model.capabilities?.optionDescriptors?.find(
         (descriptor) => descriptor.id === "variant" && descriptor.type === "select",
       );

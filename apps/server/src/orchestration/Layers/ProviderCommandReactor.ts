@@ -1155,6 +1155,7 @@ const make = Effect.gen(function* () {
         detail: `User message '${event.payload.messageId}' was not found for turn start request.`,
         turnId: null,
         createdAt: event.payload.createdAt,
+        requestId: event.payload.messageId,
       });
       return;
     }
@@ -1213,6 +1214,7 @@ const make = Effect.gen(function* () {
             detail,
             turnId: null,
             createdAt: event.payload.createdAt,
+            requestId: event.payload.messageId,
           }),
         ),
         Effect.asVoid,
@@ -1243,6 +1245,7 @@ const make = Effect.gen(function* () {
         detail,
         turnId: null,
         createdAt: event.payload.createdAt,
+        requestId: event.payload.messageId,
       }).pipe(Effect.asVoid);
     };
 
@@ -1267,6 +1270,7 @@ const make = Effect.gen(function* () {
           detail: "Context compaction requires an existing conversation.",
           turnId: null,
           createdAt: event.payload.createdAt,
+          requestId: event.payload.messageId,
         });
       }
       const latestThread = yield* resolveThread(event.payload.threadId);
@@ -1282,6 +1286,7 @@ const make = Effect.gen(function* () {
           detail: "Context compaction is unavailable while a provider turn is running.",
           turnId: null,
           createdAt: event.payload.createdAt,
+          requestId: event.payload.messageId,
         });
         return;
       }
@@ -1314,6 +1319,7 @@ const make = Effect.gen(function* () {
         detail: "Wait for context compaction to finish before sending another message.",
         turnId: null,
         createdAt: event.payload.createdAt,
+        requestId: event.payload.messageId,
       });
     }
 

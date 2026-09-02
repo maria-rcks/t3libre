@@ -729,9 +729,7 @@ describe("ClaudeAdapterLive", () => {
         runtimeMode: "full-access",
       });
 
-      const compactThread = adapter.compactThread;
-      assert.ok(compactThread);
-      yield* compactThread(session.threadId);
+      yield* adapter.compactThread!(session.threadId);
 
       const promptText = yield* Effect.promise(() =>
         readFirstPromptText(harness.getLastCreateQueryInput()),
