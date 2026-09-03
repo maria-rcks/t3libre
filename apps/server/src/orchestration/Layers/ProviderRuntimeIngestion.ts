@@ -23,6 +23,7 @@ import {
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -2095,7 +2096,15 @@ const make = Effect.gen(function* () {
       if (
         isCompactedThreadState &&
         event.requestId === undefined &&
-        Option.isSome(pendingTurnStart)
+        Option.isSome(pendingTurnStart) &&
+        thread.session?.status === "starting" &&
+        activeTurnId === null &&
+        sameId(thread.session.providerName, event.provider) &&
+        sameId(thread.session.providerInstanceId, event.providerInstanceId) &&
+        DateTime.isGreaterThanOrEqualTo(
+          DateTime.makeUnsafe(event.createdAt),
+          DateTime.makeUnsafe(pendingTurnStart.value.requestedAt),
+        )
       ) {
         const pendingMessage = (yield* getLoadedThreadDetail())?.messages.find(
           (message) => message.id === pendingTurnStart.value.messageId,

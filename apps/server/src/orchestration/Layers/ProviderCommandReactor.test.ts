@@ -658,16 +658,38 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
-  effectIt.effect("does not revive a session stopped during compaction", () =>
+  effectIt.effect("does not overwrite concurrent session state after compaction failure", () =>
     Effect.gen(function* () {
       const releaseCompaction = yield* Deferred.make<void>();
+      const releaseRunningCompaction = yield* Deferred.make<void>();
+      const releaseStop = yield* Deferred.make<void>();
+      let compactionCount = 0;
       const harness = yield* Effect.promise(() =>
         createHarness({
-          compactThreadEffect: () => Deferred.await(releaseCompaction),
+          compactThreadEffect: () =>
+            Deferred.await(
+              compactionCount++ === 0 ? releaseCompaction : releaseRunningCompaction,
+            ).pipe(Effect.andThen(Effect.die("Compaction stopped"))),
+          stopSessionEffect: () => Deferred.await(releaseStop),
         }),
       );
       const threadId = ThreadId.make("thread-1");
       const now = "2026-01-01T00:00:00.000Z";
+      const dispatchCompact = (suffix: string, createdAt: string) =>
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`cmd-compact-${suffix}`),
+          threadId,
+          message: {
+            messageId: asMessageId(`user-message-compact-${suffix}`),
+            role: "user",
+            text: "/compact",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt,
+        });
 
       yield* harness.engine.dispatch({
         type: "thread.turn.start",
@@ -700,20 +722,7 @@ describe("ProviderCommandReactor", () => {
         },
         createdAt: now,
       });
-      yield* harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-compact-before-stop"),
-        threadId,
-        message: {
-          messageId: asMessageId("user-message-compact-before-stop"),
-          role: "user",
-          text: "/compact",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: now,
-      });
+      yield* dispatchCompact("before-stop", now);
       yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
       const compactingThread = (yield* Effect.promise(() => harness.readModel())).threads.find(
         (entry) => entry.id === threadId,
@@ -727,6 +736,23 @@ describe("ProviderCommandReactor", () => {
       });
       yield* Effect.promise(() => waitFor(() => harness.stopSession.mock.calls.length === 1));
       yield* Deferred.succeed(releaseCompaction, undefined);
+      yield* Effect.promise(() =>
+        waitFor(async () => {
+          const compactingThread = (await harness.readModel()).threads.find(
+            (entry) => entry.id === threadId,
+          );
+          return (
+            compactingThread?.activities.some(
+              (activity) => activity.kind === "provider.turn.start.failed",
+            ) === true
+          );
+        }),
+      );
+      const stoppingThread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+        (entry) => entry.id === threadId,
+      );
+      expect(stoppingThread?.session?.status).toBe("starting");
+      yield* Deferred.succeed(releaseStop, undefined);
       yield* Effect.promise(() => harness.drain());
       yield* Effect.yieldNow;
 
@@ -734,6 +760,32 @@ describe("ProviderCommandReactor", () => {
         (entry) => entry.id === threadId,
       );
       expect(thread?.session?.status).toBe("stopped");
+
+      yield* dispatchCompact("before-running", "2026-01-01T00:00:02.000Z");
+      yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 2));
+      const restartedThread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+        (entry) => entry.id === threadId,
+      );
+      const restartedSession = restartedThread?.session;
+      if (!restartedSession) return yield* Effect.die("Compaction session missing");
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-running-during-compact"),
+        threadId,
+        session: {
+          ...restartedSession,
+          status: "running",
+          activeTurnId: asTurnId("compaction-turn"),
+          updatedAt: "2026-01-01T00:00:03.000Z",
+        },
+        createdAt: "2026-01-01T00:00:03.000Z",
+      });
+      yield* Deferred.succeed(releaseRunningCompaction, undefined);
+      yield* Effect.promise(() => harness.drain());
+      const runningThread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+        (entry) => entry.id === threadId,
+      );
+      expect(runningThread?.session?.status).toBe("running");
     }),
   );
   effectIt.effect("projects starting before a slow provider session finishes", () =>

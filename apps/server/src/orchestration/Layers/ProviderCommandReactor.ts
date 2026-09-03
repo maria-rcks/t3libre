@@ -342,6 +342,7 @@ const make = Effect.gen(function* () {
 
   const threadModelSelections = new Map<string, ModelSelection>();
   const compactingThreadIds = new Set<ThreadId>();
+  const stoppingThreadIds = new Set<ThreadId>();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -440,9 +441,16 @@ const make = Effect.gen(function* () {
   });
 
   const setThreadSessionReadyAfterCompaction = Effect.fnUntraced(function* (threadId: ThreadId) {
+    if (stoppingThreadIds.has(threadId)) return;
     const thread = yield* resolveThread(threadId);
-    if (!thread?.session || thread.session.status === "stopped") return;
+    if (
+      !thread?.session ||
+      (thread.session.status !== "starting" && thread.session.status !== "ready")
+    ) {
+      return;
+    }
     const completedAt = DateTime.formatIso(yield* DateTime.now);
+    if (stoppingThreadIds.has(threadId)) return;
     yield* setThreadSession({
       threadId,
       session: {
@@ -1250,11 +1258,25 @@ const make = Effect.gen(function* () {
         ),
       );
 
+    let compactionSessionEnsured = false;
     const handleCompactionFailure = (cause: Cause.Cause<unknown>) => {
       if (Cause.hasInterruptsOnly(cause)) {
         return Effect.void;
       }
       const detail = formatFailureDetail(cause);
+      if (stoppingThreadIds.has(event.payload.threadId)) {
+        return appendTurnStartFailure("Context compaction failed", detail).pipe(Effect.asVoid);
+      }
+      if (!compactionSessionEnsured) {
+        return setThreadSessionErrorOnTurnStartFailure({
+          threadId: event.payload.threadId,
+          detail,
+          createdAt: event.payload.createdAt,
+        }).pipe(
+          Effect.flatMap(() => appendTurnStartFailure("Context compaction failed", detail)),
+          Effect.asVoid,
+        );
+      }
       return appendTurnStartFailure("Context compaction failed", detail).pipe(
         Effect.ensuring(
           setThreadSessionReadyAfterCompaction(event.payload.threadId).pipe(
@@ -1308,6 +1330,7 @@ const make = Effect.gen(function* () {
             ? { modelSelection: event.payload.modelSelection, pendingTurnStart: true }
             : { pendingTurnStart: true },
         );
+        compactionSessionEnsured = true;
         if (event.payload.modelSelection !== undefined) {
           threadModelSelections.set(event.payload.threadId, event.payload.modelSelection);
         }
@@ -1545,26 +1568,32 @@ const make = Effect.gen(function* () {
     }
 
     const now = event.payload.createdAt;
-    if (thread.session && thread.session.status !== "stopped") {
-      yield* providerService.stopSession({ threadId: thread.id });
-    }
-
-    yield* setThreadSession({
-      threadId: thread.id,
-      session: {
-        threadId: thread.id,
-        status: "stopped",
-        providerName: thread.session?.providerName ?? null,
-        ...(thread.session?.providerInstanceId !== undefined
-          ? { providerInstanceId: thread.session.providerInstanceId }
-          : {}),
-        runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-        activeTurnId: null,
-        lastError: thread.session?.lastError ?? null,
-        updatedAt: now,
-      },
-      createdAt: now,
-    });
+    stoppingThreadIds.add(thread.id);
+    yield* (
+      thread.session && thread.session.status !== "stopped"
+        ? providerService.stopSession({ threadId: thread.id })
+        : Effect.void
+    ).pipe(
+      Effect.andThen(
+        setThreadSession({
+          threadId: thread.id,
+          session: {
+            threadId: thread.id,
+            status: "stopped",
+            providerName: thread.session?.providerName ?? null,
+            ...(thread.session?.providerInstanceId !== undefined
+              ? { providerInstanceId: thread.session.providerInstanceId }
+              : {}),
+            runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+            activeTurnId: null,
+            lastError: thread.session?.lastError ?? null,
+            updatedAt: now,
+          },
+          createdAt: now,
+        }),
+      ),
+      Effect.ensuring(Effect.sync(() => void stoppingThreadIds.delete(thread.id))),
+    );
   });
 
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (
