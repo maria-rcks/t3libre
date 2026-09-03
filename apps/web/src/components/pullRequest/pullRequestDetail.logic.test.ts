@@ -22,9 +22,7 @@ import {
   latestPullRequestReviewOutcomes,
   newestPullRequestCommitAt,
   mergePullRequestThreadComments,
-  windowPullRequestComments,
   orderPullRequestComments,
-  pullRequestHiddenCommentsActionLabel,
   pullRequestActionMenuHasGroup,
   pullRequestActionNeedsHostRefresh,
   pullRequestCheckoutCommand,
@@ -236,40 +234,6 @@ describe("ordering comments", () => {
     expect(orderPullRequestComments(comments, "oldest")).toEqual(comments);
     // The source array is chronological input, not a mutation target.
     expect(comments).toEqual([{ createdAt: "a" }, { createdAt: "b" }, { createdAt: "c" }]);
-  });
-
-  it("opens on the most recent comments and expands the oldest remainder after them when newest-first", () => {
-    const comments = [
-      { createdAt: "1" },
-      { createdAt: "2" },
-      { createdAt: "3" },
-      { createdAt: "4" },
-    ];
-    expect(windowPullRequestComments(comments, 2, "newest")).toEqual({
-      visible: [{ createdAt: "4" }, { createdAt: "3" }],
-      hiddenCount: 2,
-      expandFrom: "end",
-    });
-  });
-
-  it("expands the same oldest remainder from the start when oldest-first", () => {
-    const comments = [
-      { createdAt: "1" },
-      { createdAt: "2" },
-      { createdAt: "3" },
-      { createdAt: "4" },
-    ];
-    expect(windowPullRequestComments(comments, 2, "oldest")).toEqual({
-      visible: [{ createdAt: "3" }, { createdAt: "4" }],
-      hiddenCount: 2,
-      expandFrom: "start",
-    });
-  });
-
-  it("names the hidden remainder as oldest comments, not earlier ones", () => {
-    expect(pullRequestHiddenCommentsActionLabel(18, 30)).toBe("Show 18 oldest comments");
-    expect(pullRequestHiddenCommentsActionLabel(40, 30)).toBe("Show 30 oldest comments");
-    expect(pullRequestHiddenCommentsActionLabel(1, 30)).toBe("Show 1 oldest comment");
   });
 });
 

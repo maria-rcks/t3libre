@@ -161,38 +161,6 @@ export function orderPullRequestComments<T extends { readonly createdAt: string 
   return order === "newest" ? comments.toReversed() : comments;
 }
 
-/**
- * A long conversation still opens on what happened last. The window is always the most recent
- * comments; display order only decides whether those read newest-first or oldest-first, and which
- * end of the list the remaining oldest comments expand from.
- */
-export function windowPullRequestComments<T extends { readonly createdAt: string }>(
-  comments: ReadonlyArray<T>,
-  shownCount: number,
-  order: "newest" | "oldest",
-): {
-  readonly visible: ReadonlyArray<T>;
-  readonly hiddenCount: number;
-  readonly expandFrom: "start" | "end";
-} {
-  const recent = comments.slice(Math.max(0, comments.length - shownCount));
-  return {
-    visible: orderPullRequestComments(recent, order),
-    hiddenCount: comments.length - recent.length,
-    // Newest-first puts the oldest remainder after the visible list; oldest-first puts it before.
-    expandFrom: order === "newest" ? "end" : "start",
-  };
-}
-
-/** How many of the remaining oldest comments the next press reveals. */
-export function pullRequestHiddenCommentsActionLabel(
-  hiddenCount: number,
-  pageSize: number,
-): string {
-  const count = Math.min(hiddenCount, pageSize);
-  return `Show ${count} oldest ${count === 1 ? "comment" : "comments"}`;
-}
-
 /** A review that says something about the change itself, rather than only carrying remarks. */
 export type PullRequestReviewOutcome = "approved" | "changes-requested" | "dismissed";
 
