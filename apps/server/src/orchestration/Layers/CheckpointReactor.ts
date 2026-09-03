@@ -899,8 +899,14 @@ const make = Effect.gen(function* () {
           ),
         ),
       );
+      if (event.payload.status === "missing") return;
       const thread = yield* resolveThreadDetail(event.payload.threadId);
-      if (thread !== undefined) {
+      if (
+        thread !== undefined &&
+        thread.session !== null &&
+        thread.session.status !== "starting" &&
+        thread.session.status !== "running"
+      ) {
         yield* refreshPullRequestsOnce(thread.projectId, thread.id, event.payload.turnId);
       }
       return;

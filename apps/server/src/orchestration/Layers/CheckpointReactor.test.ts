@@ -629,19 +629,56 @@ describe("CheckpointReactor", () => {
 
       yield* harness.engine.dispatch({
         type: "thread.turn.diff.complete",
-        commandId: CommandId.make("cmd-pr-refresh-missed-start"),
+        commandId: CommandId.make("cmd-pr-refresh-placeholder"),
         threadId,
         turnId: asTurnId("turn-with-missed-start"),
         completedAt: "2026-01-01T00:00:05.000Z",
         checkpointRef: checkpointRefForThreadTurn(threadId, 2),
         checkpointTurnCount: 2,
-        status: "ready",
+        status: "missing",
         files: [],
         createdAt: "2026-01-01T00:00:05.000Z",
       });
       yield* Effect.promise(() => harness.drain());
+      expect(pullRequestRefreshCalls).toEqual([asProjectId("project-1")]);
 
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-pr-refresh-next-ready"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:06.000Z",
+        },
+        createdAt: "2026-01-01T00:00:06.000Z",
+      });
+      yield* Effect.promise(() => harness.drain());
       expect(pullRequestRefreshCalls).toEqual([asProjectId("project-1"), asProjectId("project-1")]);
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.make("cmd-pr-refresh-missed-start"),
+        threadId,
+        turnId: asTurnId("turn-with-missed-start"),
+        completedAt: "2026-01-01T00:00:07.000Z",
+        checkpointRef: checkpointRefForThreadTurn(threadId, 2),
+        checkpointTurnCount: 2,
+        status: "ready",
+        files: [],
+        createdAt: "2026-01-01T00:00:07.000Z",
+      });
+      yield* Effect.promise(() => harness.drain());
+
+      expect(pullRequestRefreshCalls).toEqual([
+        asProjectId("project-1"),
+        asProjectId("project-1"),
+        asProjectId("project-1"),
+      ]);
     }),
   );
 
