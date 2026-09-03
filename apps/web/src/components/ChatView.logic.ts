@@ -12,8 +12,10 @@ import {
   type ServerProvider,
   type ScopedProjectRef,
   type ScopedThreadRef,
+  type ThreadLinkedPullRequest,
   type ThreadId,
   type TurnId,
+  type VcsStatusResult,
 } from "@t3tools/contracts";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import {
@@ -83,6 +85,41 @@ export function shouldOpenProactivePullRequest(
   targetKey: string | null,
 ): boolean {
   return previousTargetKey !== undefined && targetKey !== null && targetKey !== previousTargetKey;
+}
+
+export function resolveThreadPullRequestRelink(input: {
+  linkedPullRequest: ThreadLinkedPullRequest | null;
+  linkedPullRequestState: "open" | "merged" | "closed" | null;
+  threadBranch: string | null;
+  gitStatus: VcsStatusResult | null;
+  projectId: ProjectId | null;
+  repository: string | null;
+}): ThreadLinkedPullRequest | null {
+  const detected = input.gitStatus?.pr;
+  if (
+    input.linkedPullRequest === null ||
+    (input.linkedPullRequestState !== "merged" && input.linkedPullRequestState !== "closed") ||
+    input.threadBranch === null ||
+    input.gitStatus?.refName !== input.threadBranch ||
+    detected?.state !== "open" ||
+    input.projectId === null ||
+    input.repository === null
+  ) {
+    return null;
+  }
+  if (
+    input.linkedPullRequest.projectId === input.projectId &&
+    input.linkedPullRequest.repository.toLowerCase() === input.repository.toLowerCase() &&
+    input.linkedPullRequest.number === detected.number
+  ) {
+    return null;
+  }
+  return {
+    projectId: input.projectId,
+    repository: input.repository,
+    number: detected.number,
+    url: detected.url,
+  };
 }
 
 export function shouldOpenProactiveTurnDiff(input: {

@@ -376,6 +376,7 @@ import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveDraftHeroState,
   resolveThreadMetadataUpdateForNextTurn,
+  resolveThreadPullRequestRelink,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
@@ -1783,6 +1784,7 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const refreshVcsStatus = useAtomCommand(vcsEnvironment.refreshStatus, { reportFailure: false });
   const sidebarPrRefreshKeyRef = useRef<string | null>(null);
+  const threadPrRelinkKeyRef = useRef<string | null>(null);
   const activePreviewState = useThreadPreviewState(activeThreadRef);
   const activePreviewServerEpoch = activePreviewState.serverEpoch;
   const resolvePreviewRuntimeTabId = useMemo(
@@ -3641,9 +3643,47 @@ function ChatViewContent(props: ChatViewProps) {
   );
   // The thread's own change request, placed against the project it belongs to. Without a
   // project there is nothing to resolve it against, so the caller falls back to the browser.
-  const linkedThreadPullRequest = isServerThread
+  const persistedLinkedThreadPullRequest = isServerThread
     ? (activeThreadShell?.linkedPullRequest ?? activeThread?.linkedPullRequest ?? null)
     : (activeThread?.linkedPullRequest ?? null);
+  const activeProjectRepository = activeProject?.repositoryIdentity?.displayName ?? null;
+  const persistedLinkedThreadPullRequestStatus = useLinkedThreadPullRequest(
+    activeThreadRef?.environmentId ?? null,
+    persistedLinkedThreadPullRequest,
+  );
+  const replacementLinkedThreadPullRequest = useMemo(
+    () =>
+      resolveThreadPullRequestRelink({
+        linkedPullRequest: persistedLinkedThreadPullRequest,
+        linkedPullRequestState: persistedLinkedThreadPullRequestStatus?.pr.state ?? null,
+        threadBranch: activeThread?.branch ?? null,
+        gitStatus: gitStatusQuery.data ?? null,
+        projectId: activeProject?.id ?? null,
+        repository: activeProjectRepository,
+      }),
+    [
+      activeProject?.id,
+      activeProjectRepository,
+      activeThread?.branch,
+      gitStatusQuery.data,
+      persistedLinkedThreadPullRequest,
+      persistedLinkedThreadPullRequestStatus?.pr.state,
+    ],
+  );
+  const linkedThreadPullRequest =
+    replacementLinkedThreadPullRequest ?? persistedLinkedThreadPullRequest;
+  const replacementSourceControlProvider =
+    gitStatusQuery.data?.sourceControlProvider ??
+    persistedLinkedThreadPullRequestStatus?.sourceControlProvider;
+  const linkedThreadPullRequestStatus =
+    replacementLinkedThreadPullRequest !== null &&
+    gitStatusQuery.data?.pr != null &&
+    replacementSourceControlProvider != null
+      ? {
+          pr: gitStatusQuery.data.pr,
+          sourceControlProvider: replacementSourceControlProvider,
+        }
+      : persistedLinkedThreadPullRequestStatus;
   const linkedThreadPullRequestKey = linkedThreadPullRequest
     ? JSON.stringify([
         linkedThreadPullRequest.projectId,
@@ -3651,7 +3691,6 @@ function ChatViewContent(props: ChatViewProps) {
         linkedThreadPullRequest.number,
       ])
     : null;
-  const activeProjectRepository = activeProject?.repositoryIdentity?.displayName ?? null;
   const threadRepository = linkedThreadPullRequest?.repository ?? activeProjectRepository;
   const openThreadPullRequest = useCallback(
     (number: number) => {
@@ -3675,6 +3714,61 @@ function ChatViewContent(props: ChatViewProps) {
       supportsPullRequests,
     ],
   );
+  useEffect(() => {
+    if (
+      !isServerThread ||
+      activeThreadRef === null ||
+      replacementLinkedThreadPullRequest === null
+    ) {
+      threadPrRelinkKeyRef.current = null;
+      return;
+    }
+    const relinkKey = `${activeThreadKey}:${replacementLinkedThreadPullRequest.projectId}:${replacementLinkedThreadPullRequest.repository}#${replacementLinkedThreadPullRequest.number}`;
+    if (threadPrRelinkKeyRef.current === relinkKey) return;
+    threadPrRelinkKeyRef.current = relinkKey;
+
+    if (
+      activeRightPanelSurface?.kind === "pull-request" &&
+      persistedLinkedThreadPullRequest !== null &&
+      activeRightPanelSurface.projectId === persistedLinkedThreadPullRequest.projectId &&
+      activeRightPanelSurface.repository.toLowerCase() ===
+        persistedLinkedThreadPullRequest.repository.toLowerCase() &&
+      activeRightPanelSurface.number === persistedLinkedThreadPullRequest.number
+    ) {
+      useRightPanelStore
+        .getState()
+        .openPullRequest(activeThreadRef, replacementLinkedThreadPullRequest);
+    }
+
+    void updateThreadMetadata({
+      environmentId: activeThreadRef.environmentId,
+      input: {
+        threadId: activeThreadRef.threadId,
+        linkedPullRequest: replacementLinkedThreadPullRequest,
+      },
+    }).then((result) => {
+      if (result._tag !== "Failure") return;
+      if (threadPrRelinkKeyRef.current === relinkKey) {
+        threadPrRelinkKeyRef.current = null;
+      }
+      if (isAtomCommandInterrupted(result)) return;
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Unable to update the thread pull request",
+          description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+        }),
+      );
+    });
+  }, [
+    activeRightPanelSurface,
+    activeThreadKey,
+    activeThreadRef,
+    isServerThread,
+    persistedLinkedThreadPullRequest,
+    replacementLinkedThreadPullRequest,
+    updateThreadMetadata,
+  ]);
   const openProjectPullRequest = useCallback(
     (number: number) => {
       if (
@@ -4746,17 +4840,13 @@ function ChatViewContent(props: ChatViewProps) {
       resizeObserver.disconnect();
     };
   }, [composerOverlayElement]);
-  const linkedPullRequestStatus = useLinkedThreadPullRequest(
-    activeThreadRef?.environmentId ?? null,
-    linkedThreadPullRequest,
-  );
   const activeThreadPr = resolveDisplayedThreadPr({
     threadBranch: activeThread?.branch ?? null,
     gitStatus: gitStatusQuery.data ?? null,
     snapshot: activeThreadKey ? changeRequestSnapshotByKey.get(activeThreadKey) : undefined,
     retainTerminalOnBranchMismatch: activeThread?.worktreePath === null,
     linkedPullRequest: linkedThreadPullRequest,
-    linkedPullRequestStatus,
+    linkedPullRequestStatus: linkedThreadPullRequestStatus,
   });
   const handlePullRequestTabStatusChange = useCallback(
     (status: PullRequestTabStatus) => {

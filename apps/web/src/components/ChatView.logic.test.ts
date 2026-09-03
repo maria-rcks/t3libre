@@ -32,6 +32,7 @@ import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveDraftPromotionNavigationTarget,
   resolveThreadMetadataUpdateForNextTurn,
+  resolveThreadPullRequestRelink,
   resolveSendEnvMode,
   resolveDraftHeroState,
   scheduleEnvironmentReconnectWarning,
@@ -89,6 +90,7 @@ describe("proactive panels", () => {
     expect(shouldOpenProactivePullRequest(undefined, "project:repo:42")).toBe(false);
     expect(shouldOpenProactivePullRequest(null, "project:repo:42")).toBe(true);
     expect(shouldOpenProactivePullRequest("project:repo:42", "project:repo:42")).toBe(false);
+    expect(shouldOpenProactivePullRequest("project:repo:42", "project:repo:43")).toBe(true);
     expect(shouldOpenProactivePullRequest("project:repo:42", null)).toBe(false);
   });
 
@@ -126,6 +128,71 @@ describe("proactive panels", () => {
         turnCompleted: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolveThreadPullRequestRelink", () => {
+  const projectId = ProjectId.make("project-1");
+  const linkedPullRequest = {
+    projectId,
+    repository: "pingdotgg/t3code",
+    number: 42,
+    url: "https://github.com/pingdotgg/t3code/pull/42",
+  };
+  const gitStatus = {
+    isRepo: true,
+    hasPrimaryRemote: true,
+    isDefaultRef: false,
+    refName: "feature/current",
+    hasWorkingTreeChanges: false,
+    workingTree: { files: [], insertions: 0, deletions: 0 },
+    hasUpstream: true,
+    aheadCount: 0,
+    behindCount: 0,
+    pr: {
+      number: 43,
+      title: "Next PR",
+      url: "https://github.com/pingdotgg/t3code/pull/43",
+      baseRef: "main",
+      headRef: "feature/current",
+      state: "open" as const,
+    },
+  };
+
+  it("replaces a terminal link with a different open pr on the thread branch", () => {
+    expect(
+      resolveThreadPullRequestRelink({
+        linkedPullRequest,
+        linkedPullRequestState: "merged",
+        threadBranch: "feature/current",
+        gitStatus,
+        projectId,
+        repository: "pingdotgg/t3code",
+      }),
+    ).toEqual({
+      projectId,
+      repository: "pingdotgg/t3code",
+      number: 43,
+      url: "https://github.com/pingdotgg/t3code/pull/43",
+    });
+  });
+
+  it("keeps an open link and ignores another checkout", () => {
+    const input = {
+      linkedPullRequest,
+      threadBranch: "feature/current",
+      gitStatus,
+      projectId,
+      repository: "pingdotgg/t3code",
+    };
+    expect(resolveThreadPullRequestRelink({ ...input, linkedPullRequestState: "open" })).toBeNull();
+    expect(
+      resolveThreadPullRequestRelink({
+        ...input,
+        linkedPullRequestState: "merged",
+        gitStatus: { ...gitStatus, refName: "feature/other" },
+      }),
+    ).toBeNull();
   });
 });
 
