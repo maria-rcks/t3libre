@@ -99,6 +99,7 @@ export interface ThreadDetailScreenProps {
   readonly environmentLabel: string | null;
   readonly selectedThreadFeed: ReadonlyArray<ThreadFeedEntry>;
   readonly activeWorkStartedAt: string | null;
+  readonly isCompacting: boolean;
   readonly activePendingApproval: PendingApproval | null;
   readonly respondingApprovalId: ApprovalRequestId | null;
   readonly activePendingUserInput: PendingUserInput | null;
@@ -315,7 +316,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     }
   })();
   const showWorkingControl =
-    props.activeWorkStartedAt !== null &&
+    (props.activeWorkStartedAt !== null || props.isCompacting) &&
     contentPresentationKind === "ready" &&
     threadSyncPhase === null &&
     props.connectionStateLabel === "connected" &&
@@ -758,6 +759,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               <FloatingWorkingControl
                 colorScheme={isDarkMode ? "dark" : "light"}
                 startedAt={floatingWorkingStartedAt}
+                isCompacting={props.isCompacting}
                 showScrollToEnd={showScrollToEndButton}
                 onScrollToEnd={handleScrollToEnd}
               />

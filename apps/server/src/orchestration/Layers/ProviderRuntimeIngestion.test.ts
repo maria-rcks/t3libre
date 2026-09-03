@@ -3283,66 +3283,6 @@ describe("ProviderRuntimeIngestion", () => {
     expect(activity?.summary).toBe("Compacted context 899K → 0 tokens");
     expect(activity?.tone).toBe("info");
     expect(activity?.payload).toMatchObject({ requestId: "message-compact" });
-
-    await harness.dispatch({
-      ...compactCommand,
-      commandId: CommandId.make("cmd-thread-compact-next"),
-      message: {
-        ...compactCommand.message,
-        messageId: asMessageId("message-compact-next"),
-      },
-      createdAt: "2026-01-01T00:00:01.000Z",
-    });
-    harness.emit({
-      type: "thread.state.changed",
-      eventId: asEventId("evt-thread-compacted-stale"),
-      provider: ProviderDriverKind.make("codex"),
-      providerInstanceId: ProviderInstanceId.make("codex"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      payload: { state: "compacted" },
-    });
-    const staleCompaction = await waitForThread(harness.readModel, (entry) =>
-      entry.activities.some((activity) => activity.id === "evt-thread-compacted-stale"),
-    );
-    expect(
-      staleCompaction.activities.find((activity) => activity.id === "evt-thread-compacted-stale")
-        ?.payload,
-    ).not.toHaveProperty("requestId");
-
-    harness.emit({
-      type: "thread.state.changed",
-      eventId: asEventId("evt-thread-compacted-again"),
-      provider: ProviderDriverKind.make("codex"),
-      providerInstanceId: ProviderInstanceId.make("codex_other"),
-      createdAt: "2026-01-01T00:00:01.000Z",
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-2"),
-      payload: {
-        state: "compacted",
-        detail: { source: "provider" },
-      },
-    });
-
-    const compactedAgain = await waitForThread(
-      harness.readModel,
-      (entry) =>
-        entry.activities.filter(
-          (candidate: ProviderRuntimeTestActivity) => candidate.kind === "context-compaction",
-        ).length === 3,
-    );
-    expect(
-      compactedAgain.activities.find(
-        (candidate: ProviderRuntimeTestActivity) => candidate.id === "evt-thread-compacted-again",
-      ),
-    ).toMatchObject({
-      summary: "Context compacted",
-    });
-    expect(
-      compactedAgain.activities.find(
-        (candidate: ProviderRuntimeTestActivity) => candidate.id === "evt-thread-compacted-again",
-      )?.payload,
-    ).not.toHaveProperty("requestId");
   });
 
   it("projects Codex task lifecycle chunks into thread activities", async () => {

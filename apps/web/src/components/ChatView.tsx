@@ -2532,7 +2532,29 @@ function ChatViewContent(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError,
   });
-  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const pendingCompactionMessage =
+    optimisticUserMessages.findLast((message) => message.role === "user") ??
+    activeThread?.messages.findLast((message) => message.role === "user");
+  const pendingMessageIsCompactCommand =
+    pendingCompactionMessage?.text.trim().toLowerCase() === "/compact" &&
+    (pendingCompactionMessage.attachments?.length ?? 0) === 0;
+  const compactionSettled =
+    pendingMessageIsCompactCommand &&
+    (latestTurnStartFailureId(activeThread, pendingCompactionMessage.id) !== null ||
+      activeThread?.activities.some((activity) => {
+        if (activity.kind !== "context-compaction") return false;
+        const payload =
+          typeof activity.payload === "object" && activity.payload !== null
+            ? (activity.payload as { readonly requestId?: unknown })
+            : null;
+        return payload?.requestId === pendingCompactionMessage.id;
+      }));
+  const isCompacting =
+    (isSendBusy || phase === "connecting" || phase === "running") &&
+    pendingMessageIsCompactCommand &&
+    !compactionSettled;
+  const isWorking =
+    phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint || isCompacting;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -7487,6 +7509,7 @@ function ChatViewContent(props: ChatViewProps) {
                 key={activeThread.id}
                 isWorking={isWorking}
                 isPreparingWorktree={isPreparingWorktree}
+                isCompacting={isCompacting}
                 activeTurnStartedAt={activeWorkStartedAt}
                 listRef={legendListRef}
                 timelineEntries={timelineEntries}

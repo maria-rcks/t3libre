@@ -1562,7 +1562,15 @@ function renderFeedEntry(
         className="mb-3 flex-row items-center gap-3 px-1 py-1"
       >
         <View className="h-px flex-1 bg-adaptive-neutral-200-a80-white-a8" />
-        <Text className="font-t3-medium text-xs text-foreground-muted">{label}</Text>
+        <View className="shrink-0 flex-row items-center gap-1.5">
+          <SymbolView
+            name="arrow.down.right.and.arrow.up.left"
+            size={12}
+            tintColor={iconSubtleColor}
+            type="monochrome"
+          />
+          <Text className="font-t3-medium text-xs text-foreground-muted">{label}</Text>
+        </View>
         <View className="h-px flex-1 bg-adaptive-neutral-200-a80-white-a8" />
       </View>
     );

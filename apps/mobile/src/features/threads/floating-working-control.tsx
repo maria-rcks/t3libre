@@ -13,6 +13,7 @@ import Animated, {
 import { withUniwind } from "uniwind";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
 import { ControlPill } from "../../components/ControlPill";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 
@@ -43,6 +44,7 @@ export const FLOATING_WORKING_CONTROL_COVERAGE = CONTROL_HEIGHT + CONTROL_COMPOS
 export function FloatingWorkingControl(props: {
   readonly colorScheme: "light" | "dark";
   readonly startedAt: string | null;
+  readonly isCompacting: boolean;
   readonly showScrollToEnd: boolean;
   readonly onScrollToEnd: () => void;
 }) {
@@ -62,7 +64,13 @@ export function FloatingWorkingControl(props: {
     opacity: separationProgress.value,
   }));
 
-  if (props.startedAt === null && !props.showScrollToEnd) {
+  const hasActiveWork = props.startedAt !== null || props.isCompacting;
+  const activeWorkContent = props.isCompacting ? (
+    <CompactingLabel />
+  ) : props.startedAt !== null ? (
+    <WorkingDuration startedAt={props.startedAt} />
+  ) : null;
+  if (!hasActiveWork && !props.showScrollToEnd) {
     return null;
   }
 
@@ -74,7 +82,7 @@ export function FloatingWorkingControl(props: {
       entering={NATIVE_LIQUID_GLASS_SUPPORTED ? undefined : CONTROL_ENTERING}
       exiting={NATIVE_LIQUID_GLASS_SUPPORTED ? undefined : CONTROL_EXITING}
     >
-      {props.startedAt !== null && NATIVE_LIQUID_GLASS_SUPPORTED ? (
+      {hasActiveWork && NATIVE_LIQUID_GLASS_SUPPORTED ? (
         <UniwindGlassContainer
           spacing={GLASS_MERGE_SPACING}
           pointerEvents="box-none"
@@ -87,7 +95,7 @@ export function FloatingWorkingControl(props: {
             className="h-11 justify-center overflow-hidden rounded-full"
             style={timerStyle}
           >
-            <WorkingDuration startedAt={props.startedAt} />
+            {activeWorkContent}
           </AnimatedGlassView>
 
           <AnimatedGlassView
@@ -105,14 +113,14 @@ export function FloatingWorkingControl(props: {
             </Animated.View>
           </AnimatedGlassView>
         </UniwindGlassContainer>
-      ) : props.startedAt !== null ? (
+      ) : hasActiveWork ? (
         <View pointerEvents="box-none" className="flex-row items-center gap-4">
           <Animated.View
             pointerEvents="none"
             className="h-11 justify-center rounded-full border border-border bg-card shadow-md shadow-black/10"
             style={timerStyle}
           >
-            <WorkingDuration startedAt={props.startedAt} />
+            {activeWorkContent}
           </Animated.View>
 
           <Animated.View
@@ -150,6 +158,24 @@ export function FloatingWorkingControl(props: {
         />
       )}
     </Animated.View>
+  );
+}
+
+function CompactingLabel() {
+  return (
+    <View
+      accessible
+      accessibilityLabel="Compacting"
+      className="h-11 flex-row items-center gap-1.5 px-4"
+    >
+      <SymbolView
+        name="arrow.down.right.and.arrow.up.left"
+        size={13}
+        tintColorClassName="foreground"
+        type="monochrome"
+      />
+      <Text className="font-t3-medium text-xs text-foreground">Compacting…</Text>
+    </View>
   );
 }
 

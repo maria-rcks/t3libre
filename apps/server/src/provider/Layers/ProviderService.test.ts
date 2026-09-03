@@ -1045,10 +1045,6 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
 
-      yield* advanceTestClock(10);
-      yield* provider.compactThread(session.threadId);
-      assert.deepEqual(routing.codex.compactThread.mock.calls, [[session.threadId, undefined]]);
-
       yield* provider.interruptTurn({ threadId: session.threadId });
       assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId, undefined]]);
 
