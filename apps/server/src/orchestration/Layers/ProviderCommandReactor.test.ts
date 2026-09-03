@@ -976,6 +976,9 @@ describe("ProviderCommandReactor", () => {
         }),
       );
       expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+      expect(yield* Effect.promise(() => harness.readPendingTurnStarts())).toEqual([
+        { threadId: "thread-1" },
+      ]);
 
       yield* Deferred.succeed(releaseReadyDispatch, undefined);
       yield* Effect.promise(() =>

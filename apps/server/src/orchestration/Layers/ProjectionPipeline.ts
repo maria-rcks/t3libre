@@ -1269,6 +1269,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "thread.turn-start-requested": {
+          const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isSome(pendingTurnStart)) {
+            const pendingMessage = yield* projectionThreadMessageRepository.getByMessageId({
+              messageId: pendingTurnStart.value.messageId,
+            });
+            if (
+              Option.isSome(pendingMessage) &&
+              pendingMessage.value.role === "user" &&
+              (pendingMessage.value.attachments?.length ?? 0) === 0 &&
+              pendingMessage.value.text.trim().toLowerCase() === "/compact"
+            ) {
+              return;
+            }
+          }
           yield* projectionTurnRepository.replacePendingTurnStart({
             threadId: event.payload.threadId,
             messageId: event.payload.messageId,
