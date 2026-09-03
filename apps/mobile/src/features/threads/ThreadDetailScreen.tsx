@@ -759,7 +759,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               <FloatingWorkingControl
                 colorScheme={isDarkMode ? "dark" : "light"}
                 startedAt={floatingWorkingStartedAt}
-                isCompacting={props.isCompacting}
+                isCompacting={showWorkingControl && props.isCompacting}
                 showScrollToEnd={showScrollToEndButton}
                 onScrollToEnd={handleScrollToEnd}
               />
