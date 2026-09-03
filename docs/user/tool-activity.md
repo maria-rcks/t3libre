@@ -9,6 +9,7 @@ Collapsing and reopening a group preserves your reading position and any open ca
 
 Recognized T3 tools use descriptive labels in both the running summary and individual rows.
 Labels follow the call's state, such as "Clicking" while running and "Clicked" after success.
+When a call has not reported a state yet, the label stays in the present tense.
 Failed, declined, and stopped calls say what happened without implying success.
 Preview browser actions use a globe icon. Other T3 tools keep the T3 mark.
 Group summaries count browser actions separately, such as "Used browser 18 times" or

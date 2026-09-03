@@ -115,7 +115,7 @@ function resolveT3McpToolPresentation(value: string | undefined, status: string 
             ? `Declined to ${action.toLowerCase()}`
             : status === "stopped"
               ? `Stopped ${running.toLowerCase()}`
-              : action;
+              : running;
 
   return {
     displayName: `${verb} ${detail}`,
