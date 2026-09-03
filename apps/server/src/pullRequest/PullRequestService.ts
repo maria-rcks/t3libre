@@ -38,6 +38,8 @@ import {
   type PullRequestReviewVerdict,
   type PullRequestReviewerCandidateList,
   type PullRequestReviewerRequestInput,
+  type PullRequestLabelCandidateList,
+  type PullRequestLabelChangeInput,
   type PullRequestSubmitReviewInput,
   type PullRequestSummary,
   type PullRequestThreadReplyInput,
@@ -170,6 +172,12 @@ export class PullRequestService extends Context.Service<
     readonly requestReviewers: (
       input: PullRequestReviewerRequestInput,
     ) => Effect.Effect<void, PullRequestError>;
+    readonly labelCandidates: (
+      input: PullRequestRef,
+    ) => Effect.Effect<PullRequestLabelCandidateList, PullRequestError>;
+    readonly setLabels: (
+      input: PullRequestLabelChangeInput,
+    ) => Effect.Effect<void, PullRequestError>;
     readonly invalidate: (input: PullRequestInvalidateInput) => Effect.Effect<void>;
   }
 >()("t3/pullRequest/PullRequestService") {}
@@ -213,6 +221,7 @@ const ACTION_ACCESS_REFUSALS: Record<PullRequestAction, string> = {
  * sentence is only ever the answer where a host said no.
  */
 const REVIEWER_REQUEST_REFUSAL = "You need write access on this repository to ask for a review.";
+const LABEL_CHANGE_REFUSAL = "You need triage access on this repository to change its labels.";
 
 /** A project this page can read: its remote is on a host with an implementation. */
 interface SupportedProject {
@@ -473,6 +482,10 @@ function withRateLimitBackoff(
     submitReview: interactive("submitReview", api.submitReview),
     listReviewerCandidates: interactive("listReviewerCandidates", api.listReviewerCandidates),
     setReviewerRequest: interactive("setReviewerRequest", api.setReviewerRequest),
+    ...(api.listLabelCandidates === undefined
+      ? {}
+      : { listLabelCandidates: interactive("listLabelCandidates", api.listLabelCandidates) }),
+    ...(api.setLabels === undefined ? {} : { setLabels: interactive("setLabels", api.setLabels) }),
     replyToThread: interactive("replyToThread", api.replyToThread),
     setReaction: interactive("setReaction", api.setReaction),
     setThreadResolution: interactive("setThreadResolution", api.setThreadResolution),
@@ -1844,6 +1857,78 @@ export const make = Effect.gen(function* () {
     );
 
   /**
+   * The labels, like the reviewer candidates, are wanted only by somebody about to change them,
+   * so the same permission guards the list and the change.
+   */
+  const labelCandidates: PullRequestService["Service"]["labelCandidates"] = (input) =>
+    requireProject(input).pipe(
+      Effect.flatMap((project): Effect.Effect<PullRequestLabelCandidateList, PullRequestError> => {
+        const list = project.api.listLabelCandidates;
+        if (project.api.capabilities.labels !== true || list === undefined) {
+          return Effect.fail(
+            new PullRequestOperationError({
+              operation: "labelCandidates",
+              detail: "This host cannot change the labels on a change request.",
+            }),
+          );
+        }
+        return viewerPermissionsOf(project, input, "labelCandidates").pipe(
+          Effect.flatMap(
+            (viewer): Effect.Effect<PullRequestLabelCandidateList, PullRequestError> =>
+              viewer.labels === false
+                ? Effect.fail(
+                    new PullRequestOperationError({
+                      operation: "labelCandidates",
+                      detail: LABEL_CHANGE_REFUSAL,
+                    }),
+                  )
+                : list({
+                    cwd: project.project.workspaceRoot,
+                    repository: project.repository,
+                    host: project.host,
+                    number: input.number,
+                  }).pipe(Effect.mapError(toPullRequestError("labelCandidates"))),
+          ),
+        );
+      }),
+    );
+
+  const setLabels: PullRequestService["Service"]["setLabels"] = (input) =>
+    requireProject(input).pipe(
+      Effect.flatMap((project): Effect.Effect<void, PullRequestError> => {
+        const change = project.api.setLabels;
+        if (project.api.capabilities.labels !== true || change === undefined) {
+          return Effect.fail(
+            new PullRequestOperationError({
+              operation: "setLabels",
+              detail: "This host cannot change the labels on a change request.",
+            }),
+          );
+        }
+        return viewerPermissionsOf(project, input, "setLabels").pipe(
+          Effect.flatMap(
+            (viewer): Effect.Effect<void, PullRequestError> =>
+              viewer.labels === false
+                ? Effect.fail(
+                    new PullRequestOperationError({
+                      operation: "setLabels",
+                      detail: LABEL_CHANGE_REFUSAL,
+                    }),
+                  )
+                : change({
+                    cwd: project.project.workspaceRoot,
+                    repository: project.repository,
+                    host: project.host,
+                    number: input.number,
+                    labels: input.labels,
+                    applied: input.applied,
+                  }).pipe(Effect.mapError(toPullRequestError("setLabels"))),
+          ),
+        );
+      }),
+    );
+
+  /**
    * The line counts for rows already on the page, which the listing left out because on GitHub
    * they cost more than everything else on the row put together.
    *
@@ -2001,7 +2086,25 @@ export const make = Effect.gen(function* () {
           },
         }),
       );
-    return { read, record };
+    /**
+     * A change request already read does not wait on the host again. `reuse` answers from
+     * what we hold and spends nothing — title, author, and state barely move, and a linked
+     * thread already names the change request. `revalidate` answers the same way and
+     * refreshes behind it, so line counts and the rest can change in place.
+     */
+    const serveHeld = (
+      key: string,
+      effect: Effect.Effect<A, PullRequestError>,
+      mode: "reuse" | "revalidate",
+    ) => {
+      const snapshot = held.get(key);
+      if (snapshot === undefined) return read(key, effect);
+      if (mode === "reuse") return Effect.succeed(snapshot.value);
+      return Effect.sync(() => runFork(Effect.ignore(read(key, effect)))).pipe(
+        Effect.as(snapshot.value),
+      );
+    };
+    return { peek: (key: string) => held.get(key)?.value, read, record, serveHeld };
   };
   const lastGoodSummary = makeLastGoodRead<PullRequestSummary>(DETAIL_CACHE_CAPACITY);
   const lastGoodDetail = makeLastGoodRead<PullRequestDetail>(DETAIL_CACHE_CAPACITY);
@@ -2059,7 +2162,7 @@ export const make = Effect.gen(function* () {
     const cached = Cache.get(summaryCache, key);
     return options?.recoverTransientFailure === false
       ? cached.pipe(Effect.tap((value) => lastGoodSummary.record(key, value)))
-      : lastGoodSummary.read(key, cached);
+      : lastGoodSummary.serveHeld(key, cached, "reuse");
   };
 
   // Keys serialize positionally and parse back in the lookup, so the cache is the only holder
@@ -2149,9 +2252,42 @@ export const make = Effect.gen(function* () {
       timeToLive: (exit) => (Exit.isSuccess(exit) ? DETAIL_CACHE_TTL : Duration.zero),
     },
   );
+  const summaryFromDetail = (detail: PullRequestDetail): PullRequestSummary => ({
+    provider: detail.provider,
+    projectId: detail.projectId,
+    repository: detail.repository,
+    number: detail.number,
+    title: detail.title,
+    url: detail.url,
+    state: detail.state,
+    headBranch: detail.headBranch,
+    baseBranch: detail.baseBranch,
+    updatedAt: detail.updatedAt,
+  });
+  const shouldReplaceHeldSummary = (key: string, next: PullRequestSummary) => {
+    const current = lastGoodSummary.peek(key);
+    if (current === undefined) return true;
+    if (current.state === "merged" && next.state !== "merged") return false;
+    return next.updatedAt >= current.updatedAt;
+  };
   const detail: PullRequestService["Service"]["detail"] = (input) => {
     const key = refCacheKey(input);
-    return lastGoodDetail.read(key, Cache.get(detailCache, key));
+    // Record the summary from a host or cache read, not the stale value
+    // `serveHeld` returns immediately. Skip the write when that read is older
+    // than a later strict summary — display reuse would otherwise keep the
+    // regression and never ask the host again.
+    return lastGoodDetail.serveHeld(
+      key,
+      Cache.get(detailCache, key).pipe(
+        Effect.tap((value) => {
+          const summary = summaryFromDetail(value);
+          return shouldReplaceHeldSummary(key, summary)
+            ? lastGoodSummary.record(key, summary)
+            : Effect.void;
+        }),
+      ),
+      "revalidate",
+    );
   };
 
   const activityCache = yield* Cache.makeWith(
@@ -2285,6 +2421,8 @@ export const make = Effect.gen(function* () {
     // The candidate list is deliberately read fresh per menu-open, so it stays uncached.
     reviewerCandidates,
     requestReviewers: invalidatedByMutation(requestReviewers),
+    labelCandidates,
+    setLabels: invalidatedByMutation(setLabels),
     invalidate,
   });
 });
