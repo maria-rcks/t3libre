@@ -1072,7 +1072,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       if (terminal !== "completed") {
         return yield* new ProviderAdapterRequestError({
           provider: routed.adapter.provider,
-          method: "turn/start",
+          method: nativeCompaction ? "thread/compact" : "turn/start",
           detail: `Context compaction ended with ${terminal}.`,
         });
       }

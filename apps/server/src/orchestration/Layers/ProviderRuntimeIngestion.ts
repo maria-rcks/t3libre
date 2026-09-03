@@ -253,7 +253,7 @@ function assistantSegmentMessageId(baseKey: string, segmentIndex: number): Messa
 function buildContextWindowActivityPayload(
   event: ProviderRuntimeEvent,
 ): ThreadTokenUsageSnapshot | undefined {
-  if (event.type !== "thread.token-usage.updated" || event.payload.usage.usedTokens <= 0) {
+  if (event.type !== "thread.token-usage.updated" || event.payload.usage.usedTokens < 0) {
     return undefined;
   }
   return event.payload.usage;
@@ -265,11 +265,22 @@ function compactedTokenCountsFromActivities(
   const lastCompactionIndex = activities?.findLastIndex(
     (activity) => activity.kind === "context-compaction",
   );
+  const lastCompaction =
+    lastCompactionIndex !== undefined && lastCompactionIndex >= 0
+      ? activities?.[lastCompactionIndex]
+      : undefined;
   const activitiesSinceLastCompaction = activities?.slice((lastCompactionIndex ?? -1) + 1) ?? [];
   const usedTokens = activitiesSinceLastCompaction.flatMap((activity) => {
     if (activity.kind !== "context-window.updated") return [];
+    if (lastCompaction !== undefined) {
+      const isAfterLastCompaction =
+        activity.sequence !== undefined && lastCompaction.sequence !== undefined
+          ? activity.sequence > lastCompaction.sequence
+          : activity.createdAt > lastCompaction.createdAt;
+      if (!isAfterLastCompaction) return [];
+    }
     const payload = Predicate.isObject(activity.payload) ? activity.payload : undefined;
-    return Predicate.isNumber(payload?.usedTokens) && payload.usedTokens > 0
+    return Predicate.isNumber(payload?.usedTokens) && payload.usedTokens >= 0
       ? [payload.usedTokens]
       : [];
   });
@@ -278,12 +289,7 @@ function compactedTokenCountsFromActivities(
   if (beforeTokens === undefined || afterTokens === undefined || afterTokens >= beforeTokens) {
     return undefined;
   }
-  const alreadyUsed = (activities ?? []).some((activity) => {
-    if (activity.kind !== "context-compaction") return false;
-    const payload = Predicate.isObject(activity.payload) ? activity.payload : undefined;
-    return payload?.beforeTokens === beforeTokens && payload.afterTokens === afterTokens;
-  });
-  return alreadyUsed ? undefined : { beforeTokens, afterTokens };
+  return { beforeTokens, afterTokens };
 }
 
 function normalizeRuntimeTurnState(

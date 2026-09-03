@@ -3213,7 +3213,7 @@ describe("ProviderRuntimeIngestion", () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
 
-    for (const [index, usedTokens] of [899_000, 19_000].entries()) {
+    for (const [index, usedTokens] of [899_000, 0].entries()) {
       harness.emit({
         type: "thread.token-usage.updated",
         eventId: asEventId(`evt-thread-token-usage-${index}`),
@@ -3254,7 +3254,7 @@ describe("ProviderRuntimeIngestion", () => {
     const activity = thread.activities.find(
       (candidate: ProviderRuntimeTestActivity) => candidate.kind === "context-compaction",
     );
-    expect(activity?.summary).toBe("Compacted context 899K → 19K tokens");
+    expect(activity?.summary).toBe("Compacted context 899K → 0 tokens");
     expect(activity?.tone).toBe("info");
     expect(activity?.payload).toMatchObject({ requestId: "message-compact" });
 
@@ -3262,7 +3262,7 @@ describe("ProviderRuntimeIngestion", () => {
       type: "thread.state.changed",
       eventId: asEventId("evt-thread-compacted-again"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: now,
+      createdAt: "2026-01-01T00:00:01.000Z",
       threadId: asThreadId("thread-1"),
       turnId: asTurnId("turn-2"),
       payload: {
