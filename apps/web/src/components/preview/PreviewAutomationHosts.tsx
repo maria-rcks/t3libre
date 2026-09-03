@@ -20,7 +20,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { resolvePreviewViewport } from "@t3tools/shared/previewViewport";
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Atom } from "effect/unstable/reactivity";
 
 import {
@@ -29,7 +29,7 @@ import {
   reconcilePreviewServerSessions,
   updatePreviewServerSnapshot,
 } from "~/previewStateStore";
-import { usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
+import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
 import { resolveBrowserNavigationTarget } from "~/browser/browserTargetResolver";
 import {
   readActiveBrowserRecordingTargets,
@@ -59,8 +59,10 @@ import {
   PreviewAutomationViewportTimeoutError,
 } from "./previewAutomationErrors";
 import {
+  explicitlySuppressesPreviewMiniPlayer,
   previewAutomationDefaultViewport,
   previewAutomationOpenNeedsOverlay,
+  shouldAutoShowPreviewForAutomationUse,
   shouldOpenPreviewMiniPlayer,
 } from "./previewAutomationOpenReadiness";
 import {
@@ -311,6 +313,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
   );
   const [automationConnectionAtom] = useState(() => Atom.make<string | null>(null));
   const automationConnectionId = useAtomValue(automationConnectionAtom);
+  const presentationSuppressedTabsRef = useRef(new Map<string, Set<string>>());
 
   const handleRequest = useCallback(
     async (request: PreviewAutomationRequest): Promise<unknown> => {
@@ -353,6 +356,20 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
           const readyState = readThreadPreviewState(threadRef);
           const runtimeTabId = previewRuntimeTabId(threadRef, readyState.serverEpoch, readyTabId);
+          if (request.operation !== "open") {
+            const { autoShowFloatingPreview } = await resolveBrowserDefaults();
+            if (
+              shouldAutoShowPreviewForAutomationUse({
+                operation: request.operation,
+                autoShowFloatingPreview,
+                presentationSuppressed:
+                  presentationSuppressedTabsRef.current.get(request.threadId)?.has(readyTabId) ??
+                  false,
+              })
+            ) {
+              usePreviewMiniPlayerStore.getState().open(threadRef, readyTabId);
+            }
+          }
           browserActivity.release ??= acquireBrowserSurfaceActivity(runtimeTabId);
           await waitForDesktopOverlay(
             threadRef,
@@ -450,6 +467,27 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               input,
               (await resolveBrowserDefaults()).autoShowFloatingPreview,
             );
+            const explicitlySuppressed = explicitlySuppressesPreviewMiniPlayer(input);
+            const suppressedTabs = presentationSuppressedTabsRef.current.get(request.threadId);
+            if (explicitlySuppressed) {
+              if (suppressedTabs) {
+                suppressedTabs.add(activeTabId);
+              } else {
+                presentationSuppressedTabsRef.current.set(request.threadId, new Set([activeTabId]));
+              }
+              const miniPlayer = selectThreadPreviewMiniPlayer(
+                usePreviewMiniPlayerStore.getState().byThreadKey,
+                threadRef,
+              );
+              if (miniPlayer?.tabId === activeTabId) {
+                usePreviewMiniPlayerStore.getState().close(threadRef);
+              }
+            } else if (shouldPresentPreview) {
+              suppressedTabs?.delete(activeTabId);
+              if (suppressedTabs?.size === 0) {
+                presentationSuppressedTabsRef.current.delete(request.threadId);
+              }
+            }
             if (shouldPresentPreview) {
               usePreviewMiniPlayerStore.getState().open(threadRef, activeTabId);
             }
