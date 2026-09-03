@@ -38,7 +38,7 @@ import type { OrchestrationDispatchError } from "../Errors.ts";
 import { isGitRepository } from "../../git/Utils.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
-import { PullRequestService } from "../../pullRequest/PullRequestService.ts";
+import * as PullRequestService from "../../pullRequest/PullRequestService.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -89,7 +89,7 @@ const make = Effect.gen(function* () {
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
-  const pullRequests = yield* PullRequestService;
+  const pullRequests = yield* PullRequestService.PullRequestService;
   const refreshedTurnKeys = new Set<string>();
   const REFRESHED_TURN_CAPACITY = 2_048;
 

@@ -634,24 +634,38 @@ function PullRequestsRouteView() {
         .join("|"),
     [environmentQueries],
   );
-  const turnRefreshTargets = useMemo(
-    () =>
-      environmentQueries.map(({ environmentId, projectIds }) => {
-        const projectId =
-          scopedProjectId !== undefined
-            ? scopedProjectId
-            : projectIds?.length === 1
-              ? projectIds[0]
-              : undefined;
-        return {
-          environmentId,
-          input: (projectId === undefined
-            ? {}
-            : { projectId }) satisfies PullRequestRefreshSubscriptionInput,
-        };
-      }),
-    [environmentQueries, scopedProjectId],
-  );
+  const turnRefreshTargets = useMemo(() => {
+    const targets = environmentQueries.map(({ environmentId, projectIds }) => {
+      const projectId =
+        scopedProjectId !== undefined
+          ? scopedProjectId
+          : projectIds?.length === 1
+            ? projectIds[0]
+            : undefined;
+      return {
+        environmentId,
+        input: (projectId === undefined
+          ? {}
+          : { projectId }) satisfies PullRequestRefreshSubscriptionInput,
+      };
+    });
+    if (renderedPullRequestSurface === null || panelEnvironmentId === null) return targets;
+    const panelProjectId = renderedPullRequestSurface.projectId as ProjectId;
+    const panelCovered = targets.some(
+      (target) =>
+        target.environmentId === panelEnvironmentId &&
+        (target.input.projectId === undefined || target.input.projectId === panelProjectId),
+    );
+    return panelCovered
+      ? targets
+      : [
+          ...targets,
+          {
+            environmentId: panelEnvironmentId,
+            input: { projectId: panelProjectId },
+          },
+        ];
+  }, [environmentQueries, panelEnvironmentId, renderedPullRequestSurface, scopedProjectId]);
   const turnRefreshes = usePullRequestTurnRefreshes(turnRefreshTargets);
   const turnRefreshToken = turnRefreshes
     .map(([environmentId, event]) => `${environmentId}:${event.projectId}:${event.revision}`)

@@ -2129,14 +2129,12 @@ export const make = Effect.gen(function* () {
   let epochCounter = 0;
   let listingsEpoch = 0;
   let allProjectsRefreshEpoch = 0;
-  let projectEpochFloor = 0;
   const projectEpochs = new Map<ProjectId, number>();
   const PROJECT_EPOCH_CAPACITY = 2_048;
   const refEpochs = new Map<string, number>();
   const REF_EPOCH_CAPACITY = 2_048;
   const refScope = (ref: PullRequestRef) => `${ref.projectId} ${ref.repository} ${ref.number}`;
-  const projectEpoch = (projectId: ProjectId) =>
-    Math.max(projectEpochFloor, projectEpochs.get(projectId) ?? 0);
+  const projectEpoch = (projectId: ProjectId) => projectEpochs.get(projectId) ?? 0;
   const refEpoch = (ref: PullRequestRef) =>
     Math.max(projectEpoch(ref.projectId), refEpochs.get(refScope(ref)) ?? 0);
   const refCacheKey = (ref: PullRequestRef) =>
@@ -2429,10 +2427,9 @@ export const make = Effect.gen(function* () {
     const revision = ++epochCounter;
     projectEpochs.delete(projectId);
     if (projectEpochs.size >= PROJECT_EPOCH_CAPACITY) {
-      const oldest = projectEpochs.entries().next().value;
+      const oldest = projectEpochs.keys().next().value;
       if (oldest !== undefined) {
-        projectEpochFloor = Math.max(projectEpochFloor, oldest[1]);
-        projectEpochs.delete(oldest[0]);
+        projectEpochs.delete(oldest);
       }
     }
     projectEpochs.set(projectId, revision);
