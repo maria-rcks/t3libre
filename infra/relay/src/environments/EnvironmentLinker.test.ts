@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as DpopProofs from "../auth/DpopProofs.ts";
 import * as RelayTokens from "../auth/RelayTokens.ts";
@@ -116,6 +117,7 @@ function testLayer(input?: {
   readonly upsert?: EnvironmentLinks.EnvironmentLinks["Service"]["upsert"];
   readonly getForUser?: EnvironmentLinks.EnvironmentLinks["Service"]["getForUser"];
   readonly consume?: DpopProofs.DpopProofReplay["Service"]["consume"];
+  readonly beforeProvision?: Effect.Effect<void>;
   readonly provision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["provision"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
   readonly releaseProvisionClaim?: ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims["Service"]["release"];
@@ -155,28 +157,30 @@ function testLayer(input?: {
           provision:
             input?.provision ??
             (() =>
-              Effect.succeed({
-                endpoint: {
-                  httpBaseUrl: "https://managed.example.test/",
-                  wsBaseUrl: "wss://managed.example.test/ws",
-                  providerKind: "cloudflare_tunnel",
-                },
-                runtime: {
-                  providerKind: "cloudflare_tunnel",
-                  connectorToken: "connector-token",
-                },
-                deprovisionTarget: {
-                  userId: "user_123",
-                  environmentId: "env-link-test",
-                  hostname: "managed.example.test",
-                  tunnelId: "tunnel-id",
-                  tunnelName: "tunnel-name",
-                  dnsRecordId: "dns-record-id",
-                  generationId: "provision-generation",
-                  readyAt: "2026-09-02T22:00:00.000Z",
-                  updatedAt: "2026-09-02T22:00:00.000Z",
-                },
-              })),
+              (input?.beforeProvision ?? Effect.void).pipe(
+                Effect.as({
+                  endpoint: {
+                    httpBaseUrl: "https://managed.example.test/",
+                    wsBaseUrl: "wss://managed.example.test/ws",
+                    providerKind: "cloudflare_tunnel",
+                  },
+                  runtime: {
+                    providerKind: "cloudflare_tunnel",
+                    connectorToken: "connector-token",
+                  },
+                  deprovisionTarget: {
+                    userId: "user_123",
+                    environmentId: "env-link-test",
+                    hostname: "managed.example.test",
+                    tunnelId: "tunnel-id",
+                    tunnelName: "tunnel-name",
+                    dnsRecordId: "dns-record-id",
+                    generationId: "provision-generation",
+                    readyAt: "2026-09-02T22:00:00.000Z",
+                    updatedAt: "2026-09-02T22:00:00.000Z",
+                  },
+                }),
+              )),
         }),
         Layer.succeed(ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims, {
           acquire: () => Effect.succeed("provision-claim"),
@@ -216,6 +220,29 @@ describe("EnvironmentLinker", () => {
           upsert: (input) =>
             Effect.sync(() => {
               persistedEnvironmentId = input.proof.environmentId;
+              persistedLease = input.temporaryLease;
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("starts the temporary lease after managed endpoint provisioning", () => {
+    let persistedLease: { readonly leaseId: string; readonly expiresAt: string } | undefined;
+    return Effect.gen(function* () {
+      const { request, payload } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const result = yield* linker.link({ userId: "user_123", request });
+      expect(result.temporaryLease).toEqual(persistedLease);
+      expect(Date.parse(result.temporaryLease?.expiresAt ?? "")).toBe(
+        payload.iat * 1_000 + 720_000,
+      );
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          beforeProvision: TestClock.adjust("2 minutes"),
+          upsert: (input) =>
+            Effect.sync(() => {
               persistedLease = input.temporaryLease;
             }),
         }),

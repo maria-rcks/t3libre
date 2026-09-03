@@ -282,6 +282,29 @@ describe("t3 pair", () => {
     ).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("falls back when a recorded T3 Connect pairing origin is invalid", () =>
+    withDescriptorServer((origin) =>
+      Effect.gen(function* () {
+        const baseDir = NodeFS.mkdtempSync(
+          NodePath.join(NodeOS.tmpdir(), "t3-pair-invalid-connect-test-"),
+        );
+        const statePath = NodePath.join(baseDir, "dev", "server-runtime.json");
+        yield* persistServerRuntimeState({
+          path: statePath,
+          state: yield* makePersistedServerRuntimeState({
+            config: { host: undefined, devUrl: new URL("http://localhost:5733") },
+            port: Number(new URL(origin).port),
+            pairingBaseUrl: "not-a-url",
+          }),
+        });
+
+        const output = yield* captureStdout(runCli(["pair", "--base-dir", baseDir]));
+
+        assert.include(output, "Pairing URL: http://localhost:5733/pair#token=");
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("falls back when a recorded pairing origin serves another environment", () =>
     withDescriptorServer((origin) =>
       withDescriptorServer(

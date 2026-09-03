@@ -62,6 +62,7 @@ const PAIR_PROBE_TIMEOUT = Duration.millis(2_500);
 // serve mapping, which can take a few seconds.
 const TAILSCALE_PROBE_ATTEMPTS = 5;
 const TAILSCALE_PROBE_RETRY_DELAY = Duration.seconds(1);
+const decodePairingBaseUrl = Schema.decodeUnknownOption(Schema.URLFromString);
 
 export type PairStateVariant = "userdata" | "dev";
 
@@ -241,7 +242,11 @@ const resolveReachableDirectPairingBaseUrl = Effect.fn("pair.resolveReachableDir
   function* (target: DiscoveredPairTarget) {
     const candidate = target.state.pairingBaseUrl;
     if (candidate !== undefined) {
-      const probed = yield* probeEnvironmentDescriptor(candidate);
+      const parsed = decodePairingBaseUrl(candidate);
+      if (Option.isNone(parsed)) {
+        return resolveDirectPairingBaseUrl(target.state);
+      }
+      const probed = yield* probeEnvironmentDescriptor(parsed.value.toString());
       if (
         probed._tag === "descriptor" &&
         probed.descriptor.environmentId === target.descriptor.environmentId

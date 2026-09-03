@@ -343,13 +343,7 @@ const make = Effect.gen(function* () {
               Effect.ignore,
             );
         }
-        const temporaryLease =
-          input.request.temporary === true
-            ? {
-                leaseId: verified.jti,
-                expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 10 })),
-              }
-            : undefined;
+        const temporaryLeaseId = input.request.temporary === true ? verified.jti : undefined;
         const finishLink = Effect.fnUntraced(function* (
           provisioned: ManagedEndpointProvider.ManagedEndpointProvisioningResult | null,
         ) {
@@ -366,6 +360,13 @@ const make = Effect.gen(function* () {
               stage: "validate_endpoint",
             });
           }
+          const temporaryLease =
+            temporaryLeaseId === undefined
+              ? undefined
+              : {
+                  leaseId: temporaryLeaseId,
+                  expiresAt: DateTime.formatIso(DateTime.add(yield* DateTime.now, { minutes: 10 })),
+                };
           yield* links.upsert({
             ...input,
             proof: verified,
@@ -387,11 +388,11 @@ const make = Effect.gen(function* () {
         const rollbackTemporaryLink = Effect.fnUntraced(function* (
           provisioned: ManagedEndpointProvider.ManagedEndpointProvisioningResult | null,
         ) {
-          if (temporaryLease === undefined) return;
+          if (temporaryLeaseId === undefined) return;
           const leaseKey = {
             userId: input.userId,
             environmentId: verified.environmentId,
-            leaseId: temporaryLease.leaseId,
+            leaseId: temporaryLeaseId,
           };
           const claimedLease = yield* temporaryLeases.claimCleanup(leaseKey).pipe(
             Effect.catchCause((cause) =>
@@ -424,7 +425,7 @@ const make = Effect.gen(function* () {
           environmentId: verified.environmentId,
           origin: verified.origin,
         });
-        if (temporaryLease !== undefined && input.request.managedTunnelsEnabled) {
+        if (temporaryLeaseId !== undefined && input.request.managedTunnelsEnabled) {
           return yield* Effect.acquireUseRelease(
             provisionManagedEndpoint,
             finishLink,
@@ -435,7 +436,7 @@ const make = Effect.gen(function* () {
         const provisioned = input.request.managedTunnelsEnabled
           ? yield* provisionManagedEndpoint
           : null;
-        return yield* temporaryLease === undefined
+        return yield* temporaryLeaseId === undefined
           ? finishLink(provisioned)
           : finishLink(provisioned).pipe(
               Effect.onExit((exit) =>
