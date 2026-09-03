@@ -682,6 +682,35 @@ describe("CheckpointReactor", () => {
     }),
   );
 
+  effectIt.effect("refreshes pull request data from a completion without session metadata", () =>
+    Effect.gen(function* () {
+      const pullRequestRefreshCalls: ProjectId[] = [];
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          seedFilesystemCheckpoints: false,
+          pullRequestRefreshCalls,
+        }),
+      );
+      const threadId = ThreadId.make("thread-1");
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.make("cmd-pr-refresh-sessionless"),
+        threadId,
+        turnId: asTurnId("turn-sessionless"),
+        completedAt: "2026-01-01T00:00:01.000Z",
+        checkpointRef: checkpointRefForThreadTurn(threadId, 2),
+        checkpointTurnCount: 2,
+        status: "ready",
+        files: [],
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+      yield* Effect.promise(() => harness.drain());
+
+      expect(pullRequestRefreshCalls).toEqual([asProjectId("project-1")]);
+    }),
+  );
+
   it("refreshes local git status state on turn completion using the session cwd", async () => {
     const gitStatusRefreshCalls: string[] = [];
     const harness = await createHarness({

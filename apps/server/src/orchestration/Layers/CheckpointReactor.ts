@@ -903,9 +903,8 @@ const make = Effect.gen(function* () {
       const thread = yield* resolveThreadDetail(event.payload.threadId);
       if (
         thread !== undefined &&
-        thread.session !== null &&
-        thread.session.status !== "starting" &&
-        thread.session.status !== "running"
+        (thread.session === null ||
+          (thread.session.status !== "starting" && thread.session.status !== "running"))
       ) {
         yield* refreshPullRequestsOnce(thread.projectId, thread.id, event.payload.turnId);
       }
