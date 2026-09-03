@@ -178,16 +178,16 @@ export function useThreadComposerState() {
         message.text.trim().toLowerCase() === "/compact" &&
         message.attachments.length === 0,
     );
-    const latestUserMessage = selectedThreadDetail?.messages.findLast(
-      (message) => message.role === "user",
+    const latestCompactMessage = selectedThreadDetail?.messages.findLast(
+      (message) =>
+        message.role === "user" &&
+        message.text.trim().toLowerCase() === "/compact" &&
+        (message.attachments?.length ?? 0) === 0,
     );
-    const latestMessageIsCompactCommand =
-      latestUserMessage?.text.trim().toLowerCase() === "/compact" &&
-      (latestUserMessage.attachments?.length ?? 0) === 0;
     const sessionStatus =
       selectedThreadDetail?.session?.status ?? selectedThreadShell?.session?.status;
     const compactionSettled =
-      latestMessageIsCompactCommand &&
+      latestCompactMessage !== undefined &&
       selectedThreadDetail?.activities.some((activity) => {
         if (
           activity.kind !== "context-compaction" &&
@@ -199,12 +199,12 @@ export function useThreadComposerState() {
           typeof activity.payload === "object" && activity.payload !== null
             ? (activity.payload as { readonly requestId?: unknown })
             : null;
-        return payload?.requestId === latestUserMessage.id;
+        return payload?.requestId === latestCompactMessage.id;
       });
     return (
       queuedMessage !== undefined ||
       ((sessionStatus === "starting" || sessionStatus === "running") &&
-        latestMessageIsCompactCommand &&
+        latestCompactMessage !== undefined &&
         !compactionSettled)
     );
   }, [
