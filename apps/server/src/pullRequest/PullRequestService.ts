@@ -2129,12 +2129,16 @@ export const make = Effect.gen(function* () {
   let epochCounter = 0;
   let listingsEpoch = 0;
   let allProjectsRefreshEpoch = 0;
+  let projectEpochFloor = 0;
   const projectEpochs = new Map<ProjectId, number>();
+  const PROJECT_EPOCH_CAPACITY = 2_048;
   const refEpochs = new Map<string, number>();
   const REF_EPOCH_CAPACITY = 2_048;
   const refScope = (ref: PullRequestRef) => `${ref.projectId} ${ref.repository} ${ref.number}`;
+  const projectEpoch = (projectId: ProjectId) =>
+    Math.max(projectEpochFloor, projectEpochs.get(projectId) ?? 0);
   const refEpoch = (ref: PullRequestRef) =>
-    Math.max(projectEpochs.get(ref.projectId) ?? 0, refEpochs.get(refScope(ref)) ?? 0);
+    Math.max(projectEpoch(ref.projectId), refEpochs.get(refScope(ref)) ?? 0);
   const refCacheKey = (ref: PullRequestRef) =>
     JSON.stringify([refEpoch(ref), ref.projectId, ref.repository, ref.number]);
   const bumpRefEpoch = (ref: PullRequestRef) => {
@@ -2238,9 +2242,9 @@ export const make = Effect.gen(function* () {
   const list: PullRequestService["Service"]["list"] = (input) => {
     const scopedRefreshEpoch =
       input.projectId !== undefined
-        ? (projectEpochs.get(input.projectId) ?? 0)
+        ? projectEpoch(input.projectId)
         : input.projectIds !== undefined
-          ? Math.max(0, ...input.projectIds.map((projectId) => projectEpochs.get(projectId) ?? 0))
+          ? Math.max(0, ...input.projectIds.map(projectEpoch))
           : allProjectsRefreshEpoch;
     const key = JSON.stringify([
       listingsEpoch,
@@ -2395,10 +2399,7 @@ export const make = Effect.gen(function* () {
   // refresh that forgets the listing forgets its decorations with it.
   const listStats: PullRequestService["Service"]["listStats"] = (input) => {
     if (input.refs.length === 0) return Effect.succeed({ stats: [] });
-    const scopedRefreshEpoch = Math.max(
-      0,
-      ...input.refs.map((ref) => projectEpochs.get(ref.projectId) ?? 0),
-    );
+    const scopedRefreshEpoch = Math.max(0, ...input.refs.map((ref) => projectEpoch(ref.projectId)));
     const key = JSON.stringify([
       listingsEpoch,
       scopedRefreshEpoch,
@@ -2426,6 +2427,14 @@ export const make = Effect.gen(function* () {
     "PullRequestService.refreshAfterTurn",
   )(function* (projectId) {
     const revision = ++epochCounter;
+    projectEpochs.delete(projectId);
+    if (projectEpochs.size >= PROJECT_EPOCH_CAPACITY) {
+      const oldest = projectEpochs.entries().next().value;
+      if (oldest !== undefined) {
+        projectEpochFloor = Math.max(projectEpochFloor, oldest[1]);
+        projectEpochs.delete(oldest[0]);
+      }
+    }
     projectEpochs.set(projectId, revision);
     allProjectsRefreshEpoch = revision;
     yield* PubSub.publish(pullRequestRefreshes, { projectId, revision });

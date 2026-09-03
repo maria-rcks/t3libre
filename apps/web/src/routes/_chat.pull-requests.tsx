@@ -1122,6 +1122,7 @@ function PullRequestsRouteView() {
     facetQuery.refresh();
     authoredQuery.refresh();
     reviewingQuery.refresh();
+    setDetailRefreshToken((token) => token + 1);
   });
   useEffect(() => {
     if (turnRefreshToken.length === 0 || appliedTurnRefreshToken.current === turnRefreshToken) {
