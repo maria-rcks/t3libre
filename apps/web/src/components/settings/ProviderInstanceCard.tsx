@@ -563,9 +563,13 @@ export function ProviderInstanceCard({
   const editorStatusNode =
     isAuthenticated && authEmail ? (
       <>
+        {needsAttention ? statusDotNode : null}
         <span>Authenticated as</span>
         <ProviderAuthEmail email={authEmail} />
         {authLabel ? <span>· {authLabel}</span> : null}
+        {summary.detail ? (
+          <span className="min-w-0 [overflow-wrap:anywhere]">· {summary.detail}</span>
+        ) : null}
       </>
     ) : (
       <>
@@ -743,6 +747,7 @@ export function ProviderInstanceCard({
             type="button"
             size="icon-micro"
             variant="ghost-muted"
+            disabled={readOnly}
             className="[--control-icon-color:currentColor] hover:text-destructive"
             onClick={onDelete}
             aria-label={`Delete instance ${instanceId}`}
