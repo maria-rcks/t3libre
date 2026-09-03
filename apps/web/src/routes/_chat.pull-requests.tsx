@@ -11,6 +11,7 @@ import type {
   PullRequestListState,
   SourceControlProviderKind,
 } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   ArrowDownUpIcon,
@@ -34,6 +35,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -56,7 +58,7 @@ import {
   pullRequestEntryKey,
   pullRequestEntryViewer,
   rankPullRequestMatches,
-  rankPullRequestsByMergeReadiness,
+  sortPullRequestGroups,
   pullRequestEnvironmentSetKey,
   readPullRequestListSnapshot,
   resolveProjectScope,
@@ -107,7 +109,10 @@ import {
 } from "../components/WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../components/WorkspacePageContainer";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
+import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { isElectron } from "../env";
+import { resolveShortcutCommand } from "../keybindings";
+import { isTerminalFocused } from "../lib/terminalFocus";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls";
 import { Button } from "../components/ui/button";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../components/ui/menu";
@@ -115,7 +120,6 @@ import { SidebarInset } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
-import { toSortableTimestamp } from "../lib/threadSort";
 import {
   pullRequestSurfaceId,
   selectActiveRightPanelSurface,
@@ -135,6 +139,7 @@ import {
 } from "../state/pullRequests";
 import { useAtomCommand } from "../state/use-atom-command";
 import { cn } from "~/lib/utils";
+import { primaryServerKeybindingsAtom } from "~/state/server";
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 
 export interface PullRequestsSearch extends PullRequestListPreferences {
@@ -285,6 +290,7 @@ function PullRequestsRouteView() {
   const statsPolicy: PullRequestStatsPolicy =
     sort === "ready" || sort === "largest" || sort === "smallest" ? "eager" : "visible";
   const navigate = useNavigate({ from: Route.fullPath });
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { environments } = useEnvironments();
   // Every connected environment that has said it can list pull requests. Sorted, so the query
   // keys, the scope key and the stored snapshot all read the same whichever order the
@@ -362,6 +368,8 @@ function PullRequestsRouteView() {
             ? `${project.title} · ${environmentLabels.get(project.environmentId) ?? project.environmentId}`
             : project.title,
         workspaceRoot: project.workspaceRoot,
+        faviconPath: project.faviconPath ?? null,
+        projectIcon: project.projectIcon ?? null,
       }))
       .toSorted((left, right) => left.title.localeCompare(right.title));
   }, [environmentLabels, projects]);
@@ -1417,51 +1425,16 @@ function PullRequestsRouteView() {
       ...group,
       entries: group.entries.map((entry) => withDiffStat(entry, statsByRow)),
     }));
-    if (sort === "ready" && typedParsed.text.length === 0) {
-      return [
-        {
-          key: "others" as const,
-          label: "",
-          entries: rankPullRequestsByMergeReadiness(
-            enriched.flatMap((group) => group.entries),
-            (entry) =>
-              entry.additions + entry.deletions > 0 ||
-              statsByRow.has(pullRequestDiffStatKey(entry)),
-          ),
-        },
-      ];
-    }
     // Searching keeps its relevance order and priority groups unless the reader explicitly asks
     // for another sort. The readiness queue is the default browse order, not a way to bury a
     // closer text match.
-    if (sort === "ready" || sort === "updated") return enriched;
-    const entries = enriched.flatMap((group) => group.entries);
-    const hasSize = (entry: (typeof entries)[number]) =>
-      entry.additions + entry.deletions > 0 || statsByRow.has(pullRequestDiffStatKey(entry));
-    const timestamp = (entry: (typeof entries)[number]) =>
-      toSortableTimestamp(entry.updatedAt) ?? toSortableTimestamp(entry.createdAt) ?? 0;
-    return [
-      {
-        key: "others" as const,
-        label: "",
-        entries: entries.toSorted((left, right) => {
-          if (sort === "newest" || sort === "oldest") {
-            const leftCreated = toSortableTimestamp(left.createdAt);
-            const rightCreated = toSortableTimestamp(right.createdAt);
-            const measured = Number(rightCreated !== null) - Number(leftCreated !== null);
-            const dated = (leftCreated ?? 0) - (rightCreated ?? 0);
-            return (
-              measured || (sort === "newest" ? -dated : dated) || timestamp(right) - timestamp(left)
-            );
-          }
-          const measured = Number(hasSize(right)) - Number(hasSize(left));
-          const sized = left.additions + left.deletions - (right.additions + right.deletions);
-          return (
-            measured || (sort === "largest" ? -sized : sized) || timestamp(right) - timestamp(left)
-          );
-        }),
-      },
-    ];
+    return sortPullRequestGroups(
+      enriched,
+      sort,
+      typedParsed.text,
+      (entry) =>
+        entry.additions + entry.deletions > 0 || statsByRow.has(pullRequestDiffStatKey(entry)),
+    );
   }, [groups, sort, statsByRow, typedParsed.text]);
 
   const linkedSelection = useMemo(
@@ -1886,6 +1859,26 @@ function PullRequestsRouteView() {
     selectSurfaceInUrl(null);
   };
 
+  // This page has no ChatView, so the shared panel handles `rightPanel.close`
+  // itself. With nothing open the event falls through to its native meaning.
+  const closeActiveSurfaceFromShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (activePullRequestSurface === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) closeSurface(activePullRequestSurface);
+  });
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isCommandPaletteOpen()) return;
+      const command = resolveShortcutCommand(event, keybindings, {
+        context: { terminalFocus: isTerminalFocused() },
+      });
+      if (command === "rightPanel.close") closeActiveSurfaceFromShortcut(event);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [keybindings]);
+
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="relative flex min-h-0 flex-1">
@@ -2294,7 +2287,7 @@ function PullRequestsColumn({
         {/* The top padding is the shared fade band's height, the same pairing the
             settings page makes: at rest the controls sit fully below the mask, and only
             content actually passing under the chrome fades. */}
-        <WorkspacePageContainer className="gap-4">
+        <WorkspacePageContainer width="expanded" className="gap-4">
           <div className="flex flex-col gap-3">
             <div ref={inFlowSearchRef} className="flex items-center gap-2">
               {searchInput}

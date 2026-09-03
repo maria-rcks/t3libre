@@ -112,6 +112,7 @@ function createProviderServiceHarness() {
     stopSession: () => unsupported(),
     listSessions: () => Effect.succeed([...runtimeSessions]),
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+    assertConversationRollbackSupported: () => unsupported(),
     getInstanceInfo: (instanceId) => {
       const driverKind = ProviderDriverKind.make(String(instanceId));
       return Effect.succeed({
@@ -2845,6 +2846,16 @@ describe("ProviderRuntimeIngestion", () => {
         itemType: "command_execution",
         status: "inProgress",
         title: "Command run",
+        toolSurface: "computer",
+        toolIcon: {
+          _tag: "native-app",
+          app: { _tag: "app-id", appId: "com.apple.Terminal" },
+        },
+        toolSource: {
+          key: "native-app:com.apple.terminal",
+          name: "Terminal",
+          kind: "computer",
+        },
         detail: "Bash: vp test run",
         data: {
           toolName: "Bash",
@@ -2872,6 +2883,17 @@ describe("ProviderRuntimeIngestion", () => {
       itemType: "command_execution",
       toolCallId: "tool-call-9",
       status: "inProgress",
+      title: "Command run",
+      toolSurface: "computer",
+      toolIcon: {
+        _tag: "native-app",
+        app: { _tag: "app-id", appId: "com.apple.Terminal" },
+      },
+      toolSource: {
+        key: "native-app:com.apple.terminal",
+        name: "Terminal",
+        kind: "computer",
+      },
       detail: "Bash: vp test run",
       data: {
         toolName: "Bash",
