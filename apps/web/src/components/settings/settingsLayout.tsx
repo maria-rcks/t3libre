@@ -353,7 +353,7 @@ export function SettingsPageContainer({
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
   const highlightTarget = useLocation({
-    select: (location) => location.state.settingsTargetHighlight === true,
+    select: (location) => location.state.settingsTargetHighlight !== false,
   });
   const targetId = hash.replace(/^#/, "") || null;
   const clearTargetHash = useCallback(() => {

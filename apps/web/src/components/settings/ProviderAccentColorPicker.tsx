@@ -78,6 +78,7 @@ function ProviderCustomColorPanel(props: {
   const initialHsv = useMemo(() => hexToHsv(props.value), [props.value]);
   const [hsv, setHsv] = useState(initialHsv);
   const currentColor = hsvToHex(hsv.h, hsv.s, hsv.v);
+  const [hexDraft, setHexDraft] = useState<string | null>(null);
 
   const commitHsv = useCallback(
     (nextHsv: typeof hsv) => {
@@ -152,13 +153,15 @@ function ProviderCustomColorPanel(props: {
           />
         </div>
         <input
-          value={currentColor}
+          value={hexDraft ?? currentColor}
           onChange={(event) => {
             const nextColor = event.currentTarget.value;
+            setHexDraft(nextColor);
             if (!/^#[\da-f]{6}$/i.test(nextColor)) return;
             setHsv(hexToHsv(nextColor));
             props.onCommit(nextColor);
           }}
+          onBlur={() => setHexDraft(null)}
           className="h-8 rounded-md border border-input bg-background px-2 font-mono text-xs text-foreground outline-none transition-colors focus:border-ring"
           aria-label="Custom hex accent color"
           spellCheck={false}
@@ -206,7 +209,7 @@ function ProviderCustomColorPicker(props: {
               type="button"
               size="sm"
               variant="ghost"
-              className="h-8 w-full justify-start rounded-none border-t border-border/60 px-3 text-xs text-muted-foreground"
+              className="h-8 w-full justify-start rounded-none border-t border-border/60 px-3 text-xs text-muted-foreground [--control-icon-color:currentColor]"
               onClick={props.onClear}
               disabled={!props.value}
             >
