@@ -2424,16 +2424,15 @@ export const make = Effect.gen(function* () {
   const runActionAndInvalidate: PullRequestService["Service"]["runAction"] = Effect.fn(
     "PullRequestService.runActionAndInvalidate",
   )(function* (input) {
-    const mergedAt = input.action === "merge" ? DateTime.formatIso(yield* DateTime.now) : null;
     const repository = yield* runAction(input);
     bumpRefEpoch({ ...input, repository });
     listingsEpoch = ++epochCounter;
-    if (mergedAt !== null) {
+    if (input.action === "merge") {
       yield* PubSub.publish(mergedPullRequests, {
         projectId: input.projectId,
         repository,
         number: input.number,
-        mergedAt,
+        mergedAt: DateTime.formatIso(yield* DateTime.now),
       });
     }
   });

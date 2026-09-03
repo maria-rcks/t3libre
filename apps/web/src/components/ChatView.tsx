@@ -4857,7 +4857,7 @@ function ChatViewContent(props: ChatViewProps) {
           linkedPullRequestStatus: persistedLinkedThreadPullRequestStatus,
         });
   const handlePullRequestTabStatusChange = useCallback(
-    (status: PullRequestTabStatus) => {
+    (status: Pick<PullRequestTabStatus, "repository" | "number" | "state">) => {
       if (
         threadRepository?.toLowerCase() !== status.repository.toLowerCase() ||
         activeThreadPr?.number !== status.number ||

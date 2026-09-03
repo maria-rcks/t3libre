@@ -1008,13 +1008,18 @@ it.effect("refuses an action the host never claimed it could run", () =>
 it.effect("publishes a successful merge for immediate settlement", () =>
   Effect.scoped(
     Effect.gen(function* () {
+      const mergedAt = "2026-09-03T02:00:00.000Z";
       const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
       const requestedReference = { ...reference, repository: " ACME/WEB " };
       const service = yield* makeService({
         projects: [
           project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
         ],
-        providers: [fakeProvider("github")],
+        providers: [
+          fakeProvider("github", {
+            runAction: () => TestClock.setTime(Date.parse(mergedAt)),
+          }),
+        ],
       });
       const merges = yield* service.subscribeMerges;
       const observedMerge = yield* Stream.runHead(merges).pipe(
@@ -1025,7 +1030,7 @@ it.effect("publishes a successful merge for immediate settlement", () =>
 
       const observed = Option.getOrThrow(yield* Fiber.join(observedMerge));
       assert.deepInclude(observed, reference);
-      assert.isFalse(Number.isNaN(Date.parse(observed.mergedAt)));
+      assert.strictEqual(observed.mergedAt, mergedAt);
     }),
   ),
 );
