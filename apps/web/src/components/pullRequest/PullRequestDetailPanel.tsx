@@ -2120,22 +2120,7 @@ export function PullRequestDetailPanel({
               ))}
             </ToggleGroup>
             {tab === "summary" ? (
-              <span className="ml-auto inline-flex shrink-0 items-center gap-2">
-                <span
-                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
-                  aria-label={checksSummary ? `Checks: ${checksSummary}` : "Checks"}
-                >
-                  {checksState !== null ? (
-                    <PullRequestChecksPopover
-                      checks={detail.checks}
-                      checksState={checksState}
-                      threadRef={threadRef}
-                    />
-                  ) : (
-                    <CircleDotIcon aria-hidden className="size-3.5" />
-                  )}
-                  {checksSummary}
-                </span>
+              <span className="ml-auto inline-flex shrink-0 items-center">
                 {workflowApprovalsRequired > 0 && can("approve-workflows") ? (
                   <Tooltip>
                     <TooltipTrigger
@@ -2155,7 +2140,7 @@ export function PullRequestDetailPanel({
                             }
                           >
                             <PlayIcon aria-hidden className="size-3.5" />
-                            <span className="@max-[40rem]/pr-header:hidden">
+                            <span>
                               {pendingAction === "approve-workflows"
                                 ? "Approving..."
                                 : "Approve workflows to run"}
@@ -2170,7 +2155,23 @@ export function PullRequestDetailPanel({
                         : "Approve workflows to run"}
                     </TooltipPopup>
                   </Tooltip>
-                ) : null}
+                ) : (
+                  <span
+                    className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+                    aria-label={checksSummary ? `Checks: ${checksSummary}` : "Checks"}
+                  >
+                    {checksState !== null ? (
+                      <PullRequestChecksPopover
+                        checks={detail.checks}
+                        checksState={checksState}
+                        threadRef={threadRef}
+                      />
+                    ) : (
+                      <CircleDotIcon aria-hidden className="size-3.5" />
+                    )}
+                    {checksSummary}
+                  </span>
+                )}
               </span>
             ) : tab === "timeline" ? (
               <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
