@@ -670,6 +670,17 @@ function PullRequestsRouteView() {
   const turnRefreshToken = turnRefreshes
     .map(([environmentId, event]) => `${environmentId}:${event.projectId}:${event.revision}`)
     .join("|");
+  const panelTurnRefreshToken =
+    renderedPullRequestSurface === null || panelEnvironmentId === null
+      ? ""
+      : (turnRefreshes
+          .filter(
+            ([environmentId, event]) =>
+              environmentId === panelEnvironmentId &&
+              event.projectId === renderedPullRequestSurface.projectId,
+          )
+          .map(([environmentId, event]) => `${environmentId}:${event.projectId}:${event.revision}`)
+          .at(-1) ?? "");
   // Page size is view state, not a URL concern: a shared link should open the first page.
   const scopeKey = `${environmentKey}:${assignmentKey}:${search.state}:${search.involvement}:${scopedProjectId ?? ""}:${search.host ?? ""}:${search.draft ?? ""}:${search.review ?? ""}:${search.checks ?? ""}:${search.author ?? ""}:${search.labels?.join("\u0000") ?? ""}`;
   const filterKey = `${scopeKey}:${sentQuery}`;
@@ -1130,21 +1141,26 @@ function PullRequestsRouteView() {
   };
 
   const appliedTurnRefreshToken = useRef("");
-  const refreshAfterTurn = useEffectEvent(() => {
+  const appliedPanelTurnRefreshToken = useRef("");
+  const refreshAfterTurn = useEffectEvent((refreshPanel: boolean) => {
     refreshList();
     baselineQuery.refresh();
     facetQuery.refresh();
     authoredQuery.refresh();
     reviewingQuery.refresh();
-    setDetailRefreshToken((token) => token + 1);
+    if (refreshPanel) setDetailRefreshToken((token) => token + 1);
   });
   useEffect(() => {
     if (turnRefreshToken.length === 0 || appliedTurnRefreshToken.current === turnRefreshToken) {
       return;
     }
     appliedTurnRefreshToken.current = turnRefreshToken;
-    refreshAfterTurn();
-  }, [turnRefreshToken]);
+    const refreshPanel =
+      panelTurnRefreshToken.length > 0 &&
+      appliedPanelTurnRefreshToken.current !== panelTurnRefreshToken;
+    appliedPanelTurnRefreshToken.current = panelTurnRefreshToken;
+    refreshAfterTurn(refreshPanel);
+  }, [panelTurnRefreshToken, turnRefreshToken]);
 
   // The list goes stale the same way the detail does: somebody opens a pull request, a check
   // finishes, a branch is merged. So it reads again on the way back to the window, and once a

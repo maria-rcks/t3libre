@@ -535,7 +535,7 @@ export function repositoryIdentityOf(project: OrchestrationProjectShell): string
 
 export const make = Effect.gen(function* () {
   const mergedPullRequests = yield* PubSub.sliding<PullRequestMergeEvent>(64);
-  const pullRequestRefreshes = yield* PubSub.sliding<PullRequestRefreshEvent>(64);
+  const pullRequestRefreshes = yield* PubSub.unbounded<PullRequestRefreshEvent>();
   const registry = yield* PullRequestProviderRegistry;
   const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
