@@ -60,9 +60,7 @@ export function SettingsSearchTargetProvider({
 function scrollAndFocusSettingsTarget(target: HTMLElement, highlight = true): void {
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const scrollTarget =
-    target.tagName === "SECTION" && target.firstElementChild
-      ? (target.firstElementChild as HTMLElement)
-      : target;
+    target.querySelector<HTMLElement>(":scope > [data-settings-scroll-target]") ?? target;
 
   scrollTarget.scrollIntoView({
     behavior: prefersReducedMotion ? "auto" : "smooth",
@@ -85,7 +83,7 @@ export function useSettingsSearchTargetId(): string | null {
   return useContext(SettingsSearchTargetContext).targetId;
 }
 
-function useSettingsSearchTarget<T extends HTMLElement>(id: string | undefined) {
+export function useSettingsSearchTarget<T extends HTMLElement>(id: string | undefined) {
   const { targetId, highlightTarget, onTargetHandled } = useContext(SettingsSearchTargetContext);
   const isSearchTarget = id !== undefined && id === targetId;
   const targetRef = useCallback(
@@ -179,7 +177,10 @@ export function SettingsSection({
       {hideTitle ? (
         <h2 className="sr-only">{title}</h2>
       ) : (
-        <div className="flex min-h-7 items-center justify-between gap-4 px-3 sm:px-4">
+        <div
+          data-settings-scroll-target
+          className="flex min-h-7 items-center justify-between gap-4 px-3 sm:px-4"
+        >
           <h2 className="flex items-center gap-2 text-sm font-normal tracking-[-0.005em] text-foreground/70">
             {icon}
             {title}
@@ -188,6 +189,7 @@ export function SettingsSection({
         </div>
       )}
       <div
+        data-settings-scroll-target={hideTitle ? "" : undefined}
         className={cn(
           "relative overflow-visible text-foreground",
           variant === "grouped"
