@@ -15,6 +15,7 @@ import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import type { ProviderClientDefinition } from "./providerDriverMeta";
+import { SettingsRow } from "./settingsLayout";
 
 export interface ProviderSettingsFieldModel {
   readonly key: string;
@@ -160,10 +161,9 @@ interface ProviderSettingsFormProps {
   readonly idPrefix: string;
   /**
    * `card` stacks label over control, `dialog` is the compact wizard layout,
-   * `grid` emits label and control cells followed by an optional full-width
-   * description row for a parent two-column grid.
+   * and `settings` renders the shared settings row treatment.
    */
-  readonly variant: "card" | "dialog" | "grid";
+  readonly variant: "card" | "dialog" | "settings";
   readonly onChange: (nextConfig: Record<string, unknown> | undefined) => void;
 }
 
@@ -202,67 +202,55 @@ function ProviderSettingsFieldRow({
     <span className={descriptionClassName}>{field.description}</span>
   ) : null;
 
-  if (variant === "grid") {
-    // Label and control cells are followed by a full-width description row.
-    // The description remains outside the label so the control points at it.
+  if (variant === "settings") {
     const descriptionId = field.description ? `${inputId}-description` : undefined;
+    const control =
+      field.control === "switch" ? (
+        <Switch
+          checked={readProviderConfigBoolean(value, field.key, field.defaultBooleanValue)}
+          onCheckedChange={(checked) =>
+            onChange(nextProviderConfigWithFieldValue(value, field, Boolean(checked)))
+          }
+          aria-label={field.label}
+          aria-describedby={descriptionId}
+        />
+      ) : field.control === "textarea" ? (
+        <Textarea
+          id={inputId}
+          aria-describedby={descriptionId}
+          className="w-full sm:w-96"
+          value={readProviderConfigString(value, field.key)}
+          onChange={(event) =>
+            onChange(nextProviderConfigWithFieldValue(value, field, event.target.value))
+          }
+          placeholder={field.placeholder}
+          spellCheck={false}
+        />
+      ) : (
+        <DraftInput
+          id={inputId}
+          aria-describedby={descriptionId}
+          size="sm"
+          className="w-full sm:w-56"
+          type={field.control === "password" ? "password" : undefined}
+          autoComplete={field.control === "password" ? "off" : undefined}
+          value={readProviderConfigString(value, field.key)}
+          onCommit={(next) => onChange(nextProviderConfigWithFieldValue(value, field, next))}
+          placeholder={field.placeholder}
+          spellCheck={false}
+        />
+      );
+
     return (
-      <>
-        {field.control === "switch" ? (
-          <span className="pt-1.5 text-xs font-medium text-foreground">{field.label}</span>
-        ) : (
-          <label htmlFor={inputId} className="pt-1.5 text-xs font-medium text-foreground">
-            {field.label}
-          </label>
-        )}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 sm:justify-end">
-          {field.control === "switch" ? (
-            <span className="flex h-8 items-center sm:h-7">
-              <Switch
-                checked={readProviderConfigBoolean(value, field.key, field.defaultBooleanValue)}
-                onCheckedChange={(checked) =>
-                  onChange(nextProviderConfigWithFieldValue(value, field, Boolean(checked)))
-                }
-                aria-label={field.label}
-                aria-describedby={descriptionId}
-              />
-            </span>
-          ) : field.control === "textarea" ? (
-            <Textarea
-              id={inputId}
-              aria-describedby={descriptionId}
-              className="w-full max-w-sm"
-              value={readProviderConfigString(value, field.key)}
-              onChange={(event) =>
-                onChange(nextProviderConfigWithFieldValue(value, field, event.target.value))
-              }
-              placeholder={field.placeholder}
-              spellCheck={false}
-            />
-          ) : (
-            <DraftInput
-              id={inputId}
-              aria-describedby={descriptionId}
-              size="sm"
-              className="w-56"
-              type={field.control === "password" ? "password" : undefined}
-              autoComplete={field.control === "password" ? "off" : undefined}
-              value={readProviderConfigString(value, field.key)}
-              onCommit={(next) => onChange(nextProviderConfigWithFieldValue(value, field, next))}
-              placeholder={field.placeholder}
-              spellCheck={false}
-            />
-          )}
-        </div>
-        {field.description ? (
-          <span
-            id={descriptionId}
-            className="col-span-full -mt-1.5 text-[11px] leading-snug text-muted-foreground"
-          >
-            {field.description}
-          </span>
-        ) : null}
-      </>
+      <SettingsRow
+        title={
+          field.control === "switch" ? field.label : <label htmlFor={inputId}>{field.label}</label>
+        }
+        description={
+          field.description ? <span id={descriptionId}>{field.description}</span> : undefined
+        }
+        control={control}
+      />
     );
   }
 
