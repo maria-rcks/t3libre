@@ -195,7 +195,7 @@ interface ProviderSettingsTarget {
 
 export function ProviderSettingsPanel(target: ProviderSettingsTarget) {
   return (
-    <SettingsPageContainer className="gap-8">
+    <SettingsPageContainer width="wide" className="gap-8">
       <ProviderSettingsPanelContent
         key={`${target.environmentId ?? ""}:${target.instanceId ?? ""}`}
         {...target}
@@ -910,6 +910,7 @@ export function EnvironmentProviderSettings({
     <>
       <SettingsSection
         {...searchableSetting("providers")}
+        variant="plain"
         headerAction={
           <div className="flex min-w-0 items-center gap-2">
             {readOnly ? (
@@ -962,34 +963,39 @@ export function EnvironmentProviderSettings({
           </div>
         }
       >
-        <div>
-          {deviceTabs}
-          <div className={cn("divide-y divide-border/50", deviceTabs && "pt-1")}>
-            {readOnly ? (
-              <SettingsRow
-                title="Limited permissions"
-                description={`This session can view ${environmentLabel}'s providers but can't change their settings.`}
-              />
-            ) : null}
-            {rows.map((row) => renderProviderInstance(row, "list"))}
+        {deviceTabs}
+        {readOnly ? (
+          <div className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5">
+            <SettingsRow
+              title="Limited permissions"
+              description={`This session can view ${environmentLabel}'s providers but can't change their settings.`}
+            />
+          </div>
+        ) : null}
+        <div className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5 lg:grid lg:h-[min(44rem,calc(100dvh-11rem))] lg:min-h-[32rem] lg:grid-cols-[17rem_minmax(0,1fr)]">
+          <div className="border-b border-border/60 bg-muted/10 lg:flex lg:min-h-0 lg:flex-col lg:border-r lg:border-b-0">
+            <ScrollArea scrollFade chainVerticalScroll className="lg:min-h-0 lg:flex-1">
+              <div className="divide-y divide-border/50">
+                {rows.map((row) => renderProviderInstance(row, "list"))}
+              </div>
+            </ScrollArea>
+          </div>
+
+          <div className="min-w-0 lg:min-h-0">
+            {selectedRow ? (
+              <ScrollArea scrollFade chainVerticalScroll className="lg:h-full">
+                <div className="space-y-6 p-4">{renderProviderInstance(selectedRow, "editor")}</div>
+              </ScrollArea>
+            ) : (
+              <div className="p-6 text-sm text-muted-foreground">
+                {targetInstanceMissing
+                  ? "This provider instance is no longer available on this device."
+                  : "No providers configured."}
+              </div>
+            )}
           </div>
         </div>
       </SettingsSection>
-
-      {selectedRow ? (
-        renderProviderInstance(selectedRow, "editor")
-      ) : (
-        <SettingsSection title="Configuration">
-          <SettingsRow
-            title={targetInstanceMissing ? "Provider unavailable" : "No providers configured"}
-            description={
-              targetInstanceMissing
-                ? "This provider instance is no longer available on this device."
-                : "Add a provider to configure its runtime and models."
-            }
-          />
-        </SettingsSection>
-      )}
 
       <SettingsSection title="Advanced">
         <SettingsRow

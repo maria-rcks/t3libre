@@ -424,9 +424,6 @@ export function ProviderInstanceCard({
     ? getProviderSummary(liveProvider)
     : { headline: "Disabled", detail: null };
   const authEmail = liveProvider?.auth.email?.trim();
-  // The editor header folds the account email into the status line —
-  // "Authenticated as <email> · <plan>" — with the email redacted until its
-  // reveal toggle is clicked.
   const isAuthenticated = enabled && liveProvider?.auth.status === "authenticated";
   const authLabel =
     enabled && liveProvider?.auth.status === "authenticated"
@@ -559,14 +556,26 @@ export function ProviderInstanceCard({
     statusKey === "warning" || statusKey === "error" ? (
       <span className={cn("size-1.5 shrink-0 rounded-full", statusStyle.dot)} aria-hidden />
     ) : null;
-  const statusHeadlineNode = <span>{summary.headline}</span>;
   // Trouble states carry the server's explanation (a failed probe, a shadow
   // home entry that is not a symlink, a missing binary). Show it wherever the
   // headline shows so the user can act without opening the editor.
   const needsAttention = statusKey === "warning" || statusKey === "error";
-  const statusLineClassName =
-    "flex min-w-0 flex-wrap items-center gap-x-1.5 text-[13px] leading-[1.45] text-muted-foreground/80";
-
+  const editorStatusNode =
+    isAuthenticated && authEmail ? (
+      <>
+        <span>Authenticated as</span>
+        <ProviderAuthEmail email={authEmail} />
+        {authLabel ? <span>· {authLabel}</span> : null}
+      </>
+    ) : (
+      <>
+        {statusDotNode}
+        <span>{summary.headline}</span>
+        {summary.detail ? (
+          <span className="min-w-0 [overflow-wrap:anywhere]">· {summary.detail}</span>
+        ) : null}
+      </>
+    );
   if (mode === "list") {
     return (
       <div
@@ -747,40 +756,12 @@ export function ProviderInstanceCard({
 
   return (
     <>
-      <SettingsSection title={displayName} icon={titleIconNode} headerAction={editorHeaderAction}>
-        <SettingsRow
-          title="Status"
-          description={
-            <span className={statusLineClassName}>
-              {statusDotNode}
-              {isAuthenticated && authEmail ? (
-                <>
-                  <span>Authenticated as</span>
-                  <ProviderAuthEmail email={authEmail} />
-                  {authLabel ? <span>· {authLabel}</span> : null}
-                </>
-              ) : (
-                statusHeadlineNode
-              )}
-              {summary.detail ? (
-                <span className="min-w-0 [overflow-wrap:anywhere]">· {summary.detail}</span>
-              ) : null}
-            </span>
-          }
-          control={
-            <span
-              inert={readOnly}
-              aria-disabled={readOnly || undefined}
-              className={readOnly ? "opacity-50" : undefined}
-            >
-              <Switch
-                checked={enabled}
-                onCheckedChange={(checked) => updateEnabled(Boolean(checked))}
-                aria-label={`Enable ${displayName}`}
-              />
-            </span>
-          }
-        />
+      <SettingsSection
+        title={displayName}
+        description={editorStatusNode}
+        icon={titleIconNode}
+        headerAction={editorHeaderAction}
+      >
         <SettingsRow
           title="Display name"
           control={

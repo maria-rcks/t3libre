@@ -157,6 +157,7 @@ export function useRelativeTimeTick(intervalMs = 1_000) {
 
 export function SettingsSection({
   title,
+  description,
   hideTitle = false,
   icon,
   headerAction,
@@ -166,6 +167,7 @@ export function SettingsSection({
   ...sectionProps
 }: ComponentPropsWithoutRef<"section"> & {
   title: string;
+  description?: ReactNode;
   hideTitle?: boolean;
   icon?: ReactNode;
   headerAction?: ReactNode;
@@ -186,12 +188,19 @@ export function SettingsSection({
       ) : (
         <div
           data-settings-scroll-target
-          className="flex min-h-7 items-center justify-between gap-4 px-3 sm:px-4"
+          className="flex min-h-7 items-start justify-between gap-4 px-3 sm:px-4"
         >
-          <h2 className="flex items-center gap-2 text-sm font-normal tracking-[-0.005em] text-foreground/70">
-            {icon}
-            {title}
-          </h2>
+          <div className="min-w-0">
+            <h2 className="flex min-h-7 items-center gap-2 text-sm font-normal tracking-[-0.005em] text-foreground/70">
+              {icon}
+              {title}
+            </h2>
+            {description ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[13px] leading-[1.45] text-muted-foreground/80">
+                {description}
+              </div>
+            ) : null}
+          </div>
           <div className="flex min-h-7 min-w-7 items-center justify-end">{headerAction}</div>
         </div>
       )}
