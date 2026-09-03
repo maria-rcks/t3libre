@@ -376,7 +376,6 @@ import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveDraftHeroState,
   resolveThreadMetadataUpdateForNextTurn,
-  resolveThreadPullRequestRelink,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
@@ -3651,39 +3650,43 @@ function ChatViewContent(props: ChatViewProps) {
     activeThreadRef?.environmentId ?? null,
     persistedLinkedThreadPullRequest,
   );
-  const replacementLinkedThreadPullRequest = useMemo(
-    () =>
-      resolveThreadPullRequestRelink({
-        linkedPullRequest: persistedLinkedThreadPullRequest,
-        linkedPullRequestState: persistedLinkedThreadPullRequestStatus?.pr.state ?? null,
-        threadBranch: activeThread?.branch ?? null,
-        gitStatus: gitStatusQuery.data ?? null,
-        projectId: activeProject?.id ?? null,
-        repository: activeProjectRepository,
-      }),
-    [
-      activeProject?.id,
-      activeProjectRepository,
-      activeThread?.branch,
-      gitStatusQuery.data,
-      persistedLinkedThreadPullRequest,
-      persistedLinkedThreadPullRequestStatus?.pr.state,
-    ],
-  );
+  const replacementLinkedThreadPullRequest = useMemo(() => {
+    const detected = gitStatusQuery.data?.pr;
+    const threadBranch = activeThread?.branch;
+    const projectId = activeProject?.id;
+    if (
+      persistedLinkedThreadPullRequest === null ||
+      (persistedLinkedThreadPullRequestStatus?.pr.state !== "merged" &&
+        persistedLinkedThreadPullRequestStatus?.pr.state !== "closed") ||
+      threadBranch == null ||
+      gitStatusQuery.data?.refName !== threadBranch ||
+      detected?.state !== "open" ||
+      detected.headRef !== threadBranch ||
+      projectId === undefined ||
+      activeProjectRepository === null ||
+      (persistedLinkedThreadPullRequest.projectId === projectId &&
+        persistedLinkedThreadPullRequest.repository.toLowerCase() ===
+          activeProjectRepository.toLowerCase() &&
+        persistedLinkedThreadPullRequest.number === detected.number)
+    ) {
+      return null;
+    }
+    return {
+      projectId,
+      repository: activeProjectRepository,
+      number: detected.number,
+      url: detected.url,
+    };
+  }, [
+    activeProject?.id,
+    activeProjectRepository,
+    activeThread?.branch,
+    gitStatusQuery.data,
+    persistedLinkedThreadPullRequest,
+    persistedLinkedThreadPullRequestStatus?.pr.state,
+  ]);
   const linkedThreadPullRequest =
     replacementLinkedThreadPullRequest ?? persistedLinkedThreadPullRequest;
-  const replacementSourceControlProvider =
-    gitStatusQuery.data?.sourceControlProvider ??
-    persistedLinkedThreadPullRequestStatus?.sourceControlProvider;
-  const linkedThreadPullRequestStatus =
-    replacementLinkedThreadPullRequest !== null &&
-    gitStatusQuery.data?.pr != null &&
-    replacementSourceControlProvider != null
-      ? {
-          pr: gitStatusQuery.data.pr,
-          sourceControlProvider: replacementSourceControlProvider,
-        }
-      : persistedLinkedThreadPullRequestStatus;
   const linkedThreadPullRequestKey = linkedThreadPullRequest
     ? JSON.stringify([
         linkedThreadPullRequest.projectId,
@@ -3726,14 +3729,17 @@ function ChatViewContent(props: ChatViewProps) {
     const relinkKey = `${activeThreadKey}:${replacementLinkedThreadPullRequest.projectId}:${replacementLinkedThreadPullRequest.repository}#${replacementLinkedThreadPullRequest.number}`;
     if (threadPrRelinkKeyRef.current === relinkKey) return;
     threadPrRelinkKeyRef.current = relinkKey;
-
+    const openSurface = selectActiveRightPanelSurface(
+      useRightPanelStore.getState().byThreadKey,
+      activeThreadRef,
+    );
     if (
-      activeRightPanelSurface?.kind === "pull-request" &&
+      openSurface?.kind === "pull-request" &&
       persistedLinkedThreadPullRequest !== null &&
-      activeRightPanelSurface.projectId === persistedLinkedThreadPullRequest.projectId &&
-      activeRightPanelSurface.repository.toLowerCase() ===
+      openSurface.projectId === persistedLinkedThreadPullRequest.projectId &&
+      openSurface.repository.toLowerCase() ===
         persistedLinkedThreadPullRequest.repository.toLowerCase() &&
-      activeRightPanelSurface.number === persistedLinkedThreadPullRequest.number
+      openSurface.number === persistedLinkedThreadPullRequest.number
     ) {
       useRightPanelStore
         .getState()
@@ -3761,7 +3767,6 @@ function ChatViewContent(props: ChatViewProps) {
       );
     });
   }, [
-    activeRightPanelSurface,
     activeThreadKey,
     activeThreadRef,
     isServerThread,
@@ -4840,18 +4845,20 @@ function ChatViewContent(props: ChatViewProps) {
       resizeObserver.disconnect();
     };
   }, [composerOverlayElement]);
-  const activeThreadPr = resolveDisplayedThreadPr({
-    threadBranch: activeThread?.branch ?? null,
-    gitStatus: gitStatusQuery.data ?? null,
-    snapshot: activeThreadKey ? changeRequestSnapshotByKey.get(activeThreadKey) : undefined,
-    retainTerminalOnBranchMismatch: activeThread?.worktreePath === null,
-    linkedPullRequest: linkedThreadPullRequest,
-    linkedPullRequestStatus: linkedThreadPullRequestStatus,
-  });
+  const activeThreadPr =
+    replacementLinkedThreadPullRequest !== null
+      ? (gitStatusQuery.data?.pr ?? null)
+      : resolveDisplayedThreadPr({
+          threadBranch: activeThread?.branch ?? null,
+          gitStatus: gitStatusQuery.data ?? null,
+          snapshot: activeThreadKey ? changeRequestSnapshotByKey.get(activeThreadKey) : undefined,
+          retainTerminalOnBranchMismatch: activeThread?.worktreePath === null,
+          linkedPullRequest: linkedThreadPullRequest,
+          linkedPullRequestStatus: persistedLinkedThreadPullRequestStatus,
+        });
   const handlePullRequestTabStatusChange = useCallback(
     (status: PullRequestTabStatus) => {
       if (
-        linkedThreadPullRequest !== null ||
         threadRepository?.toLowerCase() !== status.repository.toLowerCase() ||
         activeThreadPr?.number !== status.number ||
         activeThreadPr.state === status.state
@@ -4878,7 +4885,6 @@ function ChatViewContent(props: ChatViewProps) {
       activeThreadPr?.state,
       activeThreadRef,
       gitCwd,
-      linkedThreadPullRequest,
       refreshVcsStatus,
       threadRepository,
     ],
@@ -7380,7 +7386,9 @@ function ChatViewContent(props: ChatViewProps) {
             : "page"
         }
         composerDraftTarget={composerDraftTarget}
-        onStateChange={handlePullRequestTabStatusChange}
+        {...(linkedThreadPullRequest === null
+          ? { onStateChange: handlePullRequestTabStatusChange }
+          : {})}
       />
     ) : renderedRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel

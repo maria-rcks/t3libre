@@ -63,12 +63,7 @@ import { useProjects } from "~/state/entities";
 import { useEnvironments } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { useLiveRefresh } from "~/hooks/useLiveRefresh";
-import {
-  newestPullRequestSummary,
-  pullRequestEnvironment,
-  recordObservedPullRequestSummary,
-  useObservedPullRequestSummary,
-} from "~/state/pullRequests";
+import { pullRequestEnvironment, useSharedPullRequestSummary } from "~/state/pullRequests";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsEnvironment } from "~/state/vcs";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
@@ -608,8 +603,7 @@ export function PullRequestDetailPanel({
     cached: cachedDetail,
     reference,
   });
-  const observedSummary = useObservedPullRequestSummary(environmentId, reference);
-  const sharedSummary = newestPullRequestSummary(resolvedCoreDetail, observedSummary);
+  const sharedSummary = useSharedPullRequestSummary(environmentId, reference, resolvedCoreDetail);
   const coreDetail = useMemo(
     () =>
       resolvedCoreDetail === null || sharedSummary === null || sharedSummary === resolvedCoreDetail
@@ -682,7 +676,6 @@ export function PullRequestDetailPanel({
   }, [activityQuery.refresh, coreDetail, pullRequestKey]);
   useLayoutEffect(() => {
     if (!resolvedCoreDetail) return;
-    recordObservedPullRequestSummary(environmentId, resolvedCoreDetail);
     onStateChange?.({
       projectId: resolvedCoreDetail.projectId,
       repository: resolvedCoreDetail.repository,
@@ -690,7 +683,7 @@ export function PullRequestDetailPanel({
       state: resolvedCoreDetail.state,
       isDraft: resolvedCoreDetail.isDraft,
     });
-  }, [environmentId, onStateChange, resolvedCoreDetail]);
+  }, [onStateChange, resolvedCoreDetail]);
   // Core detail is cheap enough to re-read while this stays open. Activity is heavier, so the
   // revision effect above reads it only after this same pull request reports a change. Keyed by
   // the pull request rather than by the panel, because this one panel shows a different pull

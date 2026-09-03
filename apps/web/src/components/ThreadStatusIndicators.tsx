@@ -7,17 +7,12 @@ import { pullRequestDetailToVcsStatus } from "@t3tools/client-runtime/state/pull
 import type { EnvironmentId, ThreadLinkedPullRequest, VcsStatusResult } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { CloudIcon, FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
-import { useLayoutEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { useProject } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
-import {
-  linkedPullRequestDetailAtom,
-  newestPullRequestSummary,
-  recordObservedPullRequestSummary,
-  useObservedPullRequestSummary,
-} from "../state/pullRequests";
+import { linkedPullRequestDetailAtom, useSharedPullRequestSummary } from "../state/pullRequests";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { vcsEnvironment } from "../state/vcs";
 import { useUiStateStore } from "../uiStateStore";
@@ -65,12 +60,7 @@ export function useLinkedThreadPullRequest(
           },
         }),
   ).data;
-  const observed = useObservedPullRequestSummary(environmentId, linkedPullRequest ?? null);
-  useLayoutEffect(() => {
-    if (environmentId === null || queried === null) return;
-    recordObservedPullRequestSummary(environmentId, queried);
-  }, [environmentId, queried]);
-  const detail = newestPullRequestSummary(queried, observed);
+  const detail = useSharedPullRequestSummary(environmentId, linkedPullRequest ?? null, queried);
 
   return useMemo(
     () =>

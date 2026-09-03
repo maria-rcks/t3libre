@@ -2421,30 +2421,22 @@ export const make = Effect.gen(function* () {
           }),
         ),
       );
-  const runActionAndInvalidate: PullRequestService["Service"]["runAction"] = (input) =>
-    runAction(input).pipe(
-      Effect.tap((repository) =>
-        Effect.sync(() => {
-          bumpRefEpoch({ ...input, repository });
-          listingsEpoch = ++epochCounter;
-        }),
-      ),
-      Effect.flatMap((repository) =>
-        input.action === "merge"
-          ? DateTime.now.pipe(
-              Effect.flatMap((now) =>
-                PubSub.publish(mergedPullRequests, {
-                  projectId: input.projectId,
-                  repository,
-                  number: input.number,
-                  mergedAt: DateTime.formatIso(now),
-                }),
-              ),
-              Effect.asVoid,
-            )
-          : Effect.void,
-      ),
-    );
+  const runActionAndInvalidate: PullRequestService["Service"]["runAction"] = Effect.fn(
+    "PullRequestService.runActionAndInvalidate",
+  )(function* (input) {
+    const mergedAt = input.action === "merge" ? DateTime.formatIso(yield* DateTime.now) : null;
+    const repository = yield* runAction(input);
+    bumpRefEpoch({ ...input, repository });
+    listingsEpoch = ++epochCounter;
+    if (mergedAt !== null) {
+      yield* PubSub.publish(mergedPullRequests, {
+        projectId: input.projectId,
+        repository,
+        number: input.number,
+        mergedAt,
+      });
+    }
+  });
 
   return PullRequestService.of({
     list,

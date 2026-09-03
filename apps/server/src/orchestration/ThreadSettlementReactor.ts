@@ -44,20 +44,15 @@ export const make = Effect.gen(function* () {
     const snapshot = yield* snapshots.getShellSnapshot();
     const now = DateTime.formatIso(yield* DateTime.now);
     const projects = new Map(snapshot.projects.map((project) => [project.id, project]));
-    const changedProject =
-      mergedPullRequest === null ? undefined : projects.get(mergedPullRequest.projectId);
-    if (changedProject !== undefined) {
-      yield* git.invalidateStatus(changedProject.workspaceRoot);
-    }
     const candidates = snapshot.threads.filter(
       (thread) =>
         isAutoSettlementCandidate(thread, now) &&
         (mergedPullRequest === null ||
-          (thread.linkedPullRequest == null
-            ? thread.projectId === mergedPullRequest.projectId
-            : thread.linkedPullRequest.projectId === mergedPullRequest.projectId &&
-              thread.linkedPullRequest.repository === mergedPullRequest.repository &&
-              thread.linkedPullRequest.number === mergedPullRequest.number)),
+          (thread.linkedPullRequest != null &&
+            thread.linkedPullRequest.projectId === mergedPullRequest.projectId &&
+            thread.linkedPullRequest.repository.toLowerCase() ===
+              mergedPullRequest.repository.toLowerCase() &&
+            thread.linkedPullRequest.number === mergedPullRequest.number)),
     );
     const lookupKey = (thread: (typeof candidates)[number]) => {
       if (thread.linkedPullRequest != null) {
@@ -177,8 +172,7 @@ export const make = Effect.gen(function* () {
             }),
       ),
     );
-  const scheduledWorker = yield* makeDrainableWorker(runSweep);
-  const mergeWorker = yield* makeDrainableWorker(runSweep);
+  const worker = yield* makeDrainableWorker(() => runSweep(null));
 
   const start: ThreadSettlementReactor["Service"]["start"] = Effect.fn(
     "ThreadSettlementReactor.start",
@@ -190,8 +184,8 @@ export const make = Effect.gen(function* () {
     let lastOnMerge = initialSettings.sidebarAutoSettleOnMerge;
     yield* forkParked(
       Effect.gen(function* () {
-        yield* scheduledWorker.enqueue(null);
-        yield* scheduledWorker.drain;
+        yield* worker.enqueue(undefined);
+        yield* worker.drain;
       }).pipe(Effect.repeat(Schedule.spaced("1 minute")), Effect.asVoid),
     );
     yield* forkParked(
@@ -204,16 +198,13 @@ export const make = Effect.gen(function* () {
         }
         lastAfterDays = settings.sidebarAutoSettleAfterDays;
         lastOnMerge = settings.sidebarAutoSettleOnMerge;
-        return scheduledWorker.enqueue(null);
+        return worker.enqueue(undefined);
       }),
     );
-    yield* forkParked(Stream.runForEach(mergedPullRequests, mergeWorker.enqueue));
+    yield* forkParked(Stream.runForEach(mergedPullRequests, runSweep));
   });
 
-  return {
-    start,
-    drain: Effect.all([scheduledWorker.drain, mergeWorker.drain], { discard: true }),
-  } satisfies ThreadSettlementReactor["Service"];
+  return { start, drain: worker.drain } satisfies ThreadSettlementReactor["Service"];
 });
 
 export const layer = Layer.effect(ThreadSettlementReactor, make);

@@ -12,7 +12,7 @@ import type {
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
-import { useCallback, useMemo } from "react";
+import { useCallback, useLayoutEffect, useMemo } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -34,18 +34,6 @@ const observedPullRequestSummaryAtom = Atom.family((key: string) =>
   ),
 );
 
-export function observedPullRequestKey(
-  environmentId: EnvironmentId,
-  reference: PullRequestRef,
-): string {
-  return JSON.stringify([
-    environmentId,
-    reference.projectId,
-    reference.repository.toLowerCase(),
-    reference.number,
-  ]);
-}
-
 export function newestPullRequestSummary(
   current: PullRequestSummary | null,
   observed: PullRequestSummary | null,
@@ -57,28 +45,30 @@ export function newestPullRequestSummary(
   return Date.parse(observed.updatedAt) >= Date.parse(current.updatedAt) ? observed : current;
 }
 
-export function recordObservedPullRequestSummary(
-  environmentId: EnvironmentId,
-  summary: PullRequestSummary,
-): void {
-  appAtomRegistry.modify(
-    observedPullRequestSummaryAtom(observedPullRequestKey(environmentId, summary)),
-    (current) => {
-      const next = newestPullRequestSummary(current, summary);
-      return next === current ? [false, current] : [true, next];
-    },
-  );
-}
-
-export function useObservedPullRequestSummary(
+export function useSharedPullRequestSummary(
   environmentId: EnvironmentId | null,
   reference: PullRequestRef | null,
+  current: PullRequestSummary | null,
 ): PullRequestSummary | null {
   const key =
     environmentId === null || reference === null
       ? "none"
-      : observedPullRequestKey(environmentId, reference);
-  return useAtomValue(observedPullRequestSummaryAtom(key));
+      : JSON.stringify([
+          environmentId,
+          reference.projectId,
+          reference.repository.toLowerCase(),
+          reference.number,
+        ]);
+  const atom = observedPullRequestSummaryAtom(key);
+  const observed = useAtomValue(atom);
+  useLayoutEffect(() => {
+    if (environmentId === null || current === null) return;
+    appAtomRegistry.modify(atom, (previous) => {
+      const next = newestPullRequestSummary(previous, current);
+      return next === previous ? [false, previous] : [true, next];
+    });
+  }, [atom, current, environmentId]);
+  return newestPullRequestSummary(current, observed);
 }
 
 export interface EnvironmentQueryTarget<Input> {
