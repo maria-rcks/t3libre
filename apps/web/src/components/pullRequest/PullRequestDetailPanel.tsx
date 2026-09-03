@@ -1468,41 +1468,6 @@ export function PullRequestDetailPanel({
                   </MenuPopup>
                 </Menu>
               ) : null}
-              {workflowApprovalsRequired > 0 && can("approve-workflows") ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span className="inline-flex shrink-0">
-                        <Button
-                          size="xs"
-                          variant="warning-outline"
-                          disabled={actionPending}
-                          onClick={() =>
-                            setConfirmation({ open: true, action: "approve-workflows" })
-                          }
-                          aria-label={
-                            pendingAction === "approve-workflows"
-                              ? "Approving..."
-                              : "Approve workflows to run"
-                          }
-                        >
-                          <PlayIcon aria-hidden className="size-3.5" />
-                          <span className="@max-[40rem]/pr-header:hidden">
-                            {pendingAction === "approve-workflows"
-                              ? "Approving..."
-                              : "Approve workflows to run"}
-                          </span>
-                        </Button>
-                      </span>
-                    }
-                  />
-                  <TooltipPopup side="top">
-                    {pendingAction === "approve-workflows"
-                      ? "Approving..."
-                      : "Approve workflows to run"}
-                  </TooltipPopup>
-                </Tooltip>
-              ) : null}
               {/* Said where the Merge button is, because it is the answer to why nobody has
                   pressed it: the merge is already asked for, and the host is holding it. */}
               {autoMergeArmed && primaryAction !== "auto-merge-armed" ? (
@@ -2155,20 +2120,57 @@ export function PullRequestDetailPanel({
               ))}
             </ToggleGroup>
             {tab === "summary" ? (
-              <span
-                className="ml-auto inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
-                aria-label={checksSummary ? `Checks: ${checksSummary}` : "Checks"}
-              >
-                {checksState !== null ? (
-                  <PullRequestChecksPopover
-                    checks={detail.checks}
-                    checksState={checksState}
-                    threadRef={threadRef}
-                  />
-                ) : (
-                  <CircleDotIcon aria-hidden className="size-3.5" />
-                )}
-                {checksSummary}
+              <span className="ml-auto inline-flex shrink-0 items-center gap-2">
+                <span
+                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+                  aria-label={checksSummary ? `Checks: ${checksSummary}` : "Checks"}
+                >
+                  {checksState !== null ? (
+                    <PullRequestChecksPopover
+                      checks={detail.checks}
+                      checksState={checksState}
+                      threadRef={threadRef}
+                    />
+                  ) : (
+                    <CircleDotIcon aria-hidden className="size-3.5" />
+                  )}
+                  {checksSummary}
+                </span>
+                {workflowApprovalsRequired > 0 && can("approve-workflows") ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className="inline-flex shrink-0">
+                          <Button
+                            size="xs"
+                            variant="warning-outline"
+                            disabled={actionPending}
+                            onClick={() =>
+                              setConfirmation({ open: true, action: "approve-workflows" })
+                            }
+                            aria-label={
+                              pendingAction === "approve-workflows"
+                                ? "Approving..."
+                                : "Approve workflows to run"
+                            }
+                          >
+                            <PlayIcon aria-hidden className="size-3.5" />
+                            <span className="@max-[40rem]/pr-header:hidden">
+                              {pendingAction === "approve-workflows"
+                                ? "Approving..."
+                                : "Approve workflows to run"}
+                            </span>
+                          </Button>
+                        </span>
+                      }
+                    />
+                    <TooltipPopup side="top">
+                      {pendingAction === "approve-workflows"
+                        ? "Approving..."
+                        : "Approve workflows to run"}
+                    </TooltipPopup>
+                  </Tooltip>
+                ) : null}
               </span>
             ) : tab === "timeline" ? (
               <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
