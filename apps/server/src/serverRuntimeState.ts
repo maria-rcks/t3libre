@@ -128,7 +128,11 @@ const mutatePersistedServerRuntimeState = (
         );
       },
     );
-  });
+  }).pipe(
+    Effect.mapError(
+      (cause) => new ServerRuntimeStateError({ operation: "clear", statePath, cause }),
+    ),
+  );
 
 const runtimeOriginForConfig = (
   config: Pick<ServerConfig.ServerConfig["Service"], "host">,

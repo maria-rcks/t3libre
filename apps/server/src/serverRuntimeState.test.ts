@@ -238,6 +238,31 @@ describe("serverRuntimeState", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("preserves owned runtime state mutation failures", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-owned-clear-test-",
+      });
+      const blockedDirectory = path.join(root, "not-a-directory");
+      const statePath = path.join(blockedDirectory, "server.json");
+      yield* fileSystem.writeFileString(blockedDirectory, "blocked");
+
+      const error = yield* ServerRuntimeState.clearOwnedPersistedServerRuntimeState(
+        statePath,
+        123,
+      ).pipe(Effect.flip);
+
+      assert.isTrue(isServerRuntimeStateError(error));
+      if (isServerRuntimeStateError(error)) {
+        assert.equal(error.operation, "clear");
+        assert.equal(error.statePath, statePath);
+        assert.deepInclude(error.cause, { _tag: "PlatformError" });
+      }
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("preserves malformed state decode failures", () => {
     const logs: CapturedLog[] = [];
     const logger = Logger.make(({ fiber, message }) => {
