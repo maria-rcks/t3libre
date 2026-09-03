@@ -182,36 +182,35 @@ export function useThreadComposerState() {
       (message) =>
         message.role === "user" &&
         message.text.trim().toLowerCase() === "/compact" &&
-        (message.attachments?.length ?? 0) === 0,
+        !message.attachments?.length,
     );
-    const sessionStatus =
-      selectedThreadDetail?.session?.status ?? selectedThreadShell?.session?.status;
-    const compactionSettled =
+    const compactRequestIsActive =
       latestCompactMessage !== undefined &&
-      selectedThreadDetail?.activities.some((activity) => {
-        if (
-          activity.kind !== "context-compaction" &&
-          activity.kind !== "provider.turn.start.failed"
-        ) {
-          return false;
-        }
-        const payload =
-          typeof activity.payload === "object" && activity.payload !== null
-            ? (activity.payload as { readonly requestId?: unknown })
-            : null;
-        return payload?.requestId === latestCompactMessage.id;
-      });
+      (latestCompactMessage.createdAt >
+        (selectedThread?.latestTurn?.requestedAt ?? latestCompactMessage.createdAt) ||
+        (selectedThread?.latestTurn?.state === "running" &&
+          latestCompactMessage.createdAt === selectedThread.latestTurn.requestedAt));
+    const compactionSettled = selectedThreadDetail?.activities.some((activity) => {
+      if (!["context-compaction", "provider.turn.start.failed"].includes(activity.kind))
+        return false;
+      const payload =
+        typeof activity.payload === "object" && activity.payload !== null
+          ? (activity.payload as { readonly requestId?: unknown })
+          : null;
+      return payload?.requestId === latestCompactMessage?.id;
+    });
     return (
       queuedMessage !== undefined ||
-      ((sessionStatus === "starting" || sessionStatus === "running") &&
-        latestCompactMessage !== undefined &&
+      ((selectedThread?.session?.status === "starting" ||
+        selectedThread?.session?.status === "running") &&
+        compactRequestIsActive &&
         !compactionSettled)
     );
   }, [
     dispatchingQueuedMessageId,
+    selectedThread,
     selectedThreadDetail,
     selectedThreadQueuedMessages,
-    selectedThreadShell?.session?.status,
   ]);
 
   const activeWorkStartedAt = useMemo(() => {
