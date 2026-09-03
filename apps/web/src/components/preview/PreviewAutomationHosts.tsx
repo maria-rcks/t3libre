@@ -313,7 +313,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
   );
   const [automationConnectionAtom] = useState(() => Atom.make<string | null>(null));
   const automationConnectionId = useAtomValue(automationConnectionAtom);
-  const presentationSuppressedTabsRef = useRef(new Map<string, Set<string>>());
+  const presentationSuppressedRuntimeTabsRef = useRef(new Map<string, Set<string>>());
 
   const handleRequest = useCallback(
     async (request: PreviewAutomationRequest): Promise<unknown> => {
@@ -363,8 +363,9 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 operation: request.operation,
                 autoShowFloatingPreview,
                 presentationSuppressed:
-                  presentationSuppressedTabsRef.current.get(request.threadId)?.has(readyTabId) ??
-                  false,
+                  presentationSuppressedRuntimeTabsRef.current
+                    .get(request.threadId)
+                    ?.has(runtimeTabId) ?? false,
               })
             ) {
               usePreviewMiniPlayerStore.getState().open(threadRef, readyTabId);
@@ -468,12 +469,17 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               (await resolveBrowserDefaults()).autoShowFloatingPreview,
             );
             const explicitlySuppressed = explicitlySuppressesPreviewMiniPlayer(input);
-            const suppressedTabs = presentationSuppressedTabsRef.current.get(request.threadId);
+            const suppressedTabs = presentationSuppressedRuntimeTabsRef.current.get(
+              request.threadId,
+            );
             if (explicitlySuppressed) {
               if (suppressedTabs) {
-                suppressedTabs.add(activeTabId);
+                suppressedTabs.add(activeRuntimeTabId);
               } else {
-                presentationSuppressedTabsRef.current.set(request.threadId, new Set([activeTabId]));
+                presentationSuppressedRuntimeTabsRef.current.set(
+                  request.threadId,
+                  new Set([activeRuntimeTabId]),
+                );
               }
               const miniPlayer = selectThreadPreviewMiniPlayer(
                 usePreviewMiniPlayerStore.getState().byThreadKey,
@@ -483,9 +489,9 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 usePreviewMiniPlayerStore.getState().close(threadRef);
               }
             } else if (shouldPresentPreview) {
-              suppressedTabs?.delete(activeTabId);
+              suppressedTabs?.delete(activeRuntimeTabId);
               if (suppressedTabs?.size === 0) {
-                presentationSuppressedTabsRef.current.delete(request.threadId);
+                presentationSuppressedRuntimeTabsRef.current.delete(request.threadId);
               }
             }
             if (shouldPresentPreview) {
