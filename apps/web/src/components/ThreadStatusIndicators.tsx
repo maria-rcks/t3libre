@@ -4,13 +4,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { pullRequestDetailToVcsStatus } from "@t3tools/client-runtime/state/pull-requests";
-import type {
-  EnvironmentId,
-  ProjectId,
-  PullRequestSummary,
-  ThreadLinkedPullRequest,
-  VcsStatusResult,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ThreadLinkedPullRequest, VcsStatusResult } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { CloudIcon, FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
 import { useLayoutEffect, useMemo } from "react";
@@ -92,31 +86,6 @@ export function useLinkedThreadPullRequest(
           },
     [detail],
   );
-}
-
-export function newestThreadPullRequest(
-  current: ThreadPr,
-  observed: PullRequestSummary | null,
-): ThreadPr {
-  if (current === null || observed === null || current.number !== observed.number) return current;
-  if (current.state === "merged") return current;
-  const currentUpdatedAt =
-    current.updatedAt == null ? Number.NEGATIVE_INFINITY : Date.parse(current.updatedAt);
-  return observed.state === "merged" || Date.parse(observed.updatedAt) >= currentUpdatedAt
-    ? pullRequestDetailToVcsStatus(observed)
-    : current;
-}
-
-export function useObservedThreadPullRequest(
-  environmentId: EnvironmentId | null,
-  projectId: ProjectId | null,
-  current: ThreadPr,
-): ThreadPr {
-  const observed = useObservedPullRequestSummary(
-    environmentId,
-    projectId === null || current === null ? null : { projectId, number: current.number },
-  );
-  return useMemo(() => newestThreadPullRequest(current, observed), [current, observed]);
 }
 
 export function settledPrHoverColorClass(state: NonNullable<ThreadPr>["state"]): string {
@@ -588,15 +557,10 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
         })
       : null,
   );
-  const resolvedPr =
+  const pr =
     thread.linkedPullRequest == null
       ? resolveThreadPr({ threadBranch: thread.branch, gitStatus: gitStatus.data })
       : (linkedPullRequest?.pr ?? null);
-  const pr = useObservedThreadPullRequest(
-    thread.environmentId,
-    thread.linkedPullRequest?.projectId ?? thread.projectId,
-    resolvedPr,
-  );
   const prStatus = prStatusIndicator(
     pr,
     linkedPullRequest?.sourceControlProvider ?? gitStatus.data?.sourceControlProvider,

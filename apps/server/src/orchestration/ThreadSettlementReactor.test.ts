@@ -147,6 +147,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     readonly projectId: ProjectId;
     readonly repository: string;
     readonly number: number;
+    readonly mergedAt: string;
   }>();
   const commands = yield* Ref.make<ReadonlyArray<AutoSettleCommand>>([]);
   const branchCalls = yield* Ref.make<
@@ -258,6 +259,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
         projectId,
         repository: "owner/repository",
         number: 42,
+        mergedAt: NOW,
       }),
     layer: ThreadSettlementReactor.layer.pipe(Layer.provide(dependencies)),
   };
@@ -397,11 +399,39 @@ describe("ThreadSettlementReactor", () => {
     Effect.scoped(
       Effect.gen(function* () {
         yield* TestClock.setTime(Date.parse(NOW));
-        const pullRequest = yield* Ref.make<"open" | "merged">("open");
+        const periodicLookupStarted = yield* Deferred.make<void>();
+        const releasePeriodicLookup = yield* Deferred.make<void>();
+        const mergedThreadSettled = yield* Deferred.make<void>();
+        const branchLookupCount = yield* Ref.make(0);
         const fixture = yield* makeHarness({
-          snapshot: makeSnapshot([makeThread("merged-in-app", { branch: "saved-feature" })]),
+          snapshot: makeSnapshot([
+            makeThread("merged-in-app", {
+              linkedPullRequest: {
+                projectId: PROJECT_ID,
+                repository: "owner/repository",
+                number: 42,
+                url: "https://example.test/owner/repository/pull/42",
+              },
+            }),
+            makeThread("slow-periodic-lookup", { branch: "another-feature" }),
+          ]),
           branchPullRequest: () =>
-            Ref.get(pullRequest).pipe(Effect.map((state) => ({ state, updatedAt: NOW }))),
+            Ref.updateAndGet(branchLookupCount, (count) => count + 1).pipe(
+              Effect.flatMap((count) =>
+                count === 1
+                  ? Effect.succeed({ state: "open" as const, updatedAt: NOW })
+                  : Deferred.succeed(periodicLookupStarted, undefined).pipe(
+                      Effect.andThen(Deferred.await(releasePeriodicLookup)),
+                      Effect.as({ state: "open" as const, updatedAt: NOW }),
+                    ),
+              ),
+            ),
+          pullRequestSummary: (input) =>
+            Effect.succeed(makePullRequestSummary({ ...input, state: "open" })),
+          onDispatch: (command) =>
+            command.threadId === ThreadId.make("merged-in-app")
+              ? Deferred.succeed(mergedThreadSettled, undefined)
+              : Effect.void,
         });
 
         yield* Effect.gen(function* () {
@@ -409,16 +439,21 @@ describe("ThreadSettlementReactor", () => {
           yield* startHarness(reactor, fixture.activation, fixture.snapshotReads);
           assert.deepStrictEqual(yield* Ref.get(fixture.commands), []);
 
-          yield* Ref.set(pullRequest, "merged");
+          yield* fixture.updateSettings({ sidebarAutoSettleAfterDays: 4 });
+          yield* Queue.take(fixture.snapshotReads);
+          yield* Deferred.await(periodicLookupStarted);
+
           yield* fixture.publishMerge(PROJECT_ID);
           yield* Queue.take(fixture.snapshotReads);
-          yield* reactor.drain;
+          yield* Deferred.await(mergedThreadSettled);
 
           assert.deepStrictEqual(
             (yield* Ref.get(fixture.commands)).map((command) => command.threadId),
             [ThreadId.make("merged-in-app")],
           );
           assert.deepStrictEqual(yield* Ref.get(fixture.invalidatedCwds), ["/workspace/project"]);
+          yield* Deferred.succeed(releasePeriodicLookup, undefined);
+          yield* reactor.drain;
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

@@ -1,4 +1,4 @@
-import { CommandId, type ProjectId } from "@t3tools/contracts";
+import { CommandId } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -39,16 +39,26 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   const sweep = Effect.fn("ThreadSettlementReactor.sweep")(function* (
-    changedProjectId: ProjectId | null,
+    mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
   ) {
     const snapshot = yield* snapshots.getShellSnapshot();
     const now = DateTime.formatIso(yield* DateTime.now);
     const projects = new Map(snapshot.projects.map((project) => [project.id, project]));
-    const changedProject = changedProjectId === null ? undefined : projects.get(changedProjectId);
+    const changedProject =
+      mergedPullRequest === null ? undefined : projects.get(mergedPullRequest.projectId);
     if (changedProject !== undefined) {
       yield* git.invalidateStatus(changedProject.workspaceRoot);
     }
-    const candidates = snapshot.threads.filter((thread) => isAutoSettlementCandidate(thread, now));
+    const candidates = snapshot.threads.filter(
+      (thread) =>
+        isAutoSettlementCandidate(thread, now) &&
+        (mergedPullRequest === null ||
+          (thread.linkedPullRequest == null
+            ? thread.projectId === mergedPullRequest.projectId
+            : thread.linkedPullRequest.projectId === mergedPullRequest.projectId &&
+              thread.linkedPullRequest.repository === mergedPullRequest.repository &&
+              thread.linkedPullRequest.number === mergedPullRequest.number)),
+    );
     const lookupKey = (thread: (typeof candidates)[number]) => {
       if (thread.linkedPullRequest != null) {
         return JSON.stringify([
@@ -72,6 +82,12 @@ export const make = Effect.gen(function* () {
       thread: (typeof candidates)[number],
     ) {
       if (thread.linkedPullRequest != null) {
+        if (mergedPullRequest !== null) {
+          return {
+            state: "merged",
+            updatedAt: mergedPullRequest.mergedAt,
+          } satisfies SettlementPullRequest;
+        }
         if (!projects.has(thread.linkedPullRequest.projectId)) {
           return yield* Effect.die(new Error("linked pull request project not found"));
         }
@@ -151,8 +167,8 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const worker = yield* makeDrainableWorker((changedProjectId: ProjectId | null) =>
-    sweep(changedProjectId).pipe(
+  const runSweep = (mergedPullRequest: PullRequestService.PullRequestMergeEvent | null) =>
+    sweep(mergedPullRequest).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
@@ -160,8 +176,9 @@ export const make = Effect.gen(function* () {
               cause: Cause.pretty(cause),
             }),
       ),
-    ),
-  );
+    );
+  const scheduledWorker = yield* makeDrainableWorker(runSweep);
+  const mergeWorker = yield* makeDrainableWorker(runSweep);
 
   const start: ThreadSettlementReactor["Service"]["start"] = Effect.fn(
     "ThreadSettlementReactor.start",
@@ -173,8 +190,8 @@ export const make = Effect.gen(function* () {
     let lastOnMerge = initialSettings.sidebarAutoSettleOnMerge;
     yield* forkParked(
       Effect.gen(function* () {
-        yield* worker.enqueue(null);
-        yield* worker.drain;
+        yield* scheduledWorker.enqueue(null);
+        yield* scheduledWorker.drain;
       }).pipe(Effect.repeat(Schedule.spaced("1 minute")), Effect.asVoid),
     );
     yield* forkParked(
@@ -187,15 +204,16 @@ export const make = Effect.gen(function* () {
         }
         lastAfterDays = settings.sidebarAutoSettleAfterDays;
         lastOnMerge = settings.sidebarAutoSettleOnMerge;
-        return worker.enqueue(null);
+        return scheduledWorker.enqueue(null);
       }),
     );
-    yield* forkParked(
-      Stream.runForEach(mergedPullRequests, (pullRequest) => worker.enqueue(pullRequest.projectId)),
-    );
+    yield* forkParked(Stream.runForEach(mergedPullRequests, mergeWorker.enqueue));
   });
 
-  return { start, drain: worker.drain } satisfies ThreadSettlementReactor["Service"];
+  return {
+    start,
+    drain: Effect.all([scheduledWorker.drain, mergeWorker.drain], { discard: true }),
+  } satisfies ThreadSettlementReactor["Service"];
 });
 
 export const layer = Layer.effect(ThreadSettlementReactor, make);

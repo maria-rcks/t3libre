@@ -1023,7 +1023,8 @@ it.effect("publishes a successful merge for immediate settlement", () =>
       yield* service.runAction({ ...reference, action: "merge", mergeMethod: "merge" });
 
       const observed = Option.getOrThrow(yield* Fiber.join(observedMerge));
-      assert.deepStrictEqual(observed, reference);
+      assert.deepInclude(observed, reference);
+      assert.isFalse(Number.isNaN(Date.parse(observed.mergedAt)));
     }),
   ),
 );

@@ -6,6 +6,7 @@ import {
   type PullRequestMergeMethod,
   type PullRequestUpdateMethod,
   type PullRequestRef,
+  type PullRequestState,
   resolveEnvironmentMachineKind,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -453,6 +454,7 @@ export function PullRequestDetailPanel({
   refreshToken: forcedRefreshToken = 0,
   onActed,
   onClose,
+  onStateChange,
   context = "page",
   composerDraftTarget,
 }: {
@@ -471,6 +473,14 @@ export function PullRequestDetailPanel({
   onActed?: () => void;
   /** Page-owned detail columns use this to clear the selected pull request. */
   onClose?: () => void;
+  /** Keeps surrounding inferred thread state in step with refreshed host state. */
+  onStateChange?: (status: {
+    projectId: string;
+    repository: string;
+    number: number;
+    state: PullRequestState;
+    isDraft: boolean;
+  }) => void;
   /**
    * Beside a thread, the checkout affordance disappears: the panel is showing that thread's
    * own pull request, so the branch is already under the reader's feet — and checking it out
@@ -671,9 +681,16 @@ export function PullRequestDetailPanel({
     activityRevision.current = next;
   }, [activityQuery.refresh, coreDetail, pullRequestKey]);
   useLayoutEffect(() => {
-    if (!coreDetail) return;
-    recordObservedPullRequestSummary(environmentId, coreDetail);
-  }, [coreDetail, environmentId]);
+    if (!resolvedCoreDetail) return;
+    recordObservedPullRequestSummary(environmentId, resolvedCoreDetail);
+    onStateChange?.({
+      projectId: resolvedCoreDetail.projectId,
+      repository: resolvedCoreDetail.repository,
+      number: resolvedCoreDetail.number,
+      state: resolvedCoreDetail.state,
+      isDraft: resolvedCoreDetail.isDraft,
+    });
+  }, [environmentId, onStateChange, resolvedCoreDetail]);
   // Core detail is cheap enough to re-read while this stays open. Activity is heavier, so the
   // revision effect above reads it only after this same pull request reports a change. Keyed by
   // the pull request rather than by the panel, because this one panel shows a different pull

@@ -1,6 +1,7 @@
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -65,6 +66,10 @@ import {
   PullRequestProviderError,
 } from "./PullRequestProvider.ts";
 import { PullRequestProviderRegistry } from "./PullRequestProviderRegistry.ts";
+
+export interface PullRequestMergeEvent extends PullRequestRef {
+  readonly mergedAt: string;
+}
 
 /**
  * Rows per repository when the client does not ask for a page size, and rows per slice when a
@@ -138,7 +143,11 @@ export class PullRequestService extends Context.Service<
       input: PullRequestRef,
       options?: { readonly recoverTransientFailure?: boolean },
     ) => Effect.Effect<PullRequestSummary, PullRequestError>;
-    readonly subscribeMerges: Effect.Effect<Stream.Stream<PullRequestRef>, never, Scope.Scope>;
+    readonly subscribeMerges: Effect.Effect<
+      Stream.Stream<PullRequestMergeEvent>,
+      never,
+      Scope.Scope
+    >;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
     readonly activity: (
       input: PullRequestRef,
@@ -521,7 +530,7 @@ export function repositoryIdentityOf(project: OrchestrationProjectShell): string
 }
 
 export const make = Effect.gen(function* () {
-  const mergedPullRequests = yield* PubSub.unbounded<PullRequestRef>();
+  const mergedPullRequests = yield* PubSub.unbounded<PullRequestMergeEvent>();
   const registry = yield* PullRequestProviderRegistry;
   const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
@@ -2413,11 +2422,17 @@ export const make = Effect.gen(function* () {
     invalidatedByMutation(runAction)(input).pipe(
       Effect.tap(() =>
         input.action === "merge"
-          ? PubSub.publish(mergedPullRequests, {
-              projectId: input.projectId,
-              repository: input.repository,
-              number: input.number,
-            }).pipe(Effect.asVoid)
+          ? DateTime.now.pipe(
+              Effect.flatMap((now) =>
+                PubSub.publish(mergedPullRequests, {
+                  projectId: input.projectId,
+                  repository: input.repository,
+                  number: input.number,
+                  mergedAt: DateTime.formatIso(now),
+                }),
+              ),
+              Effect.asVoid,
+            )
           : Effect.void,
       ),
     );

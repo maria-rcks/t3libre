@@ -5,7 +5,6 @@ import { AtomRegistry } from "effect/unstable/reactivity";
 
 import {
   nextThreadChangeRequestSnapshot,
-  newestThreadPullRequest,
   prStatusIndicator,
   resolveDisplayedThreadPr,
   resolveDisplayedThreadPrProvider,
@@ -96,13 +95,6 @@ describe("shared pull request state", () => {
     const reopened = pullRequestSummary("open", "2026-09-03T01:01:00.000Z");
 
     expect(newestPullRequestSummary(closed, reopened)).toBe(reopened);
-  });
-
-  it("applies a panel-observed merge to an inferred sidebar pull request", () => {
-    const open = status().pr;
-    const merged = pullRequestSummary("merged", "2026-09-03T01:01:00.000Z");
-
-    expect(newestThreadPullRequest(open, merged)?.state).toBe("merged");
   });
 });
 

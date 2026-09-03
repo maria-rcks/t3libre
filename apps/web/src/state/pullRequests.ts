@@ -36,9 +36,14 @@ const observedPullRequestSummaryAtom = Atom.family((key: string) =>
 
 export function observedPullRequestKey(
   environmentId: EnvironmentId,
-  reference: Pick<PullRequestRef, "projectId" | "number">,
+  reference: PullRequestRef,
 ): string {
-  return JSON.stringify([environmentId, reference.projectId, reference.number]);
+  return JSON.stringify([
+    environmentId,
+    reference.projectId,
+    reference.repository.toLowerCase(),
+    reference.number,
+  ]);
 }
 
 export function newestPullRequestSummary(
@@ -67,7 +72,7 @@ export function recordObservedPullRequestSummary(
 
 export function useObservedPullRequestSummary(
   environmentId: EnvironmentId | null,
-  reference: Pick<PullRequestRef, "projectId" | "number"> | null,
+  reference: PullRequestRef | null,
 ): PullRequestSummary | null {
   const key =
     environmentId === null || reference === null

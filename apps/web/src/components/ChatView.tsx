@@ -173,7 +173,7 @@ import { isThreadOwnPullRequest } from "./pullRequest/pullRequestDetail.logic";
 import { PullRequestDetailPanel } from "./pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavailableState";
-import { RightPanelTabs } from "./RightPanelTabs";
+import { RightPanelTabs, type PullRequestTabStatus } from "./RightPanelTabs";
 import { AgentsPanel } from "./AgentsPanel";
 import {
   deriveAgentPanelModel,
@@ -324,7 +324,6 @@ import {
   resolveDisplayedThreadPr,
   threadChangeRequestSnapshotsAtom,
   useLinkedThreadPullRequest,
-  useObservedThreadPullRequest,
 } from "./ThreadStatusIndicators";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ComposerSurface } from "./chat/ComposerSurface";
@@ -1782,6 +1781,8 @@ function ChatViewContent(props: ChatViewProps) {
   const activeRightPanelSurface = useRightPanelStore((state) =>
     selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef),
   );
+  const refreshVcsStatus = useAtomCommand(vcsEnvironment.refreshStatus, { reportFailure: false });
+  const sidebarPrRefreshKeyRef = useRef<string | null>(null);
   const activePreviewState = useThreadPreviewState(activeThreadRef);
   const activePreviewServerEpoch = activePreviewState.serverEpoch;
   const resolvePreviewRuntimeTabId = useMemo(
@@ -4749,7 +4750,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeThreadRef?.environmentId ?? null,
     linkedThreadPullRequest,
   );
-  const resolvedActiveThreadPr = resolveDisplayedThreadPr({
+  const activeThreadPr = resolveDisplayedThreadPr({
     threadBranch: activeThread?.branch ?? null,
     gitStatus: gitStatusQuery.data ?? null,
     snapshot: activeThreadKey ? changeRequestSnapshotByKey.get(activeThreadKey) : undefined,
@@ -4757,10 +4758,40 @@ function ChatViewContent(props: ChatViewProps) {
     linkedPullRequest: linkedThreadPullRequest,
     linkedPullRequestStatus,
   });
-  const activeThreadPr = useObservedThreadPullRequest(
-    activeThreadRef?.environmentId ?? null,
-    linkedThreadPullRequest?.projectId ?? activeProject?.id ?? null,
-    resolvedActiveThreadPr,
+  const handlePullRequestTabStatusChange = useCallback(
+    (status: PullRequestTabStatus) => {
+      if (
+        linkedThreadPullRequest !== null ||
+        threadRepository?.toLowerCase() !== status.repository.toLowerCase() ||
+        activeThreadPr?.number !== status.number ||
+        activeThreadPr.state === status.state
+      ) {
+        sidebarPrRefreshKeyRef.current = null;
+        return;
+      }
+      const refreshKey = `${activeThreadKey}:vcs:${status.repository}#${status.number}:${status.state}`;
+      if (sidebarPrRefreshKeyRef.current === refreshKey) return;
+      sidebarPrRefreshKeyRef.current = refreshKey;
+      if (activeThreadRef === null || gitCwd === null) return;
+      void refreshVcsStatus({
+        environmentId: activeThreadRef.environmentId,
+        input: { cwd: gitCwd },
+      }).then(() => {
+        if (sidebarPrRefreshKeyRef.current === refreshKey) {
+          sidebarPrRefreshKeyRef.current = null;
+        }
+      });
+    },
+    [
+      activeThreadKey,
+      activeThreadPr?.number,
+      activeThreadPr?.state,
+      activeThreadRef,
+      gitCwd,
+      linkedThreadPullRequest,
+      refreshVcsStatus,
+      threadRepository,
+    ],
   );
   const activeThreadReferenceCopyTarget = useMemo(
     () =>
@@ -7259,6 +7290,7 @@ function ChatViewContent(props: ChatViewProps) {
             : "page"
         }
         composerDraftTarget={composerDraftTarget}
+        onStateChange={handlePullRequestTabStatusChange}
       />
     ) : renderedRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
