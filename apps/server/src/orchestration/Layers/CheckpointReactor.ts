@@ -38,6 +38,7 @@ import type { OrchestrationDispatchError } from "../Errors.ts";
 import { isGitRepository } from "../../git/Utils.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
+import { PullRequestService } from "../../pullRequest/PullRequestService.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -88,6 +89,24 @@ const make = Effect.gen(function* () {
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
+  const pullRequests = yield* PullRequestService;
+  const refreshedTurnKeys = new Set<string>();
+  const REFRESHED_TURN_CAPACITY = 2_048;
+
+  const refreshPullRequestsOnce = Effect.fn("refreshPullRequestsOnce")(function* (
+    projectId: ProjectId,
+    threadId: ThreadId,
+    turnId: TurnId,
+  ) {
+    const key = `${threadId}:${turnId}`;
+    if (refreshedTurnKeys.has(key)) return;
+    if (refreshedTurnKeys.size >= REFRESHED_TURN_CAPACITY) {
+      const oldest = refreshedTurnKeys.values().next().value;
+      if (oldest !== undefined) refreshedTurnKeys.delete(oldest);
+    }
+    refreshedTurnKeys.add(key);
+    yield* pullRequests.refreshAfterTurn(projectId);
+  });
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -820,6 +839,27 @@ const make = Effect.gen(function* () {
   });
 
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (event: OrchestrationEvent) {
+    if (event.type === "thread.session-set") {
+      if (
+        event.payload.session.status === "starting" ||
+        event.payload.session.status === "running"
+      ) {
+        return;
+      }
+      const thread = yield* resolveThreadDetail(event.payload.threadId);
+      const turn = thread?.latestTurn;
+      if (
+        thread !== undefined &&
+        turn !== null &&
+        turn !== undefined &&
+        turn.state !== "running" &&
+        turn.completedAt === event.payload.session.updatedAt
+      ) {
+        yield* refreshPullRequestsOnce(thread.projectId, thread.id, turn.turnId);
+      }
+      return;
+    }
+
     if (event.type === "thread.turn-start-requested" || event.type === "thread.message-sent") {
       yield* ensurePreTurnBaselineFromDomainTurnStart(event);
       return;
@@ -847,6 +887,16 @@ const make = Effect.gen(function* () {
     // turn.completed runtime events to this reactor (shared subscription), so
     // reacting to the domain event is the reliable path.
     if (event.type === "thread.turn-diff-completed") {
+      const thread = yield* resolveThreadDetail(event.payload.threadId);
+      if (
+        thread !== undefined &&
+        thread.session !== null &&
+        thread.session.status !== "starting" &&
+        thread.session.status !== "running" &&
+        thread.latestTurn?.turnId === event.payload.turnId
+      ) {
+        yield* refreshPullRequestsOnce(thread.projectId, thread.id, event.payload.turnId);
+      }
       yield* captureCheckpointFromPlaceholder(event).pipe(
         Effect.catch((error) =>
           Effect.flatMap(nowIso, (createdAt) =>
@@ -920,6 +970,7 @@ const make = Effect.gen(function* () {
         if (
           event.type !== "thread.turn-start-requested" &&
           event.type !== "thread.message-sent" &&
+          event.type !== "thread.session-set" &&
           event.type !== "thread.checkpoint-revert-requested" &&
           event.type !== "thread.turn-diff-completed"
         ) {

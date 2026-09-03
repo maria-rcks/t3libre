@@ -2,12 +2,15 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   createLinkedPullRequestSummaryAtomFamily,
   createPullRequestEnvironmentAtoms,
+  createPullRequestRefreshAtomFamily,
 } from "@t3tools/client-runtime/state/pull-requests";
 import type {
   EnvironmentId,
   PullRequestListInput,
   PullRequestListStatsInput,
   PullRequestRef,
+  PullRequestRefreshEvent,
+  PullRequestRefreshSubscriptionInput,
   PullRequestSummary,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -23,9 +26,15 @@ import {
 } from "../components/pullRequest/pullRequestList.logic";
 import { formatEnvironmentQueryError } from "./query";
 
-export const pullRequestEnvironment = createPullRequestEnvironmentAtoms(connectionAtomRuntime);
-export const linkedPullRequestDetailAtom =
-  createLinkedPullRequestSummaryAtomFamily(connectionAtomRuntime);
+const pullRequestRefreshes = createPullRequestRefreshAtomFamily(connectionAtomRuntime);
+export const pullRequestEnvironment = createPullRequestEnvironmentAtoms(
+  connectionAtomRuntime,
+  pullRequestRefreshes,
+);
+export const linkedPullRequestDetailAtom = createLinkedPullRequestSummaryAtomFamily(
+  connectionAtomRuntime,
+  pullRequestRefreshes,
+);
 
 const observedPullRequestSummaryAtom = Atom.family((key: string) =>
   Atom.make<PullRequestSummary | null>(null).pipe(
@@ -147,6 +156,21 @@ const usePullRequestStatsQuery = createMergedEnvironmentQuery(
   "web-pull-requests:list-stats",
   pullRequestEnvironment.listStats,
 );
+
+const usePullRequestTurnRefreshQuery = createMergedEnvironmentQuery(
+  "web-pull-requests:turn-refreshes",
+  ({ environmentId, input }: EnvironmentQueryTarget<PullRequestRefreshSubscriptionInput>) =>
+    pullRequestRefreshes({
+      environmentId,
+      ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+    }),
+);
+
+export function usePullRequestTurnRefreshes(
+  targets: ReadonlyArray<EnvironmentQueryTarget<PullRequestRefreshSubscriptionInput>>,
+): ReadonlyArray<readonly [EnvironmentId, PullRequestRefreshEvent]> {
+  return usePullRequestTurnRefreshQuery(targets).values;
+}
 
 export interface MergedPullRequestListView {
   readonly data: MergedPullRequestList | null;

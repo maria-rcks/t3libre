@@ -689,6 +689,18 @@ export const PullRequestInvalidateInput = Schema.Struct({
 });
 export type PullRequestInvalidateInput = typeof PullRequestInvalidateInput.Type;
 
+export const PullRequestRefreshSubscriptionInput = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+});
+export type PullRequestRefreshSubscriptionInput = typeof PullRequestRefreshSubscriptionInput.Type;
+
+/** Monotonic signal that pull request host data may have changed after a thread turn. */
+export const PullRequestRefreshEvent = Schema.Struct({
+  projectId: ProjectId,
+  revision: NonNegativeInt,
+});
+export type PullRequestRefreshEvent = typeof PullRequestRefreshEvent.Type;
+
 export const PullRequestDetail = Schema.Struct({
   provider: SourceControlProviderKind,
   capabilities: PullRequestCapabilities,

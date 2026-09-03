@@ -2681,6 +2681,73 @@ it.effect("an explicit invalidation makes the next listing ask the host again", 
   }),
 );
 
+it.effect("refreshes listing and change request caches after a thread turn", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let listCalls = 0;
+      let unrelatedListCalls = 0;
+      let detailCalls = 0;
+      let unrelatedDetailCalls = 0;
+      const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+      const unrelatedReference = {
+        projectId: "p2" as ProjectId,
+        repository: "acme/api",
+        number: 1,
+      };
+      const service = yield* makeService({
+        projects: [
+          project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
+          project({ id: "p2", title: "api", workspaceRoot: "/b", repository: "acme/api" }),
+        ],
+        providers: [
+          fakeProvider("github", {
+            listChangeRequests: (input) => {
+              const calls = input.repository === "acme/web" ? ++listCalls : ++unrelatedListCalls;
+              return Effect.succeed({
+                items: [changeRequest(calls, "2026-07-02T00:00:00Z")],
+                truncated: false,
+                continues: false,
+              });
+            },
+            getChangeRequest: (input) => {
+              const calls =
+                input.repository === "acme/web" ? ++detailCalls : ++unrelatedDetailCalls;
+              return Effect.succeed(hostedChangeRequest(`body ${calls}`));
+            },
+          }),
+        ],
+      });
+      const observedRefresh = yield* Stream.runHead(service.subscribeRefreshes).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      const firstList = yield* service.list({ state: "open", projectId: reference.projectId });
+      yield* service.list({ state: "open", projectId: unrelatedReference.projectId });
+      const firstDetail = yield* service.detail(reference);
+      const unrelatedDetail = yield* service.detail(unrelatedReference);
+      assert.strictEqual(firstList.entries[0]?.number, 1);
+      assert.strictEqual(firstDetail.body, "body 1");
+      assert.strictEqual(unrelatedDetail.body, "body 1");
+
+      yield* service.refreshAfterTurn(reference.projectId);
+      const refresh = Option.getOrThrow(yield* Fiber.join(observedRefresh));
+      const refreshedList = yield* service.list({ state: "open", projectId: reference.projectId });
+      yield* service.list({ state: "open", projectId: unrelatedReference.projectId });
+      const refreshedDetail = yield* service.detail(reference);
+      yield* service.detail(unrelatedReference);
+
+      assert.isAbove(refresh.revision, 0);
+      assert.strictEqual(refresh.projectId, reference.projectId);
+      assert.strictEqual(refreshedList.entries[0]?.number, 2);
+      assert.strictEqual(refreshedDetail.body, "body 2");
+      assert.strictEqual(listCalls, 2);
+      assert.strictEqual(unrelatedListCalls, 1);
+      assert.strictEqual(detailCalls, 2);
+      assert.strictEqual(unrelatedDetailCalls, 1);
+    }),
+  ),
+);
+
 it.effect("a mutation makes the next listing ask the host again, with no client asking", () =>
   Effect.gen(function* () {
     let hostCalls = 0;

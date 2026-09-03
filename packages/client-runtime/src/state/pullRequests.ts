@@ -1,7 +1,10 @@
 import {
+  type EnvironmentId,
   WS_METHODS,
   type PullRequestDetail,
   type PullRequestDiffInput,
+  type PullRequestRefreshEvent,
+  type ProjectId,
   type PullRequestSummary,
   type VcsStatusResult,
 } from "@t3tools/contracts";
@@ -9,12 +12,13 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import {
   createAtomCommandScheduler,
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
   createEnvironmentQueryAtomFamily,
 } from "./runtime.ts";
 import { PullRequestDiffLoader } from "./pullRequestDiffHttp.ts";
@@ -34,9 +38,30 @@ export class EnvironmentHttpConnectionNotReadyError extends Data.TaggedError(
 
 export const LINKED_PULL_REQUEST_IDLE_TTL_MS = 5_000;
 
+export type PullRequestRefreshAtomFamily = (target: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId?: ProjectId;
+}) => Atom.Atom<AsyncResult.AsyncResult<PullRequestRefreshEvent, unknown>>;
+
+/** One lightweight server signal shared by every mounted pull request read in an environment. */
+export function createPullRequestRefreshAtomFamily<R, E>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
+): PullRequestRefreshAtomFamily {
+  const family = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+    label: "environment-data:pull-requests:turn-refreshes",
+    tag: WS_METHODS.pullRequestsSubscribeRefreshes,
+  });
+  return ({ environmentId, projectId }) =>
+    family({
+      environmentId,
+      input: projectId === undefined ? {} : { projectId },
+    });
+}
+
 /** Refresh only the live fields a linked thread renders. */
 export function createLinkedPullRequestSummaryAtomFamily<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
+  refreshes = createPullRequestRefreshAtomFamily(runtime),
 ) {
   return createEnvironmentRpcQueryAtomFamily(runtime, {
     label: "environment-data:pull-requests:linked-summary",
@@ -44,6 +69,8 @@ export function createLinkedPullRequestSummaryAtomFamily<R, E>(
     staleTimeMs: 60_000,
     refreshIntervalMs: 60_000,
     idleTtlMs: LINKED_PULL_REQUEST_IDLE_TTL_MS,
+    refreshTrigger: ({ environmentId, input }) =>
+      refreshes({ environmentId, projectId: input.projectId }),
   });
 }
 
@@ -68,8 +95,14 @@ export function pullRequestDetailToVcsStatus(
  */
 export function createPullRequestEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | PullRequestDiffLoader | R, E>,
+  refreshes = createPullRequestRefreshAtomFamily(runtime),
 ) {
   const commandScheduler = createAtomCommandScheduler();
+  const refreshProject = (environmentId: EnvironmentId, projectId: ProjectId | undefined) =>
+    refreshes({
+      environmentId,
+      ...(projectId === undefined ? {} : { projectId }),
+    });
   const serialPerEnvironment = {
     mode: "serial",
     key: ({ environmentId }: { readonly environmentId: string }) => environmentId,
@@ -78,6 +111,7 @@ export function createPullRequestEnvironmentAtoms<R, E>(
     label: "environment-data:pull-requests:activity",
     tag: WS_METHODS.pullRequestsActivity,
     staleTimeMs: 15_000,
+    refreshTrigger: ({ environmentId, input }) => refreshProject(environmentId, input.projectId),
   });
   return {
     list: createEnvironmentRpcQueryAtomFamily(runtime, {
@@ -95,11 +129,21 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       label: "environment-data:pull-requests:list-stats",
       tag: WS_METHODS.pullRequestsListStats,
       staleTimeMs: 60_000,
+      refreshTrigger: ({ environmentId, input }) => {
+        const projectId = input.refs[0]?.projectId;
+        return refreshProject(
+          environmentId,
+          projectId !== undefined && input.refs.every((ref) => ref.projectId === projectId)
+            ? projectId
+            : undefined,
+        );
+      },
     }),
     detail: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:detail",
       tag: WS_METHODS.pullRequestsDetail,
       staleTimeMs: 15_000,
+      refreshTrigger: ({ environmentId, input }) => refreshProject(environmentId, input.projectId),
     }),
     activity,
     threadComments: createEnvironmentRpcCommand(runtime, {

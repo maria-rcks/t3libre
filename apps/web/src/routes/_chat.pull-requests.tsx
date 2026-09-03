@@ -9,6 +9,7 @@ import type {
   PullRequestListInput,
   PullRequestListResult,
   PullRequestListState,
+  PullRequestRefreshSubscriptionInput,
   SourceControlProviderKind,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
@@ -135,6 +136,7 @@ import {
   pullRequestEnvironment,
   usePullRequestList,
   usePullRequestListStats,
+  usePullRequestTurnRefreshes,
   type EnvironmentQueryTarget,
 } from "../state/pullRequests";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -632,6 +634,28 @@ function PullRequestsRouteView() {
         .join("|"),
     [environmentQueries],
   );
+  const turnRefreshTargets = useMemo(
+    () =>
+      environmentQueries.map(({ environmentId, projectIds }) => {
+        const projectId =
+          scopedProjectId !== undefined
+            ? scopedProjectId
+            : projectIds?.length === 1
+              ? projectIds[0]
+              : undefined;
+        return {
+          environmentId,
+          input: (projectId === undefined
+            ? {}
+            : { projectId }) satisfies PullRequestRefreshSubscriptionInput,
+        };
+      }),
+    [environmentQueries, scopedProjectId],
+  );
+  const turnRefreshes = usePullRequestTurnRefreshes(turnRefreshTargets);
+  const turnRefreshToken = turnRefreshes
+    .map(([environmentId, event]) => `${environmentId}:${event.projectId}:${event.revision}`)
+    .join("|");
   // Page size is view state, not a URL concern: a shared link should open the first page.
   const scopeKey = `${environmentKey}:${assignmentKey}:${search.state}:${search.involvement}:${scopedProjectId ?? ""}:${search.host ?? ""}:${search.draft ?? ""}:${search.review ?? ""}:${search.checks ?? ""}:${search.author ?? ""}:${search.labels?.join("\u0000") ?? ""}`;
   const filterKey = `${scopeKey}:${sentQuery}`;
@@ -1090,6 +1114,22 @@ function PullRequestsRouteView() {
       cursors: null,
     });
   };
+
+  const appliedTurnRefreshToken = useRef("");
+  const refreshAfterTurn = useEffectEvent(() => {
+    refreshList();
+    baselineQuery.refresh();
+    facetQuery.refresh();
+    authoredQuery.refresh();
+    reviewingQuery.refresh();
+  });
+  useEffect(() => {
+    if (turnRefreshToken.length === 0 || appliedTurnRefreshToken.current === turnRefreshToken) {
+      return;
+    }
+    appliedTurnRefreshToken.current = turnRefreshToken;
+    refreshAfterTurn();
+  }, [turnRefreshToken]);
 
   // The list goes stale the same way the detail does: somebody opens a pull request, a check
   // finishes, a branch is merged. So it reads again on the way back to the window, and once a

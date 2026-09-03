@@ -62,6 +62,7 @@ import { ProviderValidationError } from "../../provider/Errors.ts";
 import { ServerConfig } from "../../config.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
 import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
+import { PullRequestService } from "../../pullRequest/PullRequestService.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
@@ -294,6 +295,7 @@ describe("CheckpointReactor", () => {
     readonly providerSessionCwd?: string;
     readonly providerName?: ProviderDriverKind;
     readonly gitStatusRefreshCalls?: Array<string>;
+    readonly pullRequestRefreshCalls?: Array<ProjectId>;
   }) {
     const cwd = createGitRepository();
     tempDirs.push(cwd);
@@ -348,6 +350,14 @@ describe("CheckpointReactor", () => {
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(RuntimeReceiptBusLive),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
+      Layer.provideMerge(
+        Layer.mock(PullRequestService)({
+          refreshAfterTurn: (projectId) =>
+            Effect.sync(() => {
+              options?.pullRequestRefreshCalls?.push(projectId);
+            }),
+        }),
+      ),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
       Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer))),
       Layer.provideMerge(
@@ -537,6 +547,90 @@ describe("CheckpointReactor", () => {
       ),
     ).toBe("v2\n");
   });
+
+  effectIt.effect("refreshes pull request data once when a running turn terminates", () =>
+    Effect.gen(function* () {
+      const pullRequestRefreshCalls: ProjectId[] = [];
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          seedFilesystemCheckpoints: false,
+          pullRequestRefreshCalls,
+        }),
+      );
+      const threadId = ThreadId.make("thread-1");
+      const turnId = asTurnId("turn-refresh-prs");
+
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-pr-refresh-running"),
+        threadId,
+        session: {
+          threadId,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: turnId,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        },
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+      yield* Effect.promise(() => harness.drain());
+      expect(pullRequestRefreshCalls).toEqual([]);
+
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-pr-refresh-ready"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:02.000Z",
+        },
+        createdAt: "2026-01-01T00:00:02.000Z",
+      });
+      yield* Effect.promise(() => harness.drain());
+
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-pr-refresh-ready-again"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:03.000Z",
+        },
+        createdAt: "2026-01-01T00:00:03.000Z",
+      });
+      yield* Effect.promise(() => harness.drain());
+
+      expect(pullRequestRefreshCalls).toEqual([asProjectId("project-1")]);
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.make("cmd-pr-refresh-missed-start"),
+        threadId,
+        turnId: asTurnId("turn-with-missed-start"),
+        completedAt: "2026-01-01T00:00:04.000Z",
+        checkpointRef: checkpointRefForThreadTurn(threadId, 2),
+        checkpointTurnCount: 2,
+        status: "ready",
+        files: [],
+        createdAt: "2026-01-01T00:00:04.000Z",
+      });
+      yield* Effect.promise(() => harness.drain());
+
+      expect(pullRequestRefreshCalls).toEqual([asProjectId("project-1"), asProjectId("project-1")]);
+    }),
+  );
 
   it("refreshes local git status state on turn completion using the session cwd", async () => {
     const gitStatusRefreshCalls: string[] = [];
