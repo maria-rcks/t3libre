@@ -855,7 +855,14 @@ export function ProviderInstanceCard({
               >
                 Display name
               </label>
-              <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <div className="flex min-w-0 flex-nowrap items-center gap-2 sm:justify-end">
+                <ProviderAccentColorPicker
+                  layout="inline"
+                  displayName={displayName}
+                  value={accentColor}
+                  onCommit={updateAccentColor}
+                  commitDelayMs={120}
+                />
                 <DraftInput
                   id={`provider-instance-${instanceId}-display-name`}
                   size="sm"
@@ -864,13 +871,6 @@ export function ProviderInstanceCard({
                   onCommit={updateDisplayName}
                   placeholder={driverOption?.label ?? "Instance label"}
                   spellCheck={false}
-                />
-                <ProviderAccentColorPicker
-                  layout="inline"
-                  displayName={displayName}
-                  value={accentColor}
-                  onCommit={updateAccentColor}
-                  commitDelayMs={120}
                 />
               </div>
               <div className={PROVIDER_FIELD_GROUP_LABEL_CLASS_NAME}>Runtime</div>

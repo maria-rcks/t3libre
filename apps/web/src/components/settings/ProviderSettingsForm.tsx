@@ -160,9 +160,8 @@ interface ProviderSettingsFormProps {
   readonly idPrefix: string;
   /**
    * `card` stacks label over control, `dialog` is the compact wizard layout,
-   * `grid` emits a label cell and a control cell per field for a parent
-   * two-column grid (label column left, control right), with the description
-   * beside a fixed-width control so each field stays on one line.
+   * `grid` emits label and control cells followed by an optional full-width
+   * description row for a parent two-column grid.
    */
   readonly variant: "card" | "dialog" | "grid";
   readonly onChange: (nextConfig: Record<string, unknown> | undefined) => void;
@@ -204,9 +203,8 @@ function ProviderSettingsFieldRow({
   ) : null;
 
   if (variant === "grid") {
-    // Label cell, then a control cell where the description sits beside a
-    // fixed-width control and wraps under it when the pane is narrow. The
-    // description is outside the label, so the control points at it instead.
+    // Label and control cells are followed by a full-width description row.
+    // The description remains outside the label so the control points at it.
     const descriptionId = field.description ? `${inputId}-description` : undefined;
     return (
       <>
@@ -217,7 +215,7 @@ function ProviderSettingsFieldRow({
             {field.label}
           </label>
         )}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 sm:justify-end">
           {field.control === "switch" ? (
             <span className="flex h-8 items-center sm:h-7">
               <Switch
@@ -255,12 +253,15 @@ function ProviderSettingsFieldRow({
               spellCheck={false}
             />
           )}
-          {field.description ? (
-            <span id={descriptionId} className="text-[11px] leading-snug text-muted-foreground">
-              {field.description}
-            </span>
-          ) : null}
         </div>
+        {field.description ? (
+          <span
+            id={descriptionId}
+            className="col-span-full -mt-1.5 text-[11px] leading-snug text-muted-foreground"
+          >
+            {field.description}
+          </span>
+        ) : null}
       </>
     );
   }

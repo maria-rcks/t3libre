@@ -253,11 +253,7 @@ function ProviderSettingsPanelContent() {
   const deviceTabs =
     !onlyPrimaryDevice && options.length > 0 ? (
       <ScrollArea hideScrollbars scrollFade className="mx-3 h-11 min-w-0 rounded-none sm:mx-4">
-        <div
-          role="group"
-          aria-label="Devices"
-          className="flex h-full w-max min-w-full border-b border-border/70 px-1"
-        >
+        <div role="group" aria-label="Devices" className="flex h-full w-max min-w-full px-1">
           {options.map((environment) => {
             const Icon = providerEnvironmentIcon(environment);
             const selected = environment.environmentId === effectiveEnvironmentId;
@@ -857,6 +853,7 @@ export function EnvironmentProviderSettings({
     <>
       <SettingsSection
         {...searchableSetting("providers")}
+        variant="plain"
         headerAction={
           <div className="flex min-w-0 items-center gap-2">
             {readOnly ? (
@@ -912,7 +909,7 @@ export function EnvironmentProviderSettings({
         {readOnly ? (
           <SettingsRow
             title="Limited permissions"
-            description={`This session can view ${environmentLabel}'s providers, but its credential does not allow changing their configuration.`}
+            description={`This session can view ${environmentLabel}'s providers but can't change their settings.`}
           />
         ) : null}
         <div className="space-y-1">
@@ -959,7 +956,7 @@ export function EnvironmentProviderSettings({
                     </PolicyTooltip>
                   </span>
                 }
-                description="Refresh availability, versions, auth state, and models in the background. 0 seconds turns background checks off."
+                description="Refresh provider status, versions, and models in the background. Set to 0 to disable."
                 resetAction={
                   providerHealthRefreshIntervalSeconds !==
                   defaultProviderHealthRefreshIntervalSeconds ? (
