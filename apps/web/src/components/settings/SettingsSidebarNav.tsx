@@ -346,7 +346,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                       <Icon />
                       <span className="truncate">{item.label}</span>
                     </SidebarMenuButton>
-                    {pageSections ? (
+                    {isActive && pageSections ? (
                       <SidebarMenuSub className="border-l-0">
                         {pageSections.map((section) => (
                           <SidebarMenuSubItem key={section.targetId}>
