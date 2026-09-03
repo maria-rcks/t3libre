@@ -930,9 +930,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   );
 
   useEffect(() => {
+    if (!props.activeSurfaceId || !tabScrollState.hasOverflow) return;
     const activeTab = tabListRef.current?.querySelector<HTMLElement>("[data-active-tab='true']");
     activeTab?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [props.activeSurfaceId]);
+  }, [props.activeSurfaceId, tabScrollState.hasOverflow]);
 
   useEffect(() => {
     const viewport = tabScrollViewport(tabListRef.current);
@@ -1195,33 +1196,37 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button
-                    aria-label="Scroll tabs left"
-                    disabled={!tabScrollState.canScrollLeft}
-                    onClick={() => scrollTabs(-1)}
-                    size="icon-xs"
-                    variant="ghost"
-                  />
+                  <span className="inline-flex">
+                    <Button
+                      aria-label="Scroll tabs left"
+                      disabled={!tabScrollState.canScrollLeft}
+                      onClick={() => scrollTabs(-1)}
+                      size="icon-xs"
+                      variant="ghost"
+                    >
+                      <ChevronLeft />
+                    </Button>
+                  </span>
                 }
-              >
-                <ChevronLeft />
-              </TooltipTrigger>
+              />
               <TooltipPopup>Scroll tabs left</TooltipPopup>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button
-                    aria-label="Scroll tabs right"
-                    disabled={!tabScrollState.canScrollRight}
-                    onClick={() => scrollTabs(1)}
-                    size="icon-xs"
-                    variant="ghost"
-                  />
+                  <span className="inline-flex">
+                    <Button
+                      aria-label="Scroll tabs right"
+                      disabled={!tabScrollState.canScrollRight}
+                      onClick={() => scrollTabs(1)}
+                      size="icon-xs"
+                      variant="ghost"
+                    >
+                      <ChevronRight />
+                    </Button>
+                  </span>
                 }
-              >
-                <ChevronRight />
-              </TooltipTrigger>
+              />
               <TooltipPopup>Scroll tabs right</TooltipPopup>
             </Tooltip>
           </div>
