@@ -1033,19 +1033,21 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         start.pipe(
           Effect.andThen(Deferred.await(completion)),
           Effect.timeout(nativeCompletionTimeout),
-          Effect.tapError(() =>
+          Effect.catchTag("TimeoutError", (cause) =>
             Effect.sync(() => {
               timedOutNativeCompactions.add(threadId);
-            }),
-          ),
-          Effect.mapError(
-            (cause) =>
-              new ProviderAdapterRequestError({
-                provider: routed.adapter.provider,
-                method: "thread/compact",
-                detail: `Provider did not report completed context compaction within ${nativeCompletionTimeout}.`,
-                cause,
-              }),
+            }).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new ProviderAdapterRequestError({
+                    provider: routed.adapter.provider,
+                    method: "thread/compact",
+                    detail: `Provider did not report completed context compaction within ${nativeCompletionTimeout}.`,
+                    cause,
+                  }),
+                ),
+              ),
+            ),
           ),
         );
       const awaitFallbackCompaction = Deferred.await(completion).pipe(
