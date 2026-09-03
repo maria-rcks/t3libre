@@ -22,15 +22,18 @@ authenticated.
 ## Dev
 
 - `vp run dev`: Starts contracts, server, and web in watch mode.
-- `vp run dev --share`: Also publishes the web port over HTTPS on this machine's tailnet. The
-  startup pairing URL is built against the shared origin, and the mapping is removed on exit.
+- `vp run dev --share`: Publishes the web port over HTTPS. It uses T3 Connect when the selected
+  T3 home has stored CLI authorization, otherwise it uses Tailscale. The selected transport must
+  start successfully; it never degrades to a local-only run. The startup pairing URL is built
+  against the shared origin, and the temporary share is removed on exit.
   Shared runs default to Vite's bundled dev mode (`T3CODE_BUNDLED_DEV=1`): a remote browser pays a
   network round trip per import level in unbundled dev, which turns a cold module graph into
   minutes of waterfall. Set `T3CODE_BUNDLED_DEV=0` to opt a shared run back out.
-- `vp run dev --share --share-via=t3-connect --home-dir .t3`: Publishes the same single-origin dev stack through
-  T3 Connect without Tailscale. Run `node apps/server/src/bin.ts connect login --base-dir .t3`
-  once for the worktree first. Using the same explicit directory keeps login and runtime state aligned
-  in a main checkout or linked worktree. The managed tunnel terminates at the backend: T3 routes stay there,
+- `vp run dev --share --share-via=t3-connect --home-dir .t3`: Forces T3 Connect. Use
+  `--share-via=tailscale` to force private tailnet Serve even when Connect authorization exists.
+  Run `node apps/server/src/bin.ts connect login --base-dir .t3` once for the worktree first.
+  Using the same explicit directory keeps login and runtime state aligned in a main checkout or
+  linked worktree. The managed tunnel terminates at the backend: T3 routes stay there,
   while the invocation-prefixed Vite bundle and HMR socket are proxied from there. Connect sharing
   requires bundled dev mode and keeps source, `/@fs`, cookies, and T3 credentials outside the public
   proxy. Its temporary relay lease is removed on exit and expires after an unclean stop. The

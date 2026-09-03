@@ -11,6 +11,7 @@ import { HostProcessEnvironment, HostProcessWorkingDirectory } from "@t3tools/sh
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Hash from "effect/Hash";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -20,7 +21,7 @@ import * as Schema from "effect/Schema";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
 
-import { type DevShareError, shareDevServer, unshareDevServer } from "./lib/dev-share.ts";
+import { DevShareError, shareDevServer, unshareDevServer } from "./lib/dev-share.ts";
 import { loadRepoEnv } from "./lib/public-config.ts";
 
 Object.assign(process.env, loadRepoEnv());
@@ -31,6 +32,7 @@ const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
 const DESKTOP_DEV_LOOPBACK_HOST = "127.0.0.1";
 const CONNECT_DEV_SHARE_PREFIX = "/__t3-connect-dev-share/";
+const CONNECT_CLI_OAUTH_TOKEN_FILE = "cloud-cli-oauth-token.bin";
 // HTTP(S) requests to these ports are blocked by the Fetch standard before a
 // browser reaches the network. Keep the complete list here so explicit or
 // future wider offsets cannot produce a URL that curl accepts but browsers
@@ -101,6 +103,18 @@ type PortAvailabilityCheck<R = never> = (
 ) => Effect.Effect<boolean, never, R>;
 
 const DEV_RUNNER_MODES = Object.keys(MODE_ARGS) as Array<DevMode>;
+// Matches the local credential written by cloud/CliTokenManager. Selection
+// validates its shape without refreshing it; the spawned backend owns refresh
+// and makes a stale or revoked credential fail the selected Connect run.
+const StoredConnectCredentialJson = Schema.fromJsonString(
+  Schema.Struct({
+    accessToken: Schema.String,
+    refreshToken: Schema.String,
+    expiresAtEpochMs: Schema.Number,
+    identity: Schema.optional(Schema.String),
+  }),
+);
+const decodeStoredConnectCredential = Schema.decodeUnknownEffect(StoredConnectCredentialJson);
 
 export function getDevRunnerModeArgs(mode: DevMode): ReadonlyArray<string> {
   return MODE_ARGS[mode];
@@ -213,14 +227,35 @@ export class DevRunnerConnectShareUnsupportedError extends Schema.TaggedErrorCla
   }
 }
 
+export class DevRunnerShareSelectionError extends Schema.TaggedErrorClass<DevRunnerShareSelectionError>()(
+  "DevRunnerShareSelectionError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to inspect stored T3 Connect authorization for automatic sharing.";
+  }
+}
+
+export class DevRunnerStoredConnectCredentialInvalidError extends Schema.TaggedErrorClass<DevRunnerStoredConnectCredentialInvalidError>()(
+  "DevRunnerStoredConnectCredentialInvalidError",
+  {},
+) {
+  override get message(): string {
+    return "Stored T3 Connect authorization is invalid. Run `t3 connect login` for this T3 home again.";
+  }
+}
+
 export const DevRunnerError = Schema.Union([
   DevRunnerConfigurationError,
   DevRunnerConnectShareUnsupportedError,
+  DevRunnerShareSelectionError,
+  DevRunnerStoredConnectCredentialInvalidError,
   DevRunnerHostNotProxiableError,
   DevRunnerInvalidPortOffsetError,
   DevRunnerPortExhaustedError,
   DevRunnerProcessError,
   DevRunnerProcessExitError,
+  DevShareError,
 ]);
 export type DevRunnerError = typeof DevRunnerError.Type;
 export const isDevRunnerError = Schema.is(DevRunnerError);
@@ -307,6 +342,50 @@ function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, neve
 
     return yield* DEFAULT_T3_HOME;
   });
+}
+
+export const resolveAutomaticDevShareProvider = Effect.fn(
+  "devRunner.resolveAutomaticDevShareProvider",
+)(function* (input: { readonly baseDir: string; readonly baseDirIsExplicit: boolean }) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const credentialPath = path.join(
+    input.baseDir,
+    input.baseDirIsExplicit ? "userdata" : "dev",
+    "secrets",
+    CONNECT_CLI_OAUTH_TOKEN_FILE,
+  );
+  const storedCredential = yield* fs.readFileString(credentialPath).pipe(
+    Effect.map((value) => Option.some(value)),
+    Effect.catch((cause) =>
+      cause.reason._tag === "NotFound"
+        ? Effect.succeed(Option.none<string>())
+        : Effect.fail(new DevRunnerShareSelectionError({ cause })),
+    ),
+  );
+  if (Option.isNone(storedCredential)) return "tailscale" as const;
+  yield* decodeStoredConnectCredential(storedCredential.value).pipe(
+    Effect.mapError(() => new DevRunnerStoredConnectCredentialInvalidError()),
+  );
+  return "t3-connect" as const;
+});
+
+function validateConnectShareCompatibility(input: DevRunnerCliInput, host: string | undefined) {
+  if (input.mode !== "dev") {
+    return Effect.fail(new DevRunnerConnectShareUnsupportedError({ mode: input.mode }));
+  }
+  if (input.devUrl !== undefined) {
+    return Effect.fail(
+      new DevRunnerConnectShareUnsupportedError({
+        mode: input.mode,
+        devUrl: input.devUrl.toString(),
+      }),
+    );
+  }
+  if (host !== undefined && host !== "localhost" && host !== "127.0.0.1") {
+    return Effect.fail(new DevRunnerConnectShareUnsupportedError({ mode: input.mode, host }));
+  }
+  return Effect.void;
 }
 
 interface CreateDevRunnerEnvInput {
@@ -650,27 +729,15 @@ interface DevRunnerCliInput {
   readonly devUrl: URL | undefined;
   readonly dryRun: boolean;
   readonly share: boolean;
-  readonly shareVia?: DevShareProvider;
+  readonly shareVia?: DevShareProvider | undefined;
   readonly runArgs: ReadonlyArray<string>;
 }
 
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
-    const shareVia = input.shareVia ?? "tailscale";
     const host = input.host?.trim() || undefined;
-    if (input.share && shareVia === "t3-connect") {
-      if (input.mode !== "dev") {
-        return yield* new DevRunnerConnectShareUnsupportedError({ mode: input.mode });
-      }
-      if (input.devUrl !== undefined) {
-        return yield* new DevRunnerConnectShareUnsupportedError({
-          mode: input.mode,
-          devUrl: input.devUrl.toString(),
-        });
-      }
-      if (host !== undefined && host !== "localhost" && host !== "127.0.0.1") {
-        return yield* new DevRunnerConnectShareUnsupportedError({ mode: input.mode, host });
-      }
+    if (input.share && input.shareVia === "t3-connect") {
+      yield* validateConnectShareCompatibility(input, host);
     }
     const { portOffset, devInstance } = yield* OffsetConfig.pipe(
       Effect.mapError(
@@ -744,14 +811,27 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     delete env.T3CODE_CONNECT_DEV_SHARE;
     delete env.T3CODE_CONNECT_DEV_SHARE_BASE;
 
+    const baseDir = env.T3CODE_HOME ?? (yield* DEFAULT_T3_HOME);
+    const shareVia =
+      input.shareVia ??
+      (input.share && input.mode === "dev"
+        ? yield* resolveAutomaticDevShareProvider({
+            baseDir,
+            baseDirIsExplicit: env.T3CODE_HOME !== undefined,
+          })
+        : "tailscale");
+    if (input.share && input.shareVia === undefined && shareVia === "t3-connect") {
+      yield* validateConnectShareCompatibility(input, host);
+    }
+
     const selectionSuffix =
       serverOffset !== offset || webOffset !== offset
         ? ` selectedOffset(server=${serverOffset},web=${webOffset})`
         : "";
-    const baseDir = env.T3CODE_HOME ?? (yield* DEFAULT_T3_HOME);
+    const shareSuffix = input.share ? ` shareVia=${shareVia}` : "";
 
     yield* Effect.logInfo(
-      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T3CODE_PORT)} webPort=${String(env.PORT)} baseDir=${baseDir}`,
+      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T3CODE_PORT)} webPort=${String(env.PORT)} baseDir=${baseDir}${shareSuffix}`,
     );
 
     // Before the share block: --dry-run only resolves and prints. Sharing would
@@ -814,8 +894,8 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         // by re-running --share. A lease protocol closing that window existed
         // and was removed as more machinery than a dev convenience warrants.
         //
-        // A tailnet that isn't up shouldn't stop the dev server from starting —
-        // warn, and carry on serving locally.
+        // --share promises a reachable remote URL. If Tailscale cannot create
+        // one, fail the run instead of silently falling back to local-only.
         const shared = yield* Effect.acquireRelease(
           shareDevServer({ webPort: sharedWebPort }),
           () =>
@@ -833,43 +913,39 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
               ),
             ),
         ).pipe(
-          Effect.tapError((error: DevShareError) =>
+          Effect.tapError((error) =>
             Effect.logWarning(
               `[dev-runner] could not share on the tailnet: ${error.message}${
                 error.hint ? ` — ${error.hint}` : ""
               }`,
             ),
           ),
-          Effect.option,
-          Effect.map(Option.getOrUndefined),
         );
 
-        if (shared) {
-          // The app is reached from the tailnet origin. Vite already allows
-          // *.ts.net hosts; the backend needs the origin for credentialed
-          // requests that bypass the proxy (desktop renderer, direct calls).
-          env.T3CODE_DEV_ALLOWED_ORIGINS = [
-            env.T3CODE_DEV_ALLOWED_ORIGINS,
-            new URL(shared.url).origin,
-          ]
-            .filter((entry) => entry && entry.length > 0)
-            .join(",");
-          // The server builds its pairing URL from this, so the URL printed at
-          // startup is already the shareable one — no rewriting by hand. An
-          // explicit --dev-url still wins.
-          if (input.devUrl === undefined) {
-            env.VITE_DEV_SERVER_URL = shared.url;
-          }
-          // A shared origin serves a remote browser, where unbundled dev's
-          // per-module requests each pay a tailnet round trip — a cold module
-          // graph takes minutes to first paint. Bundled dev collapses that to
-          // a few chunk requests. Only defaulted, so T3CODE_BUNDLED_DEV=0
-          // still opts a --share run back out.
-          if (env.T3CODE_BUNDLED_DEV === undefined) {
-            env.T3CODE_BUNDLED_DEV = "1";
-          }
-          yield* Effect.logInfo(`[dev-runner] shared on tailnet: ${shared.url}`);
+        // The app is reached from the tailnet origin. Vite already allows
+        // *.ts.net hosts; the backend needs the origin for credentialed
+        // requests that bypass the proxy (desktop renderer, direct calls).
+        env.T3CODE_DEV_ALLOWED_ORIGINS = [
+          env.T3CODE_DEV_ALLOWED_ORIGINS,
+          new URL(shared.url).origin,
+        ]
+          .filter((entry) => entry && entry.length > 0)
+          .join(",");
+        // The server builds its pairing URL from this, so the URL printed at
+        // startup is already the shareable one — no rewriting by hand. An
+        // explicit --dev-url still wins.
+        if (input.devUrl === undefined) {
+          env.VITE_DEV_SERVER_URL = shared.url;
         }
+        // A shared origin serves a remote browser, where unbundled dev's
+        // per-module requests each pay a tailnet round trip — a cold module
+        // graph takes minutes to first paint. Bundled dev collapses that to
+        // a few chunk requests. Only defaulted, so T3CODE_BUNDLED_DEV=0
+        // still opts a --share run back out.
+        if (env.T3CODE_BUNDLED_DEV === undefined) {
+          env.T3CODE_BUNDLED_DEV = "1";
+        }
+        yield* Effect.logInfo(`[dev-runner] shared on tailnet: ${shared.url}`);
       }
     }
 
@@ -980,7 +1056,7 @@ const devRunnerCli = Command.make("dev-runner", {
   ),
   share: Flag.boolean("share").pipe(
     Flag.withDescription(
-      "Publish the web dev server over HTTPS and print a pairing URL. Uses Tailscale unless --share-via is set.",
+      "Publish the web dev server over HTTPS and print a pairing URL. Uses stored T3 Connect authorization when present, otherwise Tailscale.",
     ),
     Flag.withDefault(false),
   ),
@@ -988,7 +1064,8 @@ const devRunnerCli = Command.make("dev-runner", {
     Flag.withDescription(
       "Sharing transport: tailscale uses private tailnet Serve; t3-connect uses an authenticated managed tunnel.",
     ),
-    Flag.withDefault("tailscale"),
+    Flag.optional,
+    Flag.map(Option.getOrUndefined),
   ),
   runArgs: Argument.string("run-arg").pipe(
     Argument.withDescription("Additional Vite+ run args (pass after `--`)."),

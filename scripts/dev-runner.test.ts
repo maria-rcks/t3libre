@@ -26,6 +26,7 @@ import {
   findFirstAvailableOffset,
   getDevRunnerModeArgs,
   isBrowserAllowedPort,
+  resolveAutomaticDevShareProvider,
   resolveModePortOffsets,
   resolveOffset,
   runDevRunnerWithInput,
@@ -57,6 +58,77 @@ function mockProcess(exit: number | PlatformError.PlatformError) {
     getInputFd: () => Sink.drain,
     getOutputFd: () => Stream.empty,
   });
+}
+
+function mockProcessWithStdout(stdout: string, exit = 0) {
+  return ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(2),
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exit)),
+    isRunning: Effect.succeed(false),
+    kill: () => Effect.void,
+    unref: Effect.succeed(Effect.void),
+    stdin: Sink.drain,
+    stdout: Stream.make(new TextEncoder().encode(stdout)),
+    stderr: Stream.empty,
+    all: Stream.empty,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+  });
+}
+
+const temporaryT3Home = Effect.acquireRelease(
+  Effect.sync(() => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-devrunner-home-"))),
+  (home) => Effect.sync(() => NodeFS.rmSync(home, { recursive: true, force: true })),
+);
+
+function addStoredConnectCredential(home: string, stateDir = "userdata"): void {
+  const secretsDir = NodePath.join(home, stateDir, "secrets");
+  NodeFS.mkdirSync(secretsDir, { recursive: true });
+  NodeFS.writeFileSync(
+    NodePath.join(secretsDir, "cloud-cli-oauth-token.bin"),
+    JSON.stringify({
+      accessToken: "test-access-token",
+      refreshToken: "test-refresh-token",
+      expiresAtEpochMs: 4_102_444_800_000,
+    }),
+  );
+}
+
+interface ShareSpawnCapture {
+  devStackSpawns: number;
+  tailscaleArgs: Array<ReadonlyArray<string>>;
+  spawnedEnv: Record<string, string | undefined> | undefined;
+}
+
+function makeShareSpawnCapture(): ShareSpawnCapture {
+  return { devStackSpawns: 0, tailscaleArgs: [], spawnedEnv: undefined };
+}
+
+function makeShareSpawnerLayer(capture: ShareSpawnCapture, tailscaleStatusExit = 0) {
+  return Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make((command) => {
+      const spawned = command as unknown as {
+        readonly command: string;
+        readonly args: ReadonlyArray<string>;
+        readonly options?: { readonly env?: Record<string, string | undefined> };
+      };
+      if (spawned.command === "vp") {
+        capture.devStackSpawns += 1;
+        capture.spawnedEnv = spawned.options?.env;
+        return Effect.succeed(mockProcess(0));
+      }
+      capture.tailscaleArgs.push(spawned.args);
+      return Effect.succeed(
+        mockProcessWithStdout(
+          spawned.args.includes("status")
+            ? JSON.stringify({ Self: { DNSName: "host.example.ts.net." } })
+            : "",
+          spawned.args.includes("status") ? tailscaleStatusExit : 0,
+        ),
+      );
+    }),
+  );
 }
 
 const devServerInput = {
@@ -134,6 +206,36 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(error.minimum, 0);
         assert.ok(!("cause" in error));
       }),
+    );
+  });
+
+  describe("resolveAutomaticDevShareProvider", () => {
+    it.effect("checks the implicit main-checkout dev state directory", () =>
+      Effect.gen(function* () {
+        const home = yield* temporaryT3Home;
+        yield* Effect.sync(() => addStoredConnectCredential(home, "dev"));
+        const provider = yield* resolveAutomaticDevShareProvider({
+          baseDir: home,
+          baseDirIsExplicit: false,
+        });
+        assert.equal(provider, "t3-connect");
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("fails selection for a malformed stored credential", () =>
+      Effect.gen(function* () {
+        const home = yield* temporaryT3Home;
+        const secretsDir = NodePath.join(home, "userdata", "secrets");
+        yield* Effect.sync(() => {
+          NodeFS.mkdirSync(secretsDir, { recursive: true });
+          NodeFS.writeFileSync(NodePath.join(secretsDir, "cloud-cli-oauth-token.bin"), "{}");
+        });
+        const error = yield* resolveAutomaticDevShareProvider({
+          baseDir: home,
+          baseDirIsExplicit: true,
+        }).pipe(Effect.flip);
+        assert.equal(error._tag, "DevRunnerStoredConnectCredentialInvalidError");
+      }).pipe(Effect.scoped),
     );
   });
 
@@ -1016,7 +1118,109 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       });
     });
 
-    it.effect("shares through T3 Connect without invoking Tailscale", () => {
+    it.effect("defaults to T3 Connect when the selected home has stored authorization", () => {
+      const capture = makeShareSpawnCapture();
+
+      return Effect.gen(function* () {
+        const home = yield* temporaryT3Home;
+        yield* Effect.sync(() => addStoredConnectCredential(home));
+
+        yield* runDevRunnerWithInput({
+          ...devServerInput,
+          mode: "dev",
+          port: undefined,
+          t3Home: home,
+          share: true,
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(emptyConfigLayer, netServiceLayer, makeShareSpawnerLayer(capture)),
+          ),
+          Effect.provideService(HostProcessPlatform, "linux"),
+        );
+
+        assert.equal(capture.devStackSpawns, 1);
+        assert.isEmpty(capture.tailscaleArgs);
+        assert.equal(capture.spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, "1");
+      }).pipe(Effect.scoped);
+    });
+
+    it.effect("falls back to Tailscale when the selected home has no Connect authorization", () => {
+      const capture = makeShareSpawnCapture();
+
+      return Effect.gen(function* () {
+        const home = yield* temporaryT3Home;
+        yield* runDevRunnerWithInput({
+          ...devServerInput,
+          mode: "dev",
+          port: undefined,
+          t3Home: home,
+          share: true,
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(emptyConfigLayer, netServiceLayer, makeShareSpawnerLayer(capture)),
+          ),
+          Effect.provideService(HostProcessPlatform, "linux"),
+        );
+
+        assert.ok(capture.tailscaleArgs.some((args) => args.includes("status")));
+        assert.equal(capture.spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, undefined);
+        assert.match(
+          capture.spawnedEnv?.VITE_DEV_SERVER_URL ?? "",
+          /^https:\/\/host\.example\.ts\.net:/u,
+        );
+      }).pipe(Effect.scoped);
+    });
+
+    it.effect("lets an explicit Tailscale provider override stored Connect authorization", () => {
+      const capture = makeShareSpawnCapture();
+
+      return Effect.gen(function* () {
+        const home = yield* temporaryT3Home;
+        yield* Effect.sync(() => addStoredConnectCredential(home));
+        yield* runDevRunnerWithInput({
+          ...devServerInput,
+          mode: "dev",
+          port: undefined,
+          t3Home: home,
+          share: true,
+          shareVia: "tailscale",
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(emptyConfigLayer, netServiceLayer, makeShareSpawnerLayer(capture)),
+          ),
+          Effect.provideService(HostProcessPlatform, "linux"),
+        );
+
+        assert.isNotEmpty(capture.tailscaleArgs);
+        assert.equal(capture.spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, undefined);
+      }).pipe(Effect.scoped);
+    });
+
+    it.effect("fails instead of starting locally when the selected Tailscale share fails", () => {
+      const capture = makeShareSpawnCapture();
+
+      return Effect.gen(function* () {
+        const home = yield* temporaryT3Home;
+        const error = yield* runDevRunnerWithInput({
+          ...devServerInput,
+          mode: "dev",
+          port: undefined,
+          t3Home: home,
+          share: true,
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(emptyConfigLayer, netServiceLayer, makeShareSpawnerLayer(capture, 1)),
+          ),
+          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.flip,
+        );
+
+        assert.equal(error._tag, "TailscaleUnavailableError");
+        assert.equal(capture.devStackSpawns, 0);
+      }).pipe(Effect.scoped);
+    });
+
+    it.effect("shares through explicitly selected T3 Connect without invoking Tailscale", () => {
       const spawnedCommands: Array<string> = [];
       let spawnedEnv: Record<string, string | undefined> | undefined;
       const spawnerLayer = Layer.succeed(
@@ -1144,6 +1348,13 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           {
             ...devServerInput,
             mode: "dev" as const,
+            host: "192.168.1.10",
+            share: true,
+            shareVia: "t3-connect" as const,
+          },
+          {
+            ...devServerInput,
+            mode: "dev" as const,
             host: "::1",
             share: true,
             shareVia: "t3-connect" as const,
@@ -1186,6 +1397,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     describe("--share bundled dev default", () => {
       const shareSpawnedEnv = (input: { readonly ambientBundledDev: string | undefined }) =>
         Effect.gen(function* () {
+          const home = yield* temporaryT3Home;
           let captured: Record<string, string | undefined> | undefined;
           const spawnerLayer = Layer.succeed(
             ChildProcessSpawner.ChildProcessSpawner,
@@ -1229,6 +1441,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             ...devServerInput,
             mode: "dev",
             port: undefined,
+            t3Home: home,
             share: true,
           }).pipe(
             Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
@@ -1242,7 +1455,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           );
 
           return captured;
-        });
+        }).pipe(Effect.scoped);
 
       it.effect("defaults T3CODE_BUNDLED_DEV=1 for a shared run", () =>
         Effect.gen(function* () {
