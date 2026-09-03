@@ -346,12 +346,12 @@ function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, neve
 
 export const resolveAutomaticDevShareProvider = Effect.fn(
   "devRunner.resolveAutomaticDevShareProvider",
-)(function* (input: { readonly baseDir: string; readonly baseDirIsExplicit: boolean }) {
+)(function* (authorizationBaseDir: string) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const credentialPath = path.join(
-    input.baseDir,
-    input.baseDirIsExplicit ? "userdata" : "dev",
+    authorizationBaseDir,
+    "userdata",
     "secrets",
     CONNECT_CLI_OAUTH_TOKEN_FILE,
   );
@@ -810,15 +810,19 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     // opt the spawned backend into a managed tunnel.
     delete env.T3CODE_CONNECT_DEV_SHARE;
     delete env.T3CODE_CONNECT_DEV_SHARE_BASE;
+    delete env.T3CODE_CONNECT_DEV_SHARE_AUTHORIZATION_HOME;
 
     const baseDir = env.T3CODE_HOME ?? (yield* DEFAULT_T3_HOME);
+    // Connect login is account authorization, not environment state. Keep it
+    // in the stable T3 home even when a worktree gets a disposable `.t3` for
+    // its database, pairing state, and temporary link ownership.
+    const connectAuthorizationBaseDir = yield* resolveBaseDir(
+      hostEnvironment.T3CODE_HOME?.trim() || undefined,
+    );
     const shareVia =
       input.shareVia ??
       (input.share && input.mode === "dev"
-        ? yield* resolveAutomaticDevShareProvider({
-            baseDir,
-            baseDirIsExplicit: env.T3CODE_HOME !== undefined,
-          })
+        ? yield* resolveAutomaticDevShareProvider(connectAuthorizationBaseDir)
         : "tailscale");
     if (input.share && input.shareVia === undefined && shareVia === "t3-connect") {
       yield* validateConnectShareCompatibility(input, host);
@@ -863,6 +867,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         // intact. A stored `t3 connect login` credential is required; startup
         // reports a direct remedy when it is absent.
         env.T3CODE_CONNECT_DEV_SHARE = "1";
+        env.T3CODE_CONNECT_DEV_SHARE_AUTHORIZATION_HOME = connectAuthorizationBaseDir;
         const devShareBase = `${CONNECT_DEV_SHARE_PREFIX}${NodeCrypto.randomUUID()}/`;
         env.T3CODE_CONNECT_DEV_SHARE_BASE = devShareBase;
         env.VITE_DEV_SERVER_URL = new URL(

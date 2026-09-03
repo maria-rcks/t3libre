@@ -1,6 +1,6 @@
 # T3 Code
 
-T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs (Codex, Claude Code, Cursor, Grok, OpenCode) and serves web, desktop, and mobile clients.
+T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients.
 
 You can think of T3 Code as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
 
@@ -68,7 +68,7 @@ The most common defect in this repo is a change that works on the path you teste
 
 - **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
 - **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and mobile (React Native, separate navigation). Shared logic lives in `packages/client-runtime`
-- **Providers.** Codex, Claude, Cursor, Grok, and OpenCode each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here".
+- **Providers.** Codex, Claude, Cursor, Grok, OpenCode, and Antigravity each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here".
 - **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, mobile, and desktop all follow.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
 - **Connection modes.** Local, remote/relay, and tunnel behave differently. Multi-device and multi-environment cases are real.
@@ -79,7 +79,7 @@ The most common defect in this repo is a change that works on the path you teste
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
 - `vp run dev` starts server and web. In a worktree, state defaults to that worktree's gitignored `.t3`, which deliberately outranks an ambient `T3CODE_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift.
-- Sharing through T3 Connect needs no tailnet. Authorize the worktree once with `node apps/server/src/bin.ts connect login --base-dir .t3`, then run `vp run dev --share --home-dir .t3` in the background. Plain `--share` chooses T3 Connect when that home has stored authorization, otherwise Tailscale. Use `--share-via=t3-connect` or `--share-via=tailscale` to force one transport. A selected transport failure fails the run. Wait for the pairing URL and paste that full URL (token included) in your reply.
+- Sharing through T3 Connect needs no tailnet. Authorize the machine once with `node apps/server/src/bin.ts connect login`, then run `vp run dev --share --home-dir .t3` in the background. Plain `--share` chooses T3 Connect when that stable T3 home has stored authorization, otherwise Tailscale. The worktree `.t3` still owns runtime and link state. Use `--share-via=t3-connect` or `--share-via=tailscale` to force one transport. A selected transport failure fails the run. Wait for the pairing URL and paste that full URL (token included) in your reply.
 - The web app requires pairing. Hand over the pairing URL, not the bare origin. A URL without its token is useless to whoever you gave it to. If the token got consumed, mint a fresh one with `node apps/server/src/bin.ts pair` — note it carries standard scopes, while the startup URL carries admin scopes (needed for Settings → Connections management).
 - Stop what you started, by the PID you tracked. See rule 1.
 

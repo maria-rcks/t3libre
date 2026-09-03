@@ -118,13 +118,12 @@ t3 connect logout
 
 ### Dev sharing
 
-`vp run dev --share --home-dir .t3` uses T3 Connect when the selected home has a stored CLI OAuth
-credential from `t3 connect login --base-dir .t3`; without one it uses Tailscale. Once selected, a
+`vp run dev --share --home-dir .t3` uses T3 Connect when the stable T3 home has a stored CLI OAuth
+credential from `t3 connect login`; without one it uses Tailscale. Once selected, a
 transport failure fails the run rather than silently serving only on localhost. Use
 `--share-via=t3-connect` or `--share-via=tailscale` to force a transport. The matching explicit
-directories also work from the main checkout, whose default development home differs. With another
-`--home-dir`, use that same absolute path for login. Connect sharing does not record durable link
-intent.
+authorization home comes from the invoking process's `T3CODE_HOME`, or `~/.t3` by default. The
+runtime home remains worktree-local and Connect sharing does not record durable link intent.
 
 The managed tunnel continues to target the backend port. When Connect dev sharing is enabled, the
 backend keeps `/api`, `/ws`, `/oauth`, and `/.well-known` and proxies only the root document and the
@@ -132,7 +131,8 @@ invocation-prefixed bundled assets and HMR socket to Vite. This preserves one or
 API calls, and HMR without publishing Vite source or filesystem routes. The relay owns a temporary
 lease: shutdown removes the link, tunnel, DNS record, and allocation; an expiry sweep performs the
 same cleanup after an unclean stop. `t3 pair` uses the ready managed origin for replacement pairing
-URLs without restarting the server. The worktree authorization remains local for the next run.
+URLs without restarting the server. The account authorization remains available to other disposable
+worktrees, while their runtime and link state stay isolated.
 
 `t3 connect login` opens the Clerk authorization flow and stores the CLI credential without enabling
 cloud exposure. `t3 connect link` installs the pinned managed `cloudflared` binary when needed,

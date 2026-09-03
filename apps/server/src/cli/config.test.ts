@@ -68,6 +68,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
       const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-env-base");
+      const connectAuthorizationBaseDir = join(
+        NodeOS.tmpdir(),
+        "t3-cli-config-connect-authorization-base",
+      );
       const derivedPaths = yield* deriveExplicitServerPaths(
         baseDir,
         new URL("http://127.0.0.1:5173"),
@@ -101,6 +105,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   T3CODE_HOME: baseDir,
                   VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
                   T3CODE_CONNECT_DEV_SHARE: "true",
+                  T3CODE_CONNECT_DEV_SHARE_AUTHORIZATION_HOME: connectAuthorizationBaseDir,
                   T3CODE_DEV_ALLOWED_ORIGINS:
                     "https://host.example.ts.net, https://phone.example.ts.net ",
                   T3CODE_NO_BROWSER: "true",
@@ -126,6 +131,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         staticDir: undefined,
         devUrl: new URL("http://127.0.0.1:5173"),
         connectDevShare: true,
+        connectDevShareAuthorizationBaseDir: connectAuthorizationBaseDir,
         devAllowedOrigins: ["https://host.example.ts.net", "https://phone.example.ts.net"],
         noBrowser: true,
         startupPresentation: "browser",

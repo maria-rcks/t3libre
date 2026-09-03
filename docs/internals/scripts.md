@@ -22,8 +22,8 @@ authenticated.
 ## Dev
 
 - `vp run dev`: Starts contracts, server, and web in watch mode.
-- `vp run dev --share`: Publishes the web port over HTTPS. It uses T3 Connect when the selected
-  T3 home has stored CLI authorization, otherwise it uses Tailscale. The selected transport must
+- `vp run dev --share`: Publishes the web port over HTTPS. It uses T3 Connect when the stable
+  account home has stored CLI authorization, otherwise it uses Tailscale. The selected transport must
   start successfully; it never degrades to a local-only run. The startup pairing URL is built
   against the shared origin, and the temporary share is removed on exit.
   Shared runs default to Vite's bundled dev mode (`T3CODE_BUNDLED_DEV=1`): a remote browser pays a
@@ -31,13 +31,13 @@ authenticated.
   minutes of waterfall. Set `T3CODE_BUNDLED_DEV=0` to opt a shared run back out.
 - `vp run dev --share --share-via=t3-connect --home-dir .t3`: Forces T3 Connect. Use
   `--share-via=tailscale` to force private tailnet Serve even when Connect authorization exists.
-  Run `node apps/server/src/bin.ts connect login --base-dir .t3` once for the worktree first.
-  Using the same explicit directory keeps login and runtime state aligned in a main checkout or
-  linked worktree. The managed tunnel terminates at the backend: T3 routes stay there,
+  Run `node apps/server/src/bin.ts connect login` once for the machine first. Account authorization
+  stays in the stable T3 home while runtime and link state stay in the worktree home. The managed
+  tunnel terminates at the backend: T3 routes stay there,
   while the invocation-prefixed Vite bundle and HMR socket are proxied from there. Connect sharing
   requires bundled dev mode and keeps source, `/@fs`, cookies, and T3 credentials outside the public
   proxy. Its temporary relay lease is removed on exit and expires after an unclean stop. The
-  worktree's login remains authorized for the next run. While the share is reachable, `node
+  account login remains authorized for the next run. While the share is reachable, `node
 apps/server/src/bin.ts pair` prints a replacement public pairing URL without a restart.
 - `vp run dev --browser`: Auto-opens a browser. Off by default. The dev runner writes
   `T3CODE_NO_BROWSER` itself from this flag, so setting `T3CODE_NO_BROWSER=0` in your environment has

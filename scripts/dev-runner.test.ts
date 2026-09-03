@@ -210,14 +210,11 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
   });
 
   describe("resolveAutomaticDevShareProvider", () => {
-    it.effect("checks the implicit main-checkout dev state directory", () =>
+    it.effect("checks stable account authorization", () =>
       Effect.gen(function* () {
         const home = yield* temporaryT3Home;
-        yield* Effect.sync(() => addStoredConnectCredential(home, "dev"));
-        const provider = yield* resolveAutomaticDevShareProvider({
-          baseDir: home,
-          baseDirIsExplicit: false,
-        });
+        yield* Effect.sync(() => addStoredConnectCredential(home));
+        const provider = yield* resolveAutomaticDevShareProvider(home);
         assert.equal(provider, "t3-connect");
       }).pipe(Effect.scoped),
     );
@@ -230,10 +227,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           NodeFS.mkdirSync(secretsDir, { recursive: true });
           NodeFS.writeFileSync(NodePath.join(secretsDir, "cloud-cli-oauth-token.bin"), "{}");
         });
-        const error = yield* resolveAutomaticDevShareProvider({
-          baseDir: home,
-          baseDirIsExplicit: true,
-        }).pipe(Effect.flip);
+        const error = yield* resolveAutomaticDevShareProvider(home).pipe(Effect.flip);
         assert.equal(error._tag, "DevRunnerStoredConnectCredentialInvalidError");
       }).pipe(Effect.scoped),
     );
@@ -1118,52 +1112,63 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       });
     });
 
-    it.effect("defaults to T3 Connect when the selected home has stored authorization", () => {
+    it.effect("uses stable Connect authorization with disposable runtime state", () => {
       const capture = makeShareSpawnCapture();
 
       return Effect.gen(function* () {
-        const home = yield* temporaryT3Home;
-        yield* Effect.sync(() => addStoredConnectCredential(home));
+        const runtimeHome = yield* temporaryT3Home;
+        const authorizationHome = yield* temporaryT3Home;
+        yield* Effect.sync(() => addStoredConnectCredential(authorizationHome));
 
         yield* runDevRunnerWithInput({
           ...devServerInput,
           mode: "dev",
           port: undefined,
-          t3Home: home,
+          t3Home: runtimeHome,
           share: true,
         }).pipe(
           Effect.provide(
             Layer.mergeAll(emptyConfigLayer, netServiceLayer, makeShareSpawnerLayer(capture)),
           ),
           Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcessEnvironment, { T3CODE_HOME: authorizationHome }),
         );
 
         assert.equal(capture.devStackSpawns, 1);
         assert.isEmpty(capture.tailscaleArgs);
         assert.equal(capture.spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, "1");
+        assert.equal(capture.spawnedEnv?.T3CODE_HOME, runtimeHome);
+        assert.equal(
+          capture.spawnedEnv?.T3CODE_CONNECT_DEV_SHARE_AUTHORIZATION_HOME,
+          authorizationHome,
+        );
       }).pipe(Effect.scoped);
     });
 
-    it.effect("falls back to Tailscale when the selected home has no Connect authorization", () => {
+    it.effect("ignores disposable credentials and falls back when account auth is absent", () => {
       const capture = makeShareSpawnCapture();
 
       return Effect.gen(function* () {
-        const home = yield* temporaryT3Home;
+        const runtimeHome = yield* temporaryT3Home;
+        const authorizationHome = yield* temporaryT3Home;
+        yield* Effect.sync(() => addStoredConnectCredential(runtimeHome));
         yield* runDevRunnerWithInput({
           ...devServerInput,
           mode: "dev",
           port: undefined,
-          t3Home: home,
+          t3Home: runtimeHome,
           share: true,
         }).pipe(
           Effect.provide(
             Layer.mergeAll(emptyConfigLayer, netServiceLayer, makeShareSpawnerLayer(capture)),
           ),
           Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcessEnvironment, { T3CODE_HOME: authorizationHome }),
         );
 
         assert.ok(capture.tailscaleArgs.some((args) => args.includes("status")));
         assert.equal(capture.spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, undefined);
+        assert.equal(capture.spawnedEnv?.T3CODE_CONNECT_DEV_SHARE_AUTHORIZATION_HOME, undefined);
         assert.match(
           capture.spawnedEnv?.VITE_DEV_SERVER_URL ?? "",
           /^https:\/\/host\.example\.ts\.net:/u,
@@ -1189,10 +1194,15 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             Layer.mergeAll(emptyConfigLayer, netServiceLayer, makeShareSpawnerLayer(capture)),
           ),
           Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcessEnvironment, {
+            T3CODE_HOME: home,
+            T3CODE_CONNECT_DEV_SHARE_AUTHORIZATION_HOME: "/tmp/inherited-connect-auth",
+          }),
         );
 
         assert.isNotEmpty(capture.tailscaleArgs);
         assert.equal(capture.spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, undefined);
+        assert.equal(capture.spawnedEnv?.T3CODE_CONNECT_DEV_SHARE_AUTHORIZATION_HOME, undefined);
       }).pipe(Effect.scoped);
     });
 
@@ -1207,6 +1217,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           port: undefined,
           t3Home: home,
           share: true,
+          shareVia: "tailscale",
         }).pipe(
           Effect.provide(
             Layer.mergeAll(emptyConfigLayer, netServiceLayer, makeShareSpawnerLayer(capture, 1)),
@@ -1247,6 +1258,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
           Effect.provideService(HostProcessPlatform, "linux"),
           Effect.provideService(HostProcessEnvironment, {
+            T3CODE_HOME: "/tmp/stable-connect-auth",
             T3CODE_CONNECT_DEV_SHARE: "1",
             VITE_CLERK_PUBLISHABLE_KEY: "pk_parent",
             VITE_CLERK_JWT_TEMPLATE: "template_parent",
@@ -1257,6 +1269,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
         assert.deepStrictEqual(spawnedCommands, ["vp"]);
         assert.equal(spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, "1");
+        assert.equal(
+          spawnedEnv?.T3CODE_CONNECT_DEV_SHARE_AUTHORIZATION_HOME,
+          "/tmp/stable-connect-auth",
+        );
         assert.equal(spawnedEnv?.T3CODE_BUNDLED_DEV, "1");
         assert.match(
           spawnedEnv?.T3CODE_CONNECT_DEV_SHARE_BASE ?? "",
@@ -1297,12 +1313,14 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           Effect.provideService(HostProcessEnvironment, {
             T3CODE_CONNECT_DEV_SHARE: "1",
             T3CODE_CONNECT_DEV_SHARE_BASE: "/__t3-connect-dev-share/parent/",
+            T3CODE_CONNECT_DEV_SHARE_AUTHORIZATION_HOME: "/tmp/inherited-connect-auth",
             T3CODE_HOST: "0.0.0.0",
           }),
         );
 
         assert.equal(spawnedEnv?.T3CODE_CONNECT_DEV_SHARE, undefined);
         assert.equal(spawnedEnv?.T3CODE_CONNECT_DEV_SHARE_BASE, undefined);
+        assert.equal(spawnedEnv?.T3CODE_CONNECT_DEV_SHARE_AUTHORIZATION_HOME, undefined);
         assert.equal(spawnedEnv?.T3CODE_HOST, undefined);
       });
     });
@@ -1443,6 +1461,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             port: undefined,
             t3Home: home,
             share: true,
+            shareVia: "tailscale",
           }).pipe(
             Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
             Effect.provideService(HostProcessPlatform, "linux"),
