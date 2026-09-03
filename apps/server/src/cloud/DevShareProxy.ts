@@ -373,8 +373,7 @@ export const connectDevShareProxyLayer = HttpRouter.middleware(
         // The tunnel reaches this listener over loopback. Refusing wildcard
         // listeners keeps a LAN caller from spoofing Cloudflare headers to
         // reach the otherwise loopback-only Vite process.
-        listenerIsLoopback:
-          config.host === undefined || config.host === "localhost" || config.host === "127.0.0.1",
+        listenerIsLoopback: isConnectDevShareListenerCompatible(config.host),
         // Managed T3 Connect traffic always passes Cloudflare. Its request id
         // must accompany the exact origin registered by the link lifecycle.
         hasCloudflareRay: typeof request.headers["cf-ray"] === "string",
@@ -399,3 +398,6 @@ export const connectDevShareProxyLayer = HttpRouter.middleware(
     }),
   { global: true },
 );
+
+export const isConnectDevShareListenerCompatible = (host: string | undefined): boolean =>
+  host === undefined || host === "127.0.0.1";

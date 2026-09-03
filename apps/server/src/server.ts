@@ -127,6 +127,7 @@ import * as CloudCliState from "./cloud/CliState.ts";
 import {
   ConnectDevShareTrust,
   connectDevShareProxyLayer,
+  isConnectDevShareListenerCompatible,
   trustConnectDevShareManagedOrigin,
 } from "./cloud/DevShareProxy.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
@@ -565,12 +566,8 @@ class ConnectDevShareReadinessError extends Schema.TaggedErrorClass<ConnectDevSh
 
 class ConnectDevShareUnavailableError extends Schema.TaggedErrorClass<ConnectDevShareUnavailableError>()(
   "ConnectDevShareUnavailableError",
-  { reason: Schema.Literal("missing_public_configuration") },
-) {
-  override get message(): string {
-    return "T3 Connect dev sharing requires public Connect configuration. Copy .env.example to .env and retry.";
-  }
-}
+  { message: Schema.String },
+) {}
 
 export const makeRoutesLayer = Layer.mergeAll(
   Layer.mergeAll(
@@ -738,7 +735,8 @@ export const makeServerLayer = Layer.unwrap(
         if (!hasCloudPublicConfig) {
           if (config.connectDevShare === true) {
             return yield* new ConnectDevShareUnavailableError({
-              reason: "missing_public_configuration",
+              message:
+                "T3 Connect dev sharing requires public Connect configuration. Copy .env.example to .env and retry.",
             });
           }
           yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
@@ -777,8 +775,14 @@ export const makeServerLayer = Layer.unwrap(
         // while the launcher's explicit-stop marker allows it to be released.
         // Other runtimes wait for activation so a failed standby cannot tear
         // down the active runtime's tunnel.
-        const cleanupBeforeActivation = yield* pendingServiceUpdateExists;
         const connectDevShare = config.connectDevShare === true;
+        if (connectDevShare && !isConnectDevShareListenerCompatible(config.host)) {
+          return yield* new ConnectDevShareUnavailableError({
+            message:
+              "T3 Connect dev sharing requires an IPv4 loopback listener. Set T3CODE_HOST to 127.0.0.1 or omit it.",
+          });
+        }
+        const cleanupBeforeActivation = yield* pendingServiceUpdateExists;
         if (cleanupBeforeActivation && !connectDevShare) {
           yield* Effect.addFinalizer(() => releaseManagedTunnel());
         }

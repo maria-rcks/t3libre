@@ -13,6 +13,7 @@ import { openMediaFile } from "./assets/MediaFile.ts";
 import {
   ConnectDevShareTrust,
   filterDevShareRequestHeaders,
+  isConnectDevShareListenerCompatible,
   resolveDevShareTargetUrl,
   rewriteDevShareLocation,
   shouldProxyConnectDevRequest,
@@ -29,6 +30,13 @@ import {
 const fileResponseLayer = Layer.mergeAll(NodeHttpPlatform.layer, NodeServices.layer);
 
 describe("T3 Connect dev sharing", () => {
+  it("accepts only listeners reachable through the registered IPv4 loopback origin", () => {
+    expect(isConnectDevShareListenerCompatible(undefined)).toBe(true);
+    expect(isConnectDevShareListenerCompatible("127.0.0.1")).toBe(true);
+    expect(isConnectDevShareListenerCompatible("localhost")).toBe(false);
+    expect(isConnectDevShareListenerCompatible("0.0.0.0")).toBe(false);
+  });
+
   it.effect("keeps a replacement origin when an older trust scope closes", () =>
     Effect.gen(function* () {
       const trust = yield* ConnectDevShareTrust;
