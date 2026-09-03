@@ -1227,6 +1227,9 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
 
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingApproval: true })).toBe(true);
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingUserInput: true })).toBe(true);
+    expect(hasServerAcknowledgedLocalDispatch({ ...common, latestTurnStartFailed: true })).toBe(
+      true,
+    );
     expect(hasServerAcknowledgedLocalDispatch({ ...common, threadError: "failed" })).toBe(true);
   });
 });

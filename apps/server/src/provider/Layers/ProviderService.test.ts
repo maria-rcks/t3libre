@@ -172,6 +172,18 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
       Effect.void,
   );
 
+  const compactThread = vi.fn((threadId: ThreadId) =>
+    Effect.sync(() =>
+      emit({
+        type: "thread.state.changed",
+        eventId: asEventId("evt-native-compact"),
+        provider,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId,
+        payload: { state: "compacted" },
+      }),
+    ),
+  );
   const respondToRequest = vi.fn(
     (
       _threadId: ThreadId,
@@ -250,6 +262,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     },
     startSession,
     sendTurn,
+    ...(provider === CODEX_DRIVER ? { compactThread } : {}),
     interruptTurn,
     respondToRequest,
     respondToUserInput,
@@ -286,6 +299,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     updateSession,
     startSession,
     sendTurn,
+    compactThread,
     interruptTurn,
     respondToRequest,
     respondToUserInput,
@@ -1034,6 +1048,10 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
 
+      yield* advanceTestClock(10);
+      yield* provider.compactThread(session.threadId);
+      assert.deepEqual(routing.codex.compactThread.mock.calls, [[session.threadId, undefined]]);
+
       yield* provider.interruptTurn({ threadId: session.threadId });
       assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId, undefined]]);
 
@@ -1094,6 +1112,124 @@ routing.layer("ProviderServiceLive routing", (it) => {
         assert.equal(startPayload.threadId, session.threadId);
       }
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect("marks a successful fallback compaction as compacted", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-compact-cursor");
+      yield* provider.startSession(threadId, {
+        provider: CURSOR_DRIVER,
+        providerInstanceId: ProviderInstanceId.make("cursor"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const compactedEventFiber = yield* provider.streamEvents.pipe(
+        Stream.filter((event) => event.type === "thread.state.changed"),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+      const requestId = MessageId.make("message-compact-cursor");
+      const compactFiber = yield* provider
+        .compactThread(threadId, undefined, requestId)
+        .pipe(Effect.forkChild);
+      yield* advanceTestClock(50);
+      routing.cursor.emit({
+        type: "turn.completed",
+        eventId: asEventId("evt-cursor-stale-turn-completed"),
+        provider: CURSOR_DRIVER,
+        createdAt: "2026-01-01T00:00:00.500Z",
+        threadId,
+        turnId: asTurnId("turn-before-compaction"),
+        payload: { state: "completed" },
+      });
+      yield* Effect.yieldNow;
+      assert.equal(compactFiber.pollUnsafe(), undefined);
+      routing.cursor.emit({
+        type: "turn.completed",
+        eventId: asEventId("evt-cursor-compact-completed"),
+        provider: CURSOR_DRIVER,
+        createdAt: "2026-01-01T00:00:01.000Z",
+        threadId,
+        turnId: asTurnId(`turn-${threadId}`),
+        payload: { state: "completed" },
+      });
+      yield* Fiber.join(compactFiber);
+
+      const compacted = yield* Fiber.join(compactedEventFiber);
+      assert.equal(compacted._tag, "Some");
+      if (Option.isSome(compacted)) {
+        assert.equal(compacted.value.requestId, String(requestId));
+      }
+
+      const observedEvents = yield* Ref.make<Array<ProviderRuntimeEvent>>([]);
+      const observedEventsFiber = yield* provider.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            event.type === "thread.state.changed" &&
+            event.payload.state === "compacted",
+        ),
+        Stream.runForEach((event) => Ref.update(observedEvents, (events) => [...events, event])),
+        Effect.forkChild,
+      );
+      const observedRequestId = MessageId.make("message-observed-compact-cursor");
+      const observedCompactFiber = yield* provider
+        .compactThread(threadId, undefined, observedRequestId)
+        .pipe(Effect.forkChild);
+      yield* advanceTestClock(50);
+      routing.cursor.emit({
+        type: "thread.state.changed",
+        eventId: asEventId("evt-cursor-provider-compacted"),
+        provider: CURSOR_DRIVER,
+        createdAt: "2026-01-01T00:00:02.000Z",
+        threadId,
+        turnId: asTurnId(`turn-${threadId}`),
+        payload: { state: "compacted" },
+      });
+      routing.cursor.emit({
+        type: "turn.completed",
+        eventId: asEventId("evt-cursor-observed-compact-completed"),
+        provider: CURSOR_DRIVER,
+        createdAt: "2026-01-01T00:00:03.000Z",
+        threadId,
+        turnId: asTurnId(`turn-${threadId}`),
+        payload: { state: "completed" },
+      });
+      yield* Fiber.join(observedCompactFiber);
+      yield* Effect.yieldNow;
+      const observed = yield* Ref.get(observedEvents);
+      assert.equal(observed.length, 1);
+      assert.equal(observed[0]?.requestId, String(observedRequestId));
+      yield* Fiber.interrupt(observedEventsFiber);
+      yield* provider.stopSession({ threadId });
+    }),
+  );
+
+  it.effect("releases native compaction when the provider omits its completion event", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-compact-timeout");
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      routing.codex.compactThread.mockImplementationOnce(() => Effect.void);
+
+      const resultFiber = yield* provider
+        .compactThread(threadId)
+        .pipe(Effect.result, Effect.forkChild);
+      yield* advanceTestClock(30_001);
+      const result = yield* Fiber.join(resultFiber);
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure") {
+        assert.equal(result.failure._tag, "ProviderAdapterRequestError");
+      }
+
+      yield* provider.compactThread(threadId);
     }),
   );
 

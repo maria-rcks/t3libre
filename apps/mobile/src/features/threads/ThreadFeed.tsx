@@ -143,6 +143,7 @@ import {
 } from "@t3tools/mobile-markdown-text/links";
 import {
   deriveThreadFeedPresentation,
+  isContextCompactionActivityGroup,
   type ThreadFeedEntry,
   type ThreadFeedLatestTurn,
 } from "../../lib/threadActivity";
@@ -1533,6 +1534,21 @@ function renderFeedEntry(
     );
   }
 
+  if (entry.type === "activity-group" && isContextCompactionActivityGroup(entry)) {
+    const label = entry.activities[0]!.summary;
+    return (
+      <View
+        accessible
+        accessibilityLabel={label}
+        className="mb-3 flex-row items-center gap-3 px-1 py-1"
+      >
+        <View className="h-px flex-1 bg-adaptive-neutral-200-a80-white-a8" />
+        <Text className="font-t3-medium text-xs text-foreground-muted">{label}</Text>
+        <View className="h-px flex-1 bg-adaptive-neutral-200-a80-white-a8" />
+      </View>
+    );
+  }
+
   if (entry.type === "message") {
     const { message } = entry;
     const isUser = message.role === "user";
@@ -2695,6 +2711,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         case "work-toggle":
           return WORK_GROUP_TOGGLE_HEIGHT;
         case "activity-group":
+          if (isContextCompactionActivityGroup(entry)) {
+            return undefined;
+          }
           // Expanded rows append a variable detail block — fall back to
           // measurement for those groups.
           return entry.activities.some((activity) => expandedWorkRows[activity.id])
