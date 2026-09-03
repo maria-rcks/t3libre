@@ -46,6 +46,6 @@ describe("ProjectIconPickerDialog", () => {
 
     expect(markup).toContain('data-current="lucide"');
     expect(markup.indexOf(">Icons<")).toBeLessThan(markup.indexOf(">Emoji<"));
-    expect(markup).toContain("Search all Lucide icons");
+    expect(markup).toContain('aria-label="Icon color"');
   });
 });
