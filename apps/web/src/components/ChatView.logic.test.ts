@@ -193,6 +193,16 @@ describe("resolveThreadPullRequestRelink", () => {
         gitStatus: { ...gitStatus, refName: "feature/other" },
       }),
     ).toBeNull();
+    expect(
+      resolveThreadPullRequestRelink({
+        ...input,
+        linkedPullRequestState: "merged",
+        gitStatus: {
+          ...gitStatus,
+          pr: gitStatus.pr && { ...gitStatus.pr, headRef: "feature/previous" },
+        },
+      }),
+    ).toBeNull();
   });
 });
 

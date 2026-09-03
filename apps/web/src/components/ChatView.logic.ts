@@ -102,6 +102,7 @@ export function resolveThreadPullRequestRelink(input: {
     input.threadBranch === null ||
     input.gitStatus?.refName !== input.threadBranch ||
     detected?.state !== "open" ||
+    detected.headRef !== input.threadBranch ||
     input.projectId === null ||
     input.repository === null
   ) {
