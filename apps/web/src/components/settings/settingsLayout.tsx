@@ -59,8 +59,15 @@ export function SettingsSearchTargetProvider({
 
 function scrollAndFocusSettingsTarget(target: HTMLElement, highlight = true): void {
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const markedScrollTarget =
+    typeof target.querySelector === "function"
+      ? target.querySelector<HTMLElement>(":scope > [data-settings-scroll-target]")
+      : null;
   const scrollTarget =
-    target.querySelector<HTMLElement>(":scope > [data-settings-scroll-target]") ?? target;
+    markedScrollTarget ??
+    (target.tagName === "SECTION" && target.firstElementChild
+      ? (target.firstElementChild as HTMLElement)
+      : target);
 
   scrollTarget.scrollIntoView({
     behavior: prefersReducedMotion ? "auto" : "smooth",
