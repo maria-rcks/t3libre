@@ -3658,7 +3658,6 @@ function ChatViewContent(props: ChatViewProps) {
       persistedLinkedThreadPullRequest === null ||
       (persistedLinkedThreadPullRequestStatus?.pr.state !== "merged" &&
         persistedLinkedThreadPullRequestStatus?.pr.state !== "closed") ||
-      threadBranch == null ||
       gitStatusQuery.data?.refName !== threadBranch ||
       detected?.state !== "open" ||
       detected.headRef !== threadBranch ||

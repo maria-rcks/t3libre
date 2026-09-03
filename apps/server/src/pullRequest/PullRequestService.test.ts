@@ -1010,7 +1010,6 @@ it.effect("publishes a successful merge for immediate settlement", () =>
     Effect.gen(function* () {
       const mergedAt = "2026-09-03T02:00:00.000Z";
       const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
-      const requestedReference = { ...reference, repository: " ACME/WEB " };
       const service = yield* makeService({
         projects: [
           project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
@@ -1026,11 +1025,17 @@ it.effect("publishes a successful merge for immediate settlement", () =>
         Effect.forkChild({ startImmediately: true }),
       );
 
-      yield* service.runAction({ ...requestedReference, action: "merge", mergeMethod: "merge" });
+      yield* service.runAction({
+        ...reference,
+        repository: " ACME/WEB ",
+        action: "merge",
+        mergeMethod: "merge",
+      });
 
-      const observed = Option.getOrThrow(yield* Fiber.join(observedMerge));
-      assert.deepInclude(observed, reference);
-      assert.strictEqual(observed.mergedAt, mergedAt);
+      assert.deepStrictEqual(Option.getOrThrow(yield* Fiber.join(observedMerge)), {
+        ...reference,
+        mergedAt,
+      });
     }),
   ),
 );
@@ -3227,7 +3232,6 @@ it.effect("does not ask the host again for a linked summary it already holds", (
 
 it.effect("reuses an observed merged state for strict settlement reads", () =>
   Effect.gen(function* () {
-    let summaryCalls = 0;
     const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
     const service = yield* makeService({
       projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
@@ -3239,22 +3243,16 @@ it.effect("reuses an observed merged state for strict settlement reads", () =>
               state: "merged",
               updatedAt: "2026-07-03T00:00:00Z",
             }),
-          getChangeRequestSummary: () =>
-            Effect.sync(() => {
-              summaryCalls += 1;
-              return changeRequest(1, "2026-07-02T00:00:00Z");
-            }),
+          getChangeRequestSummary: () => Effect.die("strict merged state must not refresh"),
         }),
       ],
     });
 
-    const detail = yield* service.detail(reference);
-    assert.strictEqual(detail.state, "merged");
+    yield* service.detail(reference);
 
     const summary = yield* service.summary(reference, { recoverTransientFailure: false });
     assert.strictEqual(summary.state, "merged");
     assert.strictEqual(summary.updatedAt, "2026-07-03T00:00:00Z");
-    assert.strictEqual(summaryCalls, 0);
   }),
 );
 

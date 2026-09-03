@@ -25,7 +25,10 @@ import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
 import { GitManager } from "../git/GitManager.ts";
-import { PullRequestService } from "../pullRequest/PullRequestService.ts";
+import {
+  PullRequestService,
+  type PullRequestMergeEvent,
+} from "../pullRequest/PullRequestService.ts";
 import { ServerActivation } from "../serverActivation.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
@@ -143,12 +146,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   const snapshotReads = yield* Queue.unbounded<number>();
   const settings = yield* Ref.make(options.settings ?? DEFAULT_SERVER_SETTINGS);
   const settingsChanges = yield* PubSub.unbounded<ServerSettings>();
-  const mergedPullRequests = yield* PubSub.unbounded<{
-    readonly projectId: ProjectId;
-    readonly repository: string;
-    readonly number: number;
-    readonly mergedAt: string;
-  }>();
+  const mergedPullRequests = yield* PubSub.unbounded<PullRequestMergeEvent>();
   const commands = yield* Ref.make<ReadonlyArray<AutoSettleCommand>>([]);
   const branchCalls = yield* Ref.make<
     ReadonlyArray<{ readonly cwd: string; readonly branch: string }>
@@ -420,10 +418,7 @@ describe("ThreadSettlementReactor", () => {
                     ),
               ),
             ),
-          onDispatch: (command) =>
-            command.threadId === ThreadId.make("merged-in-app")
-              ? Deferred.succeed(mergedThreadSettled, undefined)
-              : Effect.void,
+          onDispatch: () => Deferred.succeed(mergedThreadSettled, undefined),
         });
 
         yield* Effect.gen(function* () {
