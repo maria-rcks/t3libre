@@ -71,6 +71,7 @@ const isModelSelection = Schema.is(ModelSelection);
 interface PendingCompaction {
   readonly completion: Deferred.Deferred<string>;
   readonly native: boolean;
+  readonly providerInstanceId: ProviderInstanceId;
   readonly requestId: MessageId | undefined;
   readonly earlyEvents: ProviderRuntimeEvent[];
   compactedEventObserved: boolean;
@@ -445,6 +446,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }
       const pendingCompaction = pendingCompactions.get(canonicalEvent.threadId);
       if (!pendingCompaction) {
+        yield* publishRuntimeEvent(canonicalEvent);
+        return;
+      }
+      if (pendingCompaction.providerInstanceId !== source.instanceId) {
         yield* publishRuntimeEvent(canonicalEvent);
         return;
       }
@@ -989,6 +994,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const pending: PendingCompaction = {
         completion,
         native: nativeCompaction !== undefined,
+        providerInstanceId: routed.instanceId,
         requestId,
         earlyEvents: [],
         compactedEventObserved: false,
@@ -1023,23 +1029,25 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         routed.adapter.provider === "codex" || routed.adapter.provider === "opencode"
           ? "10 minutes"
           : "30 seconds";
-      const awaitNativeCompaction = Deferred.await(completion).pipe(
-        Effect.timeout(nativeCompletionTimeout),
-        Effect.tapError(() =>
-          Effect.sync(() => {
-            timedOutNativeCompactions.add(threadId);
-          }),
-        ),
-        Effect.mapError(
-          (cause) =>
-            new ProviderAdapterRequestError({
-              provider: routed.adapter.provider,
-              method: "thread/compact",
-              detail: `Provider did not report completed context compaction within ${nativeCompletionTimeout}.`,
-              cause,
+      const awaitNativeCompaction = (start: Effect.Effect<void, ProviderAdapterError>) =>
+        start.pipe(
+          Effect.andThen(Deferred.await(completion)),
+          Effect.timeout(nativeCompletionTimeout),
+          Effect.tapError(() =>
+            Effect.sync(() => {
+              timedOutNativeCompactions.add(threadId);
             }),
-        ),
-      );
+          ),
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterRequestError({
+                provider: routed.adapter.provider,
+                method: "thread/compact",
+                detail: `Provider did not report completed context compaction within ${nativeCompletionTimeout}.`,
+                cause,
+              }),
+          ),
+        );
       const awaitFallbackCompaction = Deferred.await(completion).pipe(
         Effect.timeout("10 minutes"),
         Effect.mapError(
@@ -1054,9 +1062,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       );
       const terminal = yield* (
         nativeCompaction
-          ? nativeCompaction(routed.threadId, modelSelection).pipe(
-              Effect.andThen(awaitNativeCompaction),
-            )
+          ? awaitNativeCompaction(nativeCompaction(routed.threadId, modelSelection))
           : Effect.gen(function* () {
               const turn = yield* sendTurn({
                 threadId,

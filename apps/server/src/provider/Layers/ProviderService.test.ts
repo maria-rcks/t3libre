@@ -1247,7 +1247,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         runtimeMode: "full-access",
       });
       routing.codex.compactThread.mockClear();
-      routing.codex.compactThread.mockImplementationOnce(() => Effect.void);
+      routing.codex.compactThread.mockImplementationOnce(() => Effect.never);
 
       const resultFiber = yield* provider
         .compactThread(threadId)
@@ -1256,6 +1256,17 @@ routing.layer("ProviderServiceLive routing", (it) => {
       const concurrent = yield* provider.compactThread(threadId).pipe(Effect.result);
       assert.equal(concurrent._tag, "Failure");
       assert.equal(routing.codex.compactThread.mock.calls.length, 1);
+
+      routing.cursor.emit({
+        type: "thread.state.changed",
+        eventId: asEventId("evt-stale-provider-compact"),
+        provider: CURSOR_DRIVER,
+        createdAt: "2026-01-01T00:00:00.100Z",
+        threadId,
+        payload: { state: "compacted" },
+      });
+      yield* Effect.yieldNow;
+      assert.equal(resultFiber.pollUnsafe(), undefined);
 
       yield* advanceTestClock(600_001);
       const result = yield* Fiber.join(resultFiber);
