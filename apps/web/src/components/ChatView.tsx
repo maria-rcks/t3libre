@@ -210,6 +210,7 @@ import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
   NO_PROVIDER_MODEL_SELECTION,
+  sortProviderInstanceEntries,
 } from "../providerInstances";
 import {
   useClientSettings,
@@ -2944,7 +2945,7 @@ function ChatViewContent(props: ChatViewProps) {
     () =>
       hasAvailableCompactionProvider({
         providers: applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(providerStatuses),
+          sortProviderInstanceEntries(deriveProviderInstanceEntries(providerStatuses)),
           settings,
         ),
         driverKind: selectedProvider,

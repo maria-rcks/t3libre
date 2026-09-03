@@ -18,6 +18,7 @@ import {
   type OrchestrationThread,
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
+  RuntimeRequestId,
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -1563,13 +1564,16 @@ const make = Effect.gen(function* () {
       const now = event.createdAt;
       const eventTurnId = toTurnId(event.turnId);
       const activeTurnId = thread.session?.activeTurnId ?? null;
+      const isCompactedThreadState =
+        event.type === "thread.state.changed" && event.payload.state === "compacted";
       const pendingTurnStart =
         event.type === "session.started" ||
         event.type === "session.state.changed" ||
         event.type === "session.exited" ||
         event.type === "thread.started" ||
         event.type === "turn.started" ||
-        event.type === "turn.completed"
+        event.type === "turn.completed" ||
+        isCompactedThreadState
           ? yield* projectionTurnRepository.getPendingTurnStartByThreadId({
               threadId: thread.id,
             })
@@ -2089,9 +2093,29 @@ const make = Effect.gen(function* () {
 
       let activityEvent = event;
       if (
-        event.type === "thread.state.changed" &&
-        event.payload.state === "compacted" &&
-        (event.payload.beforeTokens === undefined || event.payload.afterTokens === undefined)
+        isCompactedThreadState &&
+        event.requestId === undefined &&
+        Option.isSome(pendingTurnStart)
+      ) {
+        const pendingMessage = (yield* getLoadedThreadDetail())?.messages.find(
+          (message) => message.id === pendingTurnStart.value.messageId,
+        );
+        if (
+          pendingMessage?.role === "user" &&
+          (pendingMessage.attachments?.length ?? 0) === 0 &&
+          pendingMessage.text.trim().toLowerCase() === "/compact"
+        ) {
+          activityEvent = {
+            ...event,
+            requestId: RuntimeRequestId.make(String(pendingTurnStart.value.messageId)),
+          };
+        }
+      }
+      if (
+        activityEvent.type === "thread.state.changed" &&
+        activityEvent.payload.state === "compacted" &&
+        (activityEvent.payload.beforeTokens === undefined ||
+          activityEvent.payload.afterTokens === undefined)
       ) {
         const threadDetail = yield* resolveThreadDetail(thread.id, [
           "context-window.updated",
@@ -2100,11 +2124,11 @@ const make = Effect.gen(function* () {
         const tokenCounts = compactedTokenCountsFromActivities(threadDetail?.activities);
         if (tokenCounts) {
           activityEvent = {
-            ...event,
+            ...activityEvent,
             payload: {
-              ...event.payload,
-              beforeTokens: event.payload.beforeTokens ?? tokenCounts.beforeTokens,
-              afterTokens: event.payload.afterTokens ?? tokenCounts.afterTokens,
+              ...activityEvent.payload,
+              beforeTokens: activityEvent.payload.beforeTokens ?? tokenCounts.beforeTokens,
+              afterTokens: activityEvent.payload.afterTokens ?? tokenCounts.afterTokens,
             },
           };
         }

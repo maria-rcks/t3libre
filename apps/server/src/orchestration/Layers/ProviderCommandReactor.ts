@@ -1255,7 +1255,19 @@ const make = Effect.gen(function* () {
         return Effect.void;
       }
       const detail = formatFailureDetail(cause);
-      return appendTurnStartFailure("Context compaction failed", detail).pipe(Effect.asVoid);
+      return appendTurnStartFailure("Context compaction failed", detail).pipe(
+        Effect.ensuring(
+          setThreadSessionReadyAfterCompaction(event.payload.threadId).pipe(
+            Effect.catchCause((restoreCause) =>
+              Effect.logWarning("failed to restore provider session after compaction failure", {
+                threadId: event.payload.threadId,
+                cause: Cause.pretty(restoreCause),
+              }),
+            ),
+          ),
+        ),
+        Effect.asVoid,
+      );
     };
     const recoverCompactionFailure = (cause: Cause.Cause<unknown>) =>
       handleCompactionFailure(cause).pipe(
@@ -1293,8 +1305,8 @@ const make = Effect.gen(function* () {
           event.payload.threadId,
           event.payload.createdAt,
           event.payload.modelSelection !== undefined
-            ? { modelSelection: event.payload.modelSelection }
-            : undefined,
+            ? { modelSelection: event.payload.modelSelection, pendingTurnStart: true }
+            : { pendingTurnStart: true },
         );
         if (event.payload.modelSelection !== undefined) {
           threadModelSelections.set(event.payload.threadId, event.payload.modelSelection);

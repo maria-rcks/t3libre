@@ -715,6 +715,10 @@ describe("ProviderCommandReactor", () => {
         createdAt: now,
       });
       yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 1));
+      const compactingThread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+        (entry) => entry.id === threadId,
+      );
+      expect(compactingThread?.session?.status).toBe("starting");
       yield* harness.engine.dispatch({
         type: "thread.session.stop",
         commandId: CommandId.make("cmd-stop-during-compact"),
