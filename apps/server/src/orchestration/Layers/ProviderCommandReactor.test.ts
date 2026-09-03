@@ -662,7 +662,7 @@ describe("ProviderCommandReactor", () => {
     Effect.gen(function* () {
       const releaseCompaction = yield* Deferred.make<void>();
       const releaseRunningCompaction = yield* Deferred.make<void>();
-      const releaseStop = yield* Deferred.make<void>();
+      const releaseFailedStop = yield* Deferred.make<void>();
       let compactionCount = 0;
       const harness = yield* Effect.promise(() =>
         createHarness({
@@ -670,7 +670,18 @@ describe("ProviderCommandReactor", () => {
             Deferred.await(
               compactionCount++ === 0 ? releaseCompaction : releaseRunningCompaction,
             ).pipe(Effect.andThen(Effect.die("Compaction stopped"))),
-          stopSessionEffect: () => Deferred.await(releaseStop),
+          stopSessionEffect: () =>
+            Deferred.await(releaseFailedStop).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new ProviderAdapterRequestError({
+                    provider: "codex",
+                    method: "session.stop",
+                    detail: "provider stop failed",
+                  }),
+                ),
+              ),
+            ),
         }),
       );
       const threadId = ThreadId.make("thread-1");
@@ -752,20 +763,44 @@ describe("ProviderCommandReactor", () => {
         (entry) => entry.id === threadId,
       );
       expect(stoppingThread?.session?.status).toBe("starting");
-      yield* Deferred.succeed(releaseStop, undefined);
+      yield* Deferred.succeed(releaseFailedStop, undefined);
       yield* Effect.promise(() => harness.drain());
-      yield* Effect.yieldNow;
 
-      const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+      const recoveredThread = (yield* Effect.promise(() => harness.readModel())).threads.find(
         (entry) => entry.id === threadId,
       );
-      expect(thread?.session?.status).toBe("stopped");
+      expect(recoveredThread?.session?.status).toBe("ready");
+      expect(
+        recoveredThread?.activities.find(
+          (activity) => activity.kind === "provider.session.stop.failed",
+        ),
+      ).toMatchObject({
+        summary: "Provider session stop failed",
+        payload: { detail: "provider stop failed" },
+      });
 
       yield* dispatchCompact("before-running", "2026-01-01T00:00:02.000Z");
       yield* Effect.promise(() => waitFor(() => harness.compactThread.mock.calls.length === 2));
+      yield* harness.engine.dispatch({
+        type: "thread.session.stop",
+        commandId: CommandId.make("cmd-failed-stop-before-compaction-settles"),
+        threadId,
+        createdAt: "2026-01-01T00:00:02.500Z",
+      });
+      yield* Effect.promise(() =>
+        waitFor(async () => {
+          const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId);
+          return (
+            thread?.activities.filter(
+              (activity) => activity.kind === "provider.session.stop.failed",
+            ).length === 2
+          );
+        }),
+      );
       const restartedThread = (yield* Effect.promise(() => harness.readModel())).threads.find(
         (entry) => entry.id === threadId,
       );
+      expect(restartedThread?.session?.status).toBe("starting");
       const restartedSession = restartedThread?.session;
       if (!restartedSession) return yield* Effect.die("Compaction session missing");
       yield* harness.engine.dispatch({

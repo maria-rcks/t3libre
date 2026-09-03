@@ -1339,10 +1339,10 @@ const make = Effect.gen(function* () {
           event.payload.modelSelection,
           event.payload.messageId,
         );
-        yield* setThreadSessionReadyAfterCompaction(event.payload.threadId);
       }).pipe(
-        Effect.catchCause(recoverCompactionFailure),
         Effect.ensuring(Effect.sync(() => void compactingThreadIds.delete(event.payload.threadId))),
+        Effect.andThen(setThreadSessionReadyAfterCompaction(event.payload.threadId)),
+        Effect.catchCause(recoverCompactionFailure),
         Effect.forkScoped,
       );
       return;
@@ -1568,31 +1568,58 @@ const make = Effect.gen(function* () {
     }
 
     const now = event.payload.createdAt;
+    const wasCompacting = compactingThreadIds.has(thread.id);
     stoppingThreadIds.add(thread.id);
+    const clearStopping = Effect.sync(() => void stoppingThreadIds.delete(thread.id));
     yield* (
       thread.session && thread.session.status !== "stopped"
         ? providerService.stopSession({ threadId: thread.id })
         : Effect.void
     ).pipe(
-      Effect.andThen(
-        setThreadSession({
-          threadId: thread.id,
-          session: {
+      Effect.matchCauseEffect({
+        onFailure: (cause) => {
+          if (Cause.hasInterruptsOnly(cause)) {
+            return Effect.interrupt;
+          }
+          const detail = formatFailureDetail(cause);
+          return Effect.sync(() => {
+            stoppingThreadIds.delete(thread.id);
+            return wasCompacting && !compactingThreadIds.has(thread.id);
+          }).pipe(
+            Effect.flatMap((compactionSettled) =>
+              compactionSettled ? setThreadSessionReadyAfterCompaction(thread.id) : Effect.void,
+            ),
+            Effect.andThen(
+              appendProviderFailureActivity({
+                threadId: thread.id,
+                kind: "provider.session.stop.failed",
+                summary: "Provider session stop failed",
+                detail,
+                turnId: null,
+                createdAt: now,
+              }),
+            ),
+          );
+        },
+        onSuccess: () =>
+          setThreadSession({
             threadId: thread.id,
-            status: "stopped",
-            providerName: thread.session?.providerName ?? null,
-            ...(thread.session?.providerInstanceId !== undefined
-              ? { providerInstanceId: thread.session.providerInstanceId }
-              : {}),
-            runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-            activeTurnId: null,
-            lastError: thread.session?.lastError ?? null,
-            updatedAt: now,
-          },
-          createdAt: now,
-        }),
-      ),
-      Effect.ensuring(Effect.sync(() => void stoppingThreadIds.delete(thread.id))),
+            session: {
+              threadId: thread.id,
+              status: "stopped",
+              providerName: thread.session?.providerName ?? null,
+              ...(thread.session?.providerInstanceId !== undefined
+                ? { providerInstanceId: thread.session.providerInstanceId }
+                : {}),
+              runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+              activeTurnId: null,
+              lastError: thread.session?.lastError ?? null,
+              updatedAt: now,
+            },
+            createdAt: now,
+          }),
+      }),
+      Effect.ensuring(clearStopping),
     );
   });
 
