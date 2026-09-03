@@ -7,6 +7,8 @@ import type {
   EnvironmentId,
   PullRequestListInput,
   PullRequestListStatsInput,
+  PullRequestRef,
+  PullRequestSummary,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
@@ -24,6 +26,55 @@ import { formatEnvironmentQueryError } from "./query";
 export const pullRequestEnvironment = createPullRequestEnvironmentAtoms(connectionAtomRuntime);
 export const linkedPullRequestDetailAtom =
   createLinkedPullRequestSummaryAtomFamily(connectionAtomRuntime);
+
+const observedPullRequestSummaryAtom = Atom.family((key: string) =>
+  Atom.make<PullRequestSummary | null>(null).pipe(
+    Atom.setIdleTTL(5 * 60_000),
+    Atom.withLabel(`web-pull-requests:observed-summary:${key}`),
+  ),
+);
+
+export function observedPullRequestKey(
+  environmentId: EnvironmentId,
+  reference: Pick<PullRequestRef, "projectId" | "number">,
+): string {
+  return JSON.stringify([environmentId, reference.projectId, reference.number]);
+}
+
+export function newestPullRequestSummary(
+  current: PullRequestSummary | null,
+  observed: PullRequestSummary | null,
+): PullRequestSummary | null {
+  if (current === null) return observed;
+  if (observed === null) return current;
+  if (current.state === "merged") return current;
+  if (observed.state === "merged") return observed;
+  return Date.parse(observed.updatedAt) >= Date.parse(current.updatedAt) ? observed : current;
+}
+
+export function recordObservedPullRequestSummary(
+  environmentId: EnvironmentId,
+  summary: PullRequestSummary,
+): void {
+  appAtomRegistry.modify(
+    observedPullRequestSummaryAtom(observedPullRequestKey(environmentId, summary)),
+    (current) => {
+      const next = newestPullRequestSummary(current, summary);
+      return next === current ? [false, current] : [true, next];
+    },
+  );
+}
+
+export function useObservedPullRequestSummary(
+  environmentId: EnvironmentId | null,
+  reference: Pick<PullRequestRef, "projectId" | "number"> | null,
+): PullRequestSummary | null {
+  const key =
+    environmentId === null || reference === null
+      ? "none"
+      : observedPullRequestKey(environmentId, reference);
+  return useAtomValue(observedPullRequestSummaryAtom(key));
+}
 
 export interface EnvironmentQueryTarget<Input> {
   readonly environmentId: EnvironmentId;

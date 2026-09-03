@@ -4,15 +4,26 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { pullRequestDetailToVcsStatus } from "@t3tools/client-runtime/state/pull-requests";
-import type { EnvironmentId, ThreadLinkedPullRequest, VcsStatusResult } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  PullRequestSummary,
+  ThreadLinkedPullRequest,
+  VcsStatusResult,
+} from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { CloudIcon, FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo } from "react";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { useProject } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
-import { linkedPullRequestDetailAtom } from "../state/pullRequests";
+import {
+  linkedPullRequestDetailAtom,
+  newestPullRequestSummary,
+  recordObservedPullRequestSummary,
+  useObservedPullRequestSummary,
+} from "../state/pullRequests";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { vcsEnvironment } from "../state/vcs";
 import { useUiStateStore } from "../uiStateStore";
@@ -39,32 +50,6 @@ export interface TerminalStatusIndicator {
 
 export type ThreadPr = VcsStatusResult["pr"];
 
-export type ThreadPullRequestRefreshSource = "linked-detail" | "vcs";
-
-/** Refresh only when the panel has newer state for this thread's own pull request. */
-export function threadPullRequestRefreshSource(input: {
-  readonly panel: {
-    readonly repository: string;
-    readonly number: number;
-    readonly state: NonNullable<ThreadPr>["state"];
-  };
-  readonly thread: {
-    readonly repository: string | null;
-    readonly number: number | null;
-    readonly state: NonNullable<ThreadPr>["state"] | null;
-    readonly linked: boolean;
-  };
-}): ThreadPullRequestRefreshSource | null {
-  if (
-    input.thread.repository?.toLowerCase() !== input.panel.repository.toLowerCase() ||
-    input.thread.number !== input.panel.number ||
-    input.thread.state === input.panel.state
-  ) {
-    return null;
-  }
-  return input.thread.linked ? "linked-detail" : "vcs";
-}
-
 export interface LinkedThreadPullRequestStatus {
   readonly pr: NonNullable<ThreadPr>;
   readonly sourceControlProvider: NonNullable<VcsStatusResult["sourceControlProvider"]>;
@@ -74,7 +59,7 @@ export function useLinkedThreadPullRequest(
   environmentId: EnvironmentId | null,
   linkedPullRequest: ThreadLinkedPullRequest | null | undefined,
 ): LinkedThreadPullRequestStatus | null {
-  const detail = useEnvironmentQuery(
+  const queried = useEnvironmentQuery(
     environmentId === null || linkedPullRequest == null
       ? null
       : linkedPullRequestDetailAtom({
@@ -86,6 +71,12 @@ export function useLinkedThreadPullRequest(
           },
         }),
   ).data;
+  const observed = useObservedPullRequestSummary(environmentId, linkedPullRequest ?? null);
+  useLayoutEffect(() => {
+    if (environmentId === null || queried === null) return;
+    recordObservedPullRequestSummary(environmentId, queried);
+  }, [environmentId, queried]);
+  const detail = newestPullRequestSummary(queried, observed);
 
   return useMemo(
     () =>
@@ -101,6 +92,31 @@ export function useLinkedThreadPullRequest(
           },
     [detail],
   );
+}
+
+export function newestThreadPullRequest(
+  current: ThreadPr,
+  observed: PullRequestSummary | null,
+): ThreadPr {
+  if (current === null || observed === null || current.number !== observed.number) return current;
+  if (current.state === "merged") return current;
+  const currentUpdatedAt =
+    current.updatedAt == null ? Number.NEGATIVE_INFINITY : Date.parse(current.updatedAt);
+  return observed.state === "merged" || Date.parse(observed.updatedAt) >= currentUpdatedAt
+    ? pullRequestDetailToVcsStatus(observed)
+    : current;
+}
+
+export function useObservedThreadPullRequest(
+  environmentId: EnvironmentId | null,
+  projectId: ProjectId | null,
+  current: ThreadPr,
+): ThreadPr {
+  const observed = useObservedPullRequestSummary(
+    environmentId,
+    projectId === null || current === null ? null : { projectId, number: current.number },
+  );
+  return useMemo(() => newestThreadPullRequest(current, observed), [current, observed]);
 }
 
 export function settledPrHoverColorClass(state: NonNullable<ThreadPr>["state"]): string {
@@ -572,10 +588,15 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
         })
       : null,
   );
-  const pr =
+  const resolvedPr =
     thread.linkedPullRequest == null
       ? resolveThreadPr({ threadBranch: thread.branch, gitStatus: gitStatus.data })
       : (linkedPullRequest?.pr ?? null);
+  const pr = useObservedThreadPullRequest(
+    thread.environmentId,
+    thread.linkedPullRequest?.projectId ?? thread.projectId,
+    resolvedPr,
+  );
   const prStatus = prStatusIndicator(
     pr,
     linkedPullRequest?.sourceControlProvider ?? gitStatus.data?.sourceControlProvider,

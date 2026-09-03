@@ -21,6 +21,7 @@ import {
   ThreadStatusLabel,
   ThreadWorktreeIndicator,
   useLinkedThreadPullRequest,
+  useObservedThreadPullRequest,
 } from "./ThreadStatusIndicators";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
@@ -479,10 +480,15 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       : JSON.stringify([thread.environmentId, thread.linkedPullRequest]),
     linkedPullRequestStatus,
   );
-  const pr =
+  const resolvedPr =
     thread.linkedPullRequest == null
       ? resolveThreadPr({ threadBranch: thread.branch, gitStatus: visibleGitStatus })
       : (visibleLinkedPullRequestStatus?.pr ?? null);
+  const pr = useObservedThreadPullRequest(
+    leaseLiveStatus ? thread.environmentId : null,
+    leaseLiveStatus ? (thread.linkedPullRequest?.projectId ?? thread.projectId) : null,
+    resolvedPr,
+  );
   const prStatus = prStatusIndicator(
     pr,
     visibleLinkedPullRequestStatus?.sourceControlProvider ??

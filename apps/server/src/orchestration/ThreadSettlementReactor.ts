@@ -1,4 +1,4 @@
-import { CommandId } from "@t3tools/contracts";
+import { CommandId, type ProjectId } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -38,10 +38,16 @@ export const make = Effect.gen(function* () {
   const pullRequests = yield* PullRequestService.PullRequestService;
   const crypto = yield* Crypto.Crypto;
 
-  const sweep = Effect.fn("ThreadSettlementReactor.sweep")(function* () {
+  const sweep = Effect.fn("ThreadSettlementReactor.sweep")(function* (
+    changedProjectId: ProjectId | null,
+  ) {
     const snapshot = yield* snapshots.getShellSnapshot();
     const now = DateTime.formatIso(yield* DateTime.now);
     const projects = new Map(snapshot.projects.map((project) => [project.id, project]));
+    const changedProject = changedProjectId === null ? undefined : projects.get(changedProjectId);
+    if (changedProject !== undefined) {
+      yield* git.invalidateStatus(changedProject.workspaceRoot);
+    }
     const candidates = snapshot.threads.filter((thread) => isAutoSettlementCandidate(thread, now));
     const lookupKey = (thread: (typeof candidates)[number]) => {
       if (thread.linkedPullRequest != null) {
@@ -145,8 +151,8 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const worker = yield* makeDrainableWorker(() =>
-    sweep().pipe(
+  const worker = yield* makeDrainableWorker((changedProjectId: ProjectId | null) =>
+    sweep(changedProjectId).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
@@ -161,12 +167,13 @@ export const make = Effect.gen(function* () {
     "ThreadSettlementReactor.start",
   )(function* () {
     const settingsChanges = yield* settingsService.subscribeChanges;
+    const mergedPullRequests = yield* pullRequests.subscribeMerges;
     const initialSettings = yield* settingsService.getSettings.pipe(Effect.orDie);
     let lastAfterDays = initialSettings.sidebarAutoSettleAfterDays;
     let lastOnMerge = initialSettings.sidebarAutoSettleOnMerge;
     yield* forkParked(
       Effect.gen(function* () {
-        yield* worker.enqueue(undefined);
+        yield* worker.enqueue(null);
         yield* worker.drain;
       }).pipe(Effect.repeat(Schedule.spaced("1 minute")), Effect.asVoid),
     );
@@ -180,8 +187,11 @@ export const make = Effect.gen(function* () {
         }
         lastAfterDays = settings.sidebarAutoSettleAfterDays;
         lastOnMerge = settings.sidebarAutoSettleOnMerge;
-        return worker.enqueue(undefined);
+        return worker.enqueue(null);
       }),
+    );
+    yield* forkParked(
+      Stream.runForEach(mergedPullRequests, (pullRequest) => worker.enqueue(pullRequest.projectId)),
     );
   });
 

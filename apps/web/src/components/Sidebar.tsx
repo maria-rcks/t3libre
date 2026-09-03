@@ -166,6 +166,7 @@ import {
   type ThreadChangeRequestSnapshot,
   type TerminalStatusIndicator,
   useLinkedThreadPullRequest,
+  useObservedThreadPullRequest,
 } from "./ThreadStatusIndicators";
 import {
   resolveSnoozePresets,
@@ -830,7 +831,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     gitStatus.data,
   );
   const retainTerminalOnBranchMismatch = thread.worktreePath === null;
-  const pr = resolveDisplayedThreadPr({
+  const resolvedPr = resolveDisplayedThreadPr({
     threadBranch: thread.branch,
     gitStatus: visibleGitStatus,
     snapshot: changeRequestSnapshot,
@@ -838,6 +839,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     linkedPullRequest: thread.linkedPullRequest,
     linkedPullRequestStatus,
   });
+  const pr = useObservedThreadPullRequest(
+    leaseLiveStatus ? thread.environmentId : null,
+    leaseLiveStatus ? (thread.linkedPullRequest?.projectId ?? thread.projectId) : null,
+    resolvedPr,
+  );
 
   // Same semantics as the legacy sidebar (never-visited counts as read):
   // switching sidebars must not light up every historical thread as unread.

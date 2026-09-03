@@ -5,7 +5,10 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
+import type * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import {
   PullRequestOperationError,
   PullRequestUnavailableError,
@@ -135,6 +138,7 @@ export class PullRequestService extends Context.Service<
       input: PullRequestRef,
       options?: { readonly recoverTransientFailure?: boolean },
     ) => Effect.Effect<PullRequestSummary, PullRequestError>;
+    readonly subscribeMerges: Effect.Effect<Stream.Stream<PullRequestRef>, never, Scope.Scope>;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
     readonly activity: (
       input: PullRequestRef,
@@ -517,6 +521,7 @@ export function repositoryIdentityOf(project: OrchestrationProjectShell): string
 }
 
 export const make = Effect.gen(function* () {
+  const mergedPullRequests = yield* PubSub.unbounded<PullRequestRef>();
   const registry = yield* PullRequestProviderRegistry;
   const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
@@ -2160,9 +2165,13 @@ export const make = Effect.gen(function* () {
   const summary: PullRequestService["Service"]["summary"] = (input, options) => {
     const key = refCacheKey(input);
     const cached = Cache.get(summaryCache, key);
-    return options?.recoverTransientFailure === false
-      ? cached.pipe(Effect.tap((value) => lastGoodSummary.record(key, value)))
-      : lastGoodSummary.serveHeld(key, cached, "reuse");
+    if (options?.recoverTransientFailure !== false) {
+      return lastGoodSummary.serveHeld(key, cached, "reuse");
+    }
+    const held = lastGoodSummary.peek(key);
+    return held?.state === "merged"
+      ? Effect.succeed(held)
+      : cached.pipe(Effect.tap((value) => lastGoodSummary.record(key, value)));
   };
 
   // Keys serialize positionally and parse back in the lookup, so the cache is the only holder
@@ -2400,17 +2409,32 @@ export const make = Effect.gen(function* () {
           }),
         ),
       );
+  const runActionAndInvalidate = (input: PullRequestActionInput) =>
+    invalidatedByMutation(runAction)(input).pipe(
+      Effect.tap(() =>
+        input.action === "merge"
+          ? PubSub.publish(mergedPullRequests, {
+              projectId: input.projectId,
+              repository: input.repository,
+              number: input.number,
+            }).pipe(Effect.asVoid)
+          : Effect.void,
+      ),
+    );
 
   return PullRequestService.of({
     list,
     listStats,
     summary,
+    subscribeMerges: PubSub.subscribe(mergedPullRequests).pipe(
+      Effect.map((subscription) => Stream.fromSubscription(subscription)),
+    ),
     detail,
     activity,
     threadComments,
     diff,
     diffFileContents,
-    runAction: invalidatedByMutation(runAction),
+    runAction: runActionAndInvalidate,
     update: invalidatedByMutation(update),
     comment: invalidatedByMutation(comment),
     updateComment: invalidatedByMutation(updateComment),

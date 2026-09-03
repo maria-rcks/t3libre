@@ -143,10 +143,16 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   const snapshotReads = yield* Queue.unbounded<number>();
   const settings = yield* Ref.make(options.settings ?? DEFAULT_SERVER_SETTINGS);
   const settingsChanges = yield* PubSub.unbounded<ServerSettings>();
+  const mergedPullRequests = yield* PubSub.unbounded<{
+    readonly projectId: ProjectId;
+    readonly repository: string;
+    readonly number: number;
+  }>();
   const commands = yield* Ref.make<ReadonlyArray<AutoSettleCommand>>([]);
   const branchCalls = yield* Ref.make<
     ReadonlyArray<{ readonly cwd: string; readonly branch: string }>
   >([]);
+  const invalidatedCwds = yield* Ref.make<ReadonlyArray<string>>([]);
   const summaryCalls = yield* Ref.make<
     ReadonlyArray<{
       readonly projectId: ProjectId;
@@ -168,6 +174,8 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     Ref.update(branchCalls, (calls) => [...calls, input]).pipe(
       Effect.andThen(options.branchPullRequest?.(input) ?? Effect.succeed(null)),
     );
+  const invalidateStatus: GitManager["Service"]["invalidateStatus"] = (cwd) =>
+    Ref.update(invalidatedCwds, (values) => [...values, cwd]);
 
   const pullRequestSummary: PullRequestService["Service"]["summary"] = (input, readOptions) =>
     Effect.gen(function* () {
@@ -216,8 +224,13 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
           Effect.andThen(Ref.get(snapshots)),
         ),
     }),
-    Layer.mock(GitManager)({ branchPullRequest }),
-    Layer.mock(PullRequestService)({ summary: pullRequestSummary }),
+    Layer.mock(GitManager)({ branchPullRequest, invalidateStatus }),
+    Layer.mock(PullRequestService)({
+      summary: pullRequestSummary,
+      subscribeMerges: PubSub.subscribe(mergedPullRequests).pipe(
+        Effect.map((subscription) => Stream.fromSubscription(subscription)),
+      ),
+    }),
     Layer.mock(OrchestrationEngineService)({
       readEvents: () => Stream.empty,
       dispatch,
@@ -236,9 +249,16 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     snapshotReads,
     commands,
     branchCalls,
+    invalidatedCwds,
     summaryCalls,
     summaryRecovery,
     updateSettings,
+    publishMerge: (projectId: ProjectId) =>
+      PubSub.publish(mergedPullRequests, {
+        projectId,
+        repository: "owner/repository",
+        number: 42,
+      }),
     layer: ThreadSettlementReactor.layer.pipe(Layer.provide(dependencies)),
   };
 });
@@ -368,6 +388,37 @@ describe("ThreadSettlementReactor", () => {
             [ThreadId.make("at-boundary"), ThreadId.make("open-pr")],
           );
           assert.strictEqual((yield* Ref.get(fixture.branchCalls)).length, 2);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("reevaluates immediately after a pull request merge", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const pullRequest = yield* Ref.make<"open" | "merged">("open");
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([makeThread("merged-in-app", { branch: "saved-feature" })]),
+          branchPullRequest: () =>
+            Ref.get(pullRequest).pipe(Effect.map((state) => ({ state, updatedAt: NOW }))),
+        });
+
+        yield* Effect.gen(function* () {
+          const reactor = yield* ThreadSettlementReactor.ThreadSettlementReactor;
+          yield* startHarness(reactor, fixture.activation, fixture.snapshotReads);
+          assert.deepStrictEqual(yield* Ref.get(fixture.commands), []);
+
+          yield* Ref.set(pullRequest, "merged");
+          yield* fixture.publishMerge(PROJECT_ID);
+          yield* Queue.take(fixture.snapshotReads);
+          yield* reactor.drain;
+
+          assert.deepStrictEqual(
+            (yield* Ref.get(fixture.commands)).map((command) => command.threadId),
+            [ThreadId.make("merged-in-app")],
+          );
+          assert.deepStrictEqual(yield* Ref.get(fixture.invalidatedCwds), ["/workspace/project"]);
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),
