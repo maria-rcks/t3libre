@@ -60,6 +60,7 @@ import {
 } from "./composerMentionDrag";
 import {
   composerFloatingLayerProps,
+  isInsideCollapsedComposerControls,
   isInsideComposerFloatingLayer,
   isInsideRestingComposerControlScope,
 } from "./composerEventScope";
@@ -4559,6 +4560,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onPointerDownCapture={(event) => {
         const target = event.target;
         if (isInsideRestingComposerControlScope(target)) return;
+        if (isInsideCollapsedComposerControls(target)) return;
         if (!(target instanceof Element)) return;
         const isInteractive = Boolean(
           target.closest('button, a, input, select, [role="button"], [role="menuitem"]'),
@@ -4581,11 +4583,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (composerControlsInStrip && isInsideRestingComposerControlScope(activeElement)) {
           return;
         }
-        if (
-          isComposerCollapsedMobile &&
-          activeElement instanceof HTMLElement &&
-          activeElement.closest('[data-chat-composer-collapsed-controls="true"]')
-        ) {
+        if (isInsideCollapsedComposerControls(activeElement)) {
           return;
         }
         // Focus returning from another window or tab lands on the element
