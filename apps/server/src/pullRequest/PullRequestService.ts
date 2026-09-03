@@ -2181,9 +2181,16 @@ export const make = Effect.gen(function* () {
   });
   const detail: PullRequestService["Service"]["detail"] = (input) => {
     const key = refCacheKey(input);
-    return lastGoodDetail
-      .serveHeld(key, Cache.get(detailCache, key), "revalidate")
-      .pipe(Effect.tap((value) => lastGoodSummary.record(key, summaryFromDetail(value))));
+    // Record the summary from a host (or cache) read, not from the stale value
+    // `serveHeld` returns immediately — that snapshot can be older than a later
+    // strict summary, and display reuse would then never ask the host again.
+    return lastGoodDetail.serveHeld(
+      key,
+      Cache.get(detailCache, key).pipe(
+        Effect.tap((value) => lastGoodSummary.record(key, summaryFromDetail(value))),
+      ),
+      "revalidate",
+    );
   };
 
   const activityCache = yield* Cache.makeWith(

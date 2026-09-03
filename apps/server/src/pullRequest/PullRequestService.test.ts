@@ -3073,6 +3073,55 @@ it.effect("does not ask the host again for a linked summary it already holds", (
   }),
 );
 
+it.effect("does not let a stale detail reopen overwrite a fresher linked summary", () =>
+  Effect.gen(function* () {
+    const gate = yield* Deferred.make<void>();
+    let detailCalls = 0;
+    let summaryTitle = "old title";
+    let summaryState: "open" | "merged" = "open";
+    const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequest: () =>
+            Effect.gen(function* () {
+              detailCalls += 1;
+              if (detailCalls > 1) yield* Deferred.await(gate);
+              return hostedChangeRequest("old body", 4);
+            }),
+          getChangeRequestSummary: () =>
+            Effect.succeed({
+              ...changeRequest(1, "2026-07-02T00:00:00Z"),
+              title: summaryTitle,
+              state: summaryState,
+            }),
+        }),
+      ],
+    });
+
+    const first = yield* service.detail(reference);
+    assert.strictEqual(first.title, "Change request 1");
+
+    summaryTitle = "merged title";
+    summaryState = "merged";
+    yield* TestClock.adjust("61 seconds");
+    const settled = yield* service.summary(reference, { recoverTransientFailure: false });
+    assert.strictEqual(settled.title, "merged title");
+    assert.strictEqual(settled.state, "merged");
+
+    yield* TestClock.adjust("16 seconds");
+    const stale = yield* service.detail(reference);
+    assert.strictEqual(stale.title, "Change request 1");
+    yield* Effect.yieldNow;
+
+    const display = yield* service.summary(reference);
+    assert.strictEqual(display.title, "merged title");
+    assert.strictEqual(display.state, "merged");
+    assert.strictEqual(detailCalls, 2);
+  }),
+);
+
 it.effect("keeps recent detail on a transient refresh failure but not after invalidation", () =>
   Effect.gen(function* () {
     let failing = false;

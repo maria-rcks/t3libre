@@ -576,7 +576,7 @@ export function PullRequestDetailPanel({
         reference,
       ),
     );
-  }, [environmentId, pullRequestKey, reference]);
+  }, [environmentId, pullRequestKey, reference.projectId, reference.repository, reference.number]);
   useEffect(() => {
     if (detailQuery.data === null) return;
     writePullRequestDetailSnapshot(
@@ -586,7 +586,14 @@ export function PullRequestDetailPanel({
       detailQuery.data,
     );
     setCachedDetail(detailQuery.data);
-  }, [detailQuery.data, environmentId, pullRequestKey, reference]);
+  }, [
+    detailQuery.data,
+    environmentId,
+    pullRequestKey,
+    reference.projectId,
+    reference.repository,
+    reference.number,
+  ]);
   const coreDetail = resolveDisplayedPullRequestDetail({
     live: detailQuery.data,
     cached: cachedDetail,
