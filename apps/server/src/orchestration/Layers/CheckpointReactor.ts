@@ -91,6 +91,7 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const refreshedTurnKeys = new Set<string>();
+  const activeTurnByThread = new Map<ThreadId, TurnId>();
   const REFRESHED_TURN_CAPACITY = 2_048;
 
   const refreshPullRequestsOnce = Effect.fn("refreshPullRequestsOnce")(function* (
@@ -844,18 +845,17 @@ const make = Effect.gen(function* () {
         event.payload.session.status === "starting" ||
         event.payload.session.status === "running"
       ) {
+        if (event.payload.session.activeTurnId !== null) {
+          activeTurnByThread.set(event.payload.threadId, event.payload.session.activeTurnId);
+        }
         return;
       }
+      const turnId = activeTurnByThread.get(event.payload.threadId);
+      activeTurnByThread.delete(event.payload.threadId);
+      if (turnId === undefined) return;
       const thread = yield* resolveThreadDetail(event.payload.threadId);
-      const turn = thread?.latestTurn;
-      if (
-        thread !== undefined &&
-        turn !== null &&
-        turn !== undefined &&
-        turn.state !== "running" &&
-        turn.completedAt === event.payload.session.updatedAt
-      ) {
-        yield* refreshPullRequestsOnce(thread.projectId, thread.id, turn.turnId);
+      if (thread !== undefined) {
+        yield* refreshPullRequestsOnce(thread.projectId, thread.id, turnId);
       }
       return;
     }
@@ -887,16 +887,6 @@ const make = Effect.gen(function* () {
     // turn.completed runtime events to this reactor (shared subscription), so
     // reacting to the domain event is the reliable path.
     if (event.type === "thread.turn-diff-completed") {
-      const thread = yield* resolveThreadDetail(event.payload.threadId);
-      if (
-        thread !== undefined &&
-        thread.session !== null &&
-        thread.session.status !== "starting" &&
-        thread.session.status !== "running" &&
-        thread.latestTurn?.turnId === event.payload.turnId
-      ) {
-        yield* refreshPullRequestsOnce(thread.projectId, thread.id, event.payload.turnId);
-      }
       yield* captureCheckpointFromPlaceholder(event).pipe(
         Effect.catch((error) =>
           Effect.flatMap(nowIso, (createdAt) =>
@@ -909,6 +899,11 @@ const make = Effect.gen(function* () {
           ),
         ),
       );
+      const thread = yield* resolveThreadDetail(event.payload.threadId);
+      if (thread !== undefined) {
+        yield* refreshPullRequestsOnce(thread.projectId, thread.id, event.payload.turnId);
+      }
+      return;
     }
   });
 

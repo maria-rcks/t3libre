@@ -593,8 +593,6 @@ describe("CheckpointReactor", () => {
         },
         createdAt: "2026-01-01T00:00:02.000Z",
       });
-      yield* Effect.promise(() => harness.drain());
-
       yield* harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-pr-refresh-ready-again"),
@@ -610,6 +608,21 @@ describe("CheckpointReactor", () => {
         },
         createdAt: "2026-01-01T00:00:03.000Z",
       });
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-pr-refresh-next-running"),
+        threadId,
+        session: {
+          threadId,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-after-refresh"),
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:04.000Z",
+        },
+        createdAt: "2026-01-01T00:00:04.000Z",
+      });
       yield* Effect.promise(() => harness.drain());
 
       expect(pullRequestRefreshCalls).toEqual([asProjectId("project-1")]);
@@ -619,12 +632,12 @@ describe("CheckpointReactor", () => {
         commandId: CommandId.make("cmd-pr-refresh-missed-start"),
         threadId,
         turnId: asTurnId("turn-with-missed-start"),
-        completedAt: "2026-01-01T00:00:04.000Z",
+        completedAt: "2026-01-01T00:00:05.000Z",
         checkpointRef: checkpointRefForThreadTurn(threadId, 2),
         checkpointTurnCount: 2,
         status: "ready",
         files: [],
-        createdAt: "2026-01-01T00:00:04.000Z",
+        createdAt: "2026-01-01T00:00:05.000Z",
       });
       yield* Effect.promise(() => harness.drain());
 
