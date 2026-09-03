@@ -123,6 +123,13 @@ function resolveT3McpToolPresentation(value: string | undefined, status: string 
   };
 }
 
+/** Latest live activity stays present-tense unless the call itself failed, declined, or stopped. */
+export function liveActivityToolStatus(status: string | undefined, presentTense: boolean) {
+  if (status === "failed" || status === "declined" || status === "stopped") return status;
+  if (presentTense || status === "inProgress") return "inProgress";
+  return "completed";
+}
+
 /** Resolves tool identity before choosing labels or icons in either client. */
 export function resolveWorkEntryToolPresentation(
   entry: Pick<WorkLogPresentationEntry, "label" | "toolTitle" | "toolData" | "toolLifecycleStatus">,

@@ -1039,7 +1039,7 @@ describe("buildThreadFeed", () => {
     ).toMatchObject([
       {
         type: "work-toggle",
-        summary: "Clicked in the preview browser",
+        summary: "Clicking in the preview browser",
         summaryToolIcon: "browser",
         live: true,
       },
@@ -1050,18 +1050,20 @@ describe("buildThreadFeed", () => {
     {
       status: "completed",
       displayName: "Clicked in the preview browser",
+      liveDisplayName: "Clicking in the preview browser",
       detail: "Clicked Continue",
       hasFailure: false,
     },
     {
       status: "failed",
       displayName: "Failed to click in the preview browser",
+      liveDisplayName: "Failed to click in the preview browser",
       detail: "Timed out waiting for Continue",
       hasFailure: true,
     },
   ])(
     "uses the browser call label once its action settles as $status",
-    ({ status, displayName, detail, hasFailure }) => {
+    ({ status, displayName, liveDisplayName, detail, hasFailure }) => {
       const turnId = TurnId.make("turn-preview-lifecycle");
       const toolCallId = "preview-click";
       const groupId = `work-group:tool:${turnId}:${toolCallId}`;
@@ -1156,7 +1158,7 @@ describe("buildThreadFeed", () => {
           groupId,
           hiddenCount: 1,
           expanded: true,
-          summary: displayName,
+          summary: liveDisplayName,
           summaryToolIcon: "browser",
           hasFailure,
           live: true,
@@ -1677,7 +1679,7 @@ describe("buildThreadFeed", () => {
       (
         [
           { lifecycleStatus: "inProgress", summary: "Running pnpm", shimmer: true },
-          { lifecycleStatus: "completed", summary: "Ran pnpm", shimmer: false },
+          { lifecycleStatus: "completed", summary: "Running pnpm", shimmer: false },
           { lifecycleStatus: "failed", summary: "Failed pnpm", shimmer: false },
           { lifecycleStatus: "declined", summary: "Declined pnpm", shimmer: false },
           { lifecycleStatus: "stopped", summary: "Stopped pnpm", shimmer: false },
