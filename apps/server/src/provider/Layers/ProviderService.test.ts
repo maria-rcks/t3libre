@@ -1203,6 +1203,35 @@ routing.layer("ProviderServiceLive routing", (it) => {
       assert.equal(observed.length, 1);
       assert.equal(observed[0]?.requestId, String(observedRequestId));
       yield* Fiber.interrupt(observedEventsFiber);
+
+      const failedStartEventId = asEventId("evt-cursor-failed-compact-start");
+      const failedStartEventFiber = yield* provider.streamEvents.pipe(
+        Stream.filter((event) => event.eventId === failedStartEventId),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+      routing.cursor.sendTurn.mockImplementationOnce((input) =>
+        Effect.gen(function* () {
+          routing.cursor.emit({
+            type: "turn.completed",
+            eventId: failedStartEventId,
+            provider: CURSOR_DRIVER,
+            createdAt: "2026-01-01T00:00:04.000Z",
+            threadId: input.threadId,
+            turnId: asTurnId("turn-cursor-failed-compact-start"),
+            payload: { state: "failed" },
+          });
+          yield* Effect.yieldNow;
+          return yield* new ProviderAdapterRequestError({
+            provider: String(CURSOR_DRIVER),
+            method: "turn/start",
+            detail: "Failed after emitting a terminal event.",
+          });
+        }),
+      );
+      const failedStart = yield* provider.compactThread(threadId).pipe(Effect.result);
+      assert.equal(failedStart._tag, "Failure");
+      assert.equal(Option.isSome(yield* Fiber.join(failedStartEventFiber)), true);
       yield* provider.stopSession({ threadId });
     }),
   );

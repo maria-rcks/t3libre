@@ -1062,7 +1062,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                 threadId,
                 input: routed.adapter.provider === "cursor" ? "/compress" : "/compact",
                 ...(modelSelection !== undefined ? { modelSelection } : {}),
-              });
+              }).pipe(
+                Effect.onError(() =>
+                  Effect.forEach(pending.earlyEvents.splice(0), publishRuntimeEvent, {
+                    discard: true,
+                  }),
+                ),
+              );
               pending.expectedTurnId = turn.turnId;
               const earlyEvents = pending.earlyEvents.splice(0);
               for (const earlyEvent of earlyEvents) {
