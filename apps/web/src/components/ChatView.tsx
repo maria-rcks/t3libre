@@ -1783,7 +1783,7 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const refreshVcsStatus = useAtomCommand(vcsEnvironment.refreshStatus, { reportFailure: false });
   const sidebarPrRefreshKeyRef = useRef<string | null>(null);
-  const threadPrRelinkKeyRef = useRef<string | null>(null);
+  const threadPrRelinkKeysRef = useRef(new Map<string, string>());
   const threadPrRelinkWriteRef = useRef(Promise.resolve());
   const activePreviewState = useThreadPreviewState(activeThreadRef);
   const activePreviewServerEpoch = activePreviewState.serverEpoch;
@@ -3718,17 +3718,16 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
   useEffect(() => {
-    if (
-      !isServerThread ||
-      activeThreadRef === null ||
-      replacementLinkedThreadPullRequest === null
-    ) {
-      threadPrRelinkKeyRef.current = null;
+    if (!isServerThread || activeThreadKey === null || activeThreadRef === null) {
       return;
     }
-    const relinkKey = `${activeThreadKey}:${replacementLinkedThreadPullRequest.projectId}:${replacementLinkedThreadPullRequest.repository}#${replacementLinkedThreadPullRequest.number}`;
-    if (threadPrRelinkKeyRef.current === relinkKey) return;
-    threadPrRelinkKeyRef.current = relinkKey;
+    if (replacementLinkedThreadPullRequest === null) {
+      threadPrRelinkKeysRef.current.delete(activeThreadKey);
+      return;
+    }
+    const relinkKey = `${replacementLinkedThreadPullRequest.projectId}:${replacementLinkedThreadPullRequest.repository}#${replacementLinkedThreadPullRequest.number}`;
+    if (threadPrRelinkKeysRef.current.get(activeThreadKey) === relinkKey) return;
+    threadPrRelinkKeysRef.current.set(activeThreadKey, relinkKey);
     const openSurface = selectActiveRightPanelSurface(
       useRightPanelStore.getState().byThreadKey,
       activeThreadRef,
@@ -3747,7 +3746,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     threadPrRelinkWriteRef.current = threadPrRelinkWriteRef.current.then(async () => {
-      if (threadPrRelinkKeyRef.current !== relinkKey) return;
+      if (threadPrRelinkKeysRef.current.get(activeThreadKey) !== relinkKey) return;
       const result = await updateThreadMetadata({
         environmentId: activeThreadRef.environmentId,
         input: {
@@ -3755,9 +3754,9 @@ function ChatViewContent(props: ChatViewProps) {
           linkedPullRequest: replacementLinkedThreadPullRequest,
         },
       });
+      if (threadPrRelinkKeysRef.current.get(activeThreadKey) !== relinkKey) return;
+      threadPrRelinkKeysRef.current.delete(activeThreadKey);
       if (result._tag !== "Failure") return;
-      if (threadPrRelinkKeyRef.current !== relinkKey) return;
-      threadPrRelinkKeyRef.current = null;
       if (isAtomCommandInterrupted(result)) return;
       toastManager.add(
         stackedThreadToast({
