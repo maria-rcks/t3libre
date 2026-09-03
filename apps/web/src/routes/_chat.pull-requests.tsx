@@ -1436,6 +1436,15 @@ function PullRequestsRouteView() {
         entry.additions + entry.deletions > 0 || statsByRow.has(pullRequestDiffStatKey(entry)),
     );
   }, [groups, sort, statsByRow, typedParsed.text]);
+  const listedPullRequestsBySurface = useMemo(
+    () =>
+      new Map(
+        displayGroups.flatMap((group) =>
+          group.entries.map((entry) => [pullRequestSurfaceId(entry), entry] as const),
+        ),
+      ),
+    [displayGroups],
+  );
 
   const linkedSelection = useMemo(
     () =>
@@ -1939,6 +1948,7 @@ function PullRequestsRouteView() {
                 repository: renderedPullRequestSurface.repository,
                 number: renderedPullRequestSurface.number,
               }}
+              listEntry={listedPullRequestsBySurface.get(renderedPullRequestSurface.id) ?? null}
               refreshToken={detailRefreshToken}
               // Merging, closing or reopening changes the row this panel was opened from, so
               // the list behind it is out of date the moment the host takes the action.
