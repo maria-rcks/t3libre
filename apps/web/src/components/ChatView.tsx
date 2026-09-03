@@ -3851,8 +3851,7 @@ function ChatViewContent(props: ChatViewProps) {
     })
       ? settledTurnId
       : null;
-    const eligibleCompletion =
-      settings.proactivePanelsEnabled && !shouldUseRightPanelSheet && newlyCompletedTurnId !== null;
+    const eligibleCompletion = settings.proactivePanelsEnabled && newlyCompletedTurnId !== null;
     const checkpointReady =
       eligibleCompletion &&
       activeThread?.checkpoints.some((checkpoint) => checkpoint.turnId === newlyCompletedTurnId) ===
@@ -3882,7 +3881,6 @@ function ChatViewContent(props: ChatViewProps) {
     latestTurnSettled,
     onDiffPanelOpen,
     settings.proactivePanelsEnabled,
-    shouldUseRightPanelSheet,
     threadDetailLoading,
   ]);
 
@@ -3902,8 +3900,7 @@ function ChatViewContent(props: ChatViewProps) {
       previousTargetKey,
       linkedThreadPullRequestKey,
     );
-    const eligibleLink =
-      settings.proactivePanelsEnabled && !shouldUseRightPanelSheet && newlyLinkedPullRequest;
+    const eligibleLink = settings.proactivePanelsEnabled && newlyLinkedPullRequest;
     const shouldOpenLink =
       eligibleLink &&
       pullRequestsCapabilityKnown &&
@@ -3926,7 +3923,6 @@ function ChatViewContent(props: ChatViewProps) {
     linkedThreadPullRequestKey,
     pullRequestsCapabilityKnown,
     settings.proactivePanelsEnabled,
-    shouldUseRightPanelSheet,
     supportsPullRequests,
     threadDetailLoading,
   ]);
