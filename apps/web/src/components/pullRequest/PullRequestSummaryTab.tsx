@@ -43,10 +43,11 @@ import { PullRequestReviewerPicker } from "./PullRequestReviewerPicker";
 import { PullRequestActivityUnavailableState } from "./PullRequestActivityUnavailableState";
 import {
   latestPullRequestReviewOutcomes,
-  orderPullRequestComments,
   pullRequestFindingKey,
+  pullRequestHiddenCommentsActionLabel,
   pullRequestReviewOutcome,
   visibleBody,
+  windowPullRequestComments,
   type PullRequestFinding,
 } from "./pullRequestDetail.logic";
 import {
@@ -401,12 +402,26 @@ export function PullRequestSummaryTab({
   // rather than wherever the last one had been read back to.
   const [shown, setShown] = useState({ url: detail.url, count: COMMENT_PAGE });
   const shownComments = shown.url === detail.url ? shown.count : COMMENT_PAGE;
-  // Windowed by recency regardless of display order: expanding always reaches further back in
-  // time, whether the newest comment currently reads first or last.
-  const recentComments = detail.comments.slice(Math.max(0, detail.comments.length - shownComments));
-  const hiddenCommentCount = detail.comments.length - recentComments.length;
   const [commentOrder, setCommentOrder] = useState<"newest" | "oldest">("newest");
-  const visibleComments = orderPullRequestComments(recentComments, commentOrder);
+  const {
+    visible: visibleComments,
+    hiddenCount: hiddenCommentCount,
+    expandFrom,
+  } = windowPullRequestComments(detail.comments, shownComments, commentOrder);
+  // Hundreds of comments are hundreds of markdown renders, and the ones worth opening a pull
+  // request for are the recent ones. The rest are one press away and stay rendered once asked
+  // for. Newest-first puts that press after the visible list, where the oldest comments belong.
+  const showOldestCommentsButton =
+    hiddenCommentCount > 0 ? (
+      <Button
+        size="sm"
+        variant="outline"
+        className="w-full"
+        onClick={() => setShown({ url: detail.url, count: shownComments + COMMENT_PAGE })}
+      >
+        {pullRequestHiddenCommentsActionLabel(hiddenCommentCount, COMMENT_PAGE)}
+      </Button>
+    ) : null;
   // Read from the whole conversation, not the window shown below it: a verdict older than the
   // last thirty comments still stands.
   const reviewOutcomes = latestPullRequestReviewOutcomes(detail.comments, detail.commits);
@@ -782,22 +797,7 @@ export function PullRequestSummaryTab({
               <p className="py-2 text-xs text-muted-foreground">No comments yet.</p>
             ) : (
               <div className="space-y-3">
-                {hiddenCommentCount > 0 ? (
-                  // Hundreds of comments are hundreds of markdown renders, and the ones worth
-                  // opening a pull request for are the recent ones. The rest are one press away and
-                  // stay rendered once asked for.
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full"
-                    onClick={() =>
-                      setShown({ url: detail.url, count: shownComments + COMMENT_PAGE })
-                    }
-                  >
-                    Show {Math.min(hiddenCommentCount, COMMENT_PAGE)} earlier{" "}
-                    {hiddenCommentCount === 1 ? "comment" : "comments"}
-                  </Button>
-                ) : null}
+                {expandFrom === "start" ? showOldestCommentsButton : null}
                 {visibleComments.map((comment) => {
                   const thread = threadByCommentId.get(comment.id);
                   const body = visibleBody(comment.body);
@@ -909,6 +909,7 @@ export function PullRequestSummaryTab({
                     </article>
                   );
                 })}
+                {expandFrom === "end" ? showOldestCommentsButton : null}
               </div>
             )}
           </>
