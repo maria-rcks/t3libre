@@ -167,6 +167,7 @@ describe("ProviderCommandReactor", () => {
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
     readonly serverActivation?: Effect.Effect<void>;
+    readonly beforeReadySessionDispatch?: () => Effect.Effect<void>;
     readonly compactThreadEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly interruptTurnEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly stopSessionEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
@@ -410,7 +411,11 @@ describe("ProviderCommandReactor", () => {
                 return Effect.die(new Error("Injected title regeneration completion failure"));
               }
             }
-            return engine.dispatch(command);
+            return (
+              command.type === "thread.session.set" && command.session.status === "ready"
+                ? (input?.beforeReadySessionDispatch?.() ?? Effect.void)
+                : Effect.void
+            ).pipe(Effect.andThen(engine.dispatch(command)));
           },
           get streamDomainEvents() {
             return engine.streamDomainEvents;
@@ -655,6 +660,85 @@ describe("ProviderCommandReactor", () => {
       });
       yield* Effect.promise(() => harness.drain());
       expect(harness.compactThread).not.toHaveBeenCalled();
+    }),
+  );
+
+  effectIt.effect("keeps turns blocked until compaction restores the session", () =>
+    Effect.gen(function* () {
+      const readyDispatchStarted = yield* Deferred.make<void>();
+      const releaseReadyDispatch = yield* Deferred.make<void>();
+      let blockReadyDispatch = false;
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          beforeReadySessionDispatch: () =>
+            blockReadyDispatch
+              ? Deferred.succeed(readyDispatchStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseReadyDispatch)),
+                )
+              : Effect.void,
+        }),
+      );
+      const threadId = ThreadId.make("thread-1");
+      const now = "2026-01-01T00:00:00.000Z";
+      const dispatchTurn = (id: string, text: string, createdAt: string) =>
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`cmd-${id}`),
+          threadId,
+          message: {
+            messageId: asMessageId(`user-message-${id}`),
+            role: "user",
+            text,
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt,
+        });
+
+      yield* dispatchTurn("before-blocked-compact", "hello", now);
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-ready-before-blocked-compact"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      });
+
+      blockReadyDispatch = true;
+      yield* dispatchTurn("blocked-compact", "/compact", "2026-01-01T00:00:01.000Z");
+      yield* Deferred.await(readyDispatchStarted);
+
+      yield* dispatchTurn("during-compact-recovery", "too soon", "2026-01-01T00:00:02.000Z");
+      yield* Effect.promise(() =>
+        waitFor(async () => {
+          const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId);
+          return (
+            thread?.activities.some(
+              (activity) => activity.kind === "provider.turn.start.failed",
+            ) === true
+          );
+        }),
+      );
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+
+      yield* Deferred.succeed(releaseReadyDispatch, undefined);
+      yield* Effect.promise(() =>
+        waitFor(async () => {
+          const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId);
+          return thread?.session?.status === "ready";
+        }),
+      );
     }),
   );
 

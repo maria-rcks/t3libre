@@ -441,7 +441,10 @@ const make = Effect.gen(function* () {
   });
 
   const setThreadSessionReadyAfterCompaction = Effect.fnUntraced(function* (threadId: ThreadId) {
-    if (stoppingThreadIds.has(threadId)) return;
+    if (stoppingThreadIds.has(threadId)) {
+      compactingThreadIds.delete(threadId);
+      return;
+    }
     const thread = yield* resolveThread(threadId);
     if (
       !thread?.session ||
@@ -450,7 +453,10 @@ const make = Effect.gen(function* () {
       return;
     }
     const completedAt = DateTime.formatIso(yield* DateTime.now);
-    if (stoppingThreadIds.has(threadId)) return;
+    if (stoppingThreadIds.has(threadId)) {
+      compactingThreadIds.delete(threadId);
+      return;
+    }
     yield* setThreadSession({
       threadId,
       session: {
@@ -1264,9 +1270,6 @@ const make = Effect.gen(function* () {
         return Effect.void;
       }
       const detail = formatFailureDetail(cause);
-      if (stoppingThreadIds.has(event.payload.threadId)) {
-        return appendTurnStartFailure("Context compaction failed", detail).pipe(Effect.asVoid);
-      }
       if (!compactionSessionEnsured) {
         return setThreadSessionErrorOnTurnStartFailure({
           threadId: event.payload.threadId,
@@ -1340,9 +1343,9 @@ const make = Effect.gen(function* () {
           event.payload.messageId,
         );
       }).pipe(
-        Effect.ensuring(Effect.sync(() => void compactingThreadIds.delete(event.payload.threadId))),
         Effect.andThen(setThreadSessionReadyAfterCompaction(event.payload.threadId)),
         Effect.catchCause(recoverCompactionFailure),
+        Effect.ensuring(Effect.sync(() => void compactingThreadIds.delete(event.payload.threadId))),
         Effect.forkScoped,
       );
       return;
