@@ -77,8 +77,6 @@ export function PullRequestDetailGhost({ seed }: { seed?: PullRequestListEntry |
     ? resolvePullRequestState({
         state: seed.state,
         isDraft: seed.isDraft,
-        mergeability: seed.mergeability,
-        baseBranch: seed.baseBranch,
       })
     : null;
   const checksPresentation = seed?.checksState
