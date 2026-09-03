@@ -323,13 +323,15 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     props.activePendingUserInput === null;
   const floatingWorkingStartedAt = showWorkingControl ? props.activeWorkStartedAt : null;
   const selectedThreadFeed = props.selectedThreadFeed;
-  const hasCompactableConversation = selectedThreadFeed.some(
-    (entry) =>
-      entry.type === "message" &&
-      entry.message.role === "user" &&
-      ((entry.message.attachments?.length ?? 0) > 0 ||
-        entry.message.text.trim().toLowerCase() !== "/compact"),
-  );
+  const hasCompactableConversation =
+    selectedThreadFeed.some(
+      (entry) =>
+        entry.type === "message" &&
+        entry.message.role === "user" &&
+        ((entry.message.attachments?.length ?? 0) > 0 ||
+          entry.message.text.trim().toLowerCase() !== "/compact"),
+    ) ||
+    (Boolean(props.loadEarlier) && props.selectedThread.latestUserMessageAt !== null);
   const composerChrome = composerExpanded ? COMPOSER_EXPANDED_CHROME : COMPOSER_COLLAPSED_CHROME;
   const composerOverlapHeight = composerChrome + composerBottomInset;
   // While a user-input request is pending, the questionnaire owns the

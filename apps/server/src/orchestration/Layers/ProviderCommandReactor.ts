@@ -441,7 +441,7 @@ const make = Effect.gen(function* () {
 
   const setThreadSessionReadyAfterCompaction = Effect.fnUntraced(function* (threadId: ThreadId) {
     const thread = yield* resolveThread(threadId);
-    if (!thread?.session) return;
+    if (!thread?.session || thread.session.status === "stopped") return;
     const completedAt = DateTime.formatIso(yield* DateTime.now);
     yield* setThreadSession({
       threadId,

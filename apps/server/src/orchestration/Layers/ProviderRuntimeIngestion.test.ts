@@ -3257,6 +3257,32 @@ describe("ProviderRuntimeIngestion", () => {
     expect(activity?.summary).toBe("Compacted context 899K → 19K tokens");
     expect(activity?.tone).toBe("info");
     expect(activity?.payload).toMatchObject({ requestId: "message-compact" });
+
+    harness.emit({
+      type: "thread.state.changed",
+      eventId: asEventId("evt-thread-compacted-again"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-2"),
+      payload: {
+        state: "compacted",
+        detail: { source: "provider" },
+      },
+    });
+
+    const compactedAgain = await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.activities.filter(
+          (candidate: ProviderRuntimeTestActivity) => candidate.kind === "context-compaction",
+        ).length === 2,
+    );
+    expect(
+      compactedAgain.activities.find(
+        (candidate: ProviderRuntimeTestActivity) => candidate.id === "evt-thread-compacted-again",
+      )?.summary,
+    ).toBe("Context compacted");
   });
 
   it("projects Codex task lifecycle chunks into thread activities", async () => {

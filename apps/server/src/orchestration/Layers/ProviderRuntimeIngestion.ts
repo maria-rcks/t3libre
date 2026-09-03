@@ -262,7 +262,11 @@ function buildContextWindowActivityPayload(
 function compactedTokenCountsFromActivities(
   activities: ReadonlyArray<OrchestrationThreadActivity> | undefined,
 ): { readonly beforeTokens: number; readonly afterTokens: number } | undefined {
-  const usedTokens = (activities ?? []).flatMap((activity) => {
+  const lastCompactionIndex = activities?.findLastIndex(
+    (activity) => activity.kind === "context-compaction",
+  );
+  const activitiesSinceLastCompaction = activities?.slice((lastCompactionIndex ?? -1) + 1) ?? [];
+  const usedTokens = activitiesSinceLastCompaction.flatMap((activity) => {
     if (activity.kind !== "context-window.updated") return [];
     const payload = Predicate.isObject(activity.payload) ? activity.payload : undefined;
     return Predicate.isNumber(payload?.usedTokens) && payload.usedTokens > 0
@@ -271,9 +275,15 @@ function compactedTokenCountsFromActivities(
   });
   const beforeTokens = usedTokens.at(-2);
   const afterTokens = usedTokens.at(-1);
-  return beforeTokens !== undefined && afterTokens !== undefined && afterTokens < beforeTokens
-    ? { beforeTokens, afterTokens }
-    : undefined;
+  if (beforeTokens === undefined || afterTokens === undefined || afterTokens >= beforeTokens) {
+    return undefined;
+  }
+  const alreadyUsed = (activities ?? []).some((activity) => {
+    if (activity.kind !== "context-compaction") return false;
+    const payload = Predicate.isObject(activity.payload) ? activity.payload : undefined;
+    return payload?.beforeTokens === beforeTokens && payload.afterTokens === afterTokens;
+  });
+  return alreadyUsed ? undefined : { beforeTokens, afterTokens };
 }
 
 function normalizeRuntimeTurnState(
@@ -2077,7 +2087,10 @@ const make = Effect.gen(function* () {
         event.payload.state === "compacted" &&
         (event.payload.beforeTokens === undefined || event.payload.afterTokens === undefined)
       ) {
-        const threadDetail = yield* resolveThreadDetail(thread.id, ["context-window.updated"]);
+        const threadDetail = yield* resolveThreadDetail(thread.id, [
+          "context-window.updated",
+          "context-compaction",
+        ]);
         const tokenCounts = compactedTokenCountsFromActivities(threadDetail?.activities);
         if (tokenCounts) {
           activityEvent = {

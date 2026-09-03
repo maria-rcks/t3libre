@@ -249,6 +249,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     options?.revokeMcpCredential ?? McpSessionRegistry.revokeActiveMcpThread;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
   const pendingCompactions = new Map<ThreadId, PendingCompaction>();
+  const timedOutNativeCompactions = new Set<ThreadId>();
   const settleCompaction = (threadId: ThreadId, pending: PendingCompaction, terminal: string) =>
     Effect.gen(function* () {
       if (pendingCompactions.get(threadId) !== pending) return false;
@@ -435,6 +436,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         provider: canonicalEvent.provider,
         eventType: canonicalEvent.type,
       });
+      if (
+        isCompactedEvent(canonicalEvent) &&
+        timedOutNativeCompactions.delete(canonicalEvent.threadId)
+      ) {
+        yield* publishRuntimeEvent(canonicalEvent);
+        return;
+      }
       const pendingCompaction = pendingCompactions.get(canonicalEvent.threadId);
       if (!pendingCompaction) {
         yield* publishRuntimeEvent(canonicalEvent);
@@ -796,6 +804,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             typeof input.modelSelection?.model === "string" &&
             input.modelSelection.model.trim().length > 0,
         });
+        timedOutNativeCompactions.delete(threadId);
 
         // Changing runtime mode restarts the session, so the transition is only
         // observable here, by diffing against the mode the previous session for
@@ -985,7 +994,26 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         compactedEventObserved: false,
         expectedTurnId: undefined,
       };
-      pendingCompactions.set(threadId, pending);
+      if (nativeCompaction !== undefined && timedOutNativeCompactions.has(threadId)) {
+        return yield* new ProviderAdapterRequestError({
+          provider: routed.adapter.provider,
+          method: "thread/compact",
+          detail:
+            "The previous context compaction may still be running. Restart the provider session before retrying.",
+        });
+      }
+      const claimed = yield* Effect.sync(() => {
+        if (pendingCompactions.has(threadId)) return false;
+        pendingCompactions.set(threadId, pending);
+        return true;
+      });
+      if (!claimed) {
+        return yield* new ProviderAdapterRequestError({
+          provider: routed.adapter.provider,
+          method: "thread/compact",
+          detail: "Context compaction is already in progress.",
+        });
+      }
       const clearPending = Effect.sync(() => {
         if (pendingCompactions.get(threadId) === pending) {
           pendingCompactions.delete(threadId);
@@ -995,12 +1023,29 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         routed.adapter.provider === "codex" ? "10 minutes" : "30 seconds";
       const awaitNativeCompaction = Deferred.await(completion).pipe(
         Effect.timeout(nativeCompletionTimeout),
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            timedOutNativeCompactions.add(threadId);
+          }),
+        ),
         Effect.mapError(
           (cause) =>
             new ProviderAdapterRequestError({
               provider: routed.adapter.provider,
               method: "thread/compact",
               detail: `Provider did not report completed context compaction within ${nativeCompletionTimeout}.`,
+              cause,
+            }),
+        ),
+      );
+      const awaitFallbackCompaction = Deferred.await(completion).pipe(
+        Effect.timeout("10 minutes"),
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapterRequestError({
+              provider: routed.adapter.provider,
+              method: "turn/start",
+              detail: "Provider did not finish context compaction within 10 minutes.",
               cause,
             }),
         ),
@@ -1021,7 +1066,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               for (const earlyEvent of earlyEvents) {
                 yield* processFallbackCompactionEvent(pending, earlyEvent);
               }
-              return yield* Deferred.await(completion);
+              return yield* awaitFallbackCompaction;
             })
       ).pipe(Effect.ensuring(clearPending));
       if (terminal !== "completed") {
@@ -1169,6 +1214,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (routed.isActive) {
           yield* routed.adapter.stopSession(routed.threadId);
         }
+        const pendingCompaction = pendingCompactions.get(input.threadId);
+        if (pendingCompaction !== undefined) {
+          yield* settleCompaction(input.threadId, pendingCompaction, "turn.aborted");
+        }
+        timedOutNativeCompactions.delete(input.threadId);
         yield* clearMcpSession(input.threadId);
         yield* directory.upsert({
           threadId: input.threadId,
