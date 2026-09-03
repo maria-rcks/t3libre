@@ -1020,7 +1020,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
       });
       const nativeCompletionTimeout =
-        routed.adapter.provider === "codex" ? "10 minutes" : "30 seconds";
+        routed.adapter.provider === "codex" || routed.adapter.provider === "opencode"
+          ? "10 minutes"
+          : "30 seconds";
       const awaitNativeCompaction = Deferred.await(completion).pipe(
         Effect.timeout(nativeCompletionTimeout),
         Effect.tapError(() =>
