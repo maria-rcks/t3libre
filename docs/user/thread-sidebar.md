@@ -22,11 +22,13 @@ available, the inactivity rule still applies. A manual un-settle also keeps the 
 sorts by the moment you settled it. A thread that settled on its own sorts by its last message or
 turn, not by when the server noticed it was inactive.
 
-Change these rules in **Settings > General**. The change is written to every environment you are
-connected to at that moment. An environment that is offline keeps its old value. When a connected
-environment holds a different value, **Settings > General** shows a warning that names it. Choose
-**Apply to all** to write your current values to every connected environment. The same applies to
-the new-thread workspace mode and the source control writing style.
+Change these rules in **Settings > General**. The change is written to every connected environment
+whose server supports shared settings. An environment that is offline or needs a server update
+keeps its old value and does not appear in mismatch warnings. When a connected environment whose
+server supports shared settings holds a different value, **Settings > General** shows a warning
+that names it. Choose **Apply to all** to write your current values to the environments named in
+the warning. The same applies to the new-thread workspace mode and the source control writing
+style.
 
 A settings change affects future settlement and does not reopen a settled thread. Settings saved
 by older clients on one device no longer control this behavior.
@@ -59,8 +61,10 @@ When you are connected to more than one environment, every thread that lives som
 the machine you are on wears a small icon for that machine at the end of its row: a server, a cloud
 VM, a desktop, a laptop, a Mac mini, or a Mac Studio. In the hosted web app and the mobile app,
 where every environment is remote, each row wears its machine so you can tell them apart at a
-glance. The same icon appears in the thread tooltip, the "Run on" picker, the pull request server
-filter, and the environment lists under **Settings → Connections**.
+glance. The same icon appears wherever an environment is named: the thread tooltip, the command
+palette, the "Run on" picker, the pull request server filter, the provider settings device tabs,
+and the environment lists under **Settings → Connections**. On mobile it appears in the thread
+lists, the archive, the new-task environment picker, and the Environments and storage settings.
 
 Servers pick the icon themselves from the hardware they run on. A Mac reports its model, a Linux
 machine reports its chassis type and whether it is a virtual machine, and anything without a usable

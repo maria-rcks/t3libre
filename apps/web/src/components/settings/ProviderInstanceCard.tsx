@@ -361,6 +361,7 @@ interface ProviderInstanceCardProps {
    * omit it.
    */
   readonly headerAction?: ReactNode | undefined;
+  readonly setup?: ReactNode;
   readonly hiddenModels: ReadonlyArray<string>;
   readonly favoriteModels: ReadonlyArray<string>;
   readonly modelOrder: ReadonlyArray<string>;
@@ -402,6 +403,7 @@ export function ProviderInstanceCard({
   onUpdate,
   onDelete,
   headerAction,
+  setup,
   hiddenModels,
   favoriteModels,
   modelOrder,
@@ -463,7 +465,8 @@ export function ProviderInstanceCard({
   const driverKind: ProviderDriverKind | null = isProviderDriverKind(instance.driver)
     ? instance.driver
     : null;
-  const customModels = readConfigStringArray(instance.config, "customModels");
+  const customModels =
+    instance.driver === "antigravity" ? [] : readConfigStringArray(instance.config, "customModels");
   // Server-returned models may lag behind settings writes. Treat probe
   // models as the source for built-ins only; custom rows come directly
   // from the current instance config so add/remove reflects immediately.
@@ -759,7 +762,9 @@ export function ProviderInstanceCard({
               ) : (
                 statusHeadlineNode
               )}
-              {summary.detail ? <span>· {summary.detail}</span> : null}
+              {summary.detail ? (
+                <span className="min-w-0 [overflow-wrap:anywhere]">· {summary.detail}</span>
+              ) : null}
             </span>
           }
           control={
@@ -807,6 +812,12 @@ export function ProviderInstanceCard({
           }
         />
       </SettingsSection>
+
+      {setup ? (
+        <SettingsSection title="Setup">
+          <div className="px-3 py-3 sm:px-4">{setup}</div>
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection
         title="Runtime"
