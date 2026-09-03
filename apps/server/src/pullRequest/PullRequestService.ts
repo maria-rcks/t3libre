@@ -2019,7 +2019,7 @@ export const make = Effect.gen(function* () {
         Effect.as(snapshot.value),
       );
     };
-    return { read, record, serveHeld };
+    return { peek: (key: string) => held.get(key)?.value, read, record, serveHeld };
   };
   const lastGoodSummary = makeLastGoodRead<PullRequestSummary>(DETAIL_CACHE_CAPACITY);
   const lastGoodDetail = makeLastGoodRead<PullRequestDetail>(DETAIL_CACHE_CAPACITY);
@@ -2179,15 +2179,27 @@ export const make = Effect.gen(function* () {
     baseBranch: detail.baseBranch,
     updatedAt: detail.updatedAt,
   });
+  const shouldReplaceHeldSummary = (key: string, next: PullRequestSummary) => {
+    const current = lastGoodSummary.peek(key);
+    if (current === undefined) return true;
+    if (current.state === "merged" && next.state !== "merged") return false;
+    return next.updatedAt >= current.updatedAt;
+  };
   const detail: PullRequestService["Service"]["detail"] = (input) => {
     const key = refCacheKey(input);
-    // Record the summary from a host (or cache) read, not from the stale value
-    // `serveHeld` returns immediately — that snapshot can be older than a later
-    // strict summary, and display reuse would then never ask the host again.
+    // Record the summary from a host or cache read, not the stale value
+    // `serveHeld` returns immediately. Skip the write when that read is older
+    // than a later strict summary — display reuse would otherwise keep the
+    // regression and never ask the host again.
     return lastGoodDetail.serveHeld(
       key,
       Cache.get(detailCache, key).pipe(
-        Effect.tap((value) => lastGoodSummary.record(key, summaryFromDetail(value))),
+        Effect.tap((value) => {
+          const summary = summaryFromDetail(value);
+          return shouldReplaceHeldSummary(key, summary)
+            ? lastGoodSummary.record(key, summary)
+            : Effect.void;
+        }),
       ),
       "revalidate",
     );

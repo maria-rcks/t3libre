@@ -3122,6 +3122,44 @@ it.effect("does not let a stale detail reopen overwrite a fresher linked summary
   }),
 );
 
+it.effect("does not let a still-cached detail overwrite a fresher linked summary", () =>
+  Effect.gen(function* () {
+    let summaryTitle = "old title";
+    let summaryState: "open" | "merged" = "open";
+    const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequest: () => Effect.succeed(hostedChangeRequest("old body", 4)),
+          getChangeRequestSummary: () =>
+            Effect.succeed({
+              ...changeRequest(1, "2026-07-02T00:00:00Z"),
+              title: summaryTitle,
+              state: summaryState,
+            }),
+        }),
+      ],
+    });
+
+    const first = yield* service.detail(reference);
+    assert.strictEqual(first.title, "Change request 1");
+
+    summaryTitle = "merged title";
+    summaryState = "merged";
+    const settled = yield* service.summary(reference, { recoverTransientFailure: false });
+    assert.strictEqual(settled.state, "merged");
+
+    const cached = yield* service.detail(reference);
+    assert.strictEqual(cached.title, "Change request 1");
+    yield* Effect.yieldNow;
+
+    const display = yield* service.summary(reference);
+    assert.strictEqual(display.title, "merged title");
+    assert.strictEqual(display.state, "merged");
+  }),
+);
+
 it.effect("keeps recent detail on a transient refresh failure but not after invalidation", () =>
   Effect.gen(function* () {
     let failing = false;
