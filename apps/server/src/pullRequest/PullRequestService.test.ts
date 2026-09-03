@@ -1009,6 +1009,7 @@ it.effect("publishes a successful merge for immediate settlement", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+      const requestedReference = { ...reference, repository: " ACME/WEB " };
       const service = yield* makeService({
         projects: [
           project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
@@ -1020,7 +1021,7 @@ it.effect("publishes a successful merge for immediate settlement", () =>
         Effect.forkChild({ startImmediately: true }),
       );
 
-      yield* service.runAction({ ...reference, action: "merge", mergeMethod: "merge" });
+      yield* service.runAction({ ...requestedReference, action: "merge", mergeMethod: "merge" });
 
       const observed = Option.getOrThrow(yield* Fiber.join(observedMerge));
       assert.deepInclude(observed, reference);

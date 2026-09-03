@@ -530,7 +530,7 @@ export function repositoryIdentityOf(project: OrchestrationProjectShell): string
 }
 
 export const make = Effect.gen(function* () {
-  const mergedPullRequests = yield* PubSub.unbounded<PullRequestMergeEvent>();
+  const mergedPullRequests = yield* PubSub.sliding<PullRequestMergeEvent>(64);
   const registry = yield* PullRequestProviderRegistry;
   const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
@@ -1432,9 +1432,9 @@ export const make = Effect.gen(function* () {
       }),
     );
 
-  const runAction: PullRequestService["Service"]["runAction"] = (input) =>
+  const runAction = (input: PullRequestActionInput): Effect.Effect<string, PullRequestError> =>
     requireProject(input).pipe(
-      Effect.flatMap((project): Effect.Effect<void, PullRequestError> => {
+      Effect.flatMap((project): Effect.Effect<string, PullRequestError> => {
         // The surface hides what a host cannot do, and this refuses it as well: a request that
         // reached here anyway must not be handed to a provider that never claimed the action.
         if (!project.api.capabilities.actions.includes(input.action)) {
@@ -1476,7 +1476,7 @@ export const make = Effect.gen(function* () {
         // have to say yes. The second is asked last, because it costs a request and the checks
         // above do not.
         return viewerPermissionsOf(project, input, "runAction").pipe(
-          Effect.flatMap((viewer): Effect.Effect<void, PullRequestError> => {
+          Effect.flatMap((viewer): Effect.Effect<string, PullRequestError> => {
             if (!viewer.actions.includes(input.action)) {
               return Effect.fail(
                 new PullRequestOperationError({
@@ -1506,7 +1506,10 @@ export const make = Effect.gen(function* () {
                 ...(input.mergeMethod === undefined ? {} : { mergeMethod: input.mergeMethod }),
                 ...(input.updateMethod === undefined ? {} : { updateMethod: input.updateMethod }),
               })
-              .pipe(Effect.mapError(toPullRequestError("runAction")));
+              .pipe(
+                Effect.mapError(toPullRequestError("runAction")),
+                Effect.as(project.repository),
+              );
           }),
         );
       }),
@@ -2418,15 +2421,21 @@ export const make = Effect.gen(function* () {
           }),
         ),
       );
-  const runActionAndInvalidate = (input: PullRequestActionInput) =>
-    invalidatedByMutation(runAction)(input).pipe(
-      Effect.tap(() =>
+  const runActionAndInvalidate: PullRequestService["Service"]["runAction"] = (input) =>
+    runAction(input).pipe(
+      Effect.tap((repository) =>
+        Effect.sync(() => {
+          bumpRefEpoch({ ...input, repository });
+          listingsEpoch = ++epochCounter;
+        }),
+      ),
+      Effect.flatMap((repository) =>
         input.action === "merge"
           ? DateTime.now.pipe(
               Effect.flatMap((now) =>
                 PubSub.publish(mergedPullRequests, {
                   projectId: input.projectId,
-                  repository: input.repository,
+                  repository,
                   number: input.number,
                   mergedAt: DateTime.formatIso(now),
                 }),
