@@ -199,6 +199,45 @@ describe("serverRuntimeState", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("only publishes a pairing origin for the process that still owns the state", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-pairing-publish-test-",
+      });
+      const statePath = path.join(root, "server.json");
+      const state: ServerRuntimeState.PersistedServerRuntimeState = {
+        version: 1,
+        pid: 456,
+        port: 4_971,
+        origin: "http://127.0.0.1:4971",
+        startedAt: "2026-06-20T00:00:00.000Z",
+      };
+      yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state });
+
+      yield* ServerRuntimeState.setOwnedPairingBaseUrl({
+        path: statePath,
+        pid: 789,
+        pairingBaseUrl: "https://stale.tunnels.example.com/",
+      });
+      assert.deepEqual(
+        Option.getOrThrow(yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath)),
+        state,
+      );
+
+      yield* ServerRuntimeState.setOwnedPairingBaseUrl({
+        path: statePath,
+        pid: 456,
+        pairingBaseUrl: "https://owned.tunnels.example.com/",
+      });
+      assert.deepEqual(
+        Option.getOrThrow(yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath)),
+        { ...state, pairingBaseUrl: "https://owned.tunnels.example.com/" },
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("restores the runtime advertisement when an owned mutation fails", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

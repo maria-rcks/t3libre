@@ -19,6 +19,8 @@ export interface T3CodePublicConfig {
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
+const TRUE_ENVIRONMENT_VALUES = new Set(["true", "yes", "on", "1", "y"]);
+
 const REPO_ROOT = NodePath.dirname(
   NodePath.dirname(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url))),
 );
@@ -33,11 +35,15 @@ export function loadRepoEnv({
   const rootEnv = readEnvFile(NodePath.join(repoRoot, ".env"));
   const localEnv = readEnvFile(NodePath.join(repoRoot, ".env.local"));
   const config = resolvePublicConfig(baseEnv, localEnv, rootEnv);
+  const connectDevShare = TRUE_ENVIRONMENT_VALUES.has(
+    firstNonEmpty([baseEnv, localEnv, rootEnv], "T3CODE_CONNECT_DEV_SHARE") ?? "",
+  );
 
   const environment = {
     ...rootEnv,
     ...localEnv,
     ...baseEnv,
+    ...(connectDevShare ? { T3CODE_CONNECT_DEV_SHARE: "1" } : {}),
     ...(config.clerkPublishableKey
       ? {
           T3CODE_CLERK_PUBLISHABLE_KEY: config.clerkPublishableKey,
@@ -107,7 +113,7 @@ export function loadRepoEnv({
   // Projecting Clerk and relay aliases into Vite would switch the UI into the
   // hosted sign-in flow, where Clerk correctly rejects the ephemeral relay
   // hostname. Keep this browser build in ordinary local-pairing mode instead.
-  if (baseEnv.T3CODE_CONNECT_DEV_SHARE === "1") {
+  if (connectDevShare) {
     delete environment.VITE_CLERK_PUBLISHABLE_KEY;
     delete environment.VITE_CLERK_JWT_TEMPLATE;
     delete environment.VITE_CLERK_CLI_OAUTH_CLIENT_ID;

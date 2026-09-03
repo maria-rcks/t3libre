@@ -52,6 +52,7 @@ const isAlreadyExists = (error: PlatformError.PlatformError): boolean =>
 /** Atomically take the current state and reinstall it only if no replacement won the path. */
 const mutatePersistedServerRuntimeState = (
   statePath: string,
+  operation: ServerRuntimeStateError["operation"],
   mutate: (state: PersistedServerRuntimeState) => Option.Option<PersistedServerRuntimeState>,
 ) =>
   Effect.gen(function* () {
@@ -128,11 +129,7 @@ const mutatePersistedServerRuntimeState = (
         );
       },
     );
-  }).pipe(
-    Effect.mapError(
-      (cause) => new ServerRuntimeStateError({ operation: "clear", statePath, cause }),
-    ),
-  );
+  }).pipe(Effect.mapError((cause) => new ServerRuntimeStateError({ operation, statePath, cause })));
 
 const runtimeOriginForConfig = (
   config: Pick<ServerConfig.ServerConfig["Service"], "host">,
@@ -271,8 +268,20 @@ export const readPersistedServerRuntimeState = (path: string) =>
 
 /** Clear a runtime advertisement only while it still belongs to this process. */
 export const clearOwnedPersistedServerRuntimeState = (path: string, pid: number) =>
-  mutatePersistedServerRuntimeState(path, (state) =>
+  mutatePersistedServerRuntimeState(path, "clear", (state) =>
     state.pid === pid ? Option.none() : Option.some(state),
+  );
+
+/** Publish a pairing origin only while this process still owns the runtime advertisement. */
+export const setOwnedPairingBaseUrl = (input: {
+  readonly path: string;
+  readonly pid: number;
+  readonly pairingBaseUrl: string;
+}) =>
+  mutatePersistedServerRuntimeState(input.path, "persist", (state) =>
+    Option.some(
+      state.pid === input.pid ? { ...state, pairingBaseUrl: input.pairingBaseUrl } : state,
+    ),
   );
 
 /** Remove a public pairing origin only while this process still owns that exact advertisement. */
@@ -281,7 +290,7 @@ export const clearOwnedPairingBaseUrl = (input: {
   readonly pid: number;
   readonly pairingBaseUrl: string;
 }) =>
-  mutatePersistedServerRuntimeState(input.path, (state) => {
+  mutatePersistedServerRuntimeState(input.path, "clear", (state) => {
     if (state.pid !== input.pid || state.pairingBaseUrl !== input.pairingBaseUrl) {
       return Option.some(state);
     }

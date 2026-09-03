@@ -1387,6 +1387,13 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           {
             ...devServerInput,
             mode: "dev" as const,
+            host: "localhost",
+            share: true,
+            shareVia: "t3-connect" as const,
+          },
+          {
+            ...devServerInput,
+            mode: "dev" as const,
             devUrl: new URL("http://localhost:7331"),
             share: true,
             shareVia: "t3-connect" as const,

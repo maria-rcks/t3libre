@@ -78,6 +78,61 @@ describe("RelayTokens", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("binds temporary ownership to the environment link challenge", () =>
+    Effect.gen(function* () {
+      const relayTokens = yield* RelayTokens.RelayTokens;
+      const temporaryToken = yield* relayTokens.issueLinkChallenge({
+        userId: "user_123",
+        request: {
+          notificationsEnabled: false,
+          liveActivitiesEnabled: false,
+          managedTunnelsEnabled: true,
+          temporary: true,
+        },
+        jti: "temporary-challenge",
+        issuedAtEpochSeconds: 100,
+        expiresAtEpochSeconds: 200,
+      });
+      const durableToken = yield* relayTokens.issueLinkChallenge({
+        userId: "user_123",
+        request: {
+          notificationsEnabled: false,
+          liveActivitiesEnabled: false,
+          managedTunnelsEnabled: true,
+        },
+        jti: "durable-challenge",
+        issuedAtEpochSeconds: 100,
+        expiresAtEpochSeconds: 200,
+      });
+
+      expect(
+        yield* relayTokens.verifyLinkChallenge({
+          token: temporaryToken,
+          userId: "user_123",
+          request: {
+            notificationsEnabled: false,
+            liveActivitiesEnabled: false,
+            managedTunnelsEnabled: true,
+          },
+          nowEpochSeconds: 150,
+        }),
+      ).toBeNull();
+      expect(
+        yield* relayTokens.verifyLinkChallenge({
+          token: durableToken,
+          userId: "user_123",
+          request: {
+            notificationsEnabled: false,
+            liveActivitiesEnabled: false,
+            managedTunnelsEnabled: true,
+            temporary: true,
+          },
+          nowEpochSeconds: 150,
+        }),
+      ).toBeNull();
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("issues and verifies DPoP access tokens bound to one proof-key thumbprint", () =>
     Effect.gen(function* () {
       const relayTokens = yield* RelayTokens.RelayTokens;

@@ -117,6 +117,7 @@ function testLayer(input?: {
   readonly upsert?: EnvironmentLinks.EnvironmentLinks["Service"]["upsert"];
   readonly getForUser?: EnvironmentLinks.EnvironmentLinks["Service"]["getForUser"];
   readonly consume?: DpopProofs.DpopProofReplay["Service"]["consume"];
+  readonly acquireProvisionClaim?: ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims["Service"]["acquire"];
   readonly beforeProvision?: Effect.Effect<void>;
   readonly provision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["provision"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
@@ -183,7 +184,7 @@ function testLayer(input?: {
               )),
         }),
         Layer.succeed(ManagedEndpointProvisionClaims.ManagedEndpointProvisionClaims, {
-          acquire: () => Effect.succeed("provision-claim"),
+          acquire: input?.acquireProvisionClaim ?? (() => Effect.succeed("provision-claim")),
           release: input?.releaseProvisionClaim ?? (() => Effect.void),
         }),
         Layer.succeed(TemporaryEnvironmentLeases.TemporaryEnvironmentLeases, {
@@ -337,6 +338,7 @@ describe("EnvironmentLinker", () => {
 
   it.effect("rejects an active durable link before provisioning a temporary endpoint", () => {
     let provisioned = false;
+    let consumed = 0;
     return Effect.gen(function* () {
       const { request } = yield* makeRequest;
       const linker = yield* EnvironmentLinker.EnvironmentLinker;
@@ -347,6 +349,7 @@ describe("EnvironmentLinker", () => {
         environmentId: "env-link-test",
       });
       expect(provisioned).toBe(false);
+      expect(consumed).toBe(0);
     }).pipe(
       Effect.provide(
         testLayer({
@@ -366,6 +369,39 @@ describe("EnvironmentLinker", () => {
             provisioned = true;
             return Effect.die("temporary endpoint must not be provisioned");
           },
+          consume: () =>
+            Effect.sync(() => {
+              consumed += 1;
+              return true;
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("does not consume link credentials while another provision owns the claim", () => {
+    let consumed = 0;
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const error = yield* Effect.flip(linker.link({ userId: "user_123", request }));
+      expect(error._tag).toBe("ManagedEndpointProvisionInProgress");
+      expect(consumed).toBe(0);
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          acquireProvisionClaim: () =>
+            Effect.fail(
+              new ManagedEndpointProvisionClaims.ManagedEndpointProvisionInProgress({
+                userId: "user_123",
+                environmentId: "env-link-test",
+              }),
+            ),
+          consume: () =>
+            Effect.sync(() => {
+              consumed += 1;
+              return true;
+            }),
         }),
       ),
     );

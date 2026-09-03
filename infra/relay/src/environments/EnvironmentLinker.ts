@@ -269,34 +269,6 @@ const make = Effect.gen(function* () {
           stage: "validate_expiration",
         });
       }
-      const consumedNonce = yield* proofReplay.consume({
-        thumbprint: verified.environmentPublicKey,
-        jti: verified.jti,
-        iat: verified.iat,
-        expiresAt: expiresAt.value,
-      });
-      if (!consumedNonce) {
-        return yield* new EnvironmentLinkProofInvalid({
-          userId: input.userId,
-          environmentId: verified.environmentId,
-          reason: "replayed_nonce",
-          stage: "consume_proof_nonce",
-        });
-      }
-      const consumedChallenge = yield* proofReplay.consume({
-        thumbprint: "relay-environment-link-challenge",
-        jti: challenge.jti,
-        iat: challenge.iat,
-        expiresAt: expiresAt.value,
-      });
-      if (!consumedChallenge) {
-        return yield* new EnvironmentLinkProofInvalid({
-          userId: input.userId,
-          environmentId: verified.environmentId,
-          reason: "challenge_invalid",
-          stage: "consume_challenge_nonce",
-        });
-      }
       if (input.request.managedTunnelsEnabled && !isLoopbackManagedTunnelOrigin(verified.origin)) {
         return yield* new EnvironmentLinkProofInvalid({
           userId: input.userId,
@@ -321,6 +293,34 @@ const make = Effect.gen(function* () {
               environmentId: verified.environmentId,
             });
           }
+        }
+        const consumedNonce = yield* proofReplay.consume({
+          thumbprint: verified.environmentPublicKey,
+          jti: verified.jti,
+          iat: verified.iat,
+          expiresAt: expiresAt.value,
+        });
+        if (!consumedNonce) {
+          return yield* new EnvironmentLinkProofInvalid({
+            userId: input.userId,
+            environmentId: verified.environmentId,
+            reason: "replayed_nonce",
+            stage: "consume_proof_nonce",
+          });
+        }
+        const consumedChallenge = yield* proofReplay.consume({
+          thumbprint: "relay-environment-link-challenge",
+          jti: challenge.jti,
+          iat: challenge.iat,
+          expiresAt: expiresAt.value,
+        });
+        if (!consumedChallenge) {
+          return yield* new EnvironmentLinkProofInvalid({
+            userId: input.userId,
+            environmentId: verified.environmentId,
+            reason: "challenge_invalid",
+            stage: "consume_challenge_nonce",
+          });
         }
         // Downgrading a managed link to publish-only must release the tunnel and
         // DNS that were provisioned for it — nothing else cleans them up until a

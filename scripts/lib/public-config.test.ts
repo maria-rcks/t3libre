@@ -124,39 +124,29 @@ describe("loadRepoEnv", () => {
   });
 
   it("keeps Connect dev-share cloud configuration out of the browser build", () => {
-    expect(
-      loadRepoEnv({
+    for (const marker of ["1", "true", "yes", "on", "y"]) {
+      const environment = loadRepoEnv({
         baseEnv: {
-          T3CODE_CONNECT_DEV_SHARE: "1",
+          T3CODE_CONNECT_DEV_SHARE: marker,
           T3CODE_CLERK_PUBLISHABLE_KEY: "pk_server",
           T3CODE_CLERK_JWT_TEMPLATE: "template_server",
           T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_server",
           T3CODE_RELAY_URL: "https://relay.example.test",
         },
         repoRoot: makeTemporaryDirectory(),
-      }),
-    ).toMatchObject({
-      T3CODE_CONNECT_DEV_SHARE: "1",
-      T3CODE_CLERK_PUBLISHABLE_KEY: "pk_server",
-      T3CODE_CLERK_JWT_TEMPLATE: "template_server",
-      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_server",
-      T3CODE_RELAY_URL: "https://relay.example.test",
-    });
-
-    const environment = loadRepoEnv({
-      baseEnv: {
+      });
+      expect(environment).toMatchObject({
         T3CODE_CONNECT_DEV_SHARE: "1",
         T3CODE_CLERK_PUBLISHABLE_KEY: "pk_server",
         T3CODE_CLERK_JWT_TEMPLATE: "template_server",
         T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_server",
         T3CODE_RELAY_URL: "https://relay.example.test",
-      },
-      repoRoot: makeTemporaryDirectory(),
-    });
-    expect(environment.VITE_CLERK_PUBLISHABLE_KEY).toBeUndefined();
-    expect(environment.VITE_CLERK_JWT_TEMPLATE).toBeUndefined();
-    expect(environment.VITE_CLERK_CLI_OAUTH_CLIENT_ID).toBeUndefined();
-    expect(environment.VITE_T3CODE_RELAY_URL).toBeUndefined();
+      });
+      expect(environment.VITE_CLERK_PUBLISHABLE_KEY).toBeUndefined();
+      expect(environment.VITE_CLERK_JWT_TEMPLATE).toBeUndefined();
+      expect(environment.VITE_CLERK_CLI_OAUTH_CLIENT_ID).toBeUndefined();
+      expect(environment.VITE_T3CODE_RELAY_URL).toBeUndefined();
+    }
   });
 
   it("projects canonical mobile tracing values to Expo public aliases", () => {

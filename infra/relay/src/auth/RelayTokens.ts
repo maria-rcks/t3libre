@@ -39,6 +39,7 @@ const LinkChallengeClaims = Schema.Struct({
   notificationsEnabled: Schema.Boolean,
   liveActivitiesEnabled: Schema.Boolean,
   managedTunnelsEnabled: Schema.Boolean,
+  temporary: Schema.optional(Schema.Boolean),
 });
 export type LinkChallengeClaims = typeof LinkChallengeClaims.Type;
 
@@ -155,7 +156,8 @@ const make = Effect.gen(function* () {
           claims.sub !== input.userId ||
           (input.request.notificationsEnabled && claims.notificationsEnabled !== true) ||
           (input.request.liveActivitiesEnabled && claims.liveActivitiesEnabled !== true) ||
-          (input.request.managedTunnelsEnabled && claims.managedTunnelsEnabled !== true)
+          (input.request.managedTunnelsEnabled && claims.managedTunnelsEnabled !== true) ||
+          (claims.temporary === true) !== (input.request.temporary === true)
         ) {
           return null;
         }

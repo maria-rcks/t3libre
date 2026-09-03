@@ -8,7 +8,6 @@ import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
@@ -148,7 +147,7 @@ import {
   clearOwnedPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
-  readPersistedServerRuntimeState,
+  setOwnedPairingBaseUrl,
 } from "./serverRuntimeState.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
@@ -564,6 +563,15 @@ class ConnectDevShareReadinessError extends Schema.TaggedErrorClass<ConnectDevSh
   }
 }
 
+class ConnectDevShareUnavailableError extends Schema.TaggedErrorClass<ConnectDevShareUnavailableError>()(
+  "ConnectDevShareUnavailableError",
+  { reason: Schema.Literal("missing_public_configuration") },
+) {
+  override get message(): string {
+    return "T3 Connect dev sharing requires public Connect configuration. Copy .env.example to .env and retry.";
+  }
+}
+
 export const makeRoutesLayer = Layer.mergeAll(
   Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
@@ -729,9 +737,9 @@ export const makeServerLayer = Layer.unwrap(
       Effect.gen(function* () {
         if (!hasCloudPublicConfig) {
           if (config.connectDevShare === true) {
-            yield* Effect.logWarning(
-              "T3 Connect dev sharing is unavailable because this source build has no public Connect configuration. Copy .env.example to .env and retry.",
-            );
+            return yield* new ConnectDevShareUnavailableError({
+              reason: "missing_public_configuration",
+            });
           }
           yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
           return;
@@ -770,12 +778,17 @@ export const makeServerLayer = Layer.unwrap(
         // Other runtimes wait for activation so a failed standby cannot tear
         // down the active runtime's tunnel.
         const cleanupBeforeActivation = yield* pendingServiceUpdateExists;
-        if (cleanupBeforeActivation && config.connectDevShare !== true) {
+        const connectDevShare = config.connectDevShare === true;
+        if (cleanupBeforeActivation && !connectDevShare) {
           yield* Effect.addFinalizer(() => releaseManagedTunnel());
         }
-        yield* forkParked(
+        const runLinkLifecycle = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          connectDevShare ? awaitActivation.pipe(Effect.andThen(effect)) : forkParked(effect);
+        if (connectDevShare) {
+          yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
+        }
+        yield* runLinkLifecycle(
           Effect.gen(function* () {
-            const connectDevShare = config.connectDevShare === true;
             if (!connectDevShare && !(yield* CloudCliState.readCliDesiredCloudLink)) return;
             if (!connectDevShare && !cleanupBeforeActivation) {
               yield* Effect.addFinalizer(() => releaseManagedTunnel());
@@ -864,18 +877,11 @@ export const makeServerLayer = Layer.unwrap(
                   ? Effect.gen(function* () {
                       yield* Deferred.await(runtimeStateReady);
                       yield* awaitConnectDevShareReady(link.endpoint.httpBaseUrl);
-                      const runtimeState = yield* readPersistedServerRuntimeState(
-                        config.serverRuntimeStatePath,
-                      );
-                      if (Option.isSome(runtimeState) && runtimeState.value.pid === process.pid) {
-                        yield* persistServerRuntimeState({
-                          path: config.serverRuntimeStatePath,
-                          state: {
-                            ...runtimeState.value,
-                            pairingBaseUrl: link.endpoint.httpBaseUrl,
-                          },
-                        });
-                      }
+                      yield* setOwnedPairingBaseUrl({
+                        path: config.serverRuntimeStatePath,
+                        pid: process.pid,
+                        pairingBaseUrl: link.endpoint.httpBaseUrl,
+                      });
                       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
                       const pairing = yield* Effect.acquireRelease(
                         serverAuth.issueStartupPairingCredential(),
@@ -906,7 +912,7 @@ export const makeServerLayer = Layer.unwrap(
               yield* configureActiveLink.pipe(reportLifecycleFailure);
               return;
             }
-            yield* Effect.scoped(
+            return yield* Effect.scoped(
               configureActiveLink.pipe(
                 Effect.flatMap((link) =>
                   Effect.gen(function* () {
@@ -948,10 +954,12 @@ export const makeServerLayer = Layer.unwrap(
                   }),
                 ),
               ),
-            ).pipe(reportLifecycleFailure);
+            );
           }),
         );
-        yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
+        if (!connectDevShare) {
+          yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
+        }
       }),
     );
 

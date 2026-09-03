@@ -382,7 +382,7 @@ function validateConnectShareCompatibility(input: DevRunnerCliInput, host: strin
       }),
     );
   }
-  if (host !== undefined && host !== "localhost" && host !== "127.0.0.1") {
+  if (host !== undefined && host !== "127.0.0.1") {
     return Effect.fail(new DevRunnerConnectShareUnsupportedError({ mode: input.mode, host }));
   }
   return Effect.void;
