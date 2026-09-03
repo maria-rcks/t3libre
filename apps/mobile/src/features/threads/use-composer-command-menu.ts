@@ -38,6 +38,7 @@ export function useComposerCommandMenu({
   projectCwd,
   selectedProviderStatus,
   hasThread,
+  hasCompactableConversation,
   enabled = true,
   onChangeDraftMessage,
   onUpdateInteractionMode,
@@ -48,6 +49,7 @@ export function useComposerCommandMenu({
   readonly projectCwd: string | null;
   readonly selectedProviderStatus: ServerProvider | null;
   readonly hasThread: boolean;
+  readonly hasCompactableConversation: boolean;
   readonly enabled?: boolean;
   readonly onChangeDraftMessage: (value: string) => void;
   readonly onUpdateInteractionMode?: (mode: ProviderInteractionMode) => void;
@@ -195,10 +197,13 @@ export function useComposerCommandMenu({
       for (const command of expandableCommands) {
         if (!command.name.toLowerCase().includes(q)) continue;
         // Codex feedback uploads an existing thread's session and logs.
+        if (command.name === "compact" && !hasCompactableConversation) {
+          continue;
+        }
         if (
-          !hasThread &&
-          (command.name === "compact" ||
-            (selectedProviderStatus?.driver === "codex" && command.name === "feedback"))
+          command.name === "feedback" &&
+          selectedProviderStatus?.driver === "codex" &&
+          !hasThread
         ) {
           continue;
         }
@@ -324,6 +329,7 @@ export function useComposerCommandMenu({
     return [];
   }, [
     hasThread,
+    hasCompactableConversation,
     onUpdateInteractionMode,
     pathSearch.entries,
     selectedProviderStatus,

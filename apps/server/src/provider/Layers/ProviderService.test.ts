@@ -1222,7 +1222,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       const resultFiber = yield* provider
         .compactThread(threadId)
         .pipe(Effect.result, Effect.forkChild);
-      yield* advanceTestClock(30_001);
+      yield* advanceTestClock(600_001);
       const result = yield* Fiber.join(resultFiber);
       assert.equal(result._tag, "Failure");
       if (result._tag === "Failure") {

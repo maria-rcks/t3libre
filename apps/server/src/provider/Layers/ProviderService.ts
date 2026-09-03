@@ -991,14 +991,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           pendingCompactions.delete(threadId);
         }
       });
+      const nativeCompletionTimeout =
+        routed.adapter.provider === "codex" ? "10 minutes" : "30 seconds";
       const awaitNativeCompaction = Deferred.await(completion).pipe(
-        Effect.timeout("30 seconds"),
+        Effect.timeout(nativeCompletionTimeout),
         Effect.mapError(
           (cause) =>
             new ProviderAdapterRequestError({
               provider: routed.adapter.provider,
               method: "thread/compact",
-              detail: "Provider did not report completed context compaction within 30 seconds.",
+              detail: `Provider did not report completed context compaction within ${nativeCompletionTimeout}.`,
               cause,
             }),
         ),
