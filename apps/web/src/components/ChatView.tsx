@@ -3755,8 +3755,8 @@ function ChatViewContent(props: ChatViewProps) {
         },
       });
       if (threadPrRelinkKeysRef.current.get(activeThreadKey) !== relinkKey) return;
-      threadPrRelinkKeysRef.current.delete(activeThreadKey);
       if (result._tag !== "Failure") return;
+      threadPrRelinkKeysRef.current.delete(activeThreadKey);
       if (isAtomCommandInterrupted(result)) return;
       toastManager.add(
         stackedThreadToast({
