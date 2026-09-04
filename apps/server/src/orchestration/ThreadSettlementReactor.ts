@@ -50,9 +50,7 @@ export const make = Effect.gen(function* () {
     // the merged pull request: most threads carry no link and settle from
     // their branch lookup, which would otherwise wait for the next minute's
     // sweep on a possibly stale cached answer.
-    const candidates = snapshot.threads.filter((thread) =>
-      isAutoSettlementCandidate(thread, now),
-    );
+    const candidates = snapshot.threads.filter((thread) => isAutoSettlementCandidate(thread, now));
     // Use the same cwd as the sidebar so both paths share GitManager's PR cache.
     const lookupCwdByThreadId = new Map<string, string>();
     yield* Effect.forEach(
