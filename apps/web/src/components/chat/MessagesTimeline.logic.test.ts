@@ -784,7 +784,7 @@ describe("deriveMessagesTimelineRows", () => {
     ).toBeDefined();
   });
 
-  it("keeps a tool group after the terminal response visible when the turn is folded", () => {
+  it("keeps a trailing tool group visible but folds a single activity", () => {
     const turnId = TurnId.make("turn-1");
     const timelineEntries = [
       {
@@ -829,11 +829,10 @@ describe("deriveMessagesTimelineRows", () => {
       })),
     ];
 
-    const rows = deriveMessagesTimelineRows({
-      timelineEntries,
+    const input = {
       latestTurn: {
         turnId,
-        state: "error",
+        state: "error" as const,
         startedAt: "2026-01-01T00:00:00Z",
         completedAt: "2026-01-01T00:00:10Z",
       },
@@ -841,7 +840,8 @@ describe("deriveMessagesTimelineRows", () => {
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
       revertTurnCountByUserMessageId: new Map(),
-    });
+    };
+    const rows = deriveMessagesTimelineRows({ ...input, timelineEntries });
 
     expect(rows.map((row) => row.id)).toEqual([
       "turn-fold:turn-1",
@@ -864,6 +864,11 @@ describe("deriveMessagesTimelineRows", () => {
       showAssistantMeta: false,
       showAssistantCopyButton: false,
     });
+    expect(
+      deriveMessagesTimelineRows({ ...input, timelineEntries: timelineEntries.slice(0, 3) }).map(
+        (row) => row.id,
+      ),
+    ).toEqual(["turn-fold:turn-1", "assistant-final-entry"]);
   });
 
   it("folds all assistant messages before the terminal message", () => {
