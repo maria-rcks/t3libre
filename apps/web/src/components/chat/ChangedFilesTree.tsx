@@ -71,8 +71,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                   <Button
                     type="button"
                     size="icon-xs"
-                    variant="ghost"
-                    className="text-muted-foreground"
+                    variant="ghost-muted"
                     aria-label={
                       allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"
                     }
@@ -98,8 +97,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                 <Button
                   type="button"
                   size="xs"
-                  variant="ghost"
-                  className="text-muted-foreground hover:text-foreground"
+                  variant="ghost-muted"
                   aria-label="Open diff"
                   onClick={() => onOpenTurnDiff(turnId, files[0]?.path)}
                 />
