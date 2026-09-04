@@ -28,7 +28,6 @@ export function PullRequestLinkPreview({
   link: PullRequestLinkElement;
   originalUrl: string;
   target: PullRequestLinkPreviewTarget;
-  /** A bare GitHub `#123` can be either an issue or a pull request. */
   confirmBeforeOpen: boolean;
   onOpenPullRequest: (url: string) => boolean;
   onOpenFallback: (url: string) => Promise<void>;
