@@ -627,6 +627,11 @@ function formatOutgoingPrompt(params: {
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
 
+function isCompactCommandMessage(message: ChatMessage): boolean {
+  const text = message.text.trim().toLowerCase();
+  return message.role === "user" && text === "/compact" && !message.attachments?.length;
+}
+
 type ChatViewProps =
   | {
       environmentId: EnvironmentId;
@@ -2595,14 +2600,18 @@ function ChatViewContent(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError,
   });
+  const queuedCompactionMessage = optimisticUserMessages.findLast(isCompactCommandMessage);
   const pendingCompactionMessage =
-    optimisticUserMessages.findLast((message) => message.role === "user") ??
-    activeThread?.messages.findLast((message) => message.role === "user");
-  const pendingMessageIsCompactCommand =
-    pendingCompactionMessage?.text.trim().toLowerCase() === "/compact" &&
-    (pendingCompactionMessage.attachments?.length ?? 0) === 0;
+    queuedCompactionMessage ?? activeThread?.messages.findLast(isCompactCommandMessage);
+  const compactRequestIsActive =
+    queuedCompactionMessage !== undefined ||
+    (pendingCompactionMessage !== undefined &&
+      (pendingCompactionMessage.createdAt >
+        (activeLatestTurn?.requestedAt ?? pendingCompactionMessage.createdAt) ||
+        (activeLatestTurn?.state === "running" &&
+          pendingCompactionMessage.createdAt === activeLatestTurn.requestedAt)));
   const compactionSettled =
-    pendingMessageIsCompactCommand &&
+    pendingCompactionMessage !== undefined &&
     (latestTurnStartFailureId(activeThread, pendingCompactionMessage.id) !== null ||
       activeThread?.activities.some((activity) => {
         if (activity.kind !== "context-compaction") return false;
@@ -2614,7 +2623,7 @@ function ChatViewContent(props: ChatViewProps) {
       }));
   const isCompacting =
     (isSendBusy || phase === "connecting" || phase === "running") &&
-    pendingMessageIsCompactCommand &&
+    compactRequestIsActive &&
     !compactionSettled;
   const isWorking =
     phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint || isCompacting;
@@ -5427,10 +5436,7 @@ function ChatViewContent(props: ChatViewProps) {
       : null;
   const activeThreadHasCompactableConversation =
     activeThread?.messages.some(
-      (message) =>
-        message.role === "user" &&
-        ((message.attachments?.length ?? 0) > 0 ||
-          message.text.trim().toLowerCase() !== "/compact"),
+      (message) => message.role === "user" && !isCompactCommandMessage(message),
     ) ?? false;
   const compactThreadUnavailable =
     !activeThread ||
