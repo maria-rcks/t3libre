@@ -454,14 +454,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         return;
       }
       if (pendingCompaction.native) {
+        const compacted = isCompactedEvent(canonicalEvent);
+        const terminal = compacted ? "completed" : compactionTerminal(canonicalEvent);
         yield* publishRuntimeEvent(
-          isCompactedEvent(canonicalEvent)
-            ? withCompactionRequestId(canonicalEvent, pendingCompaction)
-            : canonicalEvent,
+          compacted ? withCompactionRequestId(canonicalEvent, pendingCompaction) : canonicalEvent,
         );
-        if (isCompactedEvent(canonicalEvent)) {
-          yield* settleCompaction(canonicalEvent.threadId, pendingCompaction, "completed");
-        }
+        if (terminal !== null)
+          yield* settleCompaction(canonicalEvent.threadId, pendingCompaction, terminal);
         return;
       }
       if (

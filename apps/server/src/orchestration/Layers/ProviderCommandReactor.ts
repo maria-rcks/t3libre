@@ -442,18 +442,19 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const setThreadSessionReadyAfterCompaction = Effect.fnUntraced(function* (threadId: ThreadId) {
+  const restoreCompaction = Effect.fnUntraced(function* (threadId: ThreadId, fromRunning = false) {
     if (stoppingThreadIds.has(threadId)) {
       compactingThreadIds.delete(threadId);
       return;
     }
     const thread = yield* resolveThread(threadId);
+    if (!thread?.session) return;
     if (
-      !thread?.session ||
-      (thread.session.status !== "starting" && thread.session.status !== "ready")
-    ) {
+      thread.session.status !== "starting" &&
+      thread.session.status !== "ready" &&
+      (!fromRunning || thread.session.status !== "running")
+    )
       return;
-    }
     const completedAt = DateTime.formatIso(yield* DateTime.now);
     if (stoppingThreadIds.has(threadId)) {
       compactingThreadIds.delete(threadId);
@@ -1335,7 +1336,7 @@ const make = Effect.gen(function* () {
       }
       return appendTurnStartFailure("Context compaction failed", detail).pipe(
         Effect.ensuring(
-          setThreadSessionReadyAfterCompaction(event.payload.threadId).pipe(
+          restoreCompaction(event.payload.threadId).pipe(
             Effect.catchCause((restoreCause) =>
               Effect.logWarning("failed to restore provider session after compaction failure", {
                 threadId: event.payload.threadId,
@@ -1396,7 +1397,7 @@ const make = Effect.gen(function* () {
           event.payload.messageId,
         );
       }).pipe(
-        Effect.andThen(setThreadSessionReadyAfterCompaction(event.payload.threadId)),
+        Effect.andThen(restoreCompaction(event.payload.threadId, true)),
         Effect.catchCause(recoverCompactionFailure),
         Effect.ensuring(Effect.sync(() => void compactingThreadIds.delete(event.payload.threadId))),
         Effect.forkScoped,
@@ -1643,7 +1644,7 @@ const make = Effect.gen(function* () {
             return wasCompacting && !compactingThreadIds.has(thread.id);
           }).pipe(
             Effect.flatMap((compactionSettled) =>
-              compactionSettled ? setThreadSessionReadyAfterCompaction(thread.id) : Effect.void,
+              compactionSettled ? restoreCompaction(thread.id) : Effect.void,
             ),
             Effect.andThen(
               appendProviderFailureActivity({

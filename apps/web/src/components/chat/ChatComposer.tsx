@@ -1855,6 +1855,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const compactSlashCommandAvailable =
     composerTrigger?.kind === "slash-command" &&
+    prompt.slice(0, composerTrigger.rangeStart).trim() === "" &&
     !compactThreadUnavailable &&
     prompt.slice(composerTrigger.rangeEnd).trim() === "" &&
     composerImages.length + composerFiles.length === 0 &&
