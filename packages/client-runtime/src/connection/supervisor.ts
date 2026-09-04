@@ -385,7 +385,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     );
   });
 
-  const establishScopedTracedConnection = Effect.fnUntraced(function* (
+  const forkScopedTracedConnection = Effect.fnUntraced(function* (
     attempt: number,
     generation: number,
     lastFailure: ConnectionAttemptError | null,
@@ -396,22 +396,22 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     return yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
         const connectionScope = yield* Scope.fork(parentScope, "sequential");
-        const established = yield* Effect.exit(
-          restore(
-            establishTracedConnection(
-              attempt,
-              generation,
-              lastFailure,
-              pendingRetry,
-              publishProgress,
-            ).pipe(Scope.provide(connectionScope)),
+        const fiber = yield* restore(
+          establishTracedConnection(
+            attempt,
+            generation,
+            lastFailure,
+            pendingRetry,
+            publishProgress,
+          ).pipe(
+            Scope.provide(connectionScope),
+            Effect.map(
+              (established) =>
+                ({ ...established, scope: connectionScope }) satisfies ScopedConnection,
+            ),
           ),
-        );
-        if (Exit.isFailure(established)) {
-          yield* Scope.close(connectionScope, Exit.void).pipe(Effect.ignore);
-          return yield* Effect.failCause(established.cause);
-        }
-        return { ...established.value, scope: connectionScope } satisfies ScopedConnection;
+        ).pipe(Effect.forkChild);
+        return { fiber, scope: connectionScope };
       }),
     );
   });
@@ -580,15 +580,15 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
     let failureCount = 0;
     for (;;) {
-      const candidate = yield* establishScopedTracedConnection(
+      const candidate = yield* forkScopedTracedConnection(
         failureCount + 1,
         generation,
         null,
         Option.none(),
         false,
-      ).pipe(Effect.forkChild);
+      );
       const replacement = yield* Effect.raceAllFirst([
-        Fiber.await(candidate).pipe(
+        Fiber.await(candidate.fiber).pipe(
           Effect.map((exit): ReplacementPreparationEvent => ({ _tag: "Completed", exit })),
         ),
         waitForAuthorizationDeadline(active.lease.prepared, 0).pipe(
@@ -600,11 +600,11 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       ]);
 
       if (replacement._tag !== "Completed") {
-        yield* Fiber.interrupt(candidate);
-        const discarded = yield* Fiber.await(candidate);
-        if (Exit.isSuccess(discarded)) {
-          yield* Scope.close(discarded.value.scope, Exit.void).pipe(Effect.ignore);
-        }
+        yield* Fiber.interrupt(candidate.fiber);
+        yield* Fiber.await(candidate.fiber);
+        yield* Scope.close(candidate.scope, Exit.void).pipe(Effect.ignore);
+      } else if (Exit.isFailure(replacement.exit)) {
+        yield* Scope.close(candidate.scope, Exit.void).pipe(Effect.ignore);
       }
       if (replacement._tag === "AuthorizationExpired") {
         return Option.none<ScopedConnection>();
@@ -658,16 +658,15 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   ) {
     const initialGeneration = previousGeneration + 1;
     yield* SubscriptionRef.set(prepared, Option.none());
+    const initial = yield* forkScopedTracedConnection(
+      attempt,
+      initialGeneration,
+      lastFailure,
+      pendingRetry,
+      true,
+    );
     const establishment = yield* Effect.raceAllFirst([
-      exitUnlessInterrupted(
-        establishScopedTracedConnection(
-          attempt,
-          initialGeneration,
-          lastFailure,
-          pendingRetry,
-          true,
-        ),
-      ).pipe(
+      Fiber.await(initial.fiber).pipe(
         Effect.map((exit): EstablishmentEvent => ({
           _tag: "Completed",
           exit,
@@ -684,6 +683,13 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       ),
     ]);
 
+    if (establishment._tag !== "Completed") {
+      yield* Fiber.interrupt(initial.fiber);
+      yield* Fiber.await(initial.fiber);
+      yield* Scope.close(initial.scope, Exit.void).pipe(Effect.ignore);
+    } else if (Exit.isFailure(establishment.exit)) {
+      yield* Scope.close(initial.scope, Exit.void).pipe(Effect.ignore);
+    }
     if (establishment._tag === "Interrupted") {
       return {
         _tag: "Interrupted",
