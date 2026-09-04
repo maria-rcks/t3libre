@@ -105,7 +105,18 @@ export const make = Effect.gen(function* () {
       thread: (typeof candidates)[number],
     ) {
       if (thread.linkedPullRequest != null) {
-        if (mergedPullRequest !== null) {
+        // The event carries the merged state, so only the threads linked to
+        // that exact pull request settle from it. Every other linked thread
+        // falls through to a fresh summary lookup below: the merge sweep
+        // covers all candidates, and an unrelated merge must never settle
+        // them.
+        if (
+          mergedPullRequest !== null &&
+          thread.linkedPullRequest.projectId === mergedPullRequest.projectId &&
+          thread.linkedPullRequest.repository.toLowerCase() ===
+            mergedPullRequest.repository.toLowerCase() &&
+          thread.linkedPullRequest.number === mergedPullRequest.number
+        ) {
           return {
             state: "merged",
             updatedAt: mergedPullRequest.mergedAt,
