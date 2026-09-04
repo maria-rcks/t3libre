@@ -327,6 +327,7 @@ describe("CheckpointReactor", () => {
       prefix: "t3-checkpoint-reactor-test-",
     });
     const pullRequestRefreshes: number[] = [];
+    const refreshAfterTurn = Effect.sync(() => void pullRequestRefreshes.push(1));
     const vcsStatusBroadcasterLayer = Layer.succeed(VcsStatusBroadcaster, {
       getStatus: () => Effect.die("getStatus should not be called in this test"),
       refreshLocalStatus: (cwd: string) =>
@@ -357,11 +358,7 @@ describe("CheckpointReactor", () => {
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(RuntimeReceiptBusLive),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
-      Layer.provideMerge(
-        Layer.mock(PullRequestService)({
-          refreshAfterTurn: Effect.sync(() => void pullRequestRefreshes.push(1)),
-        }),
-      ),
+      Layer.provideMerge(Layer.mock(PullRequestService)({ refreshAfterTurn })),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
       Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer))),
       Layer.provideMerge(
