@@ -3057,6 +3057,56 @@ it.effect("fills in the line counts for the rows it is given", () =>
     ]);
   }),
 );
+it.effect(
+  "reuses counts across overlapping pages and refreshes until expiry or a reference changes",
+  () =>
+    Effect.gen(function* () {
+      const asked: number[][] = [];
+      const ref = (number: number) => ({
+        projectId: "p1" as ProjectId,
+        repository: "acme/web",
+        number,
+      });
+      const service = yield* makeService({
+        projects: [
+          project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
+        ],
+        providers: [
+          fakeProvider("github", {
+            listChangeRequestStats: (input) => {
+              asked.push(input.changeRequests.map((ref) => ref.number));
+              return Effect.succeed(
+                input.changeRequests.map((ref) => ({ ...ref, additions: 12, deletions: 3 })),
+              );
+            },
+          }),
+        ],
+      });
+
+      yield* service.listStats({ refs: [ref(1), ref(2)] });
+      const overlapping = yield* service.listStats({ refs: [ref(2), ref(3)] });
+      assert.deepStrictEqual(
+        overlapping.stats.map((stat) => stat.number),
+        [2, 3],
+      );
+      yield* service.invalidate({});
+      yield* service.listStats({ refs: [ref(1), ref(2), ref(3)] });
+      assert.deepStrictEqual(asked, [[1, 2], [3]]);
+
+      yield* service.invalidate({ reference: ref(2) });
+      yield* service.listStats({ refs: [ref(1), ref(2), ref(3)] });
+      assert.deepStrictEqual(asked, [[1, 2], [3], [2]]);
+
+      yield* TestClock.adjust("61 seconds");
+      yield* service.listStats({ refs: [ref(1), ref(2), ref(3)] });
+      assert.deepStrictEqual(asked, [[1, 2], [3], [2], [1, 2, 3]]);
+
+      yield* service.refreshAfterTurn;
+      yield* service.listStats({ refs: [ref(1)] });
+      assert.deepStrictEqual(asked, [[1, 2], [3], [2], [1, 2, 3], [1]]);
+    }),
+);
+
 it.effect("keeps the rows when the line counts cannot be read", () =>
   Effect.gen(function* () {
     const service = yield* makeService({
@@ -3080,6 +3130,7 @@ it.effect(
     Effect.gen(function* () {
       let coreCalls = 0;
       let activityCalls = 0;
+      let statsCalls = 0;
       const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
       const service = yield* makeService({
         projects: [
@@ -3087,6 +3138,10 @@ it.effect(
         ],
         providers: [
           fakeProvider("github", {
+            listChangeRequestStats: () => {
+              statsCalls += 1;
+              return Effect.succeed([]);
+            },
             getChangeRequest: () => {
               coreCalls += 1;
               return Effect.succeed({
@@ -3125,6 +3180,16 @@ it.effect(
       assert.strictEqual(core.body, "Ready before the conversation");
       assert.strictEqual(coreCalls, 1);
       assert.strictEqual(activityCalls, 0);
+
+      const counts = yield* service.listStats({ refs: [reference] });
+      assert.strictEqual(statsCalls, 0);
+      assert.deepStrictEqual(counts.stats, [
+        {
+          ...reference,
+          additions: core.additions,
+          deletions: core.deletions,
+        },
+      ]);
 
       yield* Effect.all([service.activity(reference), service.activity(reference)], {
         concurrency: 2,
