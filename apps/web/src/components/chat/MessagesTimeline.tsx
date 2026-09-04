@@ -1918,14 +1918,21 @@ function LiveActivityRow({
   iconName,
   toolIcon,
   failed = false,
+  active = false,
 }: {
   label: string;
   iconName?: WorkEntryIconName;
   toolIcon?: ToolActivityIcon | undefined;
   failed?: boolean;
+  active?: boolean;
 }) {
   return (
-    <div className="min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed">
+    <div
+      className={cn(
+        "min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed",
+        active && "motion-safe:animate-status-pulse",
+      )}
+    >
       <LiveActivityContent
         label={label}
         iconName={iconName}
@@ -2004,6 +2011,7 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
         iconName={workEntryIconName(row.entry)}
         toolIcon={row.entry.toolIcon ?? row.entry.toolSource?.icon}
         failed={failed}
+        active={row.active}
       />
     </button>
   );
