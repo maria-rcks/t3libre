@@ -2618,10 +2618,7 @@ function ChatViewContent(props: ChatViewProps) {
     (latestTurnStartFailureId(activeThread, pendingCompactionMessage.id) !== null ||
       activeThread?.activities.some((activity) => {
         if (activity.kind !== "context-compaction") return false;
-        const payload =
-          typeof activity.payload === "object" && activity.payload !== null
-            ? (activity.payload as { readonly requestId?: unknown })
-            : null;
+        const payload = activity.payload as { readonly requestId?: unknown } | null | undefined;
         return payload?.requestId === pendingCompactionMessage.id;
       }));
   const isCompacting =
