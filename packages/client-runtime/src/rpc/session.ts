@@ -54,6 +54,7 @@ export interface RpcSession {
 
 export interface RpcSessionOptions {
   readonly environmentThemes?: boolean;
+  readonly usageLimitSources?: boolean;
 }
 
 export class RpcSessionFactory extends Context.Service<
@@ -134,8 +135,10 @@ export const make = Effect.fn("RpcSessionFactory.make")(function* (
   options: RpcSessionOptions = {},
 ) {
   const webSocketConstructor = yield* Socket.WebSocketConstructor;
-  const serverConfigInput: ServerConfigSubscriptionInput =
-    options.environmentThemes === true ? { environmentThemes: true } : {};
+  const serverConfigInput: ServerConfigSubscriptionInput = {
+    ...(options.environmentThemes === true ? { environmentThemes: true } : {}),
+    ...(options.usageLimitSources === true ? { usageLimitSources: true } : {}),
+  };
 
   const connect = Effect.fnUntraced(function* (connection: PreparedConnection) {
     yield* Effect.annotateCurrentSpan({

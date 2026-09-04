@@ -1,4 +1,7 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { UsageProviderKind } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -6,7 +9,8 @@ import type { DailyTotals, HourlyTotals } from "@t3tools/shared/usageMerge";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
-import { usePrimaryEnvironmentId } from "../../state/environments";
+import { environmentPresentations } from "../../state/presentation";
+import { environmentSession } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -57,6 +61,30 @@ const WINDOW_OPTIONS = [
   { days: 90, label: "90 days" },
 ] as const;
 
+const limitsRefreshEnvironmentsAtom = Atom.family((enabled: boolean) =>
+  Atom.make((get) =>
+    !enabled
+      ? []
+      : [...get(environmentPresentations.presentationsAtom)]
+          .filter(([environmentId, presentation]) => {
+            if (
+              presentation.connection.phase !== "connected" ||
+              presentation.serverConfig === null
+            ) {
+              return false;
+            }
+            const session = Option.getOrNull(
+              AsyncResult.value(get(environmentSession.sessionStateAtom(environmentId))),
+            );
+            return (
+              session?.authenticated === true &&
+              (session.scopes === undefined || session.scopes.includes("orchestration:operate"))
+            );
+          })
+          .map(([environmentId]) => environmentId),
+  ),
+);
+
 export function UsagePage() {
   const [windowSelection, setWindowSelection] = useState(() => ({
     days: 30,
@@ -68,7 +96,7 @@ export function UsagePage() {
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
   const { merged, environments, isPending, isPartial, refresh } = useUsage(window);
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const limitsRefreshEnvironments = useAtomValue(limitsRefreshEnvironmentsAtom(showingLimits));
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -114,12 +142,9 @@ export function UsagePage() {
     });
   };
   const refreshWindow = () => {
-    // On Limits the button re-probes every provider (and usage-limit source)
-    // on the primary environment; the live snapshots then flow in over the
-    // config stream, so nothing else needs to move.
     if (showingLimits) {
-      if (primaryEnvironmentId) {
-        void refreshProviders({ environmentId: primaryEnvironmentId, input: {} });
+      for (const environmentId of limitsRefreshEnvironments) {
+        void refreshProviders({ environmentId, input: {} });
       }
       return;
     }
