@@ -7,6 +7,7 @@ import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
+import { SidebarQuestionIndicators } from "~/components/sidebar/SidebarQuestionIndicators";
 import { Separator } from "~/components/ui/separator";
 import {
   Sheet,
@@ -696,20 +697,24 @@ function SidebarContent({
 }: React.ComponentProps<"div"> & {
   fixedHeader?: React.ReactNode;
 }) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
   return (
     <>
       {fixedHeader ? <div className="w-full shrink-0">{fixedHeader}</div> : null}
-      <ScrollArea hideScrollbars scrollFade className="h-auto min-h-0 flex-1">
-        <div
-          className={cn(
-            "flex w-full min-w-0 flex-col gap-2 group-data-[collapsible=icon]:overflow-hidden",
-            className,
-          )}
-          data-sidebar="content"
-          data-slot="sidebar-content"
-          {...props}
-        />
-      </ScrollArea>
+      <div ref={containerRef} className="relative flex min-h-0 flex-1 flex-col">
+        <ScrollArea hideScrollbars scrollFade className="h-auto min-h-0 flex-1">
+          <div
+            className={cn(
+              "flex w-full min-w-0 flex-col gap-2 group-data-[collapsible=icon]:overflow-hidden",
+              className,
+            )}
+            data-sidebar="content"
+            data-slot="sidebar-content"
+            {...props}
+          />
+        </ScrollArea>
+        <SidebarQuestionIndicators containerRef={containerRef} />
+      </div>
     </>
   );
 }

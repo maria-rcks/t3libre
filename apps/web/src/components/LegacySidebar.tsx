@@ -702,6 +702,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       ref={rowRef}
       className="w-full"
       data-thread-item
+      data-pending-question={thread.hasPendingUserInput || undefined}
       onMouseLeave={handleMouseLeave}
       onBlurCapture={handleBlurCapture}
     >
@@ -713,7 +714,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         className={`${resolveThreadRowClassName({
           isActive,
           isSelected,
-        })} relative isolate`}
+        })} relative isolate${thread.hasPendingUserInput ? " sidebar-question-pending" : ""}`}
         onClick={handleRowClick}
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}

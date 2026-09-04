@@ -1909,3 +1909,40 @@ code {
     transform: scaleX(0.9);
   }
 }
+
+/* Match terminal status cadence; only visible pending rows animate. */
+.sidebar-question-pending::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  border: 1px solid var(--color-indigo-400);
+  border-radius: inherit;
+  animation: status-pulse 2s infinite paused;
+}
+
+[data-question-visible] .sidebar-question-pending::after {
+  animation-play-state: running;
+}
+
+.sidebar-question-arrow {
+  animation: sidebar-question-nudge 2s steps(4) infinite;
+}
+
+@keyframes sidebar-question-nudge {
+  0%,
+  100% {
+    transform: translateY(-2px);
+  }
+  50% {
+    transform: translateY(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-question-pending::after,
+  .sidebar-question-arrow {
+    animation: none;
+  }
+}
