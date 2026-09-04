@@ -637,7 +637,7 @@ function PullRequestsRouteView() {
     environmentQueries.map(({ environmentId }) => environmentId),
   );
   const turnRefreshToken = turnRefreshes
-    .map(([environmentId, event]) => `${environmentId}:${event.revision}`)
+    .map(([environmentId, revision]) => `${environmentId}:${revision}`)
     .join("|");
   // Page size is view state, not a URL concern: a shared link should open the first page.
   const scopeKey = `${environmentKey}:${assignmentKey}:${search.state}:${search.involvement}:${scopedProjectId ?? ""}:${search.host ?? ""}:${search.draft ?? ""}:${search.review ?? ""}:${search.checks ?? ""}:${search.author ?? ""}:${search.labels?.join("\u0000") ?? ""}`;

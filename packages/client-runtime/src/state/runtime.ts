@@ -578,7 +578,7 @@ export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
     return (
       refreshTrigger === undefined
         ? intervalQuery
-        : intervalQuery.pipe(Atom.makeRefreshOnSignal(refreshTrigger), Atom.setIdleTTL(0))
+        : intervalQuery.pipe(Atom.makeRefreshOnSignal(refreshTrigger))
     ).pipe(Atom.withLabel(`${options.label}:${key}`));
   });
   return (target) => family(environmentRpcKey(target));

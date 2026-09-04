@@ -681,7 +681,7 @@ export function PullRequestDetailPanel({
     activityQuery.refresh();
   }, [activityQuery.refresh, detailQuery.refresh]);
   const [refreshToken, setRefreshToken] = useState(0);
-  const codeRefreshToken = refreshToken + (turnRefresh?.revision ?? 0);
+  const codeRefreshToken = refreshToken + (turnRefresh ?? 0);
   const activityRevision = useRef<{ readonly key: string; readonly updatedAt: string } | null>(
     null,
   );

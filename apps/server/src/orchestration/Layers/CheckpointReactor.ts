@@ -90,15 +90,6 @@ const make = Effect.gen(function* () {
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const pullRequests = yield* PullRequestService.PullRequestService;
-  let refreshedTurnThread: ThreadId | null = null;
-
-  const refreshPullRequestsOnce = Effect.fn("refreshPullRequestsOnce")(function* (
-    threadId: ThreadId,
-  ) {
-    if (refreshedTurnThread === threadId) return;
-    refreshedTurnThread = threadId;
-    yield* pullRequests.refreshAfterTurn;
-  });
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -864,24 +855,7 @@ const make = Effect.gen(function* () {
   });
 
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (event: OrchestrationEvent) {
-    if (event.type === "thread.session-set") {
-      if (
-        event.payload.session.status === "starting" ||
-        event.payload.session.status === "running"
-      ) {
-        if (event.payload.session.activeTurnId !== null) {
-          refreshedTurnThread = null;
-        }
-        return;
-      }
-      yield* refreshPullRequestsOnce(event.payload.threadId);
-      return;
-    }
-
     if (event.type === "thread.turn-start-requested" || event.type === "thread.message-sent") {
-      if (event.type === "thread.turn-start-requested") {
-        refreshedTurnThread = null;
-      }
       yield* ensurePreTurnBaselineFromDomainTurnStart(event);
       return;
     }
@@ -919,12 +893,6 @@ const make = Effect.gen(function* () {
           ),
         ),
       );
-      if (event.payload.status === "missing") return;
-      const thread = yield* resolveThreadDetail(event.payload.threadId);
-      if (thread?.session === null) {
-        yield* refreshPullRequestsOnce(event.payload.threadId);
-      }
-      return;
     }
   });
 
@@ -932,14 +900,24 @@ const make = Effect.gen(function* () {
     event: ProviderRuntimeEvent,
   ) {
     if (event.type === "turn.started") {
-      refreshedTurnThread = null;
       yield* ensurePreTurnBaselineFromTurnStart(event);
       return;
     }
 
-    if (event.type === "turn.completed") {
+    if (event.type === "turn.completed" || event.type === "turn.aborted") {
       const turnId = toTurnId(event.turnId);
-      yield* refreshLocalGitStatusFromTurnCompletion(event);
+      const thread = yield* resolveThreadDetail(event.threadId);
+      if (event.type === "turn.completed") {
+        yield* refreshLocalGitStatusFromTurnCompletion(event);
+      }
+      if (
+        turnId !== null &&
+        thread !== undefined &&
+        (!thread.session?.activeTurnId || sameId(thread.session.activeTurnId, turnId))
+      ) {
+        yield* pullRequests.refreshAfterTurn;
+      }
+      if (event.type === "turn.aborted") return;
       yield* captureCheckpointFromTurnCompletion(event).pipe(
         Effect.catch((error) =>
           Effect.flatMap(nowIso, (createdAt) =>
@@ -987,7 +965,6 @@ const make = Effect.gen(function* () {
         if (
           event.type !== "thread.turn-start-requested" &&
           event.type !== "thread.message-sent" &&
-          event.type !== "thread.session-set" &&
           event.type !== "thread.checkpoint-revert-requested" &&
           event.type !== "thread.turn-diff-completed"
         ) {
@@ -999,7 +976,11 @@ const make = Effect.gen(function* () {
 
     yield* forkParked(
       Stream.runForEach(providerService.streamEvents, (event) => {
-        if (event.type !== "turn.started" && event.type !== "turn.completed") {
+        if (
+          event.type !== "turn.started" &&
+          event.type !== "turn.completed" &&
+          event.type !== "turn.aborted"
+        ) {
           return Effect.void;
         }
         return worker.enqueue({ source: "runtime", event });

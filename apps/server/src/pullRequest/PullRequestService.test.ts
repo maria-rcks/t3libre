@@ -2646,10 +2646,11 @@ it.effect("a listing narrowed to some projects is its own cache entry", () =>
   }),
 );
 
-it.effect("an explicit invalidation makes the next listing ask the host again", () =>
+it.effect("explicit and turn invalidations make the next listing ask the host again", () =>
   Effect.gen(function* () {
     let hostCalls = 0;
     let viewerCalls = 0;
+    const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
     const service = yield* makeService({
       projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
       providers: [
@@ -2673,59 +2674,19 @@ it.effect("an explicit invalidation makes the next listing ask the host again", 
     assert.strictEqual(viewerCalls, 2);
 
     // Forgetting one change request leaves the listings shared.
-    yield* service.invalidate({
-      reference: { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 },
-    });
+    yield* service.invalidate({ reference });
     yield* service.list({ state: "open" });
     assert.strictEqual(hostCalls, 2);
+    const observedRefresh = yield* Stream.runHead(service.subscribeRefreshes).pipe(
+      Effect.forkChild({ startImmediately: true }),
+    );
+
+    yield* service.refreshAfterTurn;
+    const refresh = Option.getOrThrow(yield* Fiber.join(observedRefresh));
+    yield* service.list({ state: "open" });
+    assert.isAbove(refresh, 0);
+    assert.strictEqual(hostCalls, 3);
   }),
-);
-
-it.effect("refreshes listing and change request caches after a thread turn", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const calls: string[] = [];
-      const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
-      const service = yield* makeService({
-        projects: [
-          project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
-        ],
-        providers: [
-          fakeProvider("github", {
-            listChangeRequests: (input) => {
-              calls.push(`list:${input.repository}`);
-              return Effect.succeed({
-                items: [changeRequest(1, "2026-07-02T00:00:00Z")],
-                truncated: false,
-                continues: false,
-              });
-            },
-            getChangeRequest: (input) => {
-              calls.push(`detail:${input.repository}`);
-              return Effect.succeed(hostedChangeRequest("body"));
-            },
-          }),
-        ],
-      });
-      const observedRefresh = yield* Stream.runHead(service.subscribeRefreshes).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
-
-      yield* service.list({ state: "open", projectId: reference.projectId });
-      yield* service.detail(reference);
-      yield* service.refreshAfterTurn;
-      const refresh = Option.getOrThrow(yield* Fiber.join(observedRefresh));
-      yield* service.list({ state: "open", projectId: reference.projectId });
-      yield* service.detail(reference);
-      assert.isAbove(refresh.revision, 0);
-      assert.deepStrictEqual(calls, [
-        "list:acme/web",
-        "detail:acme/web",
-        "list:acme/web",
-        "detail:acme/web",
-      ]);
-    }),
-  ),
 );
 
 it.effect("a mutation makes the next listing ask the host again, with no client asking", () =>
@@ -3947,7 +3908,7 @@ it.effect("refuses a remark rewritten into nothing but whitespace", () =>
   }),
 );
 
-it.effect("forgets the cached detail after a rewrite, like the other mutations", () =>
+it.effect("forgets the cached detail after a rewrite or terminal turn", () =>
   Effect.gen(function* () {
     let coreCalls = 0;
     const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
@@ -3982,8 +3943,11 @@ it.effect("forgets the cached detail after a rewrite, like the other mutations",
     yield* service.detail(reference);
     yield* service.update({ ...reference, title: "Renamed" });
     yield* service.detail(reference);
-
     assert.strictEqual(coreCalls, 2);
+
+    yield* service.refreshAfterTurn;
+    yield* service.detail(reference);
+    assert.strictEqual(coreCalls, 3);
   }),
 );
 

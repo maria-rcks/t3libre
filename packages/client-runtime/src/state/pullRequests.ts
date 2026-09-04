@@ -3,7 +3,6 @@ import {
   WS_METHODS,
   type PullRequestDetail,
   type PullRequestDiffInput,
-  type PullRequestRefreshEvent,
   type PullRequestSummary,
   type VcsStatusResult,
 } from "@t3tools/contracts";
@@ -11,7 +10,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/unstable/reactivity";
 
 import {
   createAtomCommandScheduler,
@@ -37,19 +36,16 @@ export class EnvironmentHttpConnectionNotReadyError extends Data.TaggedError(
 
 export const LINKED_PULL_REQUEST_IDLE_TTL_MS = 5_000;
 
-export type PullRequestRefreshAtomFamily = (target: {
-  readonly environmentId: EnvironmentId;
-}) => Atom.Atom<AsyncResult.AsyncResult<PullRequestRefreshEvent, unknown>>;
-
 /** One lightweight server signal shared by every mounted pull request read in an environment. */
-export function createPullRequestRefreshAtomFamily<R, E>(
+function createPullRequestRefreshAtomFamily<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
-): PullRequestRefreshAtomFamily {
+) {
   const refreshes = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
     label: "environment-data:pull-requests:turn-refreshes",
     tag: WS_METHODS.pullRequestsSubscribeRefreshes,
   });
-  return ({ environmentId }) => refreshes({ environmentId, input: {} });
+  return ({ environmentId }: { readonly environmentId: EnvironmentId }) =>
+    refreshes({ environmentId, input: {} });
 }
 
 /** Refresh only the live fields a linked thread renders. */
@@ -88,8 +84,8 @@ export function pullRequestDetailToVcsStatus(
  */
 export function createPullRequestEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | PullRequestDiffLoader | R, E>,
-  refreshes = createPullRequestRefreshAtomFamily(runtime),
 ) {
+  const refreshes = createPullRequestRefreshAtomFamily(runtime);
   const commandScheduler = createAtomCommandScheduler();
   const refreshEnvironment = (environmentId: EnvironmentId) => refreshes({ environmentId });
   const serialPerEnvironment = {
@@ -103,6 +99,7 @@ export function createPullRequestEnvironmentAtoms<R, E>(
     refreshTrigger: ({ environmentId }) => refreshEnvironment(environmentId),
   });
   return {
+    refreshes,
     list: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:list",
       tag: WS_METHODS.pullRequestsList,

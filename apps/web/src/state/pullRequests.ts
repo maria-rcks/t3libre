@@ -2,14 +2,12 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   createLinkedPullRequestSummaryAtomFamily,
   createPullRequestEnvironmentAtoms,
-  createPullRequestRefreshAtomFamily,
 } from "@t3tools/client-runtime/state/pull-requests";
 import type {
   EnvironmentId,
   PullRequestListInput,
   PullRequestListStatsInput,
   PullRequestRef,
-  PullRequestRefreshEvent,
   PullRequestSummary,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -25,14 +23,10 @@ import {
 } from "../components/pullRequest/pullRequestList.logic";
 import { formatEnvironmentQueryError } from "./query";
 
-const pullRequestRefreshes = createPullRequestRefreshAtomFamily(connectionAtomRuntime);
-export const pullRequestEnvironment = createPullRequestEnvironmentAtoms(
-  connectionAtomRuntime,
-  pullRequestRefreshes,
-);
+export const pullRequestEnvironment = createPullRequestEnvironmentAtoms(connectionAtomRuntime);
 export const linkedPullRequestDetailAtom = createLinkedPullRequestSummaryAtomFamily(
   connectionAtomRuntime,
-  pullRequestRefreshes,
+  pullRequestEnvironment.refreshes,
 );
 
 const observedPullRequestSummaryAtom = Atom.family((key: string) =>
@@ -159,21 +153,19 @@ const usePullRequestStatsQuery = createMergedEnvironmentQuery(
 const usePullRequestTurnRefreshQuery = createMergedEnvironmentQuery(
   "web-pull-requests:turn-refreshes",
   ({ environmentId }: EnvironmentQueryTarget<Readonly<Record<string, never>>>) =>
-    pullRequestRefreshes({ environmentId }),
+    pullRequestEnvironment.refreshes({ environmentId }),
 );
 
 export function usePullRequestTurnRefreshes(
   environmentIds: ReadonlyArray<EnvironmentId>,
-): ReadonlyArray<readonly [EnvironmentId, PullRequestRefreshEvent]> {
+): ReadonlyArray<readonly [EnvironmentId, number]> {
   return usePullRequestTurnRefreshQuery(
     environmentIds.map((environmentId) => ({ environmentId, input: {} })),
   ).values;
 }
 
-export function usePullRequestTurnRefresh(
-  environmentId: EnvironmentId,
-): PullRequestRefreshEvent | null {
-  const result = useAtomValue(pullRequestRefreshes({ environmentId }));
+export function usePullRequestTurnRefresh(environmentId: EnvironmentId): number | null {
+  const result = useAtomValue(pullRequestEnvironment.refreshes({ environmentId }));
   return Option.getOrNull(AsyncResult.value(result));
 }
 

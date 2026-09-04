@@ -479,7 +479,11 @@ describe("CheckpointReactor", () => {
   }
 
   it("captures pre-turn baseline on turn.started and post-turn checkpoint on turn.completed", async () => {
-    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const pullRequestCacheRefreshCalls: number[] = [];
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      pullRequestCacheRefreshCalls,
+    });
     const createdAt = "2026-01-01T00:00:00.000Z";
 
     await Effect.runPromise(
@@ -552,96 +556,8 @@ describe("CheckpointReactor", () => {
         "README.md",
       ),
     ).toBe("v2\n");
+    expect(pullRequestCacheRefreshCalls).toEqual([1]);
   });
-
-  effectIt.effect("refreshes once for terminal sessions, including after reactor startup", () =>
-    Effect.gen(function* () {
-      const pullRequestRefreshCalls: number[] = [];
-      const harness = yield* Effect.promise(() =>
-        createHarness({
-          seedFilesystemCheckpoints: false,
-          pullRequestCacheRefreshCalls: pullRequestRefreshCalls,
-        }),
-      );
-      const threadId = ThreadId.make("thread-1");
-      const setSession = (
-        command: string,
-        status: "running" | "ready",
-        activeTurnId: TurnId | null,
-      ) =>
-        harness.engine.dispatch({
-          type: "thread.session.set",
-          commandId: CommandId.make(`cmd-pr-refresh-${command}`),
-          threadId,
-          session: {
-            threadId,
-            status,
-            providerName: "codex",
-            runtimeMode: "approval-required",
-            activeTurnId,
-            lastError: null,
-            updatedAt: `2026-01-01T00:00:0${command === "running" ? 1 : 2}.000Z`,
-          },
-          createdAt: `2026-01-01T00:00:0${command === "running" ? 1 : 2}.000Z`,
-        });
-
-      yield* setSession("initial-ready", "ready", null);
-      yield* Effect.promise(() => harness.drain());
-      expect(pullRequestRefreshCalls).toEqual([1]);
-
-      yield* setSession("running", "running", asTurnId("turn-refresh-prs"));
-      yield* setSession("superseding", "running", asTurnId("turn-refresh-prs-2"));
-      yield* harness.engine.dispatch({
-        type: "thread.turn.diff.complete",
-        commandId: CommandId.make("cmd-pr-refresh-placeholder"),
-        threadId,
-        turnId: asTurnId("turn-refresh-prs"),
-        completedAt: "2026-01-01T00:00:01.000Z",
-        checkpointRef: checkpointRefForThreadTurn(threadId, 1),
-        checkpointTurnCount: 1,
-        status: "missing",
-        files: [],
-        createdAt: "2026-01-01T00:00:01.000Z",
-      });
-      yield* Effect.promise(() => harness.drain());
-      expect(pullRequestRefreshCalls).toEqual([1]);
-
-      yield* setSession("ready", "ready", null);
-      yield* setSession("ready-again", "ready", null);
-      yield* Effect.promise(() => harness.drain());
-
-      expect(pullRequestRefreshCalls).toEqual([1, 1]);
-    }),
-  );
-
-  effectIt.effect("refreshes pull request data from a completion without session metadata", () =>
-    Effect.gen(function* () {
-      const pullRequestRefreshCalls: number[] = [];
-      const harness = yield* Effect.promise(() =>
-        createHarness({
-          seedFilesystemCheckpoints: false,
-          pullRequestCacheRefreshCalls: pullRequestRefreshCalls,
-        }),
-      );
-      const threadId = ThreadId.make("thread-1");
-
-      yield* harness.engine.dispatch({
-        type: "thread.turn.diff.complete",
-        commandId: CommandId.make("cmd-pr-refresh-sessionless"),
-        threadId,
-        turnId: asTurnId("turn-sessionless"),
-        completedAt: "2026-01-01T00:00:01.000Z",
-        checkpointRef: checkpointRefForThreadTurn(threadId, 2),
-        checkpointTurnCount: 2,
-        status: "ready",
-        files: [],
-        createdAt: "2026-01-01T00:00:01.000Z",
-      });
-      yield* Effect.promise(() => harness.drain());
-
-      expect(pullRequestRefreshCalls).toEqual([1]);
-    }),
-  );
 
   it("refreshes local git status state on turn completion using the session cwd", async () => {
     const gitStatusRefreshCalls: string[] = [];
@@ -822,11 +738,13 @@ describe("CheckpointReactor", () => {
 
   it("ignores auxiliary thread turn completion while primary turn is active", async () => {
     const pullRequestRefreshCalls: string[] = [];
+    const pullRequestCacheRefreshCalls: number[] = [];
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
       threadBranch: "t3code/feature",
       localStatusRefName: "t3code/feature",
       pullRequestRefreshCalls,
+      pullRequestCacheRefreshCalls,
     });
     const createdAt = "2026-01-01T00:00:00.000Z";
 
@@ -880,6 +798,7 @@ describe("CheckpointReactor", () => {
     const midThread = midReadModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(midThread?.checkpoints).toHaveLength(0);
     expect(pullRequestRefreshCalls).toEqual([]);
+    expect(pullRequestCacheRefreshCalls).toEqual([]);
 
     harness.provider.emit({
       type: "turn.completed",
@@ -899,6 +818,7 @@ describe("CheckpointReactor", () => {
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1);
     await harness.drain();
     expect(pullRequestRefreshCalls).toEqual([harness.cwd]);
+    expect(pullRequestCacheRefreshCalls).toEqual([1]);
   });
 
   it("captures pre-turn and completion checkpoints for claude runtime events", async () => {

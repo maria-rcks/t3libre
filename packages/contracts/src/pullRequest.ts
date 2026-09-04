@@ -689,12 +689,6 @@ export const PullRequestInvalidateInput = Schema.Struct({
 });
 export type PullRequestInvalidateInput = typeof PullRequestInvalidateInput.Type;
 
-/** Monotonic signal that pull request host data may have changed after a thread turn. */
-export const PullRequestRefreshEvent = Schema.Struct({
-  revision: NonNegativeInt,
-});
-export type PullRequestRefreshEvent = typeof PullRequestRefreshEvent.Type;
-
 export const PullRequestDetail = Schema.Struct({
   provider: SourceControlProviderKind,
   capabilities: PullRequestCapabilities,

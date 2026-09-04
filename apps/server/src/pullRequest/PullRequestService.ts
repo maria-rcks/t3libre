@@ -39,7 +39,6 @@ import {
   type PullRequestProviderSummary,
   type PullRequestReactionInput,
   type PullRequestRef,
-  type PullRequestRefreshEvent,
   type PullRequestReviewVerdict,
   type PullRequestReviewerCandidateList,
   type PullRequestReviewerRequestInput,
@@ -149,7 +148,7 @@ export class PullRequestService extends Context.Service<
       never,
       Scope.Scope
     >;
-    readonly subscribeRefreshes: Stream.Stream<PullRequestRefreshEvent>;
+    readonly subscribeRefreshes: Stream.Stream<number>;
     readonly refreshAfterTurn: Effect.Effect<void>;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
     readonly activity: (
@@ -534,7 +533,7 @@ export function repositoryIdentityOf(project: OrchestrationProjectShell): string
 
 export const make = Effect.gen(function* () {
   const mergedPullRequests = yield* PubSub.sliding<PullRequestMergeEvent>(64);
-  const pullRequestRefreshes = yield* PubSub.sliding<PullRequestRefreshEvent>(1);
+  const pullRequestRefreshes = yield* PubSub.sliding<number>(1);
   const registry = yield* PullRequestProviderRegistry;
   const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
@@ -2193,7 +2192,6 @@ export const make = Effect.gen(function* () {
       // the cast restores the branded field types JSON cannot carry.
       const [
         ,
-        ,
         state,
         involvement,
         filters,
@@ -2204,7 +2202,6 @@ export const make = Effect.gen(function* () {
         query,
         cursorEntries,
       ] = JSON.parse(key) as [
-        number,
         number,
         string,
         string | null,
@@ -2236,7 +2233,6 @@ export const make = Effect.gen(function* () {
   const list: PullRequestService["Service"]["list"] = (input) => {
     const key = JSON.stringify([
       listingsEpoch,
-      turnRefreshEpoch,
       input.state,
       input.involvement ?? null,
       // Positional so two identical filter sets key alike however their record was assembled.
@@ -2367,11 +2363,7 @@ export const make = Effect.gen(function* () {
 
   const listStatsCache = yield* Cache.makeWith(
     (key: string) => {
-      const [, , refs] = JSON.parse(key) as [
-        number,
-        number,
-        ReadonlyArray<[string, string, number]>,
-      ];
+      const [, refs] = JSON.parse(key) as [number, ReadonlyArray<[string, string, number]>];
       return listStatsUncached({
         refs: refs.map(([projectId, repository, number]) => ({ projectId, repository, number })),
       } as unknown as PullRequestListStatsInput);
@@ -2389,7 +2381,6 @@ export const make = Effect.gen(function* () {
     if (input.refs.length === 0) return Effect.succeed({ stats: [] });
     const key = JSON.stringify([
       listingsEpoch,
-      turnRefreshEpoch,
       input.refs
         .map((ref) => [ref.projectId, ref.repository, ref.number] as const)
         .toSorted((left, right) =>
@@ -2412,8 +2403,8 @@ export const make = Effect.gen(function* () {
 
   const refreshAfterTurn: PullRequestService["Service"]["refreshAfterTurn"] = Effect.gen(
     function* () {
-      turnRefreshEpoch = ++epochCounter;
-      yield* PubSub.publish(pullRequestRefreshes, { revision: turnRefreshEpoch });
+      turnRefreshEpoch = listingsEpoch = ++epochCounter;
+      yield* PubSub.publish(pullRequestRefreshes, turnRefreshEpoch);
     },
   ).pipe(Effect.withSpan("PullRequestService.refreshAfterTurn"));
 

@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
@@ -106,7 +106,6 @@ import {
   PullRequestOperationError,
   PullRequestReactionInput,
   PullRequestRef,
-  PullRequestRefreshEvent,
   PullRequestSummary,
   PullRequestReviewerCandidateList,
   PullRequestReviewerRequestInput,
@@ -720,7 +719,7 @@ export const WsPullRequestsSubscribeRefreshesRpc = Rpc.make(
   WS_METHODS.pullRequestsSubscribeRefreshes,
   {
     payload: Schema.Struct({}),
-    success: PullRequestRefreshEvent,
+    success: NonNegativeInt,
     error: EnvironmentAuthorizationError,
     stream: true,
   },
