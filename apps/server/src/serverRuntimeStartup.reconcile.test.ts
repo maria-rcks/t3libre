@@ -153,7 +153,7 @@ it.effect("marks active running sessions that have persisted resume state", () =
       upsert: (binding) => Effect.sync(() => upserts.push(binding)),
       getProvider: () => Effect.die("unused"),
       listThreadIds: () => Effect.die("unused"),
-      listBindings: () => Effect.die("unused"),
+      listBindings: () => Effect.succeed([]),
     }),
     Effect.tap((marked) =>
       Effect.sync(() => {
@@ -162,6 +162,7 @@ it.effect("marks active running sessions that have persisted resume state", () =
         assert.deepStrictEqual(upserts[0]?.runtimePayload, {
           activeTurnId: "turn-mark-active",
           continueAfterServerUpdate: active.session.activeTurnId,
+          continueAfterServerUpdatePrepared: null,
         });
       }),
     ),
@@ -266,7 +267,7 @@ it.effect.each(["marked update", "opt-in restart"] as const)(
             ),
           getProvider: () => Effect.die("unused"),
           listThreadIds: () => Effect.die("unused"),
-          listBindings: () => Effect.die("unused"),
+          listBindings: () => Effect.succeed([]),
         },
         dispatch: (command) =>
           Effect.sync(() => dispatched.push(command)).pipe(
@@ -322,6 +323,7 @@ it.effect.each(["marked update", "opt-in restart"] as const)(
             .map((binding) => binding.runtimePayload)[0],
           {
             continueAfterServerUpdate: continuationTurnId,
+            continueAfterServerUpdatePrepared: true,
             activeTurnId: null,
           },
         );
@@ -391,7 +393,7 @@ it.effect("does not continue archived or deleted marked sessions", () => {
       upsert: () => Effect.void,
       getProvider: () => Effect.die("unused"),
       listThreadIds: () => Effect.die("unused"),
-      listBindings: () => Effect.die("unused"),
+      listBindings: () => Effect.succeed([]),
     },
     dispatch: (command) =>
       Effect.sync(() => dispatched.push(command)).pipe(Effect.as({ sequence: dispatched.length })),
@@ -446,7 +448,7 @@ it.effect("retries continuation preparation before settling a persistent failure
       upsert: () => Effect.void,
       getProvider: () => Effect.die("unused"),
       listThreadIds: () => Effect.die("unused"),
-      listBindings: () => Effect.die("unused"),
+      listBindings: () => Effect.succeed([]),
     },
     dispatch: (command) => {
       if (command.type !== "thread.session.set") {
@@ -517,7 +519,7 @@ it.effect("reconciles multiple active and archived orphans but skips live sessio
       upsert: (binding) => Effect.sync(() => upserts.push(binding)),
       getProvider: () => Effect.die("unused"),
       listThreadIds: () => Effect.die("unused"),
-      listBindings: () => Effect.die("unused"),
+      listBindings: () => Effect.succeed([]),
     },
     dispatch: (command) =>
       Effect.sync(() => dispatched.push(command)).pipe(Effect.as({ sequence: dispatched.length })),
@@ -551,6 +553,7 @@ it.effect("reconciles multiple active and archived orphans but skips live sessio
                   activeTurnId: null,
                   unrelated: binding.threadId,
                   continueAfterServerUpdate: null,
+                  continueAfterServerUpdatePrepared: null,
                 }
               : { activeTurnId: null, unrelated: binding.threadId },
           );
@@ -595,7 +598,7 @@ it.effect(
         upsert: () => Effect.fail(writeFailure),
         getProvider: () => Effect.die("unused"),
         listThreadIds: () => Effect.die("unused"),
-        listBindings: () => Effect.die("unused"),
+        listBindings: () => Effect.succeed([]),
       },
       dispatch: (command) =>
         Effect.sync(() => dispatched.push(command)).pipe(
@@ -632,7 +635,7 @@ it.effect("retries failed projections and continues after a persistent failure",
       upsert: () => Effect.void,
       getProvider: () => Effect.die("unused"),
       listThreadIds: () => Effect.die("unused"),
-      listBindings: () => Effect.die("unused"),
+      listBindings: () => Effect.succeed([]),
     },
     dispatch: (command) => {
       if (command.type !== "thread.session.set") {
@@ -681,7 +684,7 @@ it.effect("does not fail startup when the live provider session inventory cannot
       upsert: () => Effect.die("unused"),
       getProvider: () => Effect.die("unused"),
       listThreadIds: () => Effect.die("unused"),
-      listBindings: () => Effect.die("unused"),
+      listBindings: () => Effect.succeed([]),
     }),
     Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
       readEvents: () => Stream.empty,
@@ -753,7 +756,7 @@ for (const scenario of [
           }),
         getProvider: () => Effect.die("unused"),
         listThreadIds: () => Effect.die("unused"),
-        listBindings: () => Effect.die("unused"),
+        listBindings: () => Effect.succeed([]),
       },
       dispatch: (command) =>
         Effect.sync(() => {
@@ -779,82 +782,104 @@ for (const scenario of [
   });
 }
 
-it.effect("recovers again if startup exits after preparation but before activation", () =>
-  Effect.gen(function* () {
-    const turnId = TurnId.make("turn-interrupted-startup");
-    const thread = makeThread("thread-interrupted-startup", "running", turnId);
-    const activation = yield* Deferred.make<void>();
-    const cleared = yield* Deferred.make<void>();
-    const sends: ProviderSendTurnInput[] = [];
-    let binding: ProviderSessionDirectory.ProviderRuntimeBinding = {
-      threadId: thread.id,
-      provider: ProviderDriverKind.make("codex"),
-      providerInstanceId,
-      status: "running",
-      resumeCursor: { threadId: thread.id },
-      runtimePayload: { activeTurnId: turnId },
-    };
-    const input = {
-      threads: [thread],
-      continueAfterRestart: true,
-      providerService: {
-        ...makeProviderService(),
-        getCapabilities: () =>
-          Effect.succeed({
-            sessionModelSwitch: "in-session" as const,
-            promptlessTurnContinuation: true,
-          }),
-        sendTurn: (input: ProviderSendTurnInput) =>
+for (const preparedStatus of ["starting", "ready", "completed after update marking"] as const) {
+  it.effect(`recovers again if startup exits with a prepared ${preparedStatus} session`, () =>
+    Effect.gen(function* () {
+      const turnId = TurnId.make("turn-interrupted-startup");
+      const thread = makeThread("thread-interrupted-startup", "running", turnId);
+      const activation = yield* Deferred.make<void>();
+      const cleared = yield* Deferred.make<void>();
+      const sends: ProviderSendTurnInput[] = [];
+      let binding: ProviderSessionDirectory.ProviderRuntimeBinding = {
+        threadId: thread.id,
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId,
+        status: "running",
+        resumeCursor: { threadId: thread.id },
+        runtimePayload: { activeTurnId: turnId },
+      };
+      const input = {
+        threads: [thread],
+        continueAfterRestart: true,
+        providerService: {
+          ...makeProviderService(),
+          getCapabilities: () =>
+            Effect.succeed({
+              sessionModelSwitch: "in-session" as const,
+              promptlessTurnContinuation: true,
+            }),
+          sendTurn: (input: ProviderSendTurnInput) =>
+            Effect.sync(() => {
+              sends.push(input);
+              return { threadId: input.threadId, turnId: TurnId.make("turn-recovered") };
+            }),
+        },
+        directory: {
+          getBinding: () => Effect.sync(() => Option.some(binding)),
+          upsert: (next: ProviderSessionDirectory.ProviderRuntimeBinding) =>
+            Effect.gen(function* () {
+              binding = next;
+              if (binding.status !== "starting" || sends.length === 0) return;
+              yield* Deferred.succeed(cleared, undefined);
+            }),
+          getProvider: () => Effect.die("unused"),
+          listThreadIds: () => Effect.die("unused"),
+          listBindings: () =>
+            Effect.sync(() => [{ ...binding, lastSeenAt: "2026-01-01T00:00:00.000Z" }]),
+        },
+        dispatch: (command: OrchestrationCommand) =>
           Effect.sync(() => {
-            sends.push(input);
-            return { threadId: input.threadId, turnId: TurnId.make("turn-recovered") };
+            if (command.type === "thread.session.set") {
+              thread.session.status = command.session.status;
+              thread.session.activeTurnId = command.session.activeTurnId;
+            }
+            return { sequence: 1 };
           }),
-      },
-      directory: {
-        getBinding: () => Effect.sync(() => Option.some(binding)),
-        upsert: (next: ProviderSessionDirectory.ProviderRuntimeBinding) =>
-          Effect.gen(function* () {
-            binding = next;
-            if (binding.status !== "starting" || sends.length === 0) return;
-            yield* Deferred.succeed(cleared, undefined);
-          }),
-        getProvider: () => Effect.die("unused"),
-        listThreadIds: () => Effect.die("unused"),
-        listBindings: () => Effect.die("unused"),
-      },
-      dispatch: (command: OrchestrationCommand) =>
-        Effect.sync(() => {
-          if (command.type === "thread.session.set") {
-            thread.session.status = command.session.status;
-            thread.session.activeTurnId = command.session.activeTurnId;
-          }
-          return { sequence: 1 };
-        }),
-    };
+      };
 
-    yield* runReconciliation(input).pipe(
-      Effect.provideService(ServerActivation, Deferred.await(activation)),
-      Effect.scoped,
-    );
-    assert.deepStrictEqual(sends, []);
-    assert.equal(thread.session.status, "starting");
-    assert.equal(thread.session.activeTurnId, null);
-    assert.deepStrictEqual(binding.runtimePayload, {
-      activeTurnId: null,
-      continueAfterServerUpdate: turnId,
-    });
+      yield* runReconciliation(input).pipe(
+        Effect.provideService(ServerActivation, Deferred.await(activation)),
+        Effect.scoped,
+      );
+      assert.deepStrictEqual(sends, []);
+      assert.equal(thread.session.status, "starting");
+      assert.equal(thread.session.activeTurnId, null);
+      assert.deepStrictEqual(binding.runtimePayload, {
+        activeTurnId: null,
+        continueAfterServerUpdate: turnId,
+        continueAfterServerUpdatePrepared: true,
+      });
 
-    yield* runReconciliation(input);
-    yield* Deferred.await(cleared);
-    assert.deepStrictEqual(sends, [
-      { threadId: thread.id, continuation: true, interactionMode: "default" },
-    ]);
-    assert.deepStrictEqual(binding.runtimePayload, {
-      activeTurnId: null,
-      continueAfterServerUpdate: null,
-    });
-  }),
-);
+      if (preparedStatus === "completed after update marking") {
+        thread.session.status = "ready";
+        binding = {
+          ...binding,
+          status: "stopped",
+          runtimePayload: {
+            activeTurnId: null,
+            continueAfterServerUpdate: turnId,
+            continueAfterServerUpdatePrepared: null,
+          },
+        };
+        yield* runReconciliation(input);
+        assert.deepStrictEqual(sends, []);
+        assert.equal(thread.session.status, "ready");
+        return;
+      }
+      thread.session.status = preparedStatus;
+      yield* runReconciliation(input);
+      yield* Deferred.await(cleared);
+      assert.deepStrictEqual(sends, [
+        { threadId: thread.id, continuation: true, interactionMode: "default" },
+      ]);
+      assert.deepStrictEqual(binding.runtimePayload, {
+        activeTurnId: null,
+        continueAfterServerUpdate: null,
+        continueAfterServerUpdatePrepared: null,
+      });
+    }),
+  );
+}
 
 it.effect("settles failed opt-in recovery without retrying the provider turn", () =>
   Effect.gen(function* () {
@@ -896,7 +921,7 @@ it.effect("settles failed opt-in recovery without retrying the provider turn", (
           }),
         getProvider: () => Effect.die("unused"),
         listThreadIds: () => Effect.die("unused"),
-        listBindings: () => Effect.die("unused"),
+        listBindings: () => Effect.succeed([]),
       },
       dispatch: (command) =>
         Effect.gen(function* () {
@@ -910,7 +935,11 @@ it.effect("settles failed opt-in recovery without retrying the provider turn", (
     yield* Deferred.await(settled);
     assert.equal(sends.length, 1);
     assert.deepStrictEqual(preparedPayloads, [
-      { activeTurnId: null, continueAfterServerUpdate: turnId },
+      {
+        activeTurnId: null,
+        continueAfterServerUpdate: turnId,
+        continueAfterServerUpdatePrepared: true,
+      },
     ]);
     assert.deepStrictEqual(
       dispatched.map(
@@ -929,6 +958,7 @@ it.effect("settles failed opt-in recovery without retrying the provider turn", (
     assert.deepStrictEqual(binding.runtimePayload, {
       activeTurnId: null,
       continueAfterServerUpdate: null,
+      continueAfterServerUpdatePrepared: null,
     });
   }),
 );

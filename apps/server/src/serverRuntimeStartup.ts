@@ -394,6 +394,7 @@ export const markRunningProviderSessionsForContinuation = Effect.gen(function* (
         runtimePayload: {
           ...readRuntimePayload(binding.value.runtimePayload),
           [SERVER_UPDATE_CONTINUATION_KEY]: activeTurnId,
+          continueAfterServerUpdatePrepared: null,
         },
       });
       marked.push(thread.id);
@@ -423,6 +424,7 @@ const clearContinuationMarkers = (
                 runtimePayload: {
                   ...readRuntimePayload(binding.runtimePayload),
                   [SERVER_UPDATE_CONTINUATION_KEY]: null,
+                  continueAfterServerUpdatePrepared: null,
                 },
               }),
           }),
@@ -457,12 +459,33 @@ export const reconcileProviderSessions = Effect.gen(function* () {
     (yield* providerService.listSessions()).map((session) => session.threadId),
   );
   const { threads } = yield* query.getCommandReadModel();
+  // Provider startup can report ready before the continuation is submitted.
+  // Find those markers in one read rather than querying every idle thread.
+  const preparedThreadIds = new Set(
+    (yield* directory
+      .listBindings()
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to read prepared provider continuations", { cause }).pipe(
+            Effect.as([]),
+          ),
+        ),
+      ))
+      .filter(
+        (binding) =>
+          readServerUpdateContinuationTurnId(binding.runtimePayload) !== null &&
+          readRuntimePayload(binding.runtimePayload).activeTurnId === null &&
+          readRuntimePayload(binding.runtimePayload).continueAfterServerUpdatePrepared === true,
+      )
+      .map((binding) => binding.threadId),
+  );
   const orphanedThreads = threads.filter(
     (thread) =>
       thread.session !== null &&
       (thread.session.status === "starting" ||
         thread.session.status === "running" ||
-        thread.session.activeTurnId !== null) &&
+        thread.session.activeTurnId !== null ||
+        (thread.session.status === "ready" && preparedThreadIds.has(thread.id))) &&
       !liveThreadIds.has(thread.id),
   );
 
@@ -492,6 +515,13 @@ export const reconcileProviderSessions = Effect.gen(function* () {
       Option.isSome(binding) &&
       (readRuntimePayload(binding.value.runtimePayload).activeTurnId == null ||
         readRuntimePayload(binding.value.runtimePayload).activeTurnId === continuationTurnId);
+    const preparedWhileReady =
+      session.status === "ready" &&
+      session.activeTurnId === null &&
+      continuationMarked &&
+      Option.isSome(binding) &&
+      readRuntimePayload(binding.value.runtimePayload).activeTurnId === null &&
+      readRuntimePayload(binding.value.runtimePayload).continueAfterServerUpdatePrepared === true;
     // Abrupt shutdowns cannot write an update marker. Require both durable
     // records to agree on an unfinished turn before recovering one implicitly.
     const interruptedByRestart =
@@ -513,7 +543,10 @@ export const reconcileProviderSessions = Effect.gen(function* () {
                 ...readRuntimePayload(binding.value.runtimePayload),
                 activeTurnId: null,
                 ...(continuationMarkerPresent || interruptedByRestart
-                  ? { [SERVER_UPDATE_CONTINUATION_KEY]: null }
+                  ? {
+                      [SERVER_UPDATE_CONTINUATION_KEY]: null,
+                      continueAfterServerUpdatePrepared: null,
+                    }
                   : {}),
               },
             });
@@ -560,7 +593,7 @@ export const reconcileProviderSessions = Effect.gen(function* () {
     if (
       Option.isSome(binding) &&
       (continuationMarked || interruptedByRestart) &&
-      (session.status === "running" || session.status === "starting") &&
+      (session.status === "running" || session.status === "starting" || preparedWhileReady) &&
       binding.value.resumeCursor != null &&
       thread.archivedAt === null &&
       thread.deletedAt === null
@@ -573,6 +606,7 @@ export const reconcileProviderSessions = Effect.gen(function* () {
             ...readRuntimePayload(binding.value.runtimePayload),
             // Keep recovery durable if this process also exits before sending.
             [SERVER_UPDATE_CONTINUATION_KEY]: session.activeTurnId ?? continuationTurnId,
+            continueAfterServerUpdatePrepared: true,
             activeTurnId: null,
           },
         });
