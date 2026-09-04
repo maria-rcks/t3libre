@@ -843,8 +843,12 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                           aria-labelledby="publish-protocol-label"
                           disabled={publishRepositoryAction.isPending}
                         >
-                          <Toggle value="ssh">SSH</Toggle>
-                          <Toggle value="https">HTTPS</Toggle>
+                          <Toggle value="ssh" onFocus={() => setPublishProtocol("ssh")}>
+                            SSH
+                          </Toggle>
+                          <Toggle value="https" onFocus={() => setPublishProtocol("https")}>
+                            HTTPS
+                          </Toggle>
                         </ToggleGroup>
                       </div>
                     </div>
