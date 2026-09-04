@@ -524,10 +524,11 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   // ----- checkout selection and scripts -----
   const hasMultipleCheckouts = group.memberProjects.length > 1;
   const [selectedCheckoutKey, setSelectedCheckoutKey] = useState<string | null>(null);
-  const selectedCheckout =
-    group.memberProjects.find((member) => member.physicalProjectKey === selectedCheckoutKey) ??
-    representative;
-  const allMachinesSelected = hasMultipleCheckouts && selectedCheckoutKey === null;
+  const selectedCheckoutMatch = group.memberProjects.find(
+    (member) => member.physicalProjectKey === selectedCheckoutKey,
+  );
+  const selectedCheckout = selectedCheckoutMatch ?? representative;
+  const allMachinesSelected = hasMultipleCheckouts && selectedCheckoutMatch === undefined;
   const checkoutLabelCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const member of group.memberProjects) {
