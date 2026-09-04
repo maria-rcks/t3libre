@@ -1865,8 +1865,7 @@ function ChatViewContent(props: ChatViewProps) {
     panelAnimationDurationMs,
   );
   const rightPanelPresent = rightPanelPresence.present;
-  const rightPanelControlsInPanel =
-    shouldUseRightPanelSheet && rightPanelPresent && rightPanelOpen;
+  const rightPanelControlsInPanel = shouldUseRightPanelSheet && rightPanelPresent && rightPanelOpen;
   const renderedRightPanelSurface = rightPanelPresence.value?.activeSurface ?? null;
   const renderedRightPanelSurfaces = rightPanelPresence.value?.surfaces ?? [];
   const previewMiniPlayerVisible = shouldRenderPreviewMiniPlayer(
