@@ -21,7 +21,10 @@ export function restoreForwardedBrowserUrl(environmentId: EnvironmentId, rawUrl:
   const url = new URL(rawUrl);
   const origin = forwardedOrigins.get(`${environmentId}:${url.origin}`);
   if (!origin) return rawUrl;
-  return `${origin}${url.pathname}${url.search}${url.hash}`;
+  const restored = new URL(`${origin}${url.pathname}${url.search}${url.hash}`);
+  restored.username = url.username;
+  restored.password = url.password;
+  return restored.toString();
 }
 
 export const normalizeHostname = (host: string): string =>

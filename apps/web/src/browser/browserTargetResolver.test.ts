@@ -8,6 +8,23 @@ vi.mock("~/state/session", () => ({ readPreparedConnection }));
 describe("browser target resolver", () => {
   beforeEach(() => readPreparedConnection.mockReset());
 
+  it("restores forwarded URLs with credentials and their original hostname", async () => {
+    const { rememberForwardedOrigin, restoreForwardedBrowserUrl } =
+      await import("./browserTargetResolver");
+    const environmentId = EnvironmentId.make("forwarded-environment");
+    rememberForwardedOrigin(environmentId, "http://127.0.0.1:41001", "http://localhost:5173");
+    rememberForwardedOrigin(environmentId, "http://127.0.0.1:41002", "http://127.0.0.1:5173");
+    expect(
+      restoreForwardedBrowserUrl(
+        environmentId,
+        "http://user:p%40ss@127.0.0.1:41001/dashboard?q=1#section",
+      ),
+    ).toBe("http://user:p%40ss@localhost:5173/dashboard?q=1#section");
+    expect(restoreForwardedBrowserUrl(environmentId, "http://127.0.0.1:41002/")).toBe(
+      "http://127.0.0.1:5173/",
+    );
+  });
+
   it("maps environment ports onto a private network host", async () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://192.168.1.25:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");

@@ -54,7 +54,7 @@ export async function resolveForwardedBrowserTarget(
   socketUrl.searchParams.set("port", String(port));
   socketUrl.searchParams.set("wsTicket", ticket.ticket);
   const localPort = await previewBridge.ensurePortForward(
-    `${environmentId}:${environmentUrl.origin}:${port}`,
+    `${environmentId}:${environmentUrl.origin}:${requested.origin}:${port}`,
     socketUrl.toString(),
   );
   const requestedOrigin = requested.origin;
