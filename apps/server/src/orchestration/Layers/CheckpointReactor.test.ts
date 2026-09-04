@@ -554,7 +554,7 @@ describe("CheckpointReactor", () => {
     ).toBe("v2\n");
   });
 
-  effectIt.effect("refreshes pull request data once when a running turn terminates", () =>
+  effectIt.effect("refreshes once for terminal sessions, including after reactor startup", () =>
     Effect.gen(function* () {
       const pullRequestRefreshCalls: number[] = [];
       const harness = yield* Effect.promise(() =>
@@ -585,6 +585,10 @@ describe("CheckpointReactor", () => {
           createdAt: `2026-01-01T00:00:0${command === "running" ? 1 : 2}.000Z`,
         });
 
+      yield* setSession("initial-ready", "ready", null);
+      yield* Effect.promise(() => harness.drain());
+      expect(pullRequestRefreshCalls).toEqual([1]);
+
       yield* setSession("running", "running", asTurnId("turn-refresh-prs"));
       yield* setSession("superseding", "running", asTurnId("turn-refresh-prs-2"));
       yield* harness.engine.dispatch({
@@ -600,13 +604,13 @@ describe("CheckpointReactor", () => {
         createdAt: "2026-01-01T00:00:01.000Z",
       });
       yield* Effect.promise(() => harness.drain());
-      expect(pullRequestRefreshCalls).toEqual([]);
+      expect(pullRequestRefreshCalls).toEqual([1]);
 
       yield* setSession("ready", "ready", null);
       yield* setSession("ready-again", "ready", null);
       yield* Effect.promise(() => harness.drain());
 
-      expect(pullRequestRefreshCalls).toEqual([1]);
+      expect(pullRequestRefreshCalls).toEqual([1, 1]);
     }),
   );
 

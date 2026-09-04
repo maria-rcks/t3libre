@@ -90,7 +90,15 @@ const make = Effect.gen(function* () {
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const pullRequests = yield* PullRequestService.PullRequestService;
-  const activeTurnThreads = new Set<ThreadId>();
+  const refreshedTurnThreads = new Set<ThreadId>();
+
+  const refreshPullRequestsOnce = Effect.fn("refreshPullRequestsOnce")(function* (
+    threadId: ThreadId,
+  ) {
+    if (refreshedTurnThreads.has(threadId)) return;
+    refreshedTurnThreads.add(threadId);
+    yield* pullRequests.refreshAfterTurn;
+  });
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -862,23 +870,22 @@ const make = Effect.gen(function* () {
         event.payload.session.status === "running"
       ) {
         if (event.payload.session.activeTurnId !== null) {
-          activeTurnThreads.add(event.payload.threadId);
+          refreshedTurnThreads.delete(event.payload.threadId);
         }
         return;
       }
-      if (!activeTurnThreads.delete(event.payload.threadId)) return;
-      yield* pullRequests.refreshAfterTurn;
+      yield* refreshPullRequestsOnce(event.payload.threadId);
       return;
     }
 
     if (event.type === "thread.deleted") {
-      activeTurnThreads.delete(event.payload.threadId);
+      refreshedTurnThreads.delete(event.payload.threadId);
       return;
     }
 
     if (event.type === "thread.turn-start-requested" || event.type === "thread.message-sent") {
       if (event.type === "thread.turn-start-requested") {
-        activeTurnThreads.add(event.payload.threadId);
+        refreshedTurnThreads.delete(event.payload.threadId);
       }
       yield* ensurePreTurnBaselineFromDomainTurnStart(event);
       return;
@@ -920,8 +927,7 @@ const make = Effect.gen(function* () {
       if (event.payload.status === "missing") return;
       const thread = yield* resolveThreadDetail(event.payload.threadId);
       if (thread?.session === null) {
-        activeTurnThreads.delete(event.payload.threadId);
-        yield* pullRequests.refreshAfterTurn;
+        yield* refreshPullRequestsOnce(event.payload.threadId);
       }
       return;
     }
@@ -931,7 +937,7 @@ const make = Effect.gen(function* () {
     event: ProviderRuntimeEvent,
   ) {
     if (event.type === "turn.started") {
-      activeTurnThreads.add(event.threadId);
+      refreshedTurnThreads.delete(event.threadId);
       yield* ensurePreTurnBaselineFromTurnStart(event);
       return;
     }
