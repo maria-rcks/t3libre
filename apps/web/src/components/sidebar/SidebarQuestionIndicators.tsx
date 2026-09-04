@@ -1,5 +1,6 @@
 import { ArrowDownIcon, ArrowUpIcon } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { Button } from "~/components/ui/button";
 
 /** Tracks only pending rows, and only when the list or its viewport changes. */
 export function SidebarQuestionIndicators({
@@ -68,11 +69,12 @@ export function SidebarQuestionIndicators({
     if (!directions[direction]) return null;
     const Icon = direction === "above" ? ArrowUpIcon : ArrowDownIcon;
     return (
-      <button
+      <Button
         key={direction}
-        type="button"
+        variant="outline"
+        size="icon-sm"
         aria-label={`Show pending question ${direction}`}
-        className={`absolute left-1/2 z-20 flex size-7 -translate-x-1/2 items-center justify-center rounded-full border border-indigo-400/70 bg-sidebar text-indigo-600 shadow-sm hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-ring dark:text-indigo-300 ${direction === "above" ? "top-1" : "bottom-1"}`}
+        className={`absolute left-1/2 z-20 -translate-x-1/2 rounded-full border-indigo-400/70 bg-sidebar text-indigo-600 before:rounded-full hover:bg-sidebar-row-hover dark:bg-sidebar dark:text-indigo-300 [--control-icon-color:currentColor] ${direction === "above" ? "top-1" : "bottom-1"}`}
         onClick={() => {
           const row = targets.current[direction];
           row?.scrollIntoView({ block: "center", behavior: "instant" });
@@ -82,7 +84,7 @@ export function SidebarQuestionIndicators({
         }}
       >
         <Icon aria-hidden="true" className="sidebar-question-arrow size-4" />
-      </button>
+      </Button>
     );
   });
 }
