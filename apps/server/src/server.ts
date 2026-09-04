@@ -704,10 +704,6 @@ export const makeServerLayer = Layer.unwrap(
           yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
           return;
         }
-        if (config.devUrl && !config.connectDevShare) {
-          yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
-          return;
-        }
         const releaseManagedTunnel = releaseManagedTunnelOnShutdown().pipe(
           Effect.timeout("10 seconds"),
           Effect.tap((released) =>
@@ -736,6 +732,7 @@ export const makeServerLayer = Layer.unwrap(
             if (!cleanupBeforeActivation) {
               yield* Effect.addFinalizer(() => releaseManagedTunnel);
             }
+            if (config.devUrl && !config.connectDevShare) return;
             if (config.connectDevShare) {
               if (config.connectAuthorizationHome) {
                 const secrets = yield* ServerSecretStore.ServerSecretStore;
