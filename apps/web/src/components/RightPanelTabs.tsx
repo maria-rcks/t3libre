@@ -1233,6 +1233,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           </div>
         ) : null}
         {props.layoutControls}
+        {ownsDesktopTitleBar ? (
+          <span
+            aria-hidden
+            className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
+          />
+        ) : null}
       </div>
       <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
         {props.activeSurfaceId === null ? (
