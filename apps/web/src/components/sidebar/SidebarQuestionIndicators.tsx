@@ -1,50 +1,23 @@
-import { ArrowDownIcon, ArrowUpIcon } from "lucide-react";
+import { ArrowDownIcon } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "~/components/ui/button";
 
-/** Tracks only pending rows, and only when the list or its viewport changes. */
+/** Keeps pending questions reachable without changing the list's order. */
 export function SidebarQuestionIndicators({
   containerRef,
 }: {
   containerRef: RefObject<HTMLDivElement | null>;
 }) {
-  const targets = useRef<{ above: HTMLElement | null; below: HTMLElement | null }>({
-    above: null,
-    below: null,
-  });
-  const [directions, setDirections] = useState({ above: false, below: false });
+  const rows = useRef<HTMLElement[]>([]);
+  const lastTarget = useRef<HTMLElement | null>(null);
+  const [count, setCount] = useState(0);
 
   useEffect(() => {
-    const container = containerRef.current;
-    const viewport = container?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
-    const content = container?.querySelector<HTMLElement>('[data-sidebar="content"]');
-    if (!viewport || !content) return;
-    let rows: HTMLElement[] = [];
-    const measure = () => {
-      const bounds = viewport.getBoundingClientRect();
-      // A row inside the scroll fade is no longer a useful visible target.
-      const top = bounds.top + 24;
-      const bottom = bounds.bottom - 24;
-      let above: HTMLElement | null = null;
-      let below: HTMLElement | null = null;
-      for (const row of rows) {
-        const rect = row.getBoundingClientRect();
-        const visible = rect.height > 0 && rect.bottom > top && rect.top < bottom;
-        row.toggleAttribute("data-question-visible", visible);
-        if (rect.height === 0) continue;
-        if (rect.bottom <= top) above = row;
-        if (rect.top >= bottom && below === null) below = row;
-      }
-      targets.current = { above, below };
-      setDirections((current) =>
-        current.above === (above !== null) && current.below === (below !== null)
-          ? current
-          : { above: above !== null, below: below !== null },
-      );
-    };
+    const content = containerRef.current?.querySelector('[data-sidebar="content"]');
+    if (!content) return;
     const reconcile = () => {
-      rows = Array.from(content.querySelectorAll<HTMLElement>("[data-pending-question]"));
-      measure();
+      rows.current = Array.from(content.querySelectorAll<HTMLElement>("[data-pending-question]"));
+      setCount(rows.current.length);
     };
     const mutations = new MutationObserver(reconcile);
     mutations.observe(content, {
@@ -53,38 +26,36 @@ export function SidebarQuestionIndicators({
       attributes: true,
       attributeFilter: ["data-pending-question"],
     });
-    const resize = new ResizeObserver(measure);
-    resize.observe(viewport);
-    resize.observe(content);
-    viewport.addEventListener("scroll", measure, { passive: true });
     reconcile();
-    return () => {
-      mutations.disconnect();
-      resize.disconnect();
-      viewport.removeEventListener("scroll", measure);
-    };
+    return () => mutations.disconnect();
   }, [containerRef]);
 
-  return (["above", "below"] as const).map((direction) => {
-    if (!directions[direction]) return null;
-    const Icon = direction === "above" ? ArrowUpIcon : ArrowDownIcon;
-    return (
+  return (
+    <div className="shrink-0 px-2 pb-2">
       <Button
-        key={direction}
         variant="outline"
-        size="icon-sm"
-        aria-label={`Show pending question ${direction}`}
-        className={`absolute left-1/2 z-20 -translate-x-1/2 rounded-full border-indigo-400/70 bg-sidebar text-indigo-600 before:rounded-full hover:bg-sidebar-row-hover dark:bg-sidebar dark:text-indigo-300 [--control-icon-color:currentColor] ${direction === "above" ? "top-1" : "bottom-1"}`}
+        size="sm"
+        disabled={count === 0}
+        aria-label={`Next pending question (${count})`}
+        className="w-full justify-between border-indigo-400/50 bg-sidebar text-indigo-600 transition-none active:scale-100 dark:bg-sidebar dark:text-indigo-300 [--control-icon-color:currentColor]"
         onClick={() => {
-          const row = targets.current[direction];
-          row?.scrollIntoView({ block: "center", behavior: "instant" });
-          row
-            ?.querySelector<HTMLElement>('[role="button"], a, button')
-            ?.focus({ preventScroll: true });
+          const candidates = rows.current.filter((row) => row.getClientRects().length > 0);
+          const nextIndex =
+            (candidates.findIndex((row) => row === lastTarget.current) + 1) % candidates.length;
+          const row = candidates[nextIndex];
+          if (!row) return;
+          lastTarget.current = row;
+          row.scrollIntoView({ block: "center", behavior: "instant" });
+          const control = row.querySelector<HTMLElement>('[role="button"], a, button');
+          control?.focus({ preventScroll: true });
+          control?.click();
         }}
       >
-        <Icon aria-hidden="true" className="sidebar-question-arrow size-4" />
+        <span>
+          Needs input · <span className="tabular-nums">{count}</span>
+        </span>
+        <ArrowDownIcon aria-hidden="true" className="size-4" />
       </Button>
-    );
-  });
+    </div>
+  );
 }

@@ -702,6 +702,7 @@ function SidebarContent({
     <>
       {fixedHeader ? <div className="w-full shrink-0">{fixedHeader}</div> : null}
       <div ref={containerRef} className="relative flex min-h-0 flex-1 flex-col">
+        <SidebarQuestionIndicators containerRef={containerRef} />
         <ScrollArea hideScrollbars scrollFade className="h-auto min-h-0 flex-1">
           <div
             className={cn(
@@ -713,7 +714,6 @@ function SidebarContent({
             {...props}
           />
         </ScrollArea>
-        <SidebarQuestionIndicators containerRef={containerRef} />
       </div>
     </>
   );
