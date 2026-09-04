@@ -28,6 +28,15 @@ For a server linked through the CLI, `npx t3 pair --connect` creates a fresh pai
 through its managed endpoint. The command verifies that the endpoint reaches this environment
 before issuing a token. Tailscale is not required.
 
+In the desktop app's Browser panel, select a local server from the connected
+environment or enter its localhost URL. Preview tabs reuse that environment's
+connection and do not consume additional T3 Connect tunnel slots. Both the
+desktop app and the environment server must support remote previews.
+
+Browser recordings are saved on the desktop and copied to the connected
+environment so its agent can read them. Remote recording transfers support files
+up to 64 MiB.
+
 ## Pair over a LAN or private network
 
 Use direct pairing when the other device can reach the host's network address.

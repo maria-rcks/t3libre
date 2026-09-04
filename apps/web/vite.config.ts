@@ -202,6 +202,7 @@ function connectDevSharePlugin(): Plugin {
         const protocol = request.headers["sec-websocket-protocol"];
         if (
           pathname !== "/ws" &&
+          pathname !== "/api/preview/forward" &&
           !(pathname === "/" && (protocol === "vite-hmr" || protocol === "vite-ping"))
         ) {
           socket.destroy();
@@ -285,6 +286,8 @@ export default defineConfig(() => {
       bundledDev,
     },
     server: {
+      // The environment server owns credentialed API CORS, including Electron origins.
+      ...(connectDevShare ? { cors: { preflightContinue: true } } : {}),
       host,
       port,
       strictPort: true,
@@ -311,7 +314,7 @@ export default defineConfig(() => {
                 {
                   target: devProxyTarget,
                   changeOrigin: true,
-                  ...(prefix === "/ws" ? { ws: true } : {}),
+                  ...(prefix === "/ws" || prefix === "/api" ? { ws: true } : {}),
                 },
               ]),
             ),
@@ -350,7 +353,7 @@ export default defineConfig(() => {
                   groups: [
                     { name: "refresh", test: /react-refresh/, priority: 30 },
                     { name: "icons", test: /[\\/]lucide-react[\\/]/, priority: 20 },
-                    { name: "shared", minShareCount: 2, includeDependenciesRecursively: false },
+                    { name: "shared", minShareCount: 2, includeDependenciesRecursively: true },
                   ],
                 },
               },

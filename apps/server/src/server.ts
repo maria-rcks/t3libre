@@ -35,6 +35,8 @@ import {
 import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
+import { previewForwardRouteLayer } from "./preview/forward.ts";
+import { previewRecordingRouteLayer } from "./preview/recordings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { pullRequestHttpApiLayer } from "./pullRequest/http.ts";
 import * as PullRequestProviderRegistry from "./pullRequest/PullRequestProviderRegistry.ts";
@@ -559,6 +561,8 @@ export const makeRoutesLayer = Layer.mergeAll(
     attachmentUploadRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
+    previewForwardRouteLayer,
+    previewRecordingRouteLayer,
   ),
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
 ).pipe(

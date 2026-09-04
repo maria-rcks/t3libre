@@ -7,6 +7,23 @@ import { isLoopbackHost, normalizePreviewUrl } from "@t3tools/shared/preview";
 
 import { readPreparedConnection } from "~/state/session";
 
+const forwardedOrigins = new Map<string, string>();
+
+export function rememberForwardedOrigin(
+  environmentId: EnvironmentId,
+  localOrigin: string,
+  requestedOrigin: string,
+) {
+  forwardedOrigins.set(`${environmentId}:${localOrigin}`, requestedOrigin);
+}
+
+export function restoreForwardedBrowserUrl(environmentId: EnvironmentId, rawUrl: string): string {
+  const url = new URL(rawUrl);
+  const origin = forwardedOrigins.get(`${environmentId}:${url.origin}`);
+  if (!origin) return rawUrl;
+  return `${origin}${url.pathname}${url.search}${url.hash}`;
+}
+
 export const normalizeHostname = (host: string): string =>
   host
     .toLowerCase()
