@@ -4,21 +4,31 @@ import { type PanelAnimationDurationMs } from "@t3tools/contracts/settings";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useClientSettings } from "./hooks/useSettings";
 
-export const PanelAnimationSuppressionContext = createContext(false);
+const PanelAnimationSuppressionContext = createContext(false);
 
-export function usePanelAnimationNavigationSuppression(
-  pathname: string,
-  durationMs: PanelAnimationDurationMs,
-): boolean {
-  const [settledPathname, setSettledPathname] = useState(pathname);
+export const PanelAnimationSuppressionProvider = PanelAnimationSuppressionContext.Provider;
+
+/**
+ * Suppresses panel motion for the first painted frame of an initial route or navigation.
+ * State restored by a route must be visible immediately; later user actions can animate.
+ */
+export function usePanelNavigationSuppression(navigationKey: string): boolean {
+  const [paintedNavigationKey, setPaintedNavigationKey] = useState<string | null>(null);
+  const suppressed = paintedNavigationKey !== navigationKey;
 
   useEffect(() => {
-    if (settledPathname === pathname) return;
-    const timeout = window.setTimeout(() => setSettledPathname(pathname), durationMs);
-    return () => window.clearTimeout(timeout);
-  }, [durationMs, pathname, settledPathname]);
+    if (!suppressed) return;
+    let releaseFrame = 0;
+    const paintFrame = window.requestAnimationFrame(() => {
+      releaseFrame = window.requestAnimationFrame(() => setPaintedNavigationKey(navigationKey));
+    });
+    return () => {
+      window.cancelAnimationFrame(paintFrame);
+      window.cancelAnimationFrame(releaseFrame);
+    };
+  }, [navigationKey, suppressed]);
 
-  return settledPathname !== pathname;
+  return suppressed;
 }
 
 export function observeResponsiveBreakpointFade(options: {
