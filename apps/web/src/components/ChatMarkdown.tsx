@@ -2135,8 +2135,10 @@ function ChatMarkdown({
           stopPropagation: () => undefined,
         },
         targetUrl,
+        undefined,
+        environmentId ?? undefined,
       ),
-    [openChangeRequestLink],
+    [environmentId, openChangeRequestLink],
   );
   // Subscribed rather than read at click time: the anchor has to decide
   // synchronously whether to intercept its `_blank`, and a subscription is what

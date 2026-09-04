@@ -287,13 +287,14 @@ export function useOpenChangeRequestLink(
   >,
   targetUrl: string,
   targetThreadRef?: ScopedThreadRef,
+  targetEnvironmentId?: EnvironmentId,
 ) => boolean {
   const navigate = useNavigate();
   const allProjects = useProjects();
   const serverConfigs = useServerConfigs();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   return useCallback(
-    (event, targetUrl, targetThreadRef) => {
+    (event, targetUrl, targetThreadRef, targetEnvironmentId) => {
       if (shouldOpenPullRequestExternally(event)) return false;
       const resolvedThreadRef = targetThreadRef ?? threadRef;
       const parsed = parseChangeRequestUrl(targetUrl);
@@ -309,13 +310,15 @@ export function useOpenChangeRequestLink(
       // against all of them, the primary first where two hold the same repository.
       const projects = resolvedThreadRef
         ? allProjects.filter((project) => project.environmentId === resolvedThreadRef.environmentId)
-        : allProjects
-            .filter((project) => reads(project.environmentId))
-            .toSorted(
-              (left, right) =>
-                Number(right.environmentId === primaryEnvironmentId) -
-                Number(left.environmentId === primaryEnvironmentId),
-            );
+        : targetEnvironmentId
+          ? allProjects.filter((project) => project.environmentId === targetEnvironmentId)
+          : allProjects
+              .filter((project) => reads(project.environmentId))
+              .toSorted(
+                (left, right) =>
+                  Number(right.environmentId === primaryEnvironmentId) -
+                  Number(left.environmentId === primaryEnvironmentId),
+              );
       const project = findProjectForChangeRequest(projects, parsed);
       if (project === undefined || !reads(project.environmentId)) return false;
       event.preventDefault();

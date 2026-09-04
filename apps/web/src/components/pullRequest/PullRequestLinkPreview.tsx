@@ -51,7 +51,7 @@ export function PullRequestLinkPreview({
   const trigger = confirmBeforeOpen
     ? cloneElement(link, {
         onClick: (event) => {
-          if (event.metaKey || event.ctrlKey) return;
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           event.preventDefault();
           event.stopPropagation();
           if (resolvingClick) return;
