@@ -90,13 +90,13 @@ const make = Effect.gen(function* () {
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const pullRequests = yield* PullRequestService.PullRequestService;
-  const refreshedTurnThreads = new Set<ThreadId>();
+  let refreshedTurnThread: ThreadId | null = null;
 
   const refreshPullRequestsOnce = Effect.fn("refreshPullRequestsOnce")(function* (
     threadId: ThreadId,
   ) {
-    if (refreshedTurnThreads.has(threadId)) return;
-    refreshedTurnThreads.add(threadId);
+    if (refreshedTurnThread === threadId) return;
+    refreshedTurnThread = threadId;
     yield* pullRequests.refreshAfterTurn;
   });
 
@@ -870,7 +870,7 @@ const make = Effect.gen(function* () {
         event.payload.session.status === "running"
       ) {
         if (event.payload.session.activeTurnId !== null) {
-          refreshedTurnThreads.delete(event.payload.threadId);
+          refreshedTurnThread = null;
         }
         return;
       }
@@ -878,14 +878,9 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    if (event.type === "thread.deleted") {
-      refreshedTurnThreads.delete(event.payload.threadId);
-      return;
-    }
-
     if (event.type === "thread.turn-start-requested" || event.type === "thread.message-sent") {
       if (event.type === "thread.turn-start-requested") {
-        refreshedTurnThreads.delete(event.payload.threadId);
+        refreshedTurnThread = null;
       }
       yield* ensurePreTurnBaselineFromDomainTurnStart(event);
       return;
@@ -937,7 +932,7 @@ const make = Effect.gen(function* () {
     event: ProviderRuntimeEvent,
   ) {
     if (event.type === "turn.started") {
-      refreshedTurnThreads.delete(event.threadId);
+      refreshedTurnThread = null;
       yield* ensurePreTurnBaselineFromTurnStart(event);
       return;
     }
@@ -993,7 +988,6 @@ const make = Effect.gen(function* () {
           event.type !== "thread.turn-start-requested" &&
           event.type !== "thread.message-sent" &&
           event.type !== "thread.session-set" &&
-          event.type !== "thread.deleted" &&
           event.type !== "thread.checkpoint-revert-requested" &&
           event.type !== "thread.turn-diff-completed"
         ) {
