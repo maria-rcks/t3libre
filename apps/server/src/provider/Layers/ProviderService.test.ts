@@ -452,6 +452,79 @@ function makeProviderServiceLayer(
   };
 }
 
+for (const enabled of [false, true]) {
+  it.effect(`persists shutdown recovery before stopping providers when enabled=${enabled}`, () =>
+    Effect.gen(function* () {
+      const codex = makeFakeCodexAdapter();
+      const persistence = yield* Layer.build(
+        ProviderSessionDirectoryLive.pipe(
+          Layer.provide(ProviderSessionRuntime.layer.pipe(Layer.provide(SqlitePersistenceMemory))),
+        ),
+      );
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory.pipe(
+        Effect.provide(persistence),
+      );
+      const threadId = asThreadId("shutdown-recovery");
+      const turnId = asTurnId("shutdown-recovery-turn");
+      const scope = yield* Scope.make();
+      const services = yield* Layer.build(
+        makeProviderServiceLive().pipe(
+          Layer.provide(
+            Layer.succeed(ProviderSessionDirectory.ProviderSessionDirectory, directory),
+          ),
+          Layer.provide(
+            Layer.succeed(
+              ProviderAdapterRegistry.ProviderAdapterRegistry,
+              makeStaticInstanceRegistry([[codexInstanceId, codex.adapter]]),
+            ),
+          ),
+          Layer.provide(ServerSettings.layerTest({ continueThreadsAfterServerUpdate: enabled })),
+          Layer.provide(serverConfigTestLayer),
+          Layer.provide(AnalyticsService.layerTest),
+          Layer.provide(
+            Layer.succeed(
+              ProviderEventLoggers.ProviderEventLoggers,
+              ProviderEventLoggers.NoOpProviderEventLoggers,
+            ),
+          ),
+        ),
+      ).pipe(Scope.provide(scope));
+      const provider = yield* ProviderService.ProviderService.pipe(Effect.provide(services));
+      const session = yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      codex.listSessions.mockReturnValue(
+        Effect.succeed([{ ...session, status: "running", activeTurnId: turnId }]),
+      );
+      const markers: unknown[] = [];
+      codex.stopAll.mockImplementation(() =>
+        Effect.gen(function* () {
+          const binding = yield* directory.getBinding(threadId);
+          assert(Option.isSome(binding));
+          markers.push(binding.value.runtimePayload);
+        }).pipe(Effect.orDie),
+      );
+      yield* Scope.close(scope, Exit.void);
+      const binding = yield* directory.getBinding(threadId);
+      assert(Option.isSome(binding));
+      assert.equal(codex.stopAll.mock.calls.length, 1);
+      assert.deepStrictEqual(binding.value.resumeCursor, session.resumeCursor);
+      assert.equal(binding.value.status, "stopped");
+      assert.propertyVal(markers[0], "activeTurnId", turnId);
+      if (enabled) {
+        assert.propertyVal(markers[0], "continueAfterServerUpdate", turnId);
+        assert.propertyVal(binding.value.runtimePayload, "continueAfterServerUpdate", turnId);
+      } else {
+        assert.notProperty(markers[0], "continueAfterServerUpdate");
+        assert.notProperty(binding.value.runtimePayload, "continueAfterServerUpdate");
+      }
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+}
+
 it.effect("ProviderServiceLive catches stopAll failures during shutdown", () =>
   Effect.gen(function* () {
     const codex = makeFakeCodexAdapter();
