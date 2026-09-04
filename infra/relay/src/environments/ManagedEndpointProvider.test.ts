@@ -500,6 +500,48 @@ describe("ManagedEndpointProvider", () => {
     );
   });
 
+  it.effect("deletes a newly created tunnel when its allocation cannot be checkpointed", () => {
+    const tunnelCalls: TunnelCall[] = [];
+    const allocationCalls: AllocationCall[] = [];
+    const baseAllocations = makeAllocations(allocationCalls);
+    const allocations = ManagedEndpointAllocations.ManagedEndpointAllocations.of({
+      ...baseAllocations,
+      recordTunnel: (input) => {
+        allocationCalls.push({ operation: "recordTunnel", input });
+        return Effect.fail(
+          new ManagedEndpointAllocations.ManagedEndpointAllocationPersistenceError({
+            operation: "record-tunnel",
+            stage: "database-request",
+            userId: input.userId,
+            environmentId: input.environmentId,
+            tunnelId: input.tunnelId,
+            cause: new Error("database unavailable"),
+          }),
+        );
+      },
+    });
+
+    return Effect.gen(function* () {
+      const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+      const error = yield* Effect.flip(
+        provider.provision({
+          userId: "user_ABC",
+          environmentId: "env_ABC",
+          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+        }),
+      );
+
+      expect(error).toMatchObject({
+        _tag: "ManagedEndpointProvisioningFailed",
+        stage: "record-tunnel",
+      });
+      expect(tunnelCalls.map((call) => call.operation)).toEqual(["list", "create", "delete"]);
+      expect(allocationCalls.map((call) => call.operation)).toEqual(["reserve", "recordTunnel"]);
+    }).pipe(
+      Effect.provide(providerLayer(makeTunnelClient(tunnelCalls), makeDnsClient(), allocations)),
+    );
+  });
+
   it.effect("uses stage-scoped stable names without leaking unusual environment ids", () => {
     const tunnelCalls: TunnelCall[] = [];
 

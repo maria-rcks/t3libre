@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -188,7 +189,13 @@ describe("relay request tracing", () => {
 
 describe("reconcileDesiredCloudLink", () => {
   const provideAuthorizationContext =
-    (store: ServerSecretStore.ServerSecretStore["Service"]) =>
+    (
+      store: ServerSecretStore.ServerSecretStore["Service"],
+      options?: {
+        readonly token?: CliTokenManager.PersistedToken;
+        readonly httpClient?: HttpClient.HttpClient;
+      },
+    ) =>
     <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       effect.pipe(
         Effect.provideService(ServerSecretStore.ServerSecretStore, store),
@@ -214,7 +221,7 @@ describe("reconcileDesiredCloudLink", () => {
           CliTokenManager.CloudCliTokenManager,
           CliTokenManager.CloudCliTokenManager.of({
             get: unusedSecretStoreOperation(),
-            getExisting: Effect.succeed(Option.none()),
+            getExisting: Effect.succeed(Option.fromNullishOr(options?.token)),
             hasCredential: unusedSecretStoreOperation(),
             store: () => unusedSecretStoreOperation(),
             clear: unusedSecretStoreOperation(),
@@ -222,7 +229,7 @@ describe("reconcileDesiredCloudLink", () => {
         ),
         Effect.provideService(
           HttpClient.HttpClient,
-          HttpClient.make(() => unusedSecretStoreOperation()),
+          options?.httpClient ?? HttpClient.make(() => unusedSecretStoreOperation()),
         ),
         Effect.provide(NodeServices.layer),
       );
@@ -282,6 +289,53 @@ describe("reconcileDesiredCloudLink", () => {
         message: expect.stringContaining("unlinked worktree home"),
       });
     }).pipe(provideAuthorizationContext(store));
+  });
+
+  it.effect("rejects an old relay before it can persist a temporary share", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    const httpClient = HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests.push(request);
+        return HttpClientResponse.fromWeb(
+          request,
+          Response.json({
+            challenge: "link-challenge",
+            expiresAt: "2026-09-04T12:00:00.000Z",
+          }),
+        );
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        reconcileDesiredCloudLink("http://127.0.0.1:3774", {
+          persistDesired: false,
+          forceManaged: true,
+        }),
+      );
+
+      expect(error).toMatchObject({
+        _tag: "EnvironmentHttpInternalServerError",
+        message: "T3 Connect relay does not support temporary dev-share leases.",
+      });
+      expect(requests.map((request) => request.url)).toEqual([
+        "https://relay.example.test/v1/client/environment-link-challenges",
+      ]);
+    }).pipe(
+      provideAuthorizationContext(makeSecretStore(unusedSecretStoreOperation), {
+        token: {
+          accessToken: "cli-access-token",
+          refreshToken: "cli-refresh-token",
+          expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+        },
+        httpClient,
+      }),
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({ env: { T3CODE_RELAY_URL: "https://relay.example.test" } }),
+        ),
+      ),
+    );
   });
 });
 

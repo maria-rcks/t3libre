@@ -653,6 +653,11 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
       },
       schema: RelayEnvironmentLinkChallengeResponse,
     });
+    if (temporary && challenge.temporaryEnvironmentLeases !== true) {
+      return yield* new EnvironmentHttpInternalServerError({
+        message: "T3 Connect relay does not support temporary dev-share leases.",
+      });
+    }
     const proof = yield* makeCloudLinkProof(
       dependencies,
       {

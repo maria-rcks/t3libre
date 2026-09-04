@@ -684,7 +684,11 @@ export const clientApi = HttpApiBuilder.group(
               expiresAtEpochSeconds: Math.floor(expiresAt.epochMilliseconds / 1_000),
             })
             .pipe(Effect.catch(() => relayInternalErrorResponse("internal_error")));
-          return { challenge, expiresAt: DateTime.formatIso(expiresAt) };
+          return {
+            challenge,
+            expiresAt: DateTime.formatIso(expiresAt),
+            temporaryEnvironmentLeases: true as const,
+          };
         }, mapRelayCommonApiErrors("not_authorized")),
       )
       .handle(

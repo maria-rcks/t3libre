@@ -253,6 +253,12 @@ export type RelayEnvironmentLinkChallengeRequest = typeof RelayEnvironmentLinkCh
 export const RelayEnvironmentLinkChallengeResponse = Schema.Struct({
   challenge: TrimmedNonEmptyString,
   expiresAt: TrimmedNonEmptyString,
+  temporaryEnvironmentLeases: Schema.optional(
+    Schema.Literal(true).annotate({
+      description:
+        "Whether this relay can guarantee that a temporary environment link is lease-owned before persisting it.",
+    }),
+  ),
 });
 export type RelayEnvironmentLinkChallengeResponse =
   typeof RelayEnvironmentLinkChallengeResponse.Type;
