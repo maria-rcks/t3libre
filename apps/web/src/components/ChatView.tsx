@@ -2600,16 +2600,19 @@ function ChatViewContent(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError,
   });
-  const queuedCompactionMessage = optimisticUserMessages.findLast(isCompactCommandMessage);
+  const optimisticCompactionMessage = optimisticUserMessages.at(-1);
   const pendingCompactionMessage =
-    queuedCompactionMessage ?? activeThread?.messages.findLast(isCompactCommandMessage);
+    isSendBusy &&
+    optimisticCompactionMessage !== undefined &&
+    isCompactCommandMessage(optimisticCompactionMessage)
+      ? optimisticCompactionMessage
+      : activeThread?.messages.findLast(isCompactCommandMessage);
   const compactRequestIsActive =
-    queuedCompactionMessage !== undefined ||
-    (pendingCompactionMessage !== undefined &&
-      (pendingCompactionMessage.createdAt >
-        (activeLatestTurn?.requestedAt ?? pendingCompactionMessage.createdAt) ||
-        (activeLatestTurn?.state === "running" &&
-          pendingCompactionMessage.createdAt === activeLatestTurn.requestedAt)));
+    pendingCompactionMessage !== undefined &&
+    (pendingCompactionMessage.createdAt >
+      (activeLatestTurn?.requestedAt ?? pendingCompactionMessage.createdAt) ||
+      (activeLatestTurn?.state === "running" &&
+        pendingCompactionMessage.createdAt === activeLatestTurn.requestedAt));
   const compactionSettled =
     pendingCompactionMessage !== undefined &&
     (latestTurnStartFailureId(activeThread, pendingCompactionMessage.id) !== null ||
