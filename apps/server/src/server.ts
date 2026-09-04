@@ -1,12 +1,23 @@
-import { EnvironmentHttpApi, ProviderDriverKind } from "@t3tools/contracts";
+import {
+  EnvironmentHttpApi,
+  ExecutionEnvironmentDescriptor,
+  ProviderDriverKind,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientResponse,
+  HttpRouter,
+  HttpServer,
+} from "effect/unstable/http";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
@@ -405,10 +416,14 @@ const AuthLayerLive = EnvironmentAuth.layer.pipe(
 
 const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
   RelayClientLive,
-  CloudManagedEndpointRuntime.layer.pipe(
-    Layer.provide(ServerSecretStore.layer),
-    Layer.provide(RelayClientLive),
-  ),
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      return config.devUrl
+        ? CloudManagedEndpointRuntime.layerWithoutRestoring
+        : CloudManagedEndpointRuntime.layer;
+    }),
+  ).pipe(Layer.provide(ServerSecretStore.layer), Layer.provide(RelayClientLive)),
 );
 
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
@@ -499,7 +514,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ServerSecretStore.layer),
   Layer.provideMerge(
     Layer.mergeAll(
-      CloudCliTokenManager.layer.pipe(
+      CloudCliTokenManager.layerWithSharedAuthorization.pipe(
         Layer.provide(ServerSecretStore.layer),
         Layer.provide(ExternalLauncher.layer),
       ),
@@ -557,9 +572,28 @@ export const makeRoutesLayer = Layer.mergeAll(
   Layer.provide(httpCompressionLayer),
 );
 
+class ConnectDevShareError extends Schema.TaggedErrorClass<ConnectDevShareError>()(
+  "ConnectDevShareError",
+  {
+    message: Schema.String,
+  },
+) {}
+
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
+    if (
+      config.connectDevShare &&
+      (!hasCloudPublicConfig ||
+        !config.devUrl ||
+        config.devUrl.protocol !== "http:" ||
+        !["localhost", "127.0.0.1"].includes(config.devUrl.hostname))
+    ) {
+      return yield* new ConnectDevShareError({
+        message:
+          "Connect dev sharing requires T3 Connect public configuration and a local HTTP Vite origin. Copy .env.example to .env to configure a source build.",
+      });
+    }
     const activation = yield* Deferred.make<void>();
     const awaitActivation = Deferred.await(activation);
     const activationLayer = Layer.succeed(ServerActivation, awaitActivation);
@@ -669,6 +703,10 @@ export const makeServerLayer = Layer.unwrap(
           yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
           return;
         }
+        if (config.devUrl && !config.connectDevShare) {
+          yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
+          return;
+        }
         const releaseManagedTunnel = releaseManagedTunnelOnShutdown().pipe(
           Effect.timeout("10 seconds"),
           Effect.tap((released) =>
@@ -697,6 +735,18 @@ export const makeServerLayer = Layer.unwrap(
             if (!cleanupBeforeActivation) {
               yield* Effect.addFinalizer(() => releaseManagedTunnel);
             }
+            if (config.connectDevShare) {
+              if (config.connectAuthorizationHome) {
+                const secrets = yield* ServerSecretStore.ServerSecretStore;
+                yield* secrets.set(
+                  CloudCliTokenManager.CLOUD_CLI_AUTHORIZATION_HOME_SECRET,
+                  new TextEncoder().encode(config.connectAuthorizationHome),
+                );
+              }
+              const relayClient = yield* RelayClient.RelayClient;
+              yield* relayClient.install;
+              yield* CloudCliState.setCliDesiredCloudLink(true);
+            }
             if (!(yield* CloudCliState.readCliDesiredCloudLink)) return;
             const server = yield* HttpServer.HttpServer;
             const address = server.address;
@@ -707,7 +757,11 @@ export const makeServerLayer = Layer.unwrap(
             // covers anything this sleep used to hedge against. Every
             // millisecond here is dead time on the path to remote
             // reachability after a restart.
-            yield* reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`).pipe(
+            const origin =
+              config.connectDevShare && config.devUrl
+                ? config.devUrl.origin
+                : `http://127.0.0.1:${address.port}`;
+            yield* reconcileDesiredCloudLink(origin).pipe(
               Effect.retry({
                 while: shouldRetryCloudLink,
                 schedule: Schedule.exponential("1 second").pipe(
@@ -717,7 +771,39 @@ export const makeServerLayer = Layer.unwrap(
                   Schedule.upTo({ duration: "10 minutes" }),
                 ),
               }),
-              Effect.tap(() => Effect.logInfo("T3 Connect desired link reconciled on startup")),
+              Effect.tap((link) =>
+                Effect.gen(function* () {
+                  yield* Effect.logInfo("T3 Connect desired link reconciled on startup");
+                  if (config.connectDevShare) {
+                    const environment = yield* ServerEnvironment.ServerEnvironment;
+                    const expected = yield* environment.getDescriptor;
+                    const client = yield* HttpClient.HttpClient;
+                    yield* client
+                      .get(new URL("/.well-known/t3/environment", link.endpoint.httpBaseUrl))
+                      .pipe(
+                        Effect.flatMap(HttpClientResponse.filterStatusOk),
+                        Effect.flatMap(
+                          HttpClientResponse.schemaBodyJson(ExecutionEnvironmentDescriptor),
+                        ),
+                        Effect.filterOrFail(
+                          (actual) => actual.environmentId === expected.environmentId,
+                          () =>
+                            new ConnectDevShareError({
+                              message: "Connect endpoint belongs to a different environment.",
+                            }),
+                        ),
+                        Effect.timeout("5 seconds"),
+                        Effect.retry({ schedule: Schedule.spaced("1 second") }),
+                        Effect.timeout("2 minutes"),
+                      );
+                    const auth = yield* EnvironmentAuth.EnvironmentAuth;
+                    const pairingUrl = yield* auth.issueStartupPairingUrl(
+                      link.endpoint.httpBaseUrl,
+                    );
+                    yield* Effect.logInfo(`[dev-runner] pairingUrl: ${pairingUrl}`);
+                  }
+                }),
+              ),
               Effect.catch((cause) =>
                 Effect.logWarning("Failed to reconcile T3 Connect desired link on startup", {
                   message: cause.message,

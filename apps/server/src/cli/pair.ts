@@ -7,7 +7,8 @@
  * public environment descriptor. Inside a linked git worktree the worktree's
  * own `.t3` is checked first (matching dev-runner precedence); otherwise the
  * shared T3 home. `--tailscale` publishes the server over Tailscale Serve
- * HTTPS and pairs through the tailnet URL instead.
+ * HTTPS and pairs through the tailnet URL instead. `--connect` uses the
+ * environment's existing managed Connect endpoint after checking it is live.
  */
 import {
   AuthStandardClientScopes,
@@ -39,6 +40,8 @@ import {
 } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { CLOUD_ENDPOINT_HTTP_ORIGIN } from "../cloud/config.ts";
 import * as ServerConfig from "../config.ts";
 import { resolveBaseDir } from "../os-jank.ts";
 import {
@@ -58,6 +61,7 @@ import { baseDirFlag, DurationFromString } from "./config.ts";
 
 const WELL_KNOWN_ENVIRONMENT_PATH = "/.well-known/t3/environment";
 const PAIR_PROBE_TIMEOUT = Duration.millis(2_500);
+const decodeConnectOrigin = Schema.decodeUnknownOption(Schema.URLFromString);
 // Tailscale provisions an HTTPS certificate on the first request to a fresh
 // serve mapping, which can take a few seconds.
 const TAILSCALE_PROBE_ATTEMPTS = 5;
@@ -83,6 +87,11 @@ export class NoRunningServerError extends Schema.TaggedErrorClass<NoRunningServe
     ].join("\n");
   }
 }
+
+export class ConnectPairingError extends Schema.TaggedErrorClass<ConnectPairingError>()(
+  "ConnectPairingError",
+  { message: Schema.String },
+) {}
 
 // Each tailscale failure gets its own class (same reasoning as
 // scripts/lib/dev-share.ts): distinct caller-visible message, distinct remedy.
@@ -131,7 +140,7 @@ export class ServePortOccupiedError extends Schema.TaggedErrorClass<ServePortOcc
   }
 }
 
-/** The URL a browser or phone should pair through, absent Tailscale. */
+/** The URL a browser or phone should pair through without a sharing flag. */
 export const resolveDirectPairingBaseUrl = (state: PersistedServerRuntimeState): string =>
   state.devUrl ?? resolveHeadlessConnectionString(state.host, state.port);
 
@@ -229,6 +238,43 @@ const probeEnvironmentDescriptor = (
     );
     return { _tag: "descriptor", descriptor } as const;
   }).pipe(Effect.catch((outcome) => Effect.succeed(outcome)));
+
+const resolveConnectPairingBaseUrl = Effect.fn("pair.resolveConnectPairingBaseUrl")(function* (
+  environmentId: ExecutionEnvironmentDescriptor["environmentId"],
+) {
+  const secrets = yield* ServerSecretStore.ServerSecretStore;
+  const stored = yield* secrets.get(CLOUD_ENDPOINT_HTTP_ORIGIN);
+  if (Option.isNone(stored)) {
+    return yield* new ConnectPairingError({
+      message:
+        "No saved Connect endpoint for this environment. Run `t3 connect link`, or restart its `vp run dev --share` server.",
+    });
+  }
+  const parsed = decodeConnectOrigin(new TextDecoder().decode(stored.value));
+  if (
+    Option.isNone(parsed) ||
+    parsed.value.protocol !== "https:" ||
+    parsed.value.username !== "" ||
+    parsed.value.password !== "" ||
+    parsed.value.pathname !== "/" ||
+    parsed.value.search !== "" ||
+    parsed.value.hash !== ""
+  ) {
+    return yield* new ConnectPairingError({
+      message:
+        "The saved Connect endpoint is invalid. Restart this environment to refresh its link.",
+    });
+  }
+  const baseUrl = parsed.value.origin;
+  const probe = yield* probeEnvironmentDescriptor(baseUrl);
+  if (probe._tag !== "descriptor" || probe.descriptor.environmentId !== environmentId) {
+    return yield* new ConnectPairingError({
+      message:
+        "The saved Connect endpoint is not reaching this environment. Restart its Connect share and retry once the public endpoint is ready.",
+    });
+  }
+  return baseUrl;
+});
 
 interface DiscoveredPairTarget {
   readonly baseDir: string;
@@ -475,6 +521,10 @@ export const pairCommand = Command.make("pair", {
   baseDir: baseDirFlag,
   ttl: ttlFlag,
   label: labelFlag,
+  connect: Flag.boolean("connect").pipe(
+    Flag.withDescription("Pair through this environment's existing T3 Connect endpoint."),
+    Flag.withDefault(false),
+  ),
   tailscale: tailscaleFlag,
   tailscaleServePort: tailscaleServePortFlag,
 }).pipe(
@@ -483,16 +533,26 @@ export const pairCommand = Command.make("pair", {
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
+      if (flags.connect && flags.tailscale) {
+        return yield* new ConnectPairingError({
+          message: "Choose either --connect or --tailscale.",
+        });
+      }
       const cliLogLevel = yield* GlobalFlag.LogLevel;
       // Default to Warn so storage/migration chatter cannot bury the QR code;
       // an explicit --log-level still wins.
       const logLevel = Option.getOrElse(cliLogLevel, () => "Warn" as const);
 
       const target = yield* discoverPairTarget(Option.getOrUndefined(flags.baseDir));
+      const config = yield* makePairServerConfig({ target, logLevel });
 
       const notes: Array<string> = [];
       let pairingBaseUrl: string;
-      if (flags.tailscale) {
+      if (flags.connect) {
+        pairingBaseUrl = yield* resolveConnectPairingBaseUrl(target.descriptor.environmentId).pipe(
+          Effect.provide(ServerSecretStore.layer.pipe(Layer.provide(ServerConfig.layer(config)))),
+        );
+      } else if (flags.tailscale) {
         const resolved = yield* resolveTailscalePairingBase({
           target,
           servePort: flags.tailscaleServePort,
@@ -513,7 +573,6 @@ export const pairCommand = Command.make("pair", {
         }
       }
 
-      const config = yield* makePairServerConfig({ target, logLevel });
       const issued = yield* mintPairingLink({ config, ttl: flags.ttl, label: flags.label });
       const pairingUrl = buildPairingUrl(pairingBaseUrl, issued.credential);
 

@@ -24,6 +24,10 @@ On your other device, sign in to the same T3 Connect account and choose the
 environment. Over SSH, the CLI prints a browser link and accepts the returned
 authorization code, so you do not need to forward an OAuth callback port.
 
+For a server linked through the CLI, `npx t3 pair --connect` creates a fresh pairing link
+through its managed endpoint. The command verifies that the endpoint reaches this environment
+before issuing a token. Tailscale is not required.
+
 ## Pair over a LAN or private network
 
 Use direct pairing when the other device can reach the host's network address.
