@@ -193,37 +193,22 @@ export function changeRequestRepositoryUrl(targetUrl: string): string | null {
   return url.toString();
 }
 
-/** The public account page on hosts whose user URLs share one stable shape. */
+/** A GitHub user's public account page, where the author is a person rather than an app. */
 export function changeRequestActorProfileUrl(
   targetUrl: string,
   provider: SourceControlProviderKind,
-  repository: string,
   login: string | null | undefined,
 ): string | null {
-  if (
-    login === null ||
-    login === undefined ||
-    (provider !== "github" && provider !== "gitlab" && provider !== "bitbucket")
-  ) {
+  if (login === null || login === undefined || provider !== "github") {
     return null;
   }
   const account = login.trim();
-  if (account.length === 0) return null;
+  if (account.length === 0 || account.endsWith("[bot]")) return null;
 
   try {
     const url = new URL(targetUrl);
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-    const repositoryPath = repository
-      .split("/")
-      .map((segment) => encodeURIComponent(segment))
-      .join("/");
-    const repositorySuffix = `/${repositoryPath}`;
-    const repositoryUrl = provider === "gitlab" ? changeRequestRepositoryUrl(targetUrl) : null;
-    const gitLabPrefix =
-      repositoryUrl !== null && new URL(repositoryUrl).pathname.endsWith(repositorySuffix)
-        ? new URL(repositoryUrl).pathname.slice(0, -repositorySuffix.length)
-        : "";
-    url.pathname = `${gitLabPrefix}/${encodeURIComponent(account)}`;
+    url.pathname = `/${encodeURIComponent(account)}`;
     url.search = "";
     url.hash = "";
     return url.toString();

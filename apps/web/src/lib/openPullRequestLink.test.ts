@@ -132,53 +132,35 @@ describe("changeRequestRepositoryUrl", () => {
 });
 
 describe("changeRequestActorProfileUrl", () => {
-  it.each([
-    ["github", "https://github.com/pingdotgg/t3code/pull/42", "pingdotgg/t3code", "Gigioxx"],
-    [
-      "gitlab",
-      "https://gitlab.example.test/gitlab/team/t3code/-/merge_requests/42",
-      "team/t3code",
-      "maria.dev",
-    ],
-    [
-      "bitbucket",
-      "https://bitbucket.org/pingdotgg/t3code/pull-requests/42",
-      "pingdotgg/t3code",
-      "theo",
-    ],
-  ] as const)(
-    "builds a %s profile on the pull request host",
-    (provider, pullRequestUrl, repository, login) => {
-      expect(changeRequestActorProfileUrl(pullRequestUrl, provider, repository, login)).toBe(
-        `${new URL(pullRequestUrl).origin}${provider === "gitlab" ? "/gitlab" : ""}/${login}`,
-      );
-    },
-  );
+  it("builds a GitHub profile on the pull request host", () => {
+    expect(
+      changeRequestActorProfileUrl(
+        "https://github.com/pingdotgg/t3code/pull/42",
+        "github",
+        "Gigioxx",
+      ),
+    ).toBe("https://github.com/Gigioxx");
+  });
 
   it("encodes an account name and removes pull request URL state", () => {
     expect(
       changeRequestActorProfileUrl(
         "https://github.example.test/team/t3code/pull/42?tab=checks#summary",
         "github",
-        "team/t3code",
         "release bot",
       ),
     ).toBe("https://github.example.test/release%20bot");
   });
 
-  it.each(["azure-devops", "unknown"] as const)(
-    "does not guess a profile URL for %s",
-    (provider) => {
-      expect(
-        changeRequestActorProfileUrl(
-          "https://dev.azure.com/acme/t3code/_git/t3code/pullrequest/42",
-          provider,
-          "acme/t3code/_git/t3code",
-          "maria@acme.dev",
-        ),
-      ).toBeNull();
-    },
-  );
+  it.each([
+    ["github", "https://github.com/dependabot/dependabot-core/pull/42", "dependabot[bot]"],
+    ["gitlab", "https://gitlab.example.test/team/t3code/-/merge_requests/42", "maria.dev"],
+    ["bitbucket", "https://bitbucket.org/pingdotgg/t3code/pull-requests/42", "theo"],
+    ["azure-devops", "https://dev.azure.com/acme/t3code/_git/t3code/pullrequest/42", "maria"],
+    ["unknown", "https://example.test/team/t3code/pull/42", "maria"],
+  ] as const)("does not guess a profile URL for %s", (provider, pullRequestUrl, login) => {
+    expect(changeRequestActorProfileUrl(pullRequestUrl, provider, login)).toBeNull();
+  });
 });
 
 describe("matchesLinkedPullRequestUrl", () => {

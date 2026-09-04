@@ -714,12 +714,7 @@ export function PullRequestDetailPanel({
   const authorProfileUrl =
     detail === null
       ? null
-      : changeRequestActorProfileUrl(
-          detail.url,
-          detail.provider,
-          detail.repository,
-          detail.author?.login,
-        );
+      : changeRequestActorProfileUrl(detail.url, detail.provider, detail.author?.login);
   const checkoutCommand = detail
     ? pullRequestCheckoutCommand(
         detail.provider,
