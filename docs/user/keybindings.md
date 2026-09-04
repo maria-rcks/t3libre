@@ -75,6 +75,9 @@ section. Message matches show one labeled excerpt while keeping the thread's pro
 machine context visible. Message search begins after two characters and uses SQLite's ASCII
 case-insensitive matching.
 
+While the command palette or model picker is open, number shortcuts select its entries instead of
+switching threads. The model picker supports these shortcuts in Settings as well as the composer.
+
 The full command list and the current defaults are shown in **Settings** → **Keybindings**, which
 always matches the build you are running. Use that rather than a copied list.
 

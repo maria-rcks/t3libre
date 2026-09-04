@@ -4,6 +4,9 @@ Messages can contain up to 120,000 characters. If a draft is longer, T3 Code kee
 composer and shows how many characters need to be removed. Shorten the draft or split it into
 multiple messages, then send again in the same thread.
 
+If you return to typing while a terminal is starting, the composer keeps focus when the terminal
+becomes ready.
+
 On mobile, an empty composer shows an interrupt button while the agent is working. Adding text
 or an attachment replaces it with the send button. This applies to both compact and expanded
 composers.
