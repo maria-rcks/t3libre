@@ -2924,6 +2924,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
   return (
     <SidebarContent
+      showPendingQuestions
       className="gap-0"
       fixedHeader={
         // Lifted above the stage backdrop, whose fade bleeds below the
