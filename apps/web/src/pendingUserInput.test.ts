@@ -251,7 +251,7 @@ describe("pending user input question progress", () => {
     expect(
       findFirstUnansweredPendingUserInputQuestionIndex(questions, {
         scope: {
-          selectedOptionLabels: ["Orchestration-first"],
+          selectedOptionValues: ["Orchestration-first"],
         },
       }),
     ).toBe(1);
@@ -261,7 +261,7 @@ describe("pending user input question progress", () => {
     expect(
       findFirstUnansweredPendingUserInputQuestionIndex(questions, {
         scope: {
-          selectedOptionLabels: ["Orchestration-first"],
+          selectedOptionValues: ["Orchestration-first"],
         },
         compat: {
           customAnswer: "Keep it for one release window",
