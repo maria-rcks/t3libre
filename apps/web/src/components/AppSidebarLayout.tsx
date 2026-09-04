@@ -15,7 +15,11 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings"
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
-import { usePanelAnimationSettings } from "../panelAnimations";
+import {
+  PanelAnimationSuppressionContext,
+  usePanelAnimationNavigationSuppression,
+  usePanelAnimationSettings,
+} from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
 import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
@@ -145,6 +149,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // Settings routes show the settings nav in place of whichever thread
   // sidebar is active.
   const pathname = useLocation({ select: (location) => location.pathname });
+  const panelAnimationsSuppressed = usePanelAnimationNavigationSuppression(
+    pathname,
+    panelAnimationDurationMs,
+  );
+  const panelAnimationsEnabled = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
@@ -215,7 +224,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   return (
     <SidebarProvider
       className="h-dvh! min-h-0!"
-      data-panel-animations={panelAnimationsActive ? "true" : "false"}
+      data-panel-animations={panelAnimationsEnabled ? "true" : "false"}
       defaultOpen
       style={sidebarProviderStyle}
     >
@@ -247,7 +256,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         )}
         <SidebarRail onDoubleClick={resetSidebarWidth} />
       </Sidebar>
-      {children}
+      <PanelAnimationSuppressionContext value={panelAnimationsSuppressed}>
+        {children}
+      </PanelAnimationSuppressionContext>
       <SidebarControl />
     </SidebarProvider>
   );

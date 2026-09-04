@@ -57,7 +57,8 @@ their pinned threads keep the default newest-first order below the ones you have
 The main sidebar, right panel, and terminal drawer open and close immediately by default. Under
 **Settings → Appearance → Motion**, move the **Panel animations** slider above 0 ms to add motion.
 The duration can be set up to 400 ms. Clicking the preview replays all three panel transitions; at
-0 ms, it snaps between the same open and closed states.
+0 ms, it snaps between the same open and closed states. Moving between threads always snaps to the
+selected thread's panel state without replaying its transitions.
 
 ## Environment icons
 

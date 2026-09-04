@@ -1,8 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { type PanelAnimationDurationMs } from "@t3tools/contracts/settings";
 
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useClientSettings } from "./hooks/useSettings";
+
+export const PanelAnimationSuppressionContext = createContext(false);
+
+export function usePanelAnimationNavigationSuppression(
+  pathname: string,
+  durationMs: PanelAnimationDurationMs,
+): boolean {
+  const [settledPathname, setSettledPathname] = useState(pathname);
+
+  useEffect(() => {
+    if (settledPathname === pathname) return;
+    const timeout = window.setTimeout(() => setSettledPathname(pathname), durationMs);
+    return () => window.clearTimeout(timeout);
+  }, [durationMs, pathname, settledPathname]);
+
+  return settledPathname !== pathname;
+}
 
 export function observeResponsiveBreakpointFade(options: {
   target: HTMLElement;
@@ -47,7 +64,8 @@ export function usePanelAnimationSettings(): {
 } {
   const durationMs = useClientSettings((settings) => settings.panelAnimationDurationMs);
   const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-  return { active: durationMs > 0 && !prefersReducedMotion, durationMs };
+  const suppressed = useContext(PanelAnimationSuppressionContext);
+  return { active: durationMs > 0 && !prefersReducedMotion && !suppressed, durationMs };
 }
 
 /** Keeps closing panel content mounted until its opt-in transition ends. */
