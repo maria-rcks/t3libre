@@ -2446,7 +2446,9 @@ export const make = Effect.gen(function* () {
     subscribeMerges: PubSub.subscribe(mergedPullRequests).pipe(
       Effect.map((subscription) => Stream.fromSubscription(subscription)),
     ),
-    subscribeRefreshes: SubscriptionRef.changes(pullRequestRefreshes),
+    subscribeRefreshes: SubscriptionRef.changes(pullRequestRefreshes).pipe(
+      Stream.filter((revision) => revision > 0),
+    ),
     refreshAfterTurn,
     detail,
     activity,
