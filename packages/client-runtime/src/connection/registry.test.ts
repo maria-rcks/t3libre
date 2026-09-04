@@ -367,7 +367,11 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
         );
         yield* reportProgress({ stage: "synchronizing", prepared });
         yield* session.ready;
-        return { prepared, session };
+        return {
+          prepared,
+          session,
+          refreshAuthorization: Effect.succeed(prepared),
+        };
       }),
   });
 

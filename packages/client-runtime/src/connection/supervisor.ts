@@ -484,19 +484,46 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     }
   });
 
-  const waitForAuthorizationRefresh = Effect.fnUntraced(function* (
-    preparedConnection: PreparedConnection,
+  const refreshAuthorizationWhileConnected = Effect.fnUntraced(function* (
+    lease: ConnectionDriver.EnvironmentConnectionLease,
   ) {
-    const authorization = preparedConnection.httpAuthorization;
-    if (authorization?._tag !== "Dpop") {
-      return yield* Effect.never;
+    let currentPrepared = lease.prepared;
+    let failureCount = 0;
+    for (;;) {
+      const authorization = currentPrepared.httpAuthorization;
+      if (authorization?._tag !== "Dpop") {
+        return yield* Effect.never;
+      }
+      const now = yield* Clock.currentTimeMillis;
+      yield* Effect.sleep(
+        Math.max(0, authorization.expiresAtEpochMs - now - DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS),
+      );
+      yield* Effect.logDebug("Refreshing the environment authorization before it expires.");
+      const refreshExit = yield* exitUnlessInterrupted(lease.refreshAuthorization);
+      if (Exit.isSuccess(refreshExit)) {
+        currentPrepared = refreshExit.value;
+        failureCount = 0;
+        yield* SubscriptionRef.set(prepared, Option.some(currentPrepared));
+        continue;
+      }
+
+      const refreshFailure = Cause.findErrorOption(refreshExit.cause);
+      if (Option.isNone(refreshFailure) || refreshFailure.value._tag === "ConnectionBlockedError") {
+        return yield* Effect.failCause(refreshExit.cause);
+      }
+
+      const retryDelay = retryDelayMs(failureCount);
+      failureCount += 1;
+      yield* Effect.logWarning(
+        "Could not refresh environment authorization; keeping the active connection.",
+      ).pipe(
+        Effect.annotateLogs({
+          "authorization.refresh.retry_delay_ms": retryDelay,
+          ...safeErrorLogAttributes(Cause.squash(refreshExit.cause)),
+        }),
+      );
+      yield* Effect.sleep(retryDelay);
     }
-    const now = yield* Clock.currentTimeMillis;
-    yield* Effect.sleep(
-      Math.max(0, authorization.expiresAtEpochMs - now - DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS),
-    );
-    yield* Effect.logDebug("Refreshing the environment connection before its DPoP token expires.");
-    return true;
   });
 
   const runAttempt = Effect.fnUntraced(function* (
@@ -605,7 +632,12 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           attemptSpan: active.attemptSpan,
         })),
       ),
-      waitForAuthorizationRefresh(active.lease.prepared),
+      refreshAuthorizationWhileConnected(active.lease).pipe(
+        Effect.mapError((error): TracedAttemptFailure => ({
+          error,
+          attemptSpan: active.attemptSpan,
+        })),
+      ),
     ]).pipe(exitUnlessInterrupted);
     const connectedForMs = (yield* Clock.currentTimeMillis) - connectedAt;
     if (Exit.isSuccess(connectedExit)) {

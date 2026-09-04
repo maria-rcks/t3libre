@@ -174,7 +174,11 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
 
     yield* reportProgress({ stage: "synchronizing", prepared });
     yield* session.ready;
-    return { prepared, session } satisfies ConnectionDriver.EnvironmentConnectionLease;
+    return {
+      prepared,
+      session,
+      refreshAuthorization: prepare(target),
+    } satisfies ConnectionDriver.EnvironmentConnectionLease;
   });
 
   const dependencies = Layer.mergeAll(
@@ -1097,20 +1101,22 @@ describe("EnvironmentSupervisor", () => {
     }),
   );
 
-  it.effect("renews a relay connection before its DPoP access token expires", () =>
+  it.effect("refreshes relay authorization without replacing the connected session", () =>
     Effect.gen(function* () {
       const tokenLifetimeMs = DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS * 2;
       const harness = yield* makeHarness({
         prepare: (attempt) =>
-          Effect.succeed({
-            ...PREPARED_CONNECTION,
-            target: RELAY_TARGET,
-            httpAuthorization: {
-              _tag: "Dpop",
-              accessToken: `access-token-${attempt}`,
-              expiresAtEpochMs: tokenLifetimeMs * attempt,
-            },
-          }),
+          attempt === 2
+            ? Effect.fail(transient("Authorization refresh failed."))
+            : Effect.succeed({
+                ...PREPARED_CONNECTION,
+                target: RELAY_TARGET,
+                httpAuthorization: {
+                  _tag: "Dpop",
+                  accessToken: `access-token-${attempt}`,
+                  expiresAtEpochMs: tokenLifetimeMs * attempt,
+                },
+              }),
       });
       const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
         initiallyDesired: true,
@@ -1121,16 +1127,33 @@ describe("EnvironmentSupervisor", () => {
       expect(yield* Ref.get(harness.sessionCount)).toBe(1);
 
       yield* TestClock.adjust(1);
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2,
+      expect(yield* Ref.get(harness.prepareCount)).toBe(2);
+      expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+      expect(yield* Ref.get(harness.releaseCount)).toBe(0);
+
+      yield* TestClock.adjust("2999 millis");
+      expect(yield* Ref.get(harness.prepareCount)).toBe(2);
+      yield* TestClock.adjust("1 milli");
+      yield* SubscriptionRef.changes(supervisor.prepared).pipe(
+        Stream.filter(
+          Option.exists(
+            (value) =>
+              value.httpAuthorization?._tag === "Dpop" &&
+              value.httpAuthorization.accessToken === "access-token-3",
+          ),
+        ),
+        Stream.runHead,
       );
 
-      expect(yield* Ref.get(harness.sessionCount)).toBe(2);
-      expect(yield* Ref.get(harness.releaseCount)).toBe(1);
+      expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+      expect(yield* Ref.get(harness.releaseCount)).toBe(0);
+      expect(yield* SubscriptionRef.get(supervisor.state)).toMatchObject({
+        phase: "connected",
+        generation: 1,
+      });
       expect(
         Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).httpAuthorization,
-      ).toMatchObject({ accessToken: "access-token-2" });
+      ).toMatchObject({ accessToken: "access-token-3" });
     }).pipe(Effect.provide(TestClock.layer())),
   );
 

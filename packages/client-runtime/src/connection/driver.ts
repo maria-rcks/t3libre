@@ -24,6 +24,7 @@ export type ConnectionDriverProgress =
 export interface EnvironmentConnectionLease {
   readonly prepared: PreparedConnection;
   readonly session: RpcSession.RpcSession;
+  readonly refreshAuthorization: Effect.Effect<PreparedConnection, ConnectionAttemptError>;
 }
 
 export class ConnectionDriver extends Context.Service<
@@ -55,7 +56,11 @@ export const make = Effect.gen(function* () {
     const session = yield* sessions.connect(prepared);
     yield* reportProgress({ stage: "synchronizing", prepared });
     yield* session.ready;
-    return { prepared, session } satisfies EnvironmentConnectionLease;
+    return {
+      prepared,
+      session,
+      refreshAuthorization: resolver.prepare(entry),
+    } satisfies EnvironmentConnectionLease;
   });
 
   return ConnectionDriver.of({ connect });
