@@ -160,6 +160,30 @@ export function parseChangeRequestUrl(targetUrl: string): ChangeRequestLink | nu
   return null;
 }
 
+/**
+ * The pull-request URL a GitHub-style `#123` autolink might name. GitHub writes every bare
+ * reference through `/issues/`, including pull requests, so this only builds a candidate: the
+ * caller must successfully read it as a pull request before treating it as one.
+ */
+export function pullRequestCandidateUrlFromReferenceAutolink(targetUrl: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(targetUrl);
+  } catch {
+    return null;
+  }
+  if (
+    (url.protocol !== "https:" && url.protocol !== "http:") ||
+    !isHostOf(url.hostname.toLowerCase(), "github.com", "github")
+  ) {
+    return null;
+  }
+  const match = /^\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/|$)/u.exec(url.pathname);
+  if (match?.[1] === undefined || match[2] === undefined) return null;
+  url.pathname = `/${match[1]}/pull/${match[2]}`;
+  return url.toString();
+}
+
 /** Match a stored PR without requiring its project to remain available. */
 export function matchesLinkedPullRequestUrl(
   linkedPullRequest: ThreadLinkedPullRequest,

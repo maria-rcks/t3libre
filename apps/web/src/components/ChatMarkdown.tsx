@@ -162,8 +162,10 @@ import {
   findProjectForChangeRequest,
   matchesLinkedPullRequestUrl,
   parseChangeRequestUrl,
+  pullRequestCandidateUrlFromReferenceAutolink,
   useOpenChangeRequestLink,
 } from "~/lib/openPullRequestLink";
+import { useOpenLink } from "../browser/useOpenLink";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import { isAbsolutePath, resolvePathLinkTarget } from "../terminal-links";
@@ -174,6 +176,7 @@ import {
   BrowserPreviewUnavailableError,
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
+import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 
 interface ChatMarkdownProps {
   text: string;
@@ -2121,6 +2124,20 @@ function ChatMarkdown({
     event.clipboardData.setData("text/html", payload.html);
   }, []);
   const openChangeRequestLink = useOpenChangeRequestLink(threadRef);
+  const openDeferredMarkdownLink = useOpenLink(threadRef);
+  const openPullRequestInApp = useCallback(
+    (targetUrl: string) =>
+      openChangeRequestLink(
+        {
+          metaKey: false,
+          ctrlKey: false,
+          preventDefault: () => undefined,
+          stopPropagation: () => undefined,
+        },
+        targetUrl,
+      ),
+    [openChangeRequestLink],
+  );
   // Subscribed rather than read at click time: the anchor has to decide
   // synchronously whether to intercept its `_blank`, and a subscription is what
   // makes a persisted "app" apply once settings hydrate after launch.
@@ -2442,6 +2459,37 @@ function ChatMarkdown({
                 ? plainHastText(node)
                 : undefined;
           const isPullRequestAutolink = pullRequestCopy !== undefined;
+          const pullRequestCandidateUrl =
+            pullRequestAutolink === "reference" && href
+              ? pullRequestCandidateUrlFromReferenceAutolink(href)
+              : href;
+          const pullRequestCandidate = pullRequestCandidateUrl
+            ? parseChangeRequestUrl(pullRequestCandidateUrl)
+            : null;
+          const pullRequestProject =
+            environmentId !== null &&
+            serverConfig?.environment.capabilities.pullRequests === true &&
+            pullRequestCandidate !== null
+              ? findProjectForChangeRequest(
+                  projects.filter((project) => project.environmentId === environmentId),
+                  pullRequestCandidate,
+                )
+              : undefined;
+          const pullRequestPreviewTarget =
+            environmentId === null ||
+            pullRequestProject === undefined ||
+            pullRequestCandidate === null
+              ? null
+              : {
+                  environmentId,
+                  input: {
+                    projectId: pullRequestProject.id,
+                    repository:
+                      pullRequestProject.repositoryIdentity?.displayName ??
+                      pullRequestCandidate.repository,
+                    number: pullRequestCandidate.number,
+                  },
+                };
           const isSameDocumentLink = href?.startsWith("#") ?? false;
           const onClick = props.onClick;
           const canOpenInPreview = Boolean(threadRef) && isPreviewSupportedInRuntime();
@@ -2574,6 +2622,18 @@ function ChatMarkdown({
           );
           if (!faviconHost || !href) {
             return link;
+          }
+          if (pullRequestPreviewTarget !== null) {
+            return (
+              <PullRequestLinkPreview
+                link={link}
+                originalUrl={href}
+                target={pullRequestPreviewTarget}
+                confirmBeforeOpen={pullRequestAutolink === "reference"}
+                onOpenPullRequest={openPullRequestInApp}
+                onOpenFallback={openDeferredMarkdownLink}
+              />
+            );
           }
           return (
             <Tooltip>
@@ -2744,6 +2804,7 @@ function ChatMarkdown({
     isStreaming,
     linkTargetPreference,
     markdownFileLinkMetaByHref,
+    environmentId,
     onTaskListChange,
     onUseArtifactTemplate,
     onImageExpand,
@@ -2752,14 +2813,18 @@ function ChatMarkdown({
     openFileInPanel,
     openInPreferredEditor,
     openChangeRequestLink,
+    openDeferredMarkdownLink,
     openExternalLinkInPreview,
     openMarkdownFileInPreview,
     preferredEditorMenuLabel,
+    projects,
+    openPullRequestInApp,
     resolveThreadPullRequest,
     resolvedTheme,
     revealMarkdownFileInFileManager,
     revealInFileManagerLabel,
     skills,
+    serverConfig,
     text,
     threadRef,
     updateThreadPullRequestLink,
