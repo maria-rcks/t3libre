@@ -3172,6 +3172,8 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
                     : "truncate",
                   headingClass,
                 )}
+                onClick={expanded ? stopRowToggle : undefined}
+                onPointerDown={expanded ? stopRowToggle : undefined}
               >
                 {previewText}
               </span>
