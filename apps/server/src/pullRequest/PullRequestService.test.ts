@@ -2677,12 +2677,8 @@ it.effect("explicit and turn invalidations make the next listing ask the host ag
     yield* service.invalidate({ reference });
     yield* service.list({ state: "open" });
     assert.strictEqual(hostCalls, 2);
-    const observedRefresh = yield* Stream.runHead(service.subscribeRefreshes).pipe(
-      Effect.forkChild({ startImmediately: true }),
-    );
-
     yield* service.refreshAfterTurn;
-    const refresh = Option.getOrThrow(yield* Fiber.join(observedRefresh));
+    const refresh = Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes));
     yield* service.list({ state: "open" });
     assert.isAbove(refresh, 0);
     assert.strictEqual(hostCalls, 3);

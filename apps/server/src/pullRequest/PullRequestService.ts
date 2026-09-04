@@ -10,6 +10,7 @@ import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import {
   PullRequestOperationError,
   PullRequestUnavailableError,
@@ -533,7 +534,7 @@ export function repositoryIdentityOf(project: OrchestrationProjectShell): string
 
 export const make = Effect.gen(function* () {
   const mergedPullRequests = yield* PubSub.sliding<PullRequestMergeEvent>(64);
-  const pullRequestRefreshes = yield* PubSub.sliding<number>(1);
+  const pullRequestRefreshes = yield* SubscriptionRef.make(0);
   const registry = yield* PullRequestProviderRegistry;
   const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
@@ -2403,7 +2404,7 @@ export const make = Effect.gen(function* () {
 
   const refreshAfterTurn: PullRequestService["Service"]["refreshAfterTurn"] = Effect.suspend(() => {
     turnRefreshEpoch = listingsEpoch = ++epochCounter;
-    return PubSub.publish(pullRequestRefreshes, turnRefreshEpoch).pipe(Effect.asVoid);
+    return SubscriptionRef.set(pullRequestRefreshes, turnRefreshEpoch);
   });
 
   // A mutation's own client re-reads right after it, and every other client's next read must
@@ -2445,7 +2446,7 @@ export const make = Effect.gen(function* () {
     subscribeMerges: PubSub.subscribe(mergedPullRequests).pipe(
       Effect.map((subscription) => Stream.fromSubscription(subscription)),
     ),
-    subscribeRefreshes: Stream.fromPubSub(pullRequestRefreshes),
+    subscribeRefreshes: SubscriptionRef.changes(pullRequestRefreshes),
     refreshAfterTurn,
     detail,
     activity,
