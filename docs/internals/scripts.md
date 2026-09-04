@@ -29,16 +29,21 @@ authenticated.
   Shared runs default to Vite's bundled dev mode (`T3CODE_BUNDLED_DEV=1`): a remote browser pays a
   network round trip per import level in unbundled dev, which turns a cold module graph into
   minutes of waterfall. Set `T3CODE_BUNDLED_DEV=0` to opt a shared run back out.
+  The web entry loads the app with a dynamic import so React refresh starts before shared UI
+  chunks run. Keep app imports out of that entry. A static import can work on the first load
+  and then fail on reload after Vite splits code for lazy routes.
+  Bundled dev uses Tailwind's watched files to rebuild CSS. Its Vite-only hot-update hook is
+  disabled in this mode because Rolldown does not supply the Vite server or module graph.
 - `vp run dev --share --share-via=t3-connect --home-dir .t3`: Forces T3 Connect. Use
   `--share-via=tailscale` to force private tailnet Serve even when Connect authorization exists.
   Run `node apps/server/src/bin.ts connect login` once for the machine first. Account authorization
   stays in the stable T3 home while runtime and link state stay in the worktree home. The managed
-  tunnel terminates at the backend: T3 routes stay there,
-  while the invocation-prefixed Vite bundle and HMR socket are proxied from there. Connect sharing
-  requires bundled dev mode and keeps source, `/@fs`, cookies, and T3 credentials outside the public
-  proxy. Its temporary relay lease is removed on exit and expires after an unclean stop. The
-  account login remains authorized for the next run. While the share is reachable, `node
-apps/server/src/bin.ts pair` prints a replacement public pairing URL without a restart.
+  tunnel terminates at the backend: T3 routes stay there, while the invocation-prefixed Vite bundle
+  and HMR socket are proxied from there. Connect sharing requires bundled dev mode and keeps source,
+  `/@fs`, cookies, and T3 credentials outside the public proxy. Its temporary relay lease is removed
+  on exit and expires after an unclean stop. The account login remains authorized for the next run.
+  While the share is reachable, `node apps/server/src/bin.ts pair` prints a replacement public
+  pairing URL without a restart.
 - `vp run dev --browser`: Auto-opens a browser. Off by default. The dev runner writes
   `T3CODE_NO_BROWSER` itself from this flag, so setting `T3CODE_NO_BROWSER=0` in your environment has
   no effect; use `--browser`.
@@ -88,27 +93,35 @@ apps/server/src/bin.ts pair` prints a replacement public pairing URL without a r
 
 ### Linux AppImage prerequisites
 
-Linux AppImage packaging compiles the Rust resource monitor. Install a Rust toolchain, the standard
-C/C++ build tools, and ImageMagick before running `vp run dist:desktop:linux`.
+Linux AppImage packaging compiles the Rust resource monitor and the libsecret browser import
+helper. Install a Rust toolchain, the standard C/C++ build tools, libsecret development headers,
+pkg-config, and ImageMagick before running `vp run dist:desktop:linux`.
 
 Ubuntu and Debian:
 
 ```bash
 sudo apt-get update
-sudo apt-get install cargo rustc build-essential imagemagick
+sudo apt-get install cargo rustc build-essential libsecret-1-dev pkg-config imagemagick
 ```
 
 Fedora:
 
 ```bash
-sudo dnf install rust cargo gcc gcc-c++ make ImageMagick
+sudo dnf install rust cargo gcc gcc-c++ make libsecret-devel pkgconf-pkg-config ImageMagick
 ```
 
 Arch Linux:
 
 ```bash
-sudo pacman -S rust base-devel imagemagick
+sudo pacman -S rust base-devel libsecret pkgconf imagemagick
 ```
+
+Linux desktop development also needs the C compiler, pkg-config, and libsecret headers. Its build
+and launch commands compile `native/browser-secret/main.c` into the gitignored native build
+directory. Releases place the executable in `resources/browser-secret`, outside `app.asar`.
+The helper performs a read-only Chromium schema lookup through libsecret and writes the exact
+secret bytes to its stdout pipe. Exit codes are 2 for a missing key, 3 for denied/locked access,
+and 4 for other keyring failures; the desktop importer preserves these distinctions.
 
 The artifact script checks these capabilities before starting the web and desktop builds. If
 anything is unavailable, it reports every failed check together and prints the Ubuntu/Debian
