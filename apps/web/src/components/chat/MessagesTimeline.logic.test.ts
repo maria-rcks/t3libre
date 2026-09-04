@@ -784,7 +784,7 @@ describe("deriveMessagesTimelineRows", () => {
     ).toBeDefined();
   });
 
-  it("keeps a trailing tool group visible but folds a single activity", () => {
+  it("keeps a tool group after the terminal response visible when the turn is folded", () => {
     const turnId = TurnId.make("turn-1");
     const timelineEntries = [
       {

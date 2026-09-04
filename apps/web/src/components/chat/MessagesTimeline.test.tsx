@@ -1097,7 +1097,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("tool call failed");
   });
 
-  it("renders a failed trailing tool call as part of the terminal assistant block", () => {
+  it("renders trailing tool calls as part of the terminal assistant block", () => {
     const turnId = TurnId.make("turn-trailing-tools");
     const assistantMessageId = MessageId.make("assistant-trailing-tools");
     const markup = renderToStaticMarkup(
