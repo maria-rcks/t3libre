@@ -462,15 +462,24 @@ export const reconcileProviderSessions = Effect.gen(function* () {
   // Provider startup can report ready before the continuation is submitted.
   // Find those markers in one read rather than querying every idle thread.
   const preparedThreadIds = new Set(
-    (yield* directory
-      .listBindings()
-      .pipe(
-        Effect.catch((cause) =>
-          Effect.logWarning("failed to read prepared provider continuations", { cause }).pipe(
-            Effect.as([]),
+    (yield* directory.listBindings().pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("failed to read prepared provider continuations", { cause }).pipe(
+          Effect.andThen(
+            Effect.forEach(
+              threads.filter(
+                (thread) => thread.session?.status === "ready" && !liveThreadIds.has(thread.id),
+              ),
+              (thread) =>
+                directory.getBinding(thread.id).pipe(Effect.orElseSucceed(() => Option.none())),
+            ),
+          ),
+          Effect.map((bindings) =>
+            bindings.flatMap((binding) => (Option.isSome(binding) ? [binding.value] : [])),
           ),
         ),
-      ))
+      ),
+    ))
       .filter(
         (binding) =>
           readServerUpdateContinuationTurnId(binding.runtimePayload) !== null &&

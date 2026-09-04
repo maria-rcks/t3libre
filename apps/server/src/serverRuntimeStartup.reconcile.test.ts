@@ -782,7 +782,12 @@ for (const scenario of [
   });
 }
 
-for (const preparedStatus of ["starting", "ready", "completed after update marking"] as const) {
+for (const preparedStatus of [
+  "starting",
+  "ready",
+  "ready with failed scan",
+  "completed after update marking",
+] as const) {
   it.effect(`recovers again if startup exits with a prepared ${preparedStatus} session`, () =>
     Effect.gen(function* () {
       const turnId = TurnId.make("turn-interrupted-startup");
@@ -825,7 +830,14 @@ for (const preparedStatus of ["starting", "ready", "completed after update marki
           getProvider: () => Effect.die("unused"),
           listThreadIds: () => Effect.die("unused"),
           listBindings: () =>
-            Effect.sync(() => [{ ...binding, lastSeenAt: "2026-01-01T00:00:00.000Z" }]),
+            preparedStatus === "ready with failed scan"
+              ? Effect.fail(
+                  new ProviderSessionDirectoryPersistenceError({
+                    operation: "listBindings",
+                    detail: "unreadable unrelated binding",
+                  }),
+                )
+              : Effect.sync(() => [{ ...binding, lastSeenAt: "2026-01-01T00:00:00.000Z" }]),
         },
         dispatch: (command: OrchestrationCommand) =>
           Effect.sync(() => {
@@ -866,7 +878,8 @@ for (const preparedStatus of ["starting", "ready", "completed after update marki
         assert.equal(thread.session.status, "ready");
         return;
       }
-      thread.session.status = preparedStatus;
+      thread.session.status =
+        preparedStatus === "ready with failed scan" ? "ready" : preparedStatus;
       yield* runReconciliation(input);
       yield* Deferred.await(cleared);
       assert.deepStrictEqual(sends, [
