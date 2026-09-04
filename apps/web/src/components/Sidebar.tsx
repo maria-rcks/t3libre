@@ -3607,7 +3607,7 @@ export default function Sidebar() {
     <>
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
-        showPendingQuestions
+        onPendingQuestionNavigate={navigateToThread}
         className="gap-0"
         fixedHeader={
           // Lifted above the stage backdrop, whose fade bleeds below the

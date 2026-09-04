@@ -2859,6 +2859,7 @@ interface SidebarProjectsContentProps {
   suppressProjectClickForContextMenuRef: React.RefObject<boolean>;
   attachProjectListAutoAnimateRef: (node: HTMLElement | null) => void;
   projectsLength: number;
+  navigateToThread: (threadRef: ScopedThreadRef) => void;
 }
 
 const SidebarProjectsContent = memo(function SidebarProjectsContent(
@@ -2924,7 +2925,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
   return (
     <SidebarContent
-      showPendingQuestions
+      onPendingQuestionNavigate={props.navigateToThread}
       className="gap-0"
       fixedHeader={
         // Lifted above the stage backdrop, whose fade bleeds below the
@@ -3764,6 +3765,7 @@ export default function LegacySidebar() {
         suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
         attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
         projectsLength={projects.length}
+        navigateToThread={navigateToThread}
       />
       <SidebarChromeFooter />
     </>

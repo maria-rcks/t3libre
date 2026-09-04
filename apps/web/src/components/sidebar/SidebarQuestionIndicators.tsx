@@ -1,34 +1,27 @@
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import { ArrowDownIcon } from "lucide-react";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useMemo, useRef } from "react";
 import { Button } from "~/components/ui/button";
+import { useThreadShells } from "~/state/entities";
 
-/** Keeps pending questions reachable without changing the list's order. */
+/** Keeps all pending questions reachable, including threads in collapsed lists. */
 export function SidebarQuestionIndicators({
-  containerRef,
+  onNavigate,
 }: {
-  containerRef: RefObject<HTMLDivElement | null>;
+  onNavigate: (threadRef: ScopedThreadRef) => void;
 }) {
-  const rows = useRef<HTMLElement[]>([]);
-  const lastTarget = useRef<HTMLElement | null>(null);
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    const content = containerRef.current?.querySelector('[data-sidebar="content"]');
-    if (!content) return;
-    const reconcile = () => {
-      rows.current = Array.from(content.querySelectorAll<HTMLElement>("[data-pending-question]"));
-      setCount(rows.current.length);
-    };
-    const mutations = new MutationObserver(reconcile);
-    mutations.observe(content, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["data-pending-question"],
-    });
-    reconcile();
-    return () => mutations.disconnect();
-  }, [containerRef]);
+  const threads = useThreadShells();
+  const pending = useMemo(
+    () =>
+      threads
+        .filter((thread) => thread.archivedAt === null && thread.hasPendingUserInput)
+        .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
+    [threads],
+  );
+  const lastTarget = useRef<string | null>(null);
+  const count = pending.length;
 
   return (
     <div className="shrink-0 px-2 pb-2">
@@ -39,16 +32,12 @@ export function SidebarQuestionIndicators({
         aria-label={`Next pending question (${count})`}
         className="w-full justify-between border-indigo-400/50 bg-sidebar text-indigo-600 transition-none active:scale-100 dark:bg-sidebar dark:text-indigo-300 [--control-icon-color:currentColor]"
         onClick={() => {
-          const candidates = rows.current.filter((row) => row.getClientRects().length > 0);
           const nextIndex =
-            (candidates.findIndex((row) => row === lastTarget.current) + 1) % candidates.length;
-          const row = candidates[nextIndex];
-          if (!row) return;
-          lastTarget.current = row;
-          row.scrollIntoView({ block: "center", behavior: "instant" });
-          const control = row.querySelector<HTMLElement>('[role="button"], a, button');
-          control?.focus({ preventScroll: true });
-          control?.click();
+            (pending.findIndex((ref) => scopedThreadKey(ref) === lastTarget.current) + 1) % count;
+          const next = pending[nextIndex];
+          if (!next) return;
+          lastTarget.current = scopedThreadKey(next);
+          onNavigate(next);
         }}
       >
         <span>

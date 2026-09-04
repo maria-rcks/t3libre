@@ -693,18 +693,19 @@ function SidebarSeparator({ className, ...props }: React.ComponentProps<typeof S
 function SidebarContent({
   className,
   fixedHeader,
-  showPendingQuestions = false,
+  onPendingQuestionNavigate,
   ...props
 }: React.ComponentProps<"div"> & {
   fixedHeader?: React.ReactNode;
-  showPendingQuestions?: boolean;
+  onPendingQuestionNavigate?: React.ComponentProps<typeof SidebarQuestionIndicators>["onNavigate"];
 }) {
-  const containerRef = React.useRef<HTMLDivElement>(null);
   return (
     <>
       {fixedHeader ? <div className="w-full shrink-0">{fixedHeader}</div> : null}
-      <div ref={containerRef} className="relative flex min-h-0 flex-1 flex-col">
-        {showPendingQuestions ? <SidebarQuestionIndicators containerRef={containerRef} /> : null}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {onPendingQuestionNavigate ? (
+          <SidebarQuestionIndicators onNavigate={onPendingQuestionNavigate} />
+        ) : null}
         <ScrollArea hideScrollbars scrollFade className="h-auto min-h-0 flex-1">
           <div
             className={cn(
