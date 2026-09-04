@@ -10,7 +10,6 @@ import type {
   PullRequestListStatsInput,
   PullRequestRef,
   PullRequestRefreshEvent,
-  PullRequestRefreshSubscriptionInput,
   PullRequestSummary,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -159,17 +158,23 @@ const usePullRequestStatsQuery = createMergedEnvironmentQuery(
 
 const usePullRequestTurnRefreshQuery = createMergedEnvironmentQuery(
   "web-pull-requests:turn-refreshes",
-  ({ environmentId, input }: EnvironmentQueryTarget<PullRequestRefreshSubscriptionInput>) =>
-    pullRequestRefreshes({
-      environmentId,
-      ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
-    }),
+  ({ environmentId }: EnvironmentQueryTarget<Readonly<Record<string, never>>>) =>
+    pullRequestRefreshes({ environmentId }),
 );
 
 export function usePullRequestTurnRefreshes(
-  targets: ReadonlyArray<EnvironmentQueryTarget<PullRequestRefreshSubscriptionInput>>,
+  environmentIds: ReadonlyArray<EnvironmentId>,
 ): ReadonlyArray<readonly [EnvironmentId, PullRequestRefreshEvent]> {
-  return usePullRequestTurnRefreshQuery(targets).values;
+  return usePullRequestTurnRefreshQuery(
+    environmentIds.map((environmentId) => ({ environmentId, input: {} })),
+  ).values;
+}
+
+export function usePullRequestTurnRefresh(
+  environmentId: EnvironmentId,
+): PullRequestRefreshEvent | null {
+  const result = useAtomValue(pullRequestRefreshes({ environmentId }));
+  return Option.getOrNull(AsyncResult.value(result));
 }
 
 export interface MergedPullRequestListView {

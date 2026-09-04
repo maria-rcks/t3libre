@@ -4,7 +4,6 @@ import {
   type PullRequestDetail,
   type PullRequestDiffInput,
   type PullRequestRefreshEvent,
-  type ProjectId,
   type PullRequestSummary,
   type VcsStatusResult,
 } from "@t3tools/contracts";
@@ -40,22 +39,17 @@ export const LINKED_PULL_REQUEST_IDLE_TTL_MS = 5_000;
 
 export type PullRequestRefreshAtomFamily = (target: {
   readonly environmentId: EnvironmentId;
-  readonly projectId?: ProjectId;
 }) => Atom.Atom<AsyncResult.AsyncResult<PullRequestRefreshEvent, unknown>>;
 
 /** One lightweight server signal shared by every mounted pull request read in an environment. */
 export function createPullRequestRefreshAtomFamily<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ): PullRequestRefreshAtomFamily {
-  const family = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+  const refreshes = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
     label: "environment-data:pull-requests:turn-refreshes",
     tag: WS_METHODS.pullRequestsSubscribeRefreshes,
   });
-  return ({ environmentId, projectId }) =>
-    family({
-      environmentId,
-      input: projectId === undefined ? {} : { projectId },
-    });
+  return ({ environmentId }) => refreshes({ environmentId, input: {} });
 }
 
 /** Refresh only the live fields a linked thread renders. */
@@ -69,8 +63,7 @@ export function createLinkedPullRequestSummaryAtomFamily<R, E>(
     staleTimeMs: 60_000,
     refreshIntervalMs: 60_000,
     idleTtlMs: LINKED_PULL_REQUEST_IDLE_TTL_MS,
-    refreshTrigger: ({ environmentId, input }) =>
-      refreshes({ environmentId, projectId: input.projectId }),
+    refreshTrigger: ({ environmentId }) => refreshes({ environmentId }),
   });
 }
 
@@ -98,11 +91,7 @@ export function createPullRequestEnvironmentAtoms<R, E>(
   refreshes = createPullRequestRefreshAtomFamily(runtime),
 ) {
   const commandScheduler = createAtomCommandScheduler();
-  const refreshProject = (environmentId: EnvironmentId, projectId: ProjectId | undefined) =>
-    refreshes({
-      environmentId,
-      ...(projectId === undefined ? {} : { projectId }),
-    });
+  const refreshEnvironment = (environmentId: EnvironmentId) => refreshes({ environmentId });
   const serialPerEnvironment = {
     mode: "serial",
     key: ({ environmentId }: { readonly environmentId: string }) => environmentId,
@@ -111,13 +100,15 @@ export function createPullRequestEnvironmentAtoms<R, E>(
     label: "environment-data:pull-requests:activity",
     tag: WS_METHODS.pullRequestsActivity,
     staleTimeMs: 15_000,
-    refreshTrigger: ({ environmentId, input }) => refreshProject(environmentId, input.projectId),
+    refreshTrigger: ({ environmentId }) => refreshEnvironment(environmentId),
   });
   return {
     list: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:list",
       tag: WS_METHODS.pullRequestsList,
       staleTimeMs: 30_000,
+      refreshTrigger: ({ environmentId, input }) =>
+        input.cursors === undefined ? refreshEnvironment(environmentId) : undefined,
     }),
     /**
      * The line counts for rows the listing has already handed over. Its own query because the
@@ -129,21 +120,13 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       label: "environment-data:pull-requests:list-stats",
       tag: WS_METHODS.pullRequestsListStats,
       staleTimeMs: 60_000,
-      refreshTrigger: ({ environmentId, input }) => {
-        const projectId = input.refs[0]?.projectId;
-        return refreshProject(
-          environmentId,
-          projectId !== undefined && input.refs.every((ref) => ref.projectId === projectId)
-            ? projectId
-            : undefined,
-        );
-      },
+      refreshTrigger: ({ environmentId }) => refreshEnvironment(environmentId),
     }),
     detail: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:detail",
       tag: WS_METHODS.pullRequestsDetail,
       staleTimeMs: 15_000,
-      refreshTrigger: ({ environmentId, input }) => refreshProject(environmentId, input.projectId),
+      refreshTrigger: ({ environmentId }) => refreshEnvironment(environmentId),
     }),
     activity,
     threadComments: createEnvironmentRpcCommand(runtime, {

@@ -9,7 +9,6 @@ import type {
   PullRequestListInput,
   PullRequestListResult,
   PullRequestListState,
-  PullRequestRefreshSubscriptionInput,
   SourceControlProviderKind,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
@@ -634,53 +633,12 @@ function PullRequestsRouteView() {
         .join("|"),
     [environmentQueries],
   );
-  const turnRefreshTargets = useMemo(() => {
-    const targets = environmentQueries.map(({ environmentId, projectIds }) => {
-      const projectId =
-        scopedProjectId !== undefined
-          ? scopedProjectId
-          : projectIds?.length === 1
-            ? projectIds[0]
-            : undefined;
-      return {
-        environmentId,
-        input: (projectId === undefined
-          ? {}
-          : { projectId }) satisfies PullRequestRefreshSubscriptionInput,
-      };
-    });
-    if (renderedPullRequestSurface === null || panelEnvironmentId === null) return targets;
-    const panelProjectId = renderedPullRequestSurface.projectId as ProjectId;
-    const panelCovered = targets.some(
-      (target) =>
-        target.environmentId === panelEnvironmentId &&
-        (target.input.projectId === undefined || target.input.projectId === panelProjectId),
-    );
-    return panelCovered
-      ? targets
-      : [
-          ...targets,
-          {
-            environmentId: panelEnvironmentId,
-            input: { projectId: panelProjectId },
-          },
-        ];
-  }, [environmentQueries, panelEnvironmentId, renderedPullRequestSurface, scopedProjectId]);
-  const turnRefreshes = usePullRequestTurnRefreshes(turnRefreshTargets);
+  const turnRefreshes = usePullRequestTurnRefreshes(
+    environmentQueries.map(({ environmentId }) => environmentId),
+  );
   const turnRefreshToken = turnRefreshes
-    .map(([environmentId, event]) => `${environmentId}:${event.projectId}:${event.revision}`)
+    .map(([environmentId, event]) => `${environmentId}:${event.revision}`)
     .join("|");
-  const panelTurnRefreshToken =
-    renderedPullRequestSurface === null || panelEnvironmentId === null
-      ? ""
-      : (turnRefreshes
-          .filter(
-            ([environmentId, event]) =>
-              environmentId === panelEnvironmentId &&
-              event.projectId === renderedPullRequestSurface.projectId,
-          )
-          .map(([environmentId, event]) => `${environmentId}:${event.projectId}:${event.revision}`)
-          .at(-1) ?? "");
   // Page size is view state, not a URL concern: a shared link should open the first page.
   const scopeKey = `${environmentKey}:${assignmentKey}:${search.state}:${search.involvement}:${scopedProjectId ?? ""}:${search.host ?? ""}:${search.draft ?? ""}:${search.review ?? ""}:${search.checks ?? ""}:${search.author ?? ""}:${search.labels?.join("\u0000") ?? ""}`;
   const filterKey = `${scopeKey}:${sentQuery}`;
@@ -1141,26 +1099,16 @@ function PullRequestsRouteView() {
   };
 
   const appliedTurnRefreshToken = useRef("");
-  const appliedPanelTurnRefreshToken = useRef("");
-  const refreshAfterTurn = useEffectEvent((refreshPanel: boolean) => {
-    refreshList();
-    baselineQuery.refresh();
-    facetQuery.refresh();
-    authoredQuery.refresh();
-    reviewingQuery.refresh();
-    if (refreshPanel) setDetailRefreshToken((token) => token + 1);
+  const refreshAfterTurn = useEffectEvent(() => {
+    if (sentCursors !== null) refreshList();
   });
   useEffect(() => {
     if (turnRefreshToken.length === 0 || appliedTurnRefreshToken.current === turnRefreshToken) {
       return;
     }
     appliedTurnRefreshToken.current = turnRefreshToken;
-    const refreshPanel =
-      panelTurnRefreshToken.length > 0 &&
-      appliedPanelTurnRefreshToken.current !== panelTurnRefreshToken;
-    appliedPanelTurnRefreshToken.current = panelTurnRefreshToken;
-    refreshAfterTurn(refreshPanel);
-  }, [panelTurnRefreshToken, turnRefreshToken]);
+    refreshAfterTurn();
+  }, [turnRefreshToken]);
 
   // The list goes stale the same way the detail does: somebody opens a pull request, a check
   // finishes, a branch is merged. So it reads again on the way back to the window, and once a

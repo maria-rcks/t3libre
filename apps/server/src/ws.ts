@@ -2050,14 +2050,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.pullRequestsInvalidate, pullRequests.invalidate(input), {
             "rpc.aggregate": "pull-requests",
           }),
-        [WS_METHODS.pullRequestsSubscribeRefreshes]: (input) =>
+        [WS_METHODS.pullRequestsSubscribeRefreshes]: () =>
           observeRpcStream(
             WS_METHODS.pullRequestsSubscribeRefreshes,
-            pullRequests.subscribeRefreshes.pipe(
-              Stream.filter(
-                (event) => input.projectId === undefined || event.projectId === input.projectId,
-              ),
-            ),
+            pullRequests.subscribeRefreshes,
             { "rpc.aggregate": "pull-requests" },
           ),
         [WS_METHODS.pullRequestsReviewerCandidates]: (input) =>

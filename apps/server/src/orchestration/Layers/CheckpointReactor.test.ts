@@ -295,7 +295,7 @@ describe("CheckpointReactor", () => {
     readonly providerSessionCwd?: string;
     readonly providerName?: ProviderDriverKind;
     readonly gitStatusRefreshCalls?: Array<string>;
-    readonly pullRequestRefreshCalls?: Array<ProjectId>;
+    readonly pullRequestRefreshCalls?: Array<number>;
   }) {
     const cwd = createGitRepository();
     tempDirs.push(cwd);
@@ -352,10 +352,9 @@ describe("CheckpointReactor", () => {
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(
         Layer.mock(PullRequestService)({
-          refreshAfterTurn: (projectId) =>
-            Effect.sync(() => {
-              options?.pullRequestRefreshCalls?.push(projectId);
-            }),
+          refreshAfterTurn: Effect.sync(() => {
+            options?.pullRequestRefreshCalls?.push(1);
+          }),
         }),
       ),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
@@ -550,141 +549,60 @@ describe("CheckpointReactor", () => {
 
   effectIt.effect("refreshes pull request data once when a running turn terminates", () =>
     Effect.gen(function* () {
-      const pullRequestRefreshCalls: ProjectId[] = [];
+      const pullRequestRefreshCalls: number[] = [];
       const harness = yield* Effect.promise(() =>
-        createHarness({
-          seedFilesystemCheckpoints: false,
-          pullRequestRefreshCalls,
-        }),
+        createHarness({ seedFilesystemCheckpoints: false, pullRequestRefreshCalls }),
       );
       const threadId = ThreadId.make("thread-1");
-      const turnId = asTurnId("turn-refresh-prs");
-
-      yield* harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-pr-refresh-running"),
-        threadId,
-        session: {
+      const setSession = (
+        command: string,
+        status: "running" | "ready",
+        activeTurnId: TurnId | null,
+      ) =>
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make(`cmd-pr-refresh-${command}`),
           threadId,
-          status: "running",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: turnId,
-          lastError: null,
-          updatedAt: "2026-01-01T00:00:01.000Z",
-        },
+          session: {
+            threadId,
+            status,
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId,
+            lastError: null,
+            updatedAt: `2026-01-01T00:00:0${command === "running" ? 1 : 2}.000Z`,
+          },
+          createdAt: `2026-01-01T00:00:0${command === "running" ? 1 : 2}.000Z`,
+        });
+
+      yield* setSession("running", "running", asTurnId("turn-refresh-prs"));
+      yield* setSession("superseding", "running", asTurnId("turn-refresh-prs-2"));
+      yield* harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.make("cmd-pr-refresh-placeholder"),
+        threadId,
+        turnId: asTurnId("turn-refresh-prs"),
+        completedAt: "2026-01-01T00:00:01.000Z",
+        checkpointRef: checkpointRefForThreadTurn(threadId, 1),
+        checkpointTurnCount: 1,
+        status: "missing",
+        files: [],
         createdAt: "2026-01-01T00:00:01.000Z",
       });
       yield* Effect.promise(() => harness.drain());
       expect(pullRequestRefreshCalls).toEqual([]);
 
-      yield* harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-pr-refresh-ready"),
-        threadId,
-        session: {
-          threadId,
-          status: "ready",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: "2026-01-01T00:00:02.000Z",
-        },
-        createdAt: "2026-01-01T00:00:02.000Z",
-      });
-      yield* harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-pr-refresh-ready-again"),
-        threadId,
-        session: {
-          threadId,
-          status: "ready",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: "2026-01-01T00:00:03.000Z",
-        },
-        createdAt: "2026-01-01T00:00:03.000Z",
-      });
-      yield* harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-pr-refresh-next-running"),
-        threadId,
-        session: {
-          threadId,
-          status: "running",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: asTurnId("turn-after-refresh"),
-          lastError: null,
-          updatedAt: "2026-01-01T00:00:04.000Z",
-        },
-        createdAt: "2026-01-01T00:00:04.000Z",
-      });
+      yield* setSession("ready", "ready", null);
+      yield* setSession("ready-again", "ready", null);
       yield* Effect.promise(() => harness.drain());
 
-      expect(pullRequestRefreshCalls).toEqual([asProjectId("project-1")]);
-
-      yield* harness.engine.dispatch({
-        type: "thread.turn.diff.complete",
-        commandId: CommandId.make("cmd-pr-refresh-placeholder"),
-        threadId,
-        turnId: asTurnId("turn-with-missed-start"),
-        completedAt: "2026-01-01T00:00:05.000Z",
-        checkpointRef: checkpointRefForThreadTurn(threadId, 2),
-        checkpointTurnCount: 2,
-        status: "missing",
-        files: [],
-        createdAt: "2026-01-01T00:00:05.000Z",
-      });
-      yield* Effect.promise(() => harness.drain());
-      expect(pullRequestRefreshCalls).toEqual([asProjectId("project-1")]);
-
-      yield* harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-pr-refresh-next-ready"),
-        threadId,
-        session: {
-          threadId,
-          status: "ready",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: "2026-01-01T00:00:06.000Z",
-        },
-        createdAt: "2026-01-01T00:00:06.000Z",
-      });
-      yield* Effect.promise(() => harness.drain());
-      expect(pullRequestRefreshCalls).toEqual([asProjectId("project-1"), asProjectId("project-1")]);
-
-      yield* harness.engine.dispatch({
-        type: "thread.turn.diff.complete",
-        commandId: CommandId.make("cmd-pr-refresh-missed-start"),
-        threadId,
-        turnId: asTurnId("turn-with-missed-start"),
-        completedAt: "2026-01-01T00:00:07.000Z",
-        checkpointRef: checkpointRefForThreadTurn(threadId, 2),
-        checkpointTurnCount: 2,
-        status: "ready",
-        files: [],
-        createdAt: "2026-01-01T00:00:07.000Z",
-      });
-      yield* Effect.promise(() => harness.drain());
-
-      expect(pullRequestRefreshCalls).toEqual([
-        asProjectId("project-1"),
-        asProjectId("project-1"),
-        asProjectId("project-1"),
-      ]);
+      expect(pullRequestRefreshCalls).toEqual([1]);
     }),
   );
 
   effectIt.effect("refreshes pull request data from a completion without session metadata", () =>
     Effect.gen(function* () {
-      const pullRequestRefreshCalls: ProjectId[] = [];
+      const pullRequestRefreshCalls: number[] = [];
       const harness = yield* Effect.promise(() =>
         createHarness({
           seedFilesystemCheckpoints: false,
@@ -707,7 +625,7 @@ describe("CheckpointReactor", () => {
       });
       yield* Effect.promise(() => harness.drain());
 
-      expect(pullRequestRefreshCalls).toEqual([asProjectId("project-1")]);
+      expect(pullRequestRefreshCalls).toEqual([1]);
     }),
   );
 

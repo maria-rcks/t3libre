@@ -17,7 +17,6 @@ import {
   pullRequestProviderRequirement,
   resolvePullRequestAuthorFilter,
   type OrchestrationProjectShell,
-  type ProjectId,
   type PullRequestAction,
   type PullRequestActionInput,
   type PullRequestActivity,
@@ -151,7 +150,7 @@ export class PullRequestService extends Context.Service<
       Scope.Scope
     >;
     readonly subscribeRefreshes: Stream.Stream<PullRequestRefreshEvent>;
-    readonly refreshAfterTurn: (projectId: ProjectId) => Effect.Effect<void>;
+    readonly refreshAfterTurn: Effect.Effect<void>;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
     readonly activity: (
       input: PullRequestRef,
@@ -535,7 +534,7 @@ export function repositoryIdentityOf(project: OrchestrationProjectShell): string
 
 export const make = Effect.gen(function* () {
   const mergedPullRequests = yield* PubSub.sliding<PullRequestMergeEvent>(64);
-  const pullRequestRefreshes = yield* PubSub.unbounded<PullRequestRefreshEvent>();
+  const pullRequestRefreshes = yield* PubSub.sliding<PullRequestRefreshEvent>(1);
   const registry = yield* PullRequestProviderRegistry;
   const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
@@ -2128,15 +2127,12 @@ export const make = Effect.gen(function* () {
   // scope re-entering `refEpochs` after eviction can never mint a key an old entry still has.
   let epochCounter = 0;
   let listingsEpoch = 0;
-  let allProjectsRefreshEpoch = 0;
-  const projectEpochs = new Map<ProjectId, number>();
-  const PROJECT_EPOCH_CAPACITY = 2_048;
+  let turnRefreshEpoch = 0;
   const refEpochs = new Map<string, number>();
   const REF_EPOCH_CAPACITY = 2_048;
   const refScope = (ref: PullRequestRef) => `${ref.projectId} ${ref.repository} ${ref.number}`;
-  const projectEpoch = (projectId: ProjectId) => projectEpochs.get(projectId) ?? 0;
   const refEpoch = (ref: PullRequestRef) =>
-    Math.max(projectEpoch(ref.projectId), refEpochs.get(refScope(ref)) ?? 0);
+    Math.max(turnRefreshEpoch, refEpochs.get(refScope(ref)) ?? 0);
   const refCacheKey = (ref: PullRequestRef) =>
     JSON.stringify([refEpoch(ref), ref.projectId, ref.repository, ref.number]);
   const bumpRefEpoch = (ref: PullRequestRef) => {
@@ -2238,15 +2234,9 @@ export const make = Effect.gen(function* () {
     },
   );
   const list: PullRequestService["Service"]["list"] = (input) => {
-    const scopedRefreshEpoch =
-      input.projectId !== undefined
-        ? projectEpoch(input.projectId)
-        : input.projectIds !== undefined
-          ? Math.max(0, ...input.projectIds.map(projectEpoch))
-          : allProjectsRefreshEpoch;
     const key = JSON.stringify([
       listingsEpoch,
-      scopedRefreshEpoch,
+      turnRefreshEpoch,
       input.state,
       input.involvement ?? null,
       // Positional so two identical filter sets key alike however their record was assembled.
@@ -2365,7 +2355,7 @@ export const make = Effect.gen(function* () {
   );
   const diff: PullRequestService["Service"]["diff"] = (input) => {
     const key = JSON.stringify([
-      input.commit === undefined ? refEpoch(input) : 0,
+      refEpoch(input),
       input.projectId,
       input.repository,
       input.number,
@@ -2397,10 +2387,9 @@ export const make = Effect.gen(function* () {
   // refresh that forgets the listing forgets its decorations with it.
   const listStats: PullRequestService["Service"]["listStats"] = (input) => {
     if (input.refs.length === 0) return Effect.succeed({ stats: [] });
-    const scopedRefreshEpoch = Math.max(0, ...input.refs.map((ref) => projectEpoch(ref.projectId)));
     const key = JSON.stringify([
       listingsEpoch,
-      scopedRefreshEpoch,
+      turnRefreshEpoch,
       input.refs
         .map((ref) => [ref.projectId, ref.repository, ref.number] as const)
         .toSorted((left, right) =>
@@ -2421,21 +2410,12 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.andThen(Cache.invalidateAll(viewerFlights)));
   };
 
-  const refreshAfterTurn: PullRequestService["Service"]["refreshAfterTurn"] = Effect.fn(
-    "PullRequestService.refreshAfterTurn",
-  )(function* (projectId) {
-    const revision = ++epochCounter;
-    projectEpochs.delete(projectId);
-    if (projectEpochs.size >= PROJECT_EPOCH_CAPACITY) {
-      const oldest = projectEpochs.keys().next().value;
-      if (oldest !== undefined) {
-        projectEpochs.delete(oldest);
-      }
-    }
-    projectEpochs.set(projectId, revision);
-    allProjectsRefreshEpoch = revision;
-    yield* PubSub.publish(pullRequestRefreshes, { projectId, revision });
-  });
+  const refreshAfterTurn: PullRequestService["Service"]["refreshAfterTurn"] = Effect.gen(
+    function* () {
+      turnRefreshEpoch = ++epochCounter;
+      yield* PubSub.publish(pullRequestRefreshes, { revision: turnRefreshEpoch });
+    },
+  ).pipe(Effect.withSpan("PullRequestService.refreshAfterTurn"));
 
   // A mutation's own client re-reads right after it, and every other client's next read must
   // see the action too — so a write forgets the change request it touched and the listings its

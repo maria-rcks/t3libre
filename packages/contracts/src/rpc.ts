@@ -107,7 +107,6 @@ import {
   PullRequestReactionInput,
   PullRequestRef,
   PullRequestRefreshEvent,
-  PullRequestRefreshSubscriptionInput,
   PullRequestSummary,
   PullRequestReviewerCandidateList,
   PullRequestReviewerRequestInput,
@@ -709,7 +708,7 @@ export const WsPullRequestsInvalidateRpc = Rpc.make(WS_METHODS.pullRequestsInval
 export const WsPullRequestsSubscribeRefreshesRpc = Rpc.make(
   WS_METHODS.pullRequestsSubscribeRefreshes,
   {
-    payload: PullRequestRefreshSubscriptionInput,
+    payload: Schema.Struct({}),
     success: PullRequestRefreshEvent,
     error: EnvironmentAuthorizationError,
     stream: true,

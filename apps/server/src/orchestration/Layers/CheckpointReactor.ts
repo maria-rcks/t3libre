@@ -90,24 +90,7 @@ const make = Effect.gen(function* () {
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const pullRequests = yield* PullRequestService.PullRequestService;
-  const refreshedTurnKeys = new Set<string>();
-  const activeTurnByThread = new Map<ThreadId, TurnId>();
-  const REFRESHED_TURN_CAPACITY = 2_048;
-
-  const refreshPullRequestsOnce = Effect.fn("refreshPullRequestsOnce")(function* (
-    projectId: ProjectId,
-    threadId: ThreadId,
-    turnId: TurnId,
-  ) {
-    const key = `${threadId}:${turnId}`;
-    if (refreshedTurnKeys.has(key)) return;
-    if (refreshedTurnKeys.size >= REFRESHED_TURN_CAPACITY) {
-      const oldest = refreshedTurnKeys.values().next().value;
-      if (oldest !== undefined) refreshedTurnKeys.delete(oldest);
-    }
-    refreshedTurnKeys.add(key);
-    yield* pullRequests.refreshAfterTurn(projectId);
-  });
+  const activeTurnThreads = new Set<ThreadId>();
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -846,21 +829,24 @@ const make = Effect.gen(function* () {
         event.payload.session.status === "running"
       ) {
         if (event.payload.session.activeTurnId !== null) {
-          activeTurnByThread.set(event.payload.threadId, event.payload.session.activeTurnId);
+          activeTurnThreads.add(event.payload.threadId);
         }
         return;
       }
-      const turnId = activeTurnByThread.get(event.payload.threadId);
-      activeTurnByThread.delete(event.payload.threadId);
-      if (turnId === undefined) return;
-      const thread = yield* resolveThreadDetail(event.payload.threadId);
-      if (thread !== undefined) {
-        yield* refreshPullRequestsOnce(thread.projectId, thread.id, turnId);
-      }
+      if (!activeTurnThreads.delete(event.payload.threadId)) return;
+      yield* pullRequests.refreshAfterTurn;
+      return;
+    }
+
+    if (event.type === "thread.deleted") {
+      activeTurnThreads.delete(event.payload.threadId);
       return;
     }
 
     if (event.type === "thread.turn-start-requested" || event.type === "thread.message-sent") {
+      if (event.type === "thread.turn-start-requested") {
+        activeTurnThreads.add(event.payload.threadId);
+      }
       yield* ensurePreTurnBaselineFromDomainTurnStart(event);
       return;
     }
@@ -901,12 +887,9 @@ const make = Effect.gen(function* () {
       );
       if (event.payload.status === "missing") return;
       const thread = yield* resolveThreadDetail(event.payload.threadId);
-      if (
-        thread !== undefined &&
-        (thread.session === null ||
-          (thread.session.status !== "starting" && thread.session.status !== "running"))
-      ) {
-        yield* refreshPullRequestsOnce(thread.projectId, thread.id, event.payload.turnId);
+      if (thread?.session === null) {
+        activeTurnThreads.delete(event.payload.threadId);
+        yield* pullRequests.refreshAfterTurn;
       }
       return;
     }
@@ -916,6 +899,7 @@ const make = Effect.gen(function* () {
     event: ProviderRuntimeEvent,
   ) {
     if (event.type === "turn.started") {
+      activeTurnThreads.add(event.threadId);
       yield* ensurePreTurnBaselineFromTurnStart(event);
       return;
     }
@@ -971,6 +955,7 @@ const make = Effect.gen(function* () {
           event.type !== "thread.turn-start-requested" &&
           event.type !== "thread.message-sent" &&
           event.type !== "thread.session-set" &&
+          event.type !== "thread.deleted" &&
           event.type !== "thread.checkpoint-revert-requested" &&
           event.type !== "thread.turn-diff-completed"
         ) {
