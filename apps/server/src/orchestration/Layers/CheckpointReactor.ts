@@ -91,6 +91,7 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const startedTurns = new Map<ThreadId, TurnId>();
+  const pending = new Set<ThreadId>();
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -857,6 +858,7 @@ const make = Effect.gen(function* () {
 
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (event: OrchestrationEvent) {
     if (event.type === "thread.turn-start-requested" || event.type === "thread.message-sent") {
+      if (event.type === "thread.turn-start-requested") pending.add(event.payload.threadId);
       yield* ensurePreTurnBaselineFromDomainTurnStart(event);
       return;
     }
@@ -902,6 +904,7 @@ const make = Effect.gen(function* () {
   ) {
     if (event.type === "session.exited") {
       startedTurns.delete(event.threadId);
+      pending.delete(event.threadId);
       return;
     }
 
@@ -910,8 +913,11 @@ const make = Effect.gen(function* () {
       const activeTurnId = (yield* providerService.listSessions()).find((session) =>
         sameId(session.threadId, event.threadId),
       )?.activeTurnId;
-      if (turnId !== null && (!startedTurns.has(event.threadId) || sameId(activeTurnId, turnId)))
+      const mayReplace = pending.has(event.threadId) && sameId(activeTurnId, turnId);
+      if (turnId !== null && (!startedTurns.has(event.threadId) || mayReplace)) {
         startedTurns.set(event.threadId, turnId);
+        pending.delete(event.threadId);
+      }
       yield* ensurePreTurnBaselineFromTurnStart(event);
       return;
     }
@@ -932,6 +938,7 @@ const make = Effect.gen(function* () {
           sameId(thread.session?.activeTurnId, turnId) ||
           (startedTurnId === undefined && !thread.session?.activeTurnId))
       ) {
+        pending.delete(event.threadId);
         yield* pullRequests.refreshAfterTurn;
       }
       if (event.type === "turn.aborted") return;

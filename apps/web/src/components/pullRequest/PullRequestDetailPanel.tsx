@@ -701,10 +701,10 @@ export function PullRequestDetailPanel({
       state: resolvedCoreDetail.state,
     });
   }, [onStateChange, resolvedCoreDetail]);
-  // Core detail re-reads while this stays open, and the same tick reloads a mounted code diff.
-  // Activity is heavier, so the revision effect above reads it only after this same pull request
-  // reports a change. Keyed by the pull request rather than by the panel, because this one panel
-  // shows a different pull request every time it is opened.
+  // Core detail and a mounted diff re-read while this stays open. Activity is heavier, so the
+  // revision effect above reads it only after this same pull request reports a change. Keyed by
+  // the pull request rather than by the panel, because this one panel shows a different pull
+  // request every time it is opened.
   useLiveRefresh(
     () => {
       detailQuery.refresh();

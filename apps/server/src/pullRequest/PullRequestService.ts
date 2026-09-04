@@ -2401,12 +2401,10 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.andThen(Cache.invalidateAll(viewerFlights)));
   };
 
-  const refreshAfterTurn: PullRequestService["Service"]["refreshAfterTurn"] = Effect.gen(
-    function* () {
-      turnRefreshEpoch = listingsEpoch = ++epochCounter;
-      yield* PubSub.publish(pullRequestRefreshes, turnRefreshEpoch);
-    },
-  ).pipe(Effect.withSpan("PullRequestService.refreshAfterTurn"));
+  const refreshAfterTurn: PullRequestService["Service"]["refreshAfterTurn"] = Effect.suspend(() => {
+    turnRefreshEpoch = listingsEpoch = ++epochCounter;
+    return PubSub.publish(pullRequestRefreshes, turnRefreshEpoch).pipe(Effect.asVoid);
+  });
 
   // A mutation's own client re-reads right after it, and every other client's next read must
   // see the action too — so a write forgets the change request it touched and the listings its

@@ -569,11 +569,10 @@ export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
         }),
         Atom.setIdleTTL(idleTtlMs),
       );
-    const intervalQuery = (
+    const intervalQuery =
       options.refreshIntervalMs === undefined
         ? queryAtom
-        : queryAtom.pipe(Atom.withRefresh(options.refreshIntervalMs))
-    ).pipe(Atom.setIdleTTL(idleTtlMs));
+        : queryAtom.pipe(Atom.withRefresh(options.refreshIntervalMs));
     const refreshTrigger = options.refreshTrigger?.(target);
     return (
       refreshTrigger === undefined

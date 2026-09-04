@@ -36,7 +36,6 @@ export class EnvironmentHttpConnectionNotReadyError extends Data.TaggedError(
 
 export const LINKED_PULL_REQUEST_IDLE_TTL_MS = 5_000;
 
-/** One lightweight server signal shared by every mounted pull request read in an environment. */
 function createPullRequestRefreshAtomFamily<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
@@ -87,7 +86,6 @@ export function createPullRequestEnvironmentAtoms<R, E>(
 ) {
   const refreshes = createPullRequestRefreshAtomFamily(runtime);
   const commandScheduler = createAtomCommandScheduler();
-  const refreshEnvironment = (environmentId: EnvironmentId) => refreshes({ environmentId });
   const serialPerEnvironment = {
     mode: "serial",
     key: ({ environmentId }: { readonly environmentId: string }) => environmentId,
@@ -96,7 +94,7 @@ export function createPullRequestEnvironmentAtoms<R, E>(
     label: "environment-data:pull-requests:activity",
     tag: WS_METHODS.pullRequestsActivity,
     staleTimeMs: 15_000,
-    refreshTrigger: ({ environmentId }) => refreshEnvironment(environmentId),
+    refreshTrigger: ({ environmentId }) => refreshes({ environmentId }),
   });
   return {
     refreshes,
@@ -105,7 +103,7 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       tag: WS_METHODS.pullRequestsList,
       staleTimeMs: 30_000,
       refreshTrigger: ({ environmentId, input }) =>
-        input.cursors === undefined ? refreshEnvironment(environmentId) : undefined,
+        input.cursors === undefined ? refreshes({ environmentId }) : undefined,
     }),
     /**
      * The line counts for rows the listing has already handed over. Its own query because the
@@ -117,13 +115,13 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       label: "environment-data:pull-requests:list-stats",
       tag: WS_METHODS.pullRequestsListStats,
       staleTimeMs: 60_000,
-      refreshTrigger: ({ environmentId }) => refreshEnvironment(environmentId),
+      refreshTrigger: ({ environmentId }) => refreshes({ environmentId }),
     }),
     detail: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:detail",
       tag: WS_METHODS.pullRequestsDetail,
       staleTimeMs: 15_000,
-      refreshTrigger: ({ environmentId }) => refreshEnvironment(environmentId),
+      refreshTrigger: ({ environmentId }) => refreshes({ environmentId }),
     }),
     activity,
     threadComments: createEnvironmentRpcCommand(runtime, {
