@@ -296,7 +296,6 @@ describe("CheckpointReactor", () => {
     readonly providerSessionCwd?: string;
     readonly providerName?: ProviderDriverKind;
     readonly gitStatusRefreshCalls?: Array<string>;
-    readonly pullRequestCacheRefreshCalls?: Array<number>;
     readonly pullRequestRefreshCalls?: Array<string>;
   }) {
     const cwd = createGitRepository();
@@ -327,6 +326,7 @@ describe("CheckpointReactor", () => {
     const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
       prefix: "t3-checkpoint-reactor-test-",
     });
+    const pullRequestRefreshes: number[] = [];
     const vcsStatusBroadcasterLayer = Layer.succeed(VcsStatusBroadcaster, {
       getStatus: () => Effect.die("getStatus should not be called in this test"),
       refreshLocalStatus: (cwd: string) =>
@@ -359,9 +359,7 @@ describe("CheckpointReactor", () => {
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(
         Layer.mock(PullRequestService)({
-          refreshAfterTurn: Effect.sync(() => {
-            options?.pullRequestCacheRefreshCalls?.push(1);
-          }),
+          refreshAfterTurn: Effect.sync(() => void pullRequestRefreshes.push(1)),
         }),
       ),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
@@ -475,15 +473,12 @@ describe("CheckpointReactor", () => {
       provider,
       cwd,
       drain,
+      pullRequestRefreshes,
     };
   }
 
   it("captures pre-turn baseline on turn.started and post-turn checkpoint on turn.completed", async () => {
-    const pullRequestCacheRefreshCalls: number[] = [];
-    const harness = await createHarness({
-      seedFilesystemCheckpoints: false,
-      pullRequestCacheRefreshCalls,
-    });
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
     const createdAt = "2026-01-01T00:00:00.000Z";
 
     await Effect.runPromise(
@@ -556,7 +551,7 @@ describe("CheckpointReactor", () => {
         "README.md",
       ),
     ).toBe("v2\n");
-    expect(pullRequestCacheRefreshCalls).toEqual([1]);
+    expect(harness.pullRequestRefreshes).toEqual([1]);
   });
 
   it("refreshes local git status state on turn completion using the session cwd", async () => {
@@ -738,13 +733,11 @@ describe("CheckpointReactor", () => {
 
   it("ignores auxiliary thread turn completion while primary turn is active", async () => {
     const pullRequestRefreshCalls: string[] = [];
-    const pullRequestCacheRefreshCalls: number[] = [];
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
       threadBranch: "t3code/feature",
       localStatusRefName: "t3code/feature",
       pullRequestRefreshCalls,
-      pullRequestCacheRefreshCalls,
     });
     const createdAt = "2026-01-01T00:00:00.000Z";
 
@@ -783,6 +776,14 @@ describe("CheckpointReactor", () => {
     NodeFS.writeFileSync(NodePath.join(harness.cwd, "README.md"), "v2\n", "utf8");
 
     harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-aux"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("turn-aux"),
+    });
+    harness.provider.emit({
       type: "turn.completed",
       eventId: EventId.make("evt-turn-completed-aux"),
       provider: ProviderDriverKind.make("codex"),
@@ -798,7 +799,7 @@ describe("CheckpointReactor", () => {
     const midThread = midReadModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(midThread?.checkpoints).toHaveLength(0);
     expect(pullRequestRefreshCalls).toEqual([]);
-    expect(pullRequestCacheRefreshCalls).toEqual([]);
+    expect(harness.pullRequestRefreshes).toEqual([]);
 
     harness.provider.emit({
       type: "turn.completed",
@@ -818,7 +819,7 @@ describe("CheckpointReactor", () => {
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1);
     await harness.drain();
     expect(pullRequestRefreshCalls).toEqual([harness.cwd]);
-    expect(pullRequestCacheRefreshCalls).toEqual([1]);
+    expect(harness.pullRequestRefreshes).toEqual([1]);
   });
 
   it("captures pre-turn and completion checkpoints for claude runtime events", async () => {

@@ -907,7 +907,8 @@ const make = Effect.gen(function* () {
 
     if (event.type === "turn.started") {
       const turnId = toTurnId(event.turnId);
-      if (turnId !== null) startedTurns.set(event.threadId, turnId);
+      if (turnId !== null && !startedTurns.has(event.threadId))
+        startedTurns.set(event.threadId, turnId);
       yield* ensurePreTurnBaselineFromTurnStart(event);
       return;
     }
