@@ -24,8 +24,7 @@ export async function resolveForwardedBrowserTarget(
     target.kind === "url"
       ? new URL(restoreForwardedBrowserUrl(environmentId, normalizePreviewUrl(target.url)))
       : new URL(
-          target.path?.startsWith("/") ? target.path : `/${target.path ?? ""}`,
-          `${target.protocol ?? "http"}://localhost:${target.port}`,
+          `${target.protocol ?? "http"}://localhost:${target.port}${target.path?.startsWith("/") ? target.path : `/${target.path ?? ""}`}`,
         );
   const environmentPort =
     target.kind === "environment-port" ||
@@ -58,7 +57,7 @@ export async function resolveForwardedBrowserTarget(
     socketUrl.toString(),
   );
   const requestedOrigin = requested.origin;
-  requested.hostname = "127.0.0.1";
+  if (requested.hostname !== "localhost") requested.hostname = "127.0.0.1";
   requested.port = String(localPort);
   rememberForwardedOrigin(environmentId, requested.origin, requestedOrigin);
   return requested.toString();
