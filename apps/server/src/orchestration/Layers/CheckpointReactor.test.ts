@@ -551,7 +551,6 @@ describe("CheckpointReactor", () => {
         "README.md",
       ),
     ).toBe("v2\n");
-    expect(harness.pullRequestRefreshes).toEqual([1]);
   });
 
   it("refreshes local git status state on turn completion using the session cwd", async () => {

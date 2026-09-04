@@ -90,7 +90,7 @@ const make = Effect.gen(function* () {
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const pullRequests = yield* PullRequestService.PullRequestService;
-  const startedTurns = new Map<ThreadId, TurnId>();
+  const turns = new Map<ThreadId, TurnId | null>();
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -857,6 +857,7 @@ const make = Effect.gen(function* () {
 
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (event: OrchestrationEvent) {
     if (event.type === "thread.turn-start-requested" || event.type === "thread.message-sent") {
+      if (event.type === "thread.turn-start-requested") turns.set(event.payload.threadId, null);
       yield* ensurePreTurnBaselineFromDomainTurnStart(event);
       return;
     }
@@ -901,14 +902,13 @@ const make = Effect.gen(function* () {
     event: ProviderRuntimeEvent,
   ) {
     if (event.type === "session.exited") {
-      startedTurns.delete(event.threadId);
+      turns.delete(event.threadId);
       return;
     }
 
     if (event.type === "turn.started") {
       const turnId = toTurnId(event.turnId);
-      if (turnId !== null && !startedTurns.has(event.threadId))
-        startedTurns.set(event.threadId, turnId);
+      if (turnId !== null && !turns.get(event.threadId)) turns.set(event.threadId, turnId);
       yield* ensurePreTurnBaselineFromTurnStart(event);
       return;
     }
@@ -916,9 +916,9 @@ const make = Effect.gen(function* () {
     if (event.type === "turn.completed" || event.type === "turn.aborted") {
       const turnId = toTurnId(event.turnId);
       const thread = yield* resolveThreadDetail(event.threadId);
-      const startedTurnId = startedTurns.get(event.threadId);
+      const startedTurnId = turns.get(event.threadId);
       const isTrackedTurn = sameId(startedTurnId, turnId);
-      if (isTrackedTurn) startedTurns.delete(event.threadId);
+      if (isTrackedTurn) turns.delete(event.threadId);
       if (event.type === "turn.completed") {
         yield* refreshLocalGitStatusFromTurnCompletion(event);
       }
