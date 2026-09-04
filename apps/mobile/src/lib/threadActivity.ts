@@ -330,17 +330,15 @@ function resolvePendingUserInputAnswer(
   return selectedOptionValues[0] ?? null;
 }
 
-/** Codex children settle via task.updated (idle/failed/interrupted), never
- * task.completed — these rows are mobile's only terminal signal for them. */
+/** Some providers settle agents through task.updated instead of task.completed. */
 const MOBILE_TERMINAL_UPDATE_STATUSES: ReadonlySet<string> = new Set([
-  "idle",
   "completed",
   "failed",
   "cancelled",
   "interrupted",
 ]);
 
-function isTerminalBypassUpdate(activity: OrchestrationThreadActivity): boolean {
+function isTerminalTaskUpdate(activity: OrchestrationThreadActivity): boolean {
   if (activity.kind !== "task.updated") {
     return false;
   }
@@ -349,9 +347,9 @@ function isTerminalBypassUpdate(activity: OrchestrationThreadActivity): boolean 
       ? (activity.payload as Record<string, unknown>)
       : null;
   return (
-    payload?.timelineBypass === true &&
-    typeof payload.status === "string" &&
-    MOBILE_TERMINAL_UPDATE_STATUSES.has(payload.status)
+    typeof payload?.status === "string" &&
+    (MOBILE_TERMINAL_UPDATE_STATUSES.has(payload.status) ||
+      (payload.timelineBypass === true && payload.status === "idle"))
   );
 }
 
@@ -360,8 +358,7 @@ function isTerminalBypassUpdate(activity: OrchestrationThreadActivity): boolean 
  * activity lives in the Agents sheet, not the work log. Terminal rows are
  * kept — with no Agents surface on mobile they are the terminal signal
  * (a surface that hides rows must keep its own terminal signal). That means
- * task.completed (Claude) AND terminal bypassed task.updated (Codex, whose
- * children never emit task.completed — review finding).
+ * task.completed and terminal task.updated, including Antigravity cancellation.
  */
 function isAgentInternalActivity(activity: OrchestrationThreadActivity): boolean {
   const payload =
@@ -371,7 +368,7 @@ function isAgentInternalActivity(activity: OrchestrationThreadActivity): boolean
   if (!payload) {
     return false;
   }
-  const isTerminalTaskRow = activity.kind === "task.completed" || isTerminalBypassUpdate(activity);
+  const isTerminalTaskRow = activity.kind === "task.completed" || isTerminalTaskUpdate(activity);
   if (payload.timelineBypass === true && !isTerminalTaskRow) {
     return true;
   }
@@ -396,8 +393,7 @@ function deriveWorkLogEntries(
     if (activity.tone !== "error" && isWorktreeSetupActivity(activity.kind)) continue;
     if (activity.kind === "tool.started") continue;
     if (activity.kind === "task.started") continue;
-    // Terminal bypassed updates pass: Codex children's only terminal signal.
-    if (activity.kind === "task.updated" && !isTerminalBypassUpdate(activity)) continue;
+    if (activity.kind === "task.updated" && !isTerminalTaskUpdate(activity)) continue;
     if (activity.kind === "tool.progress") continue;
     if (activity.kind === "context-window.updated") continue;
     if (activity.summary === "Checkpoint captured") continue;
@@ -441,9 +437,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
   const toolPresentation = extractToolActivityPresentation(payload);
-  // task.updated included: terminal bypassed updates (Codex children's only
-  // terminal signal) must carry task identity so they collapse per child
-  // instead of stacking anonymous "Task idle" rows.
+  // Terminal task updates carry identity so they replace each child's progress row.
   const isTaskActivity =
     activity.kind === "task.progress" ||
     activity.kind === "task.completed" ||
@@ -506,6 +500,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
         data,
       });
     if (detail && !repeatsCommand) entry.detail = detail;
+  }
+  if (isTaskActivity && typeof payload?.error === "string" && payload.error.trim()) {
+    entry.detail = payload.error;
   }
   if (viewedImagePath) {
     entry.viewedImagePath = viewedImagePath;
@@ -1108,6 +1105,8 @@ function extractWorkLogToolLifecycleStatus(
   payload: Record<string, unknown> | null,
 ): WorkLogToolLifecycleStatus | undefined {
   const status = payload?.status;
+  if (status === "pending" || status === "running" || status === "waiting") return "inProgress";
+  if (status === "cancelled" || status === "interrupted") return "stopped";
   if (
     status === "inProgress" ||
     status === "completed" ||
