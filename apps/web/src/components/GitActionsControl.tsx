@@ -42,7 +42,7 @@ import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "~/components/Icons";
 import { RadioGroup } from "~/components/ui/radio-group";
 import { Spinner } from "~/components/ui/spinner";
-import { Toggle, ToggleGroup } from "~/components/ui/toggle-group";
+import { toggleVariants } from "~/components/ui/toggle";
 import { cn } from "~/lib/utils";
 import {
   buildGitActionProgressStages,
@@ -831,11 +831,10 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                         >
                           Protocol
                         </span>
-                        <ToggleGroup
-                          variant="segmented"
-                          value={[publishProtocol]}
-                          onValueChange={(next) => {
-                            const protocol = next[0];
+                        <RadioGroup
+                          className="w-fit flex-row gap-0.5 rounded-lg bg-input/40 p-0.5"
+                          value={publishProtocol}
+                          onValueChange={(protocol) => {
                             if (protocol === "ssh" || protocol === "https") {
                               setPublishProtocol(protocol);
                             }
@@ -843,13 +842,20 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                           aria-labelledby="publish-protocol-label"
                           disabled={publishRepositoryAction.isPending}
                         >
-                          <Toggle value="ssh" onFocus={() => setPublishProtocol("ssh")}>
-                            SSH
-                          </Toggle>
-                          <Toggle value="https" onFocus={() => setPublishProtocol("https")}>
-                            HTTPS
-                          </Toggle>
-                        </ToggleGroup>
+                          {(["ssh", "https"] as const).map((protocol) => (
+                            <RadioPrimitive.Root
+                              key={protocol}
+                              value={protocol}
+                              data-pressed={publishProtocol === protocol ? "" : undefined}
+                              className={toggleVariants({
+                                variant: "segmented",
+                                size: "segmented",
+                              })}
+                            >
+                              {protocol.toUpperCase()}
+                            </RadioPrimitive.Root>
+                          ))}
+                        </RadioGroup>
                       </div>
                     </div>
                   ) : null}
