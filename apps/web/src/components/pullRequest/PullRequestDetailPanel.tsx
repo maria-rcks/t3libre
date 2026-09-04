@@ -55,11 +55,7 @@ import {
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useCopyToClipboard, writeTextToClipboard } from "~/hooks/useCopyToClipboard";
-import {
-  changeRequestActorProfileUrl,
-  changeRequestRepositoryUrl,
-  gitHubPullRequestBrowserUrl,
-} from "~/lib/openPullRequestLink";
+import { changeRequestRepositoryUrl, gitHubPullRequestBrowserUrl } from "~/lib/openPullRequestLink";
 import { usePreparePullRequestThreadAction } from "~/lib/sourceControlActions";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
@@ -145,7 +141,7 @@ import {
 } from "./pullRequestProjectAssignment.logic";
 import { PullRequestChecksPopover } from "./PullRequestChecksPopover";
 import {
-  PullRequestActorAvatar,
+  PullRequestActorLabel,
   PullRequestDiffStat,
   PullRequestMetaLine,
   PullRequestReviewOutcomeIcon,
@@ -308,58 +304,6 @@ const openNumberContextMenu = (
     position: { x: event.clientX, y: event.clientY },
   });
 };
-
-function PullRequestAuthorProfileLink({
-  actor,
-  profileUrl,
-  avatarOnly = false,
-  className,
-}: {
-  actor: PullRequestListEntry["author"];
-  profileUrl: string | null;
-  avatarOnly?: boolean;
-  className?: string;
-}) {
-  const login = actor?.login ?? "ghost";
-  const content = avatarOnly ? (
-    <PullRequestActorAvatar actor={actor} />
-  ) : (
-    <>
-      <PullRequestActorAvatar actor={actor} />
-      <span className="truncate">{login}</span>
-    </>
-  );
-  const triggerClassName = cn(
-    "flex min-w-0 items-center gap-1.5 rounded-sm outline-none",
-    profileUrl &&
-      "cursor-pointer underline-offset-2 hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-    avatarOnly && "shrink-0 rounded-full",
-    className,
-  );
-
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          profileUrl ? (
-            <a
-              href={profileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={`Open ${login}'s profile`}
-              className={triggerClassName}
-            />
-          ) : (
-            <span className={triggerClassName} {...(avatarOnly ? { "aria-label": login } : {})} />
-          )
-        }
-      >
-        {content}
-      </TooltipTrigger>
-      <TooltipPopup side="top">{profileUrl ? `Open ${login}'s profile` : login}</TooltipPopup>
-    </Tooltip>
-  );
-}
 
 function PullRequestCopyableCode({
   value,
@@ -712,9 +656,12 @@ export function PullRequestDetailPanel({
   }, [detail?.autoMergeMethod, pullRequestKey]);
   const repositoryUrl = detail === null ? null : changeRequestRepositoryUrl(detail.url);
   const authorProfileUrl =
-    detail === null
-      ? null
-      : changeRequestActorProfileUrl(detail.url, detail.provider, detail.author?.login);
+    detail?.provider === "github" &&
+    detail.author !== null &&
+    !detail.author.login.endsWith("[bot]") &&
+    repositoryUrl !== null
+      ? new URL(`/${encodeURIComponent(detail.author.login)}`, repositoryUrl).toString()
+      : null;
   const checkoutCommand = detail
     ? pullRequestCheckoutCommand(
         detail.provider,
@@ -1929,10 +1876,11 @@ export function PullRequestDetailPanel({
               <div className="col-span-2 min-w-0 px-4 pb-2 pt-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
                   <span className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">
-                    <PullRequestAuthorProfileLink
+                    <PullRequestActorLabel
                       actor={detail.author}
                       profileUrl={authorProfileUrl}
-                      avatarOnly
+                      className="shrink-0 rounded-full"
+                      labelClassName="sr-only"
                     />
                     <span className="shrink-0">{formatRelativeTimeLabel(detail.updatedAt)}</span>
                   </span>
@@ -2093,7 +2041,7 @@ export function PullRequestDetailPanel({
                 )}
                 <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
                   <PullRequestMetaLine className="min-w-0 whitespace-nowrap">
-                    <PullRequestAuthorProfileLink
+                    <PullRequestActorLabel
                       actor={detail.author}
                       profileUrl={authorProfileUrl}
                       className="font-medium"

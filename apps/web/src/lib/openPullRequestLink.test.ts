@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
-  changeRequestActorProfileUrl,
   changeRequestRepositoryUrl,
   findProjectForChangeRequest,
   gitHubPullRequestBrowserUrl,
   matchesLinkedPullRequestUrl,
   openPullRequestLink,
   parseChangeRequestUrl,
+  pullRequestCandidateUrlFromReferenceAutolink,
   PullRequestLinkOpenError,
   shouldOpenPullRequestExternally,
 } from "./openPullRequestLink";
@@ -131,35 +131,26 @@ describe("changeRequestRepositoryUrl", () => {
   });
 });
 
-describe("changeRequestActorProfileUrl", () => {
-  it("builds a GitHub profile on the pull request host", () => {
+describe("pullRequestCandidateUrlFromReferenceAutolink", () => {
+  it("turns GitHub's shared issue route into a pull request candidate", () => {
     expect(
-      changeRequestActorProfileUrl(
-        "https://github.com/pingdotgg/t3code/pull/42",
-        "github",
-        "Gigioxx",
+      pullRequestCandidateUrlFromReferenceAutolink(
+        "https://github.com/pingdotgg/t3code/issues/8600#issuecomment-1",
       ),
-    ).toBe("https://github.com/Gigioxx");
+    ).toBe("https://github.com/pingdotgg/t3code/pull/8600#issuecomment-1");
   });
 
-  it("encodes an account name and removes pull request URL state", () => {
+  it("does not reinterpret other issue hosts or malformed references", () => {
     expect(
-      changeRequestActorProfileUrl(
-        "https://github.example.test/team/t3code/pull/42?tab=checks#summary",
-        "github",
-        "release bot",
+      pullRequestCandidateUrlFromReferenceAutolink(
+        "https://gitlab.com/pingdotgg/t3code/-/issues/8600",
       ),
-    ).toBe("https://github.example.test/release%20bot");
-  });
-
-  it.each([
-    ["github", "https://github.com/dependabot/dependabot-core/pull/42", "dependabot[bot]"],
-    ["gitlab", "https://gitlab.example.test/team/t3code/-/merge_requests/42", "maria.dev"],
-    ["bitbucket", "https://bitbucket.org/pingdotgg/t3code/pull-requests/42", "theo"],
-    ["azure-devops", "https://dev.azure.com/acme/t3code/_git/t3code/pullrequest/42", "maria"],
-    ["unknown", "https://example.test/team/t3code/pull/42", "maria"],
-  ] as const)("does not guess a profile URL for %s", (provider, pullRequestUrl, login) => {
-    expect(changeRequestActorProfileUrl(pullRequestUrl, provider, login)).toBeNull();
+    ).toBeNull();
+    expect(
+      pullRequestCandidateUrlFromReferenceAutolink(
+        "https://github.com/pingdotgg/t3code/issues/not-a-number",
+      ),
+    ).toBeNull();
   });
 });
 
