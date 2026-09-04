@@ -174,8 +174,7 @@ On web and desktop, loading and syncing statuses fill the available banner width
 stash tab. Task progress appears above the composer, while the timeline's working timer shows
 only elapsed time.
 
-Loading, syncing, and server-update icons are static. The current live tool label pulses while work
-continues.
+Loading, syncing, and server-update icons are static. Live tool labels do not shimmer.
 
 On web and desktop, additional notices peek out above the attached banner. Hover over the peek
 to reveal them, or focus **Show other notices** with `Tab` and press `Enter` or `Space`. Press
