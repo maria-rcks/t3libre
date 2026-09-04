@@ -366,7 +366,13 @@ export function SettingsPageContainer({
   });
   const targetId = hash.replace(/^#/, "") || null;
   const clearTargetHash = useCallback(() => {
-    void navigate({ hash: "", replace: true, resetScroll: false, hashScrollIntoView: false });
+    void navigate({
+      hash: "",
+      replace: true,
+      resetScroll: false,
+      hashScrollIntoView: false,
+      state: { settingsTargetHighlight: true },
+    });
   }, [navigate]);
 
   return (
