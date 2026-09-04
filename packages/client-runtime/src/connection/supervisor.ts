@@ -580,10 +580,17 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
     let failureCount = 0;
     for (;;) {
+      const candidate = yield* establishScopedTracedConnection(
+        failureCount + 1,
+        generation,
+        null,
+        Option.none(),
+        false,
+      ).pipe(Effect.forkChild);
       const replacement = yield* Effect.raceAllFirst([
-        exitUnlessInterrupted(
-          establishScopedTracedConnection(failureCount + 1, generation, null, Option.none(), false),
-        ).pipe(Effect.map((exit): ReplacementPreparationEvent => ({ _tag: "Completed", exit }))),
+        Fiber.await(candidate).pipe(
+          Effect.map((exit): ReplacementPreparationEvent => ({ _tag: "Completed", exit })),
+        ),
         waitForAuthorizationDeadline(active.lease.prepared, 0).pipe(
           Effect.as<ReplacementPreparationEvent>({ _tag: "AuthorizationExpired" }),
         ),
@@ -592,6 +599,13 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         ),
       ]);
 
+      if (replacement._tag !== "Completed") {
+        yield* Fiber.interrupt(candidate);
+        const discarded = yield* Fiber.await(candidate);
+        if (Exit.isSuccess(discarded)) {
+          yield* Scope.close(discarded.value.scope, Exit.void).pipe(Effect.ignore);
+        }
+      }
       if (replacement._tag === "AuthorizationExpired") {
         return Option.none<ScopedConnection>();
       }
