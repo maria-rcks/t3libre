@@ -2136,8 +2136,9 @@ export const make = Effect.gen(function* () {
     Math.max(turnRefreshEpoch, refEpochs.get(refScope(ref)) ?? 0);
   const refCacheKey = (ref: PullRequestRef) =>
     JSON.stringify([refEpoch(ref), ref.projectId, ref.repository, ref.number]);
-  // Counts belong to a PR, not a filtered page. Keep them when the listing refreshes or
-  // changes filters, while reference epochs still discard them after mutations and turns.
+  // Counts belong to a PR, not a filtered page. Background reads and filter changes reuse
+  // them; explicit refreshes, mutations, and turns strand old and in-flight results.
+  const statsCacheKey = (key: string) => JSON.stringify([listingsEpoch, key]);
   const recentStats = new Map<
     string,
     { readonly at: number; readonly value: PullRequestDiffStat }
@@ -2189,13 +2190,15 @@ export const make = Effect.gen(function* () {
   const summary: PullRequestService["Service"]["summary"] = (input, options) => {
     const key = refCacheKey(input);
     const cached = Cache.get(summaryCache, key);
-    if (options?.recoverTransientFailure !== false) {
-      return lastGoodSummary.serveHeld(key, cached, "reuse");
-    }
     const held = lastGoodSummary.peek(key);
-    return held?.state === "merged"
+    return held !== undefined &&
+      (options?.recoverTransientFailure !== false || held.state === "merged")
       ? Effect.succeed(held)
-      : cached.pipe(Effect.tap((value) => lastGoodSummary.record(key, value)));
+      : cached.pipe(
+          Effect.tap((value) =>
+            shouldReplaceHeldSummary(key, value) ? lastGoodSummary.record(key, value) : Effect.void,
+          ),
+        );
   };
 
   // Keys serialize positionally and parse back in the lookup, so the cache is the only holder
@@ -2277,12 +2280,13 @@ export const make = Effect.gen(function* () {
 
   const detailCache = yield* Cache.makeWith(
     (key: string) => {
+      const statsKey = statsCacheKey(key);
       const [, projectId, repository, number] = JSON.parse(key) as [number, string, string, number];
       return detailUncached({ projectId, repository, number } as PullRequestRef).pipe(
         Effect.tap(
           Effect.fn("PullRequestService.recordDetailStats")(function* (value: PullRequestDetail) {
             recordStats(
-              key,
+              statsKey,
               {
                 projectId: value.projectId,
                 repository: value.repository,
@@ -2390,6 +2394,9 @@ export const make = Effect.gen(function* () {
       input.number,
       input.cursor ?? null,
       input.commit ?? null,
+      input.commit === undefined
+        ? (lastGoodSummary.peek(refCacheKey(input))?.updatedAt ?? null)
+        : null,
     ]);
     return staleDiff(key, Cache.get(diffCache, key));
   };
@@ -2428,7 +2435,7 @@ export const make = Effect.gen(function* () {
     const held: PullRequestDiffStat[] = [];
     const missing = new Map<string, PullRequestRef>();
     for (const ref of input.refs) {
-      const key = refCacheKey(ref);
+      const key = statsCacheKey(refCacheKey(ref));
       const cached = recentStats.get(key);
       if (cached !== undefined && now - cached.at < Duration.toMillis(LIST_STATS_CACHE_TTL)) {
         held.push(cached.value);
