@@ -12,7 +12,6 @@ import {
   type CanonicalItemType,
   type CanonicalRequestType,
   type CodexSettings,
-  EventId,
   ProviderDriverKind,
   type ProviderEvent,
   ProviderInstanceId,
