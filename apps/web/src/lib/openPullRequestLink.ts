@@ -197,6 +197,7 @@ export function changeRequestRepositoryUrl(targetUrl: string): string | null {
 export function changeRequestActorProfileUrl(
   targetUrl: string,
   provider: SourceControlProviderKind,
+  repository: string,
   login: string | null | undefined,
 ): string | null {
   if (
@@ -212,7 +213,17 @@ export function changeRequestActorProfileUrl(
   try {
     const url = new URL(targetUrl);
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-    url.pathname = `/${encodeURIComponent(account)}`;
+    const repositoryPath = repository
+      .split("/")
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+    const repositorySuffix = `/${repositoryPath}`;
+    const repositoryUrl = provider === "gitlab" ? changeRequestRepositoryUrl(targetUrl) : null;
+    const gitLabPrefix =
+      repositoryUrl !== null && new URL(repositoryUrl).pathname.endsWith(repositorySuffix)
+        ? new URL(repositoryUrl).pathname.slice(0, -repositorySuffix.length)
+        : "";
+    url.pathname = `${gitLabPrefix}/${encodeURIComponent(account)}`;
     url.search = "";
     url.hash = "";
     return url.toString();
