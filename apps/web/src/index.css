@@ -442,8 +442,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
     color: transparent;
     background-image:
-      linear-gradient(to right, transparent, var(--foreground), transparent),
-      linear-gradient(var(--secondary-label), var(--secondary-label));
+      linear-gradient(to right, transparent, var(--contrast-foreground), transparent),
+      linear-gradient(var(--contrast-secondary-label), var(--contrast-secondary-label));
     background-size:
       4.5rem 100%,
       100% 100%;
