@@ -12,21 +12,29 @@ import {
   deriveProjectGroupingOverrideKey,
   selectProjectGroupingSettings,
 } from "../../logicalProject";
-import type {
-  ContextMenuItem,
-  ModelSelection,
-  ProjectIconOverride,
-  ProviderDriverKind,
-  SidebarProjectGroupingMode,
-  T3ProjectFileScript,
-  ThreadEnvMode,
+import {
+  resolveEnvironmentMachineKind,
+  type ContextMenuItem,
+  type ModelSelection,
+  type ProjectIconOverride,
+  type ProviderDriverKind,
+  type SidebarProjectGroupingMode,
+  type T3ProjectFileScript,
+  type ThreadEnvMode,
 } from "@t3tools/contracts";
 import { resolveEnvModeLabel } from "../BranchToolbar.logic";
 import { createModelSelection } from "@t3tools/shared/model";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
 import * as Cause from "effect/Cause";
-import { ChevronDownIcon, CopyIcon, PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  CopyIcon,
+  Layers3Icon,
+  PlusIcon,
+  SettingsIcon,
+  Trash2Icon,
+} from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -77,6 +85,7 @@ import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
+import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { ProjectFavicon } from "../ProjectFavicon";
 import {
   EMPTY_PROJECT_SCRIPT_INPUT,
@@ -98,6 +107,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -120,6 +130,7 @@ import {
   ProjectFaviconPickerDialog,
 } from "./ProjectFaviconPickerDialog";
 import { projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
+import { providerSettingsTabClassName } from "./providerSettingsTabs";
 
 const ProjectIconPickerDialog = lazy(() =>
   import("./ProjectIconPickerDialog").then((module) => ({
@@ -304,6 +315,11 @@ export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
 function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const { environments } = useEnvironments();
+  const environmentById = useMemo(
+    () => new Map(environments.map((environment) => [environment.environmentId, environment])),
+    [environments],
+  );
   const representative =
     group.memberProjects.find(
       (member) => member.environmentId === group.environmentId && member.id === group.id,
@@ -506,10 +522,20 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   );
 
   // ----- checkout selection and scripts -----
-  const [selectedCheckoutKey, setSelectedCheckoutKey] = useState(representative.physicalProjectKey);
+  const hasMultipleCheckouts = group.memberProjects.length > 1;
+  const [selectedCheckoutKey, setSelectedCheckoutKey] = useState<string | null>(null);
   const selectedCheckout =
     group.memberProjects.find((member) => member.physicalProjectKey === selectedCheckoutKey) ??
     representative;
+  const allMachinesSelected = hasMultipleCheckouts && selectedCheckoutKey === null;
+  const checkoutLabelCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const member of group.memberProjects) {
+      const label = member.environmentLabel ?? "This machine";
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    return counts;
+  }, [group.memberProjects]);
   const selectedServerConfig = useAtomValue(
     serverEnvironment.configValueAtom(selectedCheckout.environmentId),
   );
@@ -809,7 +835,73 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   return (
     <>
       <SettingsPageContainer width="wide" className="gap-8">
-        <SettingsSection title="Project">
+        {hasMultipleCheckouts ? (
+          <ScrollArea
+            hideScrollbars
+            scrollFade
+            className="mx-3 -mb-5 h-11 min-w-0 rounded-none sm:mx-4"
+          >
+            <div
+              role="group"
+              aria-label="Project settings scope"
+              className="flex h-full w-max min-w-full px-1"
+            >
+              <button
+                type="button"
+                aria-pressed={allMachinesSelected}
+                className={`${providerSettingsTabClassName(allMachinesSelected)} gap-2 text-left`}
+                onClick={() => setSelectedCheckoutKey(null)}
+              >
+                <Layers3Icon className="size-3.5 shrink-0" aria-hidden />
+                All machines
+              </button>
+              {group.memberProjects.map((member) => {
+                const label = member.environmentLabel ?? "This machine";
+                const selected =
+                  !allMachinesSelected &&
+                  member.physicalProjectKey === selectedCheckout.physicalProjectKey;
+                const showPathLabel = (checkoutLabelCounts.get(label) ?? 0) > 1;
+                const machine = resolveEnvironmentMachineKind(
+                  environmentById.get(member.environmentId)?.serverConfig ?? null,
+                );
+                return (
+                  <Tooltip key={member.physicalProjectKey}>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-pressed={selected}
+                          className={`${providerSettingsTabClassName(selected)} gap-2 text-left`}
+                          onClick={() => setSelectedCheckoutKey(member.physicalProjectKey)}
+                        >
+                          <EnvironmentMachineIcon
+                            kind={machine}
+                            className="size-3.5 shrink-0"
+                            aria-hidden
+                          />
+                          <span className="max-w-40 truncate">{label}</span>
+                          {showPathLabel ? (
+                            <span className="max-w-48 truncate text-muted-foreground/70">
+                              · {member.workspaceRoot}
+                            </span>
+                          ) : null}
+                        </button>
+                      }
+                    />
+                    <TooltipPopup side="top">
+                      {label} · {member.workspaceRoot}
+                    </TooltipPopup>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </ScrollArea>
+        ) : null}
+
+        <SettingsSection
+          title="Project"
+          className={!hasMultipleCheckouts || allMachinesSelected ? undefined : "hidden"}
+        >
           <SettingsRow
             title="Name"
             description="The shared name for this project group in the sidebar and thread lists."
@@ -1007,27 +1099,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
 
         <SettingsSection
           title="Checkout"
-          headerAction={
-            <Select
-              value={selectedCheckout.physicalProjectKey}
-              onValueChange={(value) => setSelectedCheckoutKey(String(value))}
-            >
-              <SelectTrigger size="sm" className="max-w-64" aria-label="Selected checkout">
-                <SelectValue>{selectedCheckoutLabel}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {group.memberProjects.map((member) => (
-                  <SelectItem
-                    key={member.physicalProjectKey}
-                    hideIndicator
-                    value={member.physicalProjectKey}
-                  >
-                    {member.environmentLabel ?? "This machine"} · {member.workspaceRoot}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
+          className={!hasMultipleCheckouts || !allMachinesSelected ? undefined : "hidden"}
         >
           <div className="px-3 py-2 sm:px-4">
             <div className="flex min-w-0 items-center rounded-lg bg-muted/30 p-1 text-base text-muted-foreground sm:text-sm">
@@ -1241,7 +1313,10 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
           ) : null}
         </SettingsSection>
 
-        <SettingsSection title="Danger">
+        <SettingsSection
+          title="Danger"
+          className={!hasMultipleCheckouts || allMachinesSelected ? undefined : "hidden"}
+        >
           <SettingsRow
             title={
               group.memberProjects.length > 1 ? "Remove this project everywhere" : "Remove project"

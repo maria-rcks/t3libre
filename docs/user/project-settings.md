@@ -2,6 +2,10 @@
 
 Open **Settings → Projects** and select a project to change its preferences.
 
+When a project group has more than one checkout, select **All machines** to edit its shared name,
+icon, model, workspace, and pull behavior. Select a machine tab to view that checkout's path, edit
+its grouping and actions, or remove it.
+
 ## Project icons
 
 Choose an icon, emoji, or image from the project to make it easier to recognize. The choice applies
