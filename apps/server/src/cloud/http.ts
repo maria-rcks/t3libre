@@ -101,6 +101,11 @@ const CLOUD_CREDENTIAL_RESPONSE_HEADERS = {
   pragma: "no-cache",
 } as const;
 
+export class ConnectDevShareRelayIncompatibleError extends Schema.TaggedErrorClass<ConnectDevShareRelayIncompatibleError>()(
+  "ConnectDevShareRelayIncompatibleError",
+  { message: Schema.String },
+) {}
+
 const appendCloudCredentialResponseHeaders = HttpEffect.appendPreResponseHandler(
   (_request, response) =>
     Effect.succeed(HttpServerResponse.setHeaders(response, CLOUD_CREDENTIAL_RESPONSE_HEADERS)),
@@ -654,7 +659,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
       schema: RelayEnvironmentLinkChallengeResponse,
     });
     if (temporary && challenge.temporaryEnvironmentLeases !== true) {
-      return yield* new EnvironmentHttpInternalServerError({
+      return yield* new ConnectDevShareRelayIncompatibleError({
         message: "T3 Connect relay does not support temporary dev-share leases.",
       });
     }
@@ -696,7 +701,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
         accessToken: token.accessToken,
         environmentId: link.environmentId,
       }).pipe(Effect.ignore);
-      return yield* new EnvironmentHttpInternalServerError({
+      return yield* new ConnectDevShareRelayIncompatibleError({
         message: "T3 Connect relay did not return a temporary dev-share lease.",
       });
     }

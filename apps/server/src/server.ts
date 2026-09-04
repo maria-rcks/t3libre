@@ -841,7 +841,8 @@ export const makeServerLayer = Layer.unwrap(
                 while: (error) =>
                   error._tag !== "EnvironmentHttpBadRequestError" &&
                   error._tag !== "EnvironmentHttpUnauthorizedError" &&
-                  error._tag !== "EnvironmentHttpConflictError",
+                  error._tag !== "EnvironmentHttpConflictError" &&
+                  error._tag !== "ConnectDevShareRelayIncompatibleError",
                 schedule: Schedule.exponential("1 second").pipe(
                   Schedule.modifyDelay(({ duration }) =>
                     Effect.succeed(Duration.min(duration, Duration.seconds(30))),

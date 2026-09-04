@@ -315,7 +315,7 @@ describe("reconcileDesiredCloudLink", () => {
       );
 
       expect(error).toMatchObject({
-        _tag: "EnvironmentHttpInternalServerError",
+        _tag: "ConnectDevShareRelayIncompatibleError",
         message: "T3 Connect relay does not support temporary dev-share leases.",
       });
       expect(requests.map((request) => request.url)).toEqual([
