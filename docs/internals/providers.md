@@ -104,11 +104,13 @@ environment extension, sets `PYTHONUNBUFFERED=1`, and controls `BROWSER`. A test
 Electron-as-Node helper prevents the official agent from opening a browser on the environment.
 The same launch factory serves setup, health checks, chat, and text generation.
 
-The official agent prints one non-JSON OAuth line on stdout. Only the exact known prefix is
-filtered before ACP decoding. Fragmented lines are joined and bounded. Other malformed
-protocol output remains fatal. Authorization URLs are validated before use. Native stderr is
-drained without logging because it can contain OAuth data. Normal work rejects an interactive
-login request with a sign-in-required error instead of waiting for consent.
+The official agent prints a non-JSON OAuth line on stderr in version 1.1.1. Earlier versions
+print it on stdout. T3 accepts the exact native prefix on either stream and its browser-helper
+marker on stderr. Fragmented lines are joined and bounded. Other malformed protocol output
+remains fatal. Authorization URLs are validated before use. Other stderr is discarded because
+it can contain OAuth data. Normal work rejects an interactive login request with a
+sign-in-required error instead of waiting for consent. A rejected stderr callback fails pending
+ACP requests and closes the owned process.
 
 [`AntigravityAuth`][antigravity-auth] owns each sign-in process and deadline in the instance
 scope. Only the initiating T3 auth session receives its URL and flow ID or can complete or
@@ -168,6 +170,8 @@ Account access starts unknown and becomes authenticated after successful session
 including an explicit model refresh.
 The [provider snapshot][antigravity-provider] takes models and commands from setup and native
 updates. It preserves returned Gemini model IDs, labels, order, and thinking-level choices.
+ACP `config_option_update` notifications and `session/set_config_option` responses replace
+the instance's model catalog. Child session notifications do not change the root catalog.
 The registry treats a successful empty catalog as authoritative and clears cached metadata
 after sign-out. It must not retain a previous account's models. Cached models do not prove
 current access. The auth response does not supply an email, plan tier, or reliable quota.

@@ -81,8 +81,8 @@ Managed downloads are available for these environment hosts:
 Google does not publish a local Intel Mac runtime. Use an Intel Mac as a client connected to
 a supported remote environment.
 
-The current Linux x64 runtime downloads about 543 MB and uses about 1.65 GB after extraction.
-Allow at least 2.5 GB free for installation. An update keeps the previous runtime too.
+The current Linux x64 runtime downloads about 682 MB and uses about 2.01 GB after extraction.
+Allow at least 3 GB free for installation. An update keeps the previous runtime too.
 T3 Code does not download it until you choose to install it.
 
 On web or desktop, **Update Antigravity** appears when T3 Code has a newer managed release.
@@ -107,6 +107,7 @@ installations. Clear **Binary path** to use managed installation controls.
 The current official ACP exposes Gemini models only. T3 Code uses the model IDs and names
 returned for your account, including any model choices with different thinking levels. Models
 available in other Antigravity apps might not be available through this agent.
+The model picker updates when a running session reports new model choices.
 
 New threads use Gemini 3.8 Flash (High) when your account offers it. Older Gemini generations
 stay available under **Legacy models** in the picker.
@@ -116,6 +117,10 @@ T3 Code asks you to select an available model instead of silently changing it.
 
 Use Antigravity's native `/plan` command to request a plan. T3 Code's separate Plan mode control
 is not available for this provider.
+
+Project skills should use `.agents/skills`. T3 Code also discovers `.gemini/skills` and the legacy
+`.agent/skills` location. When multiple locations define the same skill name, `.gemini/skills`
+takes precedence, followed by `.agents/skills` and then `.agent/skills`.
 
 Antigravity reads and edits workspace files through T3 Code. Each write shows up as a file
 change approval with the content, so **Supervised** and **Auto-accept edits** behave the same way
@@ -133,6 +138,17 @@ See [Permission modes](./permission-modes.md) for tool approvals.
 T3 Code keeps thread history and file diffs. Antigravity does not support conversation rewind,
 so reverting a thread or editing and resubmitting an earlier turn is unavailable. Send a
 follow-up message or start a new thread instead.
+
+### Subagents
+
+Antigravity subagent calls appear in **Agents** on web and desktop, and in the work log on
+mobile. Each call shows its status and the result or error returned by Antigravity. Calls
+that run at the same time have separate entries.
+
+The official ACP agent does not report subagent names, models, token usage, or parent links.
+Entries use the name **Antigravity subagent**. Child tool calls cannot be assigned to an entry
+because ACP does not include their owning subagent. These entries track each invocation,
+not a separate thread you can open or control.
 
 ## Accounts and removal
 
@@ -164,6 +180,9 @@ session succeeds. To check account access and reload models, use **Refresh provi
 in web or desktop provider settings, or **Refresh models** in the mobile model picker. Refresh
 uses saved Google sign-in and does not open a login page. If sign-in is required, use the
 provider's setup controls. Automatic status checks verify the installation only.
+
+The packaged runtime can be slow to start, especially on Windows. Health checks, model refresh,
+and sign-out each allow up to 90 seconds before reporting a timeout.
 
 If Google reports `SUBSCRIPTION_REQUIRED`, an account restriction, or a usage limit, read the
 provider's message. A finished turn can contain an upstream error instead of completed work.
