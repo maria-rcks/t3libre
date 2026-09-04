@@ -529,14 +529,6 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   );
   const selectedCheckout = selectedCheckoutMatch ?? representative;
   const allMachinesSelected = hasMultipleCheckouts && selectedCheckoutMatch === undefined;
-  const checkoutLabelCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const member of group.memberProjects) {
-      const label = member.environmentLabel ?? "This machine";
-      counts.set(label, (counts.get(label) ?? 0) + 1);
-    }
-    return counts;
-  }, [group.memberProjects]);
   const selectedServerConfig = useAtomValue(
     serverEnvironment.configValueAtom(selectedCheckout.environmentId),
   );
@@ -861,38 +853,24 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
                 const selected =
                   !allMachinesSelected &&
                   member.physicalProjectKey === selectedCheckout.physicalProjectKey;
-                const showPathLabel = (checkoutLabelCounts.get(label) ?? 0) > 1;
                 const machine = resolveEnvironmentMachineKind(
                   environmentById.get(member.environmentId)?.serverConfig ?? null,
                 );
                 return (
-                  <Tooltip key={member.physicalProjectKey}>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          aria-pressed={selected}
-                          className={`${providerSettingsTabClassName(selected)} gap-2 text-left`}
-                          onClick={() => setSelectedCheckoutKey(member.physicalProjectKey)}
-                        >
-                          <EnvironmentMachineIcon
-                            kind={machine}
-                            className="size-3.5 shrink-0"
-                            aria-hidden
-                          />
-                          <span className="max-w-40 truncate">{label}</span>
-                          {showPathLabel ? (
-                            <span className="max-w-48 truncate text-muted-foreground/70">
-                              · {member.workspaceRoot}
-                            </span>
-                          ) : null}
-                        </button>
-                      }
+                  <button
+                    key={member.physicalProjectKey}
+                    type="button"
+                    aria-pressed={selected}
+                    className={`${providerSettingsTabClassName(selected)} gap-2 text-left`}
+                    onClick={() => setSelectedCheckoutKey(member.physicalProjectKey)}
+                  >
+                    <EnvironmentMachineIcon
+                      kind={machine}
+                      className="size-3.5 shrink-0"
+                      aria-hidden
                     />
-                    <TooltipPopup side="top">
-                      {label} · {member.workspaceRoot}
-                    </TooltipPopup>
-                  </Tooltip>
+                    <span className="max-w-40 truncate">{label}</span>
+                  </button>
                 );
               })}
             </div>
@@ -901,6 +879,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
 
         <SettingsSection
           title="Project"
+          hideTitle={hasMultipleCheckouts}
           className={!hasMultipleCheckouts || allMachinesSelected ? undefined : "hidden"}
         >
           <SettingsRow
