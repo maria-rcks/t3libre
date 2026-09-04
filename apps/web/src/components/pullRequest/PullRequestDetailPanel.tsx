@@ -680,6 +680,8 @@ export function PullRequestDetailPanel({
     detailQuery.refresh();
     activityQuery.refresh();
   }, [activityQuery.refresh, detailQuery.refresh]);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const codeRefreshToken = refreshToken + (turnRefresh?.revision ?? 0);
   const activityRevision = useRef<{ readonly key: string; readonly updatedAt: string } | null>(
     null,
   );
@@ -699,20 +701,22 @@ export function PullRequestDetailPanel({
       state: resolvedCoreDetail.state,
     });
   }, [onStateChange, resolvedCoreDetail]);
-  // Core detail is cheap enough to re-read while this stays open. Activity is heavier, so the
-  // revision effect above reads it only after this same pull request reports a change. Keyed by
-  // the pull request rather than by the panel, because this one panel shows a different pull
-  // request every time it is opened.
-  useLiveRefresh(detailQuery.refresh, {
-    key: `pull-request:${reference.projectId}:${reference.repository}#${reference.number}`,
-  });
+  // Core detail re-reads while this stays open, and the same tick reloads a mounted code diff.
+  // Activity is heavier, so the revision effect above reads it only after this same pull request
+  // reports a change. Keyed by the pull request rather than by the panel, because this one panel
+  // shows a different pull request every time it is opened.
+  useLiveRefresh(
+    () => {
+      detailQuery.refresh();
+      setRefreshToken((token) => token + 1);
+    },
+    { key: `pull-request:${reference.projectId}:${reference.repository}#${reference.number}` },
+  );
   // The button, on the other hand, goes around the server's cache rather than through it: it is
   // the answer for a reader who can see that what they are looking at is behind. The
   // invalidation goes first so the re-reads miss that cache; if it fails, the reads still run
   // and at worst answer from it.
   const invalidate = useAtomCommand(pullRequestEnvironment.invalidate, { reportFailure: false });
-  const [refreshToken, setRefreshToken] = useState(0);
-  const codeRefreshToken = refreshToken + (turnRefresh?.revision ?? 0);
   const refreshFromHost = useCallback(async () => {
     await invalidate({ environmentId, input: { reference } });
     refreshDetail();
