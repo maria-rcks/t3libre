@@ -574,10 +574,14 @@ export const makeRoutesLayer = Layer.mergeAll(
 
 class ConnectDevShareError extends Schema.TaggedErrorClass<ConnectDevShareError>()(
   "ConnectDevShareError",
-  {
-    message: Schema.String,
-  },
-) {}
+  { reason: Schema.Literals(["configuration", "environment-mismatch"]) },
+) {
+  override get message(): string {
+    return this.reason === "configuration"
+      ? "Connect dev sharing requires T3 Connect public configuration and a local HTTP Vite origin. Copy .env.example to .env to configure a source build."
+      : "Connect endpoint belongs to a different environment.";
+  }
+}
 
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
@@ -589,10 +593,7 @@ export const makeServerLayer = Layer.unwrap(
         config.devUrl.protocol !== "http:" ||
         !["localhost", "127.0.0.1"].includes(config.devUrl.hostname))
     ) {
-      return yield* new ConnectDevShareError({
-        message:
-          "Connect dev sharing requires T3 Connect public configuration and a local HTTP Vite origin. Copy .env.example to .env to configure a source build.",
-      });
+      return yield* new ConnectDevShareError({ reason: "configuration" });
     }
     const activation = yield* Deferred.make<void>();
     const awaitActivation = Deferred.await(activation);
@@ -787,10 +788,7 @@ export const makeServerLayer = Layer.unwrap(
                         ),
                         Effect.filterOrFail(
                           (actual) => actual.environmentId === expected.environmentId,
-                          () =>
-                            new ConnectDevShareError({
-                              message: "Connect endpoint belongs to a different environment.",
-                            }),
+                          () => new ConnectDevShareError({ reason: "environment-mismatch" }),
                         ),
                         Effect.timeout("5 seconds"),
                         Effect.retry({ schedule: Schedule.spaced("1 second") }),

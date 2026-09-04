@@ -90,8 +90,20 @@ export class NoRunningServerError extends Schema.TaggedErrorClass<NoRunningServe
 
 export class ConnectPairingError extends Schema.TaggedErrorClass<ConnectPairingError>()(
   "ConnectPairingError",
-  { message: Schema.String },
-) {}
+  { reason: Schema.Literals(["missing", "invalid", "unreachable", "conflict"]) },
+) {
+  override get message(): string {
+    return {
+      missing:
+        "No saved Connect endpoint for this environment. Run `t3 connect link`, or restart its `vp run dev --share` server.",
+      invalid:
+        "The saved Connect endpoint is invalid. Restart this environment to refresh its link.",
+      unreachable:
+        "The saved Connect endpoint is not reaching this environment. Restart its Connect share and retry once the public endpoint is ready.",
+      conflict: "Choose either --connect or --tailscale.",
+    }[this.reason];
+  }
+}
 
 // Each tailscale failure gets its own class (same reasoning as
 // scripts/lib/dev-share.ts): distinct caller-visible message, distinct remedy.
@@ -245,10 +257,7 @@ const resolveConnectPairingBaseUrl = Effect.fn("pair.resolveConnectPairingBaseUr
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const stored = yield* secrets.get(CLOUD_ENDPOINT_HTTP_ORIGIN);
   if (Option.isNone(stored)) {
-    return yield* new ConnectPairingError({
-      message:
-        "No saved Connect endpoint for this environment. Run `t3 connect link`, or restart its `vp run dev --share` server.",
-    });
+    return yield* new ConnectPairingError({ reason: "missing" });
   }
   const parsed = decodeConnectOrigin(new TextDecoder().decode(stored.value));
   if (
@@ -260,18 +269,12 @@ const resolveConnectPairingBaseUrl = Effect.fn("pair.resolveConnectPairingBaseUr
     parsed.value.search !== "" ||
     parsed.value.hash !== ""
   ) {
-    return yield* new ConnectPairingError({
-      message:
-        "The saved Connect endpoint is invalid. Restart this environment to refresh its link.",
-    });
+    return yield* new ConnectPairingError({ reason: "invalid" });
   }
   const baseUrl = parsed.value.origin;
   const probe = yield* probeEnvironmentDescriptor(baseUrl);
   if (probe._tag !== "descriptor" || probe.descriptor.environmentId !== environmentId) {
-    return yield* new ConnectPairingError({
-      message:
-        "The saved Connect endpoint is not reaching this environment. Restart its Connect share and retry once the public endpoint is ready.",
-    });
+    return yield* new ConnectPairingError({ reason: "unreachable" });
   }
   return baseUrl;
 });
@@ -534,9 +537,7 @@ export const pairCommand = Command.make("pair", {
   Command.withHandler((flags) =>
     Effect.gen(function* () {
       if (flags.connect && flags.tailscale) {
-        return yield* new ConnectPairingError({
-          message: "Choose either --connect or --tailscale.",
-        });
+        return yield* new ConnectPairingError({ reason: "conflict" });
       }
       const cliLogLevel = yield* GlobalFlag.LogLevel;
       // Default to Warn so storage/migration chatter cannot bury the QR code;

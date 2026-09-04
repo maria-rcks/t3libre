@@ -35,10 +35,11 @@ different preference when needed.
 
 ### Sharing and remote debugging
 
-`vp run dev --share` shares through T3 Connect. Configure a source build with `.env.example`
-and run `t3 connect login --base-dir ~/.t3` once. The runner reuses that account login while
-keeping each worktree's environment and runtime state separate. Give the tester the complete
-printed pairing URL, including its token; `t3 pair --connect` creates another one.
+`vp run dev --share` shares through T3 Connect. Copy `.env.example` to `.env` for a source build,
+then run `node --env-file=.env apps/server/src/bin.ts connect login --base-dir ~/.t3` from the
+repository root once. The runner reuses that account login while keeping each worktree's
+environment and runtime state separate. Give the tester the complete printed pairing URL,
+including its token; `node --env-file=.env apps/server/src/bin.ts pair --connect` creates another.
 
 Each worktree uses a normal Connect environment and counts toward the account's tunnel limit.
 Shutdown releases its tunnel but keeps its registration and hostname for the next run.
