@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  changeRequestActorProfileUrl,
   changeRequestRepositoryUrl,
   findProjectForChangeRequest,
   gitHubPullRequestBrowserUrl,
@@ -128,6 +129,41 @@ describe("changeRequestRepositoryUrl", () => {
       ),
     ).toBe("https://gitlab.example.test/group/pull/123/repo");
   });
+});
+
+describe("changeRequestActorProfileUrl", () => {
+  it.each([
+    ["github", "https://github.com/pingdotgg/t3code/pull/42", "Gigioxx"],
+    ["gitlab", "https://gitlab.example.test/team/t3code/-/merge_requests/42", "maria.dev"],
+    ["bitbucket", "https://bitbucket.org/pingdotgg/t3code/pull-requests/42", "theo"],
+  ] as const)("builds a %s profile on the pull request host", (provider, pullRequestUrl, login) => {
+    expect(changeRequestActorProfileUrl(pullRequestUrl, provider, login)).toBe(
+      `${new URL(pullRequestUrl).origin}/${login}`,
+    );
+  });
+
+  it("encodes an account name and removes pull request URL state", () => {
+    expect(
+      changeRequestActorProfileUrl(
+        "https://github.example.test/team/t3code/pull/42?tab=checks#summary",
+        "github",
+        "release bot",
+      ),
+    ).toBe("https://github.example.test/release%20bot");
+  });
+
+  it.each(["azure-devops", "unknown"] as const)(
+    "does not guess a profile URL for %s",
+    (provider) => {
+      expect(
+        changeRequestActorProfileUrl(
+          "https://dev.azure.com/acme/t3code/_git/t3code/pullrequest/42",
+          provider,
+          "maria@acme.dev",
+        ),
+      ).toBeNull();
+    },
+  );
 });
 
 describe("matchesLinkedPullRequestUrl", () => {

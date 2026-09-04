@@ -193,6 +193,34 @@ export function changeRequestRepositoryUrl(targetUrl: string): string | null {
   return url.toString();
 }
 
+/** The public account page on hosts whose user URLs share one stable shape. */
+export function changeRequestActorProfileUrl(
+  targetUrl: string,
+  provider: SourceControlProviderKind,
+  login: string | null | undefined,
+): string | null {
+  if (
+    login === null ||
+    login === undefined ||
+    (provider !== "github" && provider !== "gitlab" && provider !== "bitbucket")
+  ) {
+    return null;
+  }
+  const account = login.trim();
+  if (account.length === 0) return null;
+
+  try {
+    const url = new URL(targetUrl);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    url.pathname = `/${encodeURIComponent(account)}`;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 function claim(host: string, match: RegExpExecArray | null): ChangeRequestLink | null {
   const repository = match?.[1];
   const number = Number(match?.[2]);
