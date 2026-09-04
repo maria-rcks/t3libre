@@ -707,6 +707,7 @@ for (const scenario of [
   "mismatched turn",
   "marked without cursor",
   "marked stopped projection",
+  "marked superseded turn",
 ] as const) {
   it.effect(`does not recover an interrupted session with ${scenario}`, () => {
     const turnId = TurnId.make("turn-excluded-recovery");
@@ -716,8 +717,10 @@ for (const scenario of [
         ? "stopped"
         : scenario === "finished projection"
           ? "ready"
-          : "running",
-      turnId,
+          : scenario === "marked superseded turn"
+            ? "starting"
+            : "running",
+      scenario === "marked superseded turn" ? null : turnId,
     );
     const dispatched: OrchestrationCommand[] = [];
     const upserts: ProviderSessionDirectory.ProviderRuntimeBinding[] = [];
@@ -737,7 +740,7 @@ for (const scenario of [
                 activeTurnId:
                   scenario === "finished binding"
                     ? null
-                    : scenario === "mismatched turn"
+                    : scenario === "mismatched turn" || scenario === "marked superseded turn"
                       ? "another-turn"
                       : turnId,
                 ...(scenario.startsWith("marked") ? { continueAfterServerUpdate: turnId } : {}),

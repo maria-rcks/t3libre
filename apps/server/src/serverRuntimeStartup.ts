@@ -488,7 +488,10 @@ export const reconcileProviderSessions = Effect.gen(function* () {
       : null;
     const continuationMarked =
       continuationTurnId !== null &&
-      (session.activeTurnId === null || continuationTurnId === session.activeTurnId);
+      (session.activeTurnId === null || continuationTurnId === session.activeTurnId) &&
+      Option.isSome(binding) &&
+      (readRuntimePayload(binding.value.runtimePayload).activeTurnId == null ||
+        readRuntimePayload(binding.value.runtimePayload).activeTurnId === continuationTurnId);
     // Abrupt shutdowns cannot write an update marker. Require both durable
     // records to agree on an unfinished turn before recovering one implicitly.
     const interruptedByRestart =
