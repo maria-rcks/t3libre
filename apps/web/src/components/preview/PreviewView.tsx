@@ -102,6 +102,7 @@ export function PreviewView({
   const activeRecordingTabIds = useActiveBrowserRecordingTabIds();
   const pickActiveRef = useRef(false);
   const isMountedRef = useRef(true);
+  const navigationRequestRef = useRef(0);
   // Kept in sync so the title effect can depend on the stable thread key
   // instead of the thread object, which is recreated on every update.
   const threadRefRef = useRef(threadRef);
@@ -136,6 +137,12 @@ export function PreviewView({
   const runtimeTabId = tabId
     ? previewRuntimeTabId(threadRef, previewState.serverEpoch, tabId)
     : null;
+  useEffect(
+    () => () => {
+      navigationRequestRef.current += 1;
+    },
+    [runtimeTabId],
+  );
   const recordingRuntimeTabId =
     tabId && runtimeTabId
       ? activeRecordingTabIds.has(runtimeTabId)
@@ -180,13 +187,16 @@ export function PreviewView({
 
   const navigateToResolvedUrl = useCallback(
     async (resolvedUrl: string) => {
+      const request = ++navigationRequestRef.current;
       if (runtimeTabId && previewBridge) {
         // The bridge mirrors the resolved URL back to the server.
         const forwardedUrl = await resolveForwardedBrowserTarget(threadRef.environmentId, {
           kind: "url",
           url: resolvedUrl,
         });
+        if (request !== navigationRequestRef.current) return false;
         await previewBridge.navigate(runtimeTabId, forwardedUrl);
+        if (request !== navigationRequestRef.current) return false;
         rememberPreviewUrl(threadRef, resolvedUrl);
         return true;
       }
@@ -235,16 +245,14 @@ export function PreviewView({
   const handleRefresh = useCallback(() => {
     const bridge = previewBridge;
     if (!url || !runtimeTabId || !bridge) return;
-    void resolveForwardedBrowserTarget(threadRef.environmentId, { kind: "url", url })
-      .then((resolvedUrl) => bridge.navigate(runtimeTabId, resolvedUrl))
-      .catch((error: unknown) =>
-        toastManager.add({
-          title: "Preview connection failed",
-          type: "error",
-          description: error instanceof Error ? error.message : "Could not refresh the preview.",
-        }),
-      );
-  }, [runtimeTabId, threadRef.environmentId, url]);
+    void navigateToResolvedUrl(url).catch((error: unknown) =>
+      toastManager.add({
+        title: "Preview connection failed",
+        type: "error",
+        description: error instanceof Error ? error.message : "Could not refresh the preview.",
+      }),
+    );
+  }, [navigateToResolvedUrl, runtimeTabId, url]);
 
   const handleZoomIn = useCallback(() => {
     if (previewBridge && runtimeTabId) void previewBridge.zoomIn(runtimeTabId);

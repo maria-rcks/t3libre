@@ -193,6 +193,7 @@ export function HostedBrowserWebview(props: {
                 description:
                   error instanceof Error ? error.message : "Could not recover the preview.",
               });
+              recoverGuest();
             });
         }
       }, recovery.delayMs);

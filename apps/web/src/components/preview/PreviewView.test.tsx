@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(async (_tabId: string, _url: string): Promise<void> => undefined),
+  ensurePortForward: vi.fn<() => Promise<number>>(),
   rememberPreviewUrl: vi.fn(),
   readPreparedConnection: vi.fn(() => ({ httpBaseUrl: "http://172.25.85.75:3773" })),
   submittedUrl: null as ((url: string) => void) | null,
@@ -205,6 +206,7 @@ vi.mock("~/components/ui/toast", () => ({
 vi.mock("./previewBridge", () => ({
   previewBridge: {
     navigate: mocks.navigate,
+    ensurePortForward: mocks.ensurePortForward,
     pickElement: mocks.pickElement,
     pictureInPicture: {
       open: mocks.openPictureInPicture,
@@ -438,6 +440,47 @@ describe("PreviewView navigation", () => {
         "http://localhost:3000/admin",
       );
     });
+  });
+
+  it("keeps the latest submission when remote forwards resolve out of order", async () => {
+    const document = installTestDom();
+    const { createRoot } = await import("react-dom/client");
+    const root = createRoot(document.createElement("div") as unknown as Element);
+    const first = Promise.withResolvers<number>();
+    const second = Promise.withResolvers<number>();
+    mocks.readPreparedConnection.mockReturnValue({ httpBaseUrl: "https://test.t3coderelay.com" });
+    mocks.ensurePortForward.mockReset();
+    mocks.ensurePortForward.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ ticket: "test-ticket" })),
+    );
+    try {
+      await act(() =>
+        root.render(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />),
+      );
+      await act(async () => {
+        mocks.submittedUrl?.("localhost:3000/older");
+        mocks.submittedUrl?.("localhost:4000/newer");
+      });
+      expect(mocks.ensurePortForward).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        second.resolve(44000);
+      });
+      await act(async () => {
+        first.resolve(43000);
+      });
+      expect(mocks.navigate.mock.calls).toEqual([
+        [TEST_RUNTIME_TAB_ID, "http://localhost:44000/newer"],
+      ]);
+      expect(mocks.recordVisitForThread.mock.calls).toEqual([
+        [TEST_THREAD_REF, "http://localhost:4000/newer"],
+      ]);
+    } finally {
+      await act(() => root.unmount());
+      mocks.readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://172.25.85.75:3773" });
+      vi.unstubAllGlobals();
+    }
   });
 
   it("maps an empty-state localhost server onto the WSL host", async () => {
