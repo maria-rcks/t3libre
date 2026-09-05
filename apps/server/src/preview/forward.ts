@@ -71,8 +71,12 @@ const forward = (websocket: Socket.Socket, port: number) =>
       }
     };
     const open = (id: number) => {
-      if (streams.has(id) || sockets.size >= MAX_STREAMS) {
+      if (streams.has(id)) {
         stop();
+        return;
+      }
+      if (sockets.size >= MAX_STREAMS) {
+        send(id, 2);
         return;
       }
       const stream: ForwardStream = {

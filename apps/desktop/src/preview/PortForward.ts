@@ -18,7 +18,6 @@ interface Stream {
 
 interface Forward {
   ensure(websocketUrl: string): Promise<number>;
-  idle(): boolean;
   close(): void;
 }
 
@@ -224,7 +223,6 @@ function createForward(): Forward {
       });
       return ready;
     },
-    idle: () => (closed || server.listening) && sockets.size === 0,
     close: () => {
       disposed = true;
       close();
@@ -241,10 +239,9 @@ export function createPreviewPortForwards() {
       const existing = forwards.get(key);
       if (existing) return existing.ensure(websocketUrl);
       if (forwards.size >= MAX_FORWARDS) {
-        const idle = [...forwards].find(([, forward]) => forward.idle());
-        if (!idle) throw new Error("Too many active preview forwarding connections.");
-        idle[1].close();
-        forwards.delete(idle[0]);
+        throw new Error(
+          "Too many preview targets. Restart the desktop app to clear unused forwards.",
+        );
       }
       const forward = createForward();
       forwards.set(key, forward);

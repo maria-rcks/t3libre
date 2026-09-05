@@ -1637,7 +1637,7 @@ const NodeHttpServerTestWithWsDeflate = HttpServer.layerTestClient.pipe(
 it.layer(NodeServices.layer)("server router seam", (it) => {
   for (const host of ["127.0.0.1", "::1"]) {
     it.effect(
-      `forwards preview TCP on ${host} with credit replenishment and request half-close`,
+      `forwards preview TCP on ${host} through stream overflow, credit replenishment and request half-close`,
       () =>
         Effect.gen(function* () {
           yield* buildAppUnderTest();
@@ -1665,18 +1665,23 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   headers: { cookie: cookie! },
                 });
                 const chunks: Buffer[] = [];
-                const send = (op: number, payload = Buffer.alloc(0)) => {
+                let opened = 0;
+                const send = (op: number, payload = Buffer.alloc(0), id = 1) => {
                   const frame = Buffer.alloc(5 + payload.length);
-                  frame.writeUInt32BE(1);
+                  frame.writeUInt32BE(id);
                   frame[4] = op;
                   payload.copy(frame, 5);
                   socket.send(frame);
                 };
                 socket.once("error", reject);
-                socket.once("open", () => send(0));
+                socket.once("open", () => {
+                  for (let id = 1; id <= 32; id++) send(0, Buffer.alloc(0), id);
+                });
                 socket.on("message", (data) => {
                   const frame = Buffer.from(data as Buffer);
                   if (frame[4] === 0) {
+                    if (++opened === 32) send(0, Buffer.alloc(0), 33);
+                  } else if (frame[4] === 2 && frame.readUInt32BE(0) === 33) {
                     send(1, Buffer.from("preview request"));
                     send(4);
                   } else if (frame[4] === 1) {
