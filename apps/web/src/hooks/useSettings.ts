@@ -391,11 +391,11 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
       if (Object.keys(serverPatch).length > 0) {
         const { sharedPatch, localPatch } = splitSharedServerPatch(serverPatch);
         // Dropping the write silently leaves the control looking saved.
-        const warnUnsaved = () =>
+        const warnUnsaved = (description = PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE) =>
           toastManager.add({
             type: "warning",
             title: "Setting not saved",
-            description: PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE,
+            description,
           });
         if (Object.keys(localPatch).length > 0) {
           if (environmentId) {
@@ -414,9 +414,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
           if (environmentId) {
             targets.add(environmentId);
           }
-          if (targets.size === 0) {
-            warnUnsaved();
-          }
+          let wroteToTarget = false;
           for (const targetId of targets) {
             const target = environments.find((candidate) => candidate.environmentId === targetId);
             const targetPatch = filterSharedServerPatch(
@@ -424,10 +422,16 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
               target?.serverConfig?.environment.capabilities,
             );
             if (Object.keys(targetPatch).length === 0) continue;
+            wroteToTarget = true;
             void persistServerSettings({
               environmentId: targetId,
               input: { patch: targetPatch },
             });
+          }
+          if (!wroteToTarget) {
+            warnUnsaved(
+              targets.size > 0 ? "Update older servers to save this setting." : undefined,
+            );
           }
         }
       }
