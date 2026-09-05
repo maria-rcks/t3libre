@@ -855,16 +855,23 @@ function ProjectDetail({
         draftStore.clearProjectDraftThreadId(projectRef);
       }
 
-      // The project's settings page just deleted itself; there is no projects
-      // listing to fall back to, so leave settings entirely.
       if (isWholeGroup) {
-        void navigate({ to: "/", replace: true });
+        if (hasOtherMembers) {
+          void navigate({
+            to: "/settings/projects",
+            search: { project: group.projectKey, machine: undefined },
+            replace: true,
+          });
+        } else {
+          void navigate({ to: "/", replace: true });
+        }
       }
     },
     [
       deleteProject,
       group.displayName,
       group.memberProjects.length,
+      group.projectKey,
       hasOtherMembers,
       navigate,
       reportFailure,
