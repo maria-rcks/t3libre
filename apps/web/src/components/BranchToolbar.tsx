@@ -6,6 +6,7 @@ import {
   FolderGitIcon,
   FolderIcon,
   HistoryIcon,
+  ScaleIcon,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -120,10 +121,14 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
     // Button's base styles apply `-mx-0.5` to descendant SVGs, which eats 4px
     // out of whatever gap we set. mx-0! cancels that so gap-0.5 reads as 2px.
     <span className="inline-flex shrink-0 items-center gap-0.5">
-      <EnvironmentMachineIcon
-        kind={activeEnvironment?.machine ?? "server"}
-        className="size-3 shrink-0 mx-0!"
-      />
+      {autoEnvironmentLabel ? (
+        <ScaleIcon className="size-3 shrink-0 mx-0!" aria-hidden="true" />
+      ) : (
+        <EnvironmentMachineIcon
+          kind={activeEnvironment?.machine ?? "server"}
+          className="size-3 shrink-0 mx-0!"
+        />
+      )}
       <WorkspaceIcon className="size-3 shrink-0 mx-0!" />
     </span>
   ) : (
@@ -189,7 +194,12 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                       if (autoEnvironmentLabel) onAutoEnvironment?.();
                     }}
                   >
-                    {autoEnvironmentLabel ?? "Balance load"}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <ScaleIcon className="size-3" aria-hidden="true" />
+                      <span className="min-w-0 truncate">
+                        {autoEnvironmentLabel ?? "Auto balance"}
+                      </span>
+                    </span>
                   </MenuRadioItem>
                 )}
                 {availableEnvironments.map((env) => (

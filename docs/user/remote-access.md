@@ -69,7 +69,7 @@ Higher preference values favor a machine when it has CPU and memory available; 0
 reserves it for manual selection. Preferences are saved separately in each client.
 
 The composer checks eligible machines when choosing a draft's environment, then keeps
-that choice stable. Choose **Balance load** again to check current resources, or choose
+that choice stable. Choose **Auto balance** again to check current resources, or choose
 a specific machine to override it. Choosing a branch or worktree also keeps the draft
 on that machine. Existing threads stay where they started. If resource checks are
 unavailable or all eligible machines are full, choose a machine manually to continue.

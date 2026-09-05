@@ -3237,10 +3237,10 @@ export default function ChatView(props: ChatViewProps) {
   ]);
   const autoEnvironmentLabel = automaticEnvironment
     ? draftThread?.loadBalancedEnvironmentId
-      ? "Balancing load · " + (activeEnvironmentOption?.label ?? "Selected machine")
+      ? "Auto balance"
       : loadBalancing.pending
         ? "Checking machines…"
-        : "Balance unavailable · choose a machine"
+        : "Auto balance unavailable"
     : undefined;
 
   // Handle environment change for draft threads.  When the user picks a

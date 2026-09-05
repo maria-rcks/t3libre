@@ -1,4 +1,5 @@
 import type { EnvironmentId } from "@t3tools/contracts";
+import { ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import type { EnvironmentOption } from "./BranchToolbar.logic";
@@ -40,7 +41,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   const environmentItems = useMemo(
     () => [
       ...(onAutoEnvironment
-        ? [{ value: "auto", label: autoEnvironmentLabel ?? "Balance load" }]
+        ? [{ value: "auto", label: autoEnvironmentLabel ?? "Auto balance" }]
         : []),
       ...availableEnvironments.map((env) => ({
         value: env.environmentId,
@@ -96,10 +97,14 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         aria-label="Run on"
         data-composer-context-control
       >
-        <EnvironmentMachineIcon
-          kind={activeEnvironment?.machine ?? "server"}
-          className="size-3 shrink-0"
-        />
+        {autoEnvironmentLabel ? (
+          <ScaleIcon className="size-3 shrink-0" aria-hidden="true" />
+        ) : (
+          <EnvironmentMachineIcon
+            kind={activeEnvironment?.machine ?? "server"}
+            className="size-3 shrink-0"
+          />
+        )}
         <span
           data-composer-label
           className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
@@ -122,7 +127,10 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
                 if (autoEnvironmentLabel) onAutoEnvironment?.();
               }}
             >
-              {autoEnvironmentLabel ?? "Balance load"}
+              <span className="inline-flex items-center gap-1.5">
+                <ScaleIcon className="size-3" aria-hidden="true" />
+                {autoEnvironmentLabel ?? "Auto balance"}
+              </span>
             </SelectItem>
           )}
           {availableEnvironments.map((env) => (
