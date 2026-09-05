@@ -1223,9 +1223,7 @@ function ProjectDetail({
                   }}
                 >
                   <SelectTrigger size="sm" aria-label="Checkout">
-                    <SelectValue className="max-w-96 truncate">
-                      {selectedCheckoutLabel}
-                    </SelectValue>
+                    <SelectValue className="max-w-96 truncate">{selectedCheckoutLabel}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup align="end" alignItemWithTrigger={false}>
                     {group.memberProjects.map((member) => (
