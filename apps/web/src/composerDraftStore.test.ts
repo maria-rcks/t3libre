@@ -1641,6 +1641,26 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(file && composerFileNeedsReattach(file)).toBe(true);
   });
 
+  it("rechecks balancing when an empty draft is remapped to another project member", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      environmentSelection: "auto",
+      loadBalancedEnvironmentId: TEST_ENVIRONMENT_ID,
+    });
+    store.setProjectDraftThreadId(remoteProjectRef, draftId, { threadId });
+    expect(store.getDraftThread(draftId)).toMatchObject({
+      environmentSelection: "auto",
+      loadBalancedEnvironmentId: null,
+    });
+    store.setDraftThreadContext(draftId, { loadBalancedEnvironmentId: OTHER_TEST_ENVIRONMENT_ID });
+    store.setDraftThreadContext(draftId, { projectRef });
+    expect(store.getDraftThread(draftId)).toMatchObject({
+      environmentSelection: "auto",
+      loadBalancedEnvironmentId: null,
+    });
+  });
+
   it("does not opt a legacy branch choice into balancing when runtime mode changes", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, { threadId, branch: "feature/pinned" });

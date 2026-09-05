@@ -1583,7 +1583,11 @@ function createDraftThreadState(
     ...(options?.loadBalancedEnvironmentId !== undefined
       ? { loadBalancedEnvironmentId: options.loadBalancedEnvironmentId }
       : existingThread?.loadBalancedEnvironmentId !== undefined
-        ? { loadBalancedEnvironmentId: existingThread.loadBalancedEnvironmentId }
+        ? {
+            loadBalancedEnvironmentId: projectChanged
+              ? null
+              : existingThread.loadBalancedEnvironmentId,
+          }
         : {}),
     createdAt: options?.createdAt ?? existingThread?.createdAt ?? new Date().toISOString(),
     runtimeMode: options?.runtimeMode ?? existingThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
@@ -2761,7 +2765,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               ...(environmentSelection ? { environmentSelection } : {}),
               loadBalancedEnvironmentId:
                 options.loadBalancedEnvironmentId === undefined
-                  ? (existing.loadBalancedEnvironmentId ?? null)
+                  ? projectChanged
+                    ? null
+                    : (existing.loadBalancedEnvironmentId ?? null)
                   : options.loadBalancedEnvironmentId,
               createdAt:
                 options.createdAt === undefined
