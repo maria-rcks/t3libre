@@ -247,8 +247,9 @@ async function fetchWithTransientRetry(url: string, init: RequestInit): Promise<
 export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const fileSystem = yield* FileSystem.FileSystem;
+  const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
   const isFile = (filePath: string) =>
-    Effect.runPromise(
+    runPromise(
       fileSystem.stat(filePath).pipe(
         Effect.map((stat) => stat.type === "File"),
         Effect.orElseSucceed(() => false),

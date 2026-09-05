@@ -64,7 +64,7 @@ describe("DesktopLocalEnvironmentAuth", () => {
           ),
         ),
       );
-      assert.equal(error._tag, "DesktopLocalEnvironmentAuthSessionBootstrapError");
+      assert.equal(error._tag, "DesktopLocalEnvironmentAuthBackendStoppedError");
       assert.equal(yield* Ref.get(requestCount), 0);
     }),
   );
