@@ -310,7 +310,7 @@ const startup = Effect.gen(function* () {
   yield* applicationMenu.configure;
   yield* updates.configure;
   yield* DesktopRemoteUpdates.listen;
-  yield* linuxUrlHandler.register;
+  yield* Effect.forkScoped(linuxUrlHandler.register);
   yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
 }).pipe(Effect.withSpan("desktop.startup"));
 

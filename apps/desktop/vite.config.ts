@@ -46,7 +46,7 @@ export default defineConfig({
       sourcemap: true,
       outExtensions: () => ({ js: ".cjs" }),
       define: publicConfigDefine,
-      entry: ["src/main.ts"],
+      entry: { main: "src/bootstrap.ts", runtime: "src/main.ts" },
       clean: true,
       deps: {
         // Avoid loading the Effect module graph from disk before Electron can start.
@@ -57,7 +57,9 @@ export default defineConfig({
           id === "@effect/platform-node" ||
           id.startsWith("@effect/platform-node/") ||
           id === "@effect/platform-node-shared" ||
-          id.startsWith("@effect/platform-node-shared/"),
+          id.startsWith("@effect/platform-node-shared/") ||
+          id === "electron-updater" ||
+          id.startsWith("electron-updater/"),
         neverBundle: isExternalCliDependency,
       },
       ...(shouldLaunchElectronAfterPack ? { onSuccess: "node scripts/dev-electron.mjs" } : {}),
