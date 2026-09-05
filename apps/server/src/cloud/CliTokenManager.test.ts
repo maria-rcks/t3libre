@@ -158,9 +158,12 @@ it.layer(NodeServices.layer)("CliTokenManager.layerWithSharedAuthorization", (it
               expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
             });
           }).pipe(
-            Effect.provide(CliTokenManager.layer),
-            Effect.provide(ServerSecretStore.layer),
-            Effect.provide(ServerConfig.layer({ ...localConfig, secretsDir })),
+            Effect.provide(
+              CliTokenManager.layer.pipe(
+                Layer.provide(ServerSecretStore.layer),
+                Layer.provide(ServerConfig.layer({ ...localConfig, secretsDir })),
+              ),
+            ),
           );
         }
         yield* Effect.gen(function* () {
@@ -178,13 +181,18 @@ it.layer(NodeServices.layer)("CliTokenManager.layerWithSharedAuthorization", (it
           assert.isTrue(Option.isSome(token));
           assert.equal(Option.getOrThrow(token).accessToken, scenario.expected);
         }).pipe(
-          Effect.provide(ServerSecretStore.layer),
-          Effect.provide(ServerConfig.layer(localConfig)),
+          Effect.provide(
+            ServerSecretStore.layer.pipe(Layer.provideMerge(ServerConfig.layer(localConfig))),
+          ),
         );
       }).pipe(
-        Effect.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-cli-auth-config-" })),
-        Effect.provide(ExternalLauncher.layer),
-        Effect.provide(makeTokenEndpointLayer([])),
+        Effect.provide(
+          Layer.mergeAll(
+            ServerConfig.layerTest(process.cwd(), { prefix: "t3-cli-auth-config-" }),
+            ExternalLauncher.layer,
+            makeTokenEndpointLayer([]),
+          ),
+        ),
       ),
     );
   }
