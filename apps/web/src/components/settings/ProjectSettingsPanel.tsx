@@ -252,8 +252,15 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
       environmentById.get(member.environmentId)?.serverConfig?.settings
         .projectAgentBrowserAccessOverrides[member.id],
   );
-  const browserMixed = browserOverrides.some((value) => value !== browserOverrides[0]);
   const browserOverride = browserOverrides[0];
+  const browserMixed = group.memberProjects.some((member, index) => {
+    const settings = environmentById.get(member.environmentId)?.serverConfig?.settings;
+    return (
+      browserOverrides[index] !== browserOverride ||
+      (browserOverrides[index] ?? settings?.enableAgentBrowserAccess) !==
+        (browserOverride ?? projectSettings.enableAgentBrowserAccess)
+    );
+  });
   const setBooleanOverride = async (
     key: "projectAgentBrowserAccessOverrides" | "projectAutoPullOverrides",
     enabled: boolean | undefined,
@@ -398,13 +405,22 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
 
   // ----- default model -----
   const storedSelection = representative.defaultModelSelection;
-  const mixedModel = group.memberProjects.some(
-    (member) => !Equal.equals(member.defaultModelSelection, storedSelection),
-  );
   const resolvedSelection = resolveDefaultProviderModelSelection(
     serverProviders,
     storedSelection ?? projectSettings.defaultModelSelection,
   );
+  const mixedModel = group.memberProjects.some((member) => {
+    const config = environmentById.get(member.environmentId)?.serverConfig;
+    return (
+      !Equal.equals(member.defaultModelSelection, storedSelection) ||
+      JSON.stringify(
+        resolveDefaultProviderModelSelection(
+          config?.providers ?? EMPTY_SERVER_PROVIDERS,
+          member.defaultModelSelection ?? config?.settings.defaultModelSelection ?? null,
+        ),
+      ) !== JSON.stringify(resolvedSelection)
+    );
+  });
   const resolvedInstanceId = resolvedSelection?.instanceId ?? null;
   const resolvedModel = resolvedSelection?.model ?? null;
   const instanceEntries = useMemo(
@@ -923,7 +939,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             title="Model"
             status={
               mixedModel
-                ? "Mixed overrides. Choosing a model updates all selected checkouts."
+                ? "Mixed defaults or overrides. Choosing a model updates all selected checkouts."
                 : storedSelection === null
                   ? "Inherited"
                   : "Overridden"
@@ -1078,7 +1094,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             title="Agent browser access"
             description={
               browserMixed
-                ? "Mixed overrides across selected checkouts."
+                ? "Mixed defaults or overrides across selected checkouts."
                 : browserOverride === undefined
                   ? "Inherited from machine defaults. Controls agent access to the preview browser."
                   : "Overridden for this project. Applies when the agent session next starts."

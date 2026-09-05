@@ -711,8 +711,10 @@ interface StartupOptions {
 
 export const autoPullProjects = Effect.fn("autoPullProjects")(function* (
   projects: ReadonlyArray<OrchestrationProjectShell>,
-  settings: Pick<typeof DEFAULT_SERVER_SETTINGS, "defaultAutoPull" | "projectAutoPullOverrides"> =
-    DEFAULT_SERVER_SETTINGS,
+  settings: Pick<
+    typeof DEFAULT_SERVER_SETTINGS,
+    "defaultAutoPull" | "projectAutoPullOverrides"
+  > = DEFAULT_SERVER_SETTINGS,
 ) {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const workspaceRoots = [

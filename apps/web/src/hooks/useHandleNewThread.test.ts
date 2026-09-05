@@ -49,19 +49,21 @@ const testState = vi.hoisted(() => {
 });
 
 vi.mock("@effect/atom-react", () => ({
-  useAtomValue: () =>
-    new Map([
-      [
-        "environment-ssh",
-        {
-          settings: {
-            defaultThreadEnvMode: "local",
-            newWorktreesStartFromOrigin: false,
-            defaultModelSelection: null,
-          },
-        },
-      ],
-    ]),
+  useAtomValue: (atom: unknown) =>
+    atom === "primary-settings"
+      ? { newWorktreesStartFromOrigin: false }
+      : new Map([
+          [
+            "environment-ssh",
+            {
+              settings: {
+                defaultThreadEnvMode: "local",
+                newWorktreesStartFromOrigin: false,
+                defaultModelSelection: null,
+              },
+            },
+          ],
+        ]),
 }));
 vi.mock("@t3tools/client-runtime/environment", () => ({
   scopedProjectKey: () => "remote-project",
@@ -128,7 +130,10 @@ vi.mock("../state/entities", () => ({
   useProjects: () => [],
   useThread: () => null,
 }));
-vi.mock("../state/server", () => ({ environmentServerConfigsAtom: {} }));
+vi.mock("../state/server", () => ({
+  environmentServerConfigsAtom: {},
+  primaryServerSettingsAtom: "primary-settings",
+}));
 vi.mock("../threadRoutes", () => ({ resolveThreadRouteTarget: () => null }));
 vi.mock("../uiStateStore", () => ({
   legacyProjectCwdPreferenceKey: () => "remote-project",
