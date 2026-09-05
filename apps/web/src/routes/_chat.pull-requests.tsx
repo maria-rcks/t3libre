@@ -1950,10 +1950,10 @@ function PullRequestsRouteView() {
                 ) ?? null
               }
               refreshToken={detailRefreshToken}
-              // Merging, closing or reopening changes the row this panel was opened from, so
-              // the list behind it is out of date the moment the host takes the action.
+              // Host actions can change both readiness and diff size, so refresh the counts
+              // alongside the list before ranking the updated row.
               onActed={() => {
-                refreshList(true);
+                void refreshFromHost();
               }}
             />
           </RightPanelTabs>
