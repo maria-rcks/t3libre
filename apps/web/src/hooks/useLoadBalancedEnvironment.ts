@@ -44,6 +44,7 @@ export function useLoadBalancedEnvironment(
         ...resource,
         weight: weights[resource.environmentId] ?? 50,
       })),
+      Date.now(),
     ) as EnvironmentId | null,
   };
 }

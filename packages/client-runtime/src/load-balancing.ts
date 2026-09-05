@@ -9,7 +9,7 @@ export function chooseLoadBalancedEnvironment(
     receivedAt?: number;
     weight: number;
   }>,
-  now = Date.now(),
+  now: number,
 ): string | null {
   let selected: string | null = null;
   let bestScore = 0;
