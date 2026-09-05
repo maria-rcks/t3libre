@@ -51,6 +51,8 @@ jobs:
       - name: Typecheck
         run: vpr typecheck
 
+      - uses: ./.github/actions/setup-apt-mirrors
+
       - name: Install browser secret helper build libraries
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
 
@@ -87,6 +89,8 @@ jobs:
 
       - name: Ensure Electron runtime is installed
         run: vp run --filter @t3tools/desktop ensure:electron
+
+      - uses: ./.github/actions/setup-apt-mirrors
 
       - name: Install browser secret helper build libraries
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
