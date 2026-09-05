@@ -40,9 +40,14 @@ describe("splitSharedServerPatch", () => {
     const { sharedPatch, localPatch } = splitSharedServerPatch({
       sidebarAutoSettleAfterDays: 7,
       sidebarAutoSettleOnMerge: false,
+      continueThreadsAfterServerUpdate: true,
       enableAgentBrowserAccess: false,
     });
-    expect(sharedPatch).toEqual({ sidebarAutoSettleAfterDays: 7, sidebarAutoSettleOnMerge: false });
+    expect(sharedPatch).toEqual({
+      sidebarAutoSettleAfterDays: 7,
+      sidebarAutoSettleOnMerge: false,
+      continueThreadsAfterServerUpdate: true,
+    });
     expect(localPatch).toEqual({ enableAgentBrowserAccess: false });
   });
 });
@@ -50,6 +55,7 @@ describe("splitSharedServerPatch", () => {
 describe("pickSharedServerSettings", () => {
   it("returns only the shared keys", () => {
     expect(Object.keys(pickSharedServerSettings(DEFAULT_SERVER_SETTINGS)).sort()).toEqual([
+      "continueThreadsAfterServerUpdate",
       "defaultThreadEnvMode",
       "newWorktreesStartFromOrigin",
       "sidebarAutoSettleAfterDays",
@@ -61,6 +67,39 @@ describe("pickSharedServerSettings", () => {
 
 describe("findSharedSettingsMismatches", () => {
   const primarySettings = { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 7 };
+
+  it.each([true, false])(
+    "detects remote restart continuation drift when the preference is %s",
+    (enabled) => {
+      const settings = { ...primarySettings, continueThreadsAfterServerUpdate: enabled };
+      const remoteSettings = { ...settings, continueThreadsAfterServerUpdate: !enabled };
+      const environment = {
+        environmentId: boxId,
+        label: "Remote Box",
+        syncEligible: true,
+        settings: remoteSettings,
+      };
+      expect(
+        findSharedSettingsMismatches({
+          primaryEnvironmentId: primaryId,
+          primarySettings: settings,
+          environments: [environment],
+        }),
+      ).toEqual([{ environmentId: boxId, label: "Remote Box" }]);
+      expect(
+        findSharedSettingsMismatches({
+          primaryEnvironmentId: primaryId,
+          primarySettings: settings,
+          environments: [
+            {
+              ...environment,
+              settings: Object.assign({}, remoteSettings, pickSharedServerSettings(settings)),
+            },
+          ],
+        }),
+      ).toEqual([]);
+    },
+  );
 
   it("lists sync-eligible environments whose shared settings differ", () => {
     const mismatches = findSharedSettingsMismatches({
