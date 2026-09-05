@@ -36,6 +36,7 @@ import { resolveProjectAgentBrowserAccess } from "@t3tools/shared/serverSettings
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
@@ -56,8 +57,12 @@ import {
   providerTurnMetricAttributes,
   withMetrics,
 } from "../../observability/Metrics.ts";
-import { ProviderAdapterRequestError } from "../Errors.ts";
-import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
+import {
+  ProviderAdapterRequestError,
+  type ProviderAdapterError,
+  ProviderValidationError,
+  ProviderWorkspaceMissingError,
+} from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
@@ -225,6 +230,7 @@ function toRuntimePayloadFromSession(
   session: ProviderSession,
   extra?: {
     readonly modelSelection?: unknown;
+    readonly continueAfterServerUpdate?: TurnId;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
   },
@@ -234,6 +240,9 @@ function toRuntimePayloadFromSession(
     model: session.model ?? null,
     activeTurnId: session.activeTurnId ?? null,
     lastError: session.lastError ?? null,
+    ...(extra?.continueAfterServerUpdate !== undefined
+      ? { continueAfterServerUpdate: extra.continueAfterServerUpdate }
+      : {}),
     ...(extra?.modelSelection !== undefined ? { modelSelection: extra.modelSelection } : {}),
     ...(extra?.lastRuntimeEvent !== undefined ? { lastRuntimeEvent: extra.lastRuntimeEvent } : {}),
     ...(extra?.lastRuntimeEventAt !== undefined
@@ -323,6 +332,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     options?.issueMcpCredential ?? McpSessionRegistry.issueActiveMcpCredential;
   const revokeMcpCredential =
     options?.revokeMcpCredential ?? McpSessionRegistry.revokeActiveMcpThread;
+  const fileSystem = yield* FileSystem.FileSystem;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
   const pendingCompactions = new Map<ThreadId, PendingCompaction>();
   const timedOutNativeCompactions = new Set<ThreadId>();
@@ -847,6 +857,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     threadId: ThreadId,
     extra?: {
       readonly modelSelection?: unknown;
+      readonly continueAfterServerUpdate?: TurnId;
       readonly lastRuntimeEvent?: string;
       readonly lastRuntimeEventAt?: string;
     },
@@ -1246,6 +1257,20 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                 : "none",
           "provider.cwd.effective": effectiveCwd ?? "",
         });
+        if (effectiveCwd !== undefined) {
+          // Fail fast with an actionable error when the workspace folder is
+          // gone (e.g. moved, deleted, or replaced by a plain file).
+          // Otherwise every adapter surfaces this as a misleading "failed to
+          // spawn <binary>" process error. Stat failures other than "missing"
+          // fall through to the adapter.
+          const workspaceIsDirectory = yield* fileSystem.stat(effectiveCwd).pipe(
+            Effect.map((workspaceStat) => workspaceStat.type === "Directory"),
+            Effect.catch((statError) => Effect.succeed(statError.reason._tag !== "NotFound")),
+          );
+          if (!workspaceIsDirectory) {
+            return yield* new ProviderWorkspaceMissingError({ threadId, cwd: effectiveCwd });
+          }
+        }
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
         yield* clearTurnAnalyticsSession(resolvedInstanceId, threadId);
         yield* prepareMcpSession(threadId, resolvedInstanceId);
@@ -1449,6 +1474,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         runtimePayload: {
           ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
           activeTurnId: turn.turnId,
+          // Admission and marker consumption must survive the same restart.
+          continueAfterServerUpdate: null,
+          continueAfterServerUpdatePrepared: null,
           lastRuntimeEvent: "provider.sendTurn",
           lastRuntimeEventAt: yield* nowIso,
         },
@@ -1749,6 +1777,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           status: "stopped",
           runtimePayload: {
             activeTurnId: null,
+            continueAfterServerUpdate: null,
+            continueAfterServerUpdatePrepared: null,
           },
         });
         yield* analytics.record("provider.session.stopped", {
@@ -1958,6 +1988,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   );
 
   const runStopAll = Effect.fn("runStopAll")(function* () {
+    const continueAfterRestart = yield* serverSettings.getSettings.pipe(
+      Effect.map((settings) => settings.continueThreadsAfterServerUpdate),
+      Effect.orElseSucceed(() => false),
+    );
     const properties = yield* Ref.modify(turnAnalytics, (state) => {
       const completed: Array<Readonly<Record<string, unknown>>> = [];
       for (const [sessionKey, session] of state.sessions) {
@@ -1985,6 +2019,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     yield* Effect.forEach(activeSessions, (session) =>
       Effect.flatMap(nowIso, (lastRuntimeEventAt) =>
         upsertSessionBinding(session, session.threadId, {
+          ...(continueAfterRestart && session.status === "running" && session.activeTurnId
+            ? { continueAfterServerUpdate: session.activeTurnId }
+            : {}),
           lastRuntimeEvent: "provider.stopAll",
           lastRuntimeEventAt,
         }),
