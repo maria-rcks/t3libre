@@ -3,63 +3,32 @@ import { describe, expect, it } from "vite-plus/test";
 import { isDefaultThreadEnvModeSettled, resolveDefaultThreadEnvMode } from "./threadEnvMode.ts";
 
 describe("resolveDefaultThreadEnvMode", () => {
-  it("prefers the project setting over t3.json over the global default", () => {
-    expect(
-      resolveDefaultThreadEnvMode({
-        projectSetting: "local",
-        projectFile: "worktree",
-        globalDefault: "worktree",
-      }),
-    ).toBe("local");
-    expect(
-      resolveDefaultThreadEnvMode({
-        projectSetting: null,
-        projectFile: "local",
-        globalDefault: "worktree",
-      }),
-    ).toBe("local");
-    expect(
-      resolveDefaultThreadEnvMode({
-        projectSetting: undefined,
-        projectFile: null,
-        globalDefault: "worktree",
-      }),
-    ).toBe("worktree");
-  });
+  it.each([
+    ["local", "worktree", "worktree", "local"],
+    [null, "local", "worktree", "local"],
+    [undefined, null, "worktree", "worktree"],
+  ] as const)(
+    "resolves project %s, file %s, global %s to %s",
+    (projectSetting, projectFile, globalDefault, expected) => {
+      expect(resolveDefaultThreadEnvMode({ projectSetting, projectFile, globalDefault })).toBe(
+        expected,
+      );
+    },
+  );
 });
 
 describe("isDefaultThreadEnvModeSettled", () => {
-  it("settles on an explicit pick or project setting even while the file loads", () => {
-    expect(
-      isDefaultThreadEnvModeSettled({
-        explicitMode: "local",
-        projectSetting: null,
-        projectFilePending: true,
-      }),
-    ).toBe(true);
-    expect(
-      isDefaultThreadEnvModeSettled({
-        explicitMode: undefined,
-        projectSetting: "worktree",
-        projectFilePending: true,
-      }),
-    ).toBe(true);
-  });
-
-  it("stays unsettled only while a consulted file read is pending", () => {
-    expect(
-      isDefaultThreadEnvModeSettled({
-        explicitMode: undefined,
-        projectSetting: null,
-        projectFilePending: true,
-      }),
-    ).toBe(false);
-    expect(
-      isDefaultThreadEnvModeSettled({
-        explicitMode: undefined,
-        projectSetting: null,
-        projectFilePending: false,
-      }),
-    ).toBe(true);
-  });
+  it.each([
+    ["local", null, true, true],
+    [undefined, "worktree", true, true],
+    [undefined, null, true, false],
+    [undefined, null, false, true],
+  ] as const)(
+    "settles explicit %s, project %s, file pending %s: %s",
+    (explicitMode, projectSetting, projectFilePending, expected) => {
+      expect(
+        isDefaultThreadEnvModeSettled({ explicitMode, projectSetting, projectFilePending }),
+      ).toBe(expected);
+    },
+  );
 });

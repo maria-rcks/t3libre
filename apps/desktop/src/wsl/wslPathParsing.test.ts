@@ -79,40 +79,25 @@ describe("parseWslDistroList", () => {
 });
 
 describe("extractDistroFromUncPath", () => {
-  it("extracts the distro from \\\\wsl.localhost UNC paths", () => {
-    expect(extractDistroFromUncPath("\\\\wsl.localhost\\Ubuntu-22.04\\home\\josh")).toBe(
-      "Ubuntu-22.04",
-    );
-  });
-
-  it("extracts the distro from the legacy \\\\wsl$ UNC paths", () => {
-    expect(extractDistroFromUncPath("\\\\wsl$\\Debian\\home\\josh")).toBe("Debian");
-  });
-
-  it("returns null for non-UNC Windows paths", () => {
-    expect(extractDistroFromUncPath("C:\\Users\\Josh\\project")).toBeNull();
-  });
-
-  it("returns null when the segment is not a valid distro name", () => {
-    expect(extractDistroFromUncPath("\\\\wsl.localhost\\bad name!\\home")).toBeNull();
+  it.each([
+    ["\\\\wsl.localhost\\Ubuntu-22.04\\home\\josh", "Ubuntu-22.04"],
+    ["\\\\wsl$\\Debian\\home\\josh", "Debian"],
+    ["C:\\Users\\Josh\\project", null],
+    ["\\\\wsl.localhost\\bad name!\\home", null],
+  ] as const)("extracts the distro from %s as %s", (path, expected) => {
+    expect(extractDistroFromUncPath(path)).toBe(expected);
   });
 });
 
 describe("wslUncPathToLinuxPath", () => {
-  it("maps WSL UNC paths back to Linux absolute paths", () => {
-    expect(wslUncPathToLinuxPath("\\\\wsl.localhost\\Ubuntu-22.04\\home\\josh\\repo")).toBe(
-      "/home/josh/repo",
-    );
-  });
-
-  it("maps a distro UNC root to Linux root", () => {
-    expect(wslUncPathToLinuxPath("\\\\wsl$\\Debian")).toBe("/");
-    expect(wslUncPathToLinuxPath("\\\\wsl.localhost\\Debian\\")).toBe("/");
-  });
-
-  it("rejects invalid distro names and non-WSL paths", () => {
-    expect(wslUncPathToLinuxPath("\\\\wsl.localhost\\bad!name\\home")).toBeNull();
-    expect(wslUncPathToLinuxPath("C:\\Users\\Josh\\repo")).toBeNull();
+  it.each([
+    ["\\\\wsl.localhost\\Ubuntu-22.04\\home\\josh\\repo", "/home/josh/repo"],
+    ["\\\\wsl$\\Debian", "/"],
+    ["\\\\wsl.localhost\\Debian\\", "/"],
+    ["\\\\wsl.localhost\\bad!name\\home", null],
+    ["C:\\Users\\Josh\\repo", null],
+  ] as const)("converts %s to %s", (path, expected) => {
+    expect(wslUncPathToLinuxPath(path)).toBe(expected);
   });
 });
 

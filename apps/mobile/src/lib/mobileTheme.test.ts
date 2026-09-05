@@ -180,12 +180,6 @@ describe("mobile themes", () => {
         expect(
           contrastRatio(variables["--color-placeholder"], variables["--color-input"]),
         ).toBeGreaterThanOrEqual(4.5);
-      }
-    }
-
-    for (const themeId of BUILT_IN_THEME_IDS) {
-      for (const appearance of ["light", "dark"] as const) {
-        const variables = getMobileThemeVariables(themeId, appearance);
         expect(
           contrastRatio(
             variables["--color-user-bubble-foreground"],

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import type { TerminalSummary } from "@t3tools/contracts";
 import { DEFAULT_TERMINAL_ID } from "@t3tools/contracts";
 
 import { getTerminalLabel, nextTerminalId, resolveTerminalSessionLabel } from "./terminalLabels.ts";
@@ -20,8 +19,7 @@ describe("getTerminalLabel", () => {
 
 describe("resolveTerminalSessionLabel", () => {
   it("prefers a non-empty summary label", () => {
-    const summary = { label: "  bun  " } as Pick<TerminalSummary, "label">;
-    expect(resolveTerminalSessionLabel("term-1", summary)).toBe("bun");
+    expect(resolveTerminalSessionLabel("term-1", { label: "  bun  " })).toBe("bun");
   });
 
   it("falls back to getTerminalLabel when summary is missing or blank", () => {
@@ -32,22 +30,15 @@ describe("resolveTerminalSessionLabel", () => {
 });
 
 describe("nextTerminalId", () => {
-  it("allocates term-1 when no terminals are listed yet", () => {
-    expect(nextTerminalId([])).toBe(DEFAULT_TERMINAL_ID);
-  });
-
-  it("allocates term-2 when only term-1 exists", () => {
-    expect(nextTerminalId([DEFAULT_TERMINAL_ID])).toBe("term-2");
-  });
-
-  it("skips over taken term-N slots", () => {
-    expect(nextTerminalId([DEFAULT_TERMINAL_ID, "term-2", "term-3"])).toBe("term-4");
-    expect(nextTerminalId([DEFAULT_TERMINAL_ID, "term-3"])).toBe("term-2");
-    expect(nextTerminalId(["term-2", "term-3"])).toBe("term-1");
-  });
-
-  it("ignores blank/whitespace-only ids", () => {
-    expect(nextTerminalId(["", "  ", DEFAULT_TERMINAL_ID])).toBe("term-2");
-    expect(nextTerminalId(["", "  "])).toBe("term-1");
+  it.each([
+    [[], DEFAULT_TERMINAL_ID],
+    [[DEFAULT_TERMINAL_ID], "term-2"],
+    [[DEFAULT_TERMINAL_ID, "term-2", "term-3"], "term-4"],
+    [[DEFAULT_TERMINAL_ID, "term-3"], "term-2"],
+    [["term-2", "term-3"], "term-1"],
+    [["", "  ", DEFAULT_TERMINAL_ID], "term-2"],
+    [["", "  "], "term-1"],
+  ])("allocates the lowest unused id for %j: %s", (existingIds, expected) => {
+    expect(nextTerminalId(existingIds)).toBe(expected);
   });
 });

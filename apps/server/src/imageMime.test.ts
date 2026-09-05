@@ -3,70 +3,37 @@ import { describe, expect, it } from "vite-plus/test";
 import { inferImageExtension, parseBase64DataUrl } from "./imageMime.ts";
 
 describe("imageMime", () => {
-  it("parses base64 data URL with mime type", () => {
-    expect(parseBase64DataUrl("data:image/png;base64,SGVsbG8=")).toEqual({
+  it.each([
+    ["mime type", "data:image/png;base64,SGVsbG8="],
+    ["mime parameters", "data:image/png;charset=utf-8;base64,SGVsbG8="],
+    ["spaces in payload", "data:image/png;base64,SGVs bG8=\n"],
+    ["case-insensitive scheme and mime type", "DATA:IMAGE/PNG;BASE64,SGVsbG8="],
+  ])("parses base64 data URL with %s", (_, dataUrl) => {
+    expect(parseBase64DataUrl(dataUrl)).toEqual({
       mimeType: "image/png",
       base64: "SGVsbG8=",
     });
   });
 
-  it("parses base64 data URL with mime parameters", () => {
-    expect(parseBase64DataUrl("data:image/png;charset=utf-8;base64,SGVsbG8=")).toEqual({
+  it.each([
+    ["non-base64 data URL", "data:image/png;charset=utf-8,hello"],
+    ["missing mime type", "data:;base64,SGVsbG8="],
+    ["invalid payload character", "data:image/png;base64,SGVs!bG8="],
+    ["comma in payload", "data:image/png;base64,SGVs,bG8="],
+    ["interior and excess padding", "data:image/png;base64,AB=CD==="],
+    ["interior padding", "data:image/png;base64,SGV=bG8="],
+    ["excess padding followed by data", "data:image/png;base64,SGVsbG8=====AAA"],
+    ["length not a multiple of four", "data:image/png;base64,SGVsbG8"],
+    ["empty payload", "data:image/png;base64,"],
+    ["whitespace-only payload", "data:image/png;base64, \r\n"],
+  ])("rejects %s", (_, dataUrl) => {
+    expect(parseBase64DataUrl(dataUrl)).toBeNull();
+  });
+
+  it.each(["SGVsbA==", "SGVsbG8h"])("accepts base64 payload %s", (base64) => {
+    expect(parseBase64DataUrl(`data:image/png;base64,${base64}`)).toEqual({
       mimeType: "image/png",
-      base64: "SGVsbG8=",
-    });
-  });
-
-  it("rejects non-base64 data URL", () => {
-    expect(parseBase64DataUrl("data:image/png;charset=utf-8,hello")).toBeNull();
-  });
-
-  it("rejects missing mime type", () => {
-    expect(parseBase64DataUrl("data:;base64,SGVsbG8=")).toBeNull();
-  });
-
-  it("parses base64 data URL with spaces in payload", () => {
-    expect(parseBase64DataUrl("data:image/png;base64,SGVs bG8=\n")).toEqual({
-      mimeType: "image/png",
-      base64: "SGVsbG8=",
-    });
-  });
-
-  it("rejects payload with characters outside the base64 alphabet", () => {
-    expect(parseBase64DataUrl("data:image/png;base64,SGVs!bG8=")).toBeNull();
-    expect(parseBase64DataUrl("data:image/png;base64,SGVs,bG8=")).toBeNull();
-  });
-
-  it("rejects structurally malformed base64", () => {
-    // '=' before the trailing padding position
-    expect(parseBase64DataUrl("data:image/png;base64,AB=CD===")).toBeNull();
-    expect(parseBase64DataUrl("data:image/png;base64,SGV=bG8=")).toBeNull();
-    // more than two padding characters
-    expect(parseBase64DataUrl("data:image/png;base64,SGVsbG8=====AAA")).toBeNull();
-    // length not a multiple of 4
-    expect(parseBase64DataUrl("data:image/png;base64,SGVsbG8")).toBeNull();
-  });
-
-  it("accepts base64 with one or two trailing padding characters", () => {
-    expect(parseBase64DataUrl("data:image/png;base64,SGVsbA==")).toEqual({
-      mimeType: "image/png",
-      base64: "SGVsbA==",
-    });
-    expect(parseBase64DataUrl("data:image/png;base64,SGVsbG8h")).toEqual({
-      mimeType: "image/png",
-      base64: "SGVsbG8h",
-    });
-  });
-
-  it("rejects empty and whitespace-only payloads", () => {
-    expect(parseBase64DataUrl("data:image/png;base64,")).toBeNull();
-    expect(parseBase64DataUrl("data:image/png;base64, \r\n")).toBeNull();
-  });
-
-  it("parses a case-insensitive scheme and mime type", () => {
-    expect(parseBase64DataUrl("DATA:IMAGE/PNG;BASE64,SGVsbG8=")).toEqual({
-      mimeType: "image/png",
-      base64: "SGVsbG8=",
+      base64,
     });
   });
 

@@ -11,55 +11,43 @@ import {
 } from "./git.ts";
 
 describe("normalizeGitRemoteUrl", () => {
-  it("canonicalizes equivalent GitHub remotes across protocol variants", () => {
-    expect(normalizeGitRemoteUrl("git@github.com:T3Tools/T3Code.git")).toBe(
-      "github.com/t3tools/t3code",
-    );
-    expect(normalizeGitRemoteUrl("https://github.com/T3Tools/T3Code.git")).toBe(
-      "github.com/t3tools/t3code",
-    );
-    expect(normalizeGitRemoteUrl("ssh://git@github.com/T3Tools/T3Code")).toBe(
-      "github.com/t3tools/t3code",
-    );
+  it.each([
+    "git@github.com:T3Tools/T3Code.git",
+    "https://github.com/T3Tools/T3Code.git",
+    "ssh://git@github.com/T3Tools/T3Code",
+  ])("canonicalizes GitHub remote %s", (remote) => {
+    expect(normalizeGitRemoteUrl(remote)).toBe("github.com/t3tools/t3code");
   });
 
-  it("preserves nested group paths for providers like GitLab", () => {
-    expect(normalizeGitRemoteUrl("git@gitlab.com:T3Tools/platform/T3Code.git")).toBe(
-      "gitlab.com/t3tools/platform/t3code",
-    );
-    expect(normalizeGitRemoteUrl("https://gitlab.com/T3Tools/platform/T3Code.git")).toBe(
-      "gitlab.com/t3tools/platform/t3code",
-    );
+  it.each([
+    "git@gitlab.com:T3Tools/platform/T3Code.git",
+    "https://gitlab.com/T3Tools/platform/T3Code.git",
+  ])("preserves nested group paths in %s", (remote) => {
+    expect(normalizeGitRemoteUrl(remote)).toBe("gitlab.com/t3tools/platform/t3code");
   });
 
-  it("drops explicit ports from URL-shaped remotes", () => {
-    expect(normalizeGitRemoteUrl("https://gitlab.company.com:8443/team/project.git")).toBe(
-      "gitlab.company.com/team/project",
-    );
-    expect(normalizeGitRemoteUrl("ssh://git@gitlab.company.com:2222/team/project.git")).toBe(
-      "gitlab.company.com/team/project",
-    );
+  it.each([
+    "https://gitlab.company.com:8443/team/project.git",
+    "ssh://git@gitlab.company.com:2222/team/project.git",
+  ])("drops explicit ports from %s", (remote) => {
+    expect(normalizeGitRemoteUrl(remote)).toBe("gitlab.company.com/team/project");
   });
 
-  it("normalizes SCP-like remotes with non-git SSH users", () => {
-    expect(normalizeGitRemoteUrl("gitlab@gitlab.example.com:group/project.git")).toBe(
-      "gitlab.example.com/group/project",
-    );
-    expect(normalizeGitRemoteUrl("deploy@bitbucket.org:workspace/repo.git")).toBe(
-      "bitbucket.org/workspace/repo",
-    );
+  it.each([
+    ["gitlab@gitlab.example.com:group/project.git", "gitlab.example.com/group/project"],
+    ["deploy@bitbucket.org:workspace/repo.git", "bitbucket.org/workspace/repo"],
+  ])("normalizes non-git SSH user in %s", (remote, expected) => {
+    expect(normalizeGitRemoteUrl(remote)).toBe(expected);
   });
 });
 
 describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
-  it("extracts the owner and repository from common GitHub remote shapes", () => {
-    expect(
-      parseGitHubRepositoryNameWithOwnerFromRemoteUrl("git@github.com:T3Tools/T3Code.git"),
-    ).toBe("T3Tools/T3Code");
-    expect(
-      parseGitHubRepositoryNameWithOwnerFromRemoteUrl("https://github.com/T3Tools/T3Code.git"),
-    ).toBe("T3Tools/T3Code");
-  });
+  it.each(["git@github.com:T3Tools/T3Code.git", "https://github.com/T3Tools/T3Code.git"])(
+    "extracts the owner and repository from %s",
+    (remote) => {
+      expect(parseGitHubRepositoryNameWithOwnerFromRemoteUrl(remote)).toBe("T3Tools/T3Code");
+    },
+  );
 });
 
 describe("isTemporaryWorktreeBranch", () => {

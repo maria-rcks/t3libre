@@ -265,29 +265,19 @@ describe("sanitizeThreadTitle", () => {
 });
 
 describe("normalizeCliError", () => {
-  it("detects 'Command not found' and includes CLI name in the message", () => {
+  it.each([
+    ["claude", "generateCommitMessage", "Claude CLI"],
+    ["codex", "generateBranchName", "Codex CLI"],
+  ])("identifies %s when its command is missing", (cliName, operation, label) => {
     const error = normalizeCliError(
-      "claude",
-      "generateCommitMessage",
-      new Error("Command not found: claude"),
+      cliName,
+      operation,
+      new Error(`Command not found: ${cliName}`),
       "Something went wrong",
     );
 
     expect(error).toBeInstanceOf(TextGenerationError);
-    expect(error.detail).toContain("Claude CLI");
-    expect(error.detail).toContain("not available on PATH");
-  });
-
-  it("uses the CLI name from the first argument for codex", () => {
-    const error = normalizeCliError(
-      "codex",
-      "generateBranchName",
-      new Error("Command not found: codex"),
-      "Something went wrong",
-    );
-
-    expect(error).toBeInstanceOf(TextGenerationError);
-    expect(error.detail).toContain("Codex CLI");
+    expect(error.detail).toContain(label);
     expect(error.detail).toContain("not available on PATH");
   });
 

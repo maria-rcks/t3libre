@@ -23,9 +23,6 @@ function normalizeWindowsArch(value: string | undefined): BuildArch | undefined 
   return undefined;
 }
 
-const optionToUndefined = <A>(value: Option.Option<A>): A | undefined =>
-  Option.getOrUndefined(value);
-
 const resolveHostProcessArch = Effect.fn("resolveHostProcessArch")(function* () {
   const platform = yield* HostProcessPlatform;
   const processArch = yield* HostProcessArchitecture;
@@ -37,8 +34,8 @@ const resolveHostProcessArch = Effect.fn("resolveHostProcessArch")(function* () 
     // still reports ARM64 via the processor environment variables.
     const env = yield* WindowsProcessorArchitectureConfig;
     return (
-      normalizeWindowsArch(optionToUndefined(env.processorArchitectureW6432)) ??
-      normalizeWindowsArch(optionToUndefined(env.processorArchitecture)) ??
+      normalizeWindowsArch(Option.getOrUndefined(env.processorArchitectureW6432)) ??
+      normalizeWindowsArch(Option.getOrUndefined(env.processorArchitecture)) ??
       "x64"
     );
   }

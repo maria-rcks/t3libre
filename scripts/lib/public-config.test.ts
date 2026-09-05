@@ -18,27 +18,7 @@ describe("loadRepoEnv", () => {
   it("does not project cloud configuration for an unconfigured clone", () => {
     const env = loadRepoEnv({ baseEnv: {}, repoRoot: makeTemporaryDirectory() });
 
-    expect(env.T3CODE_CLERK_PUBLISHABLE_KEY).toBeUndefined();
-    expect(env.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID).toBeUndefined();
-    expect(env.VITE_CLERK_PUBLISHABLE_KEY).toBeUndefined();
-    expect(env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY).toBeUndefined();
-    expect(env.T3CODE_CLERK_JWT_TEMPLATE).toBeUndefined();
-    expect(env.VITE_CLERK_JWT_TEMPLATE).toBeUndefined();
-    expect(env.EXPO_PUBLIC_CLERK_JWT_TEMPLATE).toBeUndefined();
-    expect(env.T3CODE_RELAY_URL).toBeUndefined();
-    expect(env.VITE_T3CODE_RELAY_URL).toBeUndefined();
-    expect(env.T3CODE_MOBILE_OTLP_TRACES_URL).toBeUndefined();
-    expect(env.T3CODE_MOBILE_OTLP_TRACES_DATASET).toBeUndefined();
-    expect(env.T3CODE_MOBILE_OTLP_TRACES_TOKEN).toBeUndefined();
-    expect(env.EXPO_PUBLIC_OTLP_TRACES_URL).toBeUndefined();
-    expect(env.EXPO_PUBLIC_OTLP_TRACES_DATASET).toBeUndefined();
-    expect(env.EXPO_PUBLIC_OTLP_TRACES_TOKEN).toBeUndefined();
-    expect(env.T3CODE_RELAY_CLIENT_OTLP_TRACES_URL).toBeUndefined();
-    expect(env.T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET).toBeUndefined();
-    expect(env.T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN).toBeUndefined();
-    expect(env.VITE_RELAY_OTLP_TRACES_URL).toBeUndefined();
-    expect(env.VITE_RELAY_OTLP_TRACES_DATASET).toBeUndefined();
-    expect(env.VITE_RELAY_OTLP_TRACES_TOKEN).toBeUndefined();
+    expect(env).toStrictEqual({});
   });
 
   it("applies process, root local, and root precedence in that order", () => {

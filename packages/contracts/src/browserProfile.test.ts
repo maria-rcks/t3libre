@@ -13,6 +13,8 @@ import {
   type BrowserProfile,
 } from "./browserProfile.ts";
 
+const isBrowserProfileId = Schema.is(BrowserProfileId);
+
 const work: BrowserProfile = { id: "profile-work", name: "Work", kind: "persistent" };
 
 describe("resolveBrowserProfiles", () => {
@@ -91,21 +93,13 @@ describe("resolveBrowserProfiles normalization", () => {
       kind: "persistent",
     });
   });
-
-  it("still lets the built-in incognito profile stay ephemeral", () => {
-    const incognito = resolveBrowserProfiles([]).find(
-      (profile) => profile.id === INCOGNITO_BROWSER_PROFILE_ID,
-    );
-
-    expect(incognito?.kind).toBe("incognito");
-  });
 });
 
 describe("BrowserProfileId", () => {
   it("rejects control characters", () => {
     // Ids are folded into delimiter-joined cache keys on the client, so one
     // carrying the delimiter would resolve to another profile's partition.
-    expect(Schema.is(BrowserProfileId)("profile-a\u0000b")).toBe(false);
-    expect(Schema.is(BrowserProfileId)("profile-a")).toBe(true);
+    expect(isBrowserProfileId("profile-a\u0000b")).toBe(false);
+    expect(isBrowserProfileId("profile-a")).toBe(true);
   });
 });

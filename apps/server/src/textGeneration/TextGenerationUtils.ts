@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema";
 
 const isTextGenerationError = Schema.is(TextGenerationError);
 
-/** Convert an Effect Schema to a flat JSON Schema object, inlining `$defs` when present. */
+/** Convert an Effect Schema to JSON Schema, including referenced `$defs` when present. */
 export function toJsonSchemaObject(schema: Schema.Top): unknown {
   const document = Schema.toJsonSchemaDocument(schema);
   if (document.definitions && Object.keys(document.definitions).length > 0) {
@@ -19,7 +19,7 @@ export function limitSection(value: string, maxChars: number): string {
   return `${truncated}\n\n[truncated]`;
 }
 
-/** Normalise a raw commit subject to imperative-mood, ≤72 chars, no trailing period. */
+/** Normalise a raw commit subject to ≤72 chars with no trailing period. */
 export function sanitizeCommitSubject(raw: string): string {
   const singleLine = raw.trim().split(/\r?\n/g)[0]?.trim() ?? "";
   const withoutTrailingPeriod = singleLine.replace(/[.]+$/g, "").trim();
@@ -69,11 +69,7 @@ function cliLabel(cliName: string): string {
   return `${capitalized} CLI (\`${cliName}\`)`;
 }
 
-/**
- * Normalize an unknown error from a CLI text generation process into a
- * typed `TextGenerationError`. Parameterized by CLI name so both Codex
- * and Claude (and future providers) can share the same logic.
- */
+/** Preserve typed errors and hide CLI failure details behind the public fallback. */
 export function normalizeCliError(
   cliName: string,
   operation: string,
@@ -97,11 +93,6 @@ export function normalizeCliError(
         cause: error,
       });
     }
-    return new TextGenerationError({
-      operation,
-      detail: fallback,
-      cause: error,
-    });
   }
 
   return new TextGenerationError({

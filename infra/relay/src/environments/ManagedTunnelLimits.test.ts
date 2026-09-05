@@ -112,10 +112,13 @@ describe("ManagedTunnelLimits", () => {
     }).pipe(Effect.provide(layerWithDb(fakeDb)));
   });
 
-  it.effect("retains database failures with operation and user identity", () => {
+  it.effect.each([
+    { rows: "overrideRows", operation: "load-limit" },
+    { rows: "countRows", operation: "count-tunnels" },
+  ] as const)("retains $rows failures with operation and user identity", ({ rows, operation }) => {
     const cause = new Error("database unavailable");
     const fakeDb = makeFakeDb({
-      overrideRows: Effect.fail(cause),
+      [rows]: Effect.fail(cause),
     });
 
     return Effect.gen(function* () {
@@ -126,30 +129,10 @@ describe("ManagedTunnelLimits", () => {
 
       expect(error).toMatchObject({
         _tag: "ManagedTunnelLimitPersistenceError",
-        operation: "load-limit",
+        operation,
         userId: "user-1",
       });
       expect(error).toHaveProperty("cause", cause);
-    }).pipe(Effect.provide(layerWithDb(fakeDb)));
-  });
-
-  it.effect("retains count failures with operation and user identity", () => {
-    const cause = new Error("database unavailable");
-    const fakeDb = makeFakeDb({
-      countRows: Effect.fail(cause),
-    });
-
-    return Effect.gen(function* () {
-      const limits = yield* ManagedTunnelLimits.ManagedTunnelLimits;
-      const error = yield* Effect.flip(
-        limits.ensureCapacity({ userId: "user-1", environmentId: "environment-1" }),
-      );
-
-      expect(error).toMatchObject({
-        _tag: "ManagedTunnelLimitPersistenceError",
-        operation: "count-tunnels",
-        userId: "user-1",
-      });
     }).pipe(Effect.provide(layerWithDb(fakeDb)));
   });
 });
