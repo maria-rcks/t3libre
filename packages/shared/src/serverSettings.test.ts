@@ -110,7 +110,9 @@ describe("serverSettings helpers", () => {
       projectAutoPullOverrides: { [projectId]: false },
     });
     expect(resolveProjectAutoPull(overridden, projectId, true)).toBe(false);
-    const reset = applyServerSettingsPatch(overridden, { projectAutoPullOverrides: {} });
+    const reset = applyServerSettingsPatch(overridden, {
+      projectAutoPullOverrides: { [projectId]: null },
+    });
     expect(resolveProjectAutoPull(reset, projectId, false)).toBe(true);
     const disabled = applyServerSettingsPatch(reset, {
       defaultAutoPull: false,
@@ -128,7 +130,9 @@ describe("serverSettings helpers", () => {
     });
     expect(resolveProjectAgentBrowserAccess(overridden, projectId)).toBe(false);
     expect(resolveProjectAgentBrowserAccess(overridden, otherProjectId)).toBe(true);
-    const reset = applyServerSettingsPatch(overridden, { projectAgentBrowserAccessOverrides: {} });
+    const reset = applyServerSettingsPatch(overridden, {
+      projectAgentBrowserAccessOverrides: { [projectId]: null },
+    });
     expect(resolveProjectAgentBrowserAccess(reset, projectId)).toBe(true);
     const enabled = applyServerSettingsPatch(reset, {
       enableAgentBrowserAccess: false,
@@ -136,6 +140,37 @@ describe("serverSettings helpers", () => {
     });
     expect(resolveProjectAgentBrowserAccess(enabled, projectId)).toBe(true);
     expect(resolveProjectAgentBrowserAccess(enabled, otherProjectId)).toBe(false);
+  });
+
+  it("preserves other projects' boolean overrides across separate updates and resets", () => {
+    const firstProjectId = ProjectId.make("first-project");
+    const secondProjectId = ProjectId.make("second-project");
+    const firstUpdate = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      defaultAutoPull: true,
+      projectAutoPullOverrides: { [firstProjectId]: false },
+      projectAgentBrowserAccessOverrides: { [firstProjectId]: false },
+    });
+    const secondUpdate = applyServerSettingsPatch(firstUpdate, {
+      projectAutoPullOverrides: { [secondProjectId]: false },
+      projectAgentBrowserAccessOverrides: { [secondProjectId]: false },
+    });
+    for (const projectId of [firstProjectId, secondProjectId]) {
+      expect(resolveProjectAutoPull(secondUpdate, projectId, false)).toBe(false);
+      expect(resolveProjectAgentBrowserAccess(secondUpdate, projectId)).toBe(false);
+    }
+
+    const reset = applyServerSettingsPatch(secondUpdate, {
+      projectAutoPullOverrides: { [firstProjectId]: null },
+      projectAgentBrowserAccessOverrides: { [firstProjectId]: null },
+    });
+    expect(resolveProjectAutoPull(reset, firstProjectId, false)).toBe(true);
+    expect(resolveProjectAgentBrowserAccess(reset, firstProjectId)).toBe(true);
+    expect(resolveProjectAutoPull(reset, secondProjectId, false)).toBe(false);
+    expect(resolveProjectAgentBrowserAccess(reset, secondProjectId)).toBe(false);
+    expect(reset.projectAutoPullOverrides[firstProjectId]).toBeUndefined();
+    expect(reset.projectAgentBrowserAccessOverrides[firstProjectId]).toBeUndefined();
+    expect(resolveProjectAutoPull(secondUpdate, firstProjectId, false)).toBe(false);
+    expect(resolveProjectAgentBrowserAccess(secondUpdate, firstProjectId)).toBe(false);
   });
 
   it("replaces and clears conversation model defaults without retaining old options", () => {

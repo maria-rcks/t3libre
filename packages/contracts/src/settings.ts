@@ -1130,13 +1130,17 @@ export const ServerSettingsPatch = Schema.Struct({
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
-  projectAgentBrowserAccessOverrides: Schema.optionalKey(Schema.Record(ProjectId, Schema.Boolean)),
+  projectAgentBrowserAccessOverrides: Schema.optionalKey(
+    Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
+  ),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   projectScriptOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(Schema.Array(ProjectScript))),
   ),
-  projectAutoPullOverrides: Schema.optionalKey(Schema.Record(ProjectId, Schema.Boolean)),
+  projectAutoPullOverrides: Schema.optionalKey(
+    Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
+  ),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),

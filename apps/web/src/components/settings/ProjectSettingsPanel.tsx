@@ -261,6 +261,7 @@ function ProjectDetail({
   const updateClientSettings = useUpdateClientSettings();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const threads = useThreadShells();
+  const projects = useProjects();
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const updateServerSettings = useAtomCommand(serverEnvironment.updateSettings, "project setting");
   const [savingBrowserAccess, setSavingBrowserAccess] = useState(false);
@@ -307,15 +308,11 @@ function ProjectDetail({
           });
           return;
         }
-        const overrides = {
-          ...environment.serverConfig.settings[key],
-        };
-        for (const member of group.memberProjects.filter(
-          (member) => member.environmentId === environmentId,
-        )) {
-          if (enabled === undefined) delete overrides[member.id];
-          else overrides[member.id] = enabled;
-        }
+        const overrides = Object.fromEntries(
+          group.memberProjects
+            .filter((member) => member.environmentId === environmentId)
+            .map((member) => [member.id, enabled ?? null]),
+        );
         const result = await updateServerSettings({
           environmentId,
           input: { patch: { [key]: overrides } },
@@ -608,11 +605,6 @@ function ProjectDetail({
       savingScriptsRef.current = true;
       setIsSavingScripts(true);
       try {
-        // Captured before the write so a cleared or deleted binding can be
-        // removed from the keybindings config afterwards.
-        const previousKeybinding = keybindingCommand
-          ? keybindingValueForCommand(keybindings, keybindingCommand)
-          : null;
         const updateResult = mapAtomCommandResult(
           await updateServerSettings({
             environmentId: selectedCheckout.environmentId,
@@ -631,53 +623,82 @@ function ProjectDetail({
           return updateResult;
         }
 
-        if (!keybindingCommand) return updateResult;
-        const keybindingRule = decodeProjectScriptKeybindingRule({
-          keybinding,
-          command: keybindingCommand,
-        });
         if (!isElectron) return updateResult;
-        const environmentIds = [selectedCheckout.environmentId];
-        const previousTarget = previousKeybinding
-          ? decodeProjectScriptKeybindingRule({
-              keybinding: previousKeybinding,
-              command: keybindingCommand,
-            })
-          : null;
-        if (keybindingRule) {
-          // `replace` swaps the command's previous rule instead of appending a
-          // second one that would keep the old shortcut alive.
-          const input =
-            previousTarget && previousTarget.key !== keybindingRule.key
-              ? { ...keybindingRule, replace: previousTarget }
-              : keybindingRule;
-          for (const environmentId of environmentIds) {
-            const result = mapAtomCommandResult(
-              await upsertKeybinding({ environmentId, input }),
-              () => undefined,
-            );
-            if (result._tag === "Failure") {
-              reportFailure("Failed to save keybinding", result);
-              return result;
+        const changedCommands = keybindingCommand
+          ? [keybindingCommand]
+          : scripts
+              .filter(
+                (script) =>
+                  !(nextScripts ?? scriptSettings.defaultProjectScripts).some(
+                    (nextScript) => nextScript.id === script.id,
+                  ),
+              )
+              .map((script) => commandForProjectScript(script.id));
+        for (const changedCommand of changedCommands) {
+          const previousKeybinding = keybindingValueForCommand(keybindings, changedCommand);
+          const keybindingRule = decodeProjectScriptKeybindingRule({
+            keybinding,
+            command: changedCommand,
+          });
+          const environmentIds = [selectedCheckout.environmentId];
+          const previousTarget = previousKeybinding
+            ? decodeProjectScriptKeybindingRule({
+                keybinding: previousKeybinding,
+                command: changedCommand,
+              })
+            : null;
+          if (keybindingRule) {
+            // `replace` swaps the command's previous rule instead of appending a
+            // second one that would keep the old shortcut alive.
+            const input =
+              previousTarget && previousTarget.key !== keybindingRule.key
+                ? { ...keybindingRule, replace: previousTarget }
+                : keybindingRule;
+            for (const environmentId of environmentIds) {
+              const result = mapAtomCommandResult(
+                await upsertKeybinding({ environmentId, input }),
+                () => undefined,
+              );
+              if (result._tag === "Failure") {
+                reportFailure("Failed to save keybinding", result);
+                return result;
+              }
             }
-          }
-        } else if (
-          previousTarget &&
-          !(
-            scriptSettings.defaultProjectScripts.some(
-              (script) => commandForProjectScript(script.id) === keybindingCommand,
-            ) &&
-            !nextScripts?.some((script) => commandForProjectScript(script.id) === keybindingCommand)
-          )
-        ) {
-          for (const environmentId of environmentIds) {
-            const result = mapAtomCommandResult(
-              await removeKeybinding({ environmentId, input: previousTarget }),
-              () => undefined,
-            );
-            if (result._tag === "Failure") {
-              reportFailure("Failed to remove keybinding", result);
-              return result;
+          } else if (
+            previousTarget &&
+            !(
+              !nextScripts?.some(
+                (script) => commandForProjectScript(script.id) === changedCommand,
+              ) &&
+              (scriptSettings.defaultProjectScripts.some(
+                (script) => commandForProjectScript(script.id) === changedCommand,
+              ) ||
+                Object.entries(scriptSettings.projectScriptOverrides).some(
+                  ([projectId, overrides]) =>
+                    projectId !== selectedCheckout.id &&
+                    overrides?.some(
+                      (script) => commandForProjectScript(script.id) === changedCommand,
+                    ),
+                ) ||
+                projects.some(
+                  (project) =>
+                    project.environmentId === selectedCheckout.environmentId &&
+                    project.id !== selectedCheckout.id &&
+                    resolveProjectScripts(scriptSettings, project).some(
+                      (script) => commandForProjectScript(script.id) === changedCommand,
+                    ),
+                ))
+            )
+          ) {
+            for (const environmentId of environmentIds) {
+              const result = mapAtomCommandResult(
+                await removeKeybinding({ environmentId, input: previousTarget }),
+                () => undefined,
+              );
+              if (result._tag === "Failure") {
+                reportFailure("Failed to remove keybinding", result);
+                return result;
+              }
             }
           }
         }
@@ -693,7 +714,9 @@ function ProjectDetail({
       reportFailure,
       selectedCheckout.environmentId,
       selectedCheckout.id,
-      scriptSettings.defaultProjectScripts,
+      scriptSettings,
+      scripts,
+      projects,
       updateServerSettings,
       upsertKeybinding,
     ],
@@ -883,7 +906,17 @@ function ProjectDetail({
     projectGroupingSettings.sidebarProjectGroupingOverrides?.[
       deriveProjectGroupingOverrideKey(selectedCheckout)
     ] ?? "inherit";
-  const selectedCheckoutLabel = selectedCheckout.environmentLabel ?? "This machine";
+  const checkoutLabel = (member: SidebarProjectGroupMember) => {
+    const label = member.environmentLabel ?? "This machine";
+    return group.memberProjects.some(
+      (other) =>
+        other.physicalProjectKey !== member.physicalProjectKey &&
+        (other.environmentLabel ?? "This machine") === label,
+    )
+      ? `${label} · ${member.workspaceRoot}`
+      : label;
+  };
+  const selectedCheckoutLabel = checkoutLabel(selectedCheckout);
 
   return (
     <>
@@ -1190,12 +1223,16 @@ function ProjectDetail({
                   }}
                 >
                   <SelectTrigger size="sm" aria-label="Checkout">
-                    <SelectValue>{selectedCheckoutLabel}</SelectValue>
+                    <SelectValue className="max-w-96 truncate">
+                      {selectedCheckoutLabel}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectPopup align="end" alignItemWithTrigger={false}>
                     {group.memberProjects.map((member) => (
                       <SelectItem key={member.physicalProjectKey} value={member.physicalProjectKey}>
-                        {member.environmentLabel ?? "This machine"}
+                        <span className="max-w-96 whitespace-normal break-all">
+                          {checkoutLabel(member)}
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectPopup>

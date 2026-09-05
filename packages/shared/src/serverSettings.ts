@@ -173,6 +173,8 @@ export function applyServerSettingsPatch(
     // Merged per entry below; its `null` removals must not reach deepMerge.
     usageLimitSources: usageLimitSourcesPatch,
     usagePriceOverrides: usagePriceOverridesPatch,
+    projectAgentBrowserAccessOverrides: projectAgentBrowserAccessOverridesPatch,
+    projectAutoPullOverrides: projectAutoPullOverridesPatch,
     ...patchForMerge
   } = patch;
   const currentBackgroundActivity = normalizeServerBackgroundActivitySettings(current);
@@ -229,11 +231,21 @@ export function applyServerSettingsPatch(
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
       : {}),
-    ...(patch.projectAgentBrowserAccessOverrides !== undefined
-      ? { projectAgentBrowserAccessOverrides: patch.projectAgentBrowserAccessOverrides }
+    ...(projectAgentBrowserAccessOverridesPatch !== undefined
+      ? {
+          projectAgentBrowserAccessOverrides: mergeSettingsEntries(
+            current.projectAgentBrowserAccessOverrides,
+            projectAgentBrowserAccessOverridesPatch,
+          ),
+        }
       : {}),
-    ...(patch.projectAutoPullOverrides !== undefined
-      ? { projectAutoPullOverrides: patch.projectAutoPullOverrides }
+    ...(projectAutoPullOverridesPatch !== undefined
+      ? {
+          projectAutoPullOverrides: mergeSettingsEntries(
+            current.projectAutoPullOverrides,
+            projectAutoPullOverridesPatch,
+          ),
+        }
       : {}),
     ...(patch.defaultModelSelection !== undefined
       ? { defaultModelSelection: patch.defaultModelSelection }
