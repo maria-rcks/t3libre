@@ -14,6 +14,7 @@ import {
   BlocksIcon,
   BotIcon,
   GitBranchIcon,
+  PanelsTopLeftIcon,
   KeyboardIcon,
   Link2Icon,
   PaletteIcon,
@@ -64,6 +65,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
 > = {
   "/settings/general": Settings2Icon,
   "/settings/appearance": PaletteIcon,
+  "/settings/projects": PanelsTopLeftIcon,
   "/settings/keybindings": KeyboardIcon,
   "/settings/providers": BotIcon,
   "/settings/integrations": BlocksIcon,

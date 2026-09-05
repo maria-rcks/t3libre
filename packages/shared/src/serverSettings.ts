@@ -3,6 +3,7 @@ import {
   isProviderAvailable,
   resolveProviderInstanceEnabled,
   type ModelSelection,
+  type ProjectId,
   type ProviderDriverKind,
   type ServerProvider,
   ServerSettings,
@@ -22,6 +23,27 @@ import {
 
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 const decodeServerSettingsJson = Schema.decodeUnknownOption(ServerSettingsJson);
+
+export function resolveProjectAgentBrowserAccess(
+  settings: Pick<ServerSettings, "enableAgentBrowserAccess" | "projectAgentBrowserAccessOverrides">,
+  projectId: ProjectId,
+): boolean {
+  return (
+    settings.projectAgentBrowserAccessOverrides[projectId] ?? settings.enableAgentBrowserAccess
+  );
+}
+
+export function resolveProjectAutoPull(
+  settings: Pick<ServerSettings, "defaultAutoPull" | "projectAutoPullOverrides">,
+  projectId: ProjectId,
+  legacyAutoPull: boolean | undefined,
+): boolean {
+  // Existing opt-ins stay enabled until explicitly overridden or reset.
+  return (
+    settings.projectAutoPullOverrides[projectId] ??
+    (legacyAutoPull === true || settings.defaultAutoPull)
+  );
+}
 
 type LegacyProviderSettings = ServerSettings["providers"][keyof ServerSettings["providers"]];
 
@@ -205,6 +227,21 @@ export function applyServerSettingsPatch(
       : {}),
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
+      : {}),
+    ...(patch.projectAgentBrowserAccessOverrides !== undefined
+      ? { projectAgentBrowserAccessOverrides: patch.projectAgentBrowserAccessOverrides }
+      : {}),
+    ...(patch.projectAutoPullOverrides !== undefined
+      ? { projectAutoPullOverrides: patch.projectAutoPullOverrides }
+      : {}),
+    ...(patch.defaultModelSelection !== undefined
+      ? { defaultModelSelection: patch.defaultModelSelection }
+      : {}),
+    ...(patch.defaultProjectScripts !== undefined
+      ? { defaultProjectScripts: patch.defaultProjectScripts }
+      : {}),
+    ...(patch.projectScriptOverrides !== undefined
+      ? { projectScriptOverrides: patch.projectScriptOverrides }
       : {}),
     ...(usageLimitSourcesPatch !== undefined
       ? {

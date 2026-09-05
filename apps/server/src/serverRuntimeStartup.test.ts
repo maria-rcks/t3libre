@@ -48,7 +48,7 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
         }),
     } as unknown as GitVcsDriver.GitVcsDriver["Service"];
     const project = (workspaceRoot: string, autoPull = true) =>
-      ({ workspaceRoot, autoPull }) as never;
+      ({ id: ProjectId.make(workspaceRoot), workspaceRoot, autoPull }) as never;
 
     yield* ServerRuntimeStartup.autoPullProjects([
       project("/clean"),
@@ -60,6 +60,16 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
     ]).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
 
     assert.deepStrictEqual(pulled, ["/clean"]);
+
+    pulled.length = 0;
+    yield* ServerRuntimeStartup.autoPullProjects(
+      [project("/inherited", false), project("/opted-out"), project("/dirty", false)],
+      {
+        defaultAutoPull: true,
+        projectAutoPullOverrides: { [ProjectId.make("/opted-out")]: false },
+      },
+    ).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
+    assert.deepStrictEqual(pulled, ["/inherited"]);
   }),
 );
 

@@ -2,6 +2,7 @@ import {
   CommandId,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
   type OrchestrationProjectShell,
   ProjectId,
@@ -9,6 +10,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
+import { resolveProjectAutoPull } from "@t3tools/shared/serverSettings";
 import * as Cause from "effect/Cause";
 import * as Console from "effect/Console";
 import * as Context from "effect/Context";
@@ -638,12 +640,14 @@ interface StartupOptions {
 
 export const autoPullProjects = Effect.fn("autoPullProjects")(function* (
   projects: ReadonlyArray<OrchestrationProjectShell>,
+  settings: Pick<typeof DEFAULT_SERVER_SETTINGS, "defaultAutoPull" | "projectAutoPullOverrides"> =
+    DEFAULT_SERVER_SETTINGS,
 ) {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const workspaceRoots = [
     ...new Set(
       projects
-        .filter((project) => project.autoPull === true)
+        .filter((project) => resolveProjectAutoPull(settings, project.id, project.autoPull))
         .map((project) => project.workspaceRoot),
     ),
   ];
@@ -714,7 +718,11 @@ export const make = (options?: StartupOptions) =>
     const reactorScope = yield* Scope.make("sequential");
 
     const syncAutoPullProjects = projectionSnapshotQuery.getShellSnapshot().pipe(
-      Effect.flatMap((snapshot) => autoPullProjects(snapshot.projects)),
+      Effect.flatMap((snapshot) =>
+        serverSettings.getSettings.pipe(
+          Effect.flatMap((settings) => autoPullProjects(snapshot.projects, settings)),
+        ),
+      ),
       Effect.catch((cause) =>
         Effect.logWarning("Failed to load projects for automatic pull", { cause }),
       ),

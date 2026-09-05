@@ -1,5 +1,9 @@
-import { ProjectId } from "@t3tools/contracts";
-import { projectScriptRuntimeEnv, setupProjectScript } from "@t3tools/shared/projectScripts";
+import { DEFAULT_SERVER_SETTINGS, ProjectId } from "@t3tools/contracts";
+import {
+  projectScriptRuntimeEnv,
+  resolveProjectScripts,
+  setupProjectScript,
+} from "@t3tools/shared/projectScripts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -8,6 +12,7 @@ import * as Schema from "effect/Schema";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 
 export interface ProjectSetupScriptRunnerResultNoScript {
   readonly status: "no-script";
@@ -40,7 +45,7 @@ export class ProjectSetupScriptOperationError extends Schema.TaggedErrorClass<Pr
     projectId: Schema.optional(Schema.String),
     projectCwd: Schema.optional(Schema.String),
     worktreePath: Schema.String,
-    operation: Schema.Literals(["resolveProject", "openTerminal", "writeCommand"]),
+    operation: Schema.Literals(["resolveProject", "readSettings", "openTerminal", "writeCommand"]),
     cause: Schema.Defect(),
   },
 ) {
@@ -81,6 +86,7 @@ export class ProjectSetupScriptRunner extends Context.Service<
 export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const terminalManager = yield* TerminalManager.TerminalManager;
+  const serverSettings = yield* Effect.serviceOption(ServerSettingsService);
 
   const runForThread: ProjectSetupScriptRunner["Service"]["runForThread"] = Effect.fn(
     "ProjectSetupScriptRunner.runForThread",
@@ -124,7 +130,19 @@ export const make = Effect.gen(function* () {
       return yield* new ProjectSetupScriptProjectNotFoundError(errorContext);
     }
 
-    const script = setupProjectScript(project.scripts);
+    const settings = Option.isSome(serverSettings)
+      ? yield* serverSettings.value.getSettings.pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProjectSetupScriptOperationError({
+                ...errorContext,
+                operation: "readSettings",
+                cause,
+              }),
+          ),
+        )
+      : DEFAULT_SERVER_SETTINGS;
+    const script = setupProjectScript(resolveProjectScripts(settings, project));
     if (!script) {
       return {
         status: "no-script",
