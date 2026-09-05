@@ -127,6 +127,7 @@ import { requiredScopeForRpcMethod } from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import { readHostResources } from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
@@ -1996,6 +1997,10 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.serverGetProcessDiagnostics]: (_input) =>
           observeRpcEffect(WS_METHODS.serverGetProcessDiagnostics, processDiagnostics.read, {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverGetHostResources]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverGetHostResources, readHostResources(), {
             "rpc.aggregate": "server",
           }),
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>

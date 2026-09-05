@@ -56,6 +56,8 @@ interface BranchToolbarProps {
   onActiveThreadBranchOverrideChange?: (branch: string | null) => void;
   startFromOrigin: boolean;
   onStartFromOriginChange: (startFromOrigin: boolean) => void;
+  autoEnvironmentLabel?: string | undefined;
+  onAutoEnvironment?: (() => void) | undefined;
   envLocked: boolean;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
@@ -66,6 +68,8 @@ interface BranchToolbarProps {
 }
 
 interface MobileRunContextSelectorProps {
+  autoEnvironmentLabel?: string | undefined;
+  onAutoEnvironment?: (() => void) | undefined;
   envLocked: boolean;
   envModeLocked: boolean;
   environmentId: EnvironmentId;
@@ -81,6 +85,8 @@ interface MobileRunContextSelectorProps {
 }
 
 const MobileRunContextSelector = memo(function MobileRunContextSelector({
+  autoEnvironmentLabel,
+  onAutoEnvironment,
   envLocked,
   envModeLocked,
   environmentId,
@@ -134,7 +140,8 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
           data-composer-label-motion
           className="block w-full min-w-0 max-w-[240px] origin-left truncate transition-[opacity,transform] duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:[transform:translateX(-0.25rem)_scaleX(0.95)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transform-none motion-reduce:transition-opacity"
         >
-          {showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel}
+          {autoEnvironmentLabel ??
+            (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
         </span>
       </span>
     </>
@@ -167,9 +174,24 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
             <MenuGroup>
               <MenuGroupLabel>Run on</MenuGroupLabel>
               <MenuRadioGroup
-                value={environmentId}
-                onValueChange={(value) => onEnvironmentChange(value as EnvironmentId)}
+                value={autoEnvironmentLabel ? "auto" : environmentId}
+                onValueChange={(value) =>
+                  value === "auto"
+                    ? onAutoEnvironment?.()
+                    : onEnvironmentChange(value as EnvironmentId)
+                }
               >
+                {onAutoEnvironment && (
+                  <MenuRadioItem
+                    value="auto"
+                    disabled={envLocked}
+                    onClick={() => {
+                      if (autoEnvironmentLabel) onAutoEnvironment?.();
+                    }}
+                  >
+                    {autoEnvironmentLabel ?? "Balance load"}
+                  </MenuRadioItem>
+                )}
                 {availableEnvironments.map((env) => (
                   <MenuRadioItem
                     key={env.environmentId}
@@ -421,6 +443,8 @@ export const BranchToolbar = memo(function BranchToolbar({
   onActiveThreadBranchOverrideChange,
   startFromOrigin,
   onStartFromOriginChange,
+  autoEnvironmentLabel,
+  onAutoEnvironment,
   envLocked,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
@@ -518,6 +542,8 @@ export const BranchToolbar = memo(function BranchToolbar({
       {showGitControls ? (
         <div className="contents @3xl/composer-surface:hidden">
           <MobileRunContextSelector
+            autoEnvironmentLabel={autoEnvironmentLabel}
+            onAutoEnvironment={onAutoEnvironment}
             envLocked={envLocked}
             envModeLocked={envModeLocked}
             environmentId={environmentId}
@@ -544,6 +570,8 @@ export const BranchToolbar = memo(function BranchToolbar({
           {showEnvironmentIndicator && availableEnvironments && (
             <>
               <BranchToolbarEnvironmentSelector
+                autoEnvironmentLabel={autoEnvironmentLabel}
+                onAutoEnvironment={onAutoEnvironment}
                 envLocked={envLocked}
                 environmentId={environmentId}
                 availableEnvironments={availableEnvironments}

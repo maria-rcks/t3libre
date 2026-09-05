@@ -15,6 +15,8 @@ import {
 } from "./ui/select";
 
 interface BranchToolbarEnvironmentSelectorProps {
+  autoEnvironmentLabel?: string | undefined;
+  onAutoEnvironment?: (() => void) | undefined;
   envLocked: boolean;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[];
@@ -24,6 +26,8 @@ interface BranchToolbarEnvironmentSelectorProps {
 }
 
 export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
+  autoEnvironmentLabel,
+  onAutoEnvironment,
   envLocked,
   environmentId,
   availableEnvironments,
@@ -34,12 +38,16 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   }, [availableEnvironments, environmentId]);
 
   const environmentItems = useMemo(
-    () =>
-      availableEnvironments.map((env) => ({
+    () => [
+      ...(onAutoEnvironment
+        ? [{ value: "auto", label: autoEnvironmentLabel ?? "Balance load" }]
+        : []),
+      ...availableEnvironments.map((env) => ({
         value: env.environmentId,
         label: env.label,
       })),
-    [availableEnvironments],
+    ],
+    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment],
   );
 
   // The static label carries the xs control's height (h-7 sm:h-6) as well as
@@ -75,8 +83,10 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   return (
     <Select
       modal={false}
-      value={environmentId}
-      onValueChange={(value) => onEnvironmentChange(value as EnvironmentId)}
+      value={autoEnvironmentLabel ? "auto" : environmentId}
+      onValueChange={(value) =>
+        value === "auto" ? onAutoEnvironment?.() : onEnvironmentChange(value as EnvironmentId)
+      }
       items={environmentItems}
     >
       <SelectTrigger
@@ -105,6 +115,16 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
       <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
         <SelectGroup>
           <SelectGroupLabel>Run on</SelectGroupLabel>
+          {onAutoEnvironment && (
+            <SelectItem
+              value="auto"
+              onClick={() => {
+                if (autoEnvironmentLabel) onAutoEnvironment?.();
+              }}
+            >
+              {autoEnvironmentLabel ?? "Balance load"}
+            </SelectItem>
+          )}
           {availableEnvironments.map((env) => (
             <SelectItem key={env.environmentId} value={env.environmentId}>
               <span className="inline-flex items-center gap-1.5">

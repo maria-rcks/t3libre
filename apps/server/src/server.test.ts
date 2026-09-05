@@ -6040,6 +6040,34 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("returns cached whole-host resources over websocket", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const [first, second] = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all(
+            [
+              client[WS_METHODS.serverGetHostResources]({}),
+              client[WS_METHODS.serverGetHostResources]({}),
+            ],
+            { concurrency: "unbounded" },
+          ),
+        ),
+      );
+      assert.deepEqual(first, second);
+      assert.isAtLeast(first.sampledAt, 0);
+      assert.isAbove(first.cpuCount, 0);
+      assert.isAbove(first.totalMemoryBytes, 0);
+      assert.isAtLeast(first.availableMemoryBytes, 0);
+      assert.isAtMost(first.availableMemoryBytes, first.totalMemoryBytes);
+      if (first.cpuUtilization !== null) {
+        assert.isAtLeast(first.cpuUtilization, 0);
+        assert.isAtMost(first.cpuUtilization, 1);
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket resource telemetry through the subscription", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();

@@ -1641,6 +1641,43 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(file && composerFileNeedsReattach(file)).toBe(true);
   });
 
+  it("does not opt a legacy branch choice into balancing when runtime mode changes", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId, branch: "feature/pinned" });
+    store.setDraftThreadContext(draftId, { runtimeMode: "full-access" });
+    expect(store.getDraftThread(draftId)?.environmentSelection).toBeUndefined();
+    expect(store.getDraftThread(draftId)?.branch).toBe("feature/pinned");
+  });
+
+  it("pins manual workspace choices and can return to automatic routing without losing the prompt", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    store.setPrompt(draftId, "keep this prompt");
+    store.setDraftThreadContext(draftId, {
+      projectRef: remoteProjectRef,
+      environmentSelection: "auto",
+      loadBalancedEnvironmentId: OTHER_TEST_ENVIRONMENT_ID,
+    });
+    expect(store.getDraftThread(draftId)).toMatchObject({
+      environmentId: OTHER_TEST_ENVIRONMENT_ID,
+      environmentSelection: "auto",
+      loadBalancedEnvironmentId: OTHER_TEST_ENVIRONMENT_ID,
+    });
+    store.setDraftThreadContext(draftId, { branch: "feature/pinned" });
+    expect(store.getDraftThread(draftId)?.environmentSelection).toBe("manual");
+    store.setDraftThreadContext(draftId, {
+      branch: null,
+      environmentSelection: "auto",
+      loadBalancedEnvironmentId: null,
+    });
+    expect(store.getDraftThread(draftId)).toMatchObject({
+      branch: null,
+      environmentSelection: "auto",
+      loadBalancedEnvironmentId: null,
+    });
+    expect(store.getComposerDraft(draftId)?.prompt).toBe("keep this prompt");
+  });
+
   it("clears branch and worktree but keeps env mode when changing a draft thread project ref", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, {
