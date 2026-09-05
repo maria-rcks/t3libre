@@ -200,6 +200,9 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
   let bootstrapThreadCreated = false;
 
   if (serverConfig.autoBootstrapProjectFromCwd) {
+    const settings = yield* (yield* ServerSettings.ServerSettingsService).getSettings;
+    const defaultModelSelection =
+      settings.defaultModelSelection ?? getAutoBootstrapThreadModelSelection();
     yield* Effect.gen(function* () {
       const existingProject = yield* projectionReadModelQuery.getActiveProjectByWorkspaceRoot(
         serverConfig.cwd,
@@ -211,7 +214,7 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         const createdAt = DateTime.formatIso(yield* DateTime.now);
         nextProjectId = ProjectId.make(yield* randomUUID);
         const bootstrapProjectTitle = path.basename(serverConfig.cwd) || "project";
-        nextThreadModelSelection = getAutoBootstrapThreadModelSelection();
+        nextThreadModelSelection = defaultModelSelection;
         yield* orchestrationEngine.dispatch({
           type: "project.create",
           commandId: CommandId.make(yield* randomUUID),
@@ -226,7 +229,7 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         nextProjectId = existingProject.value.id;
         bootstrapProjectId = nextProjectId;
         nextThreadModelSelection =
-          existingProject.value.defaultModelSelection ?? getAutoBootstrapThreadModelSelection();
+          existingProject.value.defaultModelSelection ?? defaultModelSelection;
       }
 
       yield* Effect.gen(function* () {

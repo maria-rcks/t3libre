@@ -159,7 +159,11 @@ export function ProjectDefaultsSettings({
   const setModel = (value: ModelSelection | null) => void save({ defaultModelSelection: value });
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Project defaults" hideTitle>
+      <SettingsSection
+        id={searchableSetting("project-defaults").id}
+        title="Project defaults"
+        hideTitle
+      >
         <SettingsRow
           title="Name"
           aria-disabled

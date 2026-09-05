@@ -833,6 +833,7 @@ function ThreadRouteContent(
     <>
       {activeInspectorRenderer ? <InspectorPaneRoleActivation /> : null}
       <NativeStackScreenOptions
+        optionsVersion={threadGitControlProps.projectScripts}
         options={{
           // Android draws its own in-flow header (AndroidScreenHeader below);
           // the native stack header stays iOS-only.

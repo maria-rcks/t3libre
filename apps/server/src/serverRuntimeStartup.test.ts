@@ -14,6 +14,7 @@ import * as ServerConfig from "./config.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
+import * as ServerSettings from "./serverSettings.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 
 it.effect("automatic pull only updates enabled, behind, clean default-branch checkouts", () =>
@@ -134,6 +135,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
   return Effect.gen(function* () {
     const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([]);
     const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
+      Effect.provide(ServerSettings.layerTest()),
       Effect.provideService(ServerConfig.ServerConfig, {
         cwd: "/tmp/startup-project",
         autoBootstrapProjectFromCwd: true,
@@ -199,8 +201,19 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
   });
 });
 
-it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when missing", () =>
+it.effect.each([
+  { existing: false, machineModel: null, projectModel: null },
+  { existing: false, machineModel: "claude-sonnet-4-6", projectModel: null },
+  { existing: true, machineModel: "claude-sonnet-4-6", projectModel: null },
+  { existing: true, machineModel: "claude-sonnet-4-6", projectModel: "gpt-5.4" },
+])("auto-bootstrap model precedence: %j", ({ existing, machineModel, projectModel }) =>
   Effect.gen(function* () {
+    const machineSelection = machineModel
+      ? { instanceId: ProviderInstanceId.make("claude-code"), model: machineModel }
+      : null;
+    const projectSelection = projectModel
+      ? { instanceId: ProviderInstanceId.make("codex"), model: projectModel }
+      : null;
     const dispatchCalls = yield* Ref.make<
       ReadonlyArray<{
         readonly type: string;
@@ -209,6 +222,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
       }>
     >([]);
     const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
+      Effect.provide(ServerSettings.layerTest({ defaultModelSelection: machineSelection })),
       Effect.provideService(ServerConfig.ServerConfig, {
         cwd: "/tmp/startup-project",
         autoBootstrapProjectFromCwd: true,
@@ -222,7 +236,21 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
         getSnapshotSequence: () => Effect.die("unused"),
         getCounts: () => Effect.die("unused"),
         getEventReplayStats: () => Effect.die("unused"),
-        getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+        getActiveProjectByWorkspaceRoot: () =>
+          Effect.succeed(
+            existing
+              ? Option.some({
+                  id: ProjectId.make("existing-project"),
+                  title: "Startup Project",
+                  workspaceRoot: "/tmp/startup-project",
+                  defaultModelSelection: projectSelection,
+                  scripts: [],
+                  createdAt: "2026-01-01T00:00:00.000Z",
+                  updatedAt: "2026-01-01T00:00:00.000Z",
+                  deletedAt: null,
+                })
+              : Option.none(),
+          ),
         getProjectShellById: () => Effect.die("unused"),
         getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
         getImportedAgentSessionSources: () => Effect.die("unused"),
@@ -251,18 +279,22 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
 
     assert.equal(typeof targets.bootstrapProjectId, "string");
     assert.equal(typeof targets.bootstrapThreadId, "string");
-    assert.equal(targets.bootstrapProjectCreated, true);
+    assert.equal(targets.bootstrapProjectCreated, !existing);
     assert.equal(targets.bootstrapThreadCreated, true);
     const commands = yield* Ref.get(dispatchCalls);
     assert.deepStrictEqual(
       commands.map((command) => command.type),
-      ["project.create", "thread.create"],
+      existing ? ["thread.create"] : ["project.create", "thread.create"],
     );
-    assert.equal("defaultModelSelection" in commands[0]!, false);
-    assert.deepStrictEqual(commands[1]?.modelSelection, {
-      instanceId: ProviderInstanceId.make("codex"),
-      model: DEFAULT_MODEL,
-    });
+    if (!existing) assert.equal("defaultModelSelection" in commands[0]!, false);
+    assert.deepStrictEqual(
+      commands.at(-1)?.modelSelection,
+      projectSelection ??
+        machineSelection ?? {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: DEFAULT_MODEL,
+        },
+    );
   }),
 );
 
@@ -272,6 +304,7 @@ it.effect(
     Effect.gen(function* () {
       const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([]);
       const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
+        Effect.provide(ServerSettings.layerTest()),
         Effect.provideService(ServerConfig.ServerConfig, {
           cwd: "/tmp/startup-project",
           autoBootstrapProjectFromCwd: true,
@@ -332,6 +365,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
     const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([]);
 
     const error = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
+      Effect.provide(ServerSettings.layerTest()),
       Effect.provideService(ServerConfig.ServerConfig, {
         cwd: "/tmp/startup-project",
         autoBootstrapProjectFromCwd: true,
