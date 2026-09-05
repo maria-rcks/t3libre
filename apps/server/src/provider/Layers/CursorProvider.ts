@@ -563,22 +563,34 @@ const discoverCursorModelsViaListAvailableModels = (
         return yield* acp.request("cursor/list_available_models", {}).pipe(
           Effect.flatMap(decodeCursorListAvailableModelsResponse),
           Effect.map(buildCursorDiscoveredModelsFromAvailableModelsResponse),
-          Effect.catchTag("AcpRequestError", (error) => {
-            const models = started.sessionSetupResult.models;
-            if (error.code !== -32601 || !models?.availableModels.length) {
-              return Effect.fail(error);
-            }
-            return Effect.succeed(
-              buildCursorDiscoveredModels(
-                models.availableModels.map((model) => ({
-                  slug: model.modelId,
-                  name: model.name,
-                  capabilities: EMPTY_CAPABILITIES,
-                })),
-              ).map((model) =>
-                model.slug === models.currentModelId ? { ...model, isDefault: true } : model,
-              ),
-            );
+          Effect.catchTags({
+            AcpRequestError: (error) => {
+              const models = started.sessionSetupResult.models;
+              if (error.code !== -32601 || !models?.availableModels.length) {
+                return Effect.fail(error);
+              }
+              return Effect.succeed(
+                buildCursorDiscoveredModels(
+                  models.availableModels.flatMap((model) => {
+                    const slug = model.modelId.trim();
+                    const name = model.name.trim();
+                    return slug && name
+                      ? [
+                          {
+                            slug,
+                            name,
+                            capabilities: EMPTY_CAPABILITIES,
+                          },
+                        ]
+                      : [];
+                  }),
+                ).map((model) =>
+                  model.slug === models.currentModelId.trim()
+                    ? { ...model, isDefault: true }
+                    : model,
+                ),
+              );
+            },
           }),
         );
       }),

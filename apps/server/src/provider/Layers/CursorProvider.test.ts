@@ -650,7 +650,10 @@ describe("discoverCursorModelsViaAcp", () => {
         customModels: [],
       }),
     );
-    expect(models.map((model) => model.slug)).toEqual(["grok-4.6", "grok-mock-alt"]);
+    expect(models.map((model) => [model.slug, model.name])).toEqual([
+      ["grok-4.6", "Grok 4.6"],
+      ["grok-mock-alt", "Grok Mock Alt"],
+    ]);
     expect(models.find((model) => model.isDefault)?.slug).toBe("grok-4.6");
     expect(models.every((model) => model.capabilities?.optionDescriptors?.length === 0)).toBe(true);
   });

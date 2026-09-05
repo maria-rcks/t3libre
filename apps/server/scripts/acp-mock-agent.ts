@@ -350,6 +350,17 @@ const grokAcpModels: ReadonlyArray<AcpSchema.ModelInfo> = [
 ];
 
 function modelState(): AcpSchema.SessionModelState {
+  if (process.env.T3_ACP_CURSOR_MODELS_ERROR === "missing") {
+    return {
+      currentModelId: " grok-4.6 ",
+      availableModels: [
+        { modelId: " grok-4.6 ", name: " Grok 4.6 " },
+        { modelId: "grok-mock-alt", name: " Grok Mock Alt " },
+        { modelId: "blank-name", name: " " },
+        { modelId: " ", name: "Invalid" },
+      ],
+    };
+  }
   if (antigravityProfile) {
     return { currentModelId, availableModels: antigravityModels };
   }
