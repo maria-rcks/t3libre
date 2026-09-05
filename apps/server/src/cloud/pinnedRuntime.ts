@@ -169,18 +169,19 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
         timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
       })
       .pipe(
-        Effect.catchTag("ProcessSpawnError", (error) =>
-          error.cause instanceof PlatformError.PlatformError &&
-          error.cause.reason._tag === "NotFound"
-            ? // pnpm-managed Node installations do not include npm. Keep npm
-              // installation semantics for the pinned runtime and native builds.
-              runner.run({
-                command: "pnpm",
-                args: ["--package=npm@11", "dlx", "npm", ...installArgs],
-                timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
-              })
-            : Effect.fail(error),
-        ),
+        Effect.catchTags({
+          ProcessSpawnError: (error) =>
+            error.cause instanceof PlatformError.PlatformError &&
+            error.cause.reason._tag === "NotFound"
+              ? // pnpm-managed Node installations do not include npm. Keep npm
+                // installation semantics for the pinned runtime and native builds.
+                runner.run({
+                  command: "pnpm",
+                  args: ["--package=npm@11", "dlx", "npm", ...installArgs],
+                  timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
+                })
+              : Effect.fail(error),
+        }),
         Effect.mapError((cause) => new PinnedRuntimeInstallError({ step: installStep, cause })),
         Effect.filterOrFail(
           (result) => result.code === 0,
