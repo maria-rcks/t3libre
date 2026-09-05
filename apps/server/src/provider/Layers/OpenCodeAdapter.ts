@@ -3785,16 +3785,25 @@ export function makeOpenCodeAdapter(
         const assistantMessages = (messages.data ?? []).filter(
           (entry) => entry.info.role === "assistant",
         );
-        const targetIndex = assistantMessages.length - numTurns - 1;
-        const target = targetIndex >= 0 ? assistantMessages[targetIndex] : null;
-        yield* runOpenCodeSdk("session.revert", () =>
-          context.client.session.revert({
-            sessionID: context.openCodeSessionId,
-            ...(target ? { messageID: target.info.id } : {}),
-          }),
-        ).pipe(Effect.mapError(toRequestError));
+        const targetIndex = Math.max(0, assistantMessages.length - numTurns);
+        const target = assistantMessages[targetIndex];
+        if (target) {
+          yield* runOpenCodeSdk("session.revert", () =>
+            context.client.session.revert({
+              sessionID: context.openCodeSessionId,
+              messageID: target.info.id,
+            }),
+          ).pipe(Effect.mapError(toRequestError));
+        }
 
-        return yield* readThread(threadId);
+        // OpenCode marks a revert boundary but retains the messages until the next prompt.
+        return {
+          threadId,
+          turns: assistantMessages.slice(0, targetIndex).map((entry) => ({
+            id: TurnId.make(entry.info.id),
+            items: [entry.info, ...entry.parts],
+          })),
+        };
       },
     );
 
