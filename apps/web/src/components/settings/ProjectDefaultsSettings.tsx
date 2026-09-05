@@ -137,11 +137,19 @@ export function ProjectDefaultsSettings({
     savingRef.current = true;
     setSaving(true);
     try {
-      await Promise.all(
+      const results = await Promise.all(
         targets.map((target) =>
           updateSettings({ environmentId: target.environmentId, input: { patch } }),
         ),
       );
+      const failedTargets = targets.filter((_, index) => results[index]?._tag === "Failure");
+      if (failedTargets.length > 0) {
+        toastManager.add({
+          type: "error",
+          title: "Project defaults not saved on every machine",
+          description: `Could not update ${failedTargets.map((target) => target.label).join(", ")}. Other machines may have saved the change.`,
+        });
+      }
     } finally {
       savingRef.current = false;
       setSaving(false);

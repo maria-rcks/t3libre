@@ -289,16 +289,8 @@ function ProjectDetail({
     savingBrowserAccessRef.current = true;
     setSavingBrowserAccess(true);
     try {
-      if (key === "projectAutoPullOverrides" && enabled === undefined) {
-        const result = await updateAllMembers(
-          { autoPull: false },
-          "Failed to reset automatic pull",
-        );
-        if (result._tag === "Failure") return;
-      }
-      for (const environmentId of new Set(
-        group.memberProjects.map((member) => member.environmentId),
-      )) {
+      const environmentIds = new Set(group.memberProjects.map((member) => member.environmentId));
+      for (const environmentId of environmentIds) {
         const environment = environmentById.get(environmentId);
         if (!environment?.serverConfig || environment.connection.phase !== "connected") {
           toastManager.add({
@@ -308,6 +300,15 @@ function ProjectDetail({
           });
           return;
         }
+      }
+      if (key === "projectAutoPullOverrides" && enabled === undefined) {
+        const result = await updateAllMembers(
+          { autoPull: false },
+          "Failed to reset automatic pull",
+        );
+        if (result._tag === "Failure") return;
+      }
+      for (const environmentId of environmentIds) {
         const overrides = Object.fromEntries(
           group.memberProjects
             .filter((member) => member.environmentId === environmentId)
@@ -317,7 +318,13 @@ function ProjectDetail({
           environmentId,
           input: { patch: { [key]: overrides } },
         });
-        if (result._tag === "Failure") return;
+        if (result._tag === "Failure") {
+          reportFailure(
+            `Failed to save project setting on ${environmentById.get(environmentId)?.label ?? "this machine"}`,
+            mapAtomCommandResult(result, () => undefined),
+          );
+          return;
+        }
       }
     } finally {
       savingBrowserAccessRef.current = false;
