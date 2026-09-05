@@ -2307,9 +2307,10 @@ function OpenCommandPaletteDialog(props: {
       }
       return;
     }
-    if (command === "thread.copyReference" && activeThreadReferenceCopyTarget !== null) {
+    if (command === "thread.copyReference") {
       event.preventDefault();
       event.stopPropagation();
+      if (activeThreadReferenceCopyTarget === null) return;
       setOpen(false);
       void copyActiveThreadReference();
       return;
