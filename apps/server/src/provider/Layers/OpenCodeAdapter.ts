@@ -3790,13 +3790,11 @@ export function makeOpenCodeAdapter(
               messageID: target.id,
             }),
           ).pipe(Effect.mapError(toRequestError));
+          // Native revert can move the boundary to the preceding user message.
+          return yield* readThread(threadId);
         }
 
-        // OpenCode marks a revert boundary but retains the messages until the next prompt.
-        return {
-          threadId,
-          turns: snapshot.turns.slice(0, targetIndex),
-        };
+        return snapshot;
       },
     );
 
