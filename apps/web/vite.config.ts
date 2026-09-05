@@ -165,6 +165,56 @@ function connectDevSharePlugin(): Plugin {
     name: "t3code:connect-dev-share",
     apply: "serve",
     configureServer(server) {
+      // Bundled dev needs only these two inbound events. Vite's other custom
+      // handlers trust their payloads and must not receive public socket input.
+      server.ws.on("connection", (socket) => {
+        const listeners = socket.listeners("message");
+        socket.removeAllListeners("message");
+        let registered = false;
+        socket.on("message", (raw, isBinary) => {
+          if (isBinary || !Buffer.isBuffer(raw) || raw.length > 4096) return socket.terminate();
+          let message: unknown;
+          try {
+            message = JSON.parse(raw.toString());
+          } catch {
+            return socket.terminate();
+          }
+          if (
+            typeof message === "object" &&
+            message !== null &&
+            "type" in message &&
+            message.type === "ping"
+          )
+            return;
+          if (
+            typeof message !== "object" ||
+            message === null ||
+            !("type" in message) ||
+            message.type !== "custom" ||
+            !("event" in message) ||
+            !("data" in message) ||
+            typeof message.data !== "object" ||
+            message.data === null
+          )
+            return socket.terminate();
+          if (
+            message.event === "vite:client-connected" &&
+            !registered &&
+            "clientId" in message.data &&
+            typeof message.data.clientId === "string" &&
+            message.data.clientId.length > 0
+          )
+            registered = true;
+          else if (
+            message.event !== "vite:bundled-dev:reload-needed" ||
+            !registered ||
+            !("reason" in message.data) ||
+            typeof message.data.reason !== "string"
+          )
+            return socket.terminate();
+          for (const listener of listeners) listener.call(socket, raw, isBinary);
+        });
+      });
       server.middlewares.use((request, response, next) => {
         const [pathname = "/", query] = (request.url ?? "/").split("?", 2);
         if (isDevProxiedPath(pathname)) return next();
