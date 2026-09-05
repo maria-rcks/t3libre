@@ -324,32 +324,30 @@ describe("DesktopServerExposure", () => {
     ),
   );
 
-  it.effect(
-    "keeps a Tailscale-only host network-accessible without advertising a LAN endpoint",
-    () =>
-      withHarness(
-        tailnetNetworkInterfaces,
-        Effect.gen(function* () {
-          const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
-          const settings = yield* DesktopAppSettings.DesktopAppSettings;
-          yield* settings.setServerExposureMode("network-accessible");
+  it.effect("keeps Tailscale-only hosts network-accessible", () =>
+    withHarness(
+      tailnetNetworkInterfaces,
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* settings.setServerExposureMode("network-accessible");
 
-          const state = yield* serverExposure.configureFromSettings({ port: 4173 });
-          assert.equal(state.mode, "network-accessible");
-          assert.equal(state.advertisedHost, null);
-          assert.equal(state.endpointUrl, null);
-          assert.equal((yield* serverExposure.backendConfig).bindHost, "0.0.0.0");
+        const state = yield* serverExposure.configureFromSettings({ port: 4173 });
+        assert.equal(state.mode, "network-accessible");
+        assert.equal(state.advertisedHost, null);
+        assert.equal(state.endpointUrl, null);
+        assert.equal((yield* serverExposure.backendConfig).bindHost, "0.0.0.0");
 
-          const endpoints = yield* serverExposure.getAdvertisedEndpoints;
-          assert.deepEqual(
-            endpoints.map((endpoint) => [endpoint.reachability, endpoint.httpBaseUrl]),
-            [
-              ["loopback", "http://127.0.0.1:4173/"],
-              ["private-network", "http://100.90.1.2:4173/"],
-            ],
-          );
-        }),
-      ),
+        const endpoints = yield* serverExposure.getAdvertisedEndpoints;
+        assert.deepEqual(
+          endpoints.map((endpoint) => [endpoint.reachability, endpoint.httpBaseUrl]),
+          [
+            ["loopback", "http://127.0.0.1:4173/"],
+            ["private-network", "http://100.90.1.2:4173/"],
+          ],
+        );
+      }),
+    ),
   );
 
   it.effect("does not spawn the tailscale CLI while server exposure is local-only", () =>
@@ -373,30 +371,28 @@ describe("DesktopServerExposure", () => {
     ),
   );
 
-  it.effect(
-    "honors an explicit Tailscale address in ConfigProvider desktop exposure overrides",
-    () =>
-      withHarness(
-        lanNetworkInterfaces,
-        Effect.gen(function* () {
-          const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
-          yield* serverExposure.configureFromSettings({ port: 4173 });
-          const change = yield* serverExposure.setMode("network-accessible");
+  it.effect("preserves explicit Tailscale exposure overrides", () =>
+    withHarness(
+      lanNetworkInterfaces,
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        yield* serverExposure.configureFromSettings({ port: 4173 });
+        const change = yield* serverExposure.setMode("network-accessible");
 
-          assert.equal(change.state.advertisedHost, "100.90.1.2");
-          assert.equal(change.state.endpointUrl, "http://100.90.1.2:4173");
+        assert.equal(change.state.advertisedHost, "100.90.1.2");
+        assert.equal(change.state.endpointUrl, "http://100.90.1.2:4173");
 
-          const endpoints = yield* serverExposure.getAdvertisedEndpoints;
-          assert.deepEqual(
-            endpoints.map((endpoint) => endpoint.httpBaseUrl),
-            ["http://127.0.0.1:4173/", "http://100.90.1.2:4173/", "https://public.example.test/"],
-          );
-        }),
-        {
-          T3CODE_DESKTOP_LAN_HOST: "100.90.1.2",
-          T3CODE_DESKTOP_HTTPS_ENDPOINTS: "https://public.example.test",
-        },
-      ),
+        const endpoints = yield* serverExposure.getAdvertisedEndpoints;
+        assert.deepEqual(
+          endpoints.map((endpoint) => endpoint.httpBaseUrl),
+          ["http://127.0.0.1:4173/", "http://100.90.1.2:4173/", "https://public.example.test/"],
+        );
+      }),
+      {
+        T3CODE_DESKTOP_LAN_HOST: "100.90.1.2",
+        T3CODE_DESKTOP_HTTPS_ENDPOINTS: "https://public.example.test",
+      },
+    ),
   );
 
   it.effect("advertises loopback, LAN, and configured manual endpoints from runtime state", () =>
