@@ -48,7 +48,7 @@ export async function resolveForwardedBrowserTarget(
     typeof ticket.ticket !== "string"
   )
     throw new Error("Invalid preview authorization response.");
-  const socketUrl = new URL("/api/preview/forward", connection.httpBaseUrl);
+  const socketUrl = new URL("/api/preview/forward", response.url || connection.httpBaseUrl);
   socketUrl.protocol = socketUrl.protocol === "https:" ? "wss:" : "ws:";
   socketUrl.searchParams.set("port", String(port));
   socketUrl.searchParams.set("wsTicket", ticket.ticket);
