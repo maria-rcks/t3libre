@@ -638,6 +638,38 @@ describe("checkCursorProviderStatus", () => {
 });
 
 describe("discoverCursorModelsViaAcp", () => {
+  it("uses the existing session catalog when the Cursor extension is unavailable", async () => {
+    const wrapperPath = await runNode(
+      makeMockAgentWrapper({ T3_ACP_CURSOR_MODELS_ERROR: "missing" }),
+    );
+    const models = await runNode(
+      discoverCursorModelsViaAcp({
+        enabled: true,
+        binaryPath: wrapperPath,
+        apiEndpoint: "",
+        customModels: [],
+      }),
+    );
+    expect(models.map((model) => model.slug)).toEqual(["grok-4.6", "grok-mock-alt"]);
+    expect(models.find((model) => model.isDefault)?.slug).toBe("grok-4.6");
+    expect(models.every((model) => model.capabilities?.optionDescriptors?.length === 0)).toBe(true);
+  });
+
+  it("does not hide failures from a supported model discovery extension", async () => {
+    const wrapperPath = await runNode(
+      makeMockAgentWrapper({ T3_ACP_CURSOR_MODELS_ERROR: "internal" }),
+    );
+    await expect(
+      runNode(
+        discoverCursorModelsViaAcp({
+          enabled: true,
+          binaryPath: wrapperPath,
+          apiEndpoint: "",
+          customModels: [],
+        }),
+      ),
+    ).rejects.toThrow("Mock model discovery failure");
+  });
   it("keeps the ACP probe runtime alive long enough to discover models", async () => {
     const wrapperPath = await runNode(makeMockAgentWrapper());
 

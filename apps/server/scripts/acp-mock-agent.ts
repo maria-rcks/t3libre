@@ -1287,6 +1287,12 @@ const program = Effect.gen(function* () {
       });
     }
     if (method === "cursor/list_available_models") {
+      if (process.env.T3_ACP_CURSOR_MODELS_ERROR === "missing") {
+        return Effect.fail(AcpError.AcpRequestError.methodNotFound(method));
+      }
+      if (process.env.T3_ACP_CURSOR_MODELS_ERROR === "internal") {
+        return Effect.fail(AcpError.AcpRequestError.internalError("Mock model discovery failure"));
+      }
       return Effect.succeed({
         models: availableModels(),
       });
