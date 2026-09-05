@@ -3144,7 +3144,7 @@ export default function ChatView(props: ChatViewProps) {
     hasMultipleEnvironments &&
     loadBalancingSettings.loadBalancingEnabled &&
     draftThread?.environmentSelection !== "manual" &&
-    (!composerHasAttachments || draftThread?.environmentSelection === "auto") &&
+    (!composerHasAttachments || Boolean(draftThread?.loadBalancedEnvironmentId)) &&
     (!draftThread?.branch || draftThread.environmentSelection === "auto") &&
     !draftThread?.worktreePath,
   );
@@ -3160,7 +3160,8 @@ export default function ChatView(props: ChatViewProps) {
                 (loadBalancingSettings.loadBalancingWeights[candidate.environmentId] ?? 50) > 0 &&
                 environment.serverConfig?.providers.some(
                   (provider) =>
-                    provider.instanceId === activeProviderInstanceId &&
+                    (activeProviderInstanceId === null ||
+                      provider.instanceId === activeProviderInstanceId) &&
                     provider.driver === selectedProvider &&
                     provider.enabled &&
                     provider.installed &&
@@ -3206,6 +3207,16 @@ export default function ChatView(props: ChatViewProps) {
   ]);
   const onAutoEnvironment = useCallback(() => {
     if (envLocked || !draftId) return;
+    if (composerHasAttachments) {
+      toastManager.add({
+        type: "warning",
+        id: "load-balancing-attachments",
+        title: "Keep attachments on this machine",
+        description:
+          "Remove attachments before choosing automatic routing, then attach them on the selected machine.",
+      });
+      return;
+    }
     loadBalancing.refresh(
       logicalProjectEnvironments.map((environment) => environment.environmentId),
     );
@@ -3221,6 +3232,7 @@ export default function ChatView(props: ChatViewProps) {
     setDraftThreadContext,
     loadBalancing.refresh,
     logicalProjectEnvironments,
+    composerHasAttachments,
   ]);
   const autoEnvironmentLabel = automaticEnvironment
     ? draftThread?.loadBalancedEnvironmentId
