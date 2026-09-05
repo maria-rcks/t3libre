@@ -242,7 +242,12 @@ export function applyServerSettingsPatch(
       ? { defaultProjectScripts: patch.defaultProjectScripts }
       : {}),
     ...(patch.projectScriptOverrides !== undefined
-      ? { projectScriptOverrides: patch.projectScriptOverrides }
+      ? {
+          projectScriptOverrides: {
+            ...current.projectScriptOverrides,
+            ...patch.projectScriptOverrides,
+          },
+        }
       : {}),
     ...(usageLimitSourcesPatch !== undefined
       ? {

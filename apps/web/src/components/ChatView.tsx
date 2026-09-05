@@ -3544,7 +3544,6 @@ export default function ChatView(props: ChatViewProps) {
           input: {
             patch: {
               projectScriptOverrides: {
-                ...settings.projectScriptOverrides,
                 [input.projectId]: input.nextScripts,
               },
             },
@@ -3572,7 +3571,7 @@ export default function ChatView(props: ChatViewProps) {
       }
       return updateResult;
     },
-    [environmentId, settings.projectScriptOverrides, updateProjectScriptSettings, upsertKeybinding],
+    [environmentId, updateProjectScriptSettings, upsertKeybinding],
   );
   const saveProjectScript = useCallback(
     async (input: NewProjectScriptInput): Promise<AtomCommandResult<void, unknown>> => {

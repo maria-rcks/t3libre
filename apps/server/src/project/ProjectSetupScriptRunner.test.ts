@@ -6,9 +6,9 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as ProjectSetupScriptRunner from "./ProjectSetupScriptRunner.ts";
-import { layerTest as settingsLayerTest } from "../serverSettings.ts";
 
 const isProjectSetupScriptOperationError = Schema.is(
   ProjectSetupScriptRunner.ProjectSetupScriptOperationError,
@@ -68,10 +68,12 @@ const makeTerminalManagerLayer = (
 const testLayer = (
   project: OrchestrationProject,
   terminal: Pick<TerminalManager.TerminalManager["Service"], "open" | "write">,
+  settings = ServerSettings.layerTest(),
 ) =>
   ProjectSetupScriptRunner.layer.pipe(
     Layer.provideMerge(makeProjectionSnapshotQueryLayer(project)),
     Layer.provideMerge(makeTerminalManagerLayer(terminal)),
+    Layer.provide(settings),
   );
 
 describe("ProjectSetupScriptRunner", () => {
@@ -114,20 +116,20 @@ describe("ProjectSetupScriptRunner", () => {
       });
     }).pipe(
       Effect.provide(
-        testLayer(makeProject([]), { open, write }).pipe(
-          Layer.provide(
-            settingsLayerTest({
-              defaultProjectScripts: [
-                {
-                  id: "default-setup",
-                  name: "Setup",
-                  command: "npm install",
-                  icon: "configure",
-                  runOnWorktreeCreate: true,
-                },
-              ],
-            }),
-          ),
+        testLayer(
+          makeProject([]),
+          { open, write },
+          ServerSettings.layerTest({
+            defaultProjectScripts: [
+              {
+                id: "default-setup",
+                name: "Setup",
+                command: "npm install",
+                icon: "configure",
+                runOnWorktreeCreate: true,
+              },
+            ],
+          }),
         ),
       ),
     );

@@ -62,6 +62,44 @@ describe("serverSettings helpers", () => {
     ).toEqual([]);
   });
 
+  it("preserves other projects' actions when overriding, clearing, or resetting one project", () => {
+    const firstProject = { id: ProjectId.make("first-project"), scripts: [] };
+    const secondProject = { id: ProjectId.make("second-project"), scripts: [] };
+    const defaultAction = {
+      id: "check",
+      name: "Check",
+      command: "npm test",
+      icon: "play" as const,
+      runOnWorktreeCreate: false,
+    };
+    const firstAction = { ...defaultAction, command: "npm run lint" };
+    const secondAction = { ...defaultAction, command: "npm run build" };
+    const firstUpdate = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      defaultProjectScripts: [defaultAction],
+      projectScriptOverrides: { [firstProject.id]: [firstAction] },
+    });
+    const secondUpdate = applyServerSettingsPatch(firstUpdate, {
+      projectScriptOverrides: { [secondProject.id]: [secondAction] },
+    });
+    expect(resolveProjectScripts(secondUpdate, firstProject)).toEqual([firstAction]);
+    expect(resolveProjectScripts(secondUpdate, secondProject)).toEqual([secondAction]);
+
+    const cleared = applyServerSettingsPatch(secondUpdate, {
+      projectScriptOverrides: { [firstProject.id]: [] },
+    });
+    expect(resolveProjectScripts(cleared, firstProject)).toEqual([]);
+    expect(resolveProjectScripts(cleared, secondProject)).toEqual([secondAction]);
+
+    const reset = applyServerSettingsPatch(cleared, {
+      projectScriptOverrides: { [firstProject.id]: null },
+    });
+    expect(resolveProjectScripts(reset, { ...firstProject, scripts: [firstAction] })).toEqual([
+      defaultAction,
+    ]);
+    expect(resolveProjectScripts(reset, secondProject)).toEqual([secondAction]);
+    expect(resolveProjectScripts(secondUpdate, firstProject)).toEqual([firstAction]);
+  });
+
   it("inherits automatic pull while preserving legacy opt-ins and explicit overrides", () => {
     const projectId = ProjectId.make("project-pull");
     expect(resolveProjectAutoPull(DEFAULT_SERVER_SETTINGS, projectId, false)).toBe(false);

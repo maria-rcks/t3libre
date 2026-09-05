@@ -160,24 +160,36 @@ export function ProjectSettingsPanel({
   const navigate = useNavigate();
 
   const selected = groups.find((group) => group.projectKey === projectKey) ?? null;
+  const members = useMemo(
+    () =>
+      selected?.memberProjects.filter(
+        (member) => environmentId === null || member.environmentId === environmentId,
+      ) ?? [],
+    [selected, environmentId],
+  );
 
   // Remember the members of the last rendered group so a grouping-rule change
   // (which changes the group key) can follow the project to its new group.
-  const lastSelectionRef = useRef<{ key: string; memberKeys: string[] } | null>(null);
+  const lastSelectionRef = useRef<{
+    key: string;
+    environmentId: EnvironmentId | null;
+    memberKeys: string[];
+  } | null>(null);
   useEffect(() => {
-    if (!selected) return;
+    if (!selected || members.length === 0) return;
     lastSelectionRef.current = {
       key: selected.projectKey,
-      memberKeys: selected.memberProjects.map((member) => member.physicalProjectKey),
+      environmentId,
+      memberKeys: members.map((member) => member.physicalProjectKey),
     };
-  }, [selected]);
+  }, [selected, members, environmentId]);
 
   // A grouping-rule change replaces the group key mid-visit; follow the
   // project to its new key instead of parking on the not-found state.
   useEffect(() => {
-    if (selected !== null) return;
+    if (members.length > 0) return;
     const last = lastSelectionRef.current;
-    if (last?.key !== projectKey) return;
+    if (last?.key !== projectKey || last.environmentId !== environmentId) return;
     const successor = groups.find((group) =>
       group.memberProjects.some((member) => last.memberKeys.includes(member.physicalProjectKey)),
     );
@@ -189,7 +201,7 @@ export function ProjectSettingsPanel({
         hashScrollIntoView: false,
       });
     }
-  }, [groups, navigate, projectKey, selected, environmentId]);
+  }, [groups, navigate, projectKey, members.length, environmentId]);
 
   if (!selected) {
     return (
@@ -200,10 +212,6 @@ export function ProjectSettingsPanel({
       </div>
     );
   }
-  const members =
-    environmentId === null
-      ? selected.memberProjects
-      : selected.memberProjects.filter((member) => member.environmentId === environmentId);
   if (members.length === 0)
     return (
       <p className="p-8 text-sm text-muted-foreground">
@@ -217,11 +225,21 @@ export function ProjectSettingsPanel({
     id: members[0]!.id,
   };
   return (
-    <ProjectDetail key={`${selected.projectKey}:${environmentId ?? "all"}`} group={scopedGroup} />
+    <ProjectDetail
+      key={`${selected.projectKey}:${environmentId ?? "all"}`}
+      group={scopedGroup}
+      hasOtherMembers={members.length < selected.memberProjects.length}
+    />
   );
 }
 
-function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
+function ProjectDetail({
+  group,
+  hasOtherMembers,
+}: {
+  group: SidebarProjectSnapshot;
+  hasOtherMembers: boolean;
+}) {
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
@@ -231,7 +249,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   );
   const representative =
     group.memberProjects.find(
-      (member) => member.environmentId === group.environmentId && member.id === group.id,
+      (member) => environmentById.get(member.environmentId)?.serverConfig != null,
     ) ?? group.memberProjects[0]!;
   // Provider instances and model options belong to the environment that runs
   // the project's threads. The hosted app has no primary environment, so
@@ -252,12 +270,13 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
       environmentById.get(member.environmentId)?.serverConfig?.settings
         .projectAgentBrowserAccessOverrides[member.id],
   );
-  const browserOverride = browserOverrides[0];
+  const browserOverride = projectSettings.projectAgentBrowserAccessOverrides[representative.id];
   const browserMixed = group.memberProjects.some((member, index) => {
     const settings = environmentById.get(member.environmentId)?.serverConfig?.settings;
+    if (!settings || !environmentById.get(representative.environmentId)?.serverConfig) return false;
     return (
       browserOverrides[index] !== browserOverride ||
-      (browserOverrides[index] ?? settings?.enableAgentBrowserAccess) !==
+      (browserOverrides[index] ?? settings.enableAgentBrowserAccess) !==
         (browserOverride ?? projectSettings.enableAgentBrowserAccess)
     );
   });
@@ -413,12 +432,15 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
     const config = environmentById.get(member.environmentId)?.serverConfig;
     return (
       !Equal.equals(member.defaultModelSelection, storedSelection) ||
-      JSON.stringify(
-        resolveDefaultProviderModelSelection(
-          config?.providers ?? EMPTY_SERVER_PROVIDERS,
-          member.defaultModelSelection ?? config?.settings.defaultModelSelection ?? null,
-        ),
-      ) !== JSON.stringify(resolvedSelection)
+      (config !== null &&
+        config !== undefined &&
+        environmentById.get(representative.environmentId)?.serverConfig != null &&
+        JSON.stringify(
+          resolveDefaultProviderModelSelection(
+            config.providers,
+            member.defaultModelSelection ?? config.settings.defaultModelSelection,
+          ),
+        ) !== JSON.stringify(resolvedSelection))
     );
   });
   const resolvedInstanceId = resolvedSelection?.instanceId ?? null;
@@ -597,7 +619,6 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             input: {
               patch: {
                 projectScriptOverrides: {
-                  ...scriptSettings.projectScriptOverrides,
                   [selectedCheckout.id]: nextScripts,
                 },
               },
@@ -672,7 +693,6 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
       reportFailure,
       selectedCheckout.environmentId,
       selectedCheckout.id,
-      scriptSettings.projectScriptOverrides,
       scriptSettings.defaultProjectScripts,
       updateServerSettings,
       upsertKeybinding,
@@ -771,14 +791,15 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
         memberKeys.has(`${thread.environmentId}:${thread.projectId}`),
       );
       const isWholeGroup = members.length === group.memberProjects.length;
+      const targetKind = hasOtherMembers || !isWholeGroup ? "checkout" : "project";
       const singleMember = members.length === 1 ? members[0]! : null;
       const targetLabel = singleMember?.title ?? group.displayName;
       const confirmed = await settlePromise(() =>
         api.dialogs.confirm(
           [
             projectThreads.length > 0
-              ? `Remove project "${targetLabel}" and delete its ${projectThreads.length} thread${projectThreads.length === 1 ? "" : "s"}?`
-              : `Remove project "${targetLabel}"?`,
+              ? `Remove ${targetKind} "${targetLabel}" and delete its ${projectThreads.length} thread${projectThreads.length === 1 ? "" : "s"}?`
+              : `Remove ${targetKind} "${targetLabel}"?`,
             ...(singleMember
               ? [
                   `Path: ${singleMember.workspaceRoot}`,
@@ -792,7 +813,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
                   "This permanently clears conversation history for those threads and any archived threads.",
                 ]
               : ["This permanently clears any archived conversation history."]),
-            isWholeGroup
+            isWholeGroup && !hasOtherMembers
               ? "This removes only the project entries, not the files on disk."
               : "Other entries in this grouped project are unaffected.",
             "This action cannot be undone.",
@@ -844,6 +865,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
       deleteProject,
       group.displayName,
       group.memberProjects.length,
+      hasOtherMembers,
       navigate,
       reportFailure,
       threads,
@@ -1324,12 +1346,18 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
         <SettingsSection title="Danger">
           <SettingsRow
             title={
-              group.memberProjects.length > 1 ? "Remove this project everywhere" : "Remove project"
+              hasOtherMembers
+                ? "Remove checkout"
+                : group.memberProjects.length > 1
+                  ? "Remove this project everywhere"
+                  : "Remove project"
             }
             description={
-              group.memberProjects.length > 1
-                ? `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
-                : "Deletes the project entry and its threads. Files on disk are not touched."
+              hasOtherMembers
+                ? "Deletes the selected machine's checkout entries and their threads. Other machines and files on disk are not touched."
+                : group.memberProjects.length > 1
+                  ? `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
+                  : "Deletes the project entry and its threads. Files on disk are not touched."
             }
             control={
               <Button
@@ -1338,7 +1366,11 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
                 onClick={() => void removeMembers(group.memberProjects)}
               >
                 <Trash2Icon />
-                {group.memberProjects.length > 1 ? "Remove all entries" : "Remove project"}
+                {hasOtherMembers
+                  ? "Remove checkout"
+                  : group.memberProjects.length > 1
+                    ? "Remove all entries"
+                    : "Remove project"}
               </Button>
             }
           />

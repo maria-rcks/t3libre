@@ -4304,6 +4304,8 @@ boundedListing.layer("ProviderServiceLive session listing", (it) => {
   );
 });
 
+const decodeBrowserAccessThreadShell = Schema.decodeUnknownEffect(OrchestrationThreadShell);
+
 describe("agent browser access", () => {
   const revokedThreads: Array<ThreadId> = [];
   const projectId = ProjectId.make("project-browser-access");
@@ -4345,7 +4347,7 @@ describe("agent browser access", () => {
           Effect.gen(function* () {
             assert.equal(requestedThreadId, threadId);
             return Option.some(
-              yield* Schema.decodeUnknownEffect(OrchestrationThreadShell)({
+              yield* decodeBrowserAccessThreadShell({
                 id: threadId,
                 projectId,
                 title: "Browser access test",

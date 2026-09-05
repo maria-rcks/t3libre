@@ -92,40 +92,47 @@ export function ProjectDefaultActionsSettings({
           },
         });
         if (result._tag === "Failure") return mapAtomCommandResult(result, () => undefined);
-        if (!isElectron || !scriptId) continue;
-        const command = commandForProjectScript(scriptId);
-        const previousValue = keybindingValueForCommand(config.keybindings, command);
-        const previous = previousValue
-          ? decodeProjectScriptKeybindingRule({ keybinding: previousValue, command })
-          : null;
-        const next = decodeProjectScriptKeybindingRule({ keybinding, command });
-        if (next) {
-          const bindingResult = await upsertKeybinding({
-            environmentId: target.environmentId,
-            input: previous && previous.key !== next.key ? { ...next, replace: previous } : next,
-          });
-          if (bindingResult._tag === "Failure")
-            return mapAtomCommandResult(bindingResult, () => undefined);
-        } else if (
-          previous &&
-          !(
-            !nextScripts.some((script) => script.id === scriptId) &&
-            (Object.values(config.settings.projectScriptOverrides).some((scripts) =>
-              scripts?.some((script) => script.id === scriptId),
-            ) ||
-              projects.some(
-                (project) =>
-                  project.environmentId === target.environmentId &&
-                  project.scripts.some((script) => script.id === scriptId),
-              ))
-          )
-        ) {
-          const bindingResult = await removeKeybinding({
-            environmentId: target.environmentId,
-            input: previous,
-          });
-          if (bindingResult._tag === "Failure")
-            return mapAtomCommandResult(bindingResult, () => undefined);
+        if (!isElectron) continue;
+        const changedScriptIds = scriptId
+          ? [scriptId]
+          : config.settings.defaultProjectScripts
+              .filter((script) => !nextScripts.some((nextScript) => nextScript.id === script.id))
+              .map((script) => script.id);
+        for (const changedScriptId of changedScriptIds) {
+          const command = commandForProjectScript(changedScriptId);
+          const previousValue = keybindingValueForCommand(config.keybindings, command);
+          const previous = previousValue
+            ? decodeProjectScriptKeybindingRule({ keybinding: previousValue, command })
+            : null;
+          const next = decodeProjectScriptKeybindingRule({ keybinding, command });
+          if (next) {
+            const bindingResult = await upsertKeybinding({
+              environmentId: target.environmentId,
+              input: previous && previous.key !== next.key ? { ...next, replace: previous } : next,
+            });
+            if (bindingResult._tag === "Failure")
+              return mapAtomCommandResult(bindingResult, () => undefined);
+          } else if (
+            previous &&
+            !(
+              !nextScripts.some((script) => script.id === changedScriptId) &&
+              (Object.values(config.settings.projectScriptOverrides).some((scripts) =>
+                scripts?.some((script) => script.id === changedScriptId),
+              ) ||
+                projects.some(
+                  (project) =>
+                    project.environmentId === target.environmentId &&
+                    project.scripts.some((script) => script.id === changedScriptId),
+                ))
+            )
+          ) {
+            const bindingResult = await removeKeybinding({
+              environmentId: target.environmentId,
+              input: previous,
+            });
+            if (bindingResult._tag === "Failure")
+              return mapAtomCommandResult(bindingResult, () => undefined);
+          }
         }
       }
       return AsyncResult.success(undefined);

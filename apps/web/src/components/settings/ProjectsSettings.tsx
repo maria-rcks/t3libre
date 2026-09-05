@@ -3,6 +3,7 @@ import { FolderIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { useEnvironments } from "../../state/environments";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -87,7 +88,7 @@ export function ProjectsSettings({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="scrollbar-gutter-both shrink-0 overflow-y-auto">
-        <div className="mx-auto w-full max-w-4xl px-5 pt-6 sm:px-6">
+        <WorkspacePageContainer className="pb-0">
           <div
             className="flex flex-wrap items-center gap-2"
             role="group"
@@ -142,7 +143,7 @@ export function ProjectsSettings({
               />
             </div>
           </div>
-        </div>
+        </WorkspacePageContainer>
       </div>
       {machineId !== null && !machine ? (
         <p className="p-8 text-sm text-muted-foreground">This machine is no longer available.</p>

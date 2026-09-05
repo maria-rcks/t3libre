@@ -1,4 +1,4 @@
-import { DEFAULT_SERVER_SETTINGS, ProjectId } from "@t3tools/contracts";
+import { ProjectId } from "@t3tools/contracts";
 import {
   projectScriptRuntimeEnv,
   resolveProjectScripts,
@@ -11,8 +11,8 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
-import { ServerSettingsService } from "../serverSettings.ts";
 
 export interface ProjectSetupScriptRunnerResultNoScript {
   readonly status: "no-script";
@@ -86,7 +86,7 @@ export class ProjectSetupScriptRunner extends Context.Service<
 export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const terminalManager = yield* TerminalManager.TerminalManager;
-  const serverSettings = yield* Effect.serviceOption(ServerSettingsService);
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
 
   const runForThread: ProjectSetupScriptRunner["Service"]["runForThread"] = Effect.fn(
     "ProjectSetupScriptRunner.runForThread",
@@ -130,18 +130,16 @@ export const make = Effect.gen(function* () {
       return yield* new ProjectSetupScriptProjectNotFoundError(errorContext);
     }
 
-    const settings = Option.isSome(serverSettings)
-      ? yield* serverSettings.value.getSettings.pipe(
-          Effect.mapError(
-            (cause) =>
-              new ProjectSetupScriptOperationError({
-                ...errorContext,
-                operation: "readSettings",
-                cause,
-              }),
-          ),
-        )
-      : DEFAULT_SERVER_SETTINGS;
+    const settings = yield* serverSettings.getSettings.pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProjectSetupScriptOperationError({
+            ...errorContext,
+            operation: "readSettings",
+            cause,
+          }),
+      ),
+    );
     const script = setupProjectScript(resolveProjectScripts(settings, project));
     if (!script) {
       return {
