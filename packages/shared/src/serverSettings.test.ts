@@ -13,9 +13,7 @@ import { createModelSelection } from "./model.ts";
 import { resolveProjectScripts, projectScriptsInheritDefaults } from "./projectScripts.ts";
 import {
   applyServerSettingsPatch,
-  extractPersistedServerObservabilitySettings,
   isModelSelectionProviderEnabled,
-  normalizePersistedServerSettingString,
   parsePersistedServerObservabilitySettings,
   resolveSourceControlWriterModelSelection,
   resolveProjectAgentBrowserAccess,
@@ -187,35 +185,28 @@ describe("serverSettings helpers", () => {
     ).toBeNull();
   });
 
-  it("normalizes optional persisted strings", () => {
-    expect(normalizePersistedServerSettingString(undefined)).toBeUndefined();
-    expect(normalizePersistedServerSettingString("   ")).toBeUndefined();
-    expect(normalizePersistedServerSettingString("  http://localhost:4318/v1/traces  ")).toBe(
-      "http://localhost:4318/v1/traces",
-    );
-  });
-
-  it("extracts persisted observability settings", () => {
+  it("ignores missing and blank persisted observability URLs", () => {
+    expect(parsePersistedServerObservabilitySettings("{}")).toEqual({
+      otlpTracesUrl: undefined,
+      otlpMetricsUrl: undefined,
+    });
     expect(
-      extractPersistedServerObservabilitySettings({
-        observability: {
-          otlpTracesUrl: "  http://localhost:4318/v1/traces  ",
-          otlpMetricsUrl: "  http://localhost:4318/v1/metrics  ",
-        },
-      }),
+      parsePersistedServerObservabilitySettings(
+        JSON.stringify({ observability: { otlpTracesUrl: "   ", otlpMetricsUrl: "" } }),
+      ),
     ).toEqual({
-      otlpTracesUrl: "http://localhost:4318/v1/traces",
-      otlpMetricsUrl: "http://localhost:4318/v1/metrics",
+      otlpTracesUrl: undefined,
+      otlpMetricsUrl: undefined,
     });
   });
 
-  it("parses lenient persisted settings JSON", () => {
+  it("parses lenient persisted settings JSON and trims observability URLs", () => {
     expect(
       parsePersistedServerObservabilitySettings(
         JSON.stringify({
           observability: {
-            otlpTracesUrl: "http://localhost:4318/v1/traces",
-            otlpMetricsUrl: "http://localhost:4318/v1/metrics",
+            otlpTracesUrl: "  http://localhost:4318/v1/traces  ",
+            otlpMetricsUrl: "  http://localhost:4318/v1/metrics  ",
           },
         }),
       ),
