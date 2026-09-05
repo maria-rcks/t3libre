@@ -8,10 +8,12 @@ export interface ThreadReferenceCopyTarget {
 
 export function resolveThreadReferenceCopyTarget(input: {
   readonly threadId: string;
+  readonly openPanelPullRequestUrl?: string | null;
   readonly linkedPullRequestUrl?: string | null;
   readonly detectedPullRequestUrl?: string | null;
 }): ThreadReferenceCopyTarget {
-  const pullRequestUrl = input.linkedPullRequestUrl ?? input.detectedPullRequestUrl;
+  const pullRequestUrl =
+    input.openPanelPullRequestUrl ?? input.linkedPullRequestUrl ?? input.detectedPullRequestUrl;
   return pullRequestUrl
     ? {
         kind: "pull-request",

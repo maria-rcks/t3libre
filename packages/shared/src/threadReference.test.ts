@@ -3,6 +3,21 @@ import { describe, expect, it } from "vite-plus/test";
 import { resolveThreadReferenceCopyTarget } from "./threadReference.ts";
 
 describe("resolveThreadReferenceCopyTarget", () => {
+  it("prefers the open panel pull request over linked and detected pull requests", () => {
+    expect(
+      resolveThreadReferenceCopyTarget({
+        threadId: "thread-1",
+        openPanelPullRequestUrl: "https://github.com/t3/pr/14",
+        linkedPullRequestUrl: "https://github.com/t3/pr/12",
+        detectedPullRequestUrl: "https://github.com/t3/pr/13",
+      }),
+    ).toMatchObject({
+      kind: "pull-request",
+      value: "https://github.com/t3/pr/14",
+      successTitle: "PR link copied",
+    });
+  });
+
   it("prefers a durable linked pull request", () => {
     expect(
       resolveThreadReferenceCopyTarget({

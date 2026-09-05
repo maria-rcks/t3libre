@@ -71,6 +71,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { useClientSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
@@ -633,11 +634,15 @@ function OpenCommandPaletteDialog(props: {
           ),
           retainTerminalOnBranchMismatch: activeThread.worktreePath === null,
         })?.url ?? null);
+  const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(
+    activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null,
+  );
   const activeThreadReferenceCopyTarget =
     activeThread == null
       ? null
       : resolveThreadReferenceCopyTarget({
           threadId: activeThread.id,
+          openPanelPullRequestUrl,
           linkedPullRequestUrl: activeThread.linkedPullRequest?.url ?? null,
           detectedPullRequestUrl,
         });
