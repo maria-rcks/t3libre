@@ -3139,6 +3139,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const loadBalancingSettings = useClientSettings();
   const automaticEnvironment = Boolean(
+    clientSettingsHydrated &&
     draftId &&
     !envLocked &&
     hasMultipleEnvironments &&
@@ -6198,6 +6199,7 @@ export default function ChatView(props: ChatViewProps) {
       !activeThread ||
       isSendBusy ||
       isConnecting ||
+      !clientSettingsHydrated ||
       threadDetailLoading ||
       sendInFlightRef.current ||
       feedbackUploadsInFlightRef.current.has(routeThreadKey)

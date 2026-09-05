@@ -161,6 +161,7 @@ import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
+import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as DesktopTelemetryReceiver from "./resourceTelemetry/DesktopTelemetryReceiver.ts";
@@ -829,7 +830,8 @@ const buildAppUnderTest = (options?: {
             }),
         }),
       ),
-      Layer.provide(
+      Layer.provide([
+        HostResources.layer,
         Layer.mock(ProcessResourceMonitor.ProcessResourceMonitor)({
           readHistory: (input) =>
             Effect.succeed({
@@ -844,7 +846,7 @@ const buildAppUnderTest = (options?: {
               error: Option.none(),
             }),
         }),
-      ),
+      ]),
       Layer.provide(
         Layer.mock(TraceDiagnostics.TraceDiagnostics)({
           read: () =>
@@ -6065,7 +6067,35 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.isAtLeast(first.cpuUtilization, 0);
         assert.isAtMost(first.cpuUtilization, 1);
       }
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  );
+
+  it.effect("counts macOS reclaimable memory once and shares concurrent samples", () =>
+    Effect.gen(function* () {
+      const commandCalls = yield* Ref.make(0);
+      const hostResources = yield* HostResources.make().pipe(
+        Effect.provideService(HostProcessPlatform, "darwin"),
+        Effect.provide(
+          Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({
+            string: () =>
+              Ref.update(commandCalls, (count) => count + 1).pipe(
+                Effect.as(
+                  "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n" +
+                    "Pages free: 10.\nPages inactive: 20.\nPages speculative: 5.\n" +
+                    "Pages purgeable: 999.\n",
+                ),
+              ),
+          }),
+        ),
+      );
+      const [first, second] = yield* Effect.all([hostResources.read, hostResources.read], {
+        concurrency: "unbounded",
+      });
+      assert.equal(first.availableMemoryBytes, 35 * 16384);
+      assert.deepEqual(first, second);
+      assert.deepEqual(yield* hostResources.read, first);
+      assert.equal(yield* Ref.get(commandCalls), 1);
+    }).pipe(TestClock.withLive),
   );
 
   it.effect("routes websocket resource telemetry through the subscription", () =>
