@@ -292,7 +292,7 @@ function PullRequestsRouteView() {
   const search = Route.useSearch();
   const sort = search.sort ?? "ready";
   const statsPolicy: PullRequestStatsPolicy =
-    sort === "largest" || sort === "smallest" ? "eager" : "visible";
+    sort === "ready" || sort === "largest" || sort === "smallest" ? "eager" : "visible";
   const navigate = useNavigate({ from: Route.fullPath });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { environments } = useEnvironments();
@@ -1270,8 +1270,8 @@ function PullRequestsRouteView() {
     viewers,
   ]);
 
-  // Date sorts keep optional line-count reads near the viewport. Size sorts need every loaded
-  // count before their order is final. Received counts stay cached across both policies.
+  // Date sorts keep optional line-count reads near the viewport. Size and readiness sorts need
+  // every loaded count before their order is final. Counts stay cached across both policies.
   const entriesByStatsKey = useRef<ReadonlyMap<string, EnvironmentPullRequestEntry>>(new Map());
   entriesByStatsKey.current = new Map(
     groups.flatMap((group) =>
