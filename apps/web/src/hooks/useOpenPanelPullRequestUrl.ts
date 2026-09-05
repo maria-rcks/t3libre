@@ -1,6 +1,11 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ProjectId, type ScopedThreadRef } from "@t3tools/contracts";
+import { useMemo } from "react";
 
+import {
+  readPullRequestDetailSnapshot,
+  resolveDisplayedPullRequestDetail,
+} from "../components/pullRequest/pullRequestDetail.logic";
 import { gitHubPullRequestBrowserUrl } from "../lib/openPullRequestLink";
 import { selectActiveRightPanelSurface, useRightPanelStore } from "../rightPanelStore";
 import { useProject } from "../state/entities";
@@ -32,8 +37,19 @@ export function useOpenPanelPullRequestUrl(threadRef: ScopedThreadRef | null): s
         })
       : null,
   ).data;
+  const cachedDetail = useMemo(
+    () =>
+      reference && environmentId
+        ? readPullRequestDetailSnapshot(
+            typeof window === "undefined" ? undefined : window.localStorage,
+            environmentId,
+            reference,
+          )
+        : null,
+    [environmentId, reference],
+  );
   return reference
-    ? (detail?.url ??
+    ? (resolveDisplayedPullRequestDetail({ live: detail, cached: cachedDetail, reference })?.url ??
         gitHubPullRequestBrowserUrl(
           project?.repositoryIdentity,
           reference.repository,
