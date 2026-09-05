@@ -826,7 +826,7 @@ function PullRequestsRouteView() {
   // from the first moment rather than the second: a button that stays live through the slow half
   // of its own work is a button that gets pressed again, and buys the whole cascade twice.
   const [invalidating, setInvalidating] = useState(false);
-  const refreshFromHost = async () => {
+  const refreshFromHost = async (includeDetail = true) => {
     const requestedStatsScope = statsScopeRef.current;
     setInvalidating(true);
     try {
@@ -851,7 +851,7 @@ function PullRequestsRouteView() {
       setStatsTargetState({ key: requestedStatsScope.key, batches });
       statsQuery.refresh(batches.map(({ environmentId, input }) => ({ environmentId, input })));
     }
-    setDetailRefreshToken((token) => token + 1);
+    if (includeDetail) setDetailRefreshToken((token) => token + 1);
   };
   const refreshing = invalidating || listQuery.isPending;
 
@@ -1951,9 +1951,9 @@ function PullRequestsRouteView() {
               }
               refreshToken={detailRefreshToken}
               // Host actions can change both readiness and diff size, so refresh the counts
-              // alongside the list before ranking the updated row.
+              // alongside the list. The panel already refreshes itself after each action.
               onActed={() => {
-                void refreshFromHost();
+                void refreshFromHost(false);
               }}
             />
           </RightPanelTabs>
