@@ -1,6 +1,7 @@
 import * as NodeOS from "node:os";
 import type { HostResourcesSnapshot } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -81,8 +82,12 @@ export const make = Effect.fn("makeHostResources")(function* () {
   });
 
   // One server-lifetime cache deduplicates simultaneous requests from all sockets.
-  const read = yield* Effect.cachedWithTTL(sample(), "5 seconds");
-  return HostResources.of({ read });
+  const cache = yield* Cache.make({
+    capacity: 1,
+    lookup: (_key: "host") => sample(),
+    timeToLive: "5 seconds",
+  });
+  return HostResources.of({ read: Cache.get(cache, "host") });
 });
 
 export const layer = Layer.effect(HostResources, make());

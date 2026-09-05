@@ -6098,6 +6098,38 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(TestClock.withLive),
   );
 
+  it.effect("retries host sampling immediately after its caller is interrupted", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const commandCalls = yield* Ref.make(0);
+      const hostResources = yield* HostResources.make().pipe(
+        Effect.provideService(HostProcessPlatform, "darwin"),
+        Effect.provide(
+          Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({
+            string: () =>
+              Effect.gen(function* () {
+                const call = yield* Ref.updateAndGet(commandCalls, (count) => count + 1);
+                if (call === 1) {
+                  yield* Deferred.succeed(started, undefined);
+                  return yield* Effect.never;
+                }
+                return (
+                  "Mach Virtual Memory Statistics: (page size of 4096 bytes)\n" +
+                  "Pages free: 10.\nPages inactive: 20.\nPages speculative: 5.\n"
+                );
+              }),
+          }),
+        ),
+      );
+      const firstRead = yield* hostResources.read.pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      yield* Fiber.interrupt(firstRead);
+      const recovered = yield* hostResources.read;
+      assert.equal(recovered.availableMemoryBytes, 35 * 4096);
+      assert.equal(yield* Ref.get(commandCalls), 2);
+    }).pipe(TestClock.withLive),
+  );
+
   it.effect("routes websocket resource telemetry through the subscription", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
