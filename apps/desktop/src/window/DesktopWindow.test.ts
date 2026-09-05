@@ -209,6 +209,7 @@ function makeTestLayer(input: {
   ) => Effect.Effect<void>;
   readonly openedExternalUrls?: unknown[];
   readonly previewZoomReapplies?: number[];
+  readonly beforeCreate?: Effect.Effect<void>;
 }) {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
   const desktopAppSettingsLayer = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
@@ -249,6 +250,7 @@ function makeTestLayer(input: {
       Effect.sync(() => {
         input.createdWindowOptions?.push(options);
       }).pipe(
+        Effect.andThen(input.beforeCreate ?? Effect.void),
         Effect.andThen(Ref.update(input.createCount, (count) => count + 1)),
         Effect.as(input.window),
       ),
@@ -400,6 +402,49 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
   });
 
 describe("DesktopWindow", () => {
+  it.effect("creates only one main window when startup and backend readiness overlap", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const started = yield* Deferred.make<void>();
+      const proceed = yield* Deferred.make<void>();
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        beforeCreate: Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(proceed)),
+        ),
+      });
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        const startup = yield* desktopWindow.ensureMain.pipe(Effect.forkChild);
+        yield* Deferred.await(started);
+        const backendReady = yield* desktopWindow
+          .handleBackendReady(new URL("http://127.0.0.1:3773"))
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Deferred.succeed(proceed, undefined);
+        assert.strictEqual(yield* Fiber.join(startup), fakeWindow.window);
+        yield* Fiber.join(backendReady);
+        assert.equal(yield* Ref.get(createCount), 1);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("retries ensuring the main window after creation fails", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const scenario = yield* makeSplashScenario([null, fakeWindow.window]);
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        assert.isTrue(Option.isNone(yield* desktopWindow.ensureMain.pipe(Effect.option)));
+        assert.strictEqual(yield* desktopWindow.ensureMain, fakeWindow.window);
+        assert.equal(yield* Ref.get(scenario.createCalls), 2);
+      }).pipe(Effect.provide(scenario.layer));
+    }),
+  );
+
   it("leaves fullscreen before concealing a pending quit", () => {
     const fakeWindow = makeFakeBrowserWindow();
 
