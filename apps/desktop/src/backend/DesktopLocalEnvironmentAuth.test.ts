@@ -1,7 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
+import type * as Duration from "effect/Duration";
 import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -32,7 +34,7 @@ const config = {
 };
 
 describe("DesktopLocalEnvironmentAuth", () => {
-  it.effect("does not exchange a credential when backend readiness times out", () =>
+  it.effect("does not exchange a credential when the backend stops before readiness", () =>
     Effect.gen(function* () {
       const requestCount = yield* Ref.make(0);
       const poolLayer = Layer.succeed(DesktopBackendPool.DesktopBackendPool, {
@@ -102,8 +104,12 @@ describe("DesktopLocalEnvironmentAuth", () => {
               id: PRIMARY_LOCAL_ENVIRONMENT_ID,
               label: Effect.succeed("Windows"),
               currentConfig: Effect.succeed(Option.some(config)),
-              waitForReady: () =>
-                Deferred.succeed(waiting, undefined).pipe(Effect.andThen(Deferred.await(ready))),
+              waitForReady: (timeout: Duration.Duration) =>
+                Deferred.succeed(waiting, undefined).pipe(
+                  Effect.andThen(Deferred.await(ready)),
+                  Effect.timeoutOption(timeout),
+                  Effect.map(Option.getOrElse(() => false)),
+                ),
             },
           ]),
         } as unknown as DesktopBackendPool.DesktopBackendPool["Service"]);
@@ -117,6 +123,7 @@ describe("DesktopLocalEnvironmentAuth", () => {
             concurrency: 2,
           }).pipe(Effect.forkChild);
           yield* Deferred.await(waiting);
+          yield* TestClock.adjust("2 minutes");
           assert.strictEqual(yield* Ref.get(requestCount), 0);
           yield* Deferred.succeed(ready, true);
           return yield* Fiber.join(authentication);

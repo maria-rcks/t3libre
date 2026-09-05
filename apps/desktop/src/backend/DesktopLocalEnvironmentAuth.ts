@@ -70,9 +70,9 @@ export const make = Effect.gen(function* () {
         }
         // Renderer assets can load while the local server starts. Every primary
         // HTTP request already awaits this token, so gate the exchange here.
-        if (primary === undefined || !(yield* primary.waitForReady(Duration.seconds(60)))) {
+        if (primary === undefined || !(yield* primary.waitForReady(Duration.infinity))) {
           return yield* new DesktopLocalEnvironmentAuthSessionBootstrapError({
-            cause: new Error("Local backend did not become ready for authentication."),
+            cause: new Error("Local backend stopped before authentication was ready."),
           });
         }
         const session = yield* bootstrapRemoteBearerSession({

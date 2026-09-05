@@ -402,6 +402,36 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
   });
 
 describe("DesktopWindow", () => {
+  it.effect("keeps the early window closed until explicit activation", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.ensureMain;
+        fakeWindow.isDestroyed.mockReturnValue(true);
+        fakeWindow.windowListeners.get("closed")?.();
+        yield* Effect.yieldNow;
+        assert.isTrue(Option.isNone(yield* Ref.get(mainWindow)));
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        assert.equal(yield* Ref.get(createCount), 1);
+        fakeWindow.isDestroyed.mockReturnValue(false);
+        yield* desktopWindow.activate;
+        assert.equal(yield* Ref.get(createCount), 2);
+        yield* desktopWindow.handleBackendNotReady;
+        fakeWindow.windowListeners.get("closed")?.();
+        yield* Effect.yieldNow;
+        yield* desktopWindow.activate;
+        assert.equal(yield* Ref.get(createCount), 2);
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        assert.equal(yield* Ref.get(createCount), 3);
+      }).pipe(
+        Effect.provide(makeTestLayer({ window: fakeWindow.window, createCount, mainWindow })),
+      );
+    }),
+  );
+
   it.effect("creates only one main window when startup and backend readiness overlap", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();

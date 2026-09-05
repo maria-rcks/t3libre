@@ -300,6 +300,7 @@ export const make = Effect.gen(function* () {
   // is never mistaken for the real main window.
   const splashWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
   const mainWindowCreation = yield* Semaphore.make(1);
+  let mainWindowClosed = false;
   const context = yield* Effect.context<DesktopWindowRuntimeServices>();
   const runFork = Effect.runForkWith(context);
   const runPromise = Effect.runPromiseWith(context);
@@ -769,6 +770,7 @@ export const make = Effect.gen(function* () {
     }
 
     window.on("closed", () => {
+      mainWindowClosed = true;
       clearDevelopmentLoadRetry();
       clearBoundsPersist();
       void runPromise(electronWindow.clearMain(Option.some(window)));
@@ -778,6 +780,7 @@ export const make = Effect.gen(function* () {
   });
 
   const createMain = Effect.gen(function* () {
+    mainWindowClosed = false;
     const window = yield* createWindow();
     yield* electronWindow.setMain(window);
     yield* logWindowInfo("main window created");
@@ -855,6 +858,7 @@ export const make = Effect.gen(function* () {
     ensureMain,
     revealOrCreateMain,
     activate: Effect.gen(function* () {
+      mainWindowClosed = false;
       const existingWindow = yield* currentMainWindow;
       if (Option.isSome(existingWindow)) {
         yield* electronWindow.reveal(existingWindow.value);
@@ -880,7 +884,8 @@ export const make = Effect.gen(function* () {
     handleBackendReady: Effect.fn("desktop.window.handleBackendReady")(function* (httpBaseUrl) {
       yield* Ref.set(backendReadyRef, true);
       yield* logWindowInfo("backend ready", { source: "http", url: httpBaseUrl.href });
-      yield* createMainIfBackendReady;
+      // Readiness must not undo an intentional close of the early window.
+      if (!mainWindowClosed) yield* createMainIfBackendReady;
     }),
     handleBackendNotReady: Ref.set(backendReadyRef, false).pipe(
       Effect.withSpan("desktop.window.handleBackendNotReady"),
