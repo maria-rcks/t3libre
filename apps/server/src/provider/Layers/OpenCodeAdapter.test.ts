@@ -84,6 +84,7 @@ const runtimeMock = {
       | ((sessionID: string) => Promise<Array<{ id: string }>>)
       | null,
     closeCalls: [] as string[],
+    revertMessageID: undefined as string | undefined,
     revertCalls: [] as Array<{ sessionID: string; messageID?: string }>,
     messageCalls: [] as Array<{ sessionID: string; messageID: string }>,
     messageFailures: 0,
@@ -143,6 +144,7 @@ const runtimeMock = {
     this.state.sessionChildrenById.clear();
     this.state.sessionChildrenImplementation = null;
     this.state.closeCalls.length = 0;
+    this.state.revertMessageID = undefined;
     this.state.revertCalls.length = 0;
     this.state.messageCalls.length = 0;
     this.state.messageFailures = 0;
@@ -263,6 +265,9 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           return {
             data: {
               id: sessionID,
+              ...(runtimeMock.state.revertMessageID
+                ? { revert: { messageID: runtimeMock.state.revertMessageID } }
+                : {}),
               ...(directory ? { directory } : {}),
               ...(parentID ? { parentID } : {}),
             },
@@ -374,6 +379,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           if (!messageID) {
             throw new Error("Expected messageID");
           }
+          runtimeMock.state.revertMessageID = messageID;
         },
       },
       event: {
@@ -6329,6 +6335,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       ];
 
       for (const numTurns of [0, 1, 2, 3]) {
+        runtimeMock.state.revertMessageID = undefined;
         runtimeMock.state.revertCalls.length = 0;
         const snapshot = yield* adapter.rollbackThread(threadId, numTurns);
         NodeAssert.deepEqual(
@@ -6347,6 +6354,16 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           ["assistant-1", "assistant-2"].slice(0, Math.max(0, 2 - numTurns)),
         );
       }
+      runtimeMock.state.revertMessageID = undefined;
+      for (const remaining of [1, 0]) {
+        const snapshot = yield* adapter.rollbackThread(threadId, 1);
+        NodeAssert.equal(snapshot.turns.length, remaining);
+        NodeAssert.deepEqual((yield* adapter.readThread(threadId)).turns, snapshot.turns);
+      }
+      NodeAssert.deepEqual(
+        runtimeMock.state.revertCalls.slice(-2).map((call) => call.messageID),
+        ["assistant-2", "assistant-1"],
+      );
       runtimeMock.state.messages = [];
       runtimeMock.state.revertCalls.length = 0;
       const emptySnapshot = yield* adapter.rollbackThread(threadId, 1);

@@ -3750,6 +3750,9 @@ export function makeOpenCodeAdapter(
     const readThread: OpenCodeAdapterShape["readThread"] = Effect.fn("readThread")(
       function* (threadId) {
         const context = yield* ensureSessionContext(sessions, threadId);
+        const session = yield* runOpenCodeSdk("session.get", () =>
+          context.client.session.get({ sessionID: context.openCodeSessionId }),
+        ).pipe(Effect.mapError(toRequestError));
         const messages = yield* runOpenCodeSdk("session.messages", () =>
           context.client.session.messages({
             sessionID: context.openCodeSessionId,
@@ -3758,6 +3761,7 @@ export function makeOpenCodeAdapter(
 
         const turns: Array<OpenCodeTurnSnapshot> = [];
         for (const entry of messages.data ?? []) {
+          if (entry.info.id === session.data?.revert?.messageID) break;
           if (entry.info.role === "assistant") {
             turns.push({
               id: TurnId.make(entry.info.id),
@@ -3776,22 +3780,14 @@ export function makeOpenCodeAdapter(
     const rollbackThread: OpenCodeAdapterShape["rollbackThread"] = Effect.fn("rollbackThread")(
       function* (threadId, numTurns) {
         const context = yield* ensureSessionContext(sessions, threadId);
-        const messages = yield* runOpenCodeSdk("session.messages", () =>
-          context.client.session.messages({
-            sessionID: context.openCodeSessionId,
-          }),
-        ).pipe(Effect.mapError(toRequestError));
-
-        const assistantMessages = (messages.data ?? []).filter(
-          (entry) => entry.info.role === "assistant",
-        );
-        const targetIndex = Math.max(0, assistantMessages.length - numTurns);
-        const target = assistantMessages[targetIndex];
+        const snapshot = yield* readThread(threadId);
+        const targetIndex = Math.max(0, snapshot.turns.length - numTurns);
+        const target = snapshot.turns[targetIndex];
         if (target) {
           yield* runOpenCodeSdk("session.revert", () =>
             context.client.session.revert({
               sessionID: context.openCodeSessionId,
-              messageID: target.info.id,
+              messageID: target.id,
             }),
           ).pipe(Effect.mapError(toRequestError));
         }
@@ -3799,10 +3795,7 @@ export function makeOpenCodeAdapter(
         // OpenCode marks a revert boundary but retains the messages until the next prompt.
         return {
           threadId,
-          turns: assistantMessages.slice(0, targetIndex).map((entry) => ({
-            id: TurnId.make(entry.info.id),
-            items: [entry.info, ...entry.parts],
-          })),
+          turns: snapshot.turns.slice(0, targetIndex),
         };
       },
     );
