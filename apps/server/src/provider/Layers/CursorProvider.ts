@@ -591,7 +591,7 @@ export const makeCursorModelDiscovery = Effect.fn("makeCursorModelDiscovery")(fu
     Cache.get(cache, JSON.stringify([about.version, about.auth]));
 });
 
-export function getCursorFallbackModels(
+function getCursorFallbackModels(
   cursorSettings: Pick<CursorSettings, "customModels">,
 ): ReadonlyArray<ServerProviderModel> {
   return providerModelsFromSettings([], cursorSettings.customModels, EMPTY_CAPABILITIES);
