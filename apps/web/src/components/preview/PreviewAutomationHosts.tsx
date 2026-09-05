@@ -77,6 +77,7 @@ import {
   resolvePreviewAutomationOpenTab,
   resolvePreviewAutomationTarget,
 } from "./previewAutomationTarget";
+import { resolveHostWaitBudgetMs, waitForHostReadiness } from "./previewAutomationHostBudget";
 import { isPreviewViewportReady } from "./previewViewportReadiness";
 import { shouldRollbackPreviewViewport } from "./previewViewportRollback";
 
@@ -96,25 +97,26 @@ const waitForDesktopOverlay = async (
   tabId: string,
   runtimeTabId: string,
   operation: PreviewAutomationRequest["operation"],
-  timeoutMs: number,
+  deadlineMs: number,
 ): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() <= deadline) {
+  const waitBudgetMs = Math.max(0, deadlineMs - Date.now());
+  const ready = await waitForHostReadiness(deadlineMs, async () => {
     const state = assertPreviewRuntimeCurrent(threadRef, tabId, runtimeTabId, {
       operation,
       requestId,
     });
     if (state.desktopByTabId[tabId] && previewBridge && isPreviewWebviewRendering(runtimeTabId)) {
       const status = await previewBridge.automation.status(runtimeTabId);
-      if (status.available) return;
+      return status.available;
     }
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
-  }
+    return false;
+  });
+  if (ready) return;
   throw new PreviewAutomationOverlayTimeoutError({
     requestId,
     environmentId: threadRef.environmentId,
     threadId: threadRef.threadId,
-    timeoutMs,
+    timeoutMs: waitBudgetMs,
   });
 };
 
@@ -318,6 +320,8 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
 
   const handleRequest = useCallback(
     async (request: PreviewAutomationRequest): Promise<unknown> => {
+      // Session sync and tab creation consume the same budget as overlay registration.
+      const hostDeadlineMs = Date.now() + resolveHostWaitBudgetMs(request.timeoutMs);
       const threadRef: ScopedThreadRef = {
         environmentId,
         threadId: request.threadId,
@@ -379,7 +383,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             readyTabId,
             runtimeTabId,
             request.operation,
-            request.timeoutMs,
+            hostDeadlineMs,
           );
           return {
             bridge,

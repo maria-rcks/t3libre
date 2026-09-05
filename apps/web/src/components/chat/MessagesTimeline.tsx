@@ -27,7 +27,9 @@ const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
+import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { getProjectFaviconCacheKey } from "@t3tools/shared/projectFavicon";
+import { observeVisibleAnimation } from "../../lib/visibleAnimation";
 import {
   createContext,
   Fragment,
@@ -1652,12 +1654,21 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
       <div className="flex h-6 min-w-0 items-baseline px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
         <span
           key={isPreparingWorktree ? "setup" : isCompacting ? "compacting" : "working"}
+          ref={isPreparingWorktree || isCompacting ? observeVisibleAnimation : undefined}
           className="relative shrink-0 overflow-hidden whitespace-nowrap transition-opacity duration-150 starting:opacity-0 motion-reduce:transition-none"
         >
           {isPreparingWorktree ? (
-            "Setting up worktree…"
+            <>
+              Setting up worktree…
+              <ActivityShimmerOverlay>Setting up worktree…</ActivityShimmerOverlay>
+            </>
           ) : isCompacting ? (
-            <CompactingLabel />
+            <>
+              <CompactingLabel />
+              <ActivityShimmerOverlay>
+                <CompactingLabel />
+              </ActivityShimmerOverlay>
+            </>
           ) : row.createdAt ? (
             <>
               Working for <WorkingTimer createdAt={row.createdAt} />
@@ -1677,7 +1688,7 @@ function ThinkingTimelineRow() {
   return (
     <div className="min-h-7">
       {isPreparingWorktree || isCompacting ? null : (
-        <LiveActivityRow label="Thinking" iconName="brain" />
+        <LiveActivityRow label="Thinking" iconName="brain" active shimmer />
       )}
     </div>
   );
@@ -1697,7 +1708,7 @@ function CompactingLabel() {
 // does not create a React commit every second while a response is streaming.
 // ---------------------------------------------------------------------------
 
-/** Live "Working for Xs" label. */
+/** Live elapsed time for the "Working for" label. */
 function WorkingTimer({ createdAt }: { createdAt: string }) {
   const textRef = useRef<HTMLSpanElement>(null);
   const initialText = formatWorkingTimerNow(createdAt);
@@ -1919,6 +1930,19 @@ function ExpandedWorkGroupEntries({
 
 const workEntryKey = (entry: TimelineWorkEntry) => entry.id;
 
+function ActivityShimmerOverlay({ children }: { children: ReactNode }) {
+  return (
+    <span
+      aria-hidden
+      className="live-activity-focus pointer-events-none absolute inset-y-0 select-none"
+    >
+      <span className="live-activity-focus-counter block">
+        <span className="live-activity-focus-aligned block text-foreground">{children}</span>
+      </span>
+    </span>
+  );
+}
+
 const failedToolIconClassName = "text-tool-error-icon/40";
 
 /** Image icons and the gradient computer-use mark cannot take a currentColor
@@ -1936,23 +1960,35 @@ function LiveActivityRow({
   toolIcon,
   failed = false,
   active = false,
+  shimmer = false,
 }: {
   label: string;
   iconName?: WorkEntryIconName;
   toolIcon?: ToolActivityIcon | undefined;
   failed?: boolean;
   active?: boolean;
+  shimmer?: boolean;
 }) {
+  const animated = active && !failed;
+  const showShimmer = animated && shimmer;
   return (
-    <div className="min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed">
+    <div
+      ref={animated ? observeVisibleAnimation : undefined}
+      className="relative min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed"
+    >
       <LiveActivityContent
         label={label}
         iconName={iconName}
         toolIcon={toolIcon}
         failed={failed}
         announceFailure={failed}
-        active={active}
+        active={animated && !shimmer}
       />
+      {showShimmer ? (
+        <ActivityShimmerOverlay>
+          <LiveActivityContent label={label} iconName={iconName} toolIcon={toolIcon} highlighted />
+        </ActivityShimmerOverlay>
+      ) : null}
     </div>
   );
 }
@@ -1964,6 +2000,7 @@ function LiveActivityContent({
   failed = false,
   announceFailure = false,
   active = false,
+  highlighted = false,
 }: {
   label: string;
   iconName: WorkEntryIconName | undefined;
@@ -1971,6 +2008,7 @@ function LiveActivityContent({
   failed?: boolean;
   announceFailure?: boolean;
   active?: boolean;
+  highlighted?: boolean;
 }) {
   const showTrailingFailureMark =
     failed && iconName !== undefined && !toolIconAcceptsTint(iconName, toolIcon);
@@ -1980,14 +2018,14 @@ function LiveActivityContent({
       className={cn(
         "flex min-h-6 min-w-0 items-center gap-1.5 py-0.5",
         iconName ? "px-0.5" : "px-1",
-        "text-secondary-label",
+        highlighted ? "text-foreground" : "text-secondary-label",
       )}
     >
       {iconName ? (
         <span
           className={cn(
             "flex size-6 shrink-0 items-center justify-center",
-            failed ? failedToolIconClassName : "text-icon-muted",
+            failed ? failedToolIconClassName : highlighted ? "text-foreground" : "text-icon-muted",
           )}
           role={announceFailure ? "img" : undefined}
           aria-label={announceFailure ? "Tool call failed" : undefined}
@@ -1996,7 +2034,7 @@ function LiveActivityContent({
             icon={toolIcon}
             fallbackName={iconName}
             className="block size-4 shrink-0 stroke-[1.8]"
-            muted
+            muted={!highlighted}
           />
         </span>
       ) : null}
@@ -2591,15 +2629,7 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
     return `${elapsedSeconds}s`;
   }
 
-  const hours = Math.floor(elapsedSeconds / 3600);
-  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
-  const seconds = elapsedSeconds % 60;
-
-  if (hours > 0) {
-    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-  }
-
-  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  return formatDuration(elapsedSeconds * 1_000);
 }
 
 function formatWorkingTimerNow(startIso: string): string {
