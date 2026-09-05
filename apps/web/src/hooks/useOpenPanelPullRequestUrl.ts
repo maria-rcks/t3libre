@@ -12,7 +12,7 @@ import { useProject } from "../state/entities";
 import { pullRequestEnvironment } from "../state/pullRequests";
 import { useEnvironmentQuery } from "../state/query";
 
-export function useOpenPanelPullRequestUrl(threadRef: ScopedThreadRef | null): string | null {
+export function useOpenPanelPullRequestUrl(threadRef: ScopedThreadRef | null) {
   const surface = useRightPanelStore((state) =>
     selectActiveRightPanelSurface(state.byThreadKey, threadRef),
   );
@@ -55,5 +55,5 @@ export function useOpenPanelPullRequestUrl(threadRef: ScopedThreadRef | null): s
           reference.repository,
           reference.number,
         ))
-    : null;
+    : undefined;
 }
