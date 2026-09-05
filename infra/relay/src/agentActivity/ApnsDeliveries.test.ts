@@ -146,6 +146,24 @@ const target: LiveActivities.TargetRow = {
   last_live_activity_delivery_at: null,
 };
 
+type JobInput = Parameters<typeof makeApnsDeliveryJobPayload>[0];
+
+function makeSignedJob(
+  input: Omit<JobInput, "userId" | "deviceId" | "createdAt" | "expiresAt"> &
+    Partial<Pick<JobInput, "userId" | "deviceId" | "createdAt" | "expiresAt">>,
+) {
+  return signApnsDeliveryJob({
+    secret: config.apnsDeliveryJobSigningSecret,
+    payload: makeApnsDeliveryJobPayload({
+      userId: target.user_id,
+      deviceId: target.device_id,
+      createdAt: "1970-01-01T00:00:00.000Z",
+      expiresAt: "1970-01-01T00:10:00.000Z",
+      ...input,
+    }),
+  });
+}
+
 function makeLayer(input: {
   readonly attempts: Array<DeliveryAttempts.DeliveryAttemptInput>;
   readonly sourceJobClaims?: ReadonlyMap<string, DeliveryAttempts.DeliverySourceJobClaimResult>;
@@ -450,21 +468,13 @@ describe("ApnsDeliveries", () => {
   it.effect("sends signed jobs to the device's APNs environment and bundle topic", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "live_activity_update",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: "activity-token",
       bundleId: "com.t3tools.t3code.preview",
       apsEnvironment: "sandbox",
       aggregate,
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-routing-1",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
@@ -876,19 +886,11 @@ describe("ApnsDeliveries", () => {
     const clearedStarts: Array<
       Parameters<LiveActivities.LiveActivities["Service"]["clearStartQueued"]>[0]
     > = [];
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "live_activity_start",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: target.push_to_start_token ?? "start-token",
       aggregate,
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-start-1",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
 
     return Effect.gen(function* () {
@@ -926,19 +928,11 @@ describe("ApnsDeliveries", () => {
         transportErrors.push(error);
       }
     });
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "live_activity_update",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: target.activity_push_token ?? "activity-token",
       aggregate,
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-1",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
 
     return Effect.gen(function* () {
@@ -1054,10 +1048,8 @@ describe("ApnsDeliveries", () => {
 
   it.effect("processes signed push notification jobs through APNs and records attempts", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "push_notification",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: "apns-device-token",
       aggregate: null,
       notification: {
@@ -1067,13 +1059,7 @@ describe("ApnsDeliveries", () => {
         threadId: "thread",
         deepLink: "/",
       },
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-push-1",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status: 200 })));
@@ -1116,10 +1102,8 @@ describe("ApnsDeliveries", () => {
   it.effect("skips duplicate signed queue jobs before calling APNs", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     let executeCount = 0;
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "push_notification",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: "apns-device-token",
       aggregate: null,
       notification: {
@@ -1129,13 +1113,7 @@ describe("ApnsDeliveries", () => {
         threadId: "thread",
         deepLink: "/",
       },
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-push-duplicate",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
@@ -1170,19 +1148,11 @@ describe("ApnsDeliveries", () => {
   it.effect("skips stale signed Live Activity jobs when the registered token changed", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     let executeCount = 0;
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "live_activity_update",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: "stale-activity-token",
       aggregate,
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-update-stale-token",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
@@ -1223,10 +1193,8 @@ describe("ApnsDeliveries", () => {
   it.effect("skips stale signed push notification jobs when the device token changed", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     let executeCount = 0;
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "push_notification",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: "stale-device-token",
       aggregate: null,
       notification: {
@@ -1236,13 +1204,7 @@ describe("ApnsDeliveries", () => {
         threadId: "thread",
         deepLink: "/",
       },
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-push-stale-token",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
@@ -1303,20 +1265,13 @@ describe("ApnsDeliveries", () => {
         },
       ],
     };
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "live_activity_update",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: target.activity_push_token ?? "activity-token",
       aggregate: completedAggregate,
       alert: { title: "Thread", body: "Done: Project" },
       createdAt: completedAt,
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-update-superseded-by-running",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
@@ -1364,10 +1319,8 @@ describe("ApnsDeliveries", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     let executeCount = 0;
     const completedAt = "1970-01-01T00:00:01.000Z";
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "push_notification",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: "apns-device-token",
       aggregate: null,
       notification: {
@@ -1380,12 +1333,7 @@ describe("ApnsDeliveries", () => {
         updatedAt: completedAt,
       },
       createdAt: completedAt,
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-push-superseded-by-running",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
@@ -1433,10 +1381,8 @@ describe("ApnsDeliveries", () => {
   it.effect("retries signed queue jobs that are already claimed but not completed", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     let executeCount = 0;
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "push_notification",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: "apns-device-token",
       aggregate: null,
       notification: {
@@ -1446,13 +1392,7 @@ describe("ApnsDeliveries", () => {
         threadId: "thread",
         deepLink: "/",
       },
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-push-in-flight",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
@@ -1487,10 +1427,8 @@ describe("ApnsDeliveries", () => {
     const invalidatedTokens: Array<
       Parameters<LiveActivities.LiveActivities["Service"]["invalidateDeliveryToken"]>[0]
     > = [];
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "push_notification",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: "apns-device-token",
       aggregate: null,
       notification: {
@@ -1500,13 +1438,7 @@ describe("ApnsDeliveries", () => {
         threadId: "thread",
         deepLink: "/",
       },
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-push-bad-token",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.succeed(
@@ -1554,19 +1486,11 @@ describe("ApnsDeliveries", () => {
     const clearedStarts: Array<
       Parameters<LiveActivities.LiveActivities["Service"]["clearStartQueued"]>[0]
     > = [];
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "live_activity_start",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: target.push_to_start_token ?? "start-token",
       aggregate,
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-start-1",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
 
     return Effect.gen(function* () {
@@ -1597,19 +1521,11 @@ describe("ApnsDeliveries", () => {
     const invalidatedTokens: Array<
       Parameters<LiveActivities.LiveActivities["Service"]["invalidateDeliveryToken"]>[0]
     > = [];
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "live_activity_start",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: target.push_to_start_token ?? "start-token",
       aggregate,
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-start-bad-token",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.succeed(
@@ -1652,19 +1568,11 @@ describe("ApnsDeliveries", () => {
     const invalidatedTokens: Array<
       Parameters<LiveActivities.LiveActivities["Service"]["invalidateDeliveryToken"]>[0]
     > = [];
-    const payload = makeApnsDeliveryJobPayload({
+    const signed = makeSignedJob({
       kind: "live_activity_update",
-      userId: target.user_id,
-      deviceId: target.device_id,
       token: target.activity_push_token ?? "activity-token",
       aggregate,
-      createdAt: "1970-01-01T00:00:00.000Z",
-      expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-update-unregistered",
-    });
-    const signed = signApnsDeliveryJob({
-      secret: config.apnsDeliveryJobSigningSecret,
-      payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.succeed(

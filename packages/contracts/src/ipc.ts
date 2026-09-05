@@ -1,3 +1,4 @@
+import type { Mutable } from "effect/Types";
 import type {
   VcsCreateRefInput,
   VcsCreateRefResult,
@@ -156,20 +157,12 @@ export const ContextMenuItemSchema: Schema.Codec<ContextMenuItemSchemaType> = Sc
   ),
 });
 
-export type DesktopUpdateStatus =
-  | "disabled"
-  | "idle"
-  | "checking"
-  | "up-to-date"
-  | "available"
-  | "downloading"
-  | "downloaded"
-  | "error";
+export type DesktopUpdateStatus = typeof DesktopUpdateStatusSchema.Type;
 
-export type DesktopRuntimeArch = "arm64" | "x64" | "other";
-export type DesktopTheme = "light" | "dark" | "system";
-export type DesktopUpdateChannel = "latest" | "nightly";
-export type DesktopAppStageLabel = "Alpha" | "Dev" | "Nightly";
+export type DesktopRuntimeArch = typeof DesktopRuntimeArchSchema.Type;
+export type DesktopTheme = typeof DesktopThemeSchema.Type;
+export type DesktopUpdateChannel = typeof DesktopUpdateChannelSchema.Type;
+export type DesktopAppStageLabel = typeof DesktopAppStageLabelSchema.Type;
 
 export const DesktopUpdateStatusSchema = Schema.Literals([
   "disabled",
@@ -186,11 +179,7 @@ export const DesktopThemeSchema = Schema.Literals(["light", "dark", "system"]);
 export const DesktopUpdateChannelSchema = Schema.Literals(["latest", "nightly"]);
 export const DesktopAppStageLabelSchema = Schema.Literals(["Alpha", "Dev", "Nightly"]);
 
-export interface DesktopAppBranding {
-  baseName: string;
-  stageLabel: DesktopAppStageLabel;
-  displayName: string;
-}
+export type DesktopAppBranding = Mutable<typeof DesktopAppBrandingSchema.Type>;
 
 export const DesktopAppBrandingSchema = Schema.Struct({
   baseName: Schema.String,
@@ -314,7 +303,7 @@ export const DesktopSshEnvironmentTargetSchema = Schema.Struct({
 });
 export type DesktopSshEnvironmentTarget = typeof DesktopSshEnvironmentTargetSchema.Type;
 
-export type DesktopSshHostSource = "ssh-config" | "known-hosts";
+export type DesktopSshHostSource = typeof DesktopSshHostSourceSchema.Type;
 export const DesktopSshHostSourceSchema = Schema.Literals(["ssh-config", "known-hosts"]);
 
 export interface DesktopDiscoveredSshHost extends DesktopSshEnvironmentTarget {
@@ -411,20 +400,14 @@ export const PersistedSavedEnvironmentRecordSchema = Schema.Struct({
 });
 export type PersistedSavedEnvironmentRecord = typeof PersistedSavedEnvironmentRecordSchema.Type;
 
-export type DesktopServerExposureMode = "local-only" | "network-accessible";
+export type DesktopServerExposureMode = typeof DesktopServerExposureModeSchema.Type;
 
 export const DesktopServerExposureModeSchema = Schema.Literals([
   "local-only",
   "network-accessible",
 ]);
 
-export interface DesktopServerExposureState {
-  mode: DesktopServerExposureMode;
-  endpointUrl: string | null;
-  advertisedHost: string | null;
-  tailscaleServeEnabled: boolean;
-  tailscaleServePort: number;
-}
+export type DesktopServerExposureState = Mutable<typeof DesktopServerExposureStateSchema.Type>;
 
 export const DesktopServerExposureStateSchema = Schema.Struct({
   mode: DesktopServerExposureModeSchema,
@@ -454,11 +437,7 @@ export const PickFolderOptionsSchema = Schema.Struct({
  * empty text so the renderer can reject them by size without the main
  * process ever holding their contents.
  */
-export interface PickedThemeFile {
-  name: string;
-  size: number;
-  text: string;
-}
+export type PickedThemeFile = Mutable<typeof PickedThemeFileSchema.Type>;
 
 export const PickedThemeFileSchema = Schema.Struct({
   name: Schema.String,
@@ -466,11 +445,7 @@ export const PickedThemeFileSchema = Schema.Struct({
   text: Schema.String,
 });
 
-export interface DesktopWslDistro {
-  name: string;
-  isDefault: boolean;
-  version: 1 | 2;
-}
+export type DesktopWslDistro = Mutable<typeof DesktopWslDistroSchema.Type>;
 
 export const DesktopWslDistroSchema = Schema.Struct({
   name: Schema.String,
@@ -528,21 +503,16 @@ export type DesktopPreviewNavStatus =
  * Emulated `prefers-color-scheme` for the guest page. "system" clears the
  * override so the page follows the OS appearance.
  */
-export type DesktopPreviewColorScheme = "system" | "light" | "dark";
+export type DesktopPreviewColorScheme = typeof DesktopPreviewColorSchemeSchema.Type;
 
-export const DesktopPreviewColorSchemeSchema: Schema.Codec<DesktopPreviewColorScheme> =
-  Schema.Literals(["system", "light", "dark"]);
+export const DesktopPreviewColorSchemeSchema = Schema.Literals(["system", "light", "dark"]);
 
 export const FAVICON_DATA_URL_MAX_LENGTH = 8192;
 export const FAVICON_CAPTURED_AT_MAX = 8_640_000_000_000_000;
 
-export interface DesktopPreviewFavicon {
-  dataUrl: string;
-  pageUrl: string;
-  capturedAt: number;
-}
+export type DesktopPreviewFavicon = Mutable<typeof DesktopPreviewFaviconSchema.Type>;
 
-export const DesktopPreviewFaviconSchema: Schema.Codec<DesktopPreviewFavicon> = Schema.Struct({
+export const DesktopPreviewFaviconSchema = Schema.Struct({
   dataUrl: Schema.String.check(
     Schema.isMaxLength(FAVICON_DATA_URL_MAX_LENGTH),
     Schema.isPattern(/^data:image\/png;base64,[a-z0-9+/]+={0,2}$/i),
@@ -654,46 +624,29 @@ export const DesktopPreviewWebviewConfigSchema: Schema.Codec<DesktopPreviewWebvi
     preloadUrl: Schema.NullOr(Schema.String),
   });
 
-export interface DesktopPreviewAnnotationTheme {
-  colorScheme: "light" | "dark";
-  radius: string;
-  background: string;
-  foreground: string;
-  popover: string;
-  popoverForeground: string;
-  primary: string;
-  primaryForeground: string;
-  muted: string;
-  mutedForeground: string;
-  accent: string;
-  accentForeground: string;
-  border: string;
-  input: string;
-  ring: string;
-  fontSans: string;
-  fontMono: string;
-}
+export type DesktopPreviewAnnotationTheme = Mutable<
+  typeof DesktopPreviewAnnotationThemeSchema.Type
+>;
 
-export const DesktopPreviewAnnotationThemeSchema: Schema.Codec<DesktopPreviewAnnotationTheme> =
-  Schema.Struct({
-    colorScheme: Schema.Literals(["light", "dark"]),
-    radius: Schema.String,
-    background: Schema.String,
-    foreground: Schema.String,
-    popover: Schema.String,
-    popoverForeground: Schema.String,
-    primary: Schema.String,
-    primaryForeground: Schema.String,
-    muted: Schema.String,
-    mutedForeground: Schema.String,
-    accent: Schema.String,
-    accentForeground: Schema.String,
-    border: Schema.String,
-    input: Schema.String,
-    ring: Schema.String,
-    fontSans: Schema.String,
-    fontMono: Schema.String,
-  });
+export const DesktopPreviewAnnotationThemeSchema = Schema.Struct({
+  colorScheme: Schema.Literals(["light", "dark"]),
+  radius: Schema.String,
+  background: Schema.String,
+  foreground: Schema.String,
+  popover: Schema.String,
+  popoverForeground: Schema.String,
+  primary: Schema.String,
+  primaryForeground: Schema.String,
+  muted: Schema.String,
+  mutedForeground: Schema.String,
+  accent: Schema.String,
+  accentForeground: Schema.String,
+  border: Schema.String,
+  input: Schema.String,
+  ring: Schema.String,
+  fontSans: Schema.String,
+  fontMono: Schema.String,
+});
 
 export interface DesktopPreviewRecordingFrame {
   tabId: string;
@@ -703,57 +656,40 @@ export interface DesktopPreviewRecordingFrame {
   receivedAt: string;
 }
 
-export interface DesktopPreviewRecordingArtifact {
-  id: string;
-  tabId: string;
-  path: string;
-  mimeType: string;
-  sizeBytes: number;
-  createdAt: string;
-}
+export type DesktopPreviewRecordingArtifact = Mutable<
+  typeof DesktopPreviewRecordingArtifactSchema.Type
+>;
 
-export const DesktopPreviewRecordingArtifactSchema: Schema.Codec<DesktopPreviewRecordingArtifact> =
-  Schema.Struct({
-    id: Schema.String,
-    tabId: DesktopPreviewTabIdSchema,
-    path: Schema.String,
-    mimeType: Schema.String,
-    sizeBytes: Schema.Int,
-    createdAt: Schema.String,
-  });
+export const DesktopPreviewRecordingArtifactSchema = Schema.Struct({
+  id: Schema.String,
+  tabId: DesktopPreviewTabIdSchema,
+  path: Schema.String,
+  mimeType: Schema.String,
+  sizeBytes: Schema.Int,
+  createdAt: Schema.String,
+});
 
-export interface DesktopPreviewScreenshotArtifact {
-  id: string;
-  tabId: string;
-  path: string;
-  mimeType: "image/png";
-  sizeBytes: number;
-  createdAt: string;
-}
+export type DesktopPreviewScreenshotArtifact = Mutable<
+  typeof DesktopPreviewScreenshotArtifactSchema.Type
+>;
 
-export const DesktopPreviewScreenshotArtifactSchema: Schema.Codec<DesktopPreviewScreenshotArtifact> =
-  Schema.Struct({
-    id: Schema.String,
-    tabId: DesktopPreviewTabIdSchema,
-    path: Schema.String,
-    mimeType: Schema.Literal("image/png"),
-    sizeBytes: Schema.Int,
-    createdAt: Schema.String,
-  });
+export const DesktopPreviewScreenshotArtifactSchema = Schema.Struct({
+  id: Schema.String,
+  tabId: DesktopPreviewTabIdSchema,
+  path: Schema.String,
+  mimeType: Schema.Literal("image/png"),
+  sizeBytes: Schema.Int,
+  createdAt: Schema.String,
+});
 
 /**
  * Single stack frame captured by react-grab's `getElementContext`. We surface
  * the source file/line so coding agents can jump straight to the JSX that
  * produced the picked DOM node.
  */
-export interface PickedElementStackFrame {
-  functionName: string | null;
-  fileName: string | null;
-  lineNumber: number | null;
-  columnNumber: number | null;
-}
+export type PickedElementStackFrame = Mutable<typeof PickedElementStackFrameSchema.Type>;
 
-export const PickedElementStackFrameSchema: Schema.Codec<PickedElementStackFrame> = Schema.Struct({
+export const PickedElementStackFrameSchema = Schema.Struct({
   functionName: Schema.NullOr(Schema.String),
   fileName: Schema.NullOr(Schema.String),
   lineNumber: Schema.NullOr(Schema.Number),
@@ -802,26 +738,18 @@ export const PickedElementPayloadSchema: Schema.Codec<PickedElementPayload> = Sc
   pickedAt: Schema.String,
 });
 
-export interface PreviewAnnotationRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+export type PreviewAnnotationRect = Mutable<typeof PreviewAnnotationRectSchema.Type>;
 
-export const PreviewAnnotationRectSchema: Schema.Codec<PreviewAnnotationRect> = Schema.Struct({
+export const PreviewAnnotationRectSchema = Schema.Struct({
   x: Schema.Number,
   y: Schema.Number,
   width: Schema.Number,
   height: Schema.Number,
 });
 
-export interface PreviewAnnotationPoint {
-  x: number;
-  y: number;
-}
+export type PreviewAnnotationPoint = Mutable<typeof PreviewAnnotationPointSchema.Type>;
 
-export const PreviewAnnotationPointSchema: Schema.Codec<PreviewAnnotationPoint> = Schema.Struct({
+export const PreviewAnnotationPointSchema = Schema.Struct({
   x: Schema.Number,
   y: Schema.Number,
 });
@@ -867,22 +795,15 @@ export const PreviewAnnotationStrokeTargetSchema: Schema.Codec<PreviewAnnotation
     bounds: PreviewAnnotationRectSchema,
   });
 
-export interface PreviewAnnotationStyleChange {
-  targetId: string;
-  selector: string | null;
-  property: string;
-  previousValue: string;
-  value: string;
-}
+export type PreviewAnnotationStyleChange = Mutable<typeof PreviewAnnotationStyleChangeSchema.Type>;
 
-export const PreviewAnnotationStyleChangeSchema: Schema.Codec<PreviewAnnotationStyleChange> =
-  Schema.Struct({
-    targetId: Schema.String,
-    selector: Schema.NullOr(Schema.String),
-    property: Schema.String,
-    previousValue: Schema.String,
-    value: Schema.String,
-  });
+export const PreviewAnnotationStyleChangeSchema = Schema.Struct({
+  targetId: Schema.String,
+  selector: Schema.NullOr(Schema.String),
+  property: Schema.String,
+  previousValue: Schema.String,
+  value: Schema.String,
+});
 
 export interface PreviewAnnotationScreenshot {
   dataUrl: string;
@@ -932,9 +853,8 @@ export const PreviewAnnotationPayloadSchema: Schema.Codec<PreviewAnnotationPaylo
   },
 );
 
-export type PreviewAnnotationSubmission = "attach" | "send";
-export const PreviewAnnotationSubmissionSchema: Schema.Codec<PreviewAnnotationSubmission> =
-  Schema.Literals(["attach", "send"]);
+export type PreviewAnnotationSubmission = typeof PreviewAnnotationSubmissionSchema.Type;
+export const PreviewAnnotationSubmissionSchema = Schema.Literals(["attach", "send"]);
 
 export interface PreviewAnnotationSubmissionResult {
   annotation: PreviewAnnotationPayload;

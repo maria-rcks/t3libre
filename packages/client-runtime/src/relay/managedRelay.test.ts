@@ -46,6 +46,32 @@ function clerkToken(subject: string, nonce: string): string {
   return `${encode({ alg: "none" })}.${encode({ sub: subject, nonce })}.signature`;
 }
 
+const tokenExchangeResponse = {
+  access_token: "relay-token",
+  issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+  token_type: "DPoP",
+  expires_in: 1_800,
+  scope: RelayEnvironmentStatusScope,
+};
+
+const onlineEnvironmentResponse = {
+  environmentId: "env-1",
+  endpoint: {
+    httpBaseUrl: "https://desktop.example.test/",
+    wsBaseUrl: "wss://desktop.example.test/ws",
+    providerKind: "cloudflare_tunnel",
+  },
+  status: "online",
+  checkedAt: "2026-06-05T20:00:00.000Z",
+  descriptor: {
+    environmentId: "env-1",
+    label: "Desktop",
+    platform: { os: "darwin", arch: "arm64" },
+    serverVersion: "0.0.0-test",
+    capabilities: { repositoryIdentity: true },
+  },
+};
+
 describe("ManagedRelayClient", () => {
   it.effect("owns tracing at service and implementation boundaries", () => {
     const spanNames: Array<string> = [];
@@ -59,35 +85,9 @@ describe("ManagedRelayClient", () => {
     const fetchFn = ((input) => {
       const url = String(input);
       if (url.endsWith("/v1/client/dpop-token")) {
-        return Promise.resolve(
-          Response.json({
-            access_token: "relay-token",
-            issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
-            token_type: "DPoP",
-            expires_in: 1_800,
-            scope: RelayEnvironmentStatusScope,
-          }),
-        );
+        return Promise.resolve(Response.json(tokenExchangeResponse));
       }
-      return Promise.resolve(
-        Response.json({
-          environmentId: "env-1",
-          endpoint: {
-            httpBaseUrl: "https://desktop.example.test/",
-            wsBaseUrl: "wss://desktop.example.test/ws",
-            providerKind: "cloudflare_tunnel",
-          },
-          status: "online",
-          checkedAt: "2026-06-05T20:00:00.000Z",
-          descriptor: {
-            environmentId: "env-1",
-            label: "Desktop",
-            platform: { os: "darwin", arch: "arm64" },
-            serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
-          },
-        }),
-      );
+      return Promise.resolve(Response.json(onlineEnvironmentResponse));
     }) satisfies typeof globalThis.fetch;
 
     return Effect.gen(function* () {
@@ -156,23 +156,7 @@ describe("ManagedRelayClient", () => {
         );
       }
       return Promise.resolve(
-        Response.json({
-          environmentId: "env-1",
-          endpoint: {
-            httpBaseUrl: "https://desktop.example.test/",
-            wsBaseUrl: "wss://desktop.example.test/ws",
-            providerKind: "cloudflare_tunnel",
-          },
-          status: "online",
-          checkedAt: "2026-05-25T00:01:00.000Z",
-          descriptor: {
-            environmentId: "env-1",
-            label: "Desktop",
-            platform: { os: "darwin", arch: "arm64" },
-            serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
-          },
-        }),
+        Response.json({ ...onlineEnvironmentResponse, checkedAt: "2026-05-25T00:01:00.000Z" }),
       );
     }) satisfies typeof globalThis.fetch;
 
@@ -312,34 +296,10 @@ describe("ManagedRelayClient", () => {
       if (url.endsWith("/v1/client/dpop-token")) {
         tokenExchangeCount += 1;
         return Promise.resolve(
-          Response.json({
-            access_token: "persisted-relay-token",
-            issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
-            token_type: "DPoP",
-            expires_in: 1_800,
-            scope: RelayEnvironmentStatusScope,
-          }),
+          Response.json({ ...tokenExchangeResponse, access_token: "persisted-relay-token" }),
         );
       }
-      return Promise.resolve(
-        Response.json({
-          environmentId: "env-1",
-          endpoint: {
-            httpBaseUrl: "https://desktop.example.test/",
-            wsBaseUrl: "wss://desktop.example.test/ws",
-            providerKind: "cloudflare_tunnel",
-          },
-          status: "online",
-          checkedAt: "2026-06-05T20:00:00.000Z",
-          descriptor: {
-            environmentId: "env-1",
-            label: "Desktop",
-            platform: { os: "darwin", arch: "arm64" },
-            serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
-          },
-        }),
-      );
+      return Promise.resolve(Response.json(onlineEnvironmentResponse));
     }) satisfies typeof globalThis.fetch;
     const statusInput = (token: string) =>
       ({
@@ -395,13 +355,7 @@ describe("ManagedRelayClient", () => {
       if (url.endsWith("/v1/client/dpop-token")) {
         tokenExchangeCount += 1;
         return Promise.resolve(
-          Response.json({
-            access_token: "fresh-relay-token",
-            issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
-            token_type: "DPoP",
-            expires_in: 1_800,
-            scope: RelayEnvironmentStatusScope,
-          }),
+          Response.json({ ...tokenExchangeResponse, access_token: "fresh-relay-token" }),
         );
       }
 
@@ -420,25 +374,7 @@ describe("ManagedRelayClient", () => {
           ),
         );
       }
-      return Promise.resolve(
-        Response.json({
-          environmentId: "env-1",
-          endpoint: {
-            httpBaseUrl: "https://desktop.example.test/",
-            wsBaseUrl: "wss://desktop.example.test/ws",
-            providerKind: "cloudflare_tunnel",
-          },
-          status: "online",
-          checkedAt: "2026-06-05T20:00:00.000Z",
-          descriptor: {
-            environmentId: "env-1",
-            label: "Desktop",
-            platform: { os: "darwin", arch: "arm64" },
-            serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
-          },
-        }),
-      );
+      return Promise.resolve(Response.json(onlineEnvironmentResponse));
     }) satisfies typeof globalThis.fetch;
 
     return Effect.gen(function* () {
@@ -473,35 +409,9 @@ describe("ManagedRelayClient", () => {
     const fetchFn = ((input) => {
       const url = String(input);
       if (url.endsWith("/v1/client/dpop-token")) {
-        return Promise.resolve(
-          Response.json({
-            access_token: "relay-token",
-            issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
-            token_type: "DPoP",
-            expires_in: 1_800,
-            scope: RelayEnvironmentStatusScope,
-          }),
-        );
+        return Promise.resolve(Response.json(tokenExchangeResponse));
       }
-      return Promise.resolve(
-        Response.json({
-          environmentId: "env-1",
-          endpoint: {
-            httpBaseUrl: "https://desktop.example.test/",
-            wsBaseUrl: "wss://desktop.example.test/ws",
-            providerKind: "cloudflare_tunnel",
-          },
-          status: "online",
-          checkedAt: "2026-06-05T20:00:00.000Z",
-          descriptor: {
-            environmentId: "env-1",
-            label: "Desktop",
-            platform: { os: "darwin", arch: "arm64" },
-            serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
-          },
-        }),
-      );
+      return Promise.resolve(Response.json(onlineEnvironmentResponse));
     }) satisfies typeof globalThis.fetch;
 
     return Effect.gen(function* () {

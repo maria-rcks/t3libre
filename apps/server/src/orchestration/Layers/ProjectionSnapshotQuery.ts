@@ -405,6 +405,104 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
   const sql = yield* SqlClient.SqlClient;
+
+  const projectColumns = sql`
+    project_id AS "projectId",
+    title,
+    workspace_root AS "workspaceRoot",
+    default_model_selection_json AS "defaultModelSelection",
+    default_thread_env_mode AS "defaultThreadEnvMode",
+    auto_pull AS "autoPull",
+    favicon_path AS "faviconPath",
+    project_icon_json AS "projectIcon",
+    scripts_json AS "scripts",
+    created_at AS "createdAt",
+    updated_at AS "updatedAt",
+    deleted_at AS "deletedAt"
+  `;
+  const threadColumns = sql`
+    thread_id AS "threadId",
+    project_id AS "projectId",
+    title,
+    model_selection_json AS "modelSelection",
+    runtime_mode AS "runtimeMode",
+    interaction_mode AS "interactionMode",
+    branch,
+    worktree_path AS "worktreePath",
+    linked_pull_request_json AS "linkedPullRequest",
+    latest_turn_id AS "latestTurnId",
+    created_at AS "createdAt",
+    updated_at AS "updatedAt",
+    archived_at AS "archivedAt",
+    settled_override AS "settledOverride",
+    settled_at AS "settledAt",
+    unsettled_at AS "unsettledAt",
+    snoozed_until AS "snoozedUntil",
+    snoozed_at AS "snoozedAt",
+    pinned_at AS "pinnedAt",
+    pin_order_key AS "pinOrderKey",
+    title_regeneration_request_id AS "titleRegenerationRequestId",
+    title_regeneration_started_at AS "titleRegenerationStartedAt",
+    latest_user_message_at AS "latestUserMessageAt",
+    pending_approval_count AS "pendingApprovalCount",
+    pending_user_input_count AS "pendingUserInputCount",
+    has_actionable_proposed_plan AS "hasActionableProposedPlan",
+    deleted_at AS "deletedAt"
+  `;
+  const messageColumns = sql`
+    message_id AS "messageId",
+    thread_id AS "threadId",
+    turn_id AS "turnId",
+    role,
+    text,
+    attachments_json AS "attachments",
+    is_streaming AS "isStreaming",
+    created_at AS "createdAt",
+    updated_at AS "updatedAt"
+  `;
+  const proposedPlanColumns = sql`
+    plan_id AS "planId",
+    thread_id AS "threadId",
+    turn_id AS "turnId",
+    plan_markdown AS "planMarkdown",
+    implemented_at AS "implementedAt",
+    implementation_thread_id AS "implementationThreadId",
+    created_at AS "createdAt",
+    updated_at AS "updatedAt"
+  `;
+  const activityColumns = sql`
+    activity_id AS "activityId",
+    thread_id AS "threadId",
+    turn_id AS "turnId",
+    tone,
+    kind,
+    summary,
+    payload_json AS "payload",
+    sequence,
+    created_at AS "createdAt"
+  `;
+  const turnColumns = sql`
+    thread_id AS "threadId",
+    turn_id AS "turnId",
+    checkpoint_turn_count AS "checkpointTurnCount",
+    checkpoint_ref AS "checkpointRef",
+    checkpoint_status AS "status",
+    checkpoint_files_json AS "files",
+    assistant_message_id AS "assistantMessageId",
+    completed_at AS "completedAt"
+  `;
+  const activityStorageColumns = sql`
+    activity_id,
+    thread_id,
+    turn_id,
+    tone,
+    kind,
+    summary,
+    payload_json,
+    sequence,
+    created_at
+  `;
+
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const repositoryIdentityResolutionConcurrency = 4;
   const resolveRepositoryIdentitiesForProjects = Effect.fn(
@@ -444,19 +542,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionProjectDbRowSchema,
     execute: () =>
       sql`
-        SELECT
-          project_id AS "projectId",
-          title,
-          workspace_root AS "workspaceRoot",
-          default_model_selection_json AS "defaultModelSelection",
-          default_thread_env_mode AS "defaultThreadEnvMode",
-          auto_pull AS "autoPull",
-          favicon_path AS "faviconPath",
-          project_icon_json AS "projectIcon",
-          scripts_json AS "scripts",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
+        SELECT ${projectColumns}
         FROM projection_projects
         ORDER BY created_at ASC, project_id ASC
       `,
@@ -467,34 +553,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadDbRowSchema,
     execute: () =>
       sql`
-        SELECT
-          thread_id AS "threadId",
-          project_id AS "projectId",
-          title,
-          model_selection_json AS "modelSelection",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          branch,
-          worktree_path AS "worktreePath",
-          linked_pull_request_json AS "linkedPullRequest",
-          latest_turn_id AS "latestTurnId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          archived_at AS "archivedAt",
-          settled_override AS "settledOverride",
-          settled_at AS "settledAt",
-          unsettled_at AS "unsettledAt",
-          snoozed_until AS "snoozedUntil",
-          snoozed_at AS "snoozedAt",
-          pinned_at AS "pinnedAt",
-          pin_order_key AS "pinOrderKey",
-          title_regeneration_request_id AS "titleRegenerationRequestId",
-          title_regeneration_started_at AS "titleRegenerationStartedAt",
-          latest_user_message_at AS "latestUserMessageAt",
-          pending_approval_count AS "pendingApprovalCount",
-          pending_user_input_count AS "pendingUserInputCount",
-          has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
+        SELECT ${threadColumns}
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
       `,
@@ -505,34 +564,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadDbRowSchema,
     execute: () =>
       sql`
-        SELECT
-          thread_id AS "threadId",
-          project_id AS "projectId",
-          title,
-          model_selection_json AS "modelSelection",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          branch,
-          worktree_path AS "worktreePath",
-          linked_pull_request_json AS "linkedPullRequest",
-          latest_turn_id AS "latestTurnId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          archived_at AS "archivedAt",
-          settled_override AS "settledOverride",
-          settled_at AS "settledAt",
-          unsettled_at AS "unsettledAt",
-          snoozed_until AS "snoozedUntil",
-          snoozed_at AS "snoozedAt",
-          pinned_at AS "pinnedAt",
-          pin_order_key AS "pinOrderKey",
-          title_regeneration_request_id AS "titleRegenerationRequestId",
-          title_regeneration_started_at AS "titleRegenerationStartedAt",
-          latest_user_message_at AS "latestUserMessageAt",
-          pending_approval_count AS "pendingApprovalCount",
-          pending_user_input_count AS "pendingUserInputCount",
-          has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
+        SELECT ${threadColumns}
         FROM projection_threads
         WHERE deleted_at IS NULL
           AND archived_at IS NULL
@@ -545,34 +577,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadDbRowSchema,
     execute: () =>
       sql`
-        SELECT
-          thread_id AS "threadId",
-          project_id AS "projectId",
-          title,
-          model_selection_json AS "modelSelection",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          branch,
-          worktree_path AS "worktreePath",
-          linked_pull_request_json AS "linkedPullRequest",
-          latest_turn_id AS "latestTurnId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          archived_at AS "archivedAt",
-          settled_override AS "settledOverride",
-          settled_at AS "settledAt",
-          unsettled_at AS "unsettledAt",
-          snoozed_until AS "snoozedUntil",
-          snoozed_at AS "snoozedAt",
-          pinned_at AS "pinnedAt",
-          pin_order_key AS "pinOrderKey",
-          title_regeneration_request_id AS "titleRegenerationRequestId",
-          title_regeneration_started_at AS "titleRegenerationStartedAt",
-          latest_user_message_at AS "latestUserMessageAt",
-          pending_approval_count AS "pendingApprovalCount",
-          pending_user_input_count AS "pendingUserInputCount",
-          has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
+        SELECT ${threadColumns}
         FROM projection_threads
         WHERE deleted_at IS NULL
           AND archived_at IS NOT NULL
@@ -585,16 +590,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadMessageDbRowSchema,
     execute: () =>
       sql`
-        SELECT
-          message_id AS "messageId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          role,
-          text,
-          attachments_json AS "attachments",
-          is_streaming AS "isStreaming",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
+        SELECT ${messageColumns}
         FROM projection_thread_messages
         ORDER BY thread_id ASC, created_at ASC, message_id ASC
       `,
@@ -605,15 +601,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadProposedPlanDbRowSchema,
     execute: () =>
       sql`
-        SELECT
-          plan_id AS "planId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          plan_markdown AS "planMarkdown",
-          implemented_at AS "implementedAt",
-          implementation_thread_id AS "implementationThreadId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
+        SELECT ${proposedPlanColumns}
         FROM projection_thread_proposed_plans
         ORDER BY thread_id ASC, created_at ASC, plan_id ASC
       `,
@@ -624,16 +612,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadActivityDbRowSchema,
     execute: () =>
       sql`
-        SELECT
-          activity_id AS "activityId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          tone,
-          kind,
-          summary,
-          payload_json AS "payload",
-          sequence,
-          created_at AS "createdAt"
+        SELECT ${activityColumns}
         FROM projection_thread_activities
         ORDER BY
           thread_id ASC,
@@ -719,15 +698,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionCheckpointDbRowSchema,
     execute: () =>
       sql`
-        SELECT
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          checkpoint_turn_count AS "checkpointTurnCount",
-          checkpoint_ref AS "checkpointRef",
-          checkpoint_status AS "status",
-          checkpoint_files_json AS "files",
-          assistant_message_id AS "assistantMessageId",
-          completed_at AS "completedAt"
+        SELECT ${turnColumns}
         FROM projection_turns
         WHERE checkpoint_turn_count IS NOT NULL
         ORDER BY thread_id ASC, checkpoint_turn_count ASC
@@ -921,19 +892,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionProjectLookupRowSchema,
     execute: ({ workspaceRoot }) =>
       sql`
-        SELECT
-          project_id AS "projectId",
-          title,
-          workspace_root AS "workspaceRoot",
-          default_model_selection_json AS "defaultModelSelection",
-          default_thread_env_mode AS "defaultThreadEnvMode",
-          auto_pull AS "autoPull",
-          favicon_path AS "faviconPath",
-          project_icon_json AS "projectIcon",
-          scripts_json AS "scripts",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
+        SELECT ${projectColumns}
         FROM projection_projects
         WHERE workspace_root = ${workspaceRoot}
           AND deleted_at IS NULL
@@ -947,19 +906,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionProjectLookupRowSchema,
     execute: ({ projectId }) =>
       sql`
-        SELECT
-          project_id AS "projectId",
-          title,
-          workspace_root AS "workspaceRoot",
-          default_model_selection_json AS "defaultModelSelection",
-          default_thread_env_mode AS "defaultThreadEnvMode",
-          auto_pull AS "autoPull",
-          favicon_path AS "faviconPath",
-          project_icon_json AS "projectIcon",
-          scripts_json AS "scripts",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
+        SELECT ${projectColumns}
         FROM projection_projects
         WHERE project_id = ${projectId}
           AND deleted_at IS NULL
@@ -1007,34 +954,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadDbRowSchema,
     execute: ({ threadId }) =>
       sql`
-        SELECT
-          thread_id AS "threadId",
-          project_id AS "projectId",
-          title,
-          model_selection_json AS "modelSelection",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          branch,
-          worktree_path AS "worktreePath",
-          linked_pull_request_json AS "linkedPullRequest",
-          latest_turn_id AS "latestTurnId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          archived_at AS "archivedAt",
-          settled_override AS "settledOverride",
-          settled_at AS "settledAt",
-          unsettled_at AS "unsettledAt",
-          snoozed_until AS "snoozedUntil",
-          snoozed_at AS "snoozedAt",
-          pinned_at AS "pinnedAt",
-          pin_order_key AS "pinOrderKey",
-          title_regeneration_request_id AS "titleRegenerationRequestId",
-          title_regeneration_started_at AS "titleRegenerationStartedAt",
-          latest_user_message_at AS "latestUserMessageAt",
-          pending_approval_count AS "pendingApprovalCount",
-          pending_user_input_count AS "pendingUserInputCount",
-          has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
+        SELECT ${threadColumns}
         FROM projection_threads
         WHERE thread_id = ${threadId}
           AND deleted_at IS NULL
@@ -1082,16 +1002,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadMessageDbRowSchema,
     execute: ({ threadId }) =>
       sql`
-        SELECT
-          message_id AS "messageId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          role,
-          text,
-          attachments_json AS "attachments",
-          is_streaming AS "isStreaming",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
+        SELECT ${messageColumns}
         FROM projection_thread_messages
         WHERE thread_id = ${threadId}
         ORDER BY created_at ASC, message_id ASC
@@ -1103,15 +1014,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadProposedPlanDbRowSchema,
     execute: ({ threadId }) =>
       sql`
-        SELECT
-          plan_id AS "planId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          plan_markdown AS "planMarkdown",
-          implemented_at AS "implementedAt",
-          implementation_thread_id AS "implementationThreadId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
+        SELECT ${proposedPlanColumns}
         FROM projection_thread_proposed_plans
         WHERE thread_id = ${threadId}
         ORDER BY created_at ASC, plan_id ASC
@@ -1123,28 +1026,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadActivityDbRowSchema,
     execute: ({ threadId }) =>
       sql`
-        SELECT
-          activity_id AS "activityId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          tone,
-          kind,
-          summary,
-          payload_json AS "payload",
-          sequence,
-          created_at AS "createdAt"
+        SELECT ${activityColumns}
         FROM (
-          SELECT
-            activity_id,
-            thread_id,
-            turn_id,
-            tone,
-            kind,
-            summary,
-            payload_json,
-            sequence,
-            created_at
-          FROM projection_thread_activities
+          SELECT ${activityStorageColumns}
+        FROM projection_thread_activities
           WHERE thread_id = ${threadId}
           ORDER BY
             sequence DESC,
@@ -1163,17 +1048,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Request: Schema.Struct({ threadId: ThreadId, requestId: ApprovalRequestId }),
     Result: ProjectionThreadActivityDbRowSchema,
     execute: ({ threadId, requestId }) => sql`
-      SELECT
-        activity_id AS "activityId",
-        thread_id AS "threadId",
-        turn_id AS "turnId",
-        tone,
-        kind,
-        summary,
-        payload_json AS "payload",
-        sequence,
-        created_at AS "createdAt"
-      FROM projection_thread_activities
+      SELECT ${activityColumns}
+        FROM projection_thread_activities
       WHERE thread_id = ${threadId}
         AND kind IN ('user-input.requested', 'user-input.resolved')
         AND json_extract(payload_json, '$.requestId') = ${requestId}
@@ -1214,16 +1090,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadActivityDbRowSchema,
     execute: ({ activityIds }) =>
       sql`
-        SELECT
-          activity_id AS "activityId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          tone,
-          kind,
-          summary,
-          payload_json AS "payload",
-          sequence,
-          created_at AS "createdAt"
+        SELECT ${activityColumns}
         FROM projection_thread_activities
         -- The selectors already scoped these globally unique ids to the
         -- thread inside this transaction. Keep this as a primary-key lookup.
@@ -1236,28 +1103,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadActivityDbRowSchema,
     execute: ({ threadId, activityKinds }) =>
       sql`
-        SELECT
-          activity_id AS "activityId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          tone,
-          kind,
-          summary,
-          payload_json AS "payload",
-          sequence,
-          created_at AS "createdAt"
+        SELECT ${activityColumns}
         FROM (
-          SELECT
-            activity_id,
-            thread_id,
-            turn_id,
-            tone,
-            kind,
-            summary,
-            payload_json,
-            sequence,
-            created_at
-          FROM projection_thread_activities
+          SELECT ${activityStorageColumns}
+        FROM projection_thread_activities
           WHERE thread_id = ${threadId}
             AND ${sql.in("kind", activityKinds)}
           ORDER BY
@@ -1324,15 +1173,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionCheckpointDbRowSchema,
     execute: ({ threadId }) =>
       sql`
-        SELECT
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          checkpoint_turn_count AS "checkpointTurnCount",
-          checkpoint_ref AS "checkpointRef",
-          checkpoint_status AS "status",
-          checkpoint_files_json AS "files",
-          assistant_message_id AS "assistantMessageId",
-          completed_at AS "completedAt"
+        SELECT ${turnColumns}
         FROM projection_turns
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count IS NOT NULL
@@ -1439,16 +1280,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionThreadMessageDbRowSchema,
     execute: ({ threadId, minAnchorAt, minTurnKey, beforeAnchorAt, beforeTurnKey }) =>
       sql`
-        SELECT
-          message_id AS "messageId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          role,
-          text,
-          attachments_json AS "attachments",
-          is_streaming AS "isStreaming",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
+        SELECT ${messageColumns}
         FROM projection_thread_messages
         WHERE thread_id = ${threadId}
           AND (
@@ -1590,28 +1422,10 @@ pending_approval_requests AS (
     Result: ProjectionThreadActivityDbRowSchema,
     execute: ({ threadId, minAnchorAt, minTurnKey, beforeAnchorAt, beforeTurnKey }) =>
       sql`
-        SELECT
-          activity_id AS "activityId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          tone,
-          kind,
-          summary,
-          payload_json AS "payload",
-          sequence,
-          created_at AS "createdAt"
+        SELECT ${activityColumns}
         FROM (
-          SELECT
-            activity_id,
-            thread_id,
-            turn_id,
-            tone,
-            kind,
-            summary,
-            payload_json,
-            sequence,
-            created_at
-          FROM projection_thread_activities
+          SELECT ${activityStorageColumns}
+        FROM projection_thread_activities
           WHERE thread_id = ${threadId}
             AND (
               turn_id IN (

@@ -340,62 +340,36 @@ export function createDevRunnerEnv({
       delete output.T3CODE_HOME;
     }
 
-    // A dev-runner server is never launcher-managed. When the shell that runs
-    // this script was itself spawned by the machine's managed t3 service (an
-    // agent working inside T3 Code), these leak through and the child server
-    // fails startup with "The service launcher started a different t3 version"
-    // (serviceLauncherClient.ts resolveStartup).
+    // Managed-service context must not leak into a separately launched dev server.
     delete output.T3_SERVICE_LAUNCHER_CONTEXT;
     delete output.T3_BOOT_SERVICE_UNIT;
+    delete output.T3CODE_DESKTOP_WS_URL;
+    output.T3CODE_PORT = String(serverPort);
 
-    if (!isDesktopMode) {
-      output.T3CODE_PORT = String(serverPort);
-      // HOST is Vite's own bind address, and the desktop branch below is the
-      // only place we set it. An inherited one (an exported HOST, a container,
-      // a `HOST=0.0.0.0 npm start` habit) would otherwise reach Vite and pin
-      // its HMR socket to that address — see the `explicitHost` gate in
-      // apps/web/vite.config.ts. Over a shared origin that is invisible: the
-      // page loads and only HMR quietly dials the wrong machine.
-      delete output.HOST;
-      if (mode === "dev" || mode === "dev:web") {
-        // Browser dev is single-origin: everything (including /ws) is proxied
-        // through Vite, so the client must resolve its backend from
-        // window.location.origin rather than a baked-in localhost URL. See
-        // resolveConfiguredPrimaryTarget in apps/web/src/environments/primary/target.ts
-        // — it only defers to the origin when both of these are absent. Baking
-        // localhost here is what breaks any non-localhost origin (tailnet, LAN,
-        // phone): the remote browser dials its own machine.
-        delete output.VITE_HTTP_URL;
-        delete output.VITE_WS_URL;
-        // Deleting is not enough on its own: vite.config.ts calls loadRepoEnv,
-        // which merges `.env`/`.env.local` *under* this env, so a developer
-        // with either URL in their `.env` would get it back and silently lose
-        // single-origin mode. This states the intent positively so Vite can
-        // ignore those values rather than infer from their absence.
-        output.T3CODE_SINGLE_ORIGIN_DEV = "1";
-      } else {
-        output.VITE_HTTP_URL = `http://localhost:${serverPort}`;
-        output.VITE_WS_URL = `ws://localhost:${serverPort}`;
-        delete output.T3CODE_SINGLE_ORIGIN_DEV;
-      }
-    } else {
-      output.T3CODE_PORT = String(serverPort);
-      output.VITE_HTTP_URL = `http://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
-      output.VITE_WS_URL = `ws://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
-      // Desktop pins the renderer to loopback on purpose; an ambient marker
-      // must not make Vite drop those URLs.
-      delete output.T3CODE_SINGLE_ORIGIN_DEV;
+    if (isDesktopMode) {
+      output.HOST = DESKTOP_DEV_LOOPBACK_HOST;
       delete output.T3CODE_MODE;
       delete output.T3CODE_NO_BROWSER;
       delete output.T3CODE_HOST;
-    }
-
-    if (!isDesktopMode && host !== undefined) {
-      output.T3CODE_HOST = host;
-    }
-
-    if (!isDesktopMode) {
+    } else {
+      // Inherited HOST would pin Vite's HMR connection to the wrong interface.
+      delete output.HOST;
+      output.T3CODE_MODE = "web";
       output.T3CODE_NO_BROWSER = browser === true ? "0" : "1";
+      if (host !== undefined) output.T3CODE_HOST = host;
+    }
+
+    if (mode === "dev" || mode === "dev:web") {
+      // Remote browsers use Vite's proxy. The marker also prevents .env files
+      // from restoring localhost URLs when vite.config.ts loads the environment.
+      delete output.VITE_HTTP_URL;
+      delete output.VITE_WS_URL;
+      output.T3CODE_SINGLE_ORIGIN_DEV = "1";
+    } else {
+      const backendHost = isDesktopMode ? DESKTOP_DEV_LOOPBACK_HOST : "localhost";
+      output.VITE_HTTP_URL = `http://${backendHost}:${serverPort}`;
+      output.VITE_WS_URL = `ws://${backendHost}:${serverPort}`;
+      delete output.T3CODE_SINGLE_ORIGIN_DEV;
     }
 
     if (autoBootstrapProjectFromCwd !== undefined) {
@@ -408,21 +382,6 @@ export function createDevRunnerEnv({
       output.T3CODE_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
     } else {
       delete output.T3CODE_LOG_WS_EVENTS;
-    }
-
-    if (mode === "dev") {
-      output.T3CODE_MODE = "web";
-      delete output.T3CODE_DESKTOP_WS_URL;
-    }
-
-    if (mode === "dev:server" || mode === "dev:web") {
-      output.T3CODE_MODE = "web";
-      delete output.T3CODE_DESKTOP_WS_URL;
-    }
-
-    if (isDesktopMode) {
-      output.HOST = DESKTOP_DEV_LOOPBACK_HOST;
-      delete output.T3CODE_DESKTOP_WS_URL;
     }
 
     return output;

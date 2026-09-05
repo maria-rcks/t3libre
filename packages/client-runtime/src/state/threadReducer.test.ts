@@ -14,12 +14,32 @@ import type { OrchestrationThread } from "@t3tools/contracts";
 
 import { applyThreadDetailEvent } from "./threadReducer.ts";
 
+function updatedThread(result: ReturnType<typeof applyThreadDetailEvent>) {
+  if (result.kind !== "updated") {
+    throw new Error(`Expected an updated thread, received ${result.kind}`);
+  }
+  return result.thread;
+}
+
+const makeActivity = (id: string, sequence: number | null, summary: string) => ({
+  id: EventId.make(id),
+  tone: "tool" as const,
+  kind: "command",
+  summary,
+  payload: {},
+  turnId: TurnId.make("turn-1"),
+  ...(sequence === null ? {} : { sequence }),
+  createdAt: "2026-04-01T11:00:00.000Z",
+});
+
 const baseEventFields = {
   eventId: EventId.make("event-1"),
   commandId: null,
   causationEventId: null,
   correlationId: null,
   metadata: {},
+  aggregateKind: "thread",
+  aggregateId: ThreadId.make("thread-1"),
 } as const;
 
 const baseThread: OrchestrationThread = {
@@ -94,14 +114,12 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.id).toBe("thread-2");
-        expect(result.thread.title).toBe("New Thread");
-        expect(result.thread.branch).toBe("main");
-        expect(result.thread.messages).toEqual([]);
-        expect(result.thread.session).toBeNull();
-      }
+      const thread = updatedThread(result);
+      expect(thread.id).toBe("thread-2");
+      expect(thread.title).toBe("New Thread");
+      expect(thread.branch).toBe("main");
+      expect(thread.messages).toEqual([]);
+      expect(thread.session).toBeNull();
     });
   });
 
@@ -111,8 +129,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 2,
         occurredAt: "2026-04-01T02:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.deleted",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -136,8 +152,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 3,
         occurredAt: "2026-04-01T03:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.archived",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -146,11 +160,9 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.archivedAt).toBe("2026-04-01T03:00:00.000Z");
-        expect(result.thread.titleRegeneration).toBeNull();
-      }
+      const thread = updatedThread(result);
+      expect(thread.archivedAt).toBe("2026-04-01T03:00:00.000Z");
+      expect(thread.titleRegeneration).toBeNull();
     });
 
     it("clears archivedAt", () => {
@@ -159,8 +171,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 4,
         occurredAt: "2026-04-01T04:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.unarchived",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -168,10 +178,8 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.archivedAt).toBeNull();
-      }
+      const thread = updatedThread(result);
+      expect(thread.archivedAt).toBeNull();
     });
   });
 
@@ -182,8 +190,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 5,
         occurredAt: settledAt,
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.settled",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -192,11 +198,9 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.settledOverride).toBe("settled");
-        expect(result.thread.settledAt).toBe(settledAt);
-      }
+      const thread = updatedThread(result);
+      expect(thread.settledOverride).toBe("settled");
+      expect(thread.settledAt).toBe(settledAt);
     });
 
     it.each([
@@ -213,8 +217,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 6,
         occurredAt: updatedAt,
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.unsettled",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -223,11 +225,9 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.settledOverride).toBe(settledOverride);
-        expect(result.thread.settledAt).toBeNull();
-      }
+      const thread = updatedThread(result);
+      expect(thread.settledOverride).toBe(settledOverride);
+      expect(thread.settledAt).toBeNull();
     });
   });
 
@@ -238,8 +238,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 5,
         occurredAt: pinnedAt,
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.pinned",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -248,10 +246,8 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.pinnedAt).toBe(pinnedAt);
-      }
+      const thread = updatedThread(result);
+      expect(thread.pinnedAt).toBe(pinnedAt);
     });
 
     it("clears pinnedAt", () => {
@@ -264,8 +260,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 6,
         occurredAt: updatedAt,
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.unpinned",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -273,10 +267,8 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.pinnedAt).toBeNull();
-      }
+      const thread = updatedThread(result);
+      expect(thread.pinnedAt).toBeNull();
     });
   });
 
@@ -286,8 +278,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 5,
         occurredAt: "2026-04-01T05:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.meta-updated",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -297,13 +287,11 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.title).toBe("Updated Title");
-        expect(result.thread.branch).toBe("feature/demo");
-        // Model selection should be unchanged since it wasn't in the payload
-        expect(result.thread.modelSelection).toEqual(baseThread.modelSelection);
-      }
+      const thread = updatedThread(result);
+      expect(thread.title).toBe("Updated Title");
+      expect(thread.branch).toBe("feature/demo");
+      // Model selection should be unchanged since it wasn't in the payload
+      expect(thread.modelSelection).toEqual(baseThread.modelSelection);
     });
 
     it("sets and clears a linked pull request", () => {
@@ -317,8 +305,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 5,
         occurredAt: "2026-04-01T05:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.meta-updated",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -335,8 +321,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 6,
         occurredAt: "2026-04-01T06:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.meta-updated",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -358,8 +342,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 6,
         occurredAt: "2026-04-01T06:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.message-sent",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -373,11 +355,9 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.messages).toHaveLength(1);
-        expect(result.thread.messages[0]?.text).toBe("Hello, world!");
-      }
+      const thread = updatedThread(result);
+      expect(thread.messages).toHaveLength(1);
+      expect(thread.messages[0]?.text).toBe("Hello, world!");
     });
 
     it("appends text for streaming messages", () => {
@@ -400,8 +380,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 7,
         occurredAt: "2026-04-01T06:01:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.message-sent",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -415,11 +393,9 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.messages).toHaveLength(1);
-        expect(result.thread.messages[0]?.text).toBe("Hello, world!");
-      }
+      const thread = updatedThread(result);
+      expect(thread.messages).toHaveLength(1);
+      expect(thread.messages[0]?.text).toBe("Hello, world!");
     });
 
     it("updates latestTurn for assistant messages with a turn", () => {
@@ -427,8 +403,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 8,
         occurredAt: "2026-04-01T07:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.message-sent",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -442,12 +416,10 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.latestTurn?.turnId).toBe("turn-1");
-        expect(result.thread.latestTurn?.state).toBe("completed");
-        expect(result.thread.latestTurn?.assistantMessageId).toBe("msg-3");
-      }
+      const thread = updatedThread(result);
+      expect(thread.latestTurn?.turnId).toBe("turn-1");
+      expect(thread.latestTurn?.state).toBe("completed");
+      expect(thread.latestTurn?.assistantMessageId).toBe("msg-3");
     });
 
     it("keeps latestTurn running for interim assistant messages while the session runs the turn", () => {
@@ -476,8 +448,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 8,
         occurredAt: "2026-04-01T07:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.message-sent",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -491,11 +461,9 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.latestTurn?.state).toBe("running");
-        expect(result.thread.latestTurn?.completedAt).toBeNull();
-      }
+      const thread = updatedThread(result);
+      expect(thread.latestTurn?.state).toBe("running");
+      expect(thread.latestTurn?.completedAt).toBeNull();
     });
 
     it("keeps latestTurn and checkpoints references across a streaming delta", () => {
@@ -546,8 +514,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 9,
         occurredAt: "2026-04-01T07:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.message-sent",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -561,13 +527,11 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.messages).not.toBe(streamingThread.messages);
-        expect(result.thread.messages[0]?.text).toBe("Hello, world");
-        expect(result.thread.latestTurn).toBe(streamingThread.latestTurn);
-        expect(result.thread.checkpoints).toBe(streamingThread.checkpoints);
-      }
+      const thread = updatedThread(result);
+      expect(thread.messages).not.toBe(streamingThread.messages);
+      expect(thread.messages[0]?.text).toBe("Hello, world");
+      expect(thread.latestTurn).toBe(streamingThread.latestTurn);
+      expect(thread.checkpoints).toBe(streamingThread.checkpoints);
     });
 
     it("replaces latestTurn and checkpoints when the first assistant message binds the turn", () => {
@@ -607,8 +571,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 9,
         occurredAt: "2026-04-01T07:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.message-sent",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -622,13 +584,11 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.latestTurn).not.toBe(unboundThread.latestTurn);
-        expect(result.thread.latestTurn?.assistantMessageId).toBe("msg-2");
-        expect(result.thread.checkpoints).not.toBe(unboundThread.checkpoints);
-        expect(result.thread.checkpoints[0]?.assistantMessageId).toBe("msg-2");
-      }
+      const thread = updatedThread(result);
+      expect(thread.latestTurn).not.toBe(unboundThread.latestTurn);
+      expect(thread.latestTurn?.assistantMessageId).toBe("msg-2");
+      expect(thread.checkpoints).not.toBe(unboundThread.checkpoints);
+      expect(thread.checkpoints[0]?.assistantMessageId).toBe("msg-2");
     });
   });
 
@@ -650,8 +610,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 9,
         occurredAt: "2026-04-01T08:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.session-set",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -667,11 +625,9 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.latestTurn?.state).toBe("completed");
-        expect(result.thread.latestTurn?.completedAt).toBe("2026-04-01T08:00:00.000Z");
-      }
+      const thread = updatedThread(result);
+      expect(thread.latestTurn?.state).toBe("completed");
+      expect(thread.latestTurn?.completedAt).toBe("2026-04-01T08:00:00.000Z");
     });
 
     it("updates session and latestTurn for a running session", () => {
@@ -679,8 +635,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 9,
         occurredAt: "2026-04-01T08:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.session-set",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -696,12 +650,10 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.session?.status).toBe("running");
-        expect(result.thread.latestTurn?.turnId).toBe("turn-1");
-        expect(result.thread.latestTurn?.state).toBe("running");
-      }
+      const thread = updatedThread(result);
+      expect(thread.session?.status).toBe("running");
+      expect(thread.latestTurn?.turnId).toBe("turn-1");
+      expect(thread.latestTurn?.state).toBe("running");
     });
   });
 
@@ -724,8 +676,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 10,
         occurredAt: "2026-04-01T09:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.session-stop-requested",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -733,11 +683,9 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.session?.status).toBe("stopped");
-        expect(result.thread.session?.activeTurnId).toBeNull();
-      }
+      const thread = updatedThread(result);
+      expect(thread.session?.status).toBe("stopped");
+      expect(thread.session?.activeTurnId).toBeNull();
     });
 
     it("returns unchanged when no session exists", () => {
@@ -745,8 +693,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 10,
         occurredAt: "2026-04-01T09:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.session-stop-requested",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -763,8 +709,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 11,
         occurredAt: "2026-04-01T10:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.proposed-plan-upserted",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -780,11 +724,9 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.proposedPlans).toHaveLength(1);
-        expect(result.thread.proposedPlans[0]?.id).toBe("plan-1");
-      }
+      const thread = updatedThread(result);
+      expect(thread.proposedPlans).toHaveLength(1);
+      expect(thread.proposedPlans[0]?.id).toBe("plan-1");
     });
   });
 
@@ -794,8 +736,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 12,
         occurredAt: "2026-04-01T11:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.activity-appended",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -811,11 +751,9 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.activities).toHaveLength(1);
-        expect(result.thread.activities[0]?.kind).toBe("file-edit");
-      }
+      const thread = updatedThread(result);
+      expect(thread.activities).toHaveLength(1);
+      expect(thread.activities[0]?.kind).toBe("file-edit");
     });
 
     it("preserves the complete activity history when live events arrive", () => {
@@ -835,8 +773,6 @@ describe("applyThreadDetailEvent", () => {
           ...baseEventFields,
           sequence: 130,
           occurredAt: "2026-04-01T11:01:00.000Z",
-          aggregateKind: "thread",
-          aggregateId: ThreadId.make("thread-1"),
           type: "thread.activity-appended",
           payload: {
             threadId: ThreadId.make("thread-1"),
@@ -854,114 +790,78 @@ describe("applyThreadDetailEvent", () => {
         },
       );
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.activities).toHaveLength(130);
-        expect(result.thread.activities[0]?.id).toBe("activity-0");
-      }
+      const thread = updatedThread(result);
+      expect(thread.activities).toHaveLength(130);
+      expect(thread.activities[0]?.id).toBe("activity-0");
     });
 
     it("re-sorts when an activity arrives out of order", () => {
-      const makeActivity = (id: string, sequence: number) => ({
-        id: EventId.make(id),
-        tone: "tool" as const,
-        kind: "command",
-        summary: `Ran command ${sequence}`,
-        payload: {},
-        turnId: TurnId.make("turn-1"),
-        sequence,
-        createdAt: "2026-04-01T11:00:00.000Z",
-      });
       const result = applyThreadDetailEvent(
         {
           ...baseThread,
-          activities: [makeActivity("activity-a", 1), makeActivity("activity-c", 3)],
+          activities: [
+            makeActivity("activity-a", 1, "Ran command 1"),
+            makeActivity("activity-c", 3, "Ran command 3"),
+          ],
         },
         {
           ...baseEventFields,
           sequence: 131,
           occurredAt: "2026-04-01T11:01:00.000Z",
-          aggregateKind: "thread",
-          aggregateId: ThreadId.make("thread-1"),
           type: "thread.activity-appended",
           payload: {
             threadId: ThreadId.make("thread-1"),
-            activity: makeActivity("activity-b", 2),
+            activity: makeActivity("activity-b", 2, "Ran command 2"),
           },
         },
       );
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.activities.map((activity) => activity.id)).toEqual([
-          "activity-a",
-          "activity-b",
-          "activity-c",
-        ]);
-      }
+      const thread = updatedThread(result);
+      expect(thread.activities.map((activity) => activity.id)).toEqual([
+        "activity-a",
+        "activity-b",
+        "activity-c",
+      ]);
     });
 
     it("repairs snapshot ordering before fast-path appends engage", () => {
-      const makeActivity = (id: string, sequence: number | null) => ({
-        id: EventId.make(id),
-        tone: "tool" as const,
-        kind: "command",
-        summary: `Ran ${id}`,
-        payload: {},
-        turnId: TurnId.make("turn-1"),
-        ...(sequence === null ? {} : { sequence }),
-        createdAt: "2026-04-01T11:00:00.000Z",
-      });
       // Snapshot loads deliver null-sequence rows first (DB order), which
       // activityOrder sorts last; an in-order live append must not freeze
       // that prefix.
       const result = applyThreadDetailEvent(
         {
           ...baseThread,
-          activities: [makeActivity("activity-null", null), makeActivity("activity-a", 1)],
+          activities: [
+            makeActivity("activity-null", null, "Ran activity-null"),
+            makeActivity("activity-a", 1, "Ran activity-a"),
+          ],
         },
         {
           ...baseEventFields,
           sequence: 135,
           occurredAt: "2026-04-01T11:01:00.000Z",
-          aggregateKind: "thread",
-          aggregateId: ThreadId.make("thread-1"),
           type: "thread.activity-appended",
           payload: {
             threadId: ThreadId.make("thread-1"),
-            activity: makeActivity("activity-b", 2),
+            activity: makeActivity("activity-b", 2, "Ran activity-b"),
           },
         },
       );
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.activities.map((activity) => activity.id)).toEqual([
-          "activity-a",
-          "activity-b",
-          "activity-null",
-        ]);
-      }
+      const thread = updatedThread(result);
+      expect(thread.activities.map((activity) => activity.id)).toEqual([
+        "activity-a",
+        "activity-b",
+        "activity-null",
+      ]);
     });
 
     it("dedupes a re-delivery arriving right after an in-order append", () => {
-      const makeActivity = (id: string, sequence: number, summary: string) => ({
-        id: EventId.make(id),
-        tone: "tool" as const,
-        kind: "command",
-        summary,
-        payload: {},
-        turnId: TurnId.make("turn-1"),
-        sequence,
-        createdAt: "2026-04-01T11:00:00.000Z",
-      });
       const makeEvent = (sequence: number, activity: ReturnType<typeof makeActivity>) =>
         ({
           ...baseEventFields,
           sequence,
           occurredAt: "2026-04-01T11:01:00.000Z",
-          aggregateKind: "thread",
-          aggregateId: ThreadId.make("thread-1"),
           type: "thread.activity-appended",
           payload: { threadId: ThreadId.make("thread-1"), activity },
         }) as const;
@@ -997,16 +897,6 @@ describe("applyThreadDetailEvent", () => {
     });
 
     it("replaces a re-delivered activity instead of duplicating it", () => {
-      const makeActivity = (id: string, sequence: number, summary: string) => ({
-        id: EventId.make(id),
-        tone: "tool" as const,
-        kind: "command",
-        summary,
-        payload: {},
-        turnId: TurnId.make("turn-1"),
-        sequence,
-        createdAt: "2026-04-01T11:00:00.000Z",
-      });
       const result = applyThreadDetailEvent(
         {
           ...baseThread,
@@ -1019,8 +909,6 @@ describe("applyThreadDetailEvent", () => {
           ...baseEventFields,
           sequence: 132,
           occurredAt: "2026-04-01T11:01:00.000Z",
-          aggregateKind: "thread",
-          aggregateId: ThreadId.make("thread-1"),
           type: "thread.activity-appended",
           payload: {
             threadId: ThreadId.make("thread-1"),
@@ -1029,14 +917,12 @@ describe("applyThreadDetailEvent", () => {
         },
       );
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.activities.map((activity) => activity.id)).toEqual([
-          "activity-a",
-          "activity-b",
-        ]);
-        expect(result.thread.activities[1]?.summary).toBe("second (redelivered)");
-      }
+      const thread = updatedThread(result);
+      expect(thread.activities.map((activity) => activity.id)).toEqual([
+        "activity-a",
+        "activity-b",
+      ]);
+      expect(thread.activities[1]?.summary).toBe("second (redelivered)");
     });
 
     it("replaces earlier resolvable context-window updates for the same turn", () => {
@@ -1066,8 +952,6 @@ describe("applyThreadDetailEvent", () => {
           ...baseEventFields,
           sequence: 20,
           occurredAt: "2026-04-01T11:02:00.000Z",
-          aggregateKind: "thread",
-          aggregateId: ThreadId.make("thread-1"),
           type: "thread.activity-appended",
           payload: {
             threadId: ThreadId.make("thread-1"),
@@ -1076,13 +960,11 @@ describe("applyThreadDetailEvent", () => {
         },
       );
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        const ids = result.thread.activities.map((activity) => activity.id);
-        // Same-turn resolvable rows collapse to the newest; the other turn's
-        // row and the malformed row are untouched.
-        expect(ids).toEqual(["activity-other-turn", "activity-cw-malformed", "activity-cw-3"]);
-      }
+      const thread = updatedThread(result);
+      const ids = thread.activities.map((activity) => activity.id);
+      // Same-turn resolvable rows collapse to the newest; the other turn's
+      // row and the malformed row are untouched.
+      expect(ids).toEqual(["activity-other-turn", "activity-cw-malformed", "activity-cw-3"]);
     });
 
     it("does not collapse context-window history for a malformed update", () => {
@@ -1103,8 +985,6 @@ describe("applyThreadDetailEvent", () => {
           ...baseEventFields,
           sequence: 21,
           occurredAt: "2026-04-01T11:03:00.000Z",
-          aggregateKind: "thread",
-          aggregateId: ThreadId.make("thread-1"),
           type: "thread.activity-appended",
           payload: {
             threadId: ThreadId.make("thread-1"),
@@ -1118,13 +998,11 @@ describe("applyThreadDetailEvent", () => {
         },
       );
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        // The resolvable row must survive so consumers can still derive a
-        // usage value by walking backwards past the malformed row.
-        const ids = result.thread.activities.map((activity) => activity.id);
-        expect(ids).toEqual(["activity-cw-resolvable", "activity-cw-broken"]);
-      }
+      const thread = updatedThread(result);
+      // The resolvable row must survive so consumers can still derive a
+      // usage value by walking backwards past the malformed row.
+      const ids = thread.activities.map((activity) => activity.id);
+      expect(ids).toEqual(["activity-cw-resolvable", "activity-cw-broken"]);
     });
   });
 
@@ -1134,8 +1012,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 13,
         occurredAt: "2026-04-01T12:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.turn-diff-completed",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -1149,12 +1025,10 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.checkpoints).toHaveLength(1);
-        expect(result.thread.latestTurn?.turnId).toBe("turn-1");
-        expect(result.thread.latestTurn?.state).toBe("completed");
-      }
+      const thread = updatedThread(result);
+      expect(thread.checkpoints).toHaveLength(1);
+      expect(thread.latestTurn?.turnId).toBe("turn-1");
+      expect(thread.latestTurn?.state).toBe("completed");
     });
   });
 
@@ -1217,8 +1091,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 14,
         occurredAt: "2026-04-01T04:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.reverted",
         payload: {
           threadId: ThreadId.make("thread-1"),
@@ -1226,15 +1098,13 @@ describe("applyThreadDetailEvent", () => {
         },
       });
 
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        // turn-2 checkpoint is filtered out (turnCount 2 > revert target 1)
-        expect(result.thread.checkpoints).toHaveLength(1);
-        expect(result.thread.checkpoints[0]?.turnId).toBe("turn-1");
-        // msg-3 (turn-2) is filtered, msg-1 (no turn) and msg-2 (turn-1) remain
-        expect(result.thread.messages).toHaveLength(2);
-        expect(result.thread.latestTurn?.turnId).toBe("turn-1");
-      }
+      const thread = updatedThread(result);
+      // turn-2 checkpoint is filtered out (turnCount 2 > revert target 1)
+      expect(thread.checkpoints).toHaveLength(1);
+      expect(thread.checkpoints[0]?.turnId).toBe("turn-1");
+      // msg-3 (turn-2) is filtered, msg-1 (no turn) and msg-2 (turn-1) remain
+      expect(thread.messages).toHaveLength(2);
+      expect(thread.latestTurn?.turnId).toBe("turn-1");
     });
   });
 
@@ -1244,8 +1114,6 @@ describe("applyThreadDetailEvent", () => {
         ...baseEventFields,
         sequence: 15,
         occurredAt: "2026-04-01T13:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
         type: "thread.approval-response-requested",
         payload: {
           threadId: ThreadId.make("thread-1"),

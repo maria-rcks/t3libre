@@ -246,6 +246,33 @@ const makeTestHostWebContents = (): TestHostWebContents => {
   };
 };
 
+const makeWebviewDefaults = () => ({
+  id: 42,
+  isDestroyed: () => false,
+  getType: () => "webview",
+  getURL: () => "https://example.com",
+  getTitle: () => "Example",
+  isLoading: () => false,
+  getZoomFactor: () => 1,
+  setZoomFactor: vi.fn(),
+  setAudioMuted: vi.fn(),
+  isCurrentlyAudible: () => false,
+  on: vi.fn(),
+  off: vi.fn(),
+  ipc: { on: vi.fn(), off: vi.fn() },
+  send: webviewSend,
+  navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+  setIgnoreMenuShortcuts: vi.fn(),
+  setWindowOpenHandler: vi.fn(),
+  debugger: {
+    isAttached: () => false,
+    attach: vi.fn(),
+    sendCommand: vi.fn(async () => undefined),
+    on: vi.fn(),
+    off: vi.fn(),
+  },
+});
+
 const makeTestPreviewWebContents = (
   capturePage: () => Promise<TestCapturedPreviewImage>,
   id = 42,
@@ -253,34 +280,12 @@ const makeTestPreviewWebContents = (
 ) => {
   const setBackgroundThrottling = vi.fn<(enabled: boolean) => void>();
   return {
+    ...makeWebviewDefaults(),
     id,
     mainFrame: { routingId: id },
     hostWebContents,
     executeJavaScript: vi.fn(async () => ({ width: 1280, height: 720 })),
-    isDestroyed: () => false,
-    getType: () => "webview",
-    getURL: () => "https://example.com",
-    getTitle: () => "Example",
-    isLoading: () => false,
-    getZoomFactor: () => 1,
-    setZoomFactor: vi.fn(),
-    setAudioMuted: vi.fn(),
     setBackgroundThrottling,
-    isCurrentlyAudible: () => false,
-    on: vi.fn(),
-    off: vi.fn(),
-    ipc: { on: vi.fn(), off: vi.fn() },
-    send: webviewSend,
-    navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-    setIgnoreMenuShortcuts: vi.fn(),
-    setWindowOpenHandler: vi.fn(),
-    debugger: {
-      isAttached: () => false,
-      attach: vi.fn(),
-      sendCommand: vi.fn(async () => undefined),
-      on: vi.fn(),
-      off: vi.fn(),
-    },
     capturePage,
   } as unknown as TestPreviewWebContents;
 };
@@ -361,17 +366,13 @@ const makeFaviconWebContents = (options?: {
   const off = vi.fn();
   const debuggerOff = vi.fn();
   const webContents = {
+    ...makeWebviewDefaults(),
     id: options?.id ?? 42,
     isDestroyed: () => destroyed,
-    getType: () => "webview",
     getURL: () => currentUrl,
     getTitle: () => "Preview",
     isLoading: () => loading,
     isDevToolsOpened: () => false,
-    getZoomFactor: () => 1,
-    setZoomFactor: vi.fn(),
-    setAudioMuted: vi.fn(),
-    isCurrentlyAudible: () => false,
     reload,
     reloadIgnoringCache: vi.fn(),
     loadURL,
@@ -379,12 +380,7 @@ const makeFaviconWebContents = (options?: {
       listeners.set(event, listener);
     }),
     off,
-    ipc: { on: vi.fn(), off: vi.fn() },
-    send: webviewSend,
     session: { fetch },
-    navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-    setIgnoreMenuShortcuts: vi.fn(),
-    setWindowOpenHandler: vi.fn(),
     executeJavaScriptInIsolatedWorld,
     debugger: {
       isAttached: () => false,
@@ -662,33 +658,13 @@ describe("PreviewManager", () => {
         const loadURL = vi.fn(async () => undefined);
         const listeners = new Map<string, (...args: never[]) => void>();
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
+          ...makeWebviewDefaults(),
           getURL: () => "about:blank",
           getTitle: () => "",
-          isLoading: () => false,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
           loadURL,
           on: vi.fn((event: string, listener: (...args: never[]) => void) => {
             listeners.set(event, listener);
           }),
-          off: vi.fn(),
-          ipc: { on: vi.fn(), off: vi.fn() },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
-          },
         } as never);
 
         yield* manager.navigate("tab_pending", "localhost:3200");
@@ -764,26 +740,13 @@ describe("PreviewManager", () => {
           off: debuggerOff,
         };
         fromId.mockReturnValue({
-          id: 42,
+          ...makeWebviewDefaults(),
           isDestroyed: () => destroyed,
-          getType: () => "webview",
           getURL: () => "http://localhost:3200/",
           getTitle: () => "Preview",
-          isLoading: () => false,
           isDevToolsOpened: () => false,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
           reload: vi.fn(),
           loadURL: vi.fn(async () => undefined),
-          on: vi.fn(),
-          off: vi.fn(),
-          ipc: { on: vi.fn(), off: vi.fn() },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
           get debugger() {
             if (destroyed) throw new Error("Object has been destroyed");
             return wcDebugger;
@@ -1267,35 +1230,16 @@ describe("PreviewManager", () => {
         const listeners = new Map<string, (...args: unknown[]) => void>();
         const setZoomFactor = vi.fn();
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
+          ...makeWebviewDefaults(),
+          setZoomFactor,
           getURL: () => url,
-          getTitle: () => "Example",
-          isLoading: () => false,
           getZoomFactor: () => {
             if (!zoomReadable) throw new Error("zoom unavailable");
             return effectiveZoom;
           },
-          setZoomFactor,
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
           on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
             listeners.set(event, listener);
           }),
-          off: vi.fn(),
-          ipc: { on: vi.fn(), off: vi.fn() },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
-          },
         } as never);
         const states: PreviewManager.PreviewTabState[] = [];
 
@@ -1337,30 +1281,10 @@ describe("PreviewManager", () => {
 
         const replacementSetZoomFactor = vi.fn();
         fromId.mockReturnValue({
+          ...makeWebviewDefaults(),
           id: 43,
-          isDestroyed: () => false,
-          getType: () => "webview",
           getURL: () => url,
-          getTitle: () => "Example",
-          isLoading: () => false,
-          getZoomFactor: () => 1,
           setZoomFactor: replacementSetZoomFactor,
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
-          on: vi.fn(),
-          off: vi.fn(),
-          ipc: { on: vi.fn(), off: vi.fn() },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
-          },
         } as never);
 
         yield* manager.registerWebview("tab_zoom", 43);
@@ -1378,30 +1302,8 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         const setZoomFactor = vi.fn();
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
-          getURL: () => "https://example.com",
-          getTitle: () => "Example",
-          isLoading: () => false,
-          getZoomFactor: () => 1,
+          ...makeWebviewDefaults(),
           setZoomFactor,
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
-          on: vi.fn(),
-          off: vi.fn(),
-          ipc: { on: vi.fn(), off: vi.fn() },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
-          },
         } as never);
 
         yield* manager.createTab("tab_reapply");
@@ -1425,30 +1327,8 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         const setZoomFactor = vi.fn();
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
-          getURL: () => "https://example.com",
-          getTitle: () => "Example",
-          isLoading: () => false,
-          getZoomFactor: () => 1,
+          ...makeWebviewDefaults(),
           setZoomFactor,
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
-          on: vi.fn(),
-          off: vi.fn(),
-          ipc: { on: vi.fn(), off: vi.fn() },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
-          },
         } as never);
         const states: PreviewManager.PreviewTabState[] = [];
         yield* manager.subscribeStateChanges((_tabId, state) =>
@@ -1480,24 +1360,9 @@ describe("PreviewManager", () => {
           return {
             sendCommand,
             wc: {
+              ...makeWebviewDefaults(),
               id,
-              isDestroyed: () => false,
               isDevToolsOpened: () => false,
-              getType: () => "webview",
-              getURL: () => "https://example.com",
-              getTitle: () => "Example",
-              isLoading: () => false,
-              getZoomFactor: () => 1,
-              setZoomFactor: vi.fn(),
-              setAudioMuted: vi.fn(),
-              isCurrentlyAudible: () => false,
-              on: vi.fn(),
-              off: vi.fn(),
-              ipc: { on: vi.fn(), off: vi.fn() },
-              send: webviewSend,
-              navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-              setIgnoreMenuShortcuts: vi.fn(),
-              setWindowOpenHandler: vi.fn(),
               debugger: {
                 isAttached: () => false,
                 attach: vi.fn(),
@@ -1569,15 +1434,9 @@ describe("PreviewManager", () => {
         audibleAfterFirstRead = true;
       },
       wc: {
+        ...makeWebviewDefaults(),
         id,
-        isDestroyed: () => false,
         isDevToolsOpened: () => false,
-        getType: () => "webview",
-        getURL: () => "https://example.com",
-        getTitle: () => "Example",
-        isLoading: () => false,
-        getZoomFactor: () => 1,
-        setZoomFactor: vi.fn(),
         setAudioMuted,
         isCurrentlyAudible: () => {
           audibleReads += 1;
@@ -1591,18 +1450,6 @@ describe("PreviewManager", () => {
         off: vi.fn((event: string) => {
           listeners.delete(event);
         }),
-        ipc: { on: vi.fn(), off: vi.fn() },
-        send: webviewSend,
-        navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-        setIgnoreMenuShortcuts: vi.fn(),
-        setWindowOpenHandler: vi.fn(),
-        debugger: {
-          isAttached: () => false,
-          attach: vi.fn(),
-          sendCommand: vi.fn(async () => undefined),
-          on: vi.fn(),
-          off: vi.fn(),
-        },
       } as never,
     };
   };
@@ -1913,32 +1760,13 @@ describe("PreviewManager", () => {
         let loading = false;
         const listeners = new Map<string, (...args: unknown[]) => void>();
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
+          ...makeWebviewDefaults(),
           getURL: () => url,
           getTitle: () => "localhost:5733",
           isLoading: () => loading,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
           on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
             listeners.set(event, listener);
           }),
-          off: vi.fn(),
-          ipc: { on: vi.fn(), off: vi.fn() },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
-          },
         } as never);
         const statuses: PreviewManager.PreviewNavStatus[] = [];
 
@@ -2006,32 +1834,11 @@ describe("PreviewManager", () => {
         const capturePage = vi.fn(async () => ({ toPNG: () => png }));
         const listeners = new Map<string, (...args: never[]) => void>();
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
+          ...makeWebviewDefaults(),
           getURL: () => "https://example.com:8443/path?query=value",
-          getTitle: () => "Example",
-          isLoading: () => false,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
           on: vi.fn((event: string, listener: (...args: never[]) => void) => {
             listeners.set(event, listener);
           }),
-          off: vi.fn(),
-          ipc: { on: vi.fn(), off: vi.fn() },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
-          },
           capturePage,
         } as never);
 
@@ -2561,29 +2368,16 @@ describe("PreviewManager", () => {
           sendCommand: typeof firstSendCommand,
         ) =>
           ({
+            ...makeWebviewDefaults(),
             id,
             mainFrame: { routingId: id },
             hostWebContents: host,
             executeJavaScript: vi.fn(async () =>
               id === 41 ? { width: 800, height: 600 } : { width: 390, height: 844 },
             ),
-            isDestroyed: () => false,
-            getType: () => "webview",
             getURL: () => `https://example.com/${id}`,
             getTitle: () => `Example ${id}`,
-            isLoading: () => false,
-            getZoomFactor: () => 1,
-            setZoomFactor: vi.fn(),
-            setAudioMuted: vi.fn(),
             setBackgroundThrottling: vi.fn(),
-            isCurrentlyAudible: () => false,
-            on: vi.fn(),
-            off: vi.fn(),
-            ipc: { on: vi.fn(), off: vi.fn() },
-            send: webviewSend,
-            navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-            setIgnoreMenuShortcuts: vi.fn(),
-            setWindowOpenHandler: vi.fn(),
             debugger: {
               isAttached: () => false,
               attach: vi.fn(),
@@ -2866,34 +2660,11 @@ describe("PreviewManager", () => {
           getSize: () => ({ width: 1280, height: 720 }),
         }));
         fromId.mockReturnValue({
-          id: 42,
+          ...makeWebviewDefaults(),
           mainFrame: { routingId: 42 },
           hostWebContents: mainWindowWebContents,
           executeJavaScript: vi.fn(async () => ({ width: 1280, height: 720 })),
-          isDestroyed: () => false,
-          getType: () => "webview",
-          getURL: () => "https://example.com",
-          getTitle: () => "Example",
-          isLoading: () => false,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
           setBackgroundThrottling: vi.fn(),
-          isCurrentlyAudible: () => false,
-          on: vi.fn(),
-          off: vi.fn(),
-          ipc: { on: vi.fn(), off: vi.fn() },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
-          },
           capturePage,
         } as never);
 
@@ -3368,36 +3139,15 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         const listeners = new Map<string, (...args: unknown[]) => void>();
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
-          getURL: () => "https://example.com",
-          getTitle: () => "Example",
-          isLoading: () => false,
+          ...makeWebviewDefaults(),
           isFocused: () => true,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
           on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
             listeners.set(event, listener);
           }),
           once: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
             listeners.set(event, listener);
           }),
-          off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
-          },
         } as never);
 
         yield* manager.createTab("tab_1");
@@ -3420,21 +3170,9 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         let onPicked: ((event: unknown, ...args: unknown[]) => void) | undefined;
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
-          getURL: () => "https://example.com",
-          getTitle: () => "Example",
-          isLoading: () => false,
+          ...makeWebviewDefaults(),
           isFocused: () => true,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
-          on: vi.fn(),
           once: vi.fn(),
-          off: vi.fn(),
-          // A wedged compositor leaves `capturePage` pending forever.
           capturePage: vi.fn(() => new Promise(() => {})),
           ipc: {
             on: vi.fn((channel: string, listener: typeof onPicked) => {
@@ -3442,17 +3180,6 @@ describe("PreviewManager", () => {
             }),
             off: vi.fn(),
             removeListener: vi.fn(),
-          },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
           },
         } as never);
 
@@ -3498,20 +3225,9 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         let onPicked: ((event: unknown, ...args: unknown[]) => void) | undefined;
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
-          getURL: () => "https://example.com",
-          getTitle: () => "Example",
-          isLoading: () => false,
+          ...makeWebviewDefaults(),
           isFocused: () => true,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
-          on: vi.fn(),
           once: vi.fn(),
-          off: vi.fn(),
           capturePage: vi.fn(() => new Promise(() => {})),
           ipc: {
             on: vi.fn((channel: string, listener: typeof onPicked) => {
@@ -3519,17 +3235,6 @@ describe("PreviewManager", () => {
             }),
             off: vi.fn(),
             removeListener: vi.fn(),
-          },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
           },
         } as never);
         const annotation = {
@@ -3583,39 +3288,18 @@ describe("PreviewManager", () => {
         const goForward = vi.fn();
         let canGoBack = true;
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
-          getURL: () => "https://example.com",
-          getTitle: () => "Example",
-          isLoading: () => false,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
-          on: vi.fn(),
-          off: vi.fn(),
+          ...makeWebviewDefaults(),
           ipc: {
             on: vi.fn((channel: string, listener: typeof mouseNavigate) => {
               if (channel === "preview:mouse-navigate") mouseNavigate = listener;
             }),
             off: vi.fn(),
           },
-          send: webviewSend,
           navigationHistory: {
             canGoBack: () => canGoBack,
             canGoForward: () => true,
             goBack,
             goForward,
-          },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
-          debugger: {
-            isAttached: () => false,
-            attach: vi.fn(),
-            sendCommand: vi.fn(async () => undefined),
-            on: vi.fn(),
-            off: vi.fn(),
           },
         } as never);
 
@@ -3717,29 +3401,14 @@ describe("PreviewManager", () => {
           return undefined;
         });
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
-          getURL: () => "https://example.com",
-          getTitle: () => "Example",
-          isLoading: () => false,
+          ...makeWebviewDefaults(),
           isDevToolsOpened: () => false,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
-          on: vi.fn(),
-          off: vi.fn(),
           ipc: {
             on: vi.fn((channel: string, listener: typeof humanInput) => {
               if (channel === "preview:human-input") humanInput = listener;
             }),
             off: vi.fn(),
           },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
             attach: vi.fn(),
@@ -3817,30 +3486,15 @@ describe("PreviewManager", () => {
           focus: restoreFocus,
         } as never);
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
-          getURL: () => "https://example.com",
-          getTitle: () => "Example",
-          isLoading: () => false,
+          ...makeWebviewDefaults(),
           isDevToolsOpened: () => false,
           focus,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
-          on: vi.fn(),
-          off: vi.fn(),
           ipc: {
             on: vi.fn((channel: string, listener: typeof humanInput) => {
               if (channel === "preview:human-input") humanInput = listener;
             }),
             off: vi.fn(),
           },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
             attach: vi.fn(),
@@ -3974,29 +3628,14 @@ describe("PreviewManager", () => {
           return undefined;
         });
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
-          getURL: () => "https://example.com",
-          getTitle: () => "Example",
-          isLoading: () => false,
+          ...makeWebviewDefaults(),
           isDevToolsOpened: () => false,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
-          on: vi.fn(),
-          off: vi.fn(),
           ipc: {
             on: vi.fn((channel: string, listener: typeof humanInput) => {
               if (channel === "preview:human-input") humanInput = listener;
             }),
             off: vi.fn(),
           },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
             attach: vi.fn(),
@@ -4044,24 +3683,8 @@ describe("PreviewManager", () => {
           method === "Runtime.evaluate" ? { exceptionDetails } : undefined,
         );
         fromId.mockReturnValue({
-          id: 42,
-          isDestroyed: () => false,
-          getType: () => "webview",
-          getURL: () => "https://example.com",
-          getTitle: () => "Example",
-          isLoading: () => false,
+          ...makeWebviewDefaults(),
           isDevToolsOpened: () => false,
-          getZoomFactor: () => 1,
-          setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
-          on: vi.fn(),
-          off: vi.fn(),
-          ipc: { on: vi.fn(), off: vi.fn() },
-          send: webviewSend,
-          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-          setIgnoreMenuShortcuts: vi.fn(),
-          setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
             attach: vi.fn(),

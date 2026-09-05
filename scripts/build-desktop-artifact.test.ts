@@ -128,22 +128,17 @@ function mockProcess(exitCode: number, stdout = "") {
   });
 }
 
-function iconResizeSpawnerLayer(
-  commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }>,
-  exitCodes: ReadonlyArray<number>,
+function mockSpawnerLayer(
+  commands: Array<ChildProcess.StandardCommand>,
+  exitCodes: ReadonlyArray<number> = [],
 ) {
   let commandIndex = 0;
   return Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) => {
-      const childProcess = command as unknown as {
-        readonly command: string;
-        readonly args: ReadonlyArray<string>;
-      };
-      commands.push({
-        command: childProcess.command,
-        args: childProcess.args,
-      });
+      if (!ChildProcess.isStandardCommand(command))
+        return Effect.die(new Error("Unexpected command pipeline"));
+      commands.push(command);
       return Effect.succeed(mockProcess(exitCodes[commandIndex++] ?? 0));
     }),
   );
@@ -326,24 +321,16 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it.effect("omits update feeds for pull request preview builds", () =>
     Effect.gen(function* () {
-      const preview = yield* createBuildConfig(
-        "mac",
-        "dmg",
-        "0.0.33-pr.8182.1",
-        false,
-        false,
-        undefined,
-        undefined,
-      );
-      const release = yield* createBuildConfig(
-        "mac",
-        "dmg",
-        "0.0.33",
-        false,
-        false,
-        undefined,
-        undefined,
-      );
+      const preview = yield* createBuildConfig({
+        platform: "mac",
+        target: "dmg",
+        version: "0.0.33-pr.8182.1",
+      });
+      const release = yield* createBuildConfig({
+        platform: "mac",
+        target: "dmg",
+        version: "0.0.33",
+      });
 
       assert.notProperty(preview, "publish");
       assert.deepStrictEqual(release.publish, [
@@ -576,44 +563,23 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it.effect("applies platform-specific packaging to the build config", () =>
     Effect.gen(function* () {
-      const mac = yield* createBuildConfig(
-        "mac",
-        "dmg",
-        "1.2.3",
-        false,
-        false,
-        undefined,
-        undefined,
-      );
-      const linux = yield* createBuildConfig(
-        "linux",
-        "AppImage",
-        "1.2.3",
-        false,
-        false,
-        undefined,
-        undefined,
-      );
-      const win = yield* createBuildConfig(
-        "win",
-        "nsis",
-        "1.2.3",
-        false,
-        false,
-        undefined,
-        undefined,
-        true,
-      );
-      const winWithoutWslPrebuild = yield* createBuildConfig(
-        "win",
-        "nsis",
-        "1.2.3",
-        false,
-        false,
-        undefined,
-        undefined,
-        false,
-      );
+      const mac = yield* createBuildConfig({ platform: "mac", target: "dmg", version: "1.2.3" });
+      const linux = yield* createBuildConfig({
+        platform: "linux",
+        target: "AppImage",
+        version: "1.2.3",
+      });
+      const win = yield* createBuildConfig({
+        platform: "win",
+        target: "nsis",
+        version: "1.2.3",
+        wslRuntimeBundled: true,
+      });
+      const winWithoutWslPrebuild = yield* createBuildConfig({
+        platform: "win",
+        target: "nsis",
+        version: "1.2.3",
+      });
 
       // All platforms keep app.asar fully packed; Windows ships the server
       // tree as the hand-packed server.asar sidecar in extraResources instead
@@ -837,8 +803,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it.effect("reports every missing Linux desktop build prerequisite with an install command", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> =
-          [];
+        const commands: Array<ChildProcess.StandardCommand> = [];
         const spawner = Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
           ChildProcessSpawner.make((command) => {
@@ -846,7 +811,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
               readonly command: string;
               readonly args: ReadonlyArray<string>;
             };
-            commands.push(childProcess);
+            commands.push(command as ChildProcess.StandardCommand);
             const fails =
               childProcess.command === "cargo" ||
               childProcess.command === "rustc" ||
@@ -959,7 +924,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-windows-preflight-" });
         const pythonPath = path.join(tempDir, "python.exe");
         yield* fs.writeFileString(pythonPath, "python");
-        const commands: string[] = [];
+        const commands: Array<string> = [];
         const spawner = Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
           ChildProcessSpawner.make((command) => {
@@ -1093,29 +1058,28 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ).pipe(Effect.provideService(HostProcessPlatform, "linux")),
   );
 
-  it.effect("rejects a Windows package missing its expected WSL runtime", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
-        const error = yield* validateWindowsPackagedPayload({
-          stageDistDir: fixture.stageDistDir,
-          appExecutableName: fixture.appExecutableName,
-          targetArch: "x64",
-          expectWslRuntime: true,
-        }).pipe(Effect.flip);
-
-        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
-        assert.equal(error.reason, "wsl-runtime-missing");
-      }),
-    ),
-  );
-
-  it.effect("rejects forbidden native members in the emitted WSL archive", () =>
+  it.effect.each([
+    {
+      title: "missing its expected WSL runtime",
+      wslRuntime: undefined,
+      reason: "wsl-runtime-missing",
+    },
+    {
+      title: "with forbidden WSL native members",
+      wslRuntime: "forbidden",
+      reason: "wsl-runtime-invalid",
+    },
+    {
+      title: "with a mismatched WSL sidecar digest",
+      wslRuntime: "bad-digest",
+      reason: "wsl-runtime-invalid",
+    },
+  ] as const)("rejects a Windows package $title", ({ wslRuntime, reason }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* makeWindowsPayloadFixture({
           copyUnpackedNatives: true,
-          wslRuntime: "forbidden",
+          ...(wslRuntime === undefined ? {} : { wslRuntime }),
         });
         const error = yield* validateWindowsPackagedPayload({
           stageDistDir: fixture.stageDistDir,
@@ -1123,49 +1087,15 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           targetArch: "x64",
           expectWslRuntime: true,
         }).pipe(Effect.flip);
-
         assert.instanceOf(error, WindowsPackagedPayloadValidationError);
-        assert.equal(error.reason, "wsl-runtime-invalid");
-      }),
-    ),
-  );
-
-  it.effect("rejects an emitted WSL archive whose sidecar digest does not match", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = yield* makeWindowsPayloadFixture({
-          copyUnpackedNatives: true,
-          wslRuntime: "bad-digest",
-        });
-        const error = yield* validateWindowsPackagedPayload({
-          stageDistDir: fixture.stageDistDir,
-          appExecutableName: fixture.appExecutableName,
-          targetArch: "x64",
-          expectWslRuntime: true,
-        }).pipe(Effect.flip);
-
-        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
-        assert.equal(error.reason, "wsl-runtime-invalid");
+        assert.equal(error.reason, reason);
       }),
     ),
   );
 
   it.effect("probes fff through the packaged Windows primary instead of helper executables", () => {
-    const commands: Array<{
-      readonly command: string;
-      readonly args: ReadonlyArray<string>;
-      readonly options: {
-        readonly cwd?: string;
-        readonly env?: Readonly<Record<string, string | undefined>>;
-      };
-    }> = [];
-    const spawnerLayer = Layer.succeed(
-      ChildProcessSpawner.ChildProcessSpawner,
-      ChildProcessSpawner.make((command) => {
-        commands.push(command as unknown as (typeof commands)[number]);
-        return Effect.succeed(mockProcess(0));
-      }),
-    );
+    const commands: Array<ChildProcess.StandardCommand> = [];
+    const spawnerLayer = mockSpawnerLayer(commands);
 
     return Effect.scoped(
       Effect.gen(function* () {
@@ -1214,14 +1144,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it.effect("builds the Linux browser secret helper for a concrete architecture", () => {
-    const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> = [];
-    const spawnerLayer = Layer.succeed(
-      ChildProcessSpawner.ChildProcessSpawner,
-      ChildProcessSpawner.make((command) => {
-        commands.push(command as unknown as (typeof commands)[number]);
-        return Effect.succeed(mockProcess(0));
-      }),
-    );
+    const commands: Array<ChildProcess.StandardCommand> = [];
+    const spawnerLayer = mockSpawnerLayer(commands);
 
     return Effect.gen(function* () {
       // `universal` is a mac-only arch the option type still admits. The helper
@@ -1257,14 +1181,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it.effect("refuses a Linux build on a host that cannot build the browser secret helper", () => {
-    const commands: Array<{ readonly command: string }> = [];
-    const spawnerLayer = Layer.succeed(
-      ChildProcessSpawner.ChildProcessSpawner,
-      ChildProcessSpawner.make((command) => {
-        commands.push(command as unknown as (typeof commands)[number]);
-        return Effect.succeed(mockProcess(0));
-      }),
-    );
+    const commands: Array<ChildProcess.StandardCommand> = [];
+    const spawnerLayer = mockSpawnerLayer(commands);
 
     return Effect.gen(function* () {
       // The helper links against the host's libsecret and its build script is
@@ -1293,19 +1211,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it.effect("skips the primary native probe for cross-architecture Windows payloads", () => {
-    const commands: Array<{
-      readonly command: string;
-      readonly options: {
-        readonly env?: Readonly<Record<string, string | undefined>>;
-      };
-    }> = [];
-    const spawnerLayer = Layer.succeed(
-      ChildProcessSpawner.ChildProcessSpawner,
-      ChildProcessSpawner.make((command) => {
-        commands.push(command as unknown as (typeof commands)[number]);
-        return Effect.succeed(mockProcess(0));
-      }),
-    );
+    const commands: Array<ChildProcess.StandardCommand> = [];
+    const spawnerLayer = mockSpawnerLayer(commands);
 
     return Effect.scoped(
       Effect.gen(function* () {
@@ -1469,11 +1376,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   );
 
   it.effect("preserves both Linux icon resize failures with structural context", () => {
-    const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> = [];
+    const commands: Array<ChildProcess.StandardCommand> = [];
 
     return Effect.gen(function* () {
       const error = yield* stageLinuxIconSize("source.png", "target.png", 512, false).pipe(
-        Effect.provide(iconResizeSpawnerLayer(commands, [1, 2])),
+        Effect.provide(mockSpawnerLayer(commands, [1, 2])),
         Effect.flip,
       );
 
@@ -1520,11 +1427,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         yield* fs.makeDirectory(dmgDir, { recursive: true });
         const sourcePath = path.join(dmgDir, "dmg-background-nightly.svg");
         yield* fs.writeFileString(sourcePath, '<svg xmlns="http://www.w3.org/2000/svg"/>');
-        const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> =
-          [];
+        const commands: Array<ChildProcess.StandardCommand> = [];
 
         yield* stageDesktopDmgBackground(stageResourcesDir, "nightly", false).pipe(
-          Effect.provide(iconResizeSpawnerLayer(commands, [0, 0])),
+          Effect.provide(mockSpawnerLayer(commands, [0, 0])),
         );
 
         assert.deepStrictEqual(
@@ -1696,9 +1602,15 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it.effect("adds passkey entitlements and both renderer protocols to signed macOS builds", () =>
     Effect.gen(function* () {
-      const config = yield* createBuildConfig("mac", "dmg", "1.2.3", true, false, undefined, {
-        entitlementsPath: "/tmp/entitlements.mac.plist",
-        provisioningProfilePath: "/tmp/t3code.provisionprofile",
+      const config = yield* createBuildConfig({
+        platform: "mac",
+        target: "dmg",
+        version: "1.2.3",
+        signed: true,
+        macPasskeySigning: {
+          entitlementsPath: "/tmp/entitlements.mac.plist",
+          provisioningProfilePath: "/tmp/t3code.provisionprofile",
+        },
       });
 
       const mac = config.mac as Record<string, unknown>;
@@ -1714,15 +1626,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it.effect("uses the nightly DMG background for nightly macOS builds", () =>
     Effect.gen(function* () {
-      const config = yield* createBuildConfig(
-        "mac",
-        "dmg",
-        "1.2.3-nightly.20260815.1",
-        false,
-        false,
-        undefined,
-        undefined,
-      );
+      const config = yield* createBuildConfig({
+        platform: "mac",
+        target: "dmg",
+        version: "1.2.3-nightly.20260815.1",
+      });
 
       assert.equal(
         (config.dmg as Record<string, unknown>).background,
@@ -1733,15 +1641,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it.effect("keeps executable resource editing enabled for unsigned Windows builds", () =>
     Effect.gen(function* () {
-      const config = yield* createBuildConfig(
-        "win",
-        "nsis",
-        "1.2.3",
-        false,
-        false,
-        undefined,
-        undefined,
-      );
+      const config = yield* createBuildConfig({
+        platform: "win",
+        target: "nsis",
+        version: "1.2.3",
+      });
 
       const win = config.win as Record<string, unknown>;
       assert.equal(win.icon, "icon.ico");
@@ -1834,11 +1738,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   // C:\... path, and handing that to tar is what made Git's GNU tar try to
   // reach a host named "C".
   it.effect("spawns tar with an archive target relative to the staged source tree", () => {
-    const commands: Array<{
-      readonly command: string;
-      readonly args: ReadonlyArray<string>;
-      readonly options: { readonly cwd?: string };
-    }> = [];
+    const commands: Array<ChildProcess.StandardCommand> = [];
 
     return Effect.scoped(
       Effect.gen(function* () {

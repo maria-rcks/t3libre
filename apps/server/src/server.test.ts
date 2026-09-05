@@ -1523,6 +1523,31 @@ const getAuthenticatedSessionCookieHeader = (credential = defaultDesktopBootstra
     return cookie.split(";")[0] ?? cookie;
   });
 
+const configureCloudRelay = Effect.fn("configureCloudRelay")(function* () {
+  const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
+    privateKeyEncoding: { format: "pem", type: "pkcs8" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
+  const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+  const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
+  const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
+    method: "POST",
+    headers: {
+      cookie: ownerCookie,
+      "content-type": "application/json",
+    },
+    body: jsonRequestBody({
+      relayUrl: "https://relay.example.test",
+      cloudUserId: "user_123",
+      environmentCredential: "t3env_test_credential",
+      cloudMintPublicKey: cloudKeyPair.publicKey,
+      endpointRuntime: null,
+    }),
+  });
+  assert.equal(relayConfigResponse.status, 200);
+  return cloudKeyPair;
+});
+
 const getAuthenticatedBearerSessionToken = (credential = defaultDesktopBootstrapToken) =>
   Effect.gen(function* () {
     const { response, body } = yield* exchangeAccessToken(credential);
@@ -3311,27 +3336,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
+      const cloudKeyPair = yield* configureCloudRelay();
 
       const now = yield* DateTime.now;
       const request = makeCloudMintCredentialRequest({
@@ -3370,27 +3375,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
+      const cloudKeyPair = yield* configureCloudRelay();
 
       const now = yield* DateTime.now;
       const request = makeCloudMintCredentialRequest({
@@ -3429,27 +3414,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
+      const cloudKeyPair = yield* configureCloudRelay();
 
       const now = yield* DateTime.now;
       const request = makeCloudEnvironmentHealthRequest({
@@ -3489,27 +3454,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
+      const cloudKeyPair = yield* configureCloudRelay();
 
       const now = yield* DateTime.now;
       const request = makeCloudEnvironmentHealthRequest({

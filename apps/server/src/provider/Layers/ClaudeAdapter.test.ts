@@ -197,23 +197,26 @@ function makeHarness(config?: {
       : {}),
   };
 
-  return {
-    layer: Layer.effect(
-      ClaudeAdapter,
-      Effect.gen(function* () {
-        const claudeConfig = decodeClaudeSettings(config?.claudeConfig ?? {});
-        return yield* makeClaudeAdapter(claudeConfig, adapterOptions);
-      }),
-    ).pipe(
-      Layer.provideMerge(
-        ServerConfig.layerTest(
-          config?.cwd ?? "/tmp/claude-adapter-test",
-          config?.baseDir ?? "/tmp",
-        ),
-      ),
-      Layer.provideMerge(ServerSettingsService.layerTest()),
-      Layer.provideMerge(NodeServices.layer),
+  const layer = Layer.effect(
+    ClaudeAdapter,
+    Effect.gen(function* () {
+      const claudeConfig = decodeClaudeSettings(config?.claudeConfig ?? {});
+      return yield* makeClaudeAdapter(claudeConfig, adapterOptions);
+    }),
+  ).pipe(
+    Layer.provideMerge(
+      ServerConfig.layerTest(config?.cwd ?? "/tmp/claude-adapter-test", config?.baseDir ?? "/tmp"),
     ),
+    Layer.provideMerge(ServerSettingsService.layerTest()),
+    Layer.provideMerge(NodeServices.layer),
+  );
+  return {
+    layer,
+    provide: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(layer),
+      ),
     query,
     getLastCreateQueryInput: () => createInput,
   };
@@ -331,10 +334,7 @@ describe("ClaudeAdapterLive", () => {
           issue: "Expected provider 'claudeAgent' but received 'codex'.",
         }),
       );
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("retains Claude session startup causes without exposing their messages", () => {
@@ -395,10 +395,7 @@ describe("ClaudeAdapterLive", () => {
       });
       assert.equal(createInput?.options.permissionMode, "bypassPermissions");
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, true);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("derives auto permission mode from auto runtime policy without skip flag", () => {
@@ -414,10 +411,7 @@ describe("ClaudeAdapterLive", () => {
       const createInput = harness.getLastCreateQueryInput();
       assert.equal(createInput?.options.permissionMode, "auto");
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, undefined);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("loads Claude filesystem settings sources for SDK sessions", () => {
@@ -434,10 +428,7 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.settingSources, ["user", "project", "local"]);
       assert.equal(createInput?.options.permissionMode, undefined);
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, undefined);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("uses bypass permissions for full-access claude sessions", () => {
@@ -453,10 +444,7 @@ describe("ClaudeAdapterLive", () => {
       const createInput = harness.getLastCreateQueryInput();
       assert.equal(createInput?.options.permissionMode, "bypassPermissions");
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, true);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("passes the configured auto-compaction window to Claude", () => {
@@ -472,10 +460,7 @@ describe("ClaudeAdapterLive", () => {
       const options = harness.getLastCreateQueryInput()?.options;
       assert.deepEqual(options?.settings, { autoCompactWindow: 300000 });
       assert.deepEqual(options?.supportedDialogKinds, ["resume_return"]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("forwards claude effort levels into query options", () => {
@@ -495,10 +480,7 @@ describe("ClaudeAdapterLive", () => {
 
       const createInput = harness.getLastCreateQueryInput();
       assert.equal(createInput?.options.effort, "max");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("runs Claude SDK sessions with the configured CLAUDE_CONFIG_DIR", () => {
@@ -520,10 +502,7 @@ describe("ClaudeAdapterLive", () => {
         createInput?.options.env?.CLAUDE_CONFIG_DIR,
         NodePath.join(NodeOS.homedir(), ".claude-work"),
       );
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("forwards Claude thinking toggle for models that support it", () => {
@@ -545,10 +524,7 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.settings, {
         alwaysThinkingEnabled: false,
       });
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("ignores Claude thinking toggle for models without it", () => {
@@ -568,10 +544,7 @@ describe("ClaudeAdapterLive", () => {
 
       const createInput = harness.getLastCreateQueryInput();
       assert.equal(createInput?.options.settings, undefined);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("forwards claude fast mode into SDK settings", () => {
@@ -593,10 +566,7 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.settings, {
         fastMode: true,
       });
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("ignores claude fast mode for models without it", () => {
@@ -616,10 +586,7 @@ describe("ClaudeAdapterLive", () => {
 
       const createInput = harness.getLastCreateQueryInput();
       assert.equal(createInput?.options.settings, undefined);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect(
@@ -642,10 +609,7 @@ describe("ClaudeAdapterLive", () => {
             runtimeMode: "full-access",
           });
           return harness.getLastCreateQueryInput()!.options;
-        }).pipe(
-          Effect.provideService(Random.Random, makeDeterministicRandomService()),
-          Effect.provide(harness.layer),
-        );
+        }).pipe(harness.provide);
       const runCustomFlow = Effect.gen(function* () {
         const adapter = yield* ClaudeAdapter;
         yield* adapter.startSession({
@@ -743,10 +707,7 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(createInput?.options.effort, "high");
       const promptText = yield* Effect.promise(() => readFirstPromptText(createInput));
       assert.equal(promptText, "Ultrathink:\nInvestigate the edge cases");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("keeps compact commands intact when ultrathink is selected", () => {
@@ -776,10 +737,7 @@ describe("ClaudeAdapterLive", () => {
         readFirstPromptText(harness.getLastCreateQueryInput()),
       );
       assert.equal(promptText, "/compact");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("embeds image attachments in Claude user messages", () => {
@@ -841,10 +799,7 @@ describe("ClaudeAdapterLive", () => {
           text: "What's in this image?",
         },
       ]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   // The Claude CLI reads a streamed user message as a slash-command invocation
@@ -936,10 +891,7 @@ describe("ClaudeAdapterLive", () => {
       // through the path line ProviderService writes into the prompt, so the
       // text block stays last on its own.
       assert.deepEqual(prompts[2]?.message.content, [commandBlock]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("dispatches a $skill mention as a trailing slash command block", () => {
@@ -976,10 +928,7 @@ describe("ClaudeAdapterLive", () => {
         { type: "text", text: "ok, now" },
         { type: "text", text: "/implement all the tickets\nstart with auth" },
       ]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("keeps the skill command block after image attachments", () => {
@@ -1030,10 +979,7 @@ describe("ClaudeAdapterLive", () => {
         blocks.map((block) => (block.type === "text" ? block.text : block.type)),
         ["image", "/review this screenshot"],
       );
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("leaves a $ mention of an unknown or disabled skill as prose", () => {
@@ -1068,10 +1014,7 @@ describe("ClaudeAdapterLive", () => {
         readFirstPromptText(harness.getLastCreateQueryInput()),
       );
       assert.equal(promptText, "run $deploy and echo $HOME");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("maps Claude stream/runtime messages to canonical provider runtime events", () => {
@@ -1245,10 +1188,7 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(String(turnCompleted.turnId), String(turn.turnId));
         assert.equal(turnCompleted.payload.state, "completed");
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("places overage-included rate-limit events on the bucket the probe named", () => {
@@ -1323,10 +1263,7 @@ describe("ClaudeAdapterLive", () => {
           ],
         },
       ]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("does not emit turn.completed for a result with no active turn", () => {
@@ -1392,10 +1329,7 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(String(completed.turnId), String(turn.turnId));
         assert.equal(completed.payload.state, "completed");
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("steers a running turn instead of opening a new one on mid-turn sendTurn", () => {
@@ -1459,10 +1393,7 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(String(turnStartedEvents[0]?.turnId), String(turn.turnId));
       assert.equal(turnCompletedEvents.length, 1);
       assert.equal(String(turnCompletedEvents[0]?.turnId), String(turn.turnId));
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("maps Claude reasoning deltas, streamed tool inputs, and tool results", () => {
@@ -1638,10 +1569,7 @@ describe("ClaudeAdapterLive", () => {
           "src/example.ts:1:foo",
         );
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("classifies only streamed Read image inputs as image views", () => {
@@ -1799,10 +1727,7 @@ describe("ClaudeAdapterLive", () => {
         textEvents.map((event) => event.payload.itemType),
         ["dynamic_tool_call", "dynamic_tool_call", "dynamic_tool_call"],
       );
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("falls back to a default plan step label for blank TodoWrite content", () => {
@@ -1890,10 +1815,7 @@ describe("ClaudeAdapterLive", () => {
           { step: "Ship it", status: "completed" },
         ]);
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("classifies Claude Task tool invocations as collaboration agent work", () => {
@@ -1989,10 +1911,7 @@ describe("ClaudeAdapterLive", () => {
       if (completed?.type === "turn.completed") {
         assert.equal(completed.payload.tokenUsage?.hasSubagents, true);
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("treats user-aborted Claude results as interrupted without a runtime error", () => {
@@ -2065,10 +1984,7 @@ describe("ClaudeAdapterLive", () => {
           hasSubagents: false,
         });
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("treats aborted_tools results as interrupted and hides ede_diagnostic errors", () => {
@@ -2126,10 +2042,7 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(turnCompleted.payload.state, "interrupted");
         assert.equal(turnCompleted.payload.errorMessage, undefined);
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("fails a turn when the result carries a give-up terminal_reason", () => {
@@ -2193,10 +2106,7 @@ describe("ClaudeAdapterLive", () => {
           "Claude gave up after repeated API errors.",
         );
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("fails a turn for every dead-turn terminal_reason", () => {
@@ -2245,10 +2155,7 @@ describe("ClaudeAdapterLive", () => {
           assert.equal(completed.value.payload.state, "failed", reason);
           assert.ok(completed.value.payload.errorMessage, `${reason} carries an error message`);
         }
-      }).pipe(
-        Effect.provideService(Random.Random, makeDeterministicRandomService()),
-        Effect.provide(harness.layer),
-      );
+      }).pipe(harness.provide);
     };
     return Effect.forEach(reasons, runDeadTurn, { discard: true });
   });
@@ -2297,10 +2204,7 @@ describe("ClaudeAdapterLive", () => {
           "Claude API is overloaded (529). Try again shortly.",
         );
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("interruptTurn settles live tasks and closes the provider session", () => {
@@ -2385,10 +2289,7 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(stoppedTaskEvent.payload.taskType, "local_agent");
         assert.equal(stoppedTaskEvent.payload.title, "Agent A");
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("keeps the session available when process close fails", () => {
@@ -2411,10 +2312,7 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(harness.query.closeCalls, 1);
       assert.equal(yield* adapter.hasSession(session.threadId), true);
       assert.equal((yield* adapter.listSessions())[0]?.status, "ready");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("stopAll attempts every session when one process close fails", () => {
@@ -2592,10 +2490,7 @@ describe("ClaudeAdapterLive", () => {
           hasSubagents: false,
         });
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("treats omitted Claude cache counters as zero contributions", () => {
@@ -2644,10 +2539,7 @@ describe("ClaudeAdapterLive", () => {
           hasSubagents: false,
         });
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("uses per-turn result usage across consecutive Claude turns", () => {
@@ -2777,10 +2669,7 @@ describe("ClaudeAdapterLive", () => {
           hasSubagents: false,
         });
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("preserves compacted usage when completion follows an older assistant frame", () => {
@@ -2880,10 +2769,7 @@ describe("ClaudeAdapterLive", () => {
         runtimeEvents.find((event) => event.type === "turn.completed")?.type,
         "turn.completed",
       );
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("workflow member coalescing: identical snapshots suppress, changes emit", () => {
@@ -2968,10 +2854,7 @@ describe("ClaudeAdapterLive", () => {
       // tick 3 unchanged).
       assert.equal(byMember.get("wf-coalesce:wf:0"), 2);
       assert.equal(byMember.get("wf-coalesce:wf:1"), 1);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("task.started carries model/effort; subagent snapshots refine the model", () => {
@@ -3049,10 +2932,7 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(progress.payload.model, SYNTHETIC_SUBAGENT_MODEL);
         assert.equal(progress.payload.effort, "max");
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("a subagent snapshot that beats task_started still wins over the seed", () => {
@@ -3127,10 +3007,7 @@ describe("ClaudeAdapterLive", () => {
       if (progress?.type === "task.progress") {
         assert.equal(progress.payload.model, SYNTHETIC_SUBAGENT_MODEL);
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("closes the session when the Claude stream aborts after a turn starts", () => {
@@ -3195,10 +3072,7 @@ describe("ClaudeAdapterLive", () => {
       const sessions = yield* adapter.listSessions();
       assert.equal(sessions.length, 0);
       assert.equal(harness.query.closeCalls, 1);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("keeps Claude stream failure events structural", () => {
@@ -3246,10 +3120,7 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(completed.payload.state, "failed");
         assert.equal(completed.payload.errorMessage, "Claude runtime stream failed.");
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("closes the previous session before replacing an existing thread session", () => {
@@ -3440,10 +3311,7 @@ describe("ClaudeAdapterLive", () => {
         );
         assert.equal(progressEvent.payload.description, "Running background teammate");
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("consumes undeclared and UX-internal system subtypes without warning rows", () => {
@@ -3657,10 +3525,7 @@ describe("ClaudeAdapterLive", () => {
           event.payload.reason.startsWith("api_retry:"),
       );
       assert.equal(heartbeat?.type, "session.state.changed");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   const observeUsageLimitEvents = (adapter: ClaudeAdapterShape, query: FakeClaudeQuery) =>
@@ -3787,10 +3652,7 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(usageLimitRows().length, 2);
 
       runtimeEventsFiber.interruptUnsafe();
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("keeps allowed and malformed Claude rate-limit events out of the work log", () => {
@@ -3834,10 +3696,7 @@ describe("ClaudeAdapterLive", () => {
       );
 
       runtimeEventsFiber.interruptUnsafe();
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("stays quiet when no turn is parked by the Claude limit", () => {
@@ -3905,10 +3764,7 @@ describe("ClaudeAdapterLive", () => {
       );
 
       runtimeEventsFiber.interruptUnsafe();
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("still surfaces the pause when overage is exhausted too", () => {
@@ -3948,10 +3804,7 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(runtimeEvents.filter((event) => event.type === "runtime.warning").length, 1);
 
       runtimeEventsFiber.interruptUnsafe();
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("keeps one row per window when two Claude limits interleave", () => {
@@ -4000,10 +3853,7 @@ describe("ClaudeAdapterLive", () => {
       );
 
       runtimeEventsFiber.interruptUnsafe();
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("re-announces a Claude limit for a synthetic turn", () => {
@@ -4063,10 +3913,7 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(runtimeEvents.filter((event) => event.type === "runtime.warning").length, 2);
 
       runtimeEventsFiber.interruptUnsafe();
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("drops an unusable Claude reset time, not the row or the session", () => {
@@ -4117,10 +3964,7 @@ describe("ClaudeAdapterLive", () => {
       yield* adapter.sendTurn({ threadId: THREAD_ID, input: "still here", attachments: [] });
 
       runtimeEventsFiber.interruptUnsafe();
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("warns for unmapped Claude limits and names the probed model bucket", () => {
@@ -4180,10 +4024,7 @@ describe("ClaudeAdapterLive", () => {
         1,
       );
       runtimeEventsFiber.interruptUnsafe();
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("consumes Claude command lifecycle notifications silently", () => {
@@ -4251,10 +4092,7 @@ describe("ClaudeAdapterLive", () => {
       if (warning?.type === "runtime.warning") {
         assert.equal(warning.payload.message, processedMessage);
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("emits thread token usage updates from Claude task progress", () => {
@@ -4305,10 +4143,7 @@ describe("ClaudeAdapterLive", () => {
       if (usageEvent && progressEvent) {
         assert.notStrictEqual(usageEvent.eventId, progressEvent.eventId);
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("emits Claude context window on result completion usage snapshots", () => {
@@ -4372,10 +4207,7 @@ describe("ClaudeAdapterLive", () => {
           },
         });
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("clamps oversized Claude usage to the reported context window", () => {
@@ -4435,10 +4267,7 @@ describe("ClaudeAdapterLive", () => {
           },
         });
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect(
@@ -4515,10 +4344,7 @@ describe("ClaudeAdapterLive", () => {
             },
           });
         }
-      }).pipe(
-        Effect.provideService(Random.Random, makeDeterministicRandomService()),
-        Effect.provide(harness.layer),
-      );
+      }).pipe(harness.provide);
     },
   );
 
@@ -4608,10 +4434,7 @@ describe("ClaudeAdapterLive", () => {
           assert.equal(deltaEvent.payload.delta, "Late text");
           assert.equal(String(deltaEvent.turnId), String(turn.turnId));
         }
-      }).pipe(
-        Effect.provideService(Random.Random, makeDeterministicRandomService()),
-        Effect.provide(harness.layer),
-      );
+      }).pipe(harness.provide);
     },
   );
 
@@ -4775,10 +4598,7 @@ describe("ClaudeAdapterLive", () => {
         String(assistantCompletions[0]?.itemId),
         String(assistantCompletions[1]?.itemId),
       );
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("falls back to assistant payload text when stream deltas are absent", () => {
@@ -4844,10 +4664,7 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(deltaEvent.payload.delta, "Fallback hello");
         assert.equal(String(deltaEvent.turnId), String(turn.turnId));
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("segments Claude assistant text blocks around tool calls", () => {
@@ -5066,10 +4883,7 @@ describe("ClaudeAdapterLive", () => {
           toolStartedIndex < secondAssistantDeltaIndex,
         true,
       );
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("does not fabricate provider thread ids before first SDK session_id", () => {
@@ -5144,10 +4958,7 @@ describe("ClaudeAdapterLive", () => {
           providerThreadId: "sdk-thread-real",
         });
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("bridges approval request/response lifecycle through canUseTool", () => {
@@ -5254,10 +5065,7 @@ describe("ClaudeAdapterLive", () => {
 
       const permissionResult = yield* Effect.promise(() => permissionPromise);
       assert.equal((permissionResult as PermissionResult).behavior, "allow");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("acceptForSession returns session-scoped permission updates", () => {
@@ -5368,10 +5176,7 @@ describe("ClaudeAdapterLive", () => {
           destination: "session",
         },
       ]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("classifies Agent tools and read-only Claude tools correctly for approvals", () => {
@@ -5443,10 +5248,7 @@ describe("ClaudeAdapterLive", () => {
       );
       yield* Stream.runHead(adapter.streamEvents);
       yield* Effect.promise(() => grepPermissionPromise);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("passes Claude resume ids without pinning a stale assistant checkpoint", () => {
@@ -5478,10 +5280,7 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(createInput?.options.resume, "550e8400-e29b-41d4-a716-446655440000");
       assert.equal(createInput?.options.sessionId, undefined);
       assert.equal(createInput?.options.resumeSessionAt, undefined);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("preserves durable resume ids across Claude resume hooks", () => {
@@ -5568,10 +5367,7 @@ describe("ClaudeAdapterLive", () => {
           }
         | undefined;
       assert.equal(resumeCursor?.resume, durableSessionId);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("uses an app-generated Claude session id for fresh sessions", () => {
@@ -5600,10 +5396,7 @@ describe("ClaudeAdapterLive", () => {
       );
       assert.equal(createInput?.options.resume, undefined);
       assert.equal(createInput?.options.sessionId, sessionResumeCursor.resume);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect(
@@ -5681,10 +5474,7 @@ describe("ClaudeAdapterLive", () => {
         const threadAfterRollback = yield* adapter.readThread(session.threadId);
         assert.equal(threadAfterRollback.turns.length, 1);
         assert.equal(threadAfterRollback.turns[0]?.id, firstTurn.turnId);
-      }).pipe(
-        Effect.provideService(Random.Random, makeDeterministicRandomService()),
-        Effect.provide(harness.layer),
-      );
+      }).pipe(harness.provide);
     },
   );
 
@@ -5711,10 +5501,7 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(harness.query.setModelCalls, [
         `${SYNTHETIC_CLAUDE_CAPABLE_MODEL}[expanded]`,
       ]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("updates model on sendTurn for the adapter's bound custom instance id", () => {
@@ -5739,10 +5526,7 @@ describe("ClaudeAdapterLive", () => {
       });
 
       assert.deepEqual(harness.query.setModelCalls, ["openai/gpt-5.5"]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect(
@@ -5777,10 +5561,7 @@ describe("ClaudeAdapterLive", () => {
         });
 
         assert.deepEqual(harness.query.setModelCalls, []);
-      }).pipe(
-        Effect.provideService(Random.Random, makeDeterministicRandomService()),
-        Effect.provide(harness.layer),
-      );
+      }).pipe(harness.provide);
     },
   );
 
@@ -5820,10 +5601,7 @@ describe("ClaudeAdapterLive", () => {
         `${SYNTHETIC_CLAUDE_CAPABLE_MODEL}[expanded]`,
         SYNTHETIC_CLAUDE_CAPABLE_MODEL,
       ]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("sets plan permission mode on sendTurn when interactionMode is plan", () => {
@@ -5844,10 +5622,7 @@ describe("ClaudeAdapterLive", () => {
       });
 
       assert.deepEqual(harness.query.setPermissionModeCalls, ["plan"]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect.each<{ runtimeMode: RuntimeMode; expectedBase: PermissionMode }>([
@@ -5901,10 +5676,7 @@ describe("ClaudeAdapterLive", () => {
         });
 
         assert.deepEqual(harness.query.setPermissionModeCalls, ["plan", expectedBase]);
-      }).pipe(
-        Effect.provideService(Random.Random, makeDeterministicRandomService()),
-        Effect.provide(harness.layer),
-      );
+      }).pipe(harness.provide);
     },
   );
 
@@ -5925,10 +5697,7 @@ describe("ClaudeAdapterLive", () => {
       });
 
       assert.deepEqual(harness.query.setPermissionModeCalls, []);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("captures ExitPlanMode as a proposed plan and denies auto-exit", () => {
@@ -5992,10 +5761,7 @@ describe("ClaudeAdapterLive", () => {
         message?: string;
       };
       assert.equal(deniedResult.message?.includes("captured your proposed plan"), true);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("extracts proposed plans from assistant ExitPlanMode snapshots", () => {
@@ -6063,10 +5829,7 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(proposedEvent.value.providerRefs, {
         providerItemId: ProviderItemId.make("tool-exit-2"),
       });
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("routes Claude resume compaction through the shared user-input UI", () => {
@@ -6119,10 +5882,7 @@ describe("ClaudeAdapterLive", () => {
         behavior: "completed",
         result: "compact",
       });
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("handles AskUserQuestion via user-input.requested/resolved lifecycle", () => {
@@ -6273,10 +6033,7 @@ describe("ClaudeAdapterLive", () => {
         .join(", ");
       assert.notEqual(v121Rendered, "", "Expected non-empty SDK 2.1.121 tool_result (#2388)");
       assert.equal(v121Rendered, '"Which framework?"="React"');
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("routes AskUserQuestion through user-input flow even in full-access mode", () => {
@@ -6342,10 +6099,7 @@ describe("ClaudeAdapterLive", () => {
       const updatedInput = (permissionResult as { updatedInput: Record<string, unknown> })
         .updatedInput;
       assert.deepEqual(updatedInput.answers, { "Deploy to which env?": "Staging" });
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("denies AskUserQuestion when the waiting turn is aborted", () => {
@@ -6411,10 +6165,7 @@ describe("ClaudeAdapterLive", () => {
         behavior: "deny",
         message: "User cancelled tool execution.",
       } satisfies PermissionResult);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("denies AskUserQuestion when the signal aborted before the listener registered", () => {
@@ -6479,10 +6230,7 @@ describe("ClaudeAdapterLive", () => {
       if (resolvedEvent?.type === "user-input.resolved") {
         assert.deepEqual(resolvedEvent.payload.answers, {});
       }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("stopping a session settles pending user-input waits", () => {
@@ -6544,10 +6292,7 @@ describe("ClaudeAdapterLive", () => {
         behavior: "deny",
         message: "User cancelled tool execution.",
       } satisfies PermissionResult);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 
   it.effect("writes provider-native observability records when enabled", () => {
@@ -6646,9 +6391,6 @@ describe("ClaudeAdapterLive", () => {
         nativeThreadIds.every((threadId) => threadId === String(THREAD_ID)),
         true,
       );
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+    }).pipe(harness.provide);
   });
 });

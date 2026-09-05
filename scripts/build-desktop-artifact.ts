@@ -2562,25 +2562,33 @@ export function resolveDesktopProductName(version: string): string {
     : (desktopPackageJson.productName ?? "T3 Code");
 }
 
-export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
-  platform: typeof BuildPlatform.Type,
-  target: string,
-  version: string,
-  signed: boolean,
-  mockUpdates: boolean,
-  mockUpdateServerPort: number | undefined,
-  macPasskeySigning:
+export const createBuildConfig = Effect.fn("createBuildConfig")(function* ({
+  platform,
+  target,
+  version,
+  signed = false,
+  mockUpdates = false,
+  mockUpdateServerPort,
+  macPasskeySigning,
+  wslRuntimeBundled = false,
+  arch,
+}: {
+  readonly platform: typeof BuildPlatform.Type;
+  readonly target: string;
+  readonly version: string;
+  readonly signed?: boolean;
+  readonly mockUpdates?: boolean;
+  readonly mockUpdateServerPort?: number | undefined;
+  readonly macPasskeySigning?:
     | {
         readonly entitlementsPath: string;
         readonly provisioningProfilePath: string;
       }
-    | undefined,
-  // Windows only, and false when no Linux node-pty prebuild was bundled: the
-  // sidecar staging skips the archive in that case, and listing a resource
-  // whose source file was never written fails the electron-builder step.
-  wslRuntimeBundled = false,
-  arch?: typeof BuildArch.Type,
-) {
+    | undefined;
+  // Only include WSL resources when sidecar staging actually wrote the archive.
+  readonly wslRuntimeBundled?: boolean;
+  readonly arch?: typeof BuildArch.Type;
+}) {
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
@@ -3666,22 +3674,26 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     description: "T3 Code desktop build",
     author: "T3 Tools",
     main: "apps/desktop/dist-electron/main.cjs",
-    build: yield* createBuildConfig(
-      options.platform,
-      options.target,
-      appVersion,
-      options.signed,
-      options.mockUpdates,
-      options.mockUpdateServerPort,
-      macPasskeySigning && macEntitlementsPath
-        ? {
-            entitlementsPath: macEntitlementsPath,
-            provisioningProfilePath: macPasskeySigning.provisioningProfilePath,
-          }
-        : undefined,
-      bundlesWslRuntime({ arch: options.arch, prebuildPath: options.wslPrebuild }),
-      options.arch,
-    ),
+    build: yield* createBuildConfig({
+      platform: options.platform,
+      target: options.target,
+      version: appVersion,
+      signed: options.signed,
+      mockUpdates: options.mockUpdates,
+      mockUpdateServerPort: options.mockUpdateServerPort,
+      macPasskeySigning:
+        macPasskeySigning && macEntitlementsPath
+          ? {
+              entitlementsPath: macEntitlementsPath,
+              provisioningProfilePath: macPasskeySigning.provisioningProfilePath,
+            }
+          : undefined,
+      wslRuntimeBundled: bundlesWslRuntime({
+        arch: options.arch,
+        prebuildPath: options.wslPrebuild,
+      }),
+      arch: options.arch,
+    }),
     dependencies: stageDependencies,
     devDependencies: {
       electron: electronVersion,

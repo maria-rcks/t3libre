@@ -1,9 +1,8 @@
-import type {
-  GitRunStackedActionResult,
-  GitStackedAction,
-  VcsStatusResult,
-} from "@t3tools/contracts";
-import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import type { GitStackedAction, VcsStatusResult } from "@t3tools/contracts";
+export {
+  resolveThreadBranchUpdate,
+  resolveLiveThreadBranchUpdate,
+} from "@t3tools/client-runtime/state/vcs";
 import {
   DEFAULT_CHANGE_REQUEST_TERMINOLOGY,
   getChangeRequestTerminology,
@@ -361,18 +360,6 @@ export function resolveDefaultBranchActionDialogCopy(input: {
   };
 }
 
-export function resolveThreadBranchUpdate(
-  result: GitRunStackedActionResult,
-): { branch: string } | null {
-  if (result.branch.status !== "created" || !result.branch.name) {
-    return null;
-  }
-
-  return {
-    branch: result.branch.name,
-  };
-}
-
 export function resolveThreadBranchMetadataPatch(
   branch: string | null,
   expectedBranch: string | null,
@@ -381,36 +368,6 @@ export function resolveThreadBranchMetadataPatch(
   expectedBranch: string | null;
 } {
   return { branch, expectedBranch };
-}
-
-export function resolveLiveThreadBranchUpdate(input: {
-  threadBranch: string | null;
-  gitStatus: VcsStatusResult | null;
-}): { branch: string | null } | null {
-  if (!input.gitStatus) {
-    return null;
-  }
-
-  if (input.gitStatus.refName === null && input.threadBranch !== null) {
-    return null;
-  }
-
-  if (input.threadBranch === input.gitStatus.refName) {
-    return null;
-  }
-
-  if (
-    input.threadBranch !== null &&
-    input.gitStatus.refName !== null &&
-    !isTemporaryWorktreeBranch(input.threadBranch) &&
-    isTemporaryWorktreeBranch(input.gitStatus.refName)
-  ) {
-    return null;
-  }
-
-  return {
-    branch: input.gitStatus.refName,
-  };
 }
 
 // Re-export from shared for backwards compatibility in this module's exports

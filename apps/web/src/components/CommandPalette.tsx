@@ -6,6 +6,13 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import {
+  addProjectRemoteSourceLabel as remoteProjectSourceLabel,
+  addProjectRemoteSourcePathHint as remoteProjectSourcePathHint,
+  addProjectRemoteSourceProvider as remoteProjectSourceProvider,
+  type AddProjectRemoteProviderKind,
+  type AddProjectRemoteSource,
+  type AddProjectCloneFlow,
+  type AddProjectRemoteSourceReadiness,
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
   getCloneDestinationPath,
@@ -34,8 +41,6 @@ import {
   type FilesystemBrowseResult,
   type ProjectId,
   type SourceControlDiscoveryResult,
-  type SourceControlProviderKind,
-  type SourceControlRepositoryInfo,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
@@ -214,27 +219,6 @@ interface AddProjectEnvironmentOption {
   readonly status: string;
 }
 
-type AddProjectRemoteProviderKind = Extract<
-  SourceControlProviderKind,
-  "github" | "gitlab" | "bitbucket" | "azure-devops"
->;
-type AddProjectRemoteSource = AddProjectRemoteProviderKind | "url";
-
-type AddProjectCloneFlow =
-  | {
-      readonly step: "repository";
-      readonly environmentId: EnvironmentId;
-      readonly source: AddProjectRemoteSource;
-    }
-  | {
-      readonly step: "confirm";
-      readonly environmentId: EnvironmentId;
-      readonly source: AddProjectRemoteSource;
-      readonly repositoryInput: string;
-      readonly repository: SourceControlRepositoryInfo | null;
-      readonly remoteUrl: string;
-    };
-
 const REMOTE_PROJECT_SOURCES: ReadonlyArray<AddProjectRemoteSource> = [
   "url",
   "github",
@@ -248,42 +232,6 @@ const REMOTE_PROJECT_PROVIDER_SOURCES: ReadonlyArray<AddProjectRemoteProviderKin
   "bitbucket",
   "azure-devops",
 ];
-
-function remoteProjectSourceLabel(source: AddProjectRemoteSource): string {
-  switch (source) {
-    case "github":
-      return "GitHub";
-    case "gitlab":
-      return "GitLab";
-    case "bitbucket":
-      return "Bitbucket";
-    case "azure-devops":
-      return "Azure DevOps";
-    case "url":
-      return "Git URL";
-  }
-}
-
-function remoteProjectSourcePathHint(source: AddProjectRemoteSource): string {
-  switch (source) {
-    case "github":
-      return "owner/repo";
-    case "gitlab":
-      return "group/project";
-    case "bitbucket":
-      return "workspace/repository";
-    case "azure-devops":
-      return "project/repository";
-    case "url":
-      return "URL";
-  }
-}
-
-function remoteProjectSourceProvider(
-  source: AddProjectRemoteSource,
-): AddProjectRemoteProviderKind | null {
-  return source === "url" ? null : source;
-}
 
 function remoteProjectSourceIcon(source: AddProjectRemoteSource, className: string): ReactNode {
   switch (source) {
@@ -309,10 +257,6 @@ function remoteProjectInputPlaceholder(flow: AddProjectCloneFlow | null): string
   return `Enter ${remoteProjectSourceLabel(flow.source)} repository (${remoteProjectSourcePathHint(flow.source)})`;
 }
 
-function sourceProviderKind(source: AddProjectRemoteSource): AddProjectRemoteProviderKind | null {
-  return source === "url" ? null : source;
-}
-
 function sortAddProjectProviderSources(
   readinessBySource: AddProjectRemoteSourceReadiness,
 ): ReadonlyArray<AddProjectRemoteProviderKind> {
@@ -325,11 +269,6 @@ function sortAddProjectProviderSources(
     return remoteProjectSourceLabel(left).localeCompare(remoteProjectSourceLabel(right));
   });
 }
-
-type AddProjectRemoteSourceReadiness = Record<
-  AddProjectRemoteSource,
-  { readonly ready: boolean; readonly hint: string | null }
->;
 
 function buildAddProjectRemoteSourceReadiness(
   discovery: SourceControlDiscoveryResult | null,
@@ -356,7 +295,7 @@ function buildAddProjectRemoteSourceReadiness(
   const readiness = { ...defaultReadiness };
 
   for (const source of REMOTE_PROJECT_SOURCES) {
-    const kind = sourceProviderKind(source);
+    const kind = remoteProjectSourceProvider(source);
     if (!kind) continue;
     const provider = providerByKind.get(kind);
     if (!provider) {

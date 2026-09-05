@@ -116,12 +116,9 @@ function hasQueuedTurnStartForThread(
 }
 
 function withEventBase(
-  input: Pick<OrchestrationCommand, "commandId"> & {
-    readonly aggregateKind: OrchestrationEvent["aggregateKind"];
-    readonly aggregateId: OrchestrationEvent["aggregateId"];
-    readonly occurredAt: string;
-    readonly metadata?: OrchestrationEvent["metadata"];
-  },
+  command: OrchestrationCommand,
+  occurredAt: string,
+  metadata: OrchestrationEvent["metadata"] = {},
 ): Effect.Effect<
   Omit<OrchestrationEvent, "sequence" | "type" | "payload">,
   PlatformError.PlatformError,
@@ -132,13 +129,13 @@ function withEventBase(
       crypto.randomUUIDv4.pipe(
         Effect.map((eventId) => ({
           eventId: EventId.make(eventId),
-          aggregateKind: input.aggregateKind,
-          aggregateId: input.aggregateId,
-          occurredAt: input.occurredAt,
-          commandId: input.commandId,
+          aggregateKind: "threadId" in command ? "thread" : "project",
+          aggregateId: "threadId" in command ? command.threadId : command.projectId,
+          occurredAt,
+          commandId: command.commandId,
           causationEventId: null,
-          correlationId: input.commandId,
-          metadata: input.metadata ?? {},
+          correlationId: command.commandId,
+          metadata,
         })),
       ),
     ),
@@ -213,12 +210,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
 
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "project",
-          aggregateId: command.projectId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "project.created",
         payload: {
           projectId: command.projectId,
@@ -253,12 +245,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "project",
-          aggregateId: command.projectId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "project.meta-updated",
         payload: {
           projectId: command.projectId,
@@ -316,12 +303,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "project",
-          aggregateId: command.projectId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "project.deleted" as const,
         payload: {
           projectId: command.projectId,
@@ -342,12 +324,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.created",
         payload: {
           threadId: command.threadId,
@@ -372,12 +349,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.deleted",
         payload: {
           threadId: command.threadId,
@@ -394,12 +366,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.archived",
         payload: {
           threadId: command.threadId,
@@ -417,12 +384,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.unarchived",
         payload: {
           threadId: command.threadId,
@@ -467,12 +429,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // double-click must stay silent no-ops rather than surface errors.
       const alreadySettled = thread.settledOverride === "settled" && thread.settledAt !== null;
       const settledEvent = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.settled" as const,
         payload: {
           threadId: command.threadId,
@@ -492,12 +449,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const companionEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
       if (thread.pinnedAt != null) {
         companionEvents.push({
-          ...(yield* withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt,
-            commandId: command.commandId,
-          })),
+          ...(yield* withEventBase(command, occurredAt)),
           type: "thread.unpinned" as const,
           payload: {
             threadId: command.threadId,
@@ -507,12 +459,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       if (thread.snoozedUntil != null) {
         companionEvents.push({
-          ...(yield* withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt,
-            commandId: command.commandId,
-          })),
+          ...(yield* withEventBase(command, occurredAt)),
           type: "thread.unsnoozed",
           payload: {
             threadId: command.threadId,
@@ -536,12 +483,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const alreadyPinnedActive = thread.settledOverride === "active";
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.unsettled",
         payload: {
           threadId: command.threadId,
@@ -605,12 +547,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ? thread.snoozedAt
           : null;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.snoozed",
         payload: {
           threadId: command.threadId,
@@ -633,12 +570,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const alreadyAwake = thread.snoozedUntil == null;
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.unsnoozed",
         payload: {
           threadId: command.threadId,
@@ -661,12 +593,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // only ever promotes visibility, so it can never hide pending work.
       const existingPinnedAt = thread.pinnedAt ?? null;
       const pinnedEvent = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.pinned" as const,
         payload: {
           threadId: command.threadId,
@@ -687,12 +614,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const promotionEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
       if (thread.settledOverride === "settled") {
         promotionEvents.push({
-          ...(yield* withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt,
-            commandId: command.commandId,
-          })),
+          ...(yield* withEventBase(command, occurredAt)),
           type: "thread.unsettled",
           payload: {
             threadId: command.threadId,
@@ -703,12 +625,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       if (thread.snoozedUntil != null) {
         promotionEvents.push({
-          ...(yield* withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt,
-            commandId: command.commandId,
-          })),
+          ...(yield* withEventBase(command, occurredAt)),
           type: "thread.unsnoozed",
           payload: {
             threadId: command.threadId,
@@ -732,12 +649,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const alreadyUnpinned = thread.pinnedAt == null;
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.unpinned",
         payload: {
           threadId: command.threadId,
@@ -768,12 +680,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const keyUnchanged = thread.pinOrderKey === command.orderKey;
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.pin-reordered",
         payload: {
           threadId: command.threadId,
@@ -797,12 +704,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           : command.branch;
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.meta-updated",
         payload: {
           threadId: command.threadId,
@@ -842,12 +744,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const requestIsCurrent = thread.titleRegeneration?.requestId === command.requestId;
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.meta-updated",
         payload: {
           threadId: command.threadId,
@@ -866,12 +763,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.runtime-mode-set",
         payload: {
           threadId: command.threadId,
@@ -889,12 +781,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, occurredAt)),
         type: "thread.interaction-mode-set",
         payload: {
           threadId: command.threadId,
@@ -935,12 +822,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.message-sent",
         payload: {
           threadId: command.threadId,
@@ -955,12 +837,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       const turnStartRequestedEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         causationEventId: userMessageEvent.eventId,
         type: "thread.turn-start-requested",
         payload: {
@@ -984,12 +861,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const lifecycleResetEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
       if (targetThread.settledOverride !== null) {
         lifecycleResetEvents.push({
-          ...(yield* withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          })),
+          ...(yield* withEventBase(command, command.createdAt)),
           type: "thread.unsettled",
           payload: {
             threadId: command.threadId,
@@ -1000,12 +872,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       if (targetThread.snoozedUntil != null) {
         lifecycleResetEvents.push({
-          ...(yield* withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          })),
+          ...(yield* withEventBase(command, command.createdAt)),
           type: "thread.unsnoozed",
           payload: {
             threadId: command.threadId,
@@ -1024,12 +891,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.turn-interrupt-requested",
         payload: {
           threadId: command.threadId,
@@ -1046,14 +908,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-          metadata: {
-            requestId: command.requestId,
-          },
+        ...(yield* withEventBase(command, command.createdAt, {
+          requestId: command.requestId,
         })),
         type: "thread.approval-response-requested",
         payload: {
@@ -1137,14 +993,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-          metadata: {
-            requestId: command.requestId,
-          },
+        ...(yield* withEventBase(command, command.createdAt, {
+          requestId: command.requestId,
         })),
         type: "thread.user-input-response-requested",
         payload: {
@@ -1163,12 +1013,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.checkpoint-revert-requested",
         payload: {
           threadId: command.threadId,
@@ -1206,12 +1051,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         }
       }
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.session-stop-requested",
         payload: {
           threadId: command.threadId,
@@ -1227,13 +1067,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const sessionSetEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-          metadata: {},
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.session-set",
         payload: {
           threadId: command.threadId,
@@ -1255,12 +1089,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return sessionSetEvent;
       }
       const unsettledEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.unsettled",
         payload: {
           threadId: command.threadId,
@@ -1278,12 +1107,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.message-sent",
         payload: {
           threadId: command.threadId,
@@ -1305,12 +1129,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.message-sent",
         payload: {
           threadId: command.threadId,
@@ -1332,12 +1151,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.proposed-plan-upserted",
         payload: {
           threadId: command.threadId,
@@ -1353,12 +1167,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.turn-diff-completed",
         payload: {
           threadId: command.threadId,
@@ -1380,12 +1189,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.reverted",
         payload: {
           threadId: command.threadId,
@@ -1409,13 +1213,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               .requestId as OrchestrationEvent["metadata"]["requestId"])
           : undefined;
       const activityAppendedEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-          ...(requestId !== undefined ? { metadata: { requestId } } : {}),
-        })),
+        ...(yield* withEventBase(
+          command,
+          command.createdAt,
+          requestId !== undefined ? { requestId } : {},
+        )),
         type: "thread.activity-appended",
         payload: {
           threadId: command.threadId,
@@ -1432,12 +1234,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return activityAppendedEvent;
       }
       const unsettledEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+        ...(yield* withEventBase(command, command.createdAt)),
         type: "thread.unsettled",
         payload: {
           threadId: command.threadId,

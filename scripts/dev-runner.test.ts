@@ -59,6 +59,20 @@ function mockProcess(exit: number | PlatformError.PlatformError) {
   });
 }
 
+const defaultDevEnvInput = {
+  mode: "dev",
+  baseEnv: {},
+  serverOffset: 0,
+  webOffset: 0,
+  t3Home: undefined,
+  browser: undefined,
+  autoBootstrapProjectFromCwd: undefined,
+  logWebSocketEvents: undefined,
+  host: undefined,
+  port: undefined,
+  devUrl: undefined,
+} satisfies Parameters<typeof createDevRunnerEnv>[0];
+
 const devServerInput = {
   mode: "dev:server",
   t3Home: "/tmp/t3code-dev-runner",
@@ -140,19 +154,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
   describe("createDevRunnerEnv", () => {
     it.effect("leaves the shared home implicit and disables browser auto-open", () =>
       Effect.gen(function* () {
-        const env = yield* createDevRunnerEnv({
-          mode: "dev",
-          baseEnv: {},
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
-        });
+        const env = yield* createDevRunnerEnv({ ...defaultDevEnvInput });
 
         assert.equal(env.T3CODE_HOME, undefined);
         assert.equal(env.T3CODE_NO_BROWSER, "1");
@@ -161,19 +163,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
     it.effect("allows browser auto-open to be explicitly enabled", () =>
       Effect.gen(function* () {
-        const env = yield* createDevRunnerEnv({
-          mode: "dev",
-          baseEnv: {},
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: true,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
-        });
+        const env = yield* createDevRunnerEnv({ ...defaultDevEnvInput, browser: true });
 
         assert.equal(env.T3CODE_NO_BROWSER, "0");
       }),
@@ -182,17 +172,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("requires the browser flag even when the environment enables auto-open", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
-          mode: "dev",
+          ...defaultDevEnvInput,
           baseEnv: { T3CODE_NO_BROWSER: "0" },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
           browser: false,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_NO_BROWSER, "1");
@@ -203,10 +185,8 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const env = yield* createDevRunnerEnv({
+          ...defaultDevEnvInput,
           mode: "dev:server",
-          baseEnv: {},
-          serverOffset: 0,
-          webOffset: 0,
           t3Home: "/tmp/custom-t3",
           browser: false,
           autoBootstrapProjectFromCwd: false,
@@ -231,20 +211,11 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("strips inherited service-launcher context", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
-          mode: "dev",
+          ...defaultDevEnvInput,
           baseEnv: {
             T3_SERVICE_LAUNCHER_CONTEXT: '{"childVersion":"9.9.9"}',
             T3_BOOT_SERVICE_UNIT: "t3code.service",
           },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
         });
 
         assert.equal(env.T3_SERVICE_LAUNCHER_CONTEXT, undefined);
@@ -255,19 +226,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("does not force websocket logging on in dev mode when unset", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
-          mode: "dev",
+          ...defaultDevEnvInput,
           baseEnv: {
             T3CODE_LOG_WS_EVENTS: "keep-me-out",
           },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_MODE, "web");
@@ -278,19 +240,11 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("forwards explicit websocket logging false without coercing it away", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
-          mode: "dev",
+          ...defaultDevEnvInput,
           baseEnv: {
             T3CODE_LOG_WS_EVENTS: "1",
           },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: false,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_LOG_WS_EVENTS, "0");
@@ -300,19 +254,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("uses custom t3Home when provided", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
-        const env = yield* createDevRunnerEnv({
-          mode: "dev",
-          baseEnv: {},
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: "/tmp/my-t3",
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
-        });
+        const env = yield* createDevRunnerEnv({ ...defaultDevEnvInput, t3Home: "/tmp/my-t3" });
 
         assert.equal(env.T3CODE_HOME, path.resolve("/tmp/my-t3"));
       }),
@@ -322,6 +264,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const env = yield* createDevRunnerEnv({
+          ...defaultDevEnvInput,
           mode: "dev:desktop",
           baseEnv: {
             T3CODE_PORT: "13773",
@@ -331,15 +274,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             VITE_DEV_SERVER_URL: "http://127.0.0.1:8526",
             VITE_WS_URL: "ws://localhost:13773",
           },
-          serverOffset: 0,
-          webOffset: 0,
           t3Home: "/tmp/my-t3",
           browser: true,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
           host: "127.0.0.1",
           port: 4222,
-          devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_HOME, path.resolve("/tmp/my-t3"));
@@ -357,19 +295,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
     it.effect("defaults dev server mode to the higher backend port range", () =>
       Effect.gen(function* () {
-        const env = yield* createDevRunnerEnv({
-          mode: "dev",
-          baseEnv: {},
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
-        });
+        const env = yield* createDevRunnerEnv({ ...defaultDevEnvInput });
 
         assert.equal(env.T3CODE_PORT, "13773");
         assert.equal(env.PORT, "5733");
@@ -383,20 +309,12 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       it.effect(`leaves the client backend URLs unset in ${mode} mode`, () =>
         Effect.gen(function* () {
           const env = yield* createDevRunnerEnv({
+            ...defaultDevEnvInput,
             mode,
             baseEnv: {
               VITE_HTTP_URL: "http://localhost:1234",
               VITE_WS_URL: "ws://localhost:1234",
             },
-            serverOffset: 0,
-            webOffset: 0,
-            t3Home: undefined,
-            browser: undefined,
-            autoBootstrapProjectFromCwd: undefined,
-            logWebSocketEvents: undefined,
-            host: undefined,
-            port: undefined,
-            devUrl: undefined,
           });
 
           assert.equal(env.VITE_HTTP_URL, undefined);
@@ -415,17 +333,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("clears the single-origin marker in dev:desktop mode", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
+          ...defaultDevEnvInput,
           mode: "dev:desktop",
           baseEnv: { T3CODE_SINGLE_ORIGIN_DEV: "1" },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_SINGLE_ORIGIN_DEV, undefined);
@@ -436,17 +346,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("clears the single-origin marker in dev:server mode", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
+          ...defaultDevEnvInput,
           mode: "dev:server",
           baseEnv: { T3CODE_SINGLE_ORIGIN_DEV: "1" },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_SINGLE_ORIGIN_DEV, undefined);
@@ -461,17 +363,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       it.effect(`drops an inherited HOST in ${mode} mode`, () =>
         Effect.gen(function* () {
           const env = yield* createDevRunnerEnv({
+            ...defaultDevEnvInput,
             mode,
             baseEnv: { HOST: "0.0.0.0" },
-            serverOffset: 0,
-            webOffset: 0,
-            t3Home: undefined,
-            browser: undefined,
-            autoBootstrapProjectFromCwd: undefined,
-            logWebSocketEvents: undefined,
-            host: undefined,
-            port: undefined,
-            devUrl: undefined,
           });
 
           assert.equal(env.HOST, undefined);
@@ -484,17 +378,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("drops an inherited HOST even when --host is given", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
-          mode: "dev",
+          ...defaultDevEnvInput,
           baseEnv: { HOST: "0.0.0.0" },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
           host: "0.0.0.0",
-          port: undefined,
-          devUrl: undefined,
         });
 
         assert.equal(env.HOST, undefined);
@@ -506,17 +392,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("still pins HOST for dev:desktop", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
+          ...defaultDevEnvInput,
           mode: "dev:desktop",
           baseEnv: { HOST: "0.0.0.0" },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
         });
 
         assert.equal(env.HOST, "127.0.0.1");
@@ -525,19 +403,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
     it.effect("keeps explicit backend URLs for the desktop renderer", () =>
       Effect.gen(function* () {
-        const env = yield* createDevRunnerEnv({
-          mode: "dev:desktop",
-          baseEnv: {},
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
-        });
+        const env = yield* createDevRunnerEnv({ ...defaultDevEnvInput, mode: "dev:desktop" });
 
         assert.equal(env.VITE_HTTP_URL, "http://127.0.0.1:13773");
         assert.equal(env.VITE_WS_URL, "ws://127.0.0.1:13773");
@@ -882,17 +748,8 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("ignores an ambient T3CODE_HOME when no home is resolved", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
-          mode: "dev",
+          ...defaultDevEnvInput,
           baseEnv: { T3CODE_HOME: "/home/user/.t3" },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_HOME, undefined);

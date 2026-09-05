@@ -81,6 +81,18 @@ const serverConfigTestLayer = ServerConfig.layerTest(process.cwd(), process.cwd(
   Layer.provide(NodeServices.layer),
 );
 
+const provideTestServices = <A, E, R>(layer: Layer.Layer<A, E, R>) =>
+  layer.pipe(
+    Layer.provide(serverConfigTestLayer),
+    Layer.provide(AnalyticsService.layerTest),
+    Layer.provide(
+      Layer.succeed(
+        ProviderEventLoggers.ProviderEventLoggers,
+        ProviderEventLoggers.NoOpProviderEventLoggers,
+      ),
+    ),
+  );
+
 // startSession verifies the workspace folder exists before dispatching to an
 // adapter, so session cwd fixtures must be real directories.
 const fixtureCwdRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-service-test-"));
@@ -501,14 +513,7 @@ for (const [enabled, completed] of [
               ),
             ),
             Layer.provide(ServerSettings.layerTest({ continueThreadsAfterServerUpdate: enabled })),
-            Layer.provide(serverConfigTestLayer),
-            Layer.provide(AnalyticsService.layerTest),
-            Layer.provide(
-              Layer.succeed(
-                ProviderEventLoggers.ProviderEventLoggers,
-                ProviderEventLoggers.NoOpProviderEventLoggers,
-              ),
-            ),
+            provideTestServices,
           ),
         ).pipe(Scope.provide(scope));
         const provider = yield* ProviderService.ProviderService.pipe(Effect.provide(services));
@@ -794,14 +799,7 @@ it.effect("ProviderServiceLive rejects new sessions for disabled providers", () 
       Layer.provide(providerAdapterLayer),
       Layer.provide(directoryLayer),
       Layer.provide(defaultServerSettingsLayer),
-      Layer.provide(serverConfigTestLayer),
-      Layer.provide(AnalyticsService.layerTest),
-      Layer.provide(
-        Layer.succeed(
-          ProviderEventLoggers.ProviderEventLoggers,
-          ProviderEventLoggers.NoOpProviderEventLoggers,
-        ),
-      ),
+      provideTestServices,
     );
 
     const failure = yield* Effect.flip(
@@ -878,14 +876,7 @@ it.effect(
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
         Layer.provide(serverSettingsLayer),
-        Layer.provide(serverConfigTestLayer),
-        Layer.provide(AnalyticsService.layerTest),
-        Layer.provide(
-          Layer.succeed(
-            ProviderEventLoggers.ProviderEventLoggers,
-            ProviderEventLoggers.NoOpProviderEventLoggers,
-          ),
-        ),
+        provideTestServices,
       );
 
       const session = yield* Effect.gen(function* () {
@@ -948,14 +939,7 @@ it.effect("ProviderServiceLive rejects new sessions for disabled custom instance
       Layer.provide(providerAdapterLayer),
       Layer.provide(directoryLayer),
       Layer.provide(defaultServerSettingsLayer),
-      Layer.provide(serverConfigTestLayer),
-      Layer.provide(AnalyticsService.layerTest),
-      Layer.provide(
-        Layer.succeed(
-          ProviderEventLoggers.ProviderEventLoggers,
-          ProviderEventLoggers.NoOpProviderEventLoggers,
-        ),
-      ),
+      provideTestServices,
     );
 
     const failure = yield* Effect.flip(
@@ -1121,14 +1105,7 @@ it.effect(
         Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
         Layer.provide(directoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(serverConfigTestLayer),
-        Layer.provide(AnalyticsService.layerTest),
-        Layer.provide(
-          Layer.succeed(
-            ProviderEventLoggers.ProviderEventLoggers,
-            ProviderEventLoggers.NoOpProviderEventLoggers,
-          ),
-        ),
+        provideTestServices,
       );
 
       yield* Effect.gen(function* () {
@@ -1180,14 +1157,7 @@ it.effect("ProviderServiceLive writes canonical events to the emitting thread se
       Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
       Layer.provide(defaultServerSettingsLayer),
-      Layer.provide(serverConfigTestLayer),
-      Layer.provide(AnalyticsService.layerTest),
-      Layer.provide(
-        Layer.succeed(
-          ProviderEventLoggers.ProviderEventLoggers,
-          ProviderEventLoggers.NoOpProviderEventLoggers,
-        ),
-      ),
+      provideTestServices,
     );
 
     yield* Effect.gen(function* () {
@@ -1242,14 +1212,7 @@ it.effect("ProviderServiceLive keeps persisted resumable sessions on startup", (
       Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
       Layer.provide(defaultServerSettingsLayer),
-      Layer.provide(serverConfigTestLayer),
-      Layer.provide(AnalyticsService.layerTest),
-      Layer.provide(
-        Layer.succeed(
-          ProviderEventLoggers.ProviderEventLoggers,
-          ProviderEventLoggers.NoOpProviderEventLoggers,
-        ),
-      ),
+      provideTestServices,
     );
 
     yield* ProviderService.ProviderService.pipe(Effect.provide(providerLayer));
@@ -1310,14 +1273,7 @@ it.effect(
         ),
         Layer.provide(firstDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(serverConfigTestLayer),
-        Layer.provide(AnalyticsService.layerTest),
-        Layer.provide(
-          Layer.succeed(
-            ProviderEventLoggers.ProviderEventLoggers,
-            ProviderEventLoggers.NoOpProviderEventLoggers,
-          ),
-        ),
+        provideTestServices,
       );
       const updatedResumeCursor = {
         threadId: asThreadId("thread-1"),
@@ -1371,14 +1327,7 @@ it.effect(
         ),
         Layer.provide(secondDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(serverConfigTestLayer),
-        Layer.provide(AnalyticsService.layerTest),
-        Layer.provide(
-          Layer.succeed(
-            ProviderEventLoggers.ProviderEventLoggers,
-            ProviderEventLoggers.NoOpProviderEventLoggers,
-          ),
-        ),
+        provideTestServices,
       );
 
       secondCodex.startSession.mockClear();
@@ -2452,14 +2401,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         ),
         Layer.provide(firstDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(serverConfigTestLayer),
-        Layer.provide(AnalyticsService.layerTest),
-        Layer.provide(
-          Layer.succeed(
-            ProviderEventLoggers.ProviderEventLoggers,
-            ProviderEventLoggers.NoOpProviderEventLoggers,
-          ),
-        ),
+        provideTestServices,
       );
 
       const initial = yield* Effect.gen(function* () {
@@ -2492,14 +2434,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         ),
         Layer.provide(secondDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(serverConfigTestLayer),
-        Layer.provide(AnalyticsService.layerTest),
-        Layer.provide(
-          Layer.succeed(
-            ProviderEventLoggers.ProviderEventLoggers,
-            ProviderEventLoggers.NoOpProviderEventLoggers,
-          ),
-        ),
+        provideTestServices,
       );
 
       secondClaude.startSession.mockClear();
@@ -2562,14 +2497,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
           ),
           Layer.provide(firstDirectoryLayer),
           Layer.provide(defaultServerSettingsLayer),
-          Layer.provide(serverConfigTestLayer),
-          Layer.provide(AnalyticsService.layerTest),
-          Layer.provide(
-            Layer.succeed(
-              ProviderEventLoggers.ProviderEventLoggers,
-              ProviderEventLoggers.NoOpProviderEventLoggers,
-            ),
-          ),
+          provideTestServices,
         );
 
         const initial = yield* Effect.gen(function* () {
@@ -2597,14 +2525,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
           ),
           Layer.provide(secondDirectoryLayer),
           Layer.provide(defaultServerSettingsLayer),
-          Layer.provide(serverConfigTestLayer),
-          Layer.provide(AnalyticsService.layerTest),
-          Layer.provide(
-            Layer.succeed(
-              ProviderEventLoggers.ProviderEventLoggers,
-              ProviderEventLoggers.NoOpProviderEventLoggers,
-            ),
-          ),
+          provideTestServices,
         );
 
         secondClaude.startSession.mockClear();
@@ -4329,14 +4250,7 @@ describe("agent browser access", () => {
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
         Layer.provide(ServerSettings.ServerSettingsService.layerTest({ enableAgentBrowserAccess })),
-        Layer.provide(serverConfigTestLayer),
-        Layer.provide(AnalyticsService.layerTest),
-        Layer.provide(
-          Layer.succeed(
-            ProviderEventLoggers.ProviderEventLoggers,
-            ProviderEventLoggers.NoOpProviderEventLoggers,
-          ),
-        ),
+        provideTestServices,
       );
 
       yield* Effect.gen(function* () {

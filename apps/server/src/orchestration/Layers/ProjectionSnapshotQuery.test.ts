@@ -51,217 +51,111 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_thread_proposed_plans`;
       yield* sql`DELETE FROM projection_turns`;
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-1',
-          'Project 1',
-          '/tmp/project-1',
-          '{"provider":"codex","model":"gpt-5-codex"}',
+      yield* sql`INSERT INTO projection_projects ${sql.insert({
+        project_id: "project-1",
+        title: "Project 1",
+        workspace_root: "/tmp/project-1",
+        default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        scripts_json:
           '[{"id":"script-1","name":"Build","command":"bun run build","icon":"build","runOnWorktreeCreate":false}]',
-          '2026-02-24T00:00:00.000Z',
-          '2026-02-24T00:00:01.000Z',
-          NULL
-        )
-      `;
+        created_at: "2026-02-24T00:00:00.000Z",
+        updated_at: "2026-02-24T00:00:01.000Z",
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          linked_pull_request_json,
-          latest_turn_id,
-          latest_user_message_at,
-          pending_approval_count,
-          pending_user_input_count,
-          has_actionable_proposed_plan,
-          pinned_at,
-          pin_order_key,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'thread-1',
-          'project-1',
-          'Thread 1',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          'full-access',
-          'default',
-          NULL,
-          NULL,
+      yield* sql`INSERT INTO projection_threads ${sql.insert({
+        thread_id: "thread-1",
+        project_id: "project-1",
+        title: "Thread 1",
+        model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        runtime_mode: "full-access",
+        interaction_mode: "default",
+        branch: null,
+        worktree_path: null,
+        linked_pull_request_json:
           '{"projectId":"project-1","repository":"pingdotgg/t3code","number":42,"url":"https://github.com/pingdotgg/t3code/pull/42"}',
-          'turn-1',
-          '2026-02-24T00:00:04.000Z',
-          1,
-          0,
-          0,
-          '2026-02-24T00:00:01.000Z',
-          'gm',
-          '2026-02-24T00:00:02.000Z',
-          '2026-02-24T00:00:03.000Z',
-          NULL
-        )
-      `;
+        latest_turn_id: "turn-1",
+        latest_user_message_at: "2026-02-24T00:00:04.000Z",
+        pending_approval_count: 1,
+        pending_user_input_count: 0,
+        has_actionable_proposed_plan: 0,
+        pinned_at: "2026-02-24T00:00:01.000Z",
+        pin_order_key: "gm",
+        created_at: "2026-02-24T00:00:02.000Z",
+        updated_at: "2026-02-24T00:00:03.000Z",
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_thread_messages (
-          message_id,
-          thread_id,
-          turn_id,
-          role,
-          text,
-          is_streaming,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          'message-1',
-          'thread-1',
-          'turn-1',
-          'assistant',
-          'hello from projection',
-          0,
-          '2026-02-24T00:00:04.000Z',
-          '2026-02-24T00:00:05.000Z'
-        )
-      `;
+      yield* sql`INSERT INTO projection_thread_messages ${sql.insert({
+        message_id: "message-1",
+        thread_id: "thread-1",
+        turn_id: "turn-1",
+        role: "assistant",
+        text: "hello from projection",
+        is_streaming: 0,
+        created_at: "2026-02-24T00:00:04.000Z",
+        updated_at: "2026-02-24T00:00:05.000Z",
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_thread_proposed_plans (
-          plan_id,
-          thread_id,
-          turn_id,
-          plan_markdown,
-          implemented_at,
-          implementation_thread_id,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          'plan-1',
-          'thread-1',
-          'turn-1',
-          '# Ship it',
-          '2026-02-24T00:00:05.500Z',
-          'thread-2',
-          '2026-02-24T00:00:05.000Z',
-          '2026-02-24T00:00:05.500Z'
-        )
-      `;
+      yield* sql`INSERT INTO projection_thread_proposed_plans ${sql.insert({
+        plan_id: "plan-1",
+        thread_id: "thread-1",
+        turn_id: "turn-1",
+        plan_markdown: "# Ship it",
+        implemented_at: "2026-02-24T00:00:05.500Z",
+        implementation_thread_id: "thread-2",
+        created_at: "2026-02-24T00:00:05.000Z",
+        updated_at: "2026-02-24T00:00:05.500Z",
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_thread_activities (
-          activity_id,
-          thread_id,
-          turn_id,
-          tone,
-          kind,
-          summary,
-          payload_json,
-          created_at
-        )
-        VALUES (
-          'activity-1',
-          'thread-1',
-          'turn-1',
-          'info',
-          'runtime.note',
-          'provider started',
-          '{"stage":"start"}',
-          '2026-02-24T00:00:06.000Z'
-        )
-      `;
+      yield* sql`INSERT INTO projection_thread_activities ${sql.insert({
+        activity_id: "activity-1",
+        thread_id: "thread-1",
+        turn_id: "turn-1",
+        tone: "info",
+        kind: "runtime.note",
+        summary: "provider started",
+        payload_json: '{"stage":"start"}',
+        created_at: "2026-02-24T00:00:06.000Z",
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_thread_sessions (
-          thread_id,
-          status,
-          provider_name,
-          provider_session_id,
-          provider_thread_id,
-          runtime_mode,
-          active_turn_id,
-          last_error,
-          updated_at
-        )
-        VALUES (
-          'thread-1',
-          'running',
-          'codex',
-          'provider-session-1',
-          'provider-thread-1',
-          'approval-required',
-          'turn-1',
-          NULL,
-          '2026-02-24T00:00:07.000Z'
-        )
-      `;
+      yield* sql`INSERT INTO projection_thread_sessions ${sql.insert({
+        thread_id: "thread-1",
+        status: "running",
+        provider_name: "codex",
+        provider_session_id: "provider-session-1",
+        provider_thread_id: "provider-thread-1",
+        runtime_mode: "approval-required",
+        active_turn_id: "turn-1",
+        last_error: null,
+        updated_at: "2026-02-24T00:00:07.000Z",
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_turns (
-          thread_id,
-          turn_id,
-          pending_message_id,
-          source_proposed_plan_thread_id,
-          source_proposed_plan_id,
-          assistant_message_id,
-          state,
-          requested_at,
-          started_at,
-          completed_at,
-          checkpoint_turn_count,
-          checkpoint_ref,
-          checkpoint_status,
-          checkpoint_files_json
-        )
-        VALUES (
-          'thread-1',
-          'turn-1',
-          NULL,
-          'thread-1',
-          'plan-1',
-          'message-1',
-          'completed',
-          '2026-02-24T00:00:08.000Z',
-          '2026-02-24T00:00:08.000Z',
-          '2026-02-24T00:00:08.000Z',
-          1,
-          'checkpoint-1',
-          'ready',
-          '[{"path":"README.md","kind":"modified","additions":2,"deletions":1}]'
-        )
-      `;
+      yield* sql`INSERT INTO projection_turns ${sql.insert({
+        thread_id: "thread-1",
+        turn_id: "turn-1",
+        pending_message_id: null,
+        source_proposed_plan_thread_id: "thread-1",
+        source_proposed_plan_id: "plan-1",
+        assistant_message_id: "message-1",
+        state: "completed",
+        requested_at: "2026-02-24T00:00:08.000Z",
+        started_at: "2026-02-24T00:00:08.000Z",
+        completed_at: "2026-02-24T00:00:08.000Z",
+        checkpoint_turn_count: 1,
+        checkpoint_ref: "checkpoint-1",
+        checkpoint_status: "ready",
+        checkpoint_files_json:
+          '[{"path":"README.md","kind":"modified","additions":2,"deletions":1}]',
+      })}`;
 
       let sequence = 5;
       for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
-        yield* sql`
-          INSERT INTO projection_state (
-            projector,
-            last_applied_sequence,
-            updated_at
-          )
-          VALUES (
-            ${projector},
-            ${sequence},
-            '2026-02-24T00:00:09.000Z'
-          )
-        `;
+        yield* sql`INSERT INTO projection_state ${sql.insert({
+          projector: projector,
+          last_applied_sequence: sequence,
+          updated_at: "2026-02-24T00:00:09.000Z",
+        })}`;
         sequence += 1;
       }
 
@@ -491,39 +385,28 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         assert.deepEqual(threadDetail.value, snapshot.threads[0]);
       }
 
-      yield* sql`
-        INSERT INTO projection_thread_activities (
-          activity_id,
-          thread_id,
-          turn_id,
-          tone,
-          kind,
-          summary,
-          payload_json,
-          created_at
-        )
-        VALUES
-          (
-            'activity-task-started',
-            'thread-1',
-            'turn-1',
-            'info',
-            'task.started',
-            'Ship the query filter',
-            '{"taskId":"task-1","detail":"Ship the query filter"}',
-            '2026-02-24T00:00:06.100Z'
-          ),
-          (
-            'activity-malformed-tool',
-            'thread-1',
-            'turn-1',
-            'info',
-            'tool.completed',
-            'Malformed tool output',
-            'not-json',
-            '2026-02-24T00:00:06.200Z'
-          )
-      `;
+      yield* sql`INSERT INTO projection_thread_activities ${sql.insert([
+        {
+          activity_id: "activity-task-started",
+          thread_id: "thread-1",
+          turn_id: "turn-1",
+          tone: "info",
+          kind: "task.started",
+          summary: "Ship the query filter",
+          payload_json: '{"taskId":"task-1","detail":"Ship the query filter"}',
+          created_at: "2026-02-24T00:00:06.100Z",
+        },
+        {
+          activity_id: "activity-malformed-tool",
+          thread_id: "thread-1",
+          turn_id: "turn-1",
+          tone: "info",
+          kind: "tool.completed",
+          summary: "Malformed tool output",
+          payload_json: "not-json",
+          created_at: "2026-02-24T00:00:06.200Z",
+        },
+      ])}`;
 
       const detailWithoutActivities = yield* snapshotQuery.getThreadDetailById(
         ThreadId.make("thread-1"),
@@ -605,101 +488,95 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_threads`;
       yield* sql`DELETE FROM projection_state`;
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-archive-test',
-          'Archive Test',
-          '/tmp/archive-test',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          '[]',
-          '2026-04-06T00:00:00.000Z',
-          '2026-04-06T00:00:01.000Z',
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_projects ${sql.insert({
+        project_id: "project-archive-test",
+        title: "Archive Test",
+        workspace_root: "/tmp/archive-test",
+        default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        scripts_json: "[]",
+        created_at: "2026-04-06T00:00:00.000Z",
+        updated_at: "2026-04-06T00:00:01.000Z",
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          latest_user_message_at,
-          pending_approval_count,
-          pending_user_input_count,
-          has_actionable_proposed_plan,
-          created_at,
-          updated_at,
-          archived_at,
-          deleted_at
-        )
-        VALUES
-          (
-            'thread-active',
-            'project-archive-test',
-            'Active Thread',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            'full-access',
-            'default',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            '2026-04-06T00:00:02.000Z',
-            '2026-04-06T00:00:03.000Z',
-            NULL,
-            NULL
-          ),
-          (
-            'thread-archived',
-            'project-archive-test',
-            'Archived Thread',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            'full-access',
-            'default',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            '2026-04-06T00:00:04.000Z',
-            '2026-04-06T00:00:05.000Z',
-            '2026-04-06T00:00:06.000Z',
-            NULL
-          )
-      `;
+      yield* sql`INSERT INTO projection_threads ${sql.insert([
+        {
+          thread_id: "thread-active",
+          project_id: "project-archive-test",
+          title: "Active Thread",
+          model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+          runtime_mode: "full-access",
+          interaction_mode: "default",
+          branch: null,
+          worktree_path: null,
+          latest_turn_id: null,
+          latest_user_message_at: null,
+          pending_approval_count: 0,
+          pending_user_input_count: 0,
+          has_actionable_proposed_plan: 0,
+          created_at: "2026-04-06T00:00:02.000Z",
+          updated_at: "2026-04-06T00:00:03.000Z",
+          archived_at: null,
+          deleted_at: null,
+        },
+        {
+          thread_id: "thread-archived",
+          project_id: "project-archive-test",
+          title: "Archived Thread",
+          model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+          runtime_mode: "full-access",
+          interaction_mode: "default",
+          branch: null,
+          worktree_path: null,
+          latest_turn_id: null,
+          latest_user_message_at: null,
+          pending_approval_count: 0,
+          pending_user_input_count: 0,
+          has_actionable_proposed_plan: 0,
+          created_at: "2026-04-06T00:00:04.000Z",
+          updated_at: "2026-04-06T00:00:05.000Z",
+          archived_at: "2026-04-06T00:00:06.000Z",
+          deleted_at: null,
+        },
+      ])}`;
 
-      yield* sql`
-        INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
-        VALUES
-          (${ORCHESTRATION_PROJECTOR_NAMES.projects}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threads}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadMessages}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadActivities}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadSessions}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.checkpoints}, 4, '2026-04-06T00:00:07.000Z')
-      `;
+      yield* sql`INSERT INTO projection_state ${sql.insert([
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.projects,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threads,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+      ])}`;
 
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
       assert.deepEqual(
@@ -741,85 +618,76 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_threads`;
       yield* sql`DELETE FROM projection_state`;
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-settled-test',
-          'Settled Test',
-          '/tmp/settled-test',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          '[]',
-          '2026-04-06T00:00:00.000Z',
-          '2026-04-06T00:00:01.000Z',
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_projects ${sql.insert({
+        project_id: "project-settled-test",
+        title: "Settled Test",
+        workspace_root: "/tmp/settled-test",
+        default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        scripts_json: "[]",
+        created_at: "2026-04-06T00:00:00.000Z",
+        updated_at: "2026-04-06T00:00:01.000Z",
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          latest_user_message_at,
-          pending_approval_count,
-          pending_user_input_count,
-          has_actionable_proposed_plan,
-          created_at,
-          updated_at,
-          archived_at,
-          settled_override,
-          settled_at,
-          deleted_at
-        )
-        VALUES (
-          'thread-settled',
-          'project-settled-test',
-          'Settled Thread',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          'full-access',
-          'default',
-          NULL,
-          NULL,
-          NULL,
-          NULL,
-          0,
-          0,
-          0,
-          '2026-04-06T00:00:02.000Z',
-          '2026-04-06T00:00:05.000Z',
-          NULL,
-          'settled',
-          '2026-04-06T00:00:04.000Z',
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_threads ${sql.insert({
+        thread_id: "thread-settled",
+        project_id: "project-settled-test",
+        title: "Settled Thread",
+        model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        runtime_mode: "full-access",
+        interaction_mode: "default",
+        branch: null,
+        worktree_path: null,
+        latest_turn_id: null,
+        latest_user_message_at: null,
+        pending_approval_count: 0,
+        pending_user_input_count: 0,
+        has_actionable_proposed_plan: 0,
+        created_at: "2026-04-06T00:00:02.000Z",
+        updated_at: "2026-04-06T00:00:05.000Z",
+        archived_at: null,
+        settled_override: "settled",
+        settled_at: "2026-04-06T00:00:04.000Z",
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
-        VALUES
-          (${ORCHESTRATION_PROJECTOR_NAMES.projects}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threads}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadMessages}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadActivities}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadSessions}, 4, '2026-04-06T00:00:07.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.checkpoints}, 4, '2026-04-06T00:00:07.000Z')
-      `;
+      yield* sql`INSERT INTO projection_state ${sql.insert([
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.projects,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threads,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
+          last_applied_sequence: 4,
+          updated_at: "2026-04-06T00:00:07.000Z",
+        },
+      ])}`;
 
       // Settled ≠ archived: the thread must appear in the LIVE shell
       // snapshot, carrying its settlement fields through the row aliases.
@@ -852,103 +720,76 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         yield* sql`DELETE FROM projection_threads`;
         yield* sql`DELETE FROM projection_turns`;
 
-        yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES
-          (
-            'project-active',
-            'Active Project',
-            '/tmp/workspace',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            '[]',
-            '2026-03-01T00:00:00.000Z',
-            '2026-03-01T00:00:01.000Z',
-            NULL
-          ),
-          (
-            'project-deleted',
-            'Deleted Project',
-            '/tmp/deleted',
-            NULL,
-            '[]',
-            '2026-03-01T00:00:02.000Z',
-            '2026-03-01T00:00:03.000Z',
-            '2026-03-01T00:00:04.000Z'
-          )
-      `;
+        yield* sql`INSERT INTO projection_projects ${sql.insert([
+          {
+            project_id: "project-active",
+            title: "Active Project",
+            workspace_root: "/tmp/workspace",
+            default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+            scripts_json: "[]",
+            created_at: "2026-03-01T00:00:00.000Z",
+            updated_at: "2026-03-01T00:00:01.000Z",
+            deleted_at: null,
+          },
+          {
+            project_id: "project-deleted",
+            title: "Deleted Project",
+            workspace_root: "/tmp/deleted",
+            default_model_selection_json: null,
+            scripts_json: "[]",
+            created_at: "2026-03-01T00:00:02.000Z",
+            updated_at: "2026-03-01T00:00:03.000Z",
+            deleted_at: "2026-03-01T00:00:04.000Z",
+          },
+        ])}`;
 
-        yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          created_at,
-          updated_at,
-          archived_at,
-          deleted_at
-        )
-        VALUES
-          (
-            'thread-first',
-            'project-active',
-            'First Thread',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            'full-access',
-            'default',
-            NULL,
-            NULL,
-            NULL,
-            '2026-03-01T00:00:05.000Z',
-            '2026-03-01T00:00:06.000Z',
-            NULL,
-            NULL
-          ),
-          (
-            'thread-second',
-            'project-active',
-            'Second Thread',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            'full-access',
-            'default',
-            NULL,
-            NULL,
-            NULL,
-            '2026-03-01T00:00:07.000Z',
-            '2026-03-01T00:00:08.000Z',
-            NULL,
-            NULL
-          ),
-          (
-            'thread-deleted',
-            'project-active',
-            'Deleted Thread',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            'full-access',
-            'default',
-            NULL,
-            NULL,
-            NULL,
-            '2026-03-01T00:00:09.000Z',
-            '2026-03-01T00:00:10.000Z',
-            NULL,
-            '2026-03-01T00:00:11.000Z'
-          )
-      `;
+        yield* sql`INSERT INTO projection_threads ${sql.insert([
+          {
+            thread_id: "thread-first",
+            project_id: "project-active",
+            title: "First Thread",
+            model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+            runtime_mode: "full-access",
+            interaction_mode: "default",
+            branch: null,
+            worktree_path: null,
+            latest_turn_id: null,
+            created_at: "2026-03-01T00:00:05.000Z",
+            updated_at: "2026-03-01T00:00:06.000Z",
+            archived_at: null,
+            deleted_at: null,
+          },
+          {
+            thread_id: "thread-second",
+            project_id: "project-active",
+            title: "Second Thread",
+            model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+            runtime_mode: "full-access",
+            interaction_mode: "default",
+            branch: null,
+            worktree_path: null,
+            latest_turn_id: null,
+            created_at: "2026-03-01T00:00:07.000Z",
+            updated_at: "2026-03-01T00:00:08.000Z",
+            archived_at: null,
+            deleted_at: null,
+          },
+          {
+            thread_id: "thread-deleted",
+            project_id: "project-active",
+            title: "Deleted Thread",
+            model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+            runtime_mode: "full-access",
+            interaction_mode: "default",
+            branch: null,
+            worktree_path: null,
+            latest_turn_id: null,
+            created_at: "2026-03-01T00:00:09.000Z",
+            updated_at: "2026-03-01T00:00:10.000Z",
+            archived_at: null,
+            deleted_at: "2026-03-01T00:00:11.000Z",
+          },
+        ])}`;
 
         const counts = yield* snapshotQuery.getCounts();
         assert.deepEqual(counts, {
@@ -1030,113 +871,67 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_threads`;
       yield* sql`DELETE FROM projection_turns`;
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-context',
-          'Context Project',
-          '/tmp/context-workspace',
-          NULL,
-          '[]',
-          '2026-03-02T00:00:00.000Z',
-          '2026-03-02T00:00:01.000Z',
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_projects ${sql.insert({
+        project_id: "project-context",
+        title: "Context Project",
+        workspace_root: "/tmp/context-workspace",
+        default_model_selection_json: null,
+        scripts_json: "[]",
+        created_at: "2026-03-02T00:00:00.000Z",
+        updated_at: "2026-03-02T00:00:01.000Z",
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          created_at,
-          updated_at,
-          archived_at,
-          deleted_at
-        )
-        VALUES (
-          'thread-context',
-          'project-context',
-          'Context Thread',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          'full-access',
-          'default',
-          'feature/perf',
-          '/tmp/context-worktree',
-          NULL,
-          '2026-03-02T00:00:02.000Z',
-          '2026-03-02T00:00:03.000Z',
-          NULL,
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_threads ${sql.insert({
+        thread_id: "thread-context",
+        project_id: "project-context",
+        title: "Context Thread",
+        model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        runtime_mode: "full-access",
+        interaction_mode: "default",
+        branch: "feature/perf",
+        worktree_path: "/tmp/context-worktree",
+        latest_turn_id: null,
+        created_at: "2026-03-02T00:00:02.000Z",
+        updated_at: "2026-03-02T00:00:03.000Z",
+        archived_at: null,
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_turns (
-          thread_id,
-          turn_id,
-          pending_message_id,
-          source_proposed_plan_thread_id,
-          source_proposed_plan_id,
-          assistant_message_id,
-          state,
-          requested_at,
-          started_at,
-          completed_at,
-          checkpoint_turn_count,
-          checkpoint_ref,
-          checkpoint_status,
-          checkpoint_files_json
-        )
-        VALUES
-          (
-            'thread-context',
-            'turn-1',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            'completed',
-            '2026-03-02T00:00:04.000Z',
-            '2026-03-02T00:00:04.000Z',
-            '2026-03-02T00:00:04.000Z',
-            1,
-            'checkpoint-a',
-            'ready',
-            '[]'
-          ),
-          (
-            'thread-context',
-            'turn-2',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            'completed',
-            '2026-03-02T00:00:05.000Z',
-            '2026-03-02T00:00:05.000Z',
-            '2026-03-02T00:00:05.000Z',
-            2,
-            'checkpoint-b',
-            'ready',
-            '[]'
-          )
-      `;
+      yield* sql`INSERT INTO projection_turns ${sql.insert([
+        {
+          thread_id: "thread-context",
+          turn_id: "turn-1",
+          pending_message_id: null,
+          source_proposed_plan_thread_id: null,
+          source_proposed_plan_id: null,
+          assistant_message_id: null,
+          state: "completed",
+          requested_at: "2026-03-02T00:00:04.000Z",
+          started_at: "2026-03-02T00:00:04.000Z",
+          completed_at: "2026-03-02T00:00:04.000Z",
+          checkpoint_turn_count: 1,
+          checkpoint_ref: "checkpoint-a",
+          checkpoint_status: "ready",
+          checkpoint_files_json: "[]",
+        },
+        {
+          thread_id: "thread-context",
+          turn_id: "turn-2",
+          pending_message_id: null,
+          source_proposed_plan_thread_id: null,
+          source_proposed_plan_id: null,
+          assistant_message_id: null,
+          state: "completed",
+          requested_at: "2026-03-02T00:00:05.000Z",
+          started_at: "2026-03-02T00:00:05.000Z",
+          completed_at: "2026-03-02T00:00:05.000Z",
+          checkpoint_turn_count: 2,
+          checkpoint_ref: "checkpoint-b",
+          checkpoint_status: "ready",
+          checkpoint_files_json: "[]",
+        },
+      ])}`;
 
       const context = yield* snapshotQuery.getThreadCheckpointContext(
         ThreadId.make("thread-context"),
@@ -1183,115 +978,71 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_thread_activities`;
       yield* sql`DELETE FROM projection_state`;
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-1',
-          'Project 1',
-          '/tmp/project-1',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          '[]',
-          '2026-04-01T00:00:00.000Z',
-          '2026-04-01T00:00:01.000Z',
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_projects ${sql.insert({
+        project_id: "project-1",
+        title: "Project 1",
+        workspace_root: "/tmp/project-1",
+        default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        scripts_json: "[]",
+        created_at: "2026-04-01T00:00:00.000Z",
+        updated_at: "2026-04-01T00:00:01.000Z",
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          latest_user_message_at,
-          pending_approval_count,
-          pending_user_input_count,
-          has_actionable_proposed_plan,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'thread-1',
-          'project-1',
-          'Thread 1',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          'full-access',
-          'default',
-          NULL,
-          NULL,
-          NULL,
-          NULL,
-          0,
-          0,
-          0,
-          '2026-04-01T00:00:02.000Z',
-          '2026-04-01T00:00:03.000Z',
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_threads ${sql.insert({
+        thread_id: "thread-1",
+        project_id: "project-1",
+        title: "Thread 1",
+        model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        runtime_mode: "full-access",
+        interaction_mode: "default",
+        branch: null,
+        worktree_path: null,
+        latest_turn_id: null,
+        latest_user_message_at: null,
+        pending_approval_count: 0,
+        pending_user_input_count: 0,
+        has_actionable_proposed_plan: 0,
+        created_at: "2026-04-01T00:00:02.000Z",
+        updated_at: "2026-04-01T00:00:03.000Z",
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_thread_activities (
-          activity_id,
-          thread_id,
-          turn_id,
-          tone,
-          kind,
-          summary,
-          payload_json,
-          sequence,
-          created_at
-        )
-        VALUES
-          (
-            'activity-unsequenced',
-            'thread-1',
-            NULL,
-            'info',
-            'runtime.note',
-            'unsequenced first',
-            '{"source":"unsequenced"}',
-            NULL,
-            '2026-04-01T00:00:06.000Z'
-          ),
-          (
-            'activity-sequence-2',
-            'thread-1',
-            NULL,
-            'info',
-            'runtime.note',
-            'sequence two',
-            '{"source":"sequence-2"}',
-            2,
-            '2026-04-01T00:00:04.000Z'
-          ),
-          (
-            'activity-sequence-1',
-            'thread-1',
-            NULL,
-            'info',
-            'runtime.note',
-            'sequence one',
-            '{"source":"sequence-1"}',
-            1,
-            '2026-04-01T00:00:05.000Z'
-          )
-      `;
+      yield* sql`INSERT INTO projection_thread_activities ${sql.insert([
+        {
+          activity_id: "activity-unsequenced",
+          thread_id: "thread-1",
+          turn_id: null,
+          tone: "info",
+          kind: "runtime.note",
+          summary: "unsequenced first",
+          payload_json: '{"source":"unsequenced"}',
+          sequence: null,
+          created_at: "2026-04-01T00:00:06.000Z",
+        },
+        {
+          activity_id: "activity-sequence-2",
+          thread_id: "thread-1",
+          turn_id: null,
+          tone: "info",
+          kind: "runtime.note",
+          summary: "sequence two",
+          payload_json: '{"source":"sequence-2"}',
+          sequence: 2,
+          created_at: "2026-04-01T00:00:04.000Z",
+        },
+        {
+          activity_id: "activity-sequence-1",
+          thread_id: "thread-1",
+          turn_id: null,
+          tone: "info",
+          kind: "runtime.note",
+          summary: "sequence one",
+          payload_json: '{"source":"sequence-1"}',
+          sequence: 1,
+          created_at: "2026-04-01T00:00:05.000Z",
+        },
+      ])}`;
 
       const snapshot = yield* snapshotQuery.getSnapshot();
       const threadDetail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-1"));
@@ -1344,121 +1095,71 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_threads`;
       yield* sql`DELETE FROM projection_turns`;
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-1',
-          'Project 1',
-          '/tmp/project-1',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          '[]',
-          '2026-04-02T00:00:00.000Z',
-          '2026-04-02T00:00:01.000Z',
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_projects ${sql.insert({
+        project_id: "project-1",
+        title: "Project 1",
+        workspace_root: "/tmp/project-1",
+        default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        scripts_json: "[]",
+        created_at: "2026-04-02T00:00:00.000Z",
+        updated_at: "2026-04-02T00:00:01.000Z",
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          latest_user_message_at,
-          pending_approval_count,
-          pending_user_input_count,
-          has_actionable_proposed_plan,
-          created_at,
-          updated_at,
-          archived_at,
-          deleted_at
-        )
-        VALUES (
-          'thread-1',
-          'project-1',
-          'Thread 1',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          'full-access',
-          'default',
-          NULL,
-          NULL,
-          'turn-running',
-          '2026-04-02T00:00:04.000Z',
-          0,
-          0,
-          0,
-          '2026-04-02T00:00:02.000Z',
-          '2026-04-02T00:00:03.000Z',
-          NULL,
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_threads ${sql.insert({
+        thread_id: "thread-1",
+        project_id: "project-1",
+        title: "Thread 1",
+        model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        runtime_mode: "full-access",
+        interaction_mode: "default",
+        branch: null,
+        worktree_path: null,
+        latest_turn_id: "turn-running",
+        latest_user_message_at: "2026-04-02T00:00:04.000Z",
+        pending_approval_count: 0,
+        pending_user_input_count: 0,
+        has_actionable_proposed_plan: 0,
+        created_at: "2026-04-02T00:00:02.000Z",
+        updated_at: "2026-04-02T00:00:03.000Z",
+        archived_at: null,
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_turns (
-          thread_id,
-          turn_id,
-          pending_message_id,
-          source_proposed_plan_thread_id,
-          source_proposed_plan_id,
-          assistant_message_id,
-          state,
-          requested_at,
-          started_at,
-          completed_at,
-          checkpoint_turn_count,
-          checkpoint_ref,
-          checkpoint_status,
-          checkpoint_files_json
-        )
-        VALUES
-          (
-            'thread-1',
-            'turn-completed',
-            'message-user-1',
-            NULL,
-            NULL,
-            'message-assistant-1',
-            'completed',
-            '2026-04-02T00:00:05.000Z',
-            '2026-04-02T00:00:06.000Z',
-            '2026-04-02T00:00:20.000Z',
-            5,
-            'checkpoint-5',
-            'ready',
-            '[]'
-          ),
-          (
-            'thread-1',
-            'turn-running',
-            'message-user-2',
-            NULL,
-            NULL,
-            NULL,
-            'running',
-            '2026-04-02T00:00:30.000Z',
-            '2026-04-02T00:00:30.000Z',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            '[]'
-          )
-      `;
+      yield* sql`INSERT INTO projection_turns ${sql.insert([
+        {
+          thread_id: "thread-1",
+          turn_id: "turn-completed",
+          pending_message_id: "message-user-1",
+          source_proposed_plan_thread_id: null,
+          source_proposed_plan_id: null,
+          assistant_message_id: "message-assistant-1",
+          state: "completed",
+          requested_at: "2026-04-02T00:00:05.000Z",
+          started_at: "2026-04-02T00:00:06.000Z",
+          completed_at: "2026-04-02T00:00:20.000Z",
+          checkpoint_turn_count: 5,
+          checkpoint_ref: "checkpoint-5",
+          checkpoint_status: "ready",
+          checkpoint_files_json: "[]",
+        },
+        {
+          thread_id: "thread-1",
+          turn_id: "turn-running",
+          pending_message_id: "message-user-2",
+          source_proposed_plan_thread_id: null,
+          source_proposed_plan_id: null,
+          assistant_message_id: null,
+          state: "running",
+          requested_at: "2026-04-02T00:00:30.000Z",
+          started_at: "2026-04-02T00:00:30.000Z",
+          completed_at: null,
+          checkpoint_turn_count: null,
+          checkpoint_ref: null,
+          checkpoint_status: null,
+          checkpoint_files_json: "[]",
+        },
+      ])}`;
 
       const threadShell = yield* snapshotQuery.getThreadShellById(ThreadId.make("thread-1"));
       assert.equal(threadShell._tag, "Some");
@@ -1488,133 +1189,109 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_turns`;
       yield* sql`DELETE FROM projection_state`;
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-1',
-          'Project 1',
-          '/tmp/project-1',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          '[]',
-          '2026-04-03T00:00:00.000Z',
-          '2026-04-03T00:00:01.000Z',
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_projects ${sql.insert({
+        project_id: "project-1",
+        title: "Project 1",
+        workspace_root: "/tmp/project-1",
+        default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        scripts_json: "[]",
+        created_at: "2026-04-03T00:00:00.000Z",
+        updated_at: "2026-04-03T00:00:01.000Z",
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          latest_user_message_at,
-          pending_approval_count,
-          pending_user_input_count,
-          has_actionable_proposed_plan,
-          created_at,
-          updated_at,
-          archived_at,
-          deleted_at
-        )
-        VALUES (
-          'thread-1',
-          'project-1',
-          'Thread 1',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          'full-access',
-          'default',
-          NULL,
-          NULL,
-          'turn-running',
-          '2026-04-03T00:00:04.000Z',
-          0,
-          0,
-          0,
-          '2026-04-03T00:00:02.000Z',
-          '2026-04-03T00:00:03.000Z',
-          NULL,
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_threads ${sql.insert({
+        thread_id: "thread-1",
+        project_id: "project-1",
+        title: "Thread 1",
+        model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        runtime_mode: "full-access",
+        interaction_mode: "default",
+        branch: null,
+        worktree_path: null,
+        latest_turn_id: "turn-running",
+        latest_user_message_at: "2026-04-03T00:00:04.000Z",
+        pending_approval_count: 0,
+        pending_user_input_count: 0,
+        has_actionable_proposed_plan: 0,
+        created_at: "2026-04-03T00:00:02.000Z",
+        updated_at: "2026-04-03T00:00:03.000Z",
+        archived_at: null,
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_turns (
-          thread_id,
-          turn_id,
-          pending_message_id,
-          source_proposed_plan_thread_id,
-          source_proposed_plan_id,
-          assistant_message_id,
-          state,
-          requested_at,
-          started_at,
-          completed_at,
-          checkpoint_turn_count,
-          checkpoint_ref,
-          checkpoint_status,
-          checkpoint_files_json
-        )
-        VALUES
-          (
-            'thread-1',
-            'turn-running',
-            'message-user-2',
-            NULL,
-            NULL,
-            NULL,
-            'running',
-            '2026-04-03T00:00:30.000Z',
-            '2026-04-03T00:00:30.000Z',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            '[]'
-          ),
-          (
-            'thread-1',
-            'turn-completed',
-            'message-user-1',
-            NULL,
-            NULL,
-            'message-assistant-1',
-            'completed',
-            '2026-04-03T00:00:05.000Z',
-            '2026-04-03T00:00:06.000Z',
-            '2026-04-03T00:00:20.000Z',
-            NULL,
-            NULL,
-            NULL,
-            '[]'
-          )
-      `;
+      yield* sql`INSERT INTO projection_turns ${sql.insert([
+        {
+          thread_id: "thread-1",
+          turn_id: "turn-running",
+          pending_message_id: "message-user-2",
+          source_proposed_plan_thread_id: null,
+          source_proposed_plan_id: null,
+          assistant_message_id: null,
+          state: "running",
+          requested_at: "2026-04-03T00:00:30.000Z",
+          started_at: "2026-04-03T00:00:30.000Z",
+          completed_at: null,
+          checkpoint_turn_count: null,
+          checkpoint_ref: null,
+          checkpoint_status: null,
+          checkpoint_files_json: "[]",
+        },
+        {
+          thread_id: "thread-1",
+          turn_id: "turn-completed",
+          pending_message_id: "message-user-1",
+          source_proposed_plan_thread_id: null,
+          source_proposed_plan_id: null,
+          assistant_message_id: "message-assistant-1",
+          state: "completed",
+          requested_at: "2026-04-03T00:00:05.000Z",
+          started_at: "2026-04-03T00:00:06.000Z",
+          completed_at: "2026-04-03T00:00:20.000Z",
+          checkpoint_turn_count: null,
+          checkpoint_ref: null,
+          checkpoint_status: null,
+          checkpoint_files_json: "[]",
+        },
+      ])}`;
 
-      yield* sql`
-        INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
-        VALUES
-          (${ORCHESTRATION_PROJECTOR_NAMES.projects}, 3, '2026-04-03T00:00:40.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threads}, 3, '2026-04-03T00:00:40.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadMessages}, 3, '2026-04-03T00:00:40.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans}, 3, '2026-04-03T00:00:40.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadActivities}, 3, '2026-04-03T00:00:40.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.threadSessions}, 3, '2026-04-03T00:00:40.000Z'),
-          (${ORCHESTRATION_PROJECTOR_NAMES.checkpoints}, 3, '2026-04-03T00:00:40.000Z')
-      `;
+      yield* sql`INSERT INTO projection_state ${sql.insert([
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.projects,
+          last_applied_sequence: 3,
+          updated_at: "2026-04-03T00:00:40.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threads,
+          last_applied_sequence: 3,
+          updated_at: "2026-04-03T00:00:40.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
+          last_applied_sequence: 3,
+          updated_at: "2026-04-03T00:00:40.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
+          last_applied_sequence: 3,
+          updated_at: "2026-04-03T00:00:40.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
+          last_applied_sequence: 3,
+          updated_at: "2026-04-03T00:00:40.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
+          last_applied_sequence: 3,
+          updated_at: "2026-04-03T00:00:40.000Z",
+        },
+        {
+          projector: ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
+          last_applied_sequence: 3,
+          updated_at: "2026-04-03T00:00:40.000Z",
+        },
+      ])}`;
 
       const commandReadModel = yield* snapshotQuery.getCommandReadModel();
       assert.equal(commandReadModel.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
@@ -1640,104 +1317,53 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_turns`;
       yield* sql`DELETE FROM projection_state`;
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-deleted',
-          'Deleted Project',
-          '/tmp/deleted-project',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          '[]',
-          '2026-04-05T00:00:00.000Z',
-          '2026-04-05T00:00:01.000Z',
-          '2026-04-05T00:00:02.000Z'
-        )
-      `;
+      yield* sql`INSERT INTO projection_projects ${sql.insert({
+        project_id: "project-deleted",
+        title: "Deleted Project",
+        workspace_root: "/tmp/deleted-project",
+        default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        scripts_json: "[]",
+        created_at: "2026-04-05T00:00:00.000Z",
+        updated_at: "2026-04-05T00:00:01.000Z",
+        deleted_at: "2026-04-05T00:00:02.000Z",
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          latest_user_message_at,
-          pending_approval_count,
-          pending_user_input_count,
-          has_actionable_proposed_plan,
-          created_at,
-          updated_at,
-          archived_at,
-          deleted_at
-        )
-        VALUES (
-          'thread-deleted',
-          'project-deleted',
-          'Deleted Thread',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          'full-access',
-          'default',
-          NULL,
-          NULL,
-          'turn-deleted',
-          NULL,
-          0,
-          0,
-          0,
-          '2026-04-05T00:00:03.000Z',
-          '2026-04-05T00:00:04.000Z',
-          NULL,
-          '2026-04-05T00:00:05.000Z'
-        )
-      `;
+      yield* sql`INSERT INTO projection_threads ${sql.insert({
+        thread_id: "thread-deleted",
+        project_id: "project-deleted",
+        title: "Deleted Thread",
+        model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        runtime_mode: "full-access",
+        interaction_mode: "default",
+        branch: null,
+        worktree_path: null,
+        latest_turn_id: "turn-deleted",
+        latest_user_message_at: null,
+        pending_approval_count: 0,
+        pending_user_input_count: 0,
+        has_actionable_proposed_plan: 0,
+        created_at: "2026-04-05T00:00:03.000Z",
+        updated_at: "2026-04-05T00:00:04.000Z",
+        archived_at: null,
+        deleted_at: "2026-04-05T00:00:05.000Z",
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_turns (
-          thread_id,
-          turn_id,
-          pending_message_id,
-          source_proposed_plan_thread_id,
-          source_proposed_plan_id,
-          assistant_message_id,
-          state,
-          requested_at,
-          started_at,
-          completed_at,
-          checkpoint_turn_count,
-          checkpoint_ref,
-          checkpoint_status,
-          checkpoint_files_json
-        )
-        VALUES (
-          'thread-deleted',
-          'turn-deleted',
-          'message-deleted-user',
-          NULL,
-          NULL,
-          'message-deleted-assistant',
-          'completed',
-          '2026-04-05T00:00:04.100Z',
-          '2026-04-05T00:00:04.200Z',
-          '2026-04-05T00:00:04.300Z',
-          NULL,
-          NULL,
-          NULL,
-          '[]'
-        )
-      `;
+      yield* sql`INSERT INTO projection_turns ${sql.insert({
+        thread_id: "thread-deleted",
+        turn_id: "turn-deleted",
+        pending_message_id: "message-deleted-user",
+        source_proposed_plan_thread_id: null,
+        source_proposed_plan_id: null,
+        assistant_message_id: "message-deleted-assistant",
+        state: "completed",
+        requested_at: "2026-04-05T00:00:04.100Z",
+        started_at: "2026-04-05T00:00:04.200Z",
+        completed_at: "2026-04-05T00:00:04.300Z",
+        checkpoint_turn_count: null,
+        checkpoint_ref: null,
+        checkpoint_status: null,
+        checkpoint_files_json: "[]",
+      })}`;
 
       const commandReadModel = yield* snapshotQuery.getCommandReadModel();
       assert.equal(commandReadModel.projects[0]?.id, asProjectId("project-deleted"));
@@ -1768,217 +1394,161 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_threads`;
       yield* sql`DELETE FROM projection_projects`;
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-search',
-          'Project Needle',
-          '/tmp/project-search',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          '[]',
-          '2026-05-01T00:00:00.000Z',
-          '2026-05-01T00:00:01.000Z',
-          NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_projects ${sql.insert({
+        project_id: "project-search",
+        title: "Project Needle",
+        workspace_root: "/tmp/project-search",
+        default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        scripts_json: "[]",
+        created_at: "2026-05-01T00:00:00.000Z",
+        updated_at: "2026-05-01T00:00:01.000Z",
+        deleted_at: null,
+      })}`;
 
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          latest_user_message_at,
-          pending_approval_count,
-          pending_user_input_count,
-          has_actionable_proposed_plan,
-          created_at,
-          updated_at,
-          archived_at,
-          deleted_at
-        )
-        VALUES
-          (
-            'thread-active',
-            'project-search',
-            'Literal 100% fix',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            'full-access',
-            'default',
-            'search-branch',
-            NULL,
-            'turn-active',
-            '2026-05-01T00:00:02.000Z',
-            0,
-            0,
-            0,
-            '2026-05-01T00:00:02.000Z',
-            '2026-05-01T00:00:03.000Z',
-            NULL,
-            NULL
-          ),
-          (
-            'thread-percent-decoy',
-            'project-search',
-            'Literal 100x fix',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            'full-access',
-            'default',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            '2026-05-01T00:00:04.000Z',
-            '2026-05-01T00:00:05.000Z',
-            NULL,
-            NULL
-          ),
-          (
-            'thread-hidden',
-            'project-search',
-            'Archived search',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            'full-access',
-            'default',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            '2026-05-01T00:00:06.000Z',
-            '2026-05-01T00:00:07.000Z',
-            '2026-05-01T00:00:08.000Z',
-            NULL
-          )
-      `;
+      yield* sql`INSERT INTO projection_threads ${sql.insert([
+        {
+          thread_id: "thread-active",
+          project_id: "project-search",
+          title: "Literal 100% fix",
+          model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+          runtime_mode: "full-access",
+          interaction_mode: "default",
+          branch: "search-branch",
+          worktree_path: null,
+          latest_turn_id: "turn-active",
+          latest_user_message_at: "2026-05-01T00:00:02.000Z",
+          pending_approval_count: 0,
+          pending_user_input_count: 0,
+          has_actionable_proposed_plan: 0,
+          created_at: "2026-05-01T00:00:02.000Z",
+          updated_at: "2026-05-01T00:00:03.000Z",
+          archived_at: null,
+          deleted_at: null,
+        },
+        {
+          thread_id: "thread-percent-decoy",
+          project_id: "project-search",
+          title: "Literal 100x fix",
+          model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+          runtime_mode: "full-access",
+          interaction_mode: "default",
+          branch: null,
+          worktree_path: null,
+          latest_turn_id: null,
+          latest_user_message_at: null,
+          pending_approval_count: 0,
+          pending_user_input_count: 0,
+          has_actionable_proposed_plan: 0,
+          created_at: "2026-05-01T00:00:04.000Z",
+          updated_at: "2026-05-01T00:00:05.000Z",
+          archived_at: null,
+          deleted_at: null,
+        },
+        {
+          thread_id: "thread-hidden",
+          project_id: "project-search",
+          title: "Archived search",
+          model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+          runtime_mode: "full-access",
+          interaction_mode: "default",
+          branch: null,
+          worktree_path: null,
+          latest_turn_id: null,
+          latest_user_message_at: null,
+          pending_approval_count: 0,
+          pending_user_input_count: 0,
+          has_actionable_proposed_plan: 0,
+          created_at: "2026-05-01T00:00:06.000Z",
+          updated_at: "2026-05-01T00:00:07.000Z",
+          archived_at: "2026-05-01T00:00:08.000Z",
+          deleted_at: null,
+        },
+      ])}`;
 
-      yield* sql`
-        INSERT INTO projection_thread_messages (
-          message_id,
-          thread_id,
-          turn_id,
-          role,
-          text,
-          is_streaming,
-          created_at,
-          updated_at
-        )
-        VALUES
-          (
-            'message-user',
-            'thread-active',
-            'turn-active',
-            'user',
-            'Please find this USER needle in an old prompt.',
-            0,
-            '2026-05-01T00:00:12.000Z',
-            '2026-05-01T00:00:12.000Z'
-          ),
-          (
-            'message-percent',
-            'thread-active',
-            NULL,
-            'user',
-            'Literal 100% fix in a prompt.',
-            0,
-            '2026-05-01T00:00:11.000Z',
-            '2026-05-01T00:00:11.000Z'
-          ),
-          (
-            'message-percent-decoy',
-            'thread-percent-decoy',
-            NULL,
-            'user',
-            'Literal 100x fix in a prompt.',
-            0,
-            '2026-05-01T00:00:11.000Z',
-            '2026-05-01T00:00:11.000Z'
-          ),
-          (
-            'message-final',
-            'thread-active',
-            'turn-active',
-            'assistant',
-            'The canonical final needle appears in this completed answer.',
-            0,
-            '2026-05-01T00:00:13.000Z',
-            '2026-05-01T00:00:13.000Z'
-          ),
-          (
-            'message-interim',
-            'thread-active',
-            'turn-active',
-            'assistant',
-            'Interim needle must not be searchable.',
-            0,
-            '2026-05-01T00:00:14.000Z',
-            '2026-05-01T00:00:14.000Z'
-          ),
-          (
-            'message-system',
-            'thread-active',
-            NULL,
-            'system',
-            'System needle must not be searchable.',
-            0,
-            '2026-05-01T00:00:15.000Z',
-            '2026-05-01T00:00:15.000Z'
-          ),
-          (
-            'message-hidden',
-            'thread-hidden',
-            NULL,
-            'user',
-            'Hidden needle in archive.',
-            0,
-            '2026-05-01T00:00:16.000Z',
-            '2026-05-01T00:00:16.000Z'
-          )
-      `;
+      yield* sql`INSERT INTO projection_thread_messages ${sql.insert([
+        {
+          message_id: "message-user",
+          thread_id: "thread-active",
+          turn_id: "turn-active",
+          role: "user",
+          text: "Please find this USER needle in an old prompt.",
+          is_streaming: 0,
+          created_at: "2026-05-01T00:00:12.000Z",
+          updated_at: "2026-05-01T00:00:12.000Z",
+        },
+        {
+          message_id: "message-percent",
+          thread_id: "thread-active",
+          turn_id: null,
+          role: "user",
+          text: "Literal 100% fix in a prompt.",
+          is_streaming: 0,
+          created_at: "2026-05-01T00:00:11.000Z",
+          updated_at: "2026-05-01T00:00:11.000Z",
+        },
+        {
+          message_id: "message-percent-decoy",
+          thread_id: "thread-percent-decoy",
+          turn_id: null,
+          role: "user",
+          text: "Literal 100x fix in a prompt.",
+          is_streaming: 0,
+          created_at: "2026-05-01T00:00:11.000Z",
+          updated_at: "2026-05-01T00:00:11.000Z",
+        },
+        {
+          message_id: "message-final",
+          thread_id: "thread-active",
+          turn_id: "turn-active",
+          role: "assistant",
+          text: "The canonical final needle appears in this completed answer.",
+          is_streaming: 0,
+          created_at: "2026-05-01T00:00:13.000Z",
+          updated_at: "2026-05-01T00:00:13.000Z",
+        },
+        {
+          message_id: "message-interim",
+          thread_id: "thread-active",
+          turn_id: "turn-active",
+          role: "assistant",
+          text: "Interim needle must not be searchable.",
+          is_streaming: 0,
+          created_at: "2026-05-01T00:00:14.000Z",
+          updated_at: "2026-05-01T00:00:14.000Z",
+        },
+        {
+          message_id: "message-system",
+          thread_id: "thread-active",
+          turn_id: null,
+          role: "system",
+          text: "System needle must not be searchable.",
+          is_streaming: 0,
+          created_at: "2026-05-01T00:00:15.000Z",
+          updated_at: "2026-05-01T00:00:15.000Z",
+        },
+        {
+          message_id: "message-hidden",
+          thread_id: "thread-hidden",
+          turn_id: null,
+          role: "user",
+          text: "Hidden needle in archive.",
+          is_streaming: 0,
+          created_at: "2026-05-01T00:00:16.000Z",
+          updated_at: "2026-05-01T00:00:16.000Z",
+        },
+      ])}`;
 
-      yield* sql`
-        INSERT INTO projection_turns (
-          thread_id,
-          turn_id,
-          pending_message_id,
-          assistant_message_id,
-          state,
-          requested_at,
-          started_at,
-          completed_at,
-          checkpoint_files_json
-        )
-        VALUES (
-          'thread-active',
-          'turn-active',
-          'message-user',
-          'message-final',
-          'completed',
-          '2026-05-01T00:00:12.000Z',
-          '2026-05-01T00:00:12.000Z',
-          '2026-05-01T00:00:13.000Z',
-          '[]'
-        )
-      `;
+      yield* sql`INSERT INTO projection_turns ${sql.insert({
+        thread_id: "thread-active",
+        turn_id: "turn-active",
+        pending_message_id: "message-user",
+        assistant_message_id: "message-final",
+        state: "completed",
+        requested_at: "2026-05-01T00:00:12.000Z",
+        started_at: "2026-05-01T00:00:12.000Z",
+        completed_at: "2026-05-01T00:00:13.000Z",
+        checkpoint_files_json: "[]",
+      })}`;
 
       const literalPercent = yield* snapshotQuery.searchThreads({ query: "100%" });
       assert.deepStrictEqual(
@@ -2060,49 +1630,38 @@ it.effect(
       yield* sql`DELETE FROM projection_turns`;
       yield* sql`DELETE FROM projection_state`;
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES
-          (
-            'project-1',
-            'Shared Project 1',
-            '/tmp/shared-root',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            '[]',
-            '2026-04-04T00:00:00.000Z',
-            '2026-04-04T00:00:01.000Z',
-            NULL
-          ),
-          (
-            'project-2',
-            'Shared Project 2',
-            '/tmp/shared-root',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            '[]',
-            '2026-04-04T00:00:02.000Z',
-            '2026-04-04T00:00:03.000Z',
-            NULL
-          ),
-          (
-            'project-3',
-            'Deleted Project',
-            '/tmp/deleted-root',
-            '{"provider":"codex","model":"gpt-5-codex"}',
-            '[]',
-            '2026-04-04T00:00:04.000Z',
-            '2026-04-04T00:00:05.000Z',
-            '2026-04-04T00:00:06.000Z'
-          )
-      `;
+      yield* sql`INSERT INTO projection_projects ${sql.insert([
+        {
+          project_id: "project-1",
+          title: "Shared Project 1",
+          workspace_root: "/tmp/shared-root",
+          default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+          scripts_json: "[]",
+          created_at: "2026-04-04T00:00:00.000Z",
+          updated_at: "2026-04-04T00:00:01.000Z",
+          deleted_at: null,
+        },
+        {
+          project_id: "project-2",
+          title: "Shared Project 2",
+          workspace_root: "/tmp/shared-root",
+          default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+          scripts_json: "[]",
+          created_at: "2026-04-04T00:00:02.000Z",
+          updated_at: "2026-04-04T00:00:03.000Z",
+          deleted_at: null,
+        },
+        {
+          project_id: "project-3",
+          title: "Deleted Project",
+          workspace_root: "/tmp/deleted-root",
+          default_model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+          scripts_json: "[]",
+          created_at: "2026-04-04T00:00:04.000Z",
+          updated_at: "2026-04-04T00:00:05.000Z",
+          deleted_at: "2026-04-04T00:00:06.000Z",
+        },
+      ])}`;
 
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
       assert.deepStrictEqual(resolveCalls.toSorted(), ["/tmp/shared-root"]);
@@ -2145,23 +1704,30 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
     yield* sql`DELETE FROM projection_thread_activities`;
     yield* sql`DELETE FROM projection_state`;
 
-    yield* sql`
-      INSERT INTO projection_projects (
-        project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
-      )
-      VALUES ('project-w', 'Windowed', '/tmp/project-w', '[]',
-        '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z', NULL)
-    `;
-    yield* sql`
-      INSERT INTO projection_threads (
-        thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode,
-        latest_turn_id, pending_approval_count, pending_user_input_count,
-        has_actionable_proposed_plan, created_at, updated_at, deleted_at
-      )
-      VALUES ('thread-w', 'project-w', 'Windowed thread',
-        '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
-        'turn-5', 0, 0, 0, '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:10.000Z', NULL)
-    `;
+    yield* sql`INSERT INTO projection_projects ${sql.insert({
+      project_id: "project-w",
+      title: "Windowed",
+      workspace_root: "/tmp/project-w",
+      scripts_json: "[]",
+      created_at: "2026-03-01T00:00:00.000Z",
+      updated_at: "2026-03-01T00:00:00.000Z",
+      deleted_at: null,
+    })}`;
+    yield* sql`INSERT INTO projection_threads ${sql.insert({
+      thread_id: "thread-w",
+      project_id: "project-w",
+      title: "Windowed thread",
+      model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+      runtime_mode: "full-access",
+      interaction_mode: "default",
+      latest_turn_id: "turn-5",
+      pending_approval_count: 0,
+      pending_user_input_count: 0,
+      has_actionable_proposed_plan: 0,
+      created_at: "2026-03-01T00:00:00.000Z",
+      updated_at: "2026-03-01T00:00:10.000Z",
+      deleted_at: null,
+    })}`;
 
     const turns: ReadonlyArray<{
       turn: string;
@@ -2175,59 +1741,80 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
       { turn: "turn-5", pendingMessage: "user-msg-5", at: "2026-03-01T00:04:00.000Z" },
     ];
     for (const { turn, pendingMessage, at } of turns) {
-      yield* sql`
-        INSERT INTO projection_turns (
-          thread_id, turn_id, pending_message_id, state, requested_at, started_at, completed_at,
-          checkpoint_files_json
-        )
-        VALUES ('thread-w', ${turn}, ${pendingMessage}, 'completed', ${at}, ${at}, ${at}, '[]')
-      `;
+      yield* sql`INSERT INTO projection_turns ${sql.insert({
+        thread_id: "thread-w",
+        turn_id: turn,
+        pending_message_id: pendingMessage,
+        state: "completed",
+        requested_at: at,
+        started_at: at,
+        completed_at: at,
+        checkpoint_files_json: "[]",
+      })}`;
       if (pendingMessage !== null) {
-        yield* sql`
-          INSERT INTO projection_thread_messages (
-            message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at
-          )
-          VALUES (${pendingMessage}, 'thread-w', NULL, 'user', ${"prompt for " + turn}, 0, ${at}, ${at})
-        `;
+        yield* sql`INSERT INTO projection_thread_messages ${sql.insert({
+          message_id: pendingMessage,
+          thread_id: "thread-w",
+          turn_id: null,
+          role: "user",
+          text: "prompt for " + turn,
+          is_streaming: 0,
+          created_at: at,
+          updated_at: at,
+        })}`;
       }
-      yield* sql`
-        INSERT INTO projection_thread_messages (
-          message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at
-        )
-        VALUES (${turn + "-reply"}, 'thread-w', ${turn}, 'assistant', ${"reply from " + turn}, 0, ${at}, ${at})
-      `;
-      yield* sql`
-        INSERT INTO projection_thread_activities (
-          activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at
-        )
-        VALUES (${turn + "-activity"}, 'thread-w', ${turn}, 'tool', 'tool.completed',
-          'ran tool', '{"ok":true}', ${at})
-      `;
+      yield* sql`INSERT INTO projection_thread_messages ${sql.insert({
+        message_id: turn + "-reply",
+        thread_id: "thread-w",
+        turn_id: turn,
+        role: "assistant",
+        text: "reply from " + turn,
+        is_streaming: 0,
+        created_at: at,
+        updated_at: at,
+      })}`;
+      yield* sql`INSERT INTO projection_thread_activities ${sql.insert({
+        activity_id: turn + "-activity",
+        thread_id: "thread-w",
+        turn_id: turn,
+        tone: "tool",
+        kind: "tool.completed",
+        summary: "ran tool",
+        payload_json: '{"ok":true}',
+        created_at: at,
+      })}`;
     }
 
     // Straggler user message sent while turn-4 ran: turn_id NULL and not any
     // turn's pending_message_id.
-    yield* sql`
-      INSERT INTO projection_thread_messages (
-        message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at
-      )
-      VALUES ('user-msg-straggler', 'thread-w', NULL, 'user', 'while you are at it',
-        0, '2026-03-01T00:03:30.000Z', '2026-03-01T00:03:30.000Z')
-    `;
+    yield* sql`INSERT INTO projection_thread_messages ${sql.insert({
+      message_id: "user-msg-straggler",
+      thread_id: "thread-w",
+      turn_id: null,
+      role: "user",
+      text: "while you are at it",
+      is_streaming: 0,
+      created_at: "2026-03-01T00:03:30.000Z",
+      updated_at: "2026-03-01T00:03:30.000Z",
+    })}`;
     // Turnless activity in the same time range.
-    yield* sql`
-      INSERT INTO projection_thread_activities (
-        activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at
-      )
-      VALUES ('turnless-activity', 'thread-w', NULL, 'info', 'context-window.updated',
-        'usage', '{"usedTokens":1}', '2026-03-01T00:03:36.000Z')
-    `;
+    yield* sql`INSERT INTO projection_thread_activities ${sql.insert({
+      activity_id: "turnless-activity",
+      thread_id: "thread-w",
+      turn_id: null,
+      tone: "info",
+      kind: "context-window.updated",
+      summary: "usage",
+      payload_json: '{"usedTokens":1}',
+      created_at: "2026-03-01T00:03:36.000Z",
+    })}`;
 
     for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
-      yield* sql`
-        INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
-        VALUES (${projector}, 42, '2026-03-01T00:00:10.000Z')
-      `;
+      yield* sql`INSERT INTO projection_state ${sql.insert({
+        projector: projector,
+        last_applied_sequence: 42,
+        updated_at: "2026-03-01T00:00:10.000Z",
+      })}`;
     }
   });
 
@@ -2328,16 +1915,16 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
       `;
       yield* sql`DELETE FROM projection_turns WHERE thread_id = 'thread-w'`;
       for (const row of turnRows) {
-        yield* sql`
-          INSERT INTO projection_turns (
-            thread_id, turn_id, pending_message_id, state, requested_at, started_at,
-            completed_at, checkpoint_files_json
-          )
-          VALUES (${row.thread_id as string}, ${row.turn_id as string},
-            ${row.pending_message_id as string | null}, ${row.state as string},
-            ${row.requested_at as string}, ${row.started_at as string},
-            ${row.completed_at as string}, ${row.checkpoint_files_json as string})
-        `;
+        yield* sql`INSERT INTO projection_turns ${sql.insert({
+          thread_id: row.thread_id as string,
+          turn_id: row.turn_id as string,
+          pending_message_id: row.pending_message_id as string | null,
+          state: row.state as string,
+          requested_at: row.requested_at as string,
+          started_at: row.started_at as string,
+          completed_at: row.completed_at as string,
+          checkpoint_files_json: row.checkpoint_files_json as string,
+        })}`;
       }
 
       const olderPage = yield* snapshotQuery.getThreadDetailSnapshot(threadW, {
@@ -2590,51 +2177,83 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
         assert.equal(windowedDetail.value.thread.activities.at(-1)?.id, asEventId("activity-0501"));
       }
 
-      yield* sql`
-        INSERT INTO projection_thread_activities (
-          activity_id, thread_id, turn_id, tone, kind, summary, payload_json, sequence, created_at
-        )
-        VALUES
-          (
-            'approval-old', 'thread-w', NULL, 'approval', 'approval.requested',
-            'Approve old command', '{"requestId":"approval-1"}', NULL,
-            '2026-03-01T00:00:01.000Z'
-          ),
-          (
-            'user-input-old', 'thread-w', NULL, 'approval', 'user-input.requested',
-            'Answer old question', '{"requestId":"input-1"}', NULL,
-            '2026-03-01T00:00:02.000Z'
-          ),
-          (
-            'user-input-closed', 'thread-w', NULL, 'approval', 'user-input.requested',
-            'Closed question', '{"requestId":"input-closed"}', NULL,
-            '2026-03-01T00:00:03.000Z'
-          ),
-          (
-            'user-input-closed-resolution', 'thread-w', NULL, 'info', 'user-input.resolved',
-            'Closed question', '{"requestId":"input-closed"}', NULL,
-            '2026-03-01T00:00:04.000Z'
-          ),
-          (
-            'user-input-tied-z-request', 'thread-w', NULL, 'approval', 'user-input.requested',
-            'Tied open question', '{"requestId":"input-tied-open"}', NULL,
-            '2026-03-01T00:00:05.000Z'
-          ),
-          (
-            'user-input-tied-a-resolution', 'thread-w', NULL, 'info', 'user-input.resolved',
-            'Tied open question', '{"requestId":"input-tied-open"}', NULL,
-            '2026-03-01T00:00:05.000Z'
-          )
-      `;
-      yield* sql`
-        INSERT INTO projection_pending_approvals (
-          request_id, thread_id, turn_id, status, decision, created_at, resolved_at
-        )
-        VALUES (
-          'approval-1', 'thread-w', NULL, 'pending', NULL,
-          '2026-03-01T00:00:01.000Z', NULL
-        )
-      `;
+      yield* sql`INSERT INTO projection_thread_activities ${sql.insert([
+        {
+          activity_id: "approval-old",
+          thread_id: "thread-w",
+          turn_id: null,
+          tone: "approval",
+          kind: "approval.requested",
+          summary: "Approve old command",
+          payload_json: '{"requestId":"approval-1"}',
+          sequence: null,
+          created_at: "2026-03-01T00:00:01.000Z",
+        },
+        {
+          activity_id: "user-input-old",
+          thread_id: "thread-w",
+          turn_id: null,
+          tone: "approval",
+          kind: "user-input.requested",
+          summary: "Answer old question",
+          payload_json: '{"requestId":"input-1"}',
+          sequence: null,
+          created_at: "2026-03-01T00:00:02.000Z",
+        },
+        {
+          activity_id: "user-input-closed",
+          thread_id: "thread-w",
+          turn_id: null,
+          tone: "approval",
+          kind: "user-input.requested",
+          summary: "Closed question",
+          payload_json: '{"requestId":"input-closed"}',
+          sequence: null,
+          created_at: "2026-03-01T00:00:03.000Z",
+        },
+        {
+          activity_id: "user-input-closed-resolution",
+          thread_id: "thread-w",
+          turn_id: null,
+          tone: "info",
+          kind: "user-input.resolved",
+          summary: "Closed question",
+          payload_json: '{"requestId":"input-closed"}',
+          sequence: null,
+          created_at: "2026-03-01T00:00:04.000Z",
+        },
+        {
+          activity_id: "user-input-tied-z-request",
+          thread_id: "thread-w",
+          turn_id: null,
+          tone: "approval",
+          kind: "user-input.requested",
+          summary: "Tied open question",
+          payload_json: '{"requestId":"input-tied-open"}',
+          sequence: null,
+          created_at: "2026-03-01T00:00:05.000Z",
+        },
+        {
+          activity_id: "user-input-tied-a-resolution",
+          thread_id: "thread-w",
+          turn_id: null,
+          tone: "info",
+          kind: "user-input.resolved",
+          summary: "Tied open question",
+          payload_json: '{"requestId":"input-tied-open"}',
+          sequence: null,
+          created_at: "2026-03-01T00:00:05.000Z",
+        },
+      ])}`;
+      yield* sql`INSERT INTO projection_pending_approvals ${sql.insert({
+        request_id: "approval-1",
+        thread_id: "thread-w",
+        turn_id: null,
+        status: "pending",
+        decision: null,
+        created_at: "2026-03-01T00:00:01.000Z",
+        resolved_at: null,
+      })}`;
       yield* sql`
         UPDATE projection_threads
         SET pending_approval_count = 1, pending_user_input_count = 1
@@ -2736,35 +2355,45 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
       yield* sql`DELETE FROM projection_thread_activities`;
       yield* sql`DELETE FROM projection_state`;
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
-        )
-        VALUES ('project-e', 'Empty', '/tmp/project-e', '[]',
-          '2026-03-02T00:00:00.000Z', '2026-03-02T00:00:00.000Z', NULL)
-      `;
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode,
-          pending_approval_count, pending_user_input_count, has_actionable_proposed_plan,
-          created_at, updated_at, deleted_at
-        )
-        VALUES ('thread-e', 'project-e', 'Turnless thread',
-          '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
-          0, 0, 0, '2026-03-02T00:00:00.000Z', '2026-03-02T00:00:00.000Z', NULL)
-      `;
-      yield* sql`
-        INSERT INTO projection_thread_messages (
-          message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at
-        )
-        VALUES ('pre-turn-msg', 'thread-e', NULL, 'user', 'first prompt', 0,
-          '2026-03-02T00:00:01.000Z', '2026-03-02T00:00:01.000Z')
-      `;
+      yield* sql`INSERT INTO projection_projects ${sql.insert({
+        project_id: "project-e",
+        title: "Empty",
+        workspace_root: "/tmp/project-e",
+        scripts_json: "[]",
+        created_at: "2026-03-02T00:00:00.000Z",
+        updated_at: "2026-03-02T00:00:00.000Z",
+        deleted_at: null,
+      })}`;
+      yield* sql`INSERT INTO projection_threads ${sql.insert({
+        thread_id: "thread-e",
+        project_id: "project-e",
+        title: "Turnless thread",
+        model_selection_json: '{"provider":"codex","model":"gpt-5-codex"}',
+        runtime_mode: "full-access",
+        interaction_mode: "default",
+        pending_approval_count: 0,
+        pending_user_input_count: 0,
+        has_actionable_proposed_plan: 0,
+        created_at: "2026-03-02T00:00:00.000Z",
+        updated_at: "2026-03-02T00:00:00.000Z",
+        deleted_at: null,
+      })}`;
+      yield* sql`INSERT INTO projection_thread_messages ${sql.insert({
+        message_id: "pre-turn-msg",
+        thread_id: "thread-e",
+        turn_id: null,
+        role: "user",
+        text: "first prompt",
+        is_streaming: 0,
+        created_at: "2026-03-02T00:00:01.000Z",
+        updated_at: "2026-03-02T00:00:01.000Z",
+      })}`;
       for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
-        yield* sql`
-          INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
-          VALUES (${projector}, 7, '2026-03-02T00:00:01.000Z')
-        `;
+        yield* sql`INSERT INTO projection_state ${sql.insert({
+          projector: projector,
+          last_applied_sequence: 7,
+          updated_at: "2026-03-02T00:00:01.000Z",
+        })}`;
       }
 
       const snapshot = yield* snapshotQuery.getThreadDetailSnapshot(ThreadId.make("thread-e"), {
