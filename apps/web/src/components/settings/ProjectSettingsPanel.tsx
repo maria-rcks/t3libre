@@ -575,8 +575,7 @@ function ProjectDetail({
   );
   // What the "Default" option resolves to while no override is set: the
   // repo's t3.json value when present, otherwise the global setting.
-  const inheritedEnvMode =
-    t3File.file?.defaultThreadEnvMode ?? scriptSettings.defaultThreadEnvMode;
+  const inheritedEnvMode = t3File.file?.defaultThreadEnvMode ?? scriptSettings.defaultThreadEnvMode;
   const inheritedEnvModeSource = t3File.file?.defaultThreadEnvMode != null ? "t3.json" : "global";
   const importableScripts = useMemo(
     () =>
