@@ -2127,19 +2127,19 @@ describe("deriveActiveWorkStartedAt", () => {
 describe("deriveWorkLogEntries quiet-timeline guarantee", () => {
   it("concurrent subagents replace their launch tools with one lifecycle row", () => {
     const activities: OrchestrationThreadActivity[] = [];
-    for (const [index, toolName] of ["Agent", "Task"].entries()) {
+    for (let agent = 0; agent < 5; agent += 1) {
       activities.push(
         makeActivity({
           kind: "tool.updated",
           summary: "Subagent task",
           payload: {
-            toolCallId: `launch-${index}`,
+            toolCallId: `launch-${agent}`,
             itemType: "collab_agent_tool_call",
             status: "inProgress",
-            data: { toolName },
+            data: { toolName: agent % 2 === 0 ? "Agent" : "Task" },
           },
           turnId: "turn-batch",
-          sequence: index - 5,
+          sequence: agent - 10,
         }),
       );
       expect(deriveWorkLogEntries(activities)).toHaveLength(0);
@@ -2147,20 +2147,6 @@ describe("deriveWorkLogEntries quiet-timeline guarantee", () => {
     for (let agent = 0; agent < 5; agent += 1) {
       const taskId = `task-${agent}`;
       const toolUseId = `launch-${agent}`;
-      activities.push(
-        makeActivity({
-          kind: "tool.updated",
-          summary: "Subagent task",
-          payload: {
-            toolCallId: toolUseId,
-            itemType: "collab_agent_tool_call",
-            status: "inProgress",
-            data: { toolName: "Agent" },
-          },
-          turnId: "turn-batch",
-          sequence: agent * 20 - 2,
-        }),
-      );
       expect(deriveWorkLogEntries(activities)).toHaveLength(agent === 0 ? 0 : 1);
       activities.push(
         makeActivity({

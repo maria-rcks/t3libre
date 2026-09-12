@@ -3724,12 +3724,7 @@ const stopRowToggleWhileSelectingText = (e: MouseEvent<HTMLElement>) => {
   }
 };
 
-/**
- * A batch of subagents as one work row. The header reads like the sibling
- * tool rows and is the only interactive part of the row; expanding lists
- * each member below it, and a member click shows its result in the
- * standard tool body box.
- */
+/** One tool row per batch, with member results available on expansion. */
 const AgentSpawnRow = memo(function AgentSpawnRow(props: {
   workEntry: TimelineWorkEntry;
   active?: boolean | undefined;
@@ -3762,24 +3757,8 @@ const AgentSpawnRow = memo(function AgentSpawnRow(props: {
   });
   const { live, lead } = summary;
   const failed = summary.tone === "failed";
-  // Same rule as the panel footer: providers may aggregate member usage into
-  // the coordinator, so count the coordinator only when no members exist.
-  const totalTokens = agents.reduce(
-    (sum, agent) => sum + (agent.usage?.totalTokens ?? 0),
-    agents.length === 0 ? (workflowGroup?.workflow.usage?.totalTokens ?? 0) : 0,
-  );
-  const livePhase = workflowGroup?.phases.find((phase) => phase.state === "running");
   const workflowName =
     workflowGroup?.workflow.workflowName ?? workflowGroup?.workflow.title ?? null;
-  const status =
-    live && livePhase ? `${livePhase.title} · ${livePhase.activeCount} working` : summary.status;
-  // The verb already says the batch ran; only surface outcomes that differ.
-  const meta = [
-    summary.tone === "completed" ? null : status,
-    totalTokens > 0 ? `${formatSubagentTokenCount(totalTokens)} tok` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
   const toggleExpanded = () => {
     props.onToggleEntry?.(expanded);
     onToggleSpawnRow(workEntry.id, !expanded);
@@ -3787,42 +3766,19 @@ const AgentSpawnRow = memo(function AgentSpawnRow(props: {
 
   return (
     <div className="flex flex-col">
-      <div
-        role="button"
-        tabIndex={0}
-        aria-label={meta ? `${lead}, ${meta}` : lead}
+      <button
+        type="button"
         aria-expanded={expanded}
         onClick={toggleExpanded}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            toggleExpanded();
-          }
-        }}
-        className="flex cursor-pointer select-none items-center gap-1.5 rounded-md transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        className="flex cursor-pointer select-none rounded-md text-left transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
       >
-        <div className="min-w-0 flex-1">
-          <LiveActivityRow
-            label={workflowName ? `${lead} · ${workflowName}` : lead}
-            iconName="bot"
-            active={live && props.active !== false}
-            failed={failed}
-          />
-        </div>
-        {meta ? (
-          <span className="shrink-0 font-mono text-[.7rem] tabular-nums text-muted-foreground">
-            {meta}
-          </span>
-        ) : null}
-        <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
-          <ChevronRightIcon
-            className={cn(
-              "size-3 shrink-0 text-icon-muted opacity-70 transition-transform duration-200",
-              expanded && "rotate-90",
-            )}
-          />
-        </span>
-      </div>
+        <LiveActivityRow
+          label={workflowName ? `${lead} · ${workflowName}` : lead}
+          iconName="bot"
+          active={live && props.active !== false}
+          failed={failed}
+        />
+      </button>
       {expanded ? (
         <div className="ms-7 mt-0.5 flex flex-col">
           {agents.map((agent) => (
