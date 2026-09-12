@@ -55,6 +55,12 @@ describe("pull request checkout commands", () => {
   it.each([
     ["github", "feature", null, "gh pr checkout 42"],
     ["gitlab", "feature", null, "glab mr checkout 42"],
+    [
+      "forgejo",
+      "feature",
+      null,
+      "git fetch origin refs/pull/42/head && git checkout -b pulls/42 FETCH_HEAD",
+    ],
     ["azure-devops", "feature", null, "az repos pr checkout --id 42"],
     [
       "bitbucket",

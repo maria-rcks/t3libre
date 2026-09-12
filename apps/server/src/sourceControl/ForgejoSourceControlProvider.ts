@@ -1,13 +1,16 @@
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
+import * as Result from "effect/Result";
 import { SourceControlProviderError } from "@t3tools/contracts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as ForgejoCli from "./ForgejoCli.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
 import {
   providerAuth,
+  probeSourceControlProvider,
   type SourceControlCliDiscoverySpec,
+  type SourceControlManagedCliDiscoverySpec,
 } from "./SourceControlProviderDiscovery.ts";
 import { ForgejoPullRequestSchema, toForgejoChangeRequest } from "./forgejoPullRequests.ts";
 
@@ -47,8 +50,94 @@ export const discovery = {
     return login ? { kind: "forgejo", name: "Forgejo / Gitea", baseUrl: login.url } : null;
   },
   installHint:
-    "Install the official Gitea CLI (`tea` 0.16 or later) from https://gitea.com/gitea/tea, then run `tea login add` for each Forgejo or Gitea server.",
+    "Install `fj` 0.6 or later from https://codeberg.org/forgejo-contrib/forgejo-cli and run `fj --host <server-url> auth add-token`, or install `tea` 0.16 or later from https://gitea.com/gitea/tea and run `tea login add` for each Forgejo or Gitea server.",
 } satisfies SourceControlCliDiscoverySpec;
+
+export const makeDiscovery = Effect.gen(function* () {
+  const cli = yield* ForgejoCli.ForgejoCli;
+  const process = yield* VcsProcess.VcsProcess;
+  const listLogins = cli.listLogins;
+  if (!listLogins) return discovery;
+  return {
+    type: "managed-cli",
+    kind: "forgejo",
+    label: discovery.label,
+    installHint: discovery.installHint,
+    probe: Effect.fn("ForgejoSourceControlProvider.discovery")(function* (cwd: string) {
+      const remoteUrl = yield* process
+        .run({
+          operation: "source-control.discovery.remote",
+          command: "git",
+          args: ["remote", "get-url", "origin"],
+          cwd,
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+          maxOutputBytes: 8_000,
+        })
+        .pipe(
+          Effect.map((result) => result.stdout.trim()),
+          Effect.orElseSucceed(() => ""),
+        );
+      const credentials = yield* Effect.result(listLogins({ cwd, command: "fj", remoteUrl }));
+      const logins = Result.isSuccess(credentials) ? credentials.success : [];
+      const remote = ForgejoCli.parseForgejoRemote(remoteUrl);
+      const login =
+        (remote && ForgejoCli.matchForgejoLogin(logins, remote)) ||
+        logins.find((entry) => entry.default === "true") ||
+        logins[0];
+      const fj = yield* probeSourceControlProvider({
+        cwd,
+        process,
+        spec: {
+          ...discovery,
+          executable: "fj",
+          versionArgs: ["version"],
+          authArgs: login ? ["--host", login.url, "whoami"] : ["auth", "list"],
+          parseAuth: (result) =>
+            Result.isFailure(credentials)
+              ? providerAuth({
+                  status: "unknown",
+                  detail: "Could not read fj authentication storage. Authenticate again with fj.",
+                })
+              : login && result.exitCode === 0
+                ? providerAuth({
+                    status: "authenticated",
+                    account: login.user,
+                    host: ForgejoCli.parseForgejoRemote(login.url)?.host,
+                  })
+                : providerAuth({
+                    status: "unauthenticated",
+                    detail:
+                      "Authenticate this server with `fj --host <server-url> auth add-token`.",
+                  }),
+        },
+      });
+      // A configured fj account owns its requests, including authentication errors.
+      if (fj.status === "available" && (login || Result.isFailure(credentials))) return fj;
+      const tea = yield* probeSourceControlProvider({ cwd, process, spec: discovery });
+      return tea.status === "available" || fj.status === "missing" ? tea : fj;
+    }),
+    refineUnknownRemote: Effect.fn("ForgejoSourceControlProvider.refineUnknownRemote")(
+      function* (input: {
+        readonly cwd: string;
+        readonly context: SourceControlProvider.SourceControlProviderContext;
+      }) {
+        const remote = ForgejoCli.parseForgejoRemote(input.context.remoteUrl);
+        if (!remote) return null;
+        for (const command of ["fj", "tea"] as const) {
+          const logins = yield* listLogins({
+            cwd: input.cwd,
+            command,
+            remoteUrl: input.context.remoteUrl,
+          }).pipe(Effect.orElseSucceed(() => []));
+          const login = ForgejoCli.matchForgejoLogin(logins, remote, input.context.requestedHost);
+          if (login) return { kind: "forgejo" as const, name: discovery.label, baseUrl: login.url };
+        }
+        return null;
+      },
+    ),
+  } satisfies SourceControlManagedCliDiscoverySpec;
+});
 
 const RepositorySchema = Schema.Struct({
   full_name: Schema.String,
@@ -95,7 +184,7 @@ export const make = Effect.gen(function* () {
           provider: "forgejo",
           operation,
           cwd,
-          command: "tea",
+          ...(isForgejoCliError(cause) ? { command: cause.command } : {}),
           detail: isForgejoCliError(cause) ? cause.detail : "Forgejo operation failed.",
           cause,
         }),
@@ -214,19 +303,56 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const repo = yield* cli.resolveRepository(input);
         const pull = yield* getPull(input);
-        yield* cli.execute({
-          cwd: input.cwd,
-          args: [
-            "pulls",
-            "checkout",
-            "--login",
-            repo.login,
-            "--repo",
-            repo.repository,
-            "--branch",
-            String(pull.number),
-          ],
-        });
+        if (repo.command === "fj") {
+          // fj checkout cannot target a repository outside the local remotes.
+          const urls = yield* request(
+            { ...input, path: repositoryPath(repo.repository) },
+            RepositorySchema,
+          );
+          const remote = input.context?.remoteUrl;
+          const useSsh = remote && ForgejoCli.parseForgejoRemote(remote)?.ssh;
+          yield* process.run({
+            operation: "ForgejoSourceControlProvider.checkoutChangeRequest",
+            command: "git",
+            cwd: input.cwd,
+            args: [
+              "fetch",
+              "--",
+              useSsh ? urls.ssh_url : urls.clone_url,
+              `refs/pull/${pull.number}/head`,
+            ],
+          });
+          const branch = `pulls/${pull.number}`;
+          const existing = yield* process.run({
+            operation: "ForgejoSourceControlProvider.checkoutChangeRequest",
+            command: "git",
+            cwd: input.cwd,
+            args: ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
+            allowNonZeroExit: true,
+          });
+          yield* process.run({
+            operation: "ForgejoSourceControlProvider.checkoutChangeRequest",
+            command: "git",
+            cwd: input.cwd,
+            args:
+              existing.exitCode === 0
+                ? ["checkout", branch]
+                : ["checkout", "-b", branch, "FETCH_HEAD"],
+          });
+        } else
+          yield* cli.execute({
+            cwd: input.cwd,
+            args: [
+              "pulls",
+              "checkout",
+              "--login",
+              repo.login,
+              "--repo",
+              repo.repository,
+              "--branch",
+              String(pull.number),
+            ],
+          });
         if (input.force) {
           // tea leaves an existing PR branch at its old tip. Keep dirty files safe
           // while bringing the selected branch to the PR revision we fetched.

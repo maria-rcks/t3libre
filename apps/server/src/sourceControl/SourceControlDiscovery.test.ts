@@ -4,8 +4,10 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { VcsProcessSpawnError } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
@@ -36,7 +38,7 @@ const sourceControlProviderRegistryTestLayer = (input: {
         Layer.mock(BitbucketApi.BitbucketApi)(input.bitbucket),
         Layer.mock(GitHubCli.GitHubCli)({}),
         Layer.mock(GitLabCli.GitLabCli)({}),
-        Layer.mock(ForgejoCli.ForgejoCli)({}),
+        Layer.mock(ForgejoCli.ForgejoCli)({ listLogins: () => Effect.succeed([]) }),
         Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({}),
         Layer.mock(VcsProcess.VcsProcess)(input.process),
       ),
@@ -639,6 +641,18 @@ it.effect("rejects HTTP failures even when tea exits successfully", () =>
         "Forgejo repository or pull request was not found.",
       );
   }).pipe(
+    Effect.provideService(
+      FileSystem.FileSystem,
+      FileSystem.makeNoop({
+        exists: () => Effect.succeed(false),
+      }),
+    ),
+    Effect.provideService(
+      HttpClient.HttpClient,
+      HttpClient.make(() => {
+        throw new Error("tea must handle its own HTTP request");
+      }),
+    ),
     Effect.provide(
       Layer.mock(VcsProcess.VcsProcess)({
         run: (input) => {
@@ -692,6 +706,18 @@ it.effect("routes mounted Forgejo repositories without repeating the mount in AP
       assert.strictEqual(result.stdout, "[]");
     }
   }).pipe(
+    Effect.provideService(
+      FileSystem.FileSystem,
+      FileSystem.makeNoop({
+        exists: () => Effect.succeed(false),
+      }),
+    ),
+    Effect.provideService(
+      HttpClient.HttpClient,
+      HttpClient.make(() => {
+        throw new Error("tea must handle its own HTTP request");
+      }),
+    ),
     Effect.provide(
       Layer.mock(VcsProcess.VcsProcess)({
         run: (input) => {
@@ -723,4 +749,528 @@ it.effect("routes mounted Forgejo repositories without repeating the mount in AP
       }),
     ),
   ),
+);
+
+it.effect("prefers fj and preserves the server port and mount when sending a mutation", () => {
+  const commands: string[] = [];
+  const requests: string[] = [];
+  return Effect.gen(function* () {
+    const cli = yield* ForgejoCli.make;
+    const result = yield* cli.api({
+      cwd: "/repo",
+      repository: "forgejo/maria/project",
+      context: {
+        provider: {
+          kind: "forgejo",
+          name: "Forgejo",
+          baseUrl: "http://forgejo.local:3000/forgejo",
+        },
+        remoteName: "origin",
+        remoteUrl: "http://forgejo.local:3000/forgejo/maria/project.git",
+      },
+      path: "repos/forgejo/maria/project/issues/42/comments",
+      method: "POST",
+      body: { body: "verified through fj" },
+    });
+    assert.strictEqual(result.stdout, '{"id":99}');
+    assert.deepStrictEqual(commands, ["fj"]);
+    assert.deepStrictEqual(requests, [
+      "http://forgejo.local:3000/forgejo/api/v1/repos/maria/project/issues/42/comments",
+    ]);
+  }).pipe(
+    Effect.provideService(
+      FileSystem.FileSystem,
+      FileSystem.makeNoop({
+        exists: () => Effect.succeed(true),
+        readFileString: () =>
+          Effect.succeed(
+            encodeJson({
+              hosts: {
+                "forgejo.local:3000/forgejo": { type: "Application", token: "test-token" },
+              },
+            }),
+          ),
+      }),
+    ),
+    Effect.provideService(
+      HttpClient.HttpClient,
+      HttpClient.make((request) => {
+        requests.push(request.url);
+        assert.strictEqual(request.method, "POST");
+        assert.strictEqual(request.headers.authorization, "token test-token");
+        assert.strictEqual(request.body._tag, "Uint8Array");
+        if (request.body._tag === "Uint8Array")
+          assert.deepStrictEqual(JSON.parse(new TextDecoder().decode(request.body.body)), {
+            body: "verified through fj",
+          });
+        return Effect.succeed(
+          HttpClientResponse.fromWeb(request, new Response('{"id":99}', { status: 201 })),
+        );
+      }),
+    ),
+    Effect.provide(
+      Layer.mock(VcsProcess.VcsProcess)({
+        run: (input) => {
+          commands.push(input.command);
+          assert.strictEqual(input.command, "fj");
+          assert.deepStrictEqual(input.args, [
+            "--host",
+            "http://forgejo.local:3000/forgejo",
+            "whoami",
+          ]);
+          return Effect.succeed(processOutput(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("falls back to tea when fj is missing or has no account for this server", () =>
+  Effect.gen(function* () {
+    for (const scenario of ["missing-cli", "missing-account", "stale-invalid-storage"] as const) {
+      const commands: string[] = [];
+      yield* Effect.gen(function* () {
+        const cli = yield* ForgejoCli.make;
+        const result = yield* cli.api({
+          cwd: "/repo",
+          repository: "https://forgejo.local:3000/maria/project",
+          path: "repos/maria/project/pulls",
+        });
+        assert.strictEqual(result.stdout, "[]");
+        assert.deepStrictEqual(
+          commands,
+          scenario === "missing-account" ? ["tea", "tea"] : ["fj", "tea", "tea"],
+        );
+      }).pipe(
+        Effect.provideService(
+          FileSystem.FileSystem,
+          FileSystem.makeNoop({
+            exists: () => Effect.succeed(true),
+            readFileString: () =>
+              Effect.succeed(
+                scenario === "stale-invalid-storage"
+                  ? "invalid json"
+                  : encodeJson({
+                      hosts: {
+                        [scenario === "missing-cli" ? "forgejo.local:3000" : "other.local"]: {
+                          type: "Application",
+                          token: "test-token",
+                        },
+                      },
+                    }),
+              ),
+          }),
+        ),
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make(() => {
+            throw new Error("tea must handle its own HTTP request");
+          }),
+        ),
+        Effect.provide(
+          Layer.mock(VcsProcess.VcsProcess)({
+            run: (input) => {
+              commands.push(input.command);
+              if (input.command === "fj")
+                return Effect.fail(
+                  new VcsProcessSpawnError({
+                    operation: input.operation,
+                    command: input.command,
+                    cwd: input.cwd,
+                    cause: new Error("fj not found"),
+                  }),
+                );
+              assert.strictEqual(input.command, "tea");
+              return Effect.succeed(
+                input.args[0] === "login"
+                  ? processOutput(
+                      encodeJson([
+                        {
+                          name: "work",
+                          url: "https://forgejo.local:3000",
+                          user: "maria",
+                          default: "true",
+                          valid: "true",
+                        },
+                      ]),
+                    )
+                  : processOutput("[]", { stderr: "HTTP/1.1 200 OK\n" }),
+              );
+            },
+          }),
+        ),
+      );
+    }
+  }),
+);
+
+it.effect("does not retry fj mutations through tea after an HTTP failure or redirect", () =>
+  Effect.gen(function* () {
+    for (const status of [302, 401, 403, 404, 429, 500]) {
+      let writes = 0;
+      yield* Effect.gen(function* () {
+        const cli = yield* ForgejoCli.make;
+        const result = yield* cli
+          .api({
+            cwd: "/repo",
+            repository: "https://forgejo.local/maria/project",
+            path: "repos/maria/project/issues/42/comments",
+            method: "POST",
+            body: { body: "only once" },
+          })
+          .pipe(Effect.result);
+        assert.strictEqual(result._tag, "Failure");
+        if (result._tag === "Failure") {
+          assert.strictEqual(result.failure.command, "fj");
+          assert.strictEqual(result.failure.httpStatus, status);
+        }
+        assert.strictEqual(writes, 1);
+      }).pipe(
+        Effect.provideService(
+          FileSystem.FileSystem,
+          FileSystem.makeNoop({
+            exists: () => Effect.succeed(true),
+            readFileString: () =>
+              Effect.succeed(
+                encodeJson({
+                  hosts: {
+                    "forgejo.local": { type: "Application", token: "test-token" },
+                  },
+                }),
+              ),
+          }),
+        ),
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make((request) => {
+            writes++;
+            assert.strictEqual(
+              request.url,
+              "https://forgejo.local/api/v1/repos/maria/project/issues/42/comments",
+            );
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                new Response("", {
+                  status,
+                  headers: { location: "https://other.local/" },
+                }),
+              ),
+            );
+          }),
+        ),
+        Effect.provide(
+          Layer.mock(VcsProcess.VcsProcess)({
+            run: (input) => {
+              assert.strictEqual(
+                input.command,
+                "fj",
+                "a failed mutation must never switch accounts or CLI",
+              );
+              return Effect.succeed(processOutput(""));
+            },
+          }),
+        ),
+      );
+    }
+  }),
+);
+
+it.effect(
+  "discovers fj first and retains configured authentication failures instead of switching accounts",
+  () =>
+    Effect.gen(function* () {
+      for (const scenario of ["authenticated", "revoked", "missing", "invalid-storage"] as const) {
+        const commands: string[] = [];
+        yield* Effect.gen(function* () {
+          const spec = yield* ForgejoSourceControlProvider.makeDiscovery;
+          assert.strictEqual(spec.type, "managed-cli");
+          if (spec.type !== "managed-cli") return;
+          const result = yield* spec.probe("/repo");
+          assert.strictEqual(result.executable, scenario === "missing" ? "tea" : "fj");
+          assert.strictEqual(
+            result.auth.status,
+            scenario === "revoked"
+              ? "unauthenticated"
+              : scenario === "invalid-storage"
+                ? "unknown"
+                : "authenticated",
+          );
+          if (scenario !== "revoked" && scenario !== "invalid-storage")
+            assert.deepStrictEqual(result.auth.host, Option.some("forgejo.local:3000"));
+          assert.strictEqual(
+            commands.some((command) => command.startsWith("tea ")),
+            scenario === "missing",
+          );
+          assert.include(commands, "fj version");
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.mock(ForgejoCli.ForgejoCli)({
+                listLogins: (input) => {
+                  assert.strictEqual(
+                    input.remoteUrl,
+                    "http://forgejo.local:3000/maria/project.git",
+                  );
+                  if (scenario === "invalid-storage")
+                    return Effect.fail(
+                      new ForgejoCli.ForgejoCliError({
+                        command: "fj",
+                        cwd: input.cwd,
+                        reason: "authentication",
+                        detail: "fj authentication storage is invalid.",
+                      }),
+                    );
+                  return Effect.succeed([
+                    {
+                      name: "forgejo.local:3000",
+                      url: "http://forgejo.local:3000",
+                      user: "maria",
+                      default: "false",
+                    },
+                  ]);
+                },
+              }),
+              Layer.mock(VcsProcess.VcsProcess)({
+                run: (input) => {
+                  commands.push(`${input.command} ${input.args.join(" ")}`);
+                  if (input.command === "git")
+                    return Effect.succeed(
+                      processOutput("http://forgejo.local:3000/maria/project.git\n"),
+                    );
+                  if (input.command === "fj") {
+                    if (scenario === "missing")
+                      return Effect.fail(
+                        new VcsProcessSpawnError({
+                          operation: input.operation,
+                          command: input.command,
+                          cwd: input.cwd,
+                          cause: new Error("fj not found"),
+                        }),
+                      );
+                    if (input.args[0] === "version")
+                      return Effect.succeed(processOutput("fj 0.10.0"));
+                    if (scenario === "invalid-storage") {
+                      assert.deepStrictEqual(input.args, ["auth", "list"]);
+                      return Effect.succeed(processOutput(""));
+                    }
+                    assert.deepStrictEqual(input.args, [
+                      "--host",
+                      "http://forgejo.local:3000",
+                      "whoami",
+                    ]);
+                    return Effect.succeed(
+                      processOutput("", {
+                        exitCode: ChildProcessSpawner.ExitCode(scenario === "revoked" ? 1 : 0),
+                      }),
+                    );
+                  }
+                  assert.strictEqual(input.command, "tea");
+                  return Effect.succeed(
+                    input.args[0] === "--version"
+                      ? processOutput("tea version 0.16.0")
+                      : processOutput(
+                          encodeJson([
+                            {
+                              name: "work",
+                              url: "http://forgejo.local:3000",
+                              user: "maria",
+                              default: "true",
+                              valid: "true",
+                            },
+                          ]),
+                        ),
+                  );
+                },
+              }),
+            ),
+          ),
+        );
+      }
+    }),
+);
+
+it.effect(
+  "checks out fj pull refs and preserves existing branches and dirty files until forced",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const git = yield* VcsProcess.VcsProcess;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-fj-checkout-" });
+      const source = path.join(root, "source");
+      const cwd = path.join(root, "checkout");
+      yield* fs.makeDirectory(source);
+      for (const args of [
+        ["init", "-b", "main"],
+        ["config", "user.name", "Test"],
+        ["config", "user.email", "test@example.com"],
+      ])
+        yield* git.run({ operation: "test.setup", command: "git", cwd: source, args });
+      yield* fs.writeFileString(path.join(source, "base.txt"), "base\n");
+      for (const args of [
+        ["add", "base.txt"],
+        ["commit", "-m", "base"],
+      ])
+        yield* git.run({ operation: "test.setup", command: "git", cwd: source, args });
+      const base = (yield* git.run({
+        operation: "test.setup",
+        command: "git",
+        cwd: source,
+        args: ["rev-parse", "HEAD"],
+      })).stdout.trim();
+      yield* git.run({
+        operation: "test.setup",
+        command: "git",
+        cwd: root,
+        args: ["clone", source, cwd],
+      });
+      yield* fs.writeFileString(path.join(source, "feature.txt"), "pull request change\n");
+      for (const args of [
+        ["add", "feature.txt"],
+        ["commit", "-m", "feature"],
+        ["update-ref", "refs/pull/42/head", "HEAD"],
+      ])
+        yield* git.run({ operation: "test.setup", command: "git", cwd: source, args });
+      const head = (yield* git.run({
+        operation: "test.setup",
+        command: "git",
+        cwd: source,
+        args: ["rev-parse", "HEAD"],
+      })).stdout.trim();
+      const fetched: string[] = [];
+      const provider = yield* ForgejoSourceControlProvider.make.pipe(
+        Effect.provideService(
+          VcsProcess.VcsProcess,
+          VcsProcess.VcsProcess.of({
+            run: (input) => {
+              if (input.args[0] !== "fetch") return git.run(input);
+              const url = input.args[2];
+              assert.isDefined(url);
+              fetched.push(url!);
+              // Only SSH transport is substituted; both paths fetch the real pull ref.
+              return git.run({
+                ...input,
+                args: input.args.map((arg) =>
+                  arg === "git@forgejo.test:reviewer/project.git" ? source : arg,
+                ),
+              });
+            },
+          }),
+        ),
+        Effect.provide(
+          Layer.mock(ForgejoCli.ForgejoCli)({
+            resolveRepository: () =>
+              Effect.succeed({
+                command: "fj",
+                login: "work",
+                repository: "reviewer/project",
+                baseUrl: "https://forgejo.test",
+              }),
+            api: (input) => {
+              assert.include(
+                ["repos/reviewer/project", "repos/reviewer/project/pulls/42"],
+                input.path,
+              );
+              return Effect.succeed(
+                processOutput(
+                  encodeJson(
+                    input.path.endsWith("/pulls/42")
+                      ? {
+                          number: 42,
+                          title: "Checkout",
+                          html_url: "https://forgejo.test/reviewer/project/pulls/42",
+                          state: "open",
+                          merged: false,
+                          base: { ref: "main", sha: base, repo: null },
+                          head: { ref: "feature", sha: head, repo: null },
+                        }
+                      : {
+                          full_name: "reviewer/project",
+                          clone_url: source,
+                          ssh_url: "git@forgejo.test:reviewer/project.git",
+                          default_branch: "main",
+                        },
+                  ),
+                ),
+              );
+            },
+          }),
+        ),
+      );
+      yield* provider.checkoutChangeRequest({
+        cwd,
+        reference: "https://forgejo.test/reviewer/project/pulls/42",
+      });
+      assert.strictEqual(
+        (yield* git.run({
+          operation: "test.verify",
+          command: "git",
+          cwd,
+          args: ["branch", "--show-current"],
+        })).stdout.trim(),
+        "pulls/42",
+      );
+      assert.strictEqual(
+        (yield* git.run({
+          operation: "test.verify",
+          command: "git",
+          cwd,
+          args: ["rev-parse", "HEAD"],
+        })).stdout.trim(),
+        head,
+      );
+      assert.strictEqual(
+        yield* fs.readFileString(path.join(cwd, "feature.txt")),
+        "pull request change\n",
+      );
+      for (const args of [
+        ["checkout", "main"],
+        ["branch", "-f", "pulls/42", "main"],
+      ])
+        yield* git.run({ operation: "test.setup", command: "git", cwd, args });
+      yield* fs.writeFileString(path.join(cwd, "base.txt"), "uncommitted work\n");
+      yield* provider.checkoutChangeRequest({ cwd, reference: "42" });
+      assert.strictEqual(
+        (yield* git.run({
+          operation: "test.verify",
+          command: "git",
+          cwd,
+          args: ["rev-parse", "HEAD"],
+        })).stdout.trim(),
+        base,
+      );
+      assert.strictEqual(yield* fs.exists(path.join(cwd, "feature.txt")), false);
+      yield* provider.checkoutChangeRequest({
+        cwd,
+        reference: "42",
+        force: true,
+        context: {
+          provider: { kind: "forgejo", name: "Forgejo", baseUrl: "https://forgejo.test" },
+          remoteName: "origin",
+          remoteUrl: "git@forgejo.test:maria/project.git",
+        },
+      });
+      assert.strictEqual(
+        (yield* git.run({
+          operation: "test.verify",
+          command: "git",
+          cwd,
+          args: ["rev-parse", "HEAD"],
+        })).stdout.trim(),
+        head,
+      );
+      assert.strictEqual(
+        yield* fs.readFileString(path.join(cwd, "base.txt")),
+        "uncommitted work\n",
+      );
+      assert.strictEqual(
+        yield* fs.readFileString(path.join(cwd, "feature.txt")),
+        "pull request change\n",
+      );
+      assert.deepStrictEqual(fetched, [source, source, "git@forgejo.test:reviewer/project.git"]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer))),
+    ),
 );
