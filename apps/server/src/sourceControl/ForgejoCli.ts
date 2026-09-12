@@ -62,10 +62,10 @@ export const ForgejoKeysSchema = Schema.Struct({
   aliases: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 });
 
-export const parseForgejoKeys = decodeJsonResult(ForgejoKeysSchema);
+const parseForgejoKeys = decodeJsonResult(ForgejoKeysSchema);
 
 /** Matches fj's directories::ProjectDirs, including its pre-0.6 organization name. */
-export function forgejoKeysPaths(input: {
+function forgejoKeysPaths(input: {
   readonly platform: string;
   readonly home: string;
   readonly dataHome?: string;
