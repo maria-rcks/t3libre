@@ -11,6 +11,7 @@ import type {
 } from "@t3tools/contracts";
 
 import * as GitHubPullRequestCli from "./GitHubPullRequestCli.ts";
+import { PinnedGitHubCredential } from "../sourceControl/GitHubCli.ts";
 import {
   PullRequestProviderError,
   type PullRequestProviderFailure,
@@ -198,7 +199,20 @@ export const make = Effect.gen(function* () {
     readonly cwd: string;
     readonly repository: string;
     readonly host: string;
-  }) => Cache.get(repositoryAccessCache, JSON.stringify([input.cwd, input.repository, input.host]));
+  }) =>
+    PinnedGitHubCredential.pipe(
+      Effect.flatMap((credential) =>
+        Cache.get(
+          repositoryAccessCache,
+          JSON.stringify([
+            input.cwd,
+            input.repository,
+            input.host,
+            credential?.credentialFingerprint ?? null,
+          ]),
+        ),
+      ),
+    );
 
   const fail = (operation: string) => (error: GitHubPullRequestCli.GitHubPullRequestCliError) =>
     new PullRequestProviderError({
@@ -214,6 +228,10 @@ export const make = Effect.gen(function* () {
     capabilities: CAPABILITIES,
     getRoutingIdentity: (input) =>
       cli.getRoutingIdentity(input).pipe(Effect.mapError(fail("routeIdentity"))),
+    withVerifiedCredential: (input, use) =>
+      cli
+        .withVerifiedCredential(input, (identity) => use(identity).pipe(Effect.result))
+        .pipe(Effect.mapError(fail("routeIdentity")), Effect.flatMap(Effect.fromResult)),
 
     getViewer: (input) =>
       cli

@@ -276,6 +276,14 @@ export interface ProviderRepositoryRef {
  * failing at call time.
  */
 export interface PullRequestProviderApi {
+  readonly withVerifiedCredential?: <A, E, R>(
+    input: { readonly cwd: string; readonly host: string },
+    use: (identity: {
+      readonly accountId: string;
+      readonly viewer: string;
+      readonly credentialFingerprint: string;
+    }) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | PullRequestProviderError, R>;
   readonly getRoutingIdentity?: (input: {
     readonly cwd: string;
     readonly host: string;

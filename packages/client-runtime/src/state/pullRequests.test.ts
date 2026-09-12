@@ -18,12 +18,15 @@ import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 
 import {
   AVAILABLE_CONNECTION_STATE,
+  ConnectionTransientError,
   PrimaryConnectionTarget,
+  SshConnectionTarget,
   type PreparedConnection,
   type SupervisorConnectionState,
 } from "../connection/model.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
-import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
+import { SshConnectionProfile, type ConnectionCatalogEntry } from "../connection/catalog.ts";
+import { ConnectionProfileStore } from "../connection/profileStore.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
@@ -34,6 +37,14 @@ import {
 import { PullRequestDiffLoader } from "./pullRequestDiffHttp.ts";
 import { executeAtomQuery } from "./runtime.ts";
 import { createPullRequestRouter } from "./pullRequestRouting.ts";
+import { GitHubRoutingPermissions } from "../connection/githubRoutingPermissions.ts";
+
+const trustedRouting = {
+  get: () => Effect.succeed("read-write" as const),
+  changes: Stream.empty,
+  set: () => Effect.void,
+  forget: () => Effect.void,
+};
 
 class MutationRefused extends Data.TaggedError("MutationRefused") {}
 
@@ -47,6 +58,8 @@ for (const scenario of [
   "keeps mutations on an old origin server without retrying them",
   "skips an old alternate server before dispatching a mutation",
   "returns a successful mutation when source invalidation stalls",
+  "does not dispatch after routing permission is revoked during the probe",
+  "preserves a local source account rejection when alternate accounts differ",
 ] as const) {
   (scenario === "returns a successful mutation when source invalidation stalls"
     ? it.live
@@ -55,26 +68,41 @@ for (const scenario of [
       Effect.gen(function* () {
         const calls: string[] = [];
         const inputs: unknown[] = [];
-        const mismatch = scenario === "falls back before mutation when the local account differs";
+        let trusted = true;
+        const switchedAccount =
+          scenario === "preserves a local source account rejection when alternate accounts differ";
+        const mismatch =
+          scenario === "falls back before mutation when the local account differs" ||
+          switchedAccount;
         const ambiguous = scenario === "never retries an ambiguous mutation failure";
         const reading =
           scenario === "returns a fast source read without checking alternate identities";
         const single = scenario === "keeps single-environment requests free of identity lookups";
-        const localOrigin = scenario === "keeps a local origin ahead of another local environment";
+        const localOrigin =
+          scenario === "keeps a local origin ahead of another local environment" || switchedAccount;
         const oldOrigin =
           scenario === "keeps mutations on an old origin server without retrying them";
         const oldAlternate =
           scenario === "skips an old alternate server before dispatching a mutation";
         const failure = new PullRequestOperationError({
-          operation: "runAction",
+          operation: switchedAccount ? "routeIdentity" : "runAction",
           detail: "connection lost after dispatch",
         });
         const clientFor = (local: boolean) => {
           const name = local ? "local" : "origin";
           return {
-            [WS_METHODS.pullRequestsRouting]: () =>
+            [local ? WS_METHODS.pullRequestsRoutingIdentity : WS_METHODS.pullRequestsRouting]: (
+              input: unknown,
+            ) =>
               Effect.gen(function* () {
+                if (local) expect(input).toEqual({ host: "github.com" });
                 calls.push(`${name}:identity`);
+                if (
+                  local &&
+                  scenario ===
+                    "does not dispatch after routing permission is revoked during the probe"
+                )
+                  trusted = false;
                 if ((!local && oldOrigin) || (local && oldAlternate)) {
                   return yield* Effect.die(
                     `Unknown request tag: ${WS_METHODS.pullRequestsRouting}`,
@@ -91,6 +119,12 @@ for (const scenario of [
               Effect.gen(function* () {
                 calls.push(`${name}:mutation`);
                 inputs.push(input);
+                if (
+                  !local &&
+                  switchedAccount &&
+                  (input as { expectedAccountId?: string }).expectedAccountId === "123"
+                )
+                  return yield* failure;
                 if (local && ambiguous) return yield* failure;
               }),
             [WS_METHODS.pullRequestsSummary]: (input: { allowStale?: boolean }) =>
@@ -131,11 +165,19 @@ for (const scenario of [
             : route(WS_METHODS.pullRequestsRunAction, input)
         ).pipe(
           Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry),
+          Effect.provideService(GitHubRoutingPermissions, {
+            ...trustedRouting,
+            get: () => Effect.succeed(trusted ? "read-write" : "off"),
+          }),
           Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
           Effect.result,
         );
 
-        if (ambiguous) {
+        if (switchedAccount) {
+          expect(result).toMatchObject({ _tag: "Failure", failure });
+          expect(calls.filter((call) => call.endsWith(":mutation"))).toEqual(["origin:mutation"]);
+          expect(inputs).toEqual([{ ...input, expectedAccountId: "123" }]);
+        } else if (ambiguous) {
           expect(result).toMatchObject({ _tag: "Failure", failure });
           expect(calls.filter((call) => call.endsWith(":mutation"))).toEqual(["local:mutation"]);
         } else {
@@ -145,7 +187,7 @@ for (const scenario of [
               "origin:mutation",
             ]);
           } else if (reading) expect(calls).toEqual(["origin:read"]);
-          else if (mismatch || localOrigin || oldOrigin || oldAlternate)
+          else if (mismatch || localOrigin || oldOrigin || oldAlternate || !trusted)
             expect(calls.filter((call) => call.endsWith(":mutation"))).toEqual(["origin:mutation"]);
           else {
             expect(calls.filter((call) => call.endsWith(":mutation"))).toEqual(["local:mutation"]);
@@ -258,6 +300,226 @@ const makeTestRuntime = Effect.fn("makeTestRuntime")(function* (
   return { runtime, atoms, registry, environmentRegistry, supervisor };
 });
 
+for (const permission of ["default", "origin-off", "destination-off", "read-only"] as const) {
+  it.effect(`does not probe another environment with ${permission} routing permission`, () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const calls: string[] = [];
+        const failure = new PullRequestOperationError({
+          operation: "summary",
+          detail: "source failed",
+        });
+        const client = {
+          [WS_METHODS.pullRequestsSummary]: () =>
+            Effect.suspend(() => {
+              calls.push("source-read");
+              return Effect.fail(failure);
+            }),
+          [WS_METHODS.pullRequestsRunAction]: () =>
+            Effect.sync(() => {
+              calls.push("source-write");
+            }),
+        } as unknown as WsRpcProtocolClient;
+        const alternate = {
+          [WS_METHODS.pullRequestsRoutingIdentity]: () =>
+            Effect.die("untrusted environment was contacted"),
+        } as unknown as WsRpcProtocolClient;
+        const { environmentRegistry, supervisor } = yield* makeTestRuntime(client, alternate);
+        const ref = {
+          projectId: ProjectId.make("project-1"),
+          repository: "private/repo",
+          number: 7,
+        };
+        const request = Effect.gen(function* () {
+          const route = createPullRequestRouter();
+          if (permission !== "read-only")
+            yield* route(WS_METHODS.pullRequestsSummary, ref).pipe(Effect.flip);
+          yield* route(WS_METHODS.pullRequestsRunAction, { ...ref, action: "merge" });
+        }).pipe(
+          Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry),
+          Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        );
+        yield* permission === "default"
+          ? request
+          : request.pipe(
+              Effect.provideService(GitHubRoutingPermissions, {
+                ...trustedRouting,
+                get: (entry) =>
+                  Effect.succeed(
+                    permission === "read-only"
+                      ? "read"
+                      : (entry.target.environmentId === TARGET.environmentId) ===
+                          (permission === "origin-off")
+                        ? "off"
+                        : "read-write",
+                  ),
+              }),
+            );
+        expect(calls).toEqual(
+          permission === "read-only" ? ["source-write"] : ["source-read", "source-write"],
+        );
+      }),
+    ),
+  );
+}
+
+for (const side of ["origin", "destination"] as const) {
+  for (const stored of ["matching", "changed", "missing", "unavailable", "failed"] as const) {
+    it.effect(`checks the current ${side} SSH profile before routing with ${stored} storage`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const calls: string[] = [];
+          const identity = {
+            host: "github.com",
+            provider: "github",
+            viewer: "maria",
+            accountId: "123",
+          };
+          const client = {
+            [WS_METHODS.pullRequestsRouting]: () =>
+              Effect.sync(() => {
+                calls.push("source-probe");
+                return identity;
+              }),
+            [WS_METHODS.pullRequestsRunAction]: (input: { expectedAccountId?: string }) =>
+              Effect.gen(function* () {
+                if (input.expectedAccountId !== undefined) {
+                  return yield* new PullRequestOperationError({
+                    operation: "routeIdentity",
+                    detail: "Source guard refused.",
+                  });
+                }
+                calls.push("source-write");
+              }),
+            [WS_METHODS.pullRequestsInvalidate]: () => Effect.void,
+          } as unknown as WsRpcProtocolClient;
+          const alternate = {
+            [WS_METHODS.pullRequestsRoutingIdentity]: () =>
+              Effect.sync(() => {
+                calls.push("alternate-probe");
+                return identity;
+              }),
+            [WS_METHODS.pullRequestsRunAction]: () =>
+              Effect.sync(() => {
+                calls.push("alternate-write");
+              }),
+            [WS_METHODS.pullRequestsInvalidate]: () => Effect.void,
+          } as unknown as WsRpcProtocolClient;
+          const { environmentRegistry, supervisor } = yield* makeTestRuntime(client, alternate);
+          const environmentId =
+            side === "origin" ? TARGET.environmentId : EnvironmentId.make("local-environment");
+          const profile = new SshConnectionProfile({
+            connectionId: "ssh-1",
+            environmentId,
+            label: "SSH",
+            target: { alias: "work", hostname: "work.example.test", username: "maria", port: 22 },
+          });
+          yield* SubscriptionRef.update(environmentRegistry.entries, (entries) =>
+            new Map(entries).set(environmentId, {
+              target: new SshConnectionTarget({
+                environmentId,
+                connectionId: profile.connectionId,
+                label: "SSH",
+              }),
+              profile: Option.some(profile),
+            }),
+          );
+          const read = Effect.suspend(() =>
+            stored === "failed"
+              ? Effect.fail(
+                  new ConnectionTransientError({
+                    reason: "remote-unavailable",
+                    detail: "Profile storage unavailable.",
+                  }),
+                )
+              : Effect.succeed(
+                  stored === "missing"
+                    ? Option.none()
+                    : Option.some(
+                        stored === "changed"
+                          ? new SshConnectionProfile({
+                              ...profile,
+                              target: { ...profile.target, hostname: "replacement.example.test" },
+                            })
+                          : profile,
+                      ),
+                ),
+          );
+          const route = createPullRequestRouter()(WS_METHODS.pullRequestsRunAction, {
+            projectId: ProjectId.make("project-1"),
+            repository: "private/repo",
+            number: 7,
+            action: "merge",
+          }).pipe(
+            Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry),
+            Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+            // This also represents a user enabling the stale catalog entry after re-resolution.
+            Effect.provideService(GitHubRoutingPermissions, trustedRouting),
+          );
+          yield* stored === "unavailable"
+            ? route
+            : route.pipe(
+                Effect.provideService(ConnectionProfileStore, {
+                  get: () => read,
+                  put: () => Effect.die("unused"),
+                  remove: () => Effect.die("unused"),
+                }),
+              );
+          expect(calls).toEqual(
+            stored === "matching"
+              ? ["source-probe", "alternate-probe", "alternate-write"]
+              : ["source-write"],
+          );
+        }),
+      ),
+    );
+  }
+}
+
+for (const probe of ["origin", "alternate"] as const) {
+  it.live(`bounds a stalled ${probe} metadata probe without repeating a strict source read`, () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let sourceReads = 0;
+        const identity = {
+          host: "github.com",
+          provider: "github",
+          viewer: "maria",
+          accountId: "123",
+        };
+        const client = {
+          [WS_METHODS.pullRequestsRouting]: () =>
+            probe === "origin" ? Effect.never : Effect.succeed(identity),
+          [WS_METHODS.pullRequestsSummary]: () =>
+            Effect.suspend(() => {
+              sourceReads += 1;
+              return Effect.fail(
+                new PullRequestOperationError({ operation: "summary", detail: "source failed" }),
+              );
+            }),
+        } as unknown as WsRpcProtocolClient;
+        const alternate = {
+          [WS_METHODS.pullRequestsRoutingIdentity]: () => Effect.never,
+        } as unknown as WsRpcProtocolClient;
+        const { environmentRegistry, supervisor } = yield* makeTestRuntime(client, alternate);
+        const error = yield* createPullRequestRouter()(WS_METHODS.pullRequestsSummary, {
+          projectId: ProjectId.make("project-1"),
+          repository: "acme/web",
+          number: 7,
+          allowStale: false,
+        }).pipe(
+          Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry),
+          Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+          Effect.provideService(GitHubRoutingPermissions, trustedRouting),
+          Effect.flip,
+        );
+        expect(error._tag).toBe("PullRequestOperationError");
+        expect(sourceReads).toBe(1);
+      }),
+    ),
+  );
+}
+
 for (const source of ["pending", "pending-local", "failed", "offline"] as const) {
   it.live(
     source === "offline"
@@ -270,13 +532,14 @@ for (const source of ["pending", "pending-local", "failed", "offline"] as const)
           const calls: string[] = [];
           const clientFor = (local: boolean) =>
             ({
-              [WS_METHODS.pullRequestsRouting]: () =>
-                Effect.succeed({
-                  host: "github.com",
-                  provider: "github",
-                  viewer: "maria-rcks",
-                  accountId: "123",
-                }),
+              [local ? WS_METHODS.pullRequestsRoutingIdentity : WS_METHODS.pullRequestsRouting]:
+                () =>
+                  Effect.succeed({
+                    host: "github.com",
+                    provider: "github",
+                    viewer: "maria-rcks",
+                    accountId: "123",
+                  }),
               [WS_METHODS.pullRequestsSummary]: (input: { allowStale?: boolean }) =>
                 Effect.gen(function* () {
                   calls.push(local ? "local" : input.allowStale === false ? "origin" : "held");
@@ -310,11 +573,12 @@ for (const source of ["pending", "pending-local", "failed", "offline"] as const)
             number: 7,
           }).pipe(
             Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry),
+            Effect.provideService(GitHubRoutingPermissions, trustedRouting),
             Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
           );
           if (source === "offline") {
             expect(result).toEqual({ state: "open" });
-            expect(calls).toEqual(["origin", "local", "origin", "held"]);
+            expect(calls).toEqual(["origin", "local", "held"]);
           } else {
             expect(result).toBeNull();
             expect(calls).toEqual(["origin", "local"]);
@@ -330,7 +594,7 @@ it.live("keeps source workspace metadata when an alternate answers a detail read
     Effect.gen(function* () {
       const clientFor = (local: boolean) =>
         ({
-          [WS_METHODS.pullRequestsRouting]: () =>
+          [local ? WS_METHODS.pullRequestsRoutingIdentity : WS_METHODS.pullRequestsRouting]: () =>
             Effect.succeed({
               host: "github.com",
               provider: "github",
@@ -359,6 +623,7 @@ it.live("keeps source workspace metadata when an alternate answers a detail read
         number: 7,
       }).pipe(
         Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry),
+        Effect.provideService(GitHubRoutingPermissions, trustedRouting),
         Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
       );
       expect(result).toEqual({
@@ -383,7 +648,7 @@ it.live(
         const clientFor = (local: boolean) => {
           const environment = local ? "local" : "origin";
           return {
-            [WS_METHODS.pullRequestsRouting]: () =>
+            [local ? WS_METHODS.pullRequestsRoutingIdentity : WS_METHODS.pullRequestsRouting]: () =>
               Effect.sync(() => {
                 identities.push(environment);
                 return {
@@ -445,6 +710,7 @@ it.live(
           expect(invalidations).toContainEqual({ environment: "local", input: {} });
         }).pipe(
           Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry),
+          Effect.provideService(GitHubRoutingPermissions, trustedRouting),
           Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
         );
       }),

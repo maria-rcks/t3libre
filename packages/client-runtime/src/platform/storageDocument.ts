@@ -7,6 +7,7 @@ import {
 } from "../connection/catalog.ts";
 import { type ConnectionTarget, PersistedConnectionTarget } from "../connection/model.ts";
 import * as TokenStore from "../authorization/tokenStore.ts";
+import { StoredGitHubRoutingPermission } from "../connection/githubRoutingPermissions.ts";
 
 export const StoredConnectionCredential = Schema.Struct({
   connectionId: Schema.String,
@@ -20,6 +21,7 @@ export const ConnectionCatalogDocument = Schema.Struct({
   profiles: Schema.Array(ConnectionProfile),
   credentials: Schema.Array(StoredConnectionCredential),
   remoteDpopTokens: Schema.Array(TokenStore.RemoteDpopAccessToken),
+  githubRoutingPermissions: Schema.optionalKey(Schema.Array(StoredGitHubRoutingPermission)),
 });
 export type ConnectionCatalogDocument = typeof ConnectionCatalogDocument.Type;
 
@@ -137,7 +139,15 @@ export function removeConnectionFromCatalog(
   document: ConnectionCatalogDocument,
   target: ConnectionTarget,
 ): ConnectionCatalogDocument {
-  return removeConnectionMetadata(document, target, true);
+  const next = removeConnectionMetadata(document, target, true);
+  return document.githubRoutingPermissions === undefined
+    ? next
+    : {
+        ...next,
+        githubRoutingPermissions: document.githubRoutingPermissions.filter(
+          (permission) => permission.environmentId !== target.environmentId,
+        ),
+      };
 }
 
 export function putRemoteDpopTokenInCatalog(

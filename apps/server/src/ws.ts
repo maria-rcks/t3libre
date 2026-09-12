@@ -71,7 +71,6 @@ import {
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
   type PullRequestRef,
-  PullRequestOperationError,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -624,41 +623,7 @@ const makeWsRpcLayer = (
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const pullRequests = yield* PullRequestService.PullRequestService;
-      const guardPullRequestViewer = Effect.fn("ws.guardPullRequestViewer")(function* (
-        input: PullRequestRef,
-      ) {
-        const expectedAccountId = input.expectedAccountId;
-        if (expectedAccountId === undefined) return;
-        yield* pullRequests.routing(input).pipe(
-          Effect.flatMap((route) =>
-            route.provider === "github" &&
-            route.accountId === expectedAccountId &&
-            input.host !== undefined &&
-            route.host.toLowerCase() === input.host.toLowerCase()
-              ? Effect.void
-              : Effect.fail(
-                  new PullRequestOperationError({
-                    operation: "routeIdentity",
-                    detail: "The GitHub account does not match the requested account.",
-                  }),
-                ),
-          ),
-          Effect.catchCause((cause) =>
-            Effect.fail(
-              new PullRequestOperationError({
-                operation: "routeIdentity",
-                detail: "The GitHub account could not be verified before starting the operation.",
-                cause,
-              }),
-            ),
-          ),
-        );
-      });
-
-      const withPullRequestViewer = <A, E, R>(
-        input: PullRequestRef,
-        operation: Effect.Effect<A, E, R>,
-      ) => guardPullRequestViewer(input).pipe(Effect.andThen(operation));
+      const withPullRequestViewer = pullRequests.withRoutingCredential;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
@@ -2185,6 +2150,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.pullRequestsListStats, pullRequests.listStats(input), {
             "rpc.aggregate": "pull-requests",
           }),
+        [WS_METHODS.pullRequestsRoutingIdentity]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsRoutingIdentity,
+            pullRequests.routingIdentity(input),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
         [WS_METHODS.pullRequestsRouting]: (input) =>
           observeRpcEffect(WS_METHODS.pullRequestsRouting, pullRequests.routing(input), {
             "rpc.aggregate": "pull-requests",

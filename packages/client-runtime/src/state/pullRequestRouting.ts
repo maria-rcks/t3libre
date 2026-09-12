@@ -12,7 +12,12 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import { EnvironmentRegistry, EnvironmentNotRegisteredError } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
+import {
+  GitHubRoutingPermissions,
+  gitHubRoutingConnectionKey,
+} from "../connection/githubRoutingPermissions.ts";
 import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
+import { ConnectionProfileStore } from "../connection/profileStore.ts";
 import {
   request,
   EnvironmentRpcUnavailableError,
@@ -84,11 +89,42 @@ function rejectedBeforeDispatch(error: unknown): boolean {
   );
 }
 
+const routingAllowed = Effect.fn("PullRequestRouting.allowed")(function* (
+  registry: EnvironmentRegistry["Service"],
+  originId: EnvironmentId,
+  destinationId: EnvironmentId,
+  write: boolean,
+) {
+  const entries = yield* SubscriptionRef.get(registry.entries);
+  const origin = entries.get(originId);
+  const destination = entries.get(destinationId);
+  if (origin === undefined || destination === undefined) return false;
+  const permissions = yield* GitHubRoutingPermissions;
+  const source = yield* permissions.get(origin);
+  const target = yield* permissions.get(destination);
+  const allowed = write
+    ? source === "read-write" && target === "read-write"
+    : source !== "off" && target !== "off";
+  if (!allowed) return false;
+  for (const entry of [origin, destination]) {
+    if (entry.target._tag !== "SshConnectionTarget") continue;
+    const profiles = yield* Effect.serviceOption(ConnectionProfileStore);
+    if (Option.isNone(profiles)) return false;
+    const profile = yield* profiles.value
+      .get(entry.target.connectionId)
+      .pipe(Effect.orElseSucceed(() => Option.none()));
+    const key = gitHubRoutingConnectionKey(entry);
+    if (key === null || key !== gitHubRoutingConnectionKey({ ...entry, profile })) return false;
+  }
+  return true;
+});
+
 /** Credentials stay on their environments. Only a verified host and account cross the wire. */
 export function createPullRequestRouter() {
   const routedRequest = Effect.fn("PullRequestRouting.request")(function* <
     T extends EnvironmentUnaryRpcTag,
-  >(tag: T, input: EnvironmentRpcInput<T>) {
+  >(tag: T, input: EnvironmentRpcInput<T>, sourceRead?: ReturnType<typeof request<T>>) {
+    const source = sourceRead ?? request(tag, input);
     if (tag === WS_METHODS.pullRequestsInvalidate && isInvalidation(input)) {
       const result = yield* request(tag, input);
       const origin = yield* EnvironmentSupervisor;
@@ -114,15 +150,27 @@ export function createPullRequestRouter() {
       yield* Effect.forEach(
         targets,
         ([target, reference]) =>
-          registry
-            .run(
-              target,
-              request(
-                WS_METHODS.pullRequestsInvalidate,
-                input.reference === undefined ? {} : { reference },
-              ),
-            )
-            .pipe(Effect.orElseSucceed(() => undefined)),
+          (target === origin.target.environmentId
+            ? Effect.succeed(true)
+            : routingAllowed(registry, origin.target.environmentId, target, false)
+          ).pipe(
+            Effect.flatMap((allowed) =>
+              allowed
+                ? registry
+                    .run(
+                      target,
+                      request(
+                        WS_METHODS.pullRequestsInvalidate,
+                        input.reference === undefined ? {} : { reference },
+                      ),
+                    )
+                    .pipe(
+                      Effect.timeoutOption("1 second"),
+                      Effect.orElseSucceed(() => undefined),
+                    )
+                : Effect.void,
+            ),
+          ),
         { concurrency: 4, discard: true },
       );
       return result;
@@ -134,6 +182,7 @@ export function createPullRequestRouter() {
     const origin = yield* EnvironmentSupervisor;
     const registry = yield* EnvironmentRegistry;
     const entries = yield* SubscriptionRef.get(registry.entries);
+    const sourceEntry = entries.get(origin.target.environmentId);
     const used = routedReads.get(registry) ?? new Map<string, RoutedRead>();
     routedReads.set(registry, used);
     const refKey = encodeKey([
@@ -170,22 +219,31 @@ export function createPullRequestRouter() {
           return Effect.forEach(
             targets,
             ([target, refs]) =>
-              registry
-                .run(
-                  target,
-                  Effect.forEach(
-                    [...refs.map((reference) => ({ reference })), {}],
-                    (invalidation) =>
-                      request(WS_METHODS.pullRequestsInvalidate, invalidation).pipe(
-                        // GitHub already accepted the write. A stalled reader on another
-                        // environment must not keep its confirmation pending indefinitely.
-                        Effect.timeoutOption("1 second"),
-                        Effect.orElseSucceed(() => undefined),
-                      ),
-                    { concurrency: 3, discard: true },
-                  ),
-                )
-                .pipe(Effect.orElseSucceed(() => undefined)),
+              (target === origin.target.environmentId
+                ? Effect.succeed(true)
+                : routingAllowed(registry, origin.target.environmentId, target, false)
+              ).pipe(
+                Effect.flatMap((allowed) =>
+                  allowed
+                    ? registry
+                        .run(
+                          target,
+                          Effect.forEach(
+                            [...refs.map((reference) => ({ reference })), {}],
+                            (invalidation) =>
+                              request(WS_METHODS.pullRequestsInvalidate, invalidation).pipe(
+                                // GitHub already accepted the write. A stalled reader on another
+                                // environment must not keep its confirmation pending indefinitely.
+                                Effect.timeoutOption("1 second"),
+                                Effect.orElseSucceed(() => undefined),
+                              ),
+                            { concurrency: 3, discard: true },
+                          ),
+                        )
+                        .pipe(Effect.orElseSucceed(() => undefined))
+                    : Effect.void,
+                ),
+              ),
             { concurrency: 4, discard: true },
           );
         }),
@@ -193,30 +251,32 @@ export function createPullRequestRouter() {
     const alternatives = [];
     for (const [id, entry] of entries) {
       if (id === origin.target.environmentId) continue;
+      if (!(yield* routingAllowed(registry, origin.target.environmentId, id, writes.has(tag))))
+        continue;
       const connected = yield* registry
         .run(id, EnvironmentSupervisor.pipe(Effect.flatMap((s) => SubscriptionRef.get(s.session))))
         .pipe(Effect.orElseSucceed(() => Option.none()));
       if (Option.isSome(connected)) alternatives.push({ id, local: isLocal(entry) });
     }
-    if (alternatives.length === 0) return yield* finish(request(tag, input));
+    if (alternatives.length === 0) return yield* finish(source);
 
     const identity = yield* request(WS_METHODS.pullRequestsRouting, ref).pipe(
+      Effect.timeout("2 seconds"),
       Effect.catchCause((cause) =>
         Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed(null),
       ),
     );
     // Old servers and unknown accounts retain the existing path.
-    if (identity === null || identity.provider !== "github")
-      return yield* finish(request(tag, input));
+    if (identity === null || identity.provider !== "github") return yield* finish(source);
 
     const routedInput = {
       ...input,
       host: identity.host,
       expectedAccountId: identity.accountId,
     };
+    const guardedSource = sourceRead ?? (yield* Effect.cached(request(tag, routedInput)));
     const local = alternatives.filter((entry) => entry.local);
     const remote = alternatives.filter((entry) => !entry.local);
-    const sourceEntry = entries.get(origin.target.environmentId);
     const sourceLocal = sourceEntry !== undefined && isLocal(sourceEntry);
     const candidates = [
       ...(sourceLocal && writes.has(tag) ? [origin.target.environmentId] : []),
@@ -226,7 +286,10 @@ export function createPullRequestRouter() {
       ...(reads.has(tag) ? [origin.target.environmentId] : []),
     ];
     const run = (id: EnvironmentId): ReturnType<typeof request<T>> =>
-      registry.run(id, request(tag, routedInput)).pipe(
+      (id === origin.target.environmentId
+        ? guardedSource
+        : registry.run(id, request(tag, routedInput))
+      ).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
             const entry = used.get(refKey) ?? {
@@ -253,13 +316,16 @@ export function createPullRequestRouter() {
       );
     const visit = (index: number): ReturnType<typeof request<T>> => {
       const id = candidates[index];
-      if (id === undefined) return request(tag, routedInput);
+      if (id === undefined) return guardedSource;
       return Effect.gen(function* () {
         if (id !== origin.target.environmentId) {
+          if (!(yield* routingAllowed(registry, origin.target.environmentId, id, writes.has(tag))))
+            return yield* visit(index + 1);
           // An older server would discard expectedAccountId. Verify it implements the guard first.
           const alternate = yield* registry
-            .run(id, request(WS_METHODS.pullRequestsRouting, routedInput))
+            .run(id, request(WS_METHODS.pullRequestsRoutingIdentity, { host: identity.host }))
             .pipe(
+              Effect.timeout("2 seconds"),
               Effect.catchCause((cause) =>
                 Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed(null),
               ),
@@ -272,6 +338,8 @@ export function createPullRequestRouter() {
           ) {
             return yield* visit(index + 1);
           }
+          if (!(yield* routingAllowed(registry, origin.target.environmentId, id, writes.has(tag))))
+            return yield* visit(index + 1);
         }
         return yield* run(id).pipe(
           Effect.catch((error) => {
@@ -308,12 +376,32 @@ export function createPullRequestRouter() {
     const registry = yield* EnvironmentRegistry;
     const entries = yield* SubscriptionRef.get(registry.entries);
     if (entries.size < 2) return yield* request(tag, input);
+    const origin = yield* EnvironmentSupervisor;
+    let allowed = false;
+    for (const id of entries.keys()) {
+      if (
+        id !== origin.target.environmentId &&
+        (yield* routingAllowed(registry, origin.target.environmentId, id, false))
+      ) {
+        allowed = true;
+        break;
+      }
+    }
+    if (!allowed) return yield* request(tag, input);
     const strictInput = { ...input, allowStale: false };
+    const source = yield* Effect.cached(request(tag, strictInput));
     // Cached source reads usually finish before another environment can verify its account.
     // Hedge slow reads only; never race mutations or retry an ambiguous write.
     return yield* Effect.race(
-      request(tag, strictInput),
-      routedRequest(tag, strictInput).pipe(Effect.delay("75 millis")),
-    ).pipe(Effect.catch(() => request(tag, input)));
+      source,
+      routedRequest(tag, strictInput, source).pipe(Effect.delay("75 millis")),
+    ).pipe(
+      Effect.catch((error) =>
+        input.allowStale !== false &&
+        (tag === WS_METHODS.pullRequestsSummary || tag === WS_METHODS.pullRequestsDetail)
+          ? request(tag, input)
+          : Effect.fail(error),
+      ),
+    );
   });
 }

@@ -16,6 +16,7 @@ import type {
   PullRequestReviewerCapabilities,
   SourceControlProviderKind,
 } from "@t3tools/contracts";
+import { PullRequestOperationError } from "@t3tools/contracts";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
@@ -3687,6 +3688,112 @@ it.effect("keeps routed summaries and details separate when the GitHub account c
       }
       assert.strictEqual(calls, 3);
     }
+  }),
+);
+
+it.effect("isolates routed caches for two credentials belonging to the same account", () =>
+  Effect.gen(function* () {
+    for (const operation of ["summary", "detail"] as const) {
+      let credential = "broad";
+      let calls = 0;
+      const read = () =>
+        Effect.suspend(() => {
+          calls += 1;
+          return credential === "broad"
+            ? Effect.succeed(hostedChangeRequest("private content"))
+            : Effect.fail(requestFailed);
+        });
+      const service = yield* makeService({
+        projects: [
+          project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
+        ],
+        providers: [
+          fakeProvider("github", {
+            withVerifiedCredential: (_, use) =>
+              Effect.suspend(() =>
+                use({
+                  accountId: "101",
+                  viewer: "octocat",
+                  credentialFingerprint: credential,
+                }),
+              ),
+            getChangeRequest: read,
+            getChangeRequestSummary: read,
+          }),
+        ],
+      });
+      const reference = {
+        projectId: "p1" as ProjectId,
+        repository: "acme/web",
+        number: 1,
+        host: "github.com",
+        expectedAccountId: "101",
+      };
+      yield* service.withRoutingCredential(reference, service[operation](reference));
+      credential = "restricted";
+      for (const allowStale of [false, true]) {
+        const error = yield* Effect.flip(
+          service.withRoutingCredential(
+            reference,
+            service[operation]({ ...reference, allowStale }),
+          ),
+        );
+        assert.strictEqual(error._tag, "PullRequestOperationError");
+      }
+      assert.strictEqual(calls, 3);
+    }
+  }),
+);
+
+it.effect("rejects mismatched routing credentials before use and preserves action errors", () =>
+  Effect.gen(function* () {
+    let operations = 0;
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getRoutingIdentity: () => Effect.succeed({ accountId: "101", viewer: "octocat" }),
+          withVerifiedCredential: (_, use) =>
+            use({
+              accountId: "101",
+              viewer: "octocat",
+              credentialFingerprint: "credential-a",
+            }),
+        }),
+      ],
+    });
+    const reference = {
+      projectId: "p1" as ProjectId,
+      repository: "acme/web",
+      number: 1,
+      host: "github.com",
+      expectedAccountId: "202",
+    };
+    const actionError = new PullRequestOperationError({
+      operation: "runAction",
+      detail: "ambiguous",
+    });
+    const operation = Effect.sync(() => {
+      operations += 1;
+    }).pipe(Effect.andThen(Effect.fail(actionError)));
+    const rejected = yield* Effect.flip(service.withRoutingCredential(reference, operation));
+    assert.strictEqual(rejected._tag, "PullRequestOperationError");
+    if (rejected._tag === "PullRequestOperationError")
+      assert.strictEqual(rejected.operation, "routeIdentity");
+    assert.strictEqual(operations, 0);
+    assert.strictEqual(
+      yield* Effect.flip(
+        service.withRoutingCredential({ ...reference, expectedAccountId: "101" }, operation),
+      ),
+      actionError,
+    );
+    assert.strictEqual(operations, 1);
+    assert.deepStrictEqual(yield* service.routingIdentity({ host: "github.com" }), {
+      accountId: "101",
+      viewer: "octocat",
+      host: "github.com",
+      provider: "github",
+    });
   }),
 );
 
