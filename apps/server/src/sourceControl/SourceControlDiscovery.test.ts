@@ -751,30 +751,36 @@ it.effect("routes mounted Forgejo repositories without repeating the mount in AP
   ),
 );
 
-it.effect("prefers fj and preserves the server port and mount when sending a mutation", () => {
+it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API mount", () => {
   const commands: string[] = [];
   const requests: string[] = [];
   return Effect.gen(function* () {
     const cli = yield* ForgejoCli.make;
-    const result = yield* cli.api({
-      cwd: "/repo",
-      repository: "forgejo/maria/project",
-      context: {
-        provider: {
-          kind: "forgejo",
-          name: "Forgejo",
-          baseUrl: "http://forgejo.local:3000/forgejo",
+    for (const remoteUrl of [
+      "http://forgejo.local:3000/forgejo/maria/project.git",
+      "ssh://git@ssh.forgejo.local:2222/maria/project.git",
+    ]) {
+      const result = yield* cli.api({
+        cwd: "/repo",
+        repository: "forgejo/maria/project",
+        context: {
+          provider: {
+            kind: "forgejo",
+            name: "Forgejo",
+            baseUrl: "http://forgejo.local:3000/forgejo",
+          },
+          remoteName: "origin",
+          remoteUrl,
         },
-        remoteName: "origin",
-        remoteUrl: "http://forgejo.local:3000/forgejo/maria/project.git",
-      },
-      path: "repos/forgejo/maria/project/issues/42/comments",
-      method: "POST",
-      body: { body: "verified through fj" },
-    });
-    assert.strictEqual(result.stdout, '{"id":99}');
+        path: "repos/forgejo/maria/project/issues/42/comments",
+        method: "POST",
+        body: { body: "verified through fj" },
+      });
+      assert.strictEqual(result.stdout, '{"id":99}');
+    }
     assert.deepStrictEqual(commands, ["fj"]);
     assert.deepStrictEqual(requests, [
+      "http://forgejo.local:3000/forgejo/api/v1/repos/maria/project/issues/42/comments",
       "http://forgejo.local:3000/forgejo/api/v1/repos/maria/project/issues/42/comments",
     ]);
   }).pipe(
@@ -788,6 +794,7 @@ it.effect("prefers fj and preserves the server port and mount when sending a mut
               hosts: {
                 "forgejo.local:3000/forgejo": { type: "Application", token: "test-token" },
               },
+              aliases: { "ssh.forgejo.local:2222": "forgejo.local:3000/forgejo" },
             }),
           ),
       }),

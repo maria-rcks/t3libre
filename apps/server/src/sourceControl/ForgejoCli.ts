@@ -191,7 +191,9 @@ export function matchForgejoLogin(
           if (!url) return false;
           if (requestedHost !== undefined && url.host !== requestedHost.toLowerCase()) return false;
           return remote.ssh
-            ? login.ssh_host?.toLowerCase() === remote.hostname || url.hostname === remote.hostname
+            ? login.ssh_host?.toLowerCase() === remote.host ||
+                login.ssh_host?.toLowerCase() === remote.hostname ||
+                url.hostname === remote.hostname
             : url.host === remote.host &&
                 (!url.path || remote.path === url.path || remote.path.startsWith(`${url.path}/`));
         })
