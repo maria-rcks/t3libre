@@ -10,6 +10,7 @@ import {
   type PullRequestChecksState as ContractPullRequestChecksState,
   type PullRequestComment,
   type PullRequestCommit,
+  type PullRequestContextMetadata,
   type PullRequestDetailView,
   type PullRequestMergeability,
   type PullRequestReaction,
@@ -26,6 +27,8 @@ import {
 } from "@t3tools/shared/threadPullRequests";
 
 import { inferReviewCommentFenceLanguage, type ReviewCommentContext } from "~/reviewCommentContext";
+import { reviewCommentContextId } from "~/lib/composerContextRecords";
+import { removeInlineContextReference } from "~/lib/composerContextReferences";
 
 export const PULL_REQUEST_MERGE_METHOD_LABELS: Record<PullRequestMergeMethod, string> = {
   merge: "Merge",
@@ -758,6 +761,20 @@ export interface FixFindingsHandoff {
  */
 const HANDOFF_COMMENT_ID_PREFIX = "pull-request-";
 
+/** Removes references owned by the previous PR handoff before its prose is replaced. */
+export function stripPullRequestHandoffReferences(
+  prompt: string,
+  comments: ReadonlyArray<ReviewCommentContext>,
+  retainedIds: ReadonlySet<string> = new Set(),
+): string {
+  let next = prompt;
+  for (const comment of comments) {
+    if (!comment.id.startsWith(HANDOFF_COMMENT_ID_PREFIX) || retainedIds.has(comment.id)) continue;
+    next = removeInlineContextReference(next, reviewCommentContextId(comment.id)).prompt;
+  }
+  return next;
+}
+
 /**
  * The prompt the composer should hold once a hand-off lands there.
  *
@@ -1013,6 +1030,8 @@ function pullRequestContextComment(
     readonly url: string;
     readonly headBranch: string;
     readonly baseBranch: string;
+    readonly state: PullRequestState;
+    readonly isDraft: boolean;
   },
   instructions: ReadonlyArray<string>,
 ): ReviewCommentContext {
@@ -1033,7 +1052,28 @@ function pullRequestContextComment(
       ...instructions,
     ].join("\n"),
     diff: "",
+    pullRequest: {
+      number: input.number,
+      title: boundedField(input.title),
+      url: boundedField(input.url),
+      headBranch: boundedField(input.headBranch),
+      baseBranch: boundedField(input.baseBranch),
+      state: input.state,
+      isDraft: input.isDraft,
+    },
   };
+}
+
+/**
+ * A neutral pull request reference inserted directly from the message composer. It is the
+ * reader's own chip, so it sits outside the `pull-request-` namespace a hand-off owns and
+ * sweeps: a later hand-off must not delete a reference the reader put there themselves.
+ */
+export function buildPullRequestReferenceContext(
+  input: PullRequestContextMetadata,
+): ReviewCommentContext {
+  const comment = pullRequestContextComment(input, []);
+  return { ...comment, id: `pr-reference:${input.number}` };
 }
 
 /** What the agent is asked to do with a question, as opposed to a task. */
@@ -1052,6 +1092,8 @@ export function buildAskAboutPullRequestHandoff(input: {
   readonly url: string;
   readonly headBranch: string;
   readonly baseBranch: string;
+  readonly state: PullRequestState;
+  readonly isDraft: boolean;
 }): FixFindingsHandoff {
   return {
     prompt: "",
@@ -1070,6 +1112,8 @@ export function buildExplainPullRequestHandoff(input: {
   readonly url: string;
   readonly headBranch: string;
   readonly baseBranch: string;
+  readonly state: PullRequestState;
+  readonly isDraft: boolean;
 }): FixFindingsHandoff {
   return {
     prompt: "Explain this pull request.",
@@ -1088,6 +1132,8 @@ export function buildAddSelectionToAgentHandoff(input: {
   readonly url: string;
   readonly headBranch: string;
   readonly baseBranch: string;
+  readonly state: PullRequestState;
+  readonly isDraft: boolean;
   readonly comment: ReviewCommentContext;
   readonly request: string;
 }): FixFindingsHandoff {
