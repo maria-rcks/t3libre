@@ -72,6 +72,9 @@ describe("projectActivityPayload", () => {
       payload: {
         itemType: "command_execution",
         detail: "private result",
+        title: "private result must not leak through the title",
+        status: "failed",
+        toolSurface: "computer",
         data,
         privateMetadata: "never-share",
       },
@@ -90,6 +93,10 @@ describe("projectActivityPayload", () => {
       includePlans: false,
     });
     expect(resultsOnly[0]).not.toHaveProperty("input");
+    expect(resultsOnly[0]).not.toHaveProperty("toolSurface");
+    expect(resultsOnly[0]).not.toHaveProperty("title");
+    expect(resultsOnly[0]).not.toHaveProperty("detail");
+    expect(resultsOnly[0]).toMatchObject({ itemType: "command_execution", status: "failed" });
     expect(resultsOnly[0]?.result).toContain("private result");
     expect(JSON.stringify(resultsOnly)).not.toContain("echo input");
     const calls = projectSharedTools([source], {
@@ -99,6 +106,10 @@ describe("projectActivityPayload", () => {
     });
     expect(calls[0]?.input).toContain("echo input");
     expect(calls[0]).not.toHaveProperty("result");
+    expect(calls[0]).not.toHaveProperty("status");
+    expect(calls[0]).not.toHaveProperty("title");
+    expect(calls[0]).not.toHaveProperty("detail");
+    expect(calls[0]).toMatchObject({ itemType: "command_execution", toolSurface: "computer" });
     expect(JSON.stringify(calls)).not.toContain("private result");
     const results = projectSharedTools([source], {
       includeToolCalls: true,
@@ -106,6 +117,13 @@ describe("projectActivityPayload", () => {
       includePlans: false,
     });
     expect(results[0]?.result).toContain("private result");
+    expect(results[0]).toMatchObject({
+      title: "private result must not leak through the title",
+      detail: "private result",
+    });
+    expect(JSON.stringify(results)).not.toContain(
+      "private result must not leak through the summary",
+    );
     expect(JSON.stringify(results)).not.toContain("never-share");
   });
 

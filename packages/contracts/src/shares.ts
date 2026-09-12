@@ -1,5 +1,10 @@
 import * as Schema from "effect/Schema";
 import { IsoDateTime, ThreadId } from "./baseSchemas.ts";
+import {
+  ItemLifecyclePayload,
+  ToolActivitySurface,
+  ToolLifecycleItemType,
+} from "./providerRuntime.ts";
 
 export const ShareCode = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{32}$/));
 export const ShareOptions = Schema.Struct({
@@ -40,6 +45,11 @@ export const SharedThread = Schema.Struct({
     Schema.Struct({
       ...SharedEntry,
       name: Schema.String,
+      itemType: Schema.optional(ToolLifecycleItemType),
+      status: ItemLifecyclePayload.fields.status,
+      toolSurface: Schema.optional(ToolActivitySurface),
+      title: Schema.optional(Schema.String),
+      detail: Schema.optional(Schema.String),
       input: Schema.optional(Schema.String),
       result: Schema.optional(Schema.String),
     }),

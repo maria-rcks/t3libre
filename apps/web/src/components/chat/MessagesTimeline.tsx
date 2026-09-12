@@ -66,6 +66,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -307,7 +308,7 @@ interface WorkGroupViewState {
 
 const WorkGroupViewCtx = createContext<{
   state: WorkGroupViewState;
-  onToggleEntry: (collapsed: boolean) => void;
+  onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 } | null>(null);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FADE_HEADER = (
@@ -1410,7 +1411,7 @@ function TimelineMinimapNavigationButton({
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
-const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
+export function TimelineRowContainer({ row, children }: { row: TimelineRow; children: ReactNode }) {
   const isExpandedToolGroup = row.kind === "work" && row.isExpandedToolGroup;
   const isExpandedToolGroupHeader =
     (row.kind === "work-toggle" && row.expanded) || (row.kind === "work-live" && row.expanded);
@@ -1448,8 +1449,16 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       }
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
+      {children}
+    </div>
+  );
+}
+
+const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
+  return (
+    <TimelineRowContainer row={row}>
       {row.kind === "work" ? (
-        <WorkGroupSection
+        <ConnectedWorkGroupSection
           anchorKey={row.id}
           groupedEntries={row.groupedEntries}
           isExpandedToolGroup={row.isExpandedToolGroup}
@@ -1470,7 +1479,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
       {row.kind === "queued-message" ? <QueuedMessageTimelineRow row={row} /> : null}
-    </div>
+    </TimelineRowContainer>
   );
 });
 
@@ -1833,7 +1842,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <UserMessageBubble>
         <MessageAuthorHeading>You</MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
@@ -1943,45 +1952,34 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             renderContextReference={renderContextReference}
             skills={ctx.skills}
             markdownCwd={ctx.markdownCwd}
+            threadRef={ctx.threadRef ?? undefined}
           />
         </div>
-      </div>
-      <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover:opacity-100">
-        <div className="flex shrink-0 items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
-              {formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat)}
-            </TooltipTrigger>
-            <TooltipPopup>
-              {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
-            </TooltipPopup>
-          </Tooltip>
-          <div className="flex items-center gap-0.5">
-            {typeof revertTurnCount === "number" && (
-              <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
-            )}
-            {resolvedContext.text && (
-              <MessageCopyButton
-                // Structured paste needs the canonical links to retain their positions.
-                text={
-                  contextClipboardFragment
-                    ? resolvedContext.text
-                    : replaceComposerContextReferences(
-                        resolvedContext.text,
-                        (reference) => reference.label,
-                      )
+      </UserMessageBubble>
+      <UserMessageMeta createdAt={row.message.createdAt} timestampFormat={ctx.timestampFormat}>
+        {typeof revertTurnCount === "number" && (
+          <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
+        )}
+        {resolvedContext.text && (
+          <MessageCopyButton
+            // Structured paste needs the canonical links to retain their positions.
+            text={
+              contextClipboardFragment
+                ? resolvedContext.text
+                : replaceComposerContextReferences(
+                    resolvedContext.text,
+                    (reference) => reference.label,
+                  )
+            }
+            {...(contextClipboardFragment
+              ? {
+                  extraFlavors: { [COMPOSER_CONTEXT_CLIPBOARD_MIME]: contextClipboardFragment },
                 }
-                {...(contextClipboardFragment
-                  ? {
-                      extraFlavors: { [COMPOSER_CONTEXT_CLIPBOARD_MIME]: contextClipboardFragment },
-                    }
-                  : {})}
-                variant="ghost"
-              />
-            )}
-          </div>
-        </div>
-      </div>
+              : {})}
+            variant="ghost"
+          />
+        )}
+      </UserMessageMeta>
     </div>
   );
 }
@@ -2041,6 +2039,16 @@ function RevertUserMessageButton({
 
 function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-fold" }> }) {
   const ctx = use(TimelineRowCtx);
+  return <TurnFoldButton row={row} onToggle={() => ctx.onToggleTurnFold(row.turnId)} />;
+}
+
+export function TurnFoldButton({
+  row,
+  onToggle,
+}: {
+  row: Extract<TimelineRow, { kind: "turn-fold" }>;
+  onToggle: () => void;
+}) {
   const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
 
   return (
@@ -2049,7 +2057,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
         type="button"
         aria-expanded={row.expanded}
         data-scroll-anchor-ignore
-        onClick={() => ctx.onToggleTurnFold(row.turnId)}
+        onClick={onToggle}
         className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-sm leading-relaxed text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
       >
         <span>{row.label}</span>
@@ -2074,12 +2082,11 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           request={ctx.citationRequest}
           listRef={ctx.listRef}
         >
-          <ChatMarkdown
+          <AssistantMessageBody
             text={messageText}
             cwd={ctx.markdownCwd}
             threadRef={ctx.threadRef ?? undefined}
             isStreaming={Boolean(row.message.streaming)}
-            lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
             skills={ctx.skills}
             headingLevelOffset={MESSAGE_HEADING_LEVEL}
             onUseArtifactTemplate={ctx.onUseArtifactTemplate}
@@ -2093,7 +2100,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
         {row.showAssistantMeta ? (
-          <AssistantMessageMeta
+          <ConnectedAssistantMessageMeta
             className="mt-1.5"
             message={row.message}
             showCopyButton={row.showAssistantCopyButton}
@@ -2112,7 +2119,7 @@ function AssistantMetaTimelineRow({
 }) {
   return (
     <div className="px-1">
-      <AssistantMessageMeta
+      <ConnectedAssistantMessageMeta
         className="mt-0.5"
         message={row.message}
         showCopyButton={row.showAssistantCopyButton}
@@ -2123,21 +2130,28 @@ function AssistantMetaTimelineRow({
   );
 }
 
-function AssistantMessageMeta({
+function ConnectedAssistantMessageMeta(
+  props: Omit<ComponentProps<typeof AssistantMessageMeta>, "timestampFormat">,
+) {
+  const { timestampFormat } = use(TimelineRowCtx);
+  return <AssistantMessageMeta {...props} timestampFormat={timestampFormat} />;
+}
+
+export function AssistantMessageMeta({
   className,
   message,
   showCopyButton,
   copyStreaming,
   alwaysVisible = false,
+  timestampFormat,
 }: {
   className?: string;
   message: ChatMessage;
   showCopyButton: boolean;
   copyStreaming: boolean;
   alwaysVisible?: boolean;
+  timestampFormat: Parameters<typeof formatDayAwareTimestamp>[1];
 }) {
-  const ctx = use(TimelineRowCtx);
-
   return (
     <div
       className={cn(
@@ -2156,10 +2170,10 @@ function AssistantMessageMeta({
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
-            {formatDayAwareTimestamp(message.updatedAt, ctx.timestampFormat)}
+            {formatDayAwareTimestamp(message.updatedAt, timestampFormat)}
           </TooltipTrigger>
           <TooltipPopup>
-            {formatChatTimestampTooltip(message.updatedAt, ctx.timestampFormat)}
+            {formatChatTimestampTooltip(message.updatedAt, timestampFormat)}
           </TooltipPopup>
         </Tooltip>
       )}
@@ -2299,20 +2313,47 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
 // ---------------------------------------------------------------------------
 
 /** Renders standalone activity or one bounded, virtualized expanded tool group. */
-const WorkGroupSection = memo(function WorkGroupSection({
-  anchorKey,
-  groupedEntries,
-  isExpandedToolGroup,
-  displayLabel,
-}: {
+interface WorkGroupSectionProps {
   anchorKey: string;
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
   isExpandedToolGroup: boolean;
   displayLabel?: string | undefined;
-}) {
-  const { workspaceRoot, routeThreadKey, onToggleWorkEntry } = use(TimelineRowCtx);
+  readOnly?: boolean | undefined;
+  workspaceRoot?: string | undefined;
+  viewState?: WorkGroupViewState | undefined;
+  onToggleWorkEntry?: ((anchorKey: string, collapsed: boolean) => void) | undefined;
+}
+
+function ConnectedWorkGroupSection(props: WorkGroupSectionProps) {
+  const { workspaceRoot, routeThreadKey, onToggleWorkEntry, workGroupViewState } =
+    use(TimelineRowCtx);
+  return (
+    <WorkGroupSection
+      key={routeThreadKey}
+      {...props}
+      workspaceRoot={workspaceRoot}
+      viewState={workGroupViewState}
+      onToggleWorkEntry={onToggleWorkEntry}
+    />
+  );
+}
+
+export const WorkGroupSection = memo(function WorkGroupSection({
+  anchorKey,
+  groupedEntries,
+  isExpandedToolGroup,
+  displayLabel,
+  readOnly,
+  workspaceRoot,
+  viewState,
+  onToggleWorkEntry,
+}: WorkGroupSectionProps) {
+  const [localViewState] = useState<WorkGroupViewState>(() => ({
+    scrollPositions: new Map(),
+    expandedEntries: new Set(),
+  }));
   const onToggleStandaloneEntry = useCallback(
-    (collapsed: boolean) => onToggleWorkEntry(anchorKey, collapsed),
+    (collapsed: boolean) => onToggleWorkEntry?.(anchorKey, collapsed),
     [anchorKey, onToggleWorkEntry],
   );
   const nonEmptyEntries = useMemo(
@@ -2324,10 +2365,13 @@ const WorkGroupSection = memo(function WorkGroupSection({
   if (isExpandedToolGroup) {
     return (
       <ExpandedWorkGroupEntries
-        key={`${routeThreadKey}:${anchorKey}`}
+        key={anchorKey}
         anchorKey={anchorKey}
         entries={nonEmptyEntries}
         workspaceRoot={workspaceRoot}
+        readOnly={readOnly}
+        viewState={viewState ?? localViewState}
+        onToggleWorkEntry={onToggleWorkEntry}
       />
     );
   }
@@ -2341,6 +2385,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
             workEntry={workEntry}
             workspaceRoot={workspaceRoot}
             isExpandedToolGroupEntry={false}
+            readOnly={readOnly}
             displayLabel={displayLabel}
             onToggleEntry={onToggleStandaloneEntry}
           />
@@ -2354,12 +2399,17 @@ function ExpandedWorkGroupEntries({
   anchorKey,
   entries,
   workspaceRoot,
+  readOnly,
+  viewState,
+  onToggleWorkEntry,
 }: {
   anchorKey: string;
   entries: TimelineWorkEntry[];
   workspaceRoot: string | undefined;
+  readOnly?: boolean | undefined;
+  viewState: WorkGroupViewState;
+  onToggleWorkEntry?: ((anchorKey: string, collapsed: boolean) => void) | undefined;
 }) {
-  const { workGroupViewState: viewState, onToggleWorkEntry } = use(TimelineRowCtx);
   const [initialScrollIndex] = useState(() =>
     resolveWorkGroupScrollIndex(entries, viewState.scrollPositions.get(anchorKey)),
   );
@@ -2381,7 +2431,9 @@ function ExpandedWorkGroupEntries({
   const groupView = useMemo(
     () => ({
       state: viewState,
-      onToggleEntry: (collapsed: boolean) => onToggleWorkEntry(anchorKey, collapsed),
+      onToggleEntry: onToggleWorkEntry
+        ? (collapsed: boolean) => onToggleWorkEntry(anchorKey, collapsed)
+        : undefined,
     }),
     [anchorKey, onToggleWorkEntry, viewState],
   );
@@ -2447,9 +2499,10 @@ function ExpandedWorkGroupEntries({
         workEntry={item}
         workspaceRoot={workspaceRoot}
         isExpandedToolGroupEntry
+        readOnly={readOnly}
       />
     ),
-    [workspaceRoot],
+    [workspaceRoot, readOnly],
   );
 
   return (
@@ -2703,15 +2756,30 @@ function WorkGroupToggleTimelineRow({
 }) {
   const ctx = use(TimelineRowCtx);
   return (
+    <WorkGroupToggleButton row={row} onToggle={() => ctx.onToggleWorkGroup(row.groupId, row.id)} />
+  );
+}
+
+export function WorkGroupToggleButton({
+  row,
+  onToggle,
+  readOnly,
+}: {
+  row: Extract<TimelineRow, { kind: "work-toggle" }>;
+  onToggle: () => void;
+  readOnly?: boolean | undefined;
+}) {
+  return (
     <button
       type="button"
       className="group/tool-group flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
       aria-label={row.hasFailure ? `${row.summary}, tool call failed` : undefined}
       aria-expanded={row.expanded}
-      onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
+      onClick={onToggle}
     >
       <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
-        <ToolActivityIconView
+        <WorkEntryRowIcon
+          readOnly={readOnly}
           icon={row.toolIcon}
           fallbackName={
             row.summaryToolIcon ?? row.toolSurface ?? toolGroupSummaryIconName(row.summaryKind)
@@ -3349,11 +3417,51 @@ function shouldCollapseUserMessage(text: string): boolean {
   );
 }
 
-const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(props: {
+export function UserMessageMeta({
+  createdAt,
+  timestampFormat,
+  children,
+}: {
+  createdAt: string;
+  timestampFormat: Parameters<typeof formatDayAwareTimestamp>[1];
+  children?: ReactNode;
+}) {
+  return (
+    <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover:opacity-100">
+      <div className="flex shrink-0 items-center gap-2">
+        <Tooltip>
+          <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
+            {formatDayAwareTimestamp(createdAt, timestampFormat)}
+          </TooltipTrigger>
+          <TooltipPopup>{formatChatTimestampTooltip(createdAt, timestampFormat)}</TooltipPopup>
+        </Tooltip>
+        <div className="flex items-center gap-0.5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+export function UserMessageBubble({ children }: { children: ReactNode }) {
+  return (
+    <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      {children}
+    </div>
+  );
+}
+
+export const AssistantMessageBody = memo(function AssistantMessageBody(
+  props: ComponentProps<typeof ChatMarkdown>,
+) {
+  return <ChatMarkdown {...props} lineBreaks={shouldPreserveAssistantLineBreaks(props.text)} />;
+});
+
+export const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(props: {
   text: string;
-  renderContextReference: (reference: ChatMarkdownContextReference) => ReactNode;
-  skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
-  markdownCwd: string | undefined;
+  renderContextReference?: ((reference: ChatMarkdownContextReference) => ReactNode) | undefined;
+  skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> | undefined;
+  markdownCwd?: string | undefined;
+  threadRef?: ScopedThreadRef | undefined;
+  readOnly?: boolean | undefined;
   footer?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -3384,6 +3492,8 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
             renderContextReference={props.renderContextReference}
             skills={props.skills}
             markdownCwd={props.markdownCwd}
+            threadRef={props.threadRef}
+            readOnly={props.readOnly}
           />
         </div>
       ) : null}
@@ -3419,11 +3529,12 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
 
 const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
-  renderContextReference: (reference: ChatMarkdownContextReference) => ReactNode;
-  skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
-  markdownCwd: string | undefined;
+  renderContextReference?: ((reference: ChatMarkdownContextReference) => ReactNode) | undefined;
+  skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> | undefined;
+  markdownCwd?: string | undefined;
+  threadRef?: ScopedThreadRef | undefined;
+  readOnly?: boolean | undefined;
 }) {
-  const ctx = use(TimelineRowCtx);
   if (props.text.length === 0) {
     return null;
   }
@@ -3431,8 +3542,9 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     <ChatMarkdown
       text={props.text}
       cwd={props.markdownCwd}
-      threadRef={ctx.threadRef ?? undefined}
-      skills={props.skills}
+      threadRef={props.threadRef}
+      readOnly={props.readOnly ?? false}
+      skills={props.skills ?? EMPTY_TIMELINE_SKILLS}
       className="text-message-foreground"
       lineBreaks
       parseRawHtml={false}
@@ -3610,6 +3722,19 @@ function ComputerUseAppIcon({ className }: { className: string }) {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+function WorkEntryRowIcon(
+  props: ComponentProps<typeof ToolActivityIconView> & { readOnly?: boolean | undefined },
+) {
+  return props.readOnly ? (
+    <WorkEntryIcon
+      name={props.fallbackName}
+      className={cn(props.className, props.muted && "opacity-70 light:brightness-[.6]")}
+    />
+  ) : (
+    <ToolActivityIconView {...props} />
   );
 }
 
@@ -4134,13 +4259,15 @@ function AgentSpawnMemberRow({
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
+  readOnly?: boolean | undefined;
   workspaceRoot: string | undefined;
   isExpandedToolGroupEntry: boolean;
   displayLabel?: string | undefined;
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry, displayLabel } = props;
-  // Before any hooks: spawn rows render their own component.
+  if (props.readOnly) return <PlainWorkEntryRow {...props} />;
+  // Before any hooks: spawn CTA rows render their own component.
   if (workEntry.agentSpawn) {
     return (
       <AgentSpawnRow
@@ -4151,7 +4278,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
     );
   }
   return (
-    <PlainWorkEntryRow
+    <ConnectedPlainWorkEntryRow
       workEntry={workEntry}
       workspaceRoot={workspaceRoot}
       isExpandedToolGroupEntry={isExpandedToolGroupEntry}
@@ -4161,15 +4288,32 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   );
 });
 
-const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
+interface PlainWorkEntryRowProps {
   workEntry: TimelineWorkEntry;
-  workspaceRoot: string | undefined;
-  isExpandedToolGroupEntry: boolean;
+  workspaceRoot?: string | undefined;
+  isExpandedToolGroupEntry?: boolean | undefined;
   displayLabel?: string | undefined;
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
-}) {
-  const { workEntry, workspaceRoot, isExpandedToolGroupEntry, displayLabel } = props;
+  readOnly?: boolean | undefined;
+  threadRef?: ScopedThreadRef | undefined;
+  onImageExpand?: ComponentProps<typeof ChatMarkdown>["onImageExpand"];
+}
+
+function ConnectedPlainWorkEntryRow(props: PlainWorkEntryRowProps) {
   const { threadRef, onImageExpand } = use(TimelineRowCtx);
+  return (
+    <PlainWorkEntryRow
+      {...props}
+      threadRef={threadRef ?? undefined}
+      onImageExpand={onImageExpand}
+    />
+  );
+}
+
+export const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: PlainWorkEntryRowProps) {
+  const { workEntry, workspaceRoot, isExpandedToolGroupEntry, displayLabel } = props;
+  const threadRef = props.readOnly ? undefined : props.threadRef;
+  const onImageExpand = props.onImageExpand;
   const groupView = use(WorkGroupViewCtx);
   const [expanded, setExpanded] = useState(
     () => groupView?.state.expandedEntries.has(workEntry.id) ?? false,
@@ -4177,7 +4321,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const toggleExpanded = () => {
     const next = !expanded;
     if (groupView) {
-      groupView.onToggleEntry(!next);
+      groupView.onToggleEntry?.(!next);
       if (next) groupView.state.expandedEntries.add(workEntry.id);
       else groupView.state.expandedEntries.delete(workEntry.id);
     } else {
@@ -4194,7 +4338,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const entryIconName =
     showWarningIndicator || showDestructiveRowStyle ? "circle-alert" : workEntryIconName(workEntry);
   const entryToolIcon =
-    showWarningIndicator || showDestructiveRowStyle
+    props.readOnly || showWarningIndicator || showDestructiveRowStyle
       ? undefined
       : (workEntry.toolIcon ?? workEntry.toolSource?.icon);
   const previewText = displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot);
@@ -4285,7 +4429,8 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           role={showFailedIndicator ? "img" : undefined}
           aria-label={showFailedIndicator ? "Tool call failed" : undefined}
         >
-          <ToolActivityIconView
+          <WorkEntryRowIcon
+            readOnly={props.readOnly}
             icon={entryToolIcon}
             fallbackName={entryIconName}
             className="block size-4 shrink-0 stroke-[1.8]"
@@ -4361,7 +4506,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         </div>
       ) : null}
       {expanded && workEntry.questionAnswer ? (
-        <QuestionAnswerHistory answer={workEntry.questionAnswer} />
+        <QuestionAnswerHistory answer={workEntry.questionAnswer} readOnly={props.readOnly} />
       ) : null}
       {expanded && canExpand && expandedBody && !workEntry.questionAnswer ? (
         <div
@@ -4376,11 +4521,20 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   );
 });
 
-function QuestionAnswerHistory({
-  answer,
-}: {
+function QuestionAnswerHistory(props: {
   answer: import("@t3tools/contracts").UserInputAttachmentAnswerPayload;
+  readOnly?: boolean | undefined;
 }) {
+  return props.readOnly ? (
+    <QuestionAnswerHistoryBody answer={props.answer} urls={[]} />
+  ) : (
+    <ConnectedQuestionAnswerHistory answer={props.answer} />
+  );
+}
+
+function ConnectedQuestionAnswerHistory({
+  answer,
+}: Pick<ComponentProps<typeof QuestionAnswerHistory>, "answer">) {
   const { activeThreadEnvironmentId } = use(TimelineRowCtx);
   const attachments = useMemo(() => Object.values(answer.attachmentsByQuestionId).flat(), [answer]);
   const resources = useMemo(
@@ -4392,6 +4546,17 @@ function QuestionAnswerHistory({
     [attachments],
   );
   const urls = useAssetUrls(activeThreadEnvironmentId, resources);
+  return <QuestionAnswerHistoryBody answer={answer} urls={urls} />;
+}
+
+function QuestionAnswerHistoryBody({
+  answer,
+  urls,
+}: {
+  answer: import("@t3tools/contracts").UserInputAttachmentAnswerPayload;
+  urls: ReadonlyArray<string | null | undefined>;
+}) {
+  const attachments = Object.values(answer.attachmentsByQuestionId).flat();
   return (
     <div className="ms-7 mt-2 space-y-2" onClick={stopRowToggle}>
       {[

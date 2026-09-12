@@ -3,9 +3,12 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
+  ItemLifecyclePayload,
   SharedThread,
   ShareSummary,
   ThreadId,
+  ToolActivitySurface,
+  ToolLifecycleItemType,
   type ShareOptions,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -34,6 +37,9 @@ const StoredShare = Schema.Struct({ threadId: ThreadId, snapshot: SharedThread }
 const decodeStoredShare = Schema.decodeUnknownEffect(Schema.fromJsonString(StoredShare));
 const encodeStoredShare = Schema.encodeEffect(Schema.fromJsonString(StoredShare));
 const codePattern = /^[A-Za-z0-9_-]{32}\.json$/;
+const isSharedToolItemType = Schema.is(ToolLifecycleItemType);
+const isSharedToolStatus = Schema.is(ItemLifecyclePayload.fields.status);
+const isSharedToolSurface = Schema.is(ToolActivitySurface);
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -92,11 +98,44 @@ export function projectSharedTools(
         )
       : undefined;
     const toolName = data?.toolName ?? data?.tool ?? item?.tool ?? payload?.itemType;
+    const rawItemType = payload?.itemType;
+    const rawStatus = payload?.status;
+    const rawToolSurface = payload?.toolSurface;
+    const itemType = isSharedToolItemType(rawItemType) ? rawItemType : previous?.itemType;
+    const status = options.includeToolResults
+      ? rawStatus !== undefined && isSharedToolStatus(rawStatus)
+        ? rawStatus
+        : activity.kind === "tool.completed"
+          ? "completed"
+          : previous?.status
+      : undefined;
+    const toolSurface = options.includeToolCalls
+      ? isSharedToolSurface(rawToolSurface)
+        ? rawToolSurface
+        : previous?.toolSurface
+      : undefined;
+    // Provider presentation can mix input and output, so it requires both selections.
+    const includePresentation = options.includeToolCalls && options.includeToolResults;
+    const title = includePresentation
+      ? typeof payload?.title === "string"
+        ? payload.title
+        : previous?.title
+      : undefined;
+    const detail = includePresentation
+      ? typeof payload?.detail === "string"
+        ? payload.detail
+        : previous?.detail
+      : undefined;
     tools.set(id, {
       id,
       name: typeof toolName === "string" ? toolName : "Tool",
       createdAt: previous?.createdAt ?? activity.createdAt,
       turnId: activity.turnId,
+      ...(itemType !== undefined ? { itemType } : {}),
+      ...(status !== undefined ? { status } : {}),
+      ...(toolSurface !== undefined ? { toolSurface } : {}),
+      ...(title !== undefined ? { title } : {}),
+      ...(detail !== undefined ? { detail } : {}),
       ...(input !== undefined || previous?.input !== undefined
         ? { input: input ?? previous?.input }
         : {}),
