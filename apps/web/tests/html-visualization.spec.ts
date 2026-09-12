@@ -226,7 +226,7 @@ test("keeps parent DOM and storage inaccessible and oversized content clipped", 
 }) => {
   const content = await mountVisualization(
     page,
-      `"></iframe>
+    `"></iframe>
     <div style="position:fixed;inset:0;width:10000px;height:10000px;background:red">Contained content</div>`,
   );
   const isolation = await content.locator("body").evaluate(() => {
