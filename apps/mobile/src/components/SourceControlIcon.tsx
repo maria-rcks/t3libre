@@ -1,4 +1,4 @@
-import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
+import Svg, { Circle, Defs, G, LinearGradient, Path, Stop } from "react-native-svg";
 import { withUniwind } from "uniwind";
 
 const ThemedSvg = withUniwind(Svg);
@@ -15,20 +15,17 @@ export function SourceControlIcon(props: {
 
   switch (props.kind) {
     case "forgejo":
+      // Official two-color mark from https://forgejo.org/favicon.svg.
       return (
-        <ThemedSvg
-          width={size}
-          height={size}
-          viewBox="0 0 24 24"
-          color={props.color}
-          colorClassName={props.colorClassName}
-          fill="currentColor"
-        >
-          <Path
-            fill="#ff6600"
-            d="M16.7773 0c1.6018 0 2.9004 1.2986 2.9004 2.9005s-1.2986 2.9004-2.9004 2.9004c-1.0854 0-2.0315-.596-2.5288-1.4787H12.91c-2.3322 0-4.2272 1.8718-4.2649 4.195l-.0007 2.1175a7.0759 7.0759 0 0 1 4.148-1.4205l.1176-.001 1.3385.0002c.4973-.8827 1.4434-1.4788 2.5288-1.4788 1.6018 0 2.9004 1.2986 2.9004 2.9005s-1.2986 2.9004-2.9004 2.9004c-1.0854 0-2.0315-.596-2.5288-1.4787H12.91c-2.3322 0-4.2272 1.8718-4.2649 4.195l-.0007 2.319c.8827.4973 1.4788 1.4434 1.4788 2.5287 0 1.602-1.2986 2.9005-2.9005 2.9005-1.6018 0-2.9004-1.2986-2.9004-2.9005 0-1.0853.596-2.0314 1.4788-2.5287l-.0002-9.9831c0-3.887 3.1195-7.0453 6.9915-7.108l.1176-.001h1.3385C14.7458.5962 15.692 0 16.7773 0ZM7.2227 19.9052c-.6596 0-1.1943.5347-1.1943 1.1943s.5347 1.1943 1.1943 1.1943 1.1944-.5347 1.1944-1.1943-.5348-1.1943-1.1944-1.1943Zm9.5546-10.4644c-.6596 0-1.1944.5347-1.1944 1.1943s.5348 1.1943 1.1944 1.1943c.6596 0 1.1943-.5347 1.1943-1.1943s-.5347-1.1943-1.1943-1.1943Zm0-7.7346c-.6596 0-1.1944.5347-1.1944 1.1943s.5348 1.1943 1.1944 1.1943c.6596 0 1.1943-.5347 1.1943-1.1943s-.5347-1.1943-1.1943-1.1943Z"
-          />
-        </ThemedSvg>
+        <Svg width={size} height={size} viewBox="0 0 212 212">
+          <G transform="translate(6 6)" fill="none">
+            <Path d="M58 168 v-98 a50 50 0 0 1 50-50 h20" stroke="#ff6600" strokeWidth={25} />
+            <Path d="M58 168 v-30 a50 50 0 0 1 50-50 h20" stroke="#d40000" strokeWidth={25} />
+            <Circle cx={142} cy={20} r={18} stroke="#ff6600" strokeWidth={15} />
+            <Circle cx={142} cy={88} r={18} stroke="#d40000" strokeWidth={15} />
+            <Circle cx={58} cy={180} r={18} stroke="#d40000" strokeWidth={15} />
+          </G>
+        </Svg>
       );
     case "github":
       return (
