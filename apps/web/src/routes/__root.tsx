@@ -10,6 +10,7 @@ import {
   useLocation,
   useNavigate,
   useRouter,
+  HeadContent,
 } from "@tanstack/react-router";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
@@ -78,6 +79,9 @@ import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
 
 export const Route = createRootRoute({
   beforeLoad: async ({ location }) => {
+    if (location.pathname.startsWith("/share/")) {
+      return { authGateState: { status: "public-share" } as const };
+    }
     if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
       return {
         authGateState: {
@@ -151,6 +155,15 @@ function RootRouteView() {
       window.cancelAnimationFrame(frame);
     };
   }, [pathname]);
+
+  if (pathname.startsWith("/share/")) {
+    return (
+      <ToastProvider>
+        <HeadContent />
+        <Outlet />
+      </ToastProvider>
+    );
+  }
 
   if (pathname === "/pair" || pathname === "/connect") {
     return (
