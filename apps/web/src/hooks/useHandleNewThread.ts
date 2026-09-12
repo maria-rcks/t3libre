@@ -159,7 +159,7 @@ export function useNewThreadHandler() {
       // skipped entirely when a higher-priority source decides, and its
       // query atom caches per project after the first call.
       const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
-        if (project && isChatProject(project)) return "local";
+        if (isChatProject({ id: projectRef.projectId })) return "local";
         const consultProjectFile = project !== undefined && projectThreadEnvMode == null;
         return resolveDefaultThreadEnvMode({
           projectSetting: projectThreadEnvMode,

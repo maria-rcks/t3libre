@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { RuntimeMode } from "@t3tools/contracts";
+import { CHAT_PROJECT_ID, type RuntimeMode } from "@t3tools/contracts";
 
 const testState = vi.hoisted(() => {
   let completeProjectFileRead: (value: null) => void = () => undefined;
@@ -225,6 +225,30 @@ describe.each([
     expect(testState.router.state.location.href).toBe("/usage");
     expect(testState.router.navigate).not.toHaveBeenCalled();
     expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+  });
+
+  it("uses local mode for a chat before its project record loads", async () => {
+    testState.reset(draft, { envMode: "worktree", startFromOrigin: false });
+    const projectRef = {
+      environmentId: "environment-ssh",
+      projectId: CHAT_PROJECT_ID,
+    } as never;
+
+    const opened = await useNewThreadHandler()(projectRef);
+
+    expect(opened).not.toBeNull();
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      projectRef,
+      opened!.draftId,
+      expect.objectContaining({ envMode: "local" }),
+    );
+    if (draft) {
+      expect(testState.draftStore.setDraftThreadContext).toHaveBeenCalledWith(
+        draft.draftId,
+        expect.objectContaining({ envMode: "local" }),
+      );
+    }
   });
 
   it.each([true, false])(
