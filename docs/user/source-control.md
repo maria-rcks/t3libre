@@ -29,7 +29,8 @@ or has no login for that server. Once an account is selected, failed actions sta
 account. Settings shows the detected CLI. Forgejo and Gitea share one integration entry.
 
 When cloning or publishing, use a full repository URL to select a specific server.
-You can use `owner/repo` when only one server is configured, or with your default `tea` login.
+You can use `owner/repo` when only one fj server is configured, or with your default `tea`
+login when fj is unavailable or unconfigured. With multiple fj servers, use the full URL.
 If you have multiple `tea` accounts on one server, select one with
 `tea login default <login-name>`. Git push and clone also need Git credentials or an SSH key
 for that server.

@@ -59,7 +59,7 @@ describe("pull request checkout commands", () => {
       "forgejo",
       "feature",
       null,
-      "git fetch origin refs/pull/42/head && git checkout -b pulls/42 FETCH_HEAD",
+      "git fetch origin refs/pull/42/head && git checkout -B pulls/42 FETCH_HEAD",
     ],
     ["azure-devops", "feature", null, "az repos pr checkout --id 42"],
     [

@@ -139,6 +139,10 @@ export class ForgejoCli extends Context.Service<
       readonly command: "fj" | "tea";
       readonly remoteUrl?: string;
     }) => Effect.Effect<ReturnType<typeof parseForgejoLogins>, ForgejoCliError>;
+    readonly getAccount?: (input: {
+      readonly cwd: string;
+      readonly baseUrl: string;
+    }) => Effect.Effect<string, ForgejoCliError>;
     readonly resolveRepository: (
       input: ForgejoRepositoryInput,
     ) => Effect.Effect<ForgejoRepository, ForgejoCliError>;
@@ -374,10 +378,13 @@ export const make = Effect.gen(function* () {
               ? "Forgejo repository or pull request was not found."
               : `Forgejo API request failed (HTTP ${status}). Check this server's fj credentials and permissions.`,
         });
-      const body = yield* collectUint8StreamText({
-        stream: response.stream,
-        maxBytes: 8 * 1024 * 1024,
-      });
+      const body =
+        status === 204 || status === 205
+          ? { text: "", truncated: false, invalidUtf8: false }
+          : yield* collectUint8StreamText({
+              stream: response.stream,
+              maxBytes: 8 * 1024 * 1024,
+            });
       if (body.truncated || body.invalidUtf8)
         return yield* new ForgejoCliError({
           command: "fj",
@@ -407,6 +414,61 @@ export const make = Effect.gen(function* () {
         ),
       ),
   );
+
+  const authenticateFj = Effect.fn("ForgejoCli.authenticateFj")(function* (
+    cwd: string,
+    login: typeof ForgejoLoginSchema.Type,
+  ) {
+    const keys = yield* readKeys(cwd);
+    const token = keys.hosts[login.name]?.token;
+    const now = yield* Clock.currentTimeMillis;
+    const cached = authenticated.get(login.url);
+    if (token && cached?.token === token && now - cached.time < 30_000) return token;
+    yield* execute({ command: "fj", cwd, args: ["--host", login.url, "whoami"] });
+    // fj owns OAuth renewal. Re-read the file after it has refreshed an expired token.
+    const refreshed = (yield* readKeys(cwd)).hosts[login.name]?.token;
+    if (!refreshed)
+      return yield* new ForgejoCliError({
+        command: "fj",
+        cwd,
+        reason: "authentication",
+        detail: "fj has no credentials for this server. Authenticate again with fj.",
+      });
+    authenticated.set(login.url, { token: refreshed, time: now });
+    return refreshed;
+  }, authLock.withPermits(1));
+
+  const getAccount: NonNullable<ForgejoCli["Service"]["getAccount"]> = Effect.fn(
+    "ForgejoCli.getAccount",
+  )(function* (input) {
+    const logins = yield* listLogins({ cwd: input.cwd, command: "fj", remoteUrl: input.baseUrl });
+    const login = logins.find(
+      (item) => item.url.replace(/\/+$/, "") === input.baseUrl.replace(/\/+$/, ""),
+    );
+    if (!login)
+      return yield* new ForgejoCliError({
+        command: "fj",
+        cwd: input.cwd,
+        reason: "authentication",
+        detail: "fj has no credentials for this server.",
+      });
+    const token = yield* authenticateFj(input.cwd, login);
+    const currentUser = yield* requestFj({
+      cwd: input.cwd,
+      baseUrl: login.url.replace(/\/+$/, ""),
+      token,
+      path: "user",
+    });
+    const user = decodeJsonResult(Schema.Struct({ login: Schema.String }))(currentUser.stdout);
+    if (Result.isFailure(user) || !user.success.login.trim())
+      return yield* new ForgejoCliError({
+        command: "fj",
+        cwd: input.cwd,
+        reason: "invalid-response",
+        detail: "Forgejo returned an invalid account response.",
+      });
+    return user.success.login;
+  });
 
   const resolveRepository = Effect.fn("ForgejoCli.resolveRepository")(function* (
     input: ForgejoRepositoryInput,
@@ -486,25 +548,7 @@ export const make = Effect.gen(function* () {
       if (available.failure.reason !== "missing-cli") return yield* available.failure;
     }
     if (login) {
-      const selected = login;
-      const auth = yield* Effect.gen(function* () {
-        const keys = yield* readKeys(input.cwd);
-        const token = keys.hosts[selected.name]?.token;
-        const now = yield* Clock.currentTimeMillis;
-        const cached = authenticated.get(selected.url);
-        if (token && cached?.token === token && now - cached.time < 30_000) return;
-        yield* execute({ command: "fj", cwd: input.cwd, args: ["--host", selected.url, "whoami"] });
-        // fj owns OAuth renewal. Re-read the file after it has refreshed an expired token.
-        const refreshed = (yield* readKeys(input.cwd)).hosts[selected.name]?.token;
-        if (!refreshed)
-          return yield* new ForgejoCliError({
-            command: "fj",
-            cwd: input.cwd,
-            reason: "authentication",
-            detail: "fj has no credentials for this server. Authenticate again with fj.",
-          });
-        authenticated.set(selected.url, { token: refreshed, time: now });
-      }).pipe(authLock.withPermits(1), Effect.result);
+      const auth = yield* authenticateFj(input.cwd, login).pipe(Effect.result);
       if (Result.isFailure(auth)) {
         if (auth.failure.reason === "missing-cli") login = undefined;
         else return yield* auth.failure;
@@ -533,29 +577,7 @@ export const make = Effect.gen(function* () {
       basePath && path.startsWith(`${basePath}/`) ? path.slice(basePath.length + 1) : path;
     const repositoryPath = relativePath.replace(/\/pulls\/\d+.*$/, "").replace(/\.git$/, "");
     if (command === "fj" && !repositoryPath.includes("/")) {
-      const token = (yield* readKeys(input.cwd)).hosts[login.name]?.token;
-      if (!token)
-        return yield* new ForgejoCliError({
-          command: "fj",
-          cwd: input.cwd,
-          reason: "authentication",
-          detail: "fj has no credentials for this server.",
-        });
-      const currentUser = yield* requestFj({
-        cwd: input.cwd,
-        baseUrl: login.url.replace(/\/+$/, ""),
-        token,
-        path: "user",
-      });
-      const user = decodeJsonResult(Schema.Struct({ login: Schema.String }))(currentUser.stdout);
-      if (Result.isFailure(user))
-        return yield* new ForgejoCliError({
-          command: "fj",
-          cwd: input.cwd,
-          reason: "invalid-response",
-          detail: "Forgejo returned an invalid account response.",
-        });
-      login = { ...login, user: user.success.login };
+      login = { ...login, user: yield* getAccount({ cwd: input.cwd, baseUrl: login.url }) };
     }
     const repository = repositoryPath.includes("/")
       ? repositoryPath
@@ -653,7 +675,7 @@ export const make = Effect.gen(function* () {
       });
     return result;
   });
-  return ForgejoCli.of({ execute, listLogins, resolveRepository, api });
+  return ForgejoCli.of({ execute, listLogins, getAccount, resolveRepository, api });
 });
 
 export const layer = Layer.effect(ForgejoCli, make);

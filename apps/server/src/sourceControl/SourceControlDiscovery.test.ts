@@ -904,9 +904,9 @@ it.effect("falls back to tea when fj is missing or has no account for this serve
   }),
 );
 
-it.effect("does not retry fj mutations through tea after an HTTP failure or redirect", () =>
+it.effect("handles fj mutation statuses without retrying failures or reading absent bodies", () =>
   Effect.gen(function* () {
-    for (const status of [302, 401, 403, 404, 429, 500]) {
+    for (const status of [204, 205, 302, 401, 403, 404, 429, 500]) {
       let writes = 0;
       yield* Effect.gen(function* () {
         const cli = yield* ForgejoCli.make;
@@ -919,7 +919,8 @@ it.effect("does not retry fj mutations through tea after an HTTP failure or redi
             body: { body: "only once" },
           })
           .pipe(Effect.result);
-        assert.strictEqual(result._tag, "Failure");
+        assert.strictEqual(result._tag, status < 300 ? "Success" : "Failure");
+        if (result._tag === "Success") assert.strictEqual(result.success.stdout, "");
         if (result._tag === "Failure") {
           assert.strictEqual(result.failure.command, "fj");
           assert.strictEqual(result.failure.httpStatus, status);
@@ -951,7 +952,7 @@ it.effect("does not retry fj mutations through tea after an HTTP failure or redi
             return Effect.succeed(
               HttpClientResponse.fromWeb(
                 request,
-                new Response("", {
+                new Response(status < 300 ? null : "", {
                   status,
                   headers: { location: "https://other.local/" },
                 }),
@@ -998,6 +999,12 @@ it.effect(
           );
           if (scenario !== "revoked" && scenario !== "invalid-storage")
             assert.deepStrictEqual(result.auth.host, Option.some("forgejo.local:3000"));
+          assert.deepStrictEqual(
+            result.auth.account,
+            scenario === "authenticated" || scenario === "missing"
+              ? Option.some("maria")
+              : Option.none(),
+          );
           assert.strictEqual(
             commands.some((command) => command.startsWith("tea ")),
             scenario === "missing",
@@ -1007,6 +1014,14 @@ it.effect(
           Effect.provide(
             Layer.mergeAll(
               Layer.mock(ForgejoCli.ForgejoCli)({
+                getAccount: (input) => {
+                  assert.strictEqual(scenario, "authenticated");
+                  assert.deepStrictEqual(input, {
+                    cwd: "/repo",
+                    baseUrl: "http://forgejo.local:3000",
+                  });
+                  return Effect.succeed("maria");
+                },
                 listLogins: (input) => {
                   assert.strictEqual(
                     input.remoteUrl,
@@ -1025,7 +1040,7 @@ it.effect(
                     {
                       name: "forgejo.local:3000",
                       url: "http://forgejo.local:3000",
-                      user: "maria",
+                      user: "",
                       default: "false",
                     },
                   ]);

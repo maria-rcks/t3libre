@@ -113,7 +113,26 @@ export const makeDiscovery = Effect.gen(function* () {
         },
       });
       // A configured fj account owns its requests, including authentication errors.
-      if (fj.status === "available" && (login || Result.isFailure(credentials))) return fj;
+      if (fj.status === "available" && (login || Result.isFailure(credentials))) {
+        if (login && fj.auth.status === "authenticated" && cli.getAccount) {
+          const account = yield* cli.getAccount({ cwd, baseUrl: login.url }).pipe(Effect.result);
+          return {
+            ...fj,
+            auth: Result.isSuccess(account)
+              ? providerAuth({
+                  status: "authenticated",
+                  account: account.success,
+                  host: ForgejoCli.parseForgejoRemote(login.url)?.host,
+                })
+              : providerAuth({
+                  status: "unknown",
+                  detail: account.failure.detail,
+                  host: ForgejoCli.parseForgejoRemote(login.url)?.host,
+                }),
+          };
+        }
+        return fj;
+      }
       const tea = yield* probeSourceControlProvider({ cwd, process, spec: discovery });
       return tea.status === "available" || fj.status === "missing" ? tea : fj;
     }),
