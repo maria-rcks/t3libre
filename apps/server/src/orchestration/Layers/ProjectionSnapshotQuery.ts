@@ -522,7 +522,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     return new Map(
       filteredProjectRows.map((row) => [
         row.projectId,
-        repositoryIdentityByWorkspaceRoot.get(row.workspaceRoot) ?? null,
+        row.projectId === CHAT_PROJECT_ID
+          ? null
+          : (repositoryIdentityByWorkspaceRoot.get(row.workspaceRoot) ?? null),
       ]),
     );
   });
