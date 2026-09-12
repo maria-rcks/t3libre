@@ -194,6 +194,8 @@ import {
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
+import { HtmlVisualization } from "./chat/HtmlVisualization";
+import { isHtmlVisualizationFence } from "../html-visualization";
 
 interface ChatMarkdownProps {
   text: string;
@@ -205,6 +207,8 @@ interface ChatMarkdownProps {
   environmentId?: EnvironmentId | undefined;
   onTaskListChange?: ((input: { markerOffset: number; checked: boolean }) => void) | undefined;
   isStreaming?: boolean;
+  /** Opt in only for assistant timeline messages. */
+  allowHtmlVisualizations?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   className?: string;
   /** Treat single newlines as hard breaks — chat-style user input. */
@@ -2220,6 +2224,7 @@ function useChatMarkdownState({
   environmentId: explicitEnvironmentId,
   onTaskListChange,
   isStreaming = false,
+  allowHtmlVisualizations = false,
   skills = EMPTY_MARKDOWN_SKILLS,
   onUseArtifactTemplate,
   imageBaseDir,
@@ -2618,6 +2623,7 @@ function useChatMarkdownState({
 
   const componentState = useMemo(
     () => ({
+      allowHtmlVisualizations,
       cwd,
       diffThemeName,
       environmentId,
@@ -2647,6 +2653,7 @@ function useChatMarkdownState({
       updateThreadPullRequestLink,
     }),
     [
+      allowHtmlVisualizations,
       cwd,
       diffThemeName,
       environmentId,
@@ -3177,7 +3184,9 @@ const CHAT_MARKDOWN_COMPONENTS = {
     return <MarkdownDetails open={detailsOpen}>{children}</MarkdownDetails>;
   },
   pre: function MarkdownPre({ node, children, ...props }) {
-    const { resolvedTheme, diffThemeName, isStreaming } = use(ChatMarkdownRendererContext);
+    const { resolvedTheme, diffThemeName, isStreaming, allowHtmlVisualizations, text } = use(
+      ChatMarkdownRendererContext,
+    );
     const codeBlock = extractCodeBlock(children);
     if (!codeBlock) {
       return <pre {...props}>{children}</pre>;
@@ -3185,7 +3194,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
 
     const language = extractFenceLanguage(codeBlock.className);
     const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
-    return (
+    const source = (
       <MarkdownCodeBlock
         code={codeBlock.code}
         language={language}
@@ -3206,7 +3215,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
             }
           >
             <SuspenseShikiCodeBlock
-              className={codeBlock.className}
+              className={language === "t3-html" ? "language-html" : codeBlock.className}
               code={codeBlock.code}
               themeName={diffThemeName}
               isStreaming={isStreaming}
@@ -3215,6 +3224,27 @@ const CHAT_MARKDOWN_COMPONENTS = {
         </RenderErrorBoundary>
       </MarkdownCodeBlock>
     );
+    const start = node?.position?.start.offset;
+    const end = node?.position?.end.offset;
+    if (
+      allowHtmlVisualizations &&
+      !isStreaming &&
+      language === "t3-html" &&
+      start !== undefined &&
+      end !== undefined &&
+      isHtmlVisualizationFence(text.slice(start, end), codeBlock.code)
+    ) {
+      return (
+        <HtmlVisualization
+          html={codeBlock.code}
+          title={fenceTitle ?? "HTML visualization"}
+          dark={resolvedTheme === "dark"}
+        >
+          {source}
+        </HtmlVisualization>
+      );
+    }
+    return source;
   },
 } satisfies Components;
 

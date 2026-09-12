@@ -12,6 +12,18 @@ becomes an attachment when inserting it would exceed the message limit. On a
 hardware keyboard, use `Cmd+Shift+V` on Apple devices or `Ctrl+Shift+V` elsewhere
 to keep a large paste editable in the composer instead.
 
+## Inline visualizations
+
+Ask any provider for an HTML visualization to see a chart, diagram, or comparison
+inside its response on web and desktop. Providers use a `t3-html` Markdown fence
+containing self-contained HTML, CSS, and optional inline SVG. Visualizations appear
+after the message finishes and support native controls such as expandable sections
+and checkbox toggles. JavaScript, external resources, and navigation are blocked.
+
+Use **Show source** to inspect or copy the HTML, and **Reset** to restore its initial
+state. Mobile displays the source and accompanying explanation. Ordinary `html`
+fences, unfinished fences, and visualizations over 100,000 characters stay as code.
+
 ## Attach files
 
 Attach up to eight files per message. Images can be up to 10 MB; other files can
