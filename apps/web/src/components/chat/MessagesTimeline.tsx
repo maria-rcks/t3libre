@@ -3751,6 +3751,7 @@ const AgentSpawnRow = memo(function AgentSpawnRow(props: {
     coordinatorStatus: workflowGroup?.workflow.status,
   });
   const { live, lead } = summary;
+  const failed = summary.tone === "failed";
   // Same rule as the panel footer: providers may aggregate member usage into
   // the coordinator, so count the coordinator only when no members exist.
   const totalTokens = agents.reduce(
@@ -3777,6 +3778,7 @@ const AgentSpawnRow = memo(function AgentSpawnRow(props: {
   return (
     <div className="flex flex-col">
       <div
+        ref={live && !failed ? observeVisibleAnimation : undefined}
         role="button"
         tabIndex={0}
         aria-label={meta ? `${lead}, ${meta}` : lead}
@@ -3790,28 +3792,29 @@ const AgentSpawnRow = memo(function AgentSpawnRow(props: {
         }}
         className="flex cursor-pointer select-none items-center gap-1.5 rounded-md px-0.5 py-0.5 transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
       >
-        <span className="relative flex size-6 shrink-0 items-center justify-center text-icon-muted">
+        <span
+          className={cn(
+            "flex size-6 shrink-0 items-center justify-center",
+            failed ? failedToolIconClassName : "text-icon-muted",
+          )}
+        >
           <WorkEntryIcon name="bot" className="block size-4 shrink-0 stroke-[1.8]" />
-          {live ? (
-            <span
-              aria-hidden
-              className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-info"
-            />
-          ) : null}
         </span>
         <p className="flex min-w-0 flex-1 items-baseline gap-1.5 text-sm leading-relaxed">
-          <span className="min-w-0 truncate text-secondary-label">{lead}</span>
+          <span
+            className={cn(
+              "min-w-0 truncate text-secondary-label",
+              live && !failed && "live-tool-shine",
+            )}
+          >
+            {lead}
+          </span>
           {workflowName ? (
             <span className="min-w-0 truncate text-muted-foreground">· {workflowName}</span>
           ) : null}
         </p>
         {meta ? (
-          <span
-            className={cn(
-              "shrink-0 font-mono text-[.7rem] tabular-nums",
-              summary.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
-            )}
-          >
+          <span className="shrink-0 font-mono text-[.7rem] tabular-nums text-muted-foreground">
             {meta}
           </span>
         ) : null}
@@ -3841,17 +3844,6 @@ const AgentSpawnRow = memo(function AgentSpawnRow(props: {
     </div>
   );
 });
-
-const AGENT_MEMBER_DOT_CLASS: Record<RuntimeSubagent["status"], string> = {
-  pending: "bg-info",
-  running: "bg-info",
-  waiting: "bg-info",
-  idle: "bg-muted-foreground/50",
-  completed: "bg-success",
-  failed: "bg-destructive",
-  cancelled: "bg-muted-foreground/60",
-  interrupted: "bg-muted-foreground/60",
-};
 
 const AGENT_MEMBER_STATUS_LABEL: Record<RuntimeSubagent["status"], string> = {
   pending: "Working",
@@ -3889,7 +3881,7 @@ function AgentSpawnMemberRow({
     .filter(Boolean)
     .join(" · ");
   // Settled members show their metrics; anything other than success keeps
-  // the status word so the outcome is not carried by color alone.
+  // the status word so the outcome remains explicit.
   const statusLabel =
     activeStatus || !meta
       ? AGENT_MEMBER_STATUS_LABEL[agent.status]
@@ -3934,18 +3926,11 @@ function AgentSpawnMemberRow({
       )}
     >
       <div className="flex select-none items-center gap-1.5">
-        <span
-          aria-hidden
-          className={cn(
-            "mx-1 size-1.5 shrink-0 rounded-full",
-            AGENT_MEMBER_DOT_CLASS[agent.status],
-          )}
-        />
         <p className="flex min-w-0 flex-1 items-baseline gap-1.5 text-sm leading-relaxed">
           <span
             className={cn(
-              "min-w-0 truncate text-foreground/80",
-              agent.status === "failed" && "text-destructive-foreground",
+              "min-w-0 truncate",
+              agent.status === "failed" ? failedToolIconClassName : "text-foreground/80",
             )}
           >
             {agent.title}
@@ -3961,11 +3946,11 @@ function AgentSpawnMemberRow({
         </span>
       </div>
       {!open && firstLine ? (
-        <p className="ms-4.5 truncate text-xs text-muted-foreground">{firstLine}</p>
+        <p className="truncate text-xs text-muted-foreground">{firstLine}</p>
       ) : null}
       {open ? (
         <div
-          className="ms-4.5 mt-1 cursor-default rounded-md bg-muted/40 px-3 py-2"
+          className="mt-1 cursor-default rounded-md bg-muted/40 px-3 py-2"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >

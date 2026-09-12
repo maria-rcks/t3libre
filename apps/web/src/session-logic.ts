@@ -394,7 +394,8 @@ export function hasActionableProposedPlan(
  * - tool rows attributed to an owning agent (payload.agentId) are re-homed;
  * - task.progress ticks collapse into one row per taskId;
  * - task.updated is fold input only (status patches are not narrative).
- * Unattributed rows always stay: over-hiding loses the only terminal signal.
+ * Unattributed rows stay unless a linked agent row replaces their launch;
+ * failed launches stay so the only terminal signal cannot disappear.
  */
 /** Agent (non-background) task.started rows seed spawn batches. */
 function isAgentTaskStartedActivity(activity: OrchestrationThreadActivity): boolean {
@@ -451,6 +452,21 @@ export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  // A launch tool and its task lifecycle describe the same run. Only hide
+  // launch rows once their tool-use id has an agent row to replace them.
+  const agentLaunchToolIds = new Set<string>();
+  for (const activity of ordered) {
+    if (
+      (activity.kind === "task.started" ||
+        activity.kind === "task.progress" ||
+        activity.kind === "task.completed") &&
+      isAgentTaskStartedActivity(activity) &&
+      !isAgentInternalActivity(activity)
+    ) {
+      const toolUseId = asTrimmedString(asRecord(activity.payload)?.toolUseId);
+      if (toolUseId) agentLaunchToolIds.add(toolUseId);
+    }
+  }
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of foldUserInputActivities(ordered)) {
     if (activity.tone !== "error" && isWorktreeSetupActivity(activity.kind)) continue;
@@ -468,7 +484,28 @@ export function deriveWorkLogEntries(
     if (isNoContentRuntimeWarning(activity)) continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
     if (isAgentInternalActivity(activity)) continue;
-    entries.push(toDerivedWorkLogEntry(activity));
+    const entry = toDerivedWorkLogEntry(activity);
+    // Native agent launches get their visible row from task.started. Defer
+    // their active tool row so another launch cannot duplicate the batch.
+    if (
+      activity.kind === "tool.updated" &&
+      entry.itemType === "collab_agent_tool_call" &&
+      entry.toolLifecycleStatus === "inProgress" &&
+      entry.tone !== "error"
+    ) {
+      const toolName = asRecord(asRecord(activity.payload)?.data)?.toolName;
+      if (toolName === "Agent" || toolName === "Task") continue;
+    }
+    if (
+      (activity.kind === "tool.updated" || activity.kind === "tool.completed") &&
+      entry.toolCallId &&
+      agentLaunchToolIds.has(entry.toolCallId) &&
+      entry.tone !== "error" &&
+      entry.toolLifecycleStatus !== "failed"
+    ) {
+      continue;
+    }
+    entries.push(entry);
   }
   return collapseDerivedWorkLogEntries(entries);
 }
