@@ -1672,8 +1672,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const handleProjectButtonContextMenu = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
-      if (isChatProject(project)) return;
       suppressProjectClickForContextMenuRef.current = true;
+      if (isChatProject({ id: project.id })) return;
       void (async () => {
         const api = readLocalApi();
         if (!api) return;
@@ -2252,7 +2252,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
-          ...(!isChatProject(project)
+          ...(!isChatProject({ id: project.id })
             ? [{ id: "project-settings", label: "Project settings" }]
             : []),
           { id: "delete", label: "Delete", destructive: true, icon: "trash" },

@@ -267,7 +267,7 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
               onPress: () => void props.onRunProjectScript(script),
               type: "action" as const,
             })),
-            ...(props.projectScripts.length === 0
+            ...(!props.hideGitControls && props.projectScripts.length === 0
               ? [
                   {
                     description: "This project has no saved scripts yet",
@@ -382,6 +382,7 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
       props.canOpenFiles,
       props.canOpenTerminal,
       props.gitStatus,
+      props.hideGitControls,
       props.onOpenNewTerminal,
       props.onOpenTerminal,
       props.onRunProjectScript,
@@ -396,7 +397,7 @@ export function useThreadGitRightHeaderItems(props: ThreadGitControlsProps): Hea
   return useMemo(
     () =>
       (props.hideGitControls
-        ? [actionItems.files]
+        ? [actionItems.files, actionItems.terminal]
         : [actionItems.git, actionItems.files, actionItems.terminal]) as HeaderItems,
     [actionItems, props.hideGitControls],
   );
@@ -407,7 +408,7 @@ export function useThreadGitCenterHeaderItems(props: ThreadGitControlsProps): He
   return useMemo(
     () =>
       (props.hideGitControls
-        ? [actionItems.files]
+        ? [actionItems.files, actionItems.terminal]
         : [actionItems.files, actionItems.git, actionItems.terminal]) as HeaderItems,
     [actionItems, props.hideGitControls],
   );
@@ -431,7 +432,7 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
           separateBackground
         />
       ) : null}
-      {showActionControls && !props.hideGitControls ? (
+      {showActionControls ? (
         <NativeHeaderToolbar.Menu
           icon="terminal"
           disabled={!props.canOpenTerminal}
@@ -450,7 +451,7 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
                 </NativeHeaderToolbar.Label>
               </NativeHeaderToolbar.MenuAction>
             ))
-          ) : (
+          ) : !props.hideGitControls ? (
             <NativeHeaderToolbar.MenuAction
               icon="play"
               disabled
@@ -459,7 +460,7 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
             >
               <NativeHeaderToolbar.Label>No project scripts</NativeHeaderToolbar.Label>
             </NativeHeaderToolbar.MenuAction>
-          )}
+          ) : null}
           {props.terminalSessions.map((session) => (
             <NativeHeaderToolbar.MenuAction
               key={session.terminalId}

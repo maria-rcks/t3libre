@@ -880,15 +880,16 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
       ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
       : null;
   const storedProject = useProject(projectRef);
+  const serverThreadId = serverThread?.id;
   const project = useMemo(() => {
     if (!storedProject || !isChatProject(storedProject)) return storedProject;
-    return serverThread
+    return serverThreadId
       ? {
           ...storedProject,
-          workspaceRoot: chatThreadWorkspacePath(storedProject.workspaceRoot, serverThread.id),
+          workspaceRoot: chatThreadWorkspacePath(storedProject.workspaceRoot, serverThreadId),
         }
       : null;
-  }, [storedProject, serverThread?.id]);
+  }, [storedProject, serverThreadId]);
   const terminalUiState = useTerminalUiStateStore((state) =>
     selectThreadTerminalUiState(state.terminalUiStateByThreadKey, threadRef),
   );
@@ -1271,15 +1272,16 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
       ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
       : null;
   const storedProject = useProject(projectRef);
+  const serverThreadId = serverThread?.id;
   const project = useMemo(() => {
     if (!storedProject || !isChatProject(storedProject)) return storedProject;
-    return serverThread
+    return serverThreadId
       ? {
           ...storedProject,
-          workspaceRoot: chatThreadWorkspacePath(storedProject.workspaceRoot, serverThread.id),
+          workspaceRoot: chatThreadWorkspacePath(storedProject.workspaceRoot, serverThreadId),
         }
       : null;
-  }, [storedProject, serverThread?.id]);
+  }, [storedProject, serverThreadId]);
   const knownTerminalSessions = useKnownTerminalSessions({
     environmentId: threadRef.environmentId,
     threadId: threadRef.threadId,
@@ -3489,7 +3491,7 @@ export default function ChatView(props: ChatViewProps) {
     [keybindings, terminalShortcutLabelOptions],
   );
   const onToggleDiff = useCallback(() => {
-    if (!isServerThread) {
+    if (!isServerThread || (isChat && !diffOpen)) {
       return;
     }
     if (!diffOpen) {
@@ -3498,7 +3500,7 @@ export default function ChatView(props: ChatViewProps) {
     if (activeThreadRef) {
       useRightPanelStore.getState().toggle(activeThreadRef, "diff");
     }
-  }, [activeThreadRef, diffOpen, isServerThread, onDiffPanelOpen]);
+  }, [activeThreadRef, diffOpen, isChat, isServerThread, onDiffPanelOpen]);
 
   const needsLoadBalancing = automaticEnvironment && !draftThread?.loadBalancedEnvironmentId;
   const loadBalancingCandidates = useMemo(
@@ -8507,15 +8509,17 @@ export default function ChatView(props: ChatViewProps) {
         closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
       />
     ) : renderedRightPanelSurface?.kind === "diff" ? (
-      <Suspense fallback={null}>
-        <DiffPanel
-          key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
-          mode="embedded"
-          composerDraftTarget={composerDraftTarget}
-          initialGitScope={initialDiffPanelGitScope}
-          workspaceMutationId={workspaceMutationId}
-        />
-      </Suspense>
+      isChat ? null : (
+        <Suspense fallback={null}>
+          <DiffPanel
+            key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
+            mode="embedded"
+            composerDraftTarget={composerDraftTarget}
+            initialGitScope={initialDiffPanelGitScope}
+            workspaceMutationId={workspaceMutationId}
+          />
+        </Suspense>
+      )
     ) : renderedRightPanelSurface?.kind === "pull-request" && !pullRequestsCapabilityKnown ? (
       <PullRequestDetailGhost />
     ) : renderedRightPanelSurface?.kind === "pull-request" && !supportsPullRequests ? (
