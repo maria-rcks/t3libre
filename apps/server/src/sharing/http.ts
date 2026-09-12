@@ -71,6 +71,8 @@ export function projectSharedTools(
             data?.command ??
             item?.changes ??
             item?.action ??
+            item?.query ??
+            item?.prompt ??
             item?.path,
         )
       : undefined;
@@ -78,6 +80,9 @@ export function projectSharedTools(
       ? printable(
           item?.aggregatedOutput ??
             item?.result ??
+            item?.contentItems ??
+            item?.results ??
+            item?.agentsStates ??
             item?.error ??
             data?.result ??
             state?.output ??
@@ -152,7 +157,7 @@ export const sharesHttpApiLayer = HttpApiBuilder.group(
           yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
           yield* noCache;
           const thread = yield* snapshots
-            .getThreadDetailById(payload.threadId)
+            .getThreadDetailById(payload.threadId, { activityKinds: [] })
             .pipe(Effect.catch((error) => failEnvironmentInternal("internal_error", error)));
           if (Option.isNone(thread)) return yield* failEnvironmentNotFound("thread_not_found");
           const rawActivities =
