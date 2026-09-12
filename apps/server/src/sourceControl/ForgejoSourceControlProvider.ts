@@ -106,7 +106,7 @@ export const make = Effect.gen(function* () {
     >[0],
   ) {
     const repo = yield* cli.resolveRepository(input);
-    const number = /(?:^#?|\/pulls\/)(\d+)\/?(?:[?#].*)?$/.exec(input.reference)?.[1];
+    const number = /(?:^#?|\/pulls\/)(\d+)(?:\/[^?#]*)?(?:[?#].*)?$/.exec(input.reference)?.[1];
     if (!number)
       return yield* new ForgejoCli.ForgejoCliError({
         command: "tea",

@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -58,6 +59,58 @@ const processOutput = (
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const encodeJsonEffect = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
+it.effect("loads Forgejo pull request references from files and commits views", () =>
+  Effect.gen(function* () {
+    const provider = yield* ForgejoSourceControlProvider.make;
+    for (const reference of [
+      "42",
+      "#42",
+      "https://forgejo.test/maria/project/pulls/42",
+      "https://forgejo.test/maria/project/pulls/42/",
+      "https://forgejo.test/maria/project/pulls/42/files?w=1#diff-1",
+      "http://forgejo.test:3000/git/maria/project/pulls/42/commits",
+    ]) {
+      const result = yield* provider.getChangeRequest({ cwd: "/repo", reference });
+      assert.strictEqual(result.number, 42);
+      assert.strictEqual(result.title, "Forgejo view reference");
+    }
+    const invalid = yield* provider
+      .getChangeRequest({
+        cwd: "/repo",
+        reference: "https://forgejo.test/maria/project/pulls/42invalid/files",
+      })
+      .pipe(Effect.result);
+    assert.strictEqual(invalid._tag, "Failure");
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.mock(FileSystem.FileSystem)({}),
+        Layer.mock(VcsProcess.VcsProcess)({}),
+        Layer.mock(ForgejoCli.ForgejoCli)({
+          resolveRepository: () =>
+            Effect.succeed({
+              login: "work",
+              repository: "maria/project",
+              baseUrl: "https://forgejo.test",
+            }),
+          api: (input) => {
+            assert.strictEqual(input.path, "repos/maria/project/pulls/42");
+            return encodeJsonEffect({
+              number: 42,
+              title: "Forgejo view reference",
+              html_url: "https://forgejo.test/maria/project/pulls/42",
+              state: "open",
+              merged: false,
+              base: { ref: "main", sha: "base", repo: null },
+              head: { ref: "feature", sha: "head", repo: null },
+            }).pipe(Effect.orDie, Effect.map(processOutput));
+          },
+        }),
+      ),
+    ),
+  ),
+);
 
 it.effect(
   "loads Forgejo reactions on comments, reviews and inline threads and resolves review mutations",
