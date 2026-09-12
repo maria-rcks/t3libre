@@ -57,6 +57,9 @@ const pullPath = (input: ProviderRepositoryRef & { readonly number: number }) =>
   `${repoPath(input)}/pulls/${input.number}`;
 const issuePath = (input: ProviderRepositoryRef & { readonly number: number }) =>
   `${repoPath(input)}/issues/${input.number}`;
+// Review IDs differ from the issue-comment IDs used by Forgejo's reactions API.
+const reviewCommentId = (review: typeof ForgejoReview.Type) =>
+  /#issuecomment-([1-9]\d*)$/.exec(review.html_url ?? "")?.[1];
 
 export const make = Effect.gen(function* () {
   const cli = yield* ForgejoCli;
@@ -279,37 +282,51 @@ export const make = Effect.gen(function* () {
             ),
           { concurrency: 4 },
         );
-        const timelineComments = yield* Effect.forEach(
-          comments.items,
-          (comment) =>
-            readArray(
-              { ...input, path: `${repoPath(input)}/issues/comments/${comment.id}/reactions` },
-              ForgejoReaction,
+        const inline = reviewComments.flat();
+        const entries = [
+          ...comments.items.map((comment) => ({
+            comment: forgejoComment(comment),
+            reactionId: String(comment.id),
+          })),
+          ...reviews.items
+            .filter((review) => review.state !== "PENDING" && review.state !== "REQUEST_REVIEW")
+            .map((review) => ({
+              comment: forgejoReview(review),
+              reactionId: reviewCommentId(review),
+            })),
+          ...inline.map((comment) => ({
+            comment: {
+              ...forgejoComment(comment),
+              kind: "review-comment" as const,
+              path: comment.path,
+            },
+            reactionId: String(comment.id),
+          })),
+        ];
+        const enriched = yield* Effect.forEach(
+          entries,
+          ({ comment, reactionId }) =>
+            (reactionId === undefined
+              ? Effect.succeed([])
+              : readArray(
+                  { ...input, path: `${repoPath(input)}/issues/comments/${reactionId}/reactions` },
+                  ForgejoReaction,
+                )
             ).pipe(
-              Effect.map((rows) => ({
-                ...forgejoComment(comment),
-                reactions: forgejoReactions(rows, viewer),
-              })),
+              Effect.map((rows) => ({ ...comment, reactions: forgejoReactions(rows, viewer) })),
             ),
           { concurrency: 4 },
         );
-        const inline = reviewComments.flat();
-        const timeline = [
-          ...timelineComments,
-          ...reviews.items
-            .filter((review) => review.state !== "PENDING" && review.state !== "REQUEST_REVIEW")
-            .map(forgejoReview),
-          ...inline.map((comment) => ({
-            ...forgejoComment(comment),
-            kind: "review-comment" as const,
-            path: comment.path,
-          })),
-        ].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
+        const byId = new Map(enriched.map((comment) => [comment.id, comment]));
+        const timeline = enriched.toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
         return {
           comments: timeline,
           commentCount: timeline.length,
           commentsTruncated: comments.truncated || reviews.truncated,
-          reviewThreads: inline.map(forgejoReviewThread),
+          reviewThreads: inline.map((comment) => ({
+            ...forgejoReviewThread(comment),
+            comments: [byId.get(String(comment.id)) ?? forgejoComment(comment)],
+          })),
           commits: commits.items.map(forgejoCommit),
           reactions: forgejoReactions(reactions.items, viewer),
         };
@@ -518,15 +535,33 @@ export const make = Effect.gen(function* () {
           { concurrency: 1 },
         );
     }),
-    setReaction: (input) =>
-      write({
+    setReaction: Effect.fn("ForgejoPullRequestProvider.setReaction")(function* (input) {
+      let commentId = input.subjectId;
+      if (commentId?.startsWith("review:")) {
+        const reviewId = /^review:([1-9]\d*)$/.exec(commentId)?.[1];
+        if (!reviewId) return yield* failure("setReaction", "Invalid Forgejo review ID.");
+        const review = yield* read(
+          { ...input, path: `${pullPath(input)}/reviews/${reviewId}` },
+          ForgejoReview,
+        );
+        commentId = reviewCommentId(review);
+        if (!commentId)
+          return yield* failure(
+            "setReaction",
+            "Forgejo did not return a comment ID for this review.",
+          );
+      }
+      if (commentId && !/^[1-9]\d*$/.test(commentId))
+        return yield* failure("setReaction", "Invalid Forgejo comment ID.");
+      yield* write({
         ...input,
-        path: input.subjectId
-          ? `${repoPath(input)}/issues/comments/${encodeURIComponent(input.subjectId)}/reactions`
+        path: commentId
+          ? `${repoPath(input)}/issues/comments/${commentId}/reactions`
           : `${issuePath(input)}/reactions`,
         method: input.reacted ? "POST" : "DELETE",
         body: { content: FORGEJO_REACTIONS[input.content] },
-      }),
+      });
+    }),
     replyToThread: () => unsupported("thread replies"),
     setThreadResolution: () => unsupported("thread resolution"),
   };

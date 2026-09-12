@@ -16,6 +16,7 @@ import * as GitHubCli from "./GitHubCli.ts";
 import * as GitLabCli from "./GitLabCli.ts";
 import * as ForgejoCli from "./ForgejoCli.ts";
 import * as ForgejoSourceControlProvider from "./ForgejoSourceControlProvider.ts";
+import * as ForgejoPullRequestProvider from "../pullRequest/ForgejoPullRequestProvider.ts";
 import * as SourceControlDiscovery from "./SourceControlDiscovery.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import { firstNonEmptyLine } from "./SourceControlProviderDiscovery.ts";
@@ -57,6 +58,134 @@ const processOutput = (
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const encodeJsonEffect = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
+it.effect(
+  "loads Forgejo reactions on comments, reviews and inline threads and resolves review mutations",
+  () => {
+    const user = { login: "maria" };
+    const review = {
+      id: 8,
+      body: "review body",
+      user,
+      state: "COMMENT",
+      submitted_at: "2026-09-12T00:00:00Z",
+      html_url: "https://forgejo.test/maria/project/pulls/2#issuecomment-37",
+      comments_count: 1,
+    };
+    const comment = { id: 12, body: "ordinary", user, created_at: review.submitted_at };
+    const responses: Record<string, unknown> = {
+      user,
+      "repos/maria/project/issues/2/comments": [comment],
+      "repos/maria/project/pulls/2/reviews": [review],
+      "repos/maria/project/pulls/2/reviews/8": review,
+      "repos/maria/project/pulls/2/reviews/9": { ...review, id: 9, html_url: "" },
+      "repos/maria/project/pulls/2/commits": [],
+      "repos/maria/project/issues/2/reactions": [],
+      "repos/maria/project/pulls/2/reviews/8/comments": [
+        {
+          ...comment,
+          id: 38,
+          body: "inline",
+          path: "file.ts",
+          position: 1,
+          original_position: 1,
+          commit_id: "head",
+          original_commit_id: "head",
+          resolver: null,
+        },
+      ],
+      "repos/maria/project/issues/comments/12/reactions": [{ content: "+1", user }],
+      "repos/maria/project/issues/comments/37/reactions": [{ content: "heart", user }],
+      "repos/maria/project/issues/comments/38/reactions": [
+        { content: "rocket", user: { login: "reviewer" } },
+      ],
+    };
+    const writes: ForgejoCli.ForgejoApiInput[] = [];
+    return Effect.gen(function* () {
+      const provider = yield* ForgejoPullRequestProvider.make;
+      const input = { cwd: "/repo", repository: "maria/project", host: "forgejo.test", number: 2 };
+      const activity = yield* provider.getChangeRequestActivity(input);
+      assert.deepStrictEqual(
+        activity.comments.map((entry) => ({
+          id: entry.id,
+          kind: entry.kind,
+          reactions: entry.reactions,
+        })),
+        [
+          {
+            id: "12",
+            kind: "issue-comment",
+            reactions: [{ content: "thumbs-up", count: 1, actors: [], viewerHasReacted: true }],
+          },
+          {
+            id: "review:8",
+            kind: "review",
+            reactions: [{ content: "heart", count: 1, actors: [], viewerHasReacted: true }],
+          },
+          {
+            id: "38",
+            kind: "review-comment",
+            reactions: [
+              { content: "rocket", count: 1, actors: ["reviewer"], viewerHasReacted: false },
+            ],
+          },
+        ],
+      );
+      const inlineComment = activity.comments[2];
+      assert.ok(inlineComment);
+      assert.deepStrictEqual(activity.reviewThreads[0]?.comments, [inlineComment]);
+      for (const reacted of [true, false]) {
+        yield* provider.setReaction({ ...input, subjectId: "review:8", content: "heart", reacted });
+        yield* provider.setReaction({ ...input, subjectId: "38", content: "rocket", reacted });
+      }
+      assert.deepStrictEqual(
+        writes.map(({ path, method, body }) => ({ path, method, body })),
+        [
+          {
+            path: "repos/maria/project/issues/comments/37/reactions",
+            method: "POST",
+            body: { content: "heart" },
+          },
+          {
+            path: "repos/maria/project/issues/comments/38/reactions",
+            method: "POST",
+            body: { content: "rocket" },
+          },
+          {
+            path: "repos/maria/project/issues/comments/37/reactions",
+            method: "DELETE",
+            body: { content: "heart" },
+          },
+          {
+            path: "repos/maria/project/issues/comments/38/reactions",
+            method: "DELETE",
+            body: { content: "rocket" },
+          },
+        ],
+      );
+      const missing = yield* provider
+        .setReaction({ ...input, subjectId: "review:9", content: "heart", reacted: true })
+        .pipe(Effect.result);
+      assert.strictEqual(missing._tag, "Failure");
+      if (missing._tag === "Failure") assert.include(missing.failure.detail, "comment ID");
+      assert.strictEqual(writes.length, 4);
+    }).pipe(
+      Effect.provide(
+        Layer.mock(ForgejoCli.ForgejoCli)({
+          api: (input) => {
+            if (input.method) {
+              writes.push(input);
+              return Effect.succeed(processOutput("{}"));
+            }
+            const path = input.path.split("?")[0]!;
+            assert.ok(Object.hasOwn(responses, path), `Unexpected Forgejo request: ${path}`);
+            return encodeJsonEffect(responses[path]).pipe(Effect.orDie, Effect.map(processOutput));
+          },
+        }),
+      ),
+    );
+  },
+);
 
 it.effect("reports implemented tools separately from locally available executables", () => {
   const processMock = {
