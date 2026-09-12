@@ -197,6 +197,8 @@ import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 
 interface ChatMarkdownProps {
   text: string;
+  /** Render public snapshots without environment access, app actions, or remote media. */
+  readOnly?: boolean;
   cwd: string | undefined;
   threadRef?: ScopedThreadRef | undefined;
   /** Panel that receives pull request links, including the standalone PR view. */
@@ -2708,6 +2710,18 @@ function markdownHeadingRenderer(level: 1 | 2 | 3 | 4 | 5 | 6) {
     );
   };
 }
+const ChatMarkdownPresentationContext = React.createContext<
+  Pick<
+    ReturnType<typeof useChatMarkdownState>["componentState"],
+    | "text"
+    | "skills"
+    | "onTaskListChange"
+    | "onUseArtifactTemplate"
+    | "resolvedTheme"
+    | "diffThemeName"
+    | "isStreaming"
+  >
+>(null!);
 
 // Keep component types stable when streaming changes the message state.
 const CHAT_MARKDOWN_COMPONENTS = {
@@ -2718,7 +2732,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
   h5: markdownHeadingRenderer(5),
   h6: markdownHeadingRenderer(6),
   div: function MarkdownDiv({ node, children, ...props }) {
-    const { onUseArtifactTemplate } = use(ChatMarkdownRendererContext);
+    const { onUseArtifactTemplate } = use(ChatMarkdownPresentationContext);
     const artifactTemplate = artifactTemplateFromHastProperties(node?.properties);
     if (artifactTemplate) {
       return (
@@ -2728,7 +2742,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
     return <div {...props}>{children}</div>;
   },
   p: function MarkdownParagraph({ node: _node, children, ...props }) {
-    const { skills } = use(ChatMarkdownRendererContext);
+    const { skills } = use(ChatMarkdownPresentationContext);
     return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
   },
   blockquote: function MarkdownBlockquote({ node: _node, children, ...props }) {
@@ -2759,7 +2773,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
     );
   },
   li: function MarkdownListItem({ node, children, ...props }) {
-    const { text, skills } = use(ChatMarkdownRendererContext);
+    const { text, skills } = use(ChatMarkdownPresentationContext);
     const listItemStart = node?.position?.start.offset;
     const markerOffset =
       typeof listItemStart === "number" ? findTaskListMarkerOffset(text, listItemStart) : null;
@@ -2770,7 +2784,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
     );
   },
   input: function MarkdownInput({ node: _node, type, checked, disabled: _disabled, ...props }) {
-    const { onTaskListChange } = use(ChatMarkdownRendererContext);
+    const { onTaskListChange } = use(ChatMarkdownPresentationContext);
     if (type !== "checkbox" || !onTaskListChange) {
       return (
         <input
@@ -3177,7 +3191,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
     return <MarkdownDetails open={detailsOpen}>{children}</MarkdownDetails>;
   },
   pre: function MarkdownPre({ node, children, ...props }) {
-    const { resolvedTheme, diffThemeName, isStreaming } = use(ChatMarkdownRendererContext);
+    const { resolvedTheme, diffThemeName, isStreaming } = use(ChatMarkdownPresentationContext);
     const codeBlock = extractCodeBlock(children);
     if (!codeBlock) {
       return <pre {...props}>{children}</pre>;
@@ -3218,7 +3232,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
   },
 } satisfies Components;
 
-function ChatMarkdown({
+function ConnectedChatMarkdown({
   text,
   className,
   lineBreaks = false,
@@ -3262,15 +3276,17 @@ function ChatMarkdown({
       onCopy={handleCopy}
     >
       <ChatMarkdownRendererContext value={componentState}>
-        <ReactMarkdown
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
-          skipHtml={false}
-          components={CHAT_MARKDOWN_COMPONENTS}
-          urlTransform={markdownUrlTransform}
-        >
-          {text}
-        </ReactMarkdown>
+        <ChatMarkdownPresentationContext value={componentState}>
+          <ReactMarkdown
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
+            skipHtml={false}
+            components={CHAT_MARKDOWN_COMPONENTS}
+            urlTransform={markdownUrlTransform}
+          >
+            {text}
+          </ReactMarkdown>
+        </ChatMarkdownPresentationContext>
       </ChatMarkdownRendererContext>
       {localMediaPreview ? (
         <ExpandedImageDialog
@@ -3279,6 +3295,76 @@ function ChatMarkdown({
         />
       ) : null}
     </div>
+  );
+}
+
+const READ_ONLY_MARKDOWN_COMPONENTS = {
+  ...CHAT_MARKDOWN_COMPONENTS,
+  a: function ReadOnlyMarkdownAnchor({ href, children }) {
+    return href && /^https?:\/\//i.test(href) ? (
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    ) : (
+      <span>{children}</span>
+    );
+  },
+  code: function ReadOnlyMarkdownCode({ node: _node, children, ...props }) {
+    return <code {...props}>{children}</code>;
+  },
+  img: function ReadOnlyMarkdownImage({ alt }) {
+    return <span className="text-muted-foreground">[Image: {alt || "not included"}]</span>;
+  },
+} satisfies Components;
+
+function ReadOnlyChatMarkdown({
+  text,
+  className,
+  lineBreaks = false,
+  parseRawHtml = true,
+}: ChatMarkdownProps) {
+  const { resolvedTheme } = useTheme();
+  const presentation = useMemo(
+    () => ({
+      text,
+      skills: EMPTY_MARKDOWN_SKILLS,
+      onTaskListChange: undefined,
+      onUseArtifactTemplate: undefined,
+      resolvedTheme,
+      diffThemeName: resolveDiffThemeName(resolvedTheme),
+      isStreaming: false,
+    }),
+    [resolvedTheme, text],
+  );
+  return (
+    <div
+      className={cn(
+        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word]",
+        className,
+      )}
+    >
+      <ChatMarkdownPresentationContext value={presentation}>
+        <ReactMarkdown
+          remarkPlugins={
+            lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS
+          }
+          rehypePlugins={parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
+          skipHtml={false}
+          components={READ_ONLY_MARKDOWN_COMPONENTS}
+          urlTransform={defaultUrlTransform}
+        >
+          {text}
+        </ReactMarkdown>
+      </ChatMarkdownPresentationContext>
+    </div>
+  );
+}
+
+function ChatMarkdown(props: ChatMarkdownProps) {
+  return props.readOnly ? (
+    <ReadOnlyChatMarkdown {...props} />
+  ) : (
+    <ConnectedChatMarkdown {...props} />
   );
 }
 
