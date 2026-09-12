@@ -1187,6 +1187,25 @@ describe("deriveMessagesTimelineRows", () => {
     const folded = ["turn-fold:turn-1", "assistant-final-entry"];
     const unfolded = ["turn-fold:turn-1", "spawn-entry", "assistant-final-entry"];
 
+    const activeRows = (
+      timelineEntries: typeof direct,
+      liveAgentTaskIds: ReadonlySet<string>,
+      runningTurnId = "turn-1",
+    ) =>
+      deriveMessagesTimelineRows({
+        timelineEntries: timelineEntries.slice(0, 2),
+        isWorking: true,
+        runningTurnId: runningTurnId as TurnId,
+        activeTurnStartedAt: "2026-01-01T00:00:00Z",
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+        liveAgentTaskIds,
+      }).map((row) => row.kind);
+    expect(activeRows(direct, new Set(["agent-b"]))).not.toContain("thinking");
+    expect(activeRows(workflow, new Set(["wf-1"]))).not.toContain("thinking");
+    expect(activeRows(direct, new Set())).toContain("thinking");
+    expect(activeRows(direct, new Set(["agent-b"]), "turn-2")).toContain("thinking");
+
     expect(derive(direct, new Set())).toEqual(folded);
     expect(derive(direct, new Set(["agent-b"]))).toEqual(unfolded);
     // A workflow coordinator between phases keeps its batch out of the fold.
