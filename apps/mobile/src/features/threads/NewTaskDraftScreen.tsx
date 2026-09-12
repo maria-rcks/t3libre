@@ -29,6 +29,7 @@ import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useFontFamily } from "../../lib/useFontFamily";
 
 import {
+  isChatProject,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   resolveEnvironmentMachineKind,
@@ -437,9 +438,11 @@ export function NewTaskDraftScreen(props: {
       selectedEnvironmentServerConfig?.usageLimitSources ?? [],
     );
   const composerWorkspaceCwd =
-    (flow.workspaceMode === "worktree"
-      ? selectedProject?.workspaceRoot
-      : (flow.selectedWorktreePath ?? selectedProject?.workspaceRoot)) || null;
+    selectedProject && isChatProject(selectedProject)
+      ? null
+      : (flow.workspaceMode === "worktree"
+          ? selectedProject?.workspaceRoot
+          : (flow.selectedWorktreePath ?? selectedProject?.workspaceRoot)) || null;
   // Media needs its thumbnail; every other file already reads as its inline chip.
   const stripAttachments = useMemo(
     () => composerStripAttachments(flow.attachments),
@@ -1187,7 +1190,9 @@ export function NewTaskDraftScreen(props: {
         selectedEnvironmentServerConfig,
         draft.modelSelection ?? null,
       ) ?? flow.selectedModel;
-    const workspaceMode = draft.workspaceSelection?.mode ?? flow.workspaceMode;
+    const workspaceMode = isChatProject(selectedProject)
+      ? "local"
+      : (draft.workspaceSelection?.mode ?? flow.workspaceMode);
     const selectedBranchName = draft.workspaceSelection?.branch ?? flow.selectedBranchName;
     const initialMessageText = draft.text.trim();
 
@@ -1447,13 +1452,15 @@ export function NewTaskDraftScreen(props: {
     <View className="items-center gap-6 px-6" testID="new-task-hero">
       <View className="w-full items-center gap-1.5">
         <Text className="text-center text-2xl font-t3-medium tracking-tight text-foreground">
-          What should we build
+          {isChatProject(selectedProject) ? "What would you like to ask?" : "What should we build"}
         </Text>
         <View className="max-w-full flex-row items-center justify-center">
-          <Text className="text-2xl font-t3-medium tracking-tight text-foreground">in </Text>
+          {!isChatProject(selectedProject) ? (
+            <Text className="text-2xl font-t3-medium tracking-tight text-foreground">in </Text>
+          ) : null}
           <Pressable
             accessibilityHint="Opens the project picker"
-            accessibilityLabel={`Change project from ${selectedProject.title}`}
+            accessibilityLabel={`Change project from ${isChatProject(selectedProject) ? "No project" : selectedProject.title}`}
             accessibilityRole="button"
             disabled={isComposerInteractionLocked}
             onPress={chooseProject}
@@ -1463,10 +1470,12 @@ export function NewTaskDraftScreen(props: {
               className="text-2xl font-t3-medium tracking-tight text-foreground"
               numberOfLines={1}
             >
-              {selectedProject.title}
+              {isChatProject(selectedProject) ? "No project" : selectedProject.title}
             </Text>
           </Pressable>
-          <Text className="text-2xl font-t3-medium tracking-tight text-foreground">?</Text>
+          {!isChatProject(selectedProject) ? (
+            <Text className="text-2xl font-t3-medium tracking-tight text-foreground">?</Text>
+          ) : null}
         </View>
       </View>
 
@@ -1509,7 +1518,7 @@ export function NewTaskDraftScreen(props: {
     </View>
   );
 
-  const workspaceControls = (
+  const workspaceControls = isChatProject(selectedProject) ? null : (
     <View className="flex-row items-center gap-1 px-2">
       <ComposerInlineControl
         accessibilityHint={`Switches to ${flow.workspaceMode === "local" ? "a new worktree" : "the current checkout"}`}

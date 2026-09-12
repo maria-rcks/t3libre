@@ -1,4 +1,5 @@
 import {
+  CHAT_PROJECT_ID,
   AgentSessionImportSource,
   ApprovalRequestId,
   ChatAttachment,
@@ -503,7 +504,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       options?.includeDeleted === true
         ? projectRows
         : projectRows.filter((row) => row.deletedAt === null);
-    const uniqueWorkspaceRoots = [...new Set(filteredProjectRows.map((row) => row.workspaceRoot))];
+    const uniqueWorkspaceRoots = [
+      ...new Set(
+        filteredProjectRows
+          .filter((row) => row.projectId !== CHAT_PROJECT_ID)
+          .map((row) => row.workspaceRoot),
+      ),
+    ];
     const repositoryIdentityByWorkspaceRoot = new Map(
       yield* Effect.forEach(
         uniqueWorkspaceRoots,
@@ -2979,7 +2986,10 @@ pending_approval_requests AS (
         Effect.flatMap((option) =>
           Option.isNone(option)
             ? Effect.succeed(Option.none<OrchestrationProject>())
-            : repositoryIdentityResolver.resolve(option.value.workspaceRoot).pipe(
+            : (option.value.projectId === CHAT_PROJECT_ID
+                ? Effect.succeed(null)
+                : repositoryIdentityResolver.resolve(option.value.workspaceRoot)
+              ).pipe(
                 Effect.map((repositoryIdentity) =>
                   Option.some({
                     id: option.value.projectId,
@@ -3031,13 +3041,14 @@ pending_approval_requests AS (
       Effect.flatMap((option) =>
         Option.isNone(option)
           ? Effect.succeed(Option.none<OrchestrationProjectShell>())
-          : repositoryIdentityResolver
-              .resolve(option.value.workspaceRoot)
-              .pipe(
-                Effect.map((repositoryIdentity) =>
-                  Option.some(mapProjectShellRow(option.value, repositoryIdentity)),
-                ),
+          : (projectId === CHAT_PROJECT_ID
+              ? Effect.succeed(null)
+              : repositoryIdentityResolver.resolve(option.value.workspaceRoot)
+            ).pipe(
+              Effect.map((repositoryIdentity) =>
+                Option.some(mapProjectShellRow(option.value, repositoryIdentity)),
               ),
+            ),
       ),
     );
 

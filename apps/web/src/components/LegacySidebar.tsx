@@ -1,3 +1,4 @@
+import { chatThreadWorkspacePath, isChatProject } from "@t3tools/contracts";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { GitPullRequestIcon } from "lucide-react";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
@@ -1671,6 +1672,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const handleProjectButtonContextMenu = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
+      if (isChatProject(project)) return;
       suppressProjectClickForContextMenuRef.current = true;
       void (async () => {
         const api = readLocalApi();
@@ -1780,6 +1782,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       isMobile,
       openProjectGroupingDialog,
       openProjectRenameDialog,
+      project.id,
       project.groupedProjectCount,
       project.memberProjects,
       project.projectKey,
@@ -2237,7 +2240,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
       );
       const threadWorkspacePath =
-        thread.worktreePath ?? threadProject?.workspaceRoot ?? project.workspaceRoot ?? null;
+        threadProject && isChatProject(threadProject)
+          ? chatThreadWorkspacePath(threadProject.workspaceRoot, thread.id)
+          : (thread.worktreePath ?? threadProject?.workspaceRoot ?? project.workspaceRoot ?? null);
       const clicked = await api.contextMenu.show(
         [
           ...(thread.branch
@@ -2247,7 +2252,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
-          { id: "project-settings", label: "Project settings" },
+          ...(!isChatProject(project)
+            ? [{ id: "project-settings", label: "Project settings" }]
+            : []),
           { id: "delete", label: "Delete", destructive: true, icon: "trash" },
         ],
         position,
@@ -2347,6 +2354,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       isMobile,
       markThreadUnread,
       memberProjectByScopedKey,
+      project.id,
       project.projectKey,
       project.workspaceRoot,
       router,
