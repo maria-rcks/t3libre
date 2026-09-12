@@ -7,7 +7,7 @@ import {
   type ScopedProjectRef,
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { FolderPlusIcon } from "lucide-react";
+import { FolderIcon, FolderPlusIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
@@ -36,17 +36,17 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
-interface DraftHeroHeadlineProps {
+interface DraftProjectPickerProps {
   readonly draftId: DraftId | null;
   readonly activeProjectRef: ScopedProjectRef | null;
   readonly activeProjectTitle: string | null;
 }
 
-export function DraftHeroHeadline({
+export function DraftProjectPicker({
   draftId,
   activeProjectRef,
   activeProjectTitle,
-}: DraftHeroHeadlineProps) {
+}: DraftProjectPickerProps) {
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments } = useEnvironments();
@@ -133,11 +133,51 @@ export function DraftHeroHeadline({
   const activeProjectKey = activeProjectGroup?.projectKey ?? "";
   const isChat = activeProjectRef?.projectId === CHAT_PROJECT_ID;
   const activeProjectDisplayName = isChat
-    ? "No project"
+    ? null
     : (activeProjectGroup?.displayName ?? activeProjectTitle);
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
+
+  const selectProject = (value: string) => {
+    const entry = projectEntryByKey.get(value);
+    if (!entry || value === activeProjectKey) {
+      return;
+    }
+    const project = entry.targetProject;
+    if (!draftId) {
+      return;
+    }
+    // Project selection changes the target of the open draft in
+    // place. The prompt stays in the same composer session, so the
+    // sidebar only gets a draft row if the user later navigates away.
+    const currentDraft = getComposerDraft(draftId);
+    setLogicalProjectDraftThreadId(
+      entry.group.projectKey,
+      scopeProjectRef(project.environmentId, project.id),
+      draftId,
+    );
+    if (!hasExplicitComposerModelSelection(currentDraft)) {
+      applyStickyState(draftId);
+      const environmentSettings = environments.find(
+        (environment) => environment.environmentId === project.environmentId,
+      )?.serverConfig?.settings;
+      const defaultModelSelection = environmentSettings
+        ? resolveProjectSettings(environmentSettings, project.id, project).settings
+            .defaultModelSelection
+        : project.defaultModelSelection;
+      if (defaultModelSelection) {
+        setModelSelection(draftId, defaultModelSelection, {
+          replaceOptions: true,
+        });
+      }
+    }
+  };
+  const chatEntry = projectPickerEntries.find(
+    ({ targetProject }) =>
+      isChatProject(targetProject) &&
+      targetProject.environmentId === activeProjectRef?.environmentId,
+  );
 
   const projectSelector = shouldShowProjectMenu ? (
     <Menu>
@@ -145,12 +185,13 @@ export function DraftHeroHeadline({
         <TooltipTrigger
           render={
             <MenuTrigger
-              aria-label={hasResolvedProject ? "Change project" : "Choose a project"}
-              className="pointer-events-auto inline-block max-w-64 truncate border-foreground/60 border-b border-dotted align-baseline text-foreground transition-colors hover:border-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={!isChat && hasResolvedProject ? "Change project" : "Add project"}
+              className="inline-flex h-8 min-w-0 max-w-64 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             />
           }
         >
-          {activeProjectDisplayName ?? "Choose a project"}
+          {isChat ? <PlusIcon className="size-3.5" /> : <FolderIcon className="size-3.5" />}
+          <span className="truncate">{activeProjectDisplayName ?? "Add project"}</span>
         </TooltipTrigger>
         {activeProjectDisplayName ? (
           <TooltipPopup side="top" className="max-w-80">
@@ -161,68 +202,37 @@ export function DraftHeroHeadline({
       <MenuPopup align="center" className="max-h-80 min-w-40! w-max max-w-64 overflow-y-auto">
         <MenuRadioGroup
           value={activeProjectKey}
-          onValueChange={(value) => {
-            const entry = projectEntryByKey.get(value as string);
-            if (!entry || value === activeProjectKey) {
-              return;
-            }
-            const project = entry.targetProject;
-            if (!draftId) {
-              return;
-            }
-            // Project selection changes the target of the open draft in
-            // place. The prompt stays in the same composer session, so the
-            // sidebar only gets a draft row if the user later navigates away.
-            const currentDraft = getComposerDraft(draftId);
-            setLogicalProjectDraftThreadId(
-              entry.group.projectKey,
-              scopeProjectRef(project.environmentId, project.id),
-              draftId,
-            );
-            if (!hasExplicitComposerModelSelection(currentDraft)) {
-              applyStickyState(draftId);
-              const environmentSettings = environments.find(
-                (environment) => environment.environmentId === project.environmentId,
-              )?.serverConfig?.settings;
-              const defaultModelSelection = environmentSettings
-                ? resolveProjectSettings(environmentSettings, project.id, project).settings
-                    .defaultModelSelection
-                : project.defaultModelSelection;
-              if (defaultModelSelection) {
-                setModelSelection(draftId, defaultModelSelection, {
-                  replaceOptions: true,
-                });
-              }
-            }
-          }}
+          onValueChange={(value) => selectProject(value as string)}
         >
-          {projectPickerEntries.map(({ group, targetProject }) => {
-            return (
-              <MenuRadioItem
-                key={group.projectKey}
-                value={group.projectKey}
-                closeOnClick
-                className="[&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
-              >
-                <ProjectFavicon project={group} className="size-4 shrink-0" />
-                <Tooltip>
-                  <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
-                    {isChatProject(targetProject) ? "No project" : group.displayName}
-                  </TooltipTrigger>
-                  <TooltipPopup side="top" className="max-w-80">
-                    {group.displayName}
-                  </TooltipPopup>
-                </Tooltip>
-                {showProjectEnvironments ? (
-                  <ProjectEnvironmentBadge
-                    group={group}
-                    primaryEnvironmentId={primaryEnvironmentId}
-                    machineByEnvironmentId={environmentMachineById}
-                  />
-                ) : null}
-              </MenuRadioItem>
-            );
-          })}
+          {projectPickerEntries
+            .filter(({ targetProject }) => !isChatProject(targetProject))
+            .map(({ group }) => {
+              return (
+                <MenuRadioItem
+                  key={group.projectKey}
+                  value={group.projectKey}
+                  closeOnClick
+                  className="[&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
+                >
+                  <ProjectFavicon project={group} className="size-4 shrink-0" />
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
+                      {group.displayName}
+                    </TooltipTrigger>
+                    <TooltipPopup side="top" className="max-w-80">
+                      {group.displayName}
+                    </TooltipPopup>
+                  </Tooltip>
+                  {showProjectEnvironments ? (
+                    <ProjectEnvironmentBadge
+                      group={group}
+                      primaryEnvironmentId={primaryEnvironmentId}
+                      machineByEnvironmentId={environmentMachineById}
+                    />
+                  ) : null}
+                </MenuRadioItem>
+              );
+            })}
         </MenuRadioGroup>
         <MenuSeparator />
         <MenuItem onClick={openAddProject}>
@@ -235,26 +245,35 @@ export function DraftHeroHeadline({
     <button
       type="button"
       onClick={openAddProject}
-      className="pointer-events-auto inline cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex h-8 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
     >
-      {activeProjectTitle ?? "Add a project"}
+      <PlusIcon className="size-3.5" />
+      Add project
     </button>
   );
 
   return (
-    <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-      {isChat ? (
-        <>
-          What would you like to know?{" "}
-          <span className="mt-3 block text-base text-muted-foreground">{projectSelector}</span>
-        </>
-      ) : hasResolvedProject ? (
-        <>What should we build in {projectSelector}?</>
-      ) : canChooseProject ? (
-        <>{projectSelector} to start</>
-      ) : (
-        <>Add a project to start</>
-      )}
-    </h1>
+    <div className="flex items-center px-2 pt-1.5">
+      <div className="inline-flex min-w-0 items-center rounded-lg">
+        {projectSelector}
+        {!isChat && chatEntry ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Remove project"
+                  onClick={() => selectProject(chatEntry.group.projectKey)}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              }
+            >
+              <XIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup>Don't work in a project</TooltipPopup>
+          </Tooltip>
+        ) : null}
+      </div>
+    </div>
   );
 }
