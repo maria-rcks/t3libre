@@ -1239,33 +1239,46 @@ export function NewTaskDraftScreen(props: {
     navigation.dispatch(StackActions.push(routeName));
   };
 
+  const chatProject = projects.find(
+    (project) => project.environmentId === selectedProject.environmentId && isChatProject(project),
+  );
   const hero = (
     <View className="items-center gap-6 px-6" testID="new-task-hero">
       <View className="w-full items-center gap-1.5">
         <Text className="text-center text-2xl font-t3-medium tracking-tight text-foreground">
-          {isChatProject(selectedProject) ? "What would you like to ask?" : "What should we build"}
+          What should we work on?
         </Text>
         <View className="max-w-full flex-row items-center justify-center">
-          {!isChatProject(selectedProject) ? (
-            <Text className="text-2xl font-t3-medium tracking-tight text-foreground">in </Text>
-          ) : null}
-          <Pressable
+          <ComposerInlineControl
             accessibilityHint="Opens the project picker"
-            accessibilityLabel={`Change project from ${isChatProject(selectedProject) ? "No project" : selectedProject.title}`}
-            accessibilityRole="button"
+            accessibilityLabel={
+              isChatProject(selectedProject)
+                ? "Add project"
+                : `Change project from ${selectedProject.title}`
+            }
             disabled={isComposerInteractionLocked}
+            icon={isChatProject(selectedProject) ? "plus" : "folder"}
+            label={isChatProject(selectedProject) ? "Add project" : selectedProject.title}
+            maxWidth={250}
             onPress={chooseProject}
-            className="min-w-0 max-w-[250px] border-b border-foreground-muted active:opacity-65"
-          >
-            <Text
-              className="text-2xl font-t3-medium tracking-tight text-foreground"
-              numberOfLines={1}
+            showChevron={!isChatProject(selectedProject)}
+          />
+          {!isChatProject(selectedProject) && chatProject ? (
+            <Pressable
+              accessibilityLabel="Don't work in a project"
+              accessibilityRole="button"
+              disabled={isComposerInteractionLocked}
+              onPress={() => setProject(chatProject)}
+              className="size-11 items-center justify-center rounded-xl active:bg-subtle"
+              style={{ opacity: isComposerInteractionLocked ? 0.45 : 1 }}
             >
-              {isChatProject(selectedProject) ? "No project" : selectedProject.title}
-            </Text>
-          </Pressable>
-          {!isChatProject(selectedProject) ? (
-            <Text className="text-2xl font-t3-medium tracking-tight text-foreground">?</Text>
+              <SymbolView
+                name="xmark"
+                size={14}
+                tintColorClassName="accent-icon-muted"
+                type="monochrome"
+              />
+            </Pressable>
           ) : null}
         </View>
       </View>

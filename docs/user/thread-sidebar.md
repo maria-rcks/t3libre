@@ -5,9 +5,10 @@ need a separate branch and working directory.
 
 ## Start a thread
 
-To ask a question without a project, open a new thread and choose **No project**
-from the project picker. These conversations appear under **Chats**, with a separate
-folder for each conversation on the selected environment.
+To ask a question without a project, open a new thread and remove the selected
+project with the **×** next to its name. Choose **Add project** to attach a project
+again. These conversations appear under **Chats**, with a separate folder for each
+conversation on the selected environment.
 
 On web and desktop, a new thread keeps the current project and carries your model
 and mode selections, unless the destination project has its own model default.
