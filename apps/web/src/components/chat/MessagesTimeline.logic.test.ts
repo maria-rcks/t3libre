@@ -1206,7 +1206,12 @@ describe("deriveMessagesTimelineRows", () => {
     expect(activeRows(direct, new Set())).toContain("thinking");
     expect(activeRows(direct, new Set(["agent-b"]), "turn-2")).toContain("thinking");
 
-    for (const toolLifecycleStatus of ["inProgress", "completed"] as const) {
+    for (const [toolLifecycleStatus, tone, sourceActivityKind] of [
+      ["inProgress", "tool", "tool.updated"],
+      ["completed", "tool", "tool.completed"],
+      // Claude background Bash completions arrive without a command or item type.
+      ["completed", "info", "task.completed"],
+    ] as const) {
       const laterTool = {
         id: "later-tool",
         kind: "work" as const,
@@ -1216,8 +1221,8 @@ describe("deriveMessagesTimelineRows", () => {
           turnId: "turn-1" as TurnId,
           createdAt: "2026-01-01T00:00:04Z",
           label: "Read file",
-          tone: "tool" as const,
-          toolName: "read_file",
+          tone,
+          sourceActivityKind,
           toolLifecycleStatus,
         },
       };
@@ -2426,7 +2431,7 @@ describe("deriveMessagesTimelineRows", () => {
   it.each([
     [undefined, true],
     ["inProgress", true],
-    ["completed", false],
+    ["completed", true],
     ["failed", null],
     ["declined", false],
     ["stopped", false],
@@ -2469,6 +2474,7 @@ describe("deriveMessagesTimelineRows", () => {
         expect(rows.at(-1)).toMatchObject({ kind: "thinking", id: "live-activity-row" });
       } else {
         expect(workLiveRow).toMatchObject({ active });
+        if (active) expect(rows.some((row) => row.kind === "thinking")).toBe(false);
       }
     },
   );
