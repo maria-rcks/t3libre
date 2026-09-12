@@ -3212,6 +3212,42 @@ describe("shared chat native projection", () => {
     },
   );
 
+  it.each([
+    ["true", "true"],
+    [JSON.stringify({ executable: "bun", args: ["run", "typecheck"] }), "bun run typecheck"],
+    [JSON.stringify({ executable: "pwd" }), "pwd"],
+  ])("preserves calls-only command %s", (input, label) => {
+    const [entry] = deriveSharedTimelineEntries({
+      ...share,
+      tools: [{ ...share.tools[0]!, input, result: undefined }],
+    });
+    if (entry?.kind !== "work") throw new Error("Expected native work entry");
+    expect(workEntryDisplayLabel(entry.entry, undefined)).toBe(label);
+  });
+
+  it.each(["dynamic_tool_call", "file_change", "web_search", "collab_agent_tool_call"] as const)(
+    "preserves selected input and output in expanded %s details",
+    (itemType) => {
+      const [entry] = deriveSharedTimelineEntries({
+        ...share,
+        tools: [
+          {
+            ...share.tools[0]!,
+            name: itemType,
+            itemType,
+            detail: "provider description",
+            input: '{"query":"needle"}',
+            result: "selected output or patch",
+          },
+        ],
+      });
+      if (entry?.kind !== "work") throw new Error("Expected native work entry");
+      expect(entry.entry.detail).toBe(
+        'provider description\n\n{"query":"needle"}\n\nselected output or patch',
+      );
+    },
+  );
+
   it("keeps omitted input absent from the native result-only projection", () => {
     const entries = deriveSharedTimelineEntries({
       ...share,
