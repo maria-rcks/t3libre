@@ -1,6 +1,11 @@
 import type { DraftId } from "~/composerDraftStore";
 import { useComposerDraftStore } from "~/composerDraftStore";
-import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
+import {
+  CHAT_PROJECT_ID,
+  isChatProject,
+  resolveEnvironmentMachineKind,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
@@ -126,7 +131,10 @@ export function DraftHeroHeadline({
           ),
         ) ?? null);
   const activeProjectKey = activeProjectGroup?.projectKey ?? "";
-  const activeProjectDisplayName = activeProjectGroup?.displayName ?? activeProjectTitle;
+  const isChat = activeProjectRef?.projectId === CHAT_PROJECT_ID;
+  const activeProjectDisplayName = isChat
+    ? "No project"
+    : (activeProjectGroup?.displayName ?? activeProjectTitle);
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
@@ -188,7 +196,7 @@ export function DraftHeroHeadline({
             }
           }}
         >
-          {projectPickerEntries.map(({ group }) => {
+          {projectPickerEntries.map(({ group, targetProject }) => {
             return (
               <MenuRadioItem
                 key={group.projectKey}
@@ -199,7 +207,7 @@ export function DraftHeroHeadline({
                 <ProjectFavicon project={group} className="size-4 shrink-0" />
                 <Tooltip>
                   <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
-                    {group.displayName}
+                    {isChatProject(targetProject) ? "No project" : group.displayName}
                   </TooltipTrigger>
                   <TooltipPopup side="top" className="max-w-80">
                     {group.displayName}
@@ -235,7 +243,12 @@ export function DraftHeroHeadline({
 
   return (
     <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-      {hasResolvedProject ? (
+      {isChat ? (
+        <>
+          What would you like to know?{" "}
+          <span className="mt-3 block text-base text-muted-foreground">{projectSelector}</span>
+        </>
+      ) : hasResolvedProject ? (
         <>What should we build in {projectSelector}?</>
       ) : canChooseProject ? (
         <>{projectSelector} to start</>

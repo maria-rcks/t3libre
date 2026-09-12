@@ -100,6 +100,7 @@ type ThreadGitControlsProps = ThreadGitMenuProps & {
   readonly projectScripts: ReadonlyArray<ProjectScript>;
   readonly terminalSessions: ReadonlyArray<TerminalMenuSession>;
   readonly showActionControls?: boolean;
+  readonly hideGitControls?: boolean;
   readonly showDirectFileControl?: boolean;
   readonly onOpenTerminal: (terminalId?: string | null) => void;
   readonly onOpenNewTerminal: () => void;
@@ -393,16 +394,22 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
 export function useThreadGitRightHeaderItems(props: ThreadGitControlsProps): HeaderItems {
   const actionItems = useThreadGitHeaderActionItems(props);
   return useMemo(
-    () => [actionItems.git, actionItems.files, actionItems.terminal] as HeaderItems,
-    [actionItems],
+    () =>
+      (props.hideGitControls
+        ? [actionItems.files]
+        : [actionItems.git, actionItems.files, actionItems.terminal]) as HeaderItems,
+    [actionItems, props.hideGitControls],
   );
 }
 
 export function useThreadGitCenterHeaderItems(props: ThreadGitControlsProps): HeaderItems {
   const actionItems = useThreadGitHeaderActionItems(props);
   return useMemo(
-    () => [actionItems.files, actionItems.git, actionItems.terminal] as HeaderItems,
-    [actionItems],
+    () =>
+      (props.hideGitControls
+        ? [actionItems.files]
+        : [actionItems.files, actionItems.git, actionItems.terminal]) as HeaderItems,
+    [actionItems, props.hideGitControls],
   );
 }
 
@@ -424,7 +431,7 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
           separateBackground
         />
       ) : null}
-      {showActionControls ? (
+      {showActionControls && !props.hideGitControls ? (
         <NativeHeaderToolbar.Menu
           icon="terminal"
           disabled={!props.canOpenTerminal}
@@ -489,7 +496,7 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
           separateBackground
         />
       ) : null}
-      {showActionControls ? <ThreadGitMenu {...props} /> : null}
+      {showActionControls && !props.hideGitControls ? <ThreadGitMenu {...props} /> : null}
     </NativeHeaderToolbar>
   );
 }
