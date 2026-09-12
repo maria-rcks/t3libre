@@ -1206,6 +1206,42 @@ describe("deriveMessagesTimelineRows", () => {
     expect(activeRows(direct, new Set())).toContain("thinking");
     expect(activeRows(direct, new Set(["agent-b"]), "turn-2")).toContain("thinking");
 
+    for (const toolLifecycleStatus of ["inProgress", "completed"] as const) {
+      const laterTool = {
+        id: "later-tool",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:04Z",
+        entry: {
+          id: "later-tool",
+          turnId: "turn-1" as TurnId,
+          createdAt: "2026-01-01T00:00:04Z",
+          label: "Read file",
+          tone: "tool" as const,
+          toolName: "read_file",
+          toolLifecycleStatus,
+        },
+      };
+      for (const trailingEntries of [[], [laterTool]]) {
+        const rows = deriveMessagesTimelineRows({
+          timelineEntries: [...direct.slice(0, 2), ...trailingEntries],
+          isWorking: true,
+          runningTurnId: "turn-1" as TurnId,
+          activeTurnStartedAt: "2026-01-01T00:00:00Z",
+          turnDiffSummaries: [],
+          supportsConversationRollback: false,
+          liveAgentTaskIds: new Set(["agent-b"]),
+        });
+        expect(rows.filter((row) => row.kind === "work-live")).toMatchObject([
+          {
+            id: "live-activity-row",
+            entry: { id: trailingEntries.length ? "later-tool" : "spawn-1" },
+            active: true,
+          },
+        ]);
+        expect(rows.some((row) => row.kind === "work" || row.kind === "thinking")).toBe(false);
+      }
+    }
+
     expect(derive(direct, new Set())).toEqual(folded);
     expect(derive(direct, new Set(["agent-b"]))).toEqual(unfolded);
     // A workflow coordinator between phases keeps its batch out of the fold.

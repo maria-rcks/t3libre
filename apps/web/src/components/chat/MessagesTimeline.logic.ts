@@ -945,7 +945,6 @@ export function deriveMessagesTimelineRows(input: {
     if (
       !entryBelongsToActiveTurn(entry, index) ||
       entry.kind !== "work" ||
-      entry.entry.agentSpawn !== undefined ||
       entry.entry.questionAnswer !== undefined ||
       entry.entry.sourceActivityKind === "context-compaction" ||
       entry.entry.tone === "error"
@@ -960,9 +959,14 @@ export function deriveMessagesTimelineRows(input: {
   );
   const activeWorkAnchor = activeToolEntries[0];
   const latestVisibleToolEntry = visibleActiveToolEntries.at(-1);
-  const latestRunningToolEntry = visibleActiveToolEntries.findLast((entry) =>
-    workEntryIsActiveTurnActivity(entry.entry),
-  );
+  const latestRunningToolEntry = visibleActiveToolEntries.findLast((entry) => {
+    const spawn = entry.entry.agentSpawn;
+    return spawn
+      ? entry === latestVisibleToolEntry &&
+          ((spawn.workflowId !== null && input.liveAgentTaskIds?.has(spawn.workflowId)) ||
+            spawn.agentTaskIds.some((taskId) => input.liveAgentTaskIds?.has(taskId)))
+      : workEntryIsActiveTurnActivity(entry.entry);
+  });
   const latestToolFailed =
     latestRunningToolEntry === undefined &&
     latestVisibleToolEntry !== undefined &&
@@ -971,6 +975,7 @@ export function deriveMessagesTimelineRows(input: {
   const latestToolKeepsActivityLive =
     latestRunningToolEntry !== undefined ||
     (latestVisibleToolEntry !== undefined &&
+      latestVisibleToolEntry.entry.agentSpawn === undefined &&
       workEntryIndicatesToolSuccess(latestVisibleToolEntry.entry));
   const activeWorkPlacementEntryId = latestVisibleToolEntry?.id;
   const activeWorkRow =
@@ -1013,7 +1018,7 @@ export function deriveMessagesTimelineRows(input: {
     if (activeWorkRow === null) return;
     nextRows.push(activeWorkRow);
     hasActivityRow ||= activeWorkRow.active;
-    if (!activeWorkRow.expanded) return;
+    if (!activeWorkRow.expanded || activeWorkRow.entry.agentSpawn) return;
     nextRows.push(
       expandedWorkGroupRow(
         activeWorkRow.groupId,

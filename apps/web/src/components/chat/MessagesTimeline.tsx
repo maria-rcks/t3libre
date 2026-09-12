@@ -2392,6 +2392,15 @@ function LiveActivityContent({
 
 function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "work-live" }> }) {
   const ctx = use(TimelineRowCtx);
+  if (row.entry.agentSpawn) {
+    return (
+      <AgentSpawnRow
+        workEntry={row.entry}
+        active={row.active}
+        onToggleEntry={(collapsed) => ctx.onToggleWorkEntry(row.id, collapsed)}
+      />
+    );
+  }
   const label = liveWorkEntryLabel(row.entry, ctx.workspaceRoot, row.active);
   const failed = workEntryDisplayIndicatesToolFailure(row.entry);
 
@@ -3723,6 +3732,7 @@ const stopRowToggleWhileSelectingText = (e: MouseEvent<HTMLElement>) => {
  */
 const AgentSpawnRow = memo(function AgentSpawnRow(props: {
   workEntry: TimelineWorkEntry;
+  active?: boolean | undefined;
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 }) {
   const { workEntry } = props;
@@ -3778,7 +3788,6 @@ const AgentSpawnRow = memo(function AgentSpawnRow(props: {
   return (
     <div className="flex flex-col">
       <div
-        ref={live && !failed ? observeVisibleAnimation : undefined}
         role="button"
         tabIndex={0}
         aria-label={meta ? `${lead}, ${meta}` : lead}
@@ -3790,29 +3799,16 @@ const AgentSpawnRow = memo(function AgentSpawnRow(props: {
             toggleExpanded();
           }
         }}
-        className="flex cursor-pointer select-none items-center gap-1.5 rounded-md px-0.5 py-0.5 transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        className="flex cursor-pointer select-none items-center gap-1.5 rounded-md transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
       >
-        <span
-          className={cn(
-            "flex size-6 shrink-0 items-center justify-center",
-            failed ? failedToolIconClassName : "text-icon-muted",
-          )}
-        >
-          <WorkEntryIcon name="bot" className="block size-4 shrink-0 stroke-[1.8]" />
-        </span>
-        <p className="flex min-w-0 flex-1 items-baseline gap-1.5 text-sm leading-relaxed">
-          <span
-            className={cn(
-              "min-w-0 truncate text-secondary-label",
-              live && !failed && "live-tool-shine",
-            )}
-          >
-            {lead}
-          </span>
-          {workflowName ? (
-            <span className="min-w-0 truncate text-muted-foreground">· {workflowName}</span>
-          ) : null}
-        </p>
+        <div className="min-w-0 flex-1">
+          <LiveActivityRow
+            label={workflowName ? `${lead} · ${workflowName}` : lead}
+            iconName="bot"
+            active={live && props.active !== false}
+            failed={failed}
+          />
+        </div>
         {meta ? (
           <span className="shrink-0 font-mono text-[.7rem] tabular-nums text-muted-foreground">
             {meta}
@@ -3971,7 +3967,13 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry, displayLabel } = props;
   // Before any hooks: spawn rows render their own component.
   if (workEntry.agentSpawn) {
-    return <AgentSpawnRow workEntry={workEntry} onToggleEntry={props.onToggleEntry} />;
+    return (
+      <AgentSpawnRow
+        workEntry={workEntry}
+        active={!isExpandedToolGroupEntry}
+        onToggleEntry={props.onToggleEntry}
+      />
+    );
   }
   return (
     <PlainWorkEntryRow
