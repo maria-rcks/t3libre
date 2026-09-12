@@ -191,6 +191,7 @@ export function ImageChipButton({
   suffix?: string | null;
 }) {
   const [sample, setSample] = useState<{ url: string; color: string | undefined }>();
+  const [corsFailedUrl, setCorsFailedUrl] = useState<string>();
   const accent = sample?.url === previewUrl ? sample?.color : undefined;
   return (
     <Button
@@ -208,9 +209,11 @@ export function ImageChipButton({
       {previewUrl ? (
         <img
           key={previewUrl}
+          crossOrigin={corsFailedUrl === previewUrl ? undefined : "anonymous"}
           src={previewUrl}
           alt=""
           className="size-3.5 shrink-0 rounded-sm object-cover"
+          onError={() => setCorsFailedUrl(previewUrl)}
           onLoad={(event) =>
             setSample({ url: previewUrl, color: averageImageColor(event.currentTarget) })
           }
