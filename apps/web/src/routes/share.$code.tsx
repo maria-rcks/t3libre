@@ -23,10 +23,10 @@ export const Route = createFileRoute("/share/$code")({
       Loading shared chat…
     </div>
   ),
-  errorComponent: ({ error, reset }) => (
+  errorComponent: ({ error }) => (
     <div className="grid h-dvh place-content-center gap-4 p-6 text-center">
       <p>{error.message}</p>
-      <Button onClick={reset}>Try again</Button>
+      <Button onClick={() => window.location.reload()}>Try again</Button>
     </div>
   ),
   head: ({ loaderData }) => ({

@@ -30,6 +30,21 @@ describe("projectActivityPayload", () => {
       { item: { tool: "terminal", command: "echo input", aggregatedOutput: "private result" } },
     ],
     [
+      "codex dynamic tool",
+      {
+        item: {
+          tool: "lookup",
+          arguments: "echo input",
+          contentItems: [{ type: "inputText", text: "private result" }],
+        },
+      },
+    ],
+    ["codex web search", { item: { query: "echo input", results: [{ title: "private result" }] } }],
+    [
+      "codex collaboration",
+      { item: { prompt: "echo input", agentsStates: { agent: { message: "private result" } } } },
+    ],
+    [
       "claude",
       { toolName: "Bash", input: { command: "echo input" }, result: { content: "private result" } },
     ],
