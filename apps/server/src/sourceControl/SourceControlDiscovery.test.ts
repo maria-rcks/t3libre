@@ -85,7 +85,7 @@ it.effect("loads Forgejo pull request references from files and commits views", 
   }).pipe(
     Effect.provide(
       Layer.mergeAll(
-        Layer.mock(FileSystem.FileSystem)({}),
+        Layer.succeed(FileSystem.FileSystem, FileSystem.makeNoop({})),
         Layer.mock(VcsProcess.VcsProcess)({}),
         Layer.mock(ForgejoCli.ForgejoCli)({
           resolveRepository: () =>
