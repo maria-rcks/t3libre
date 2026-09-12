@@ -658,6 +658,10 @@ function deriveTurnFolds(input: {
       if (!isCompaction && index > terminalEntryIndex && !isSingleTrailingActivity) {
         continue;
       }
+      // User input stays visible after the surrounding work settles.
+      if (entry.kind === "work" && entry.entry.questionAnswer !== undefined) {
+        continue;
+      }
       // Workflows outlive their launching turn (dynamic spawns, background
       // execution), so a spawn row with a live member or coordinator stays
       // outside the fold instead of hiding a still-running fleet. Settled
@@ -942,6 +946,7 @@ export function deriveMessagesTimelineRows(input: {
       !entryBelongsToActiveTurn(entry, index) ||
       entry.kind !== "work" ||
       entry.entry.agentSpawn !== undefined ||
+      entry.entry.questionAnswer !== undefined ||
       entry.entry.sourceActivityKind === "context-compaction" ||
       entry.entry.tone === "error"
     ) {
@@ -1066,7 +1071,11 @@ export function deriveMessagesTimelineRows(input: {
     }
 
     if (timelineEntry.kind === "work") {
-      if (timelineEntry.entry.agentSpawn !== undefined || timelineEntry.entry.tone === "error") {
+      if (
+        timelineEntry.entry.agentSpawn !== undefined ||
+        timelineEntry.entry.questionAnswer !== undefined ||
+        timelineEntry.entry.tone === "error"
+      ) {
         nextRows.push({
           kind: "work",
           id: timelineEntry.id,
@@ -1084,6 +1093,7 @@ export function deriveMessagesTimelineRows(input: {
           !nextEntry ||
           nextEntry.kind !== "work" ||
           nextEntry.entry.agentSpawn !== undefined ||
+          nextEntry.entry.questionAnswer !== undefined ||
           nextEntry.entry.sourceActivityKind === "context-compaction" ||
           nextEntry.entry.tone === "error" ||
           activeWorkEntryIds.has(nextEntry.id) ||
