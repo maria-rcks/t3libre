@@ -2,7 +2,6 @@ import { GitPullRequestIcon } from "lucide-react";
 import {
   getQuestionAnswerPreview,
   getQuestionAnswerText,
-  getQuestionAnswerTitle,
   hasQuestionAnswer,
 } from "@t3tools/client-runtime/work-log/user-input";
 import {
@@ -3342,14 +3341,10 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     showWarningIndicator || showDestructiveRowStyle
       ? undefined
       : (workEntry.toolIcon ?? workEntry.toolSource?.icon);
-  const questionAnswer = workEntry.questionAnswer;
-  const previewText = questionAnswer
-    ? getQuestionAnswerTitle(questionAnswer)
-    : (displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot));
-  const answerPreview =
-    questionAnswer && hasQuestionAnswer(questionAnswer)
-      ? getQuestionAnswerPreview(questionAnswer)
-      : null;
+  const previewText = displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot);
+  const answerPreview = workEntry.questionAnswer
+    ? getQuestionAnswerPreview(workEntry.questionAnswer)
+    : null;
   const viewedImagePath = workEntryViewedImagePath(workEntry);
   const viewedImage =
     viewedImagePath && threadRef
@@ -3445,20 +3440,29 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
             <p className="flex min-w-0 w-full items-baseline gap-1.5 text-sm leading-relaxed">
               <span
                 className={cn(
-                  "min-w-0 flex-1",
-                  expanded && !questionAnswer ? "whitespace-pre-wrap break-words" : "truncate",
-                  expanded && "select-text",
-                  answerPreview
-                    ? expanded
-                      ? "text-muted-foreground"
-                      : "text-foreground"
-                    : headingClass,
+                  answerPreview ? "shrink-0" : "min-w-0 flex-1",
+                  expanded ? "whitespace-pre-wrap break-words select-text" : "truncate",
+                  headingClass,
                 )}
                 onClick={expanded ? stopRowToggleWhileSelectingText : undefined}
                 onPointerDown={expanded ? stopRowToggle : undefined}
               >
-                {questionAnswer ? (answerPreview ?? "Question") : previewText}
+                {previewText}
               </span>
+              {answerPreview ? (
+                <span
+                  className={cn(
+                    "min-w-0 truncate",
+                    !expanded &&
+                      workEntry.questionAnswer &&
+                      hasQuestionAnswer(workEntry.questionAnswer)
+                      ? "text-foreground"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {answerPreview}
+                </span>
+              ) : null}
             </p>
           </div>
           {showFailedIndicator &&

@@ -1,7 +1,6 @@
 import { QuestionAnswerHistory } from "./QuestionAnswerHistory";
 import {
   getQuestionAnswerPreview,
-  getQuestionAnswerTitle,
   hasQuestionAnswer,
 } from "@t3tools/client-runtime/work-log/user-input";
 import * as Haptics from "expo-haptics";
@@ -749,18 +748,12 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
   const fullDetail = expanded ? row.getFullDetail() : null;
   const viewedImagePath = workEntryViewedImagePath(row.workEntry);
   const toolPresentation = resolveWorkEntryToolPresentation(row.workEntry);
-  const questionAnswer = row.workEntry.questionAnswer;
-  const previewText = questionAnswer
-    ? getQuestionAnswerTitle(questionAnswer)
-    : workEntryRowLabel(row.workEntry);
-  const answerPreview =
-    questionAnswer && hasQuestionAnswer(questionAnswer)
-      ? getQuestionAnswerPreview(questionAnswer)
-      : null;
+  const previewText = workEntryRowLabel(row.workEntry);
+  const answerPreview = row.workEntry.questionAnswer
+    ? getQuestionAnswerPreview(row.workEntry.questionAnswer)
+    : null;
   const accessiblePreview = [previewText, answerPreview].filter(Boolean).join(": ");
-  const displayText = questionAnswer
-    ? (answerPreview ?? "Question")
-    : workEntryRowLabel(row.workEntry, expanded);
+  const displayText = workEntryRowLabel(row.workEntry, expanded);
   const iconIsDestructive = row.icon === "alert" || row.icon === "warning";
   const failed = row.status === "failure";
   const toolIcon = row.workEntry.toolIcon ?? row.workEntry.toolSource?.icon;
@@ -829,18 +822,23 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
               </View>
               <Text
                 className={cn(
-                  "min-w-0 flex-1 text-sm",
-                  answerPreview
-                    ? expanded
-                      ? "text-foreground-subtle"
-                      : "text-foreground"
-                    : "text-foreground-muted",
+                  "min-w-0 flex-1 text-sm text-foreground-muted",
                   iconIsDestructive && "font-t3-medium text-adaptive-rose-600-400",
                 )}
-                numberOfLines={expanded && !questionAnswer ? undefined : 1}
-                ellipsizeMode="tail"
+                numberOfLines={expanded ? undefined : 1}
               >
                 {displayText}
+                {answerPreview ? (
+                  <Text
+                    className={
+                      !expanded &&
+                      row.workEntry.questionAnswer &&
+                      hasQuestionAnswer(row.workEntry.questionAnswer)
+                        ? "text-foreground"
+                        : "text-foreground-subtle"
+                    }
+                  >{`  ${answerPreview}`}</Text>
+                ) : null}
               </Text>
             </>
           )}
