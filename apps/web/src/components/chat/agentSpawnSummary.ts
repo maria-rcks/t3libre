@@ -33,7 +33,7 @@ export function deriveAgentSpawnSummary({
   ]
     .filter(Boolean)
     .join(" and ");
-  const lead = `${live ? "Spawning" : "Spawned"} ${subjects || "subagents"}`;
+  const lead = `${batches > 0 ? "Launched" : live ? "Kicked off" : "Ran"} ${subjects || "subagents"}`;
 
   const status = live
     ? working > 0

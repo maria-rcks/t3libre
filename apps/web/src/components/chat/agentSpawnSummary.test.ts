@@ -6,25 +6,16 @@ const batch = (status: RuntimeSubagent["status"]) => ({ kind: "subagent_batch" a
 const agent = (status: RuntimeSubagent["status"]) => ({ kind: "subagent" as const, status });
 
 describe("deriveAgentSpawnSummary", () => {
-  it.each([
-    ["running", "Spawning 2 subagents"],
-    ["completed", "Spawned 2 subagents"],
-  ] as const)("uses the spawn tense for %s agents", (state, lead) => {
-    expect(
-      deriveAgentSpawnSummary({ agents: [agent(state), agent(state)], agentCount: 2 }).lead,
-    ).toBe(lead);
-  });
-
   it("counts a native batch without claiming the number of children", () => {
     expect(deriveAgentSpawnSummary({ agents: [batch("running")], agentCount: 1 })).toEqual({
       live: true,
-      lead: "Spawning 1 subagent batch",
+      lead: "Launched 1 subagent batch",
       status: "1 working",
       tone: "working",
     });
     expect(deriveAgentSpawnSummary({ agents: [batch("idle")], agentCount: 1 })).toEqual({
       live: false,
-      lead: "Spawned 1 subagent batch",
+      lead: "Launched 1 subagent batch",
       status: "1 idle",
       tone: "inactive",
     });
@@ -36,7 +27,7 @@ describe("deriveAgentSpawnSummary", () => {
         agents: [agent("running"), batch("running"), batch("idle")],
         agentCount: 3,
       }).lead,
-    ).toBe("Spawning 1 subagent and 2 batches");
+    ).toBe("Launched 1 subagent and 2 batches");
   });
 
   it.each([

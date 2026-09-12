@@ -84,7 +84,7 @@ export interface WorkLogEntry {
   agentRole?: string;
   /**
    * Present on agent-spawn rows: one per workflow run or per-turn batch of
-   * direct spawns. The row ("Spawning N subagents") derives its live
+   * direct spawns. The row ("Kicked off N subagents") derives its live
    * status and member list from the agent panel model at render time.
    */
   agentSpawn?: {
@@ -641,7 +641,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
 /**
  * Spawn-group key for a subagent lifecycle row. Workflow members and their
  * coordinator share the coordinator's group; direct spawns batch per turn.
- * One row per group: "Spawning N subagents".
+ * One row per group: "Kicked off N subagents".
  */
 function agentSpawnGroupKey(entry: DerivedWorkLogEntry): string {
   const taskId = entry.taskId ?? "";
@@ -687,7 +687,7 @@ function collapseDerivedWorkLogEntries(
   // Batch membership is decided once, at the FIRST row seen for a taskId.
   // Claude background subagents settle between turns, so their completion
   // rows carry fresh synthetic turn ids (or none) — keying each row by its
-  // own turn splintered one batch into a stream of "Spawning N subagents"
+  // own turn splintered one batch into a stream of "Kicked off N subagents"
   // rows (live-test finding, thread 7ac7ef05).
   const groupKeyByTaskId = new Map<string, string>();
   const toolLifecycleRowIndex = new Map<string, number>();
