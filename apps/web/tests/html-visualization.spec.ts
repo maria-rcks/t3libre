@@ -13,29 +13,37 @@ const APP_URL = "https://visualization.test/";
 let bundle: string;
 
 const test = base.extend<{ unexpectedRequests: string[] }>({
-  unexpectedRequests: async ({ page }, use) => {
-    const requests: string[] = [];
-    await page.route("**/*", async (route) => {
-      if (route.request().url() === APP_URL && route.request().isNavigationRequest()) {
-        await route.fulfill({
-          contentType: "text/html",
-          body: '<!doctype html><title>Visualization security tests</title><body><p id="parent">Parent document</p></body>',
-        });
-      } else {
-        requests.push(route.request().url());
-        await route.abort();
-      }
-    });
-    await page.goto(APP_URL);
-    await page.addScriptTag({ content: bundle });
-    await page.evaluate(() => {
-      localStorage.setItem("visualization-test-secret", "parent-only");
-      window.visualizationMessages = [];
-      addEventListener("message", (event) => window.visualizationMessages.push(event.data));
-    });
-    await use(requests);
-    expect(requests, "visualization must not initiate network requests").toEqual([]);
-  },
+  unexpectedRequests: [
+    async ({ page }, use) => {
+      const requests: string[] = [];
+      await page.route("**/*", async (route) => {
+        if (route.request().url() === APP_URL && route.request().isNavigationRequest()) {
+          await route.fulfill({
+            contentType: "text/html",
+            body: '<!doctype html><title>Visualization security tests</title><body><p id="parent">Parent document</p></body>',
+          });
+        } else {
+          requests.push(route.request().url());
+          await route.abort();
+        }
+      });
+      await page.goto(APP_URL);
+      await page.addScriptTag({ content: bundle });
+      await page.evaluate(() => {
+        localStorage.setItem("visualization-test-secret", "parent-only");
+        window.visualizationMessages = [];
+        addEventListener(
+          "message",
+          (event) =>
+            window.T3Visualization.parseVisualizationHeight(event.data) === null &&
+            window.visualizationMessages.push(event.data),
+        );
+      });
+      await use(requests);
+      expect(requests, "visualization must not initiate network requests").toEqual([]);
+    },
+    { auto: true },
+  ],
 });
 
 test.beforeAll(async () => {
@@ -54,16 +62,24 @@ test.beforeAll(async () => {
   bundle = chunk.code;
 });
 
-async function mountVisualization(page: Page, html: string) {
-  await page.evaluate((source) => {
-    const frame = document.createElement("iframe");
-    frame.id = "visualization";
-    frame.title = "Visualization";
-    frame.sandbox.value = "";
-    frame.style.cssText = "display:block;width:480px;height:320px;border:0";
-    frame.srcdoc = window.T3Visualization.visualizationDocument(source, false);
-    document.body.append(frame);
-  }, html);
+async function mountVisualization(page: Page, html: string, themeCSS = "") {
+  await page.evaluate(
+    ({ source, theme }) => {
+      const frame = document.createElement("iframe");
+      frame.id = "visualization";
+      frame.title = "Visualization";
+      frame.sandbox.value = "allow-scripts";
+      frame.style.cssText = "display:block;width:480px;height:320px;border:0";
+      frame.srcdoc = window.T3Visualization.visualizationDocument(source, false, theme);
+      addEventListener("message", (event) => {
+        if (event.source !== frame.contentWindow) return;
+        const height = window.T3Visualization.parseVisualizationHeight(event.data);
+        if (height !== null) frame.style.height = `${height}px`;
+      });
+      document.body.append(frame);
+    },
+    { source: html, theme: themeCSS },
+  );
   const content = page.frameLocator("#visualization").frameLocator("iframe");
   await expect(content.locator("body")).toBeVisible();
   return content;
@@ -113,9 +129,9 @@ test("removes scripts, hints, nested documents, and navigation attributes", asyn
     <a href="https://popup.example.invalid" target="_blank">Popup probe</a>
     <form action="https://form.example.invalid"><input autofocus><button formaction="https://button.example.invalid">Submit probe</button></form>`,
   );
-  await expect(content.locator("script, link, iframe, object, embed, base, body meta")).toHaveCount(
-    0,
-  );
+  await expect(
+    content.locator("body script, link, iframe, object, embed, base, body meta"),
+  ).toHaveCount(0);
   await expect(
     content.locator(
       "[href], [src], [srcset], [action], [formaction], [ping], [autofocus], [onerror]",
@@ -227,7 +243,7 @@ test("keeps parent DOM and storage inaccessible and oversized content clipped", 
   const content = await mountVisualization(
     page,
     `"></iframe>
-    <div style="position:fixed;inset:0;width:10000px;height:10000px;background:red">Contained content</div>`,
+    <div style="height:20000px">Tall content</div><div style="position:fixed;inset:0;width:10000px;height:10000px;background:red">Contained content</div>`,
   );
   const isolation = await content.locator("body").evaluate(() => {
     const denied = (read: () => unknown) => {
@@ -248,10 +264,116 @@ test("keeps parent DOM and storage inaccessible and oversized content clipped", 
   expect(isolation).toEqual({ parent: true, top: true, localStorage: true, sessionStorage: true });
   await expect(page.locator("body > iframe")).toHaveCount(1);
   await expect(page.locator("#parent")).toHaveText("Parent document");
+  await expect(page.locator("#visualization")).toHaveCSS("height", "10000px");
   expect(await page.locator("#visualization").boundingBox()).toMatchObject({
     width: 480,
-    height: 320,
+    height: 10000,
   });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(900);
   expect(unexpectedRequests).toEqual([]);
+});
+
+test("fits native interactions in both directions and preserves state across theme changes", async ({
+  page,
+}) => {
+  const content = await mountVisualization(
+    page,
+    `
+    <style>body{background:red;padding:40px;margin:40px}.extra{display:none;height:240px}#toggle:checked ~ .extra{display:block}p{margin:0}</style>
+    <input type="checkbox" id="toggle"><label for="toggle">Show graph</label><div class="extra">Graph</div>
+    <details><summary>Breakdown</summary><div style="height:180px">Details</div></details>
+    <p>Theme text</p>`,
+    "--foreground:rgb(12, 34, 56);font-family:monospace;font-size:16px;line-height:24px",
+  );
+  const frame = page.locator("#visualization");
+  await expect(content.getByText("Theme text")).toHaveCSS("color", "rgb(12, 34, 56)");
+  await expect(content.locator("body")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(content.locator("body")).toHaveCSS("margin", "0px");
+  await expect(content.locator("body")).toHaveCSS("padding", "0px");
+  await expect(content.locator("body")).toHaveCSS("font-family", "monospace");
+  await expect.poll(async () => (await frame.boundingBox())!.height).toBeLessThan(150);
+  const initialHeight = (await frame.boundingBox())!.height;
+  await content.getByLabel("Show graph").check();
+  await expect.poll(async () => (await frame.boundingBox())!.height).toBe(initialHeight + 240);
+  await content.getByText("Breakdown").click();
+  await expect.poll(async () => (await frame.boundingBox())!.height).toBe(initialHeight + 420);
+  await frame.evaluate((node) =>
+    (node as HTMLIFrameElement).contentWindow!.postMessage(
+      { type: "t3-visualization-theme", css: "--foreground:rgb(65, 43, 21);color-scheme:dark" },
+      "*",
+    ),
+  );
+  await expect(content.getByText("Theme text")).toHaveCSS("color", "rgb(65, 43, 21)");
+  await expect(content.getByLabel("Show graph")).toBeChecked();
+  await expect(content.getByText("Details", { exact: true })).toBeVisible();
+  await content.getByLabel("Show graph").uncheck();
+  await content.getByText("Breakdown").click();
+  await expect.poll(async () => (await frame.boundingBox())!.height).toBe(initialHeight);
+  await frame.evaluate((node) => {
+    (node as HTMLIFrameElement).style.width = "240px";
+  });
+  await expect(content.locator("body")).toHaveCSS("width", "240px");
+  expect(await content.locator("body").evaluate(() => document.documentElement.scrollWidth)).toBe(
+    240,
+  );
+});
+
+test("rejects spoofed resize and theme messages and resists named DOM clobbering", async ({
+  page,
+}) => {
+  const content = await mountVisualization(
+    page,
+    `<form id="content" name="parent"><input name="postMessage"><input name="ResizeObserver"></form><p id="theme">Still isolated</p>`,
+    "--foreground:rgb(12, 34, 56)",
+  );
+  const frame = page.locator("#visualization");
+  await expect.poll(async () => (await frame.boundingBox())!.height).toBeLessThan(150);
+  const height = (await frame.boundingBox())!.height;
+  await page.evaluate(() => {
+    const target = document.querySelector<HTMLIFrameElement>("#visualization")!.contentWindow!;
+    window.postMessage({ type: "t3-visualization-height", height: 9000 }, "*");
+    target.postMessage({ type: "t3-visualization-height", height: 9000 }, "*");
+    // The top window is not the inner frame's direct parent.
+    target.frames[0]!.postMessage({ type: "t3-visualization-theme", css: "--foreground:red" }, "*");
+    target.postMessage(
+      { type: "t3-visualization-theme", css: "--foreground:red;" + " ".repeat(16000) },
+      "*",
+    );
+  });
+  await content
+    .locator("body")
+    .evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+  expect((await frame.boundingBox())!.height).toBe(height);
+  await expect(content.getByText("Still isolated")).toHaveCSS("color", "rgb(12, 34, 56)");
+  expect(
+    await page.evaluate(() =>
+      [
+        null,
+        {},
+        { type: "t3-visualization-height", height: NaN },
+        { type: "t3-visualization-height", height: Infinity },
+        { type: "t3-visualization-height", height: 10001 },
+        { type: "t3-visualization-height", height: 0 },
+        { type: "t3-visualization-height", height: "200" },
+      ].map(window.T3Visualization.parseVisualizationHeight),
+    ),
+  ).toEqual([null, null, null, null, null, null, null]);
+});
+
+test("embeds initial theme declarations without allowing style-element breakout", async ({
+  page,
+}) => {
+  const content = await mountVisualization(
+    page,
+    "<p>Theme boundary</p>",
+    '--foreground:rgb(12, 34, 56);--probe:"</style><script>top.postMessage("theme escaped","*")</script>"',
+  );
+  await expect(content.getByText("Theme boundary")).toHaveCSS("color", "rgb(12, 34, 56)");
+  await expect(content.locator("body script")).toHaveCount(0);
+  expect(await page.evaluate(() => window.visualizationMessages)).toEqual([]);
 });

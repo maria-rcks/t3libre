@@ -11,8 +11,9 @@ so you can shorten them or split them into several messages.
 Ask any provider for an HTML visualization to see a chart, diagram, or comparison
 inside its response on web and desktop. Providers use a `t3-html` Markdown fence
 containing self-contained HTML, CSS, and optional inline SVG. Visualizations appear
-after the message finishes and support native controls such as expandable sections
-and checkbox toggles. JavaScript, external resources, and navigation are blocked.
+after the message finishes, match your chat theme, and grow inline as you open
+expandable sections or use checkbox toggles. Generated JavaScript, external
+resources, and navigation are blocked.
 
 Use **Show source** to inspect or copy the HTML, and **Reset** to restore its initial
 state. Mobile displays the source and accompanying explanation. Ordinary `html`
