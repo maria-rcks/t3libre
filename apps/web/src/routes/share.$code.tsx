@@ -66,7 +66,7 @@ function SharePage() {
         </div>
       </header>
       {share ? (
-        <main className="mx-auto max-w-3xl px-5 pb-20 pt-12 sm:px-8 sm:pt-16">
+        <main className="mx-auto max-w-[52rem] px-5 pb-20 pt-12 sm:px-8 sm:pt-16">
           <div className="mb-10 border-b border-border/60 pb-8">
             <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
               <LinkIcon className="size-3.5" />
