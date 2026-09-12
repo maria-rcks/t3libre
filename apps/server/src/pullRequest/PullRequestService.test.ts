@@ -1663,6 +1663,7 @@ it.effect("routes explicit Forgejo HTTP authorities through SSH checkouts after 
   Effect.gen(function* () {
     for (const provider of ["forgejo", "unknown"] as const) {
       const seen: string[] = [];
+      const viewers: Array<string | undefined> = [];
       const service = yield* makeService({
         projects: [
           project({
@@ -1677,6 +1678,19 @@ it.effect("routes explicit Forgejo HTTP authorities through SSH checkouts after 
         ],
         providers: [
           fakeProvider("forgejo", {
+            getViewer: (input) => {
+              viewers.push(input.host);
+              assert.strictEqual(input.host, "code.example:3000");
+              return Effect.succeed("bilal");
+            },
+            listChangeRequests: (input) => {
+              assert.strictEqual(input.host, "code.example:3000");
+              return Effect.succeed({ items: [], truncated: false, continues: true });
+            },
+            getChangeRequest: (input) => {
+              assert.strictEqual(input.host, "code.example:3000");
+              return Effect.succeed({ ...hostedChangeRequest("Forgejo detail"), number: 42 });
+            },
             getChangeRequestSummary: (input) =>
               Effect.sync(() => {
                 seen.push(input.host);
@@ -1708,6 +1722,20 @@ it.effect("routes explicit Forgejo HTTP authorities through SSH checkouts after 
         { recoverTransientFailure: false },
       );
       assert.deepStrictEqual(seen, ["code.example:3000"]);
+      const listed = yield* service.list({
+        projectId: "ssh" as ProjectId,
+        host: "code.example:3000",
+        state: "open",
+      });
+      assert.strictEqual(listed.viewers["code.example:3000"], "bilal");
+      const detail = yield* service.detail({
+        projectId: "ssh" as ProjectId,
+        host: "code.example:3000",
+        repository: "team/repo",
+        number: 42,
+      });
+      assert.strictEqual(detail.body, "Forgejo detail");
+      assert.deepStrictEqual(viewers, ["code.example:3000"]);
     }
   }),
 );
