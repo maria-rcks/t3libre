@@ -34,7 +34,16 @@ export function deriveSharedTimelineEntries(share: SharedThread) {
       const command =
         inputRecord?.command ??
         inputRecord?.cmd ??
-        (itemType === "command_execution" ? input : undefined);
+        (typeof inputRecord?.executable === "string"
+          ? [inputRecord.executable, ...[inputRecord.args].flat()].filter(
+              (part): part is string => typeof part === "string",
+            )
+          : undefined) ??
+        (itemType === "command_execution"
+          ? typeof input === "string" || Array.isArray(input)
+            ? input
+            : tool.input
+          : undefined);
       return {
         id: EventId.make(tool.id),
         createdAt: tool.createdAt,
@@ -72,7 +81,14 @@ export function deriveSharedTimelineEntries(share: SharedThread) {
   const toolsById = new Map(share.tools.map((tool) => [tool.id, tool]));
   for (const entry of workEntries) {
     const tool = toolsById.get(entry.id);
-    if (tool?.input === undefined && tool?.result !== undefined) entry.detail = tool.result;
+    if (!tool) continue;
+    if (entry.itemType !== "command_execution" && entry.itemType !== "mcp_tool_call") {
+      entry.detail = [...new Set([tool.detail, tool.input, tool.result])]
+        .filter((value): value is string => Boolean(value))
+        .join("\n\n");
+    } else if (tool.input === undefined && tool.result !== undefined) {
+      entry.detail = tool.result;
+    }
   }
   return deriveTimelineEntries(
     share.messages.map((message) => ({
