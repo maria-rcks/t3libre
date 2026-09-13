@@ -1282,7 +1282,7 @@ const CHAT_MARKDOWN_MEDIA_BOUNDS_CLASS_NAME = cn(
   "max-h-[30rem]",
   CHAT_MARKDOWN_MEDIA_MAX_WIDTH_CLASS_NAME,
 );
-const CHAT_MARKDOWN_MEDIA_LAYOUT_CLASS_NAME = "inline-block!";
+const CHAT_MARKDOWN_MEDIA_LAYOUT_CLASS_NAME = "inline-block! [text-shadow:none]";
 const CHAT_MARKDOWN_MEDIA_FRAME_CLASS_NAME = "rounded-lg border border-border/40";
 const CHAT_MARKDOWN_IMAGE_SIZE_CLASS_NAME = cn(
   "h-auto w-auto object-contain",
