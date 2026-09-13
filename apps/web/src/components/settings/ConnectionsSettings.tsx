@@ -1819,12 +1819,12 @@ export function ConnectionsSettings() {
   const primaryEnvironment = usePrimaryEnvironment();
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(null);
   const searchTargetId = useLocation({ select: (location) => location.hash.replace(/^#/, "") });
-  if (
-    ["connections-environment", "wsl-backend"].includes(searchTargetId) &&
-    primaryEnvironment &&
-    selectedEnvironmentId !== primaryEnvironment.environmentId
-  ) {
-    setSelectedEnvironmentId(primaryEnvironment.environmentId);
+  const [handledSearchTargetId, setHandledSearchTargetId] = useState<string | null>(null);
+  if (primaryEnvironment && handledSearchTargetId !== searchTargetId) {
+    setHandledSearchTargetId(searchTargetId);
+    if (["connections-environment", "wsl-backend"].includes(searchTargetId)) {
+      setSelectedEnvironmentId(primaryEnvironment.environmentId);
+    }
   }
   const selectedEnvironment =
     environments.find((environment) => environment.environmentId === selectedEnvironmentId) ??
