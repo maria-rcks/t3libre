@@ -587,7 +587,18 @@ function SidebarSectionPlaceholder(props: {
             props.isDropTarget && "border-primary/40 bg-primary/5 text-primary",
           )}
         >
-          {props.label}
+          <span className="group-data-[collapsible=icon]:sr-only">{props.label}</span>
+          {props.marker === "settled-placeholder" ? (
+            <CheckIcon
+              aria-hidden
+              className="hidden size-3.5 group-data-[collapsible=icon]:block"
+            />
+          ) : (
+            <Undo2Icon
+              aria-hidden
+              className="hidden size-3.5 group-data-[collapsible=icon]:block"
+            />
+          )}
         </div>
       ) : null}
     </SortableSidebarMarker>
@@ -611,19 +622,30 @@ function SidebarDragBoundary(props: {
       className="pointer-events-none relative mx-0.5 -mb-px h-0"
     >
       {props.visible ? (
-        <div className="sidebar-drag-boundary-label absolute inset-x-2 top-1 flex h-4 items-center gap-2">
+        <div className="sidebar-drag-boundary-label absolute inset-x-2 top-1 flex h-4 items-center gap-2 group-data-[collapsible=icon]:inset-x-0 group-data-[collapsible=icon]:justify-center">
           <span
             className={cn(
               "shrink-0 text-xs font-medium",
               props.isDropTarget ? "text-primary" : "text-sidebar-foreground/80",
             )}
           >
-            {props.label}
+            <span className="group-data-[collapsible=icon]:sr-only">{props.label}</span>
+            {props.marker === "pinned-header" ? (
+              <PinIcon
+                aria-hidden
+                className="hidden size-3.5 group-data-[collapsible=icon]:block"
+              />
+            ) : (
+              <Undo2Icon
+                aria-hidden
+                className="hidden size-3.5 group-data-[collapsible=icon]:block"
+              />
+            )}
           </span>
           <span
             aria-hidden
             className={cn(
-              "h-px flex-1",
+              "h-px flex-1 group-data-[collapsible=icon]:hidden",
               props.isDropTarget ? "bg-primary/50" : "bg-sidebar-foreground/25",
             )}
           />
@@ -1322,7 +1344,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     [isRenaming, onStartRename, thread.title, threadRef],
   );
   const [isFileDragOver, setIsFileDragOver] = useState(false);
-  const [compactTooltipOpen, setCompactTooltipOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const fileDropHandlers = useMemo(
     () =>
       onFileDropThreads
@@ -1635,8 +1657,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         className={cn("list-none py-0.5", sortable?.isDragging && "relative z-20")}
       >
         <Tooltip
-          open={sortable?.isDragging ? dragDestination !== null : compactTooltipOpen}
-          onOpenChange={setCompactTooltipOpen}
+          open={sortable?.isDragging ? dragDestination !== null : tooltipOpen}
+          onOpenChange={setTooltipOpen}
         >
           <TooltipTrigger
             render={
@@ -1707,7 +1729,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           sortable?.isDragging && "relative z-20",
         )}
       >
-        <Tooltip disabled={sortable?.isDragging}>
+        <Tooltip
+          open={!sortable?.isDragging && tooltipOpen}
+          onOpenChange={setTooltipOpen}
+          disabled={sortable?.isDragging}
+        >
           <TooltipTrigger
             render={
               <div
@@ -1860,7 +1886,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         sortable?.isDragging && "relative z-20",
       )}
     >
-      <Tooltip disabled={snoozeMenuOpen || sortable?.isDragging}>
+      <Tooltip
+        open={!snoozeMenuOpen && !sortable?.isDragging && tooltipOpen}
+        onOpenChange={setTooltipOpen}
+        disabled={snoozeMenuOpen || sortable?.isDragging}
+      >
         <TooltipTrigger
           render={
             <div
