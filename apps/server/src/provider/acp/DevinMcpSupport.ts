@@ -15,7 +15,7 @@ const decodeServers = Schema.decodeUnknownEffect(JsonObject);
  * Devin 3000.10.21 accepts ACP MCP servers but resolves calls from on-disk config.
  * Keep this overlay scoped to the process; never write credentials into the workspace.
  * XDG_DATA_HOME stays unchanged so authentication and saved sessions remain available.
- * Shell tools inherit XDG_CONFIG_HOME too, so their unrelated XDG config lookup changes.
+ * Existing config entries remain visible to shell and MCP children through symlinks.
  */
 export const prepareDevinMcpEnvironment = Effect.fn("prepareDevinMcpEnvironment")(
   function* (input: {
@@ -39,6 +39,12 @@ export const prepareDevinMcpEnvironment = Effect.fn("prepareDevinMcpEnvironment"
       ...(config.mcpServers === undefined ? {} : yield* decodeServers(config.mcpServers)),
     };
     const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-devin-mcp-" });
+    if (yield* fs.exists(configRoot)) {
+      for (const entry of yield* fs.readDirectory(configRoot)) {
+        if (entry === "devin") continue;
+        yield* fs.symlink(path.join(configRoot, entry), path.join(directory, entry));
+      }
+    }
     const devinDirectory = path.join(directory, "devin");
     yield* fs.makeDirectory(devinDirectory, { mode: 0o700 });
     // Preserve Devin's other config resources without copying private files.

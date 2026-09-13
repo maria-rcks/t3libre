@@ -39,7 +39,7 @@ export function selectDevinPermissionOptionId(
   request: EffectAcpSchema.RequestPermissionRequest,
   decision: ProviderApprovalDecision,
 ): string | undefined {
-  if (decision === "cancel") return undefined;
+  if (decision === "cancel" || decision === "acceptAlways") return undefined;
   const option =
     decision === "acceptForSession"
       ? request.options.find(

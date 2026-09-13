@@ -67,6 +67,7 @@ describe("Devin ACP protocol", () => {
     expect(selectDevinPermissionOptionId(request, "accept")).toBe("allow_once");
     expect(selectDevinPermissionOptionId(request, "decline")).toBe("deny");
     expect(selectDevinPermissionOptionId(request, "cancel")).toBeUndefined();
+    expect(selectDevinPermissionOptionId(request, "acceptAlways")).toBeUndefined();
     expect(devinApprovalOptions(request)).toEqual([
       { decision: "accept", label: "Allow once" },
       { decision: "decline", label: "Deny" },

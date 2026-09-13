@@ -8078,6 +8078,18 @@ export default function ChatView(props: ChatViewProps) {
       selectedModelSelection: ctxSelectedModelSelection,
     } = sendCtx;
 
+    if (ctxSelectedProvider === "devin" && defaultRuntimeMode === "approval-required") {
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Devin does not support Supervised mode",
+          description:
+            "Choose another default permission mode in Settings before starting a new thread.",
+        }),
+      );
+      return;
+    }
+
     const createdAt = new Date().toISOString();
     const nextThreadId = newThreadId();
     const planMarkdown = activeProposedPlan.planMarkdown;
