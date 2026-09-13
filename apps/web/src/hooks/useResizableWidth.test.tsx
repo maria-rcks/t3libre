@@ -40,12 +40,12 @@ function pointer(clientX = 100) {
   } as unknown as PointerEvent<HTMLElement>;
 }
 
-function Panel({ edge = "left" }: { edge?: "left" | "right" }) {
+function Panel({ edge = "left", maxWidth = 800 }: { edge?: "left" | "right"; maxWidth?: number }) {
   const resize = useResizableWidth({
     storageKey: "test-panel-width",
     defaultWidth: 400,
     minWidth: 200,
-    maxWidth: 800,
+    maxWidth,
     edge,
   });
   useLayoutEffect(() => {
@@ -130,6 +130,26 @@ describe("panel resize cleanup", () => {
       expect(cancelAnimationFrame).toHaveBeenCalledWith(42);
     },
   );
+
+  it.each([
+    [800, 450],
+    [450, 800],
+  ])("uses updated bounds during a drag from max %s to %s", async (initialMax, nextMax) => {
+    await act(() => renderer.update(<Panel maxWidth={initialMax} />));
+    await act(() => {
+      result.handlers.onPointerDown(pointer());
+      result.handlers.onPointerMove(pointer(-200));
+    });
+    await act(() => frame?.(0));
+    expect(result.width).toBe(Math.min(700, initialMax));
+    await act(() => renderer.update(<Panel maxWidth={nextMax} />));
+    await act(() => result.handlers.onPointerMove(pointer(-250)));
+    await act(() => frame?.(0));
+    expect(result.width).toBe(Math.min(750, nextMax));
+    await act(() => result.handlers.onPointerUp(pointer(-300)));
+    expect(result.width).toBe(nextMax);
+    expect(setItem).toHaveBeenCalledExactlyOnceWith("test-panel-width", String(nextMax));
+  });
 
   it("handles release before any move event", async () => {
     await act(() => {

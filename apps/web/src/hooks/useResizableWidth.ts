@@ -1,5 +1,11 @@
 import * as Schema from "effect/Schema";
-import { type PointerEvent as ReactPointerEvent, useCallback, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { getLocalStorageItem, setLocalStorageItem } from "./useLocalStorage";
 import { useResizeDrag } from "./useResizeDrag";
@@ -64,19 +70,23 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
   });
 
   const clampedWidth = clamp(width);
+  const latestOptions = useRef({ clamp, storageKey });
+  useLayoutEffect(() => {
+    latestOptions.current = { clamp, storageKey };
+  }, [clamp, storageKey]);
 
   const handlers = useResizeDrag<HTMLElement>(() => ({
     width: clampedWidth,
     edge,
     resize(value) {
-      const nextWidth = clamp(value);
+      const nextWidth = latestOptions.current.clamp(value);
       setWidth(nextWidth);
       return nextWidth;
     },
     finish(finalWidth) {
       // Commit once at drag-end to avoid 60Hz localStorage writes.
       try {
-        setLocalStorageItem(storageKey, finalWidth, WidthSchema);
+        setLocalStorageItem(latestOptions.current.storageKey, finalWidth, WidthSchema);
       } catch (error) {
         console.error("Could not persist panel width.", error);
       }

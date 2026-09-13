@@ -365,6 +365,10 @@ function SidebarRail({
   const railRef = React.useRef<HTMLButtonElement | null>(null);
   const suppressClickRef = React.useRef(false);
   const resolvedResizable = sidebarInstance?.resizable ?? null;
+  const latestResizable = React.useRef(resolvedResizable);
+  React.useLayoutEffect(() => {
+    latestResizable.current = resolvedResizable;
+  }, [resolvedResizable]);
   const canResize = resolvedResizable !== null && open;
   const railLabel = canResize ? "Resize Sidebar" : "Toggle Sidebar";
   const railTitle = canResize ? "Drag to resize sidebar" : "Toggle Sidebar";
@@ -396,9 +400,11 @@ function SidebarRail({
       width,
       edge: side === "left" ? "right" : "left",
       resize(value) {
-        const nextWidth = clampSidebarWidth(value, resolvedResizable);
+        const options = latestResizable.current;
+        if (!options) return width;
+        const nextWidth = clampSidebarWidth(value, options);
         const accepted =
-          resolvedResizable.shouldAcceptWidth?.({
+          options.shouldAcceptWidth?.({
             currentWidth: width,
             nextWidth,
             rail,
@@ -414,10 +420,11 @@ function SidebarRail({
       },
       finish(finalWidth, moved) {
         suppressClickRef.current = moved;
-        if (resolvedResizable.storageKey) {
-          setLocalStorageItem(resolvedResizable.storageKey, finalWidth, Schema.Finite);
+        const options = latestResizable.current;
+        if (options?.storageKey) {
+          setLocalStorageItem(options.storageKey, finalWidth, Schema.Finite);
         }
-        resolvedResizable.onResize?.(finalWidth);
+        options?.onResize?.(finalWidth);
       },
       cleanup() {
         transitionTargets.forEach((element) => {
