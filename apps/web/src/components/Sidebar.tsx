@@ -1322,6 +1322,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     [isRenaming, onStartRename, thread.title, threadRef],
   );
   const [isFileDragOver, setIsFileDragOver] = useState(false);
+  const [compactTooltipOpen, setCompactTooltipOpen] = useState(false);
   const fileDropHandlers = useMemo(
     () =>
       onFileDropThreads
@@ -1633,7 +1634,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         {...(fileDropHandlers ?? {})}
         className={cn("list-none py-0.5", sortable?.isDragging && "relative z-20")}
       >
-        <Tooltip disabled={sortable?.isDragging}>
+        <Tooltip
+          open={sortable?.isDragging ? dragDestination !== null : compactTooltipOpen}
+          onOpenChange={setCompactTooltipOpen}
+        >
           <TooltipTrigger
             render={
               <div
@@ -1681,7 +1685,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             ) : null}
             {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
           </TooltipTrigger>
-          {detailsTooltip}
+          {sortable?.isDragging ? (
+            <TooltipPopup side="right">{dragDestination}</TooltipPopup>
+          ) : (
+            detailsTooltip
+          )}
         </Tooltip>
       </li>
     );
