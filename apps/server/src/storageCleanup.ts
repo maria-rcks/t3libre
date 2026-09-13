@@ -23,12 +23,12 @@ import { forkParked } from "./serverActivation.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 import { TerminalManager } from "./terminal/Manager.ts";
 import { GitVcsDriver } from "./vcs/GitVcsDriver.ts";
-import { withThreadWorkspaceLease } from "./workspace/threadWorkspaceLease.ts";
+import { withWorkspaceLease } from "./workspace/workspaceLease.ts";
 
 const DAY_MS = 86_400_000;
 
 /** Live sessions keep their cwd even when no turn is currently running. */
-export function storageCleanupThreadIdle(thread: OrchestrationThreadShell, now: number): boolean {
+function storageCleanupThreadIdle(thread: OrchestrationThreadShell, now: number): boolean {
   return (
     thread.branch !== null &&
     thread.worktreePath !== null &&
@@ -42,7 +42,7 @@ export function storageCleanupThreadIdle(thread: OrchestrationThreadShell, now: 
 }
 
 /** PR metadata refreshes must not reset the inactivity clock. */
-export function storageCleanupActivityAt(thread: OrchestrationThreadShell): number {
+function storageCleanupActivityAt(thread: OrchestrationThreadShell): number {
   return Math.max(
     ...[
       thread.createdAt,
@@ -91,13 +91,16 @@ export const make = Effect.gen(function* () {
   const hasTerminal = (worktreePath: string) =>
     [...liveTerminals.values()]
       .flatMap((entries) => [...entries.values()])
-      .some(
-        (terminal) =>
-          (terminal.status === "starting" || terminal.status === "running") &&
-          (terminal.worktreePath === worktreePath ||
-            terminal.cwd === worktreePath ||
-            inside(worktreePath, terminal.cwd)),
-      );
+      .some((terminal) => {
+        if (terminal.status !== "starting" && terminal.status !== "running") return false;
+        const cwd = path.resolve(terminal.cwd);
+        return (
+          (terminal.worktreePath !== null &&
+            path.resolve(terminal.worktreePath) === worktreePath) ||
+          cwd === worktreePath ||
+          inside(worktreePath, cwd)
+        );
+      });
 
   const readThreads = Effect.fn("StorageCleanup.readThreads")(function* () {
     const active = yield* snapshots.getShellSnapshot();
@@ -231,7 +234,7 @@ export const make = Effect.gen(function* () {
         // from that branch when the thread is resumed.
         yield* Effect.logInfo("storage cleanup removed worktree", { threadId: thread.id });
       }).pipe(
-        (effect) => withThreadWorkspaceLease(thread.id, effect),
+        (effect) => withWorkspaceLease(worktreePath, effect),
         Effect.catch((error) =>
           Effect.logDebug("storage cleanup skipped worktree", { threadId: thread.id, error }),
         ),

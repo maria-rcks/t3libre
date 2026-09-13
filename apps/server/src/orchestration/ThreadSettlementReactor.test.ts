@@ -18,6 +18,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
@@ -45,6 +46,7 @@ import * as Path from "effect/Path";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { ServerConfig } from "../config.ts";
 import * as StorageCleanup from "../storageCleanup.ts";
+import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 
@@ -1293,6 +1295,27 @@ describe("ThreadSettlementReactor", () => {
 });
 
 describe("storage cleanup", () => {
+  it.effect("serializes users of one workspace while other workspaces can start", () =>
+    Effect.gen(function* () {
+      const releaseCleanup = yield* Deferred.make<void>();
+      const providerEntered = yield* Deferred.make<void>();
+      const cleanup = yield* withWorkspaceLease(
+        "/workspace/shared",
+        Deferred.await(releaseCleanup),
+      ).pipe(Effect.forkScoped({ startImmediately: true }));
+      const provider = yield* withWorkspaceLease(
+        "/workspace/shared",
+        Deferred.succeed(providerEntered, undefined),
+      ).pipe(Effect.forkScoped({ startImmediately: true }));
+      assert.strictEqual(yield* Deferred.isDone(providerEntered), false);
+      yield* withWorkspaceLease("/workspace/other", Effect.void);
+      yield* Deferred.succeed(releaseCleanup, undefined);
+      yield* Fiber.join(cleanup);
+      yield* Fiber.join(provider);
+      assert.strictEqual(yield* Deferred.isDone(providerEntered), true);
+    }).pipe(Effect.scoped),
+  );
+
   for (const protection of [
     "none",
     "dirty",
@@ -1300,6 +1323,8 @@ describe("storage cleanup", () => {
     "ignored-directory",
     "shared",
     "session",
+    "terminal-cwd",
+    "terminal-worktree",
     "recent",
     "merged",
     "unmerged",
@@ -1455,7 +1480,36 @@ describe("storage cleanup", () => {
                     return fs.remove(input.path, { recursive: true }).pipe(Effect.orDie);
                   },
                 }),
-                Layer.mock(TerminalManager)({ subscribeMetadata: () => Effect.succeed(() => {}) }),
+                Layer.mock(TerminalManager)({
+                  subscribeMetadata: (listener) =>
+                    listener({
+                      type: "snapshot",
+                      terminals:
+                        protection === "terminal-cwd" || protection === "terminal-worktree"
+                          ? [
+                              {
+                                threadId: "terminal-thread",
+                                terminalId: "default",
+                                cwd:
+                                  protection === "terminal-cwd"
+                                    ? `${worktreePath}${path.sep}`
+                                    : config.baseDir,
+                                worktreePath:
+                                  protection === "terminal-worktree"
+                                    ? `${worktreePath}${path.sep}`
+                                    : null,
+                                status: "running",
+                                pid: 42,
+                                exitCode: null,
+                                exitSignal: null,
+                                hasRunningSubprocess: false,
+                                label: "shell",
+                                updatedAt: NOW,
+                              },
+                            ]
+                          : [],
+                    }).pipe(Effect.as(() => {})),
+                }),
               ),
             ),
           );

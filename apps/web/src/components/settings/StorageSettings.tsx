@@ -62,12 +62,16 @@ function RetentionControl({
 }
 
 export function StorageSettingsPanel() {
-  const { scope, connectedEnvironments, environments } = useSettingsScope();
+  const { scope, connectedEnvironments, environments, targets } = useSettingsScope();
   const settings = useScopedSettings(
     (value) => value.storageCleanup ?? DEFAULT_SERVER_SETTINGS.storageCleanup,
   );
   const updateSettings = useUpdateScopedSettings();
   const mixed = useScopedSettingsMixed(["storageCleanup"]);
+  const ruleStatus = (key: keyof StorageCleanupSettings) =>
+    targets.some((target) => target.settings.storageCleanup[key] !== settings[key])
+      ? "Mixed across selected machines"
+      : undefined;
   const update = (patch: Partial<StorageCleanupSettings>) =>
     updateSettings({ storageCleanup: patch });
 
@@ -124,6 +128,7 @@ export function StorageSettingsPanel() {
       <SettingsSection id="storage-worktrees" title="Worktrees">
         <SettingsRow
           title="Delete inactive worktrees"
+          status={ruleStatus("worktreeAfterDays")}
           description="Remove worktrees after their threads have been inactive for this many days. Branches and thread history are kept."
           serverScoped
           control={
@@ -136,6 +141,7 @@ export function StorageSettingsPanel() {
         />
         <SettingsRow
           title="Delete merged worktrees"
+          status={ruleStatus("worktreeOnMerge")}
           description="Remove worktrees whose pull request is merged and whose commits are included in the default branch."
           serverScoped
           control={
@@ -148,6 +154,7 @@ export function StorageSettingsPanel() {
         />
         <SettingsRow
           title="Delete unchanged worktrees"
+          status={ruleStatus("worktreeUnchanged")}
           description="Remove worktrees with no commits beyond the default branch."
           serverScoped
           control={
@@ -167,6 +174,7 @@ export function StorageSettingsPanel() {
       <SettingsSection id="storage-artifacts" title="Artifacts and logs">
         <SettingsRow
           title="Delete old browser artifacts"
+          status={ruleStatus("browserArtifactsAfterDays")}
           description="Delete saved browser captures after this many days. Older capture links will no longer open."
           serverScoped
           control={
@@ -179,6 +187,7 @@ export function StorageSettingsPanel() {
         />
         <SettingsRow
           title="Delete old rotated logs"
+          status={ruleStatus("logsAfterDays")}
           description="Delete inactive rotated log files after this many days. Current logs are kept."
           serverScoped
           control={
