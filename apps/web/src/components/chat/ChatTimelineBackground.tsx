@@ -2,7 +2,7 @@ import { cn } from "../../lib/utils";
 import { useClientSettings } from "../../hooks/useSettings";
 
 export const CHAT_BACKGROUND_TEXT_SHADOW_CLASSES =
-  "[text-shadow:0_1px_3px_var(--background),0_0_1px_var(--background)] [&_.live-tool-shine]:[text-shadow:none] [&_.live-tool-shine]:drop-shadow-[0_1px_2px_var(--background)]";
+  "[text-shadow:0_1px_2px_color-mix(in_oklab,var(--background)_65%,transparent)] [&_:is(button,[role=button],code,.chat-markdown-codeblock,.chat-markdown-file-link,.chat-markdown-artifact-template)]:[text-shadow:none]";
 
 export function TimelineBackgroundImage({
   image,

@@ -156,18 +156,14 @@ export function TimelineBackgroundSettings() {
         aria-label="Wallpaper preview"
       >
         <TimelineBackgroundImage image={image} opacity={previewOpacity} blur={previewBlur} />
-        <div
-          className={cn(
-            "mx-auto max-w-lg space-y-4 text-sm leading-relaxed",
-            image && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
-          )}
-        >
+        <div className="mx-auto max-w-lg space-y-4 text-sm leading-relaxed">
           <div className="flex justify-end">
             <UserMessageBubble>Can you give this page a softer look?</UserMessageBubble>
           </div>
           <WorkingIndicator createdAt={previewStartedAt} />
           <AssistantMessageSurface>
             <ChatMarkdown
+              className={cn(image && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES)}
               cwd={undefined}
               text="I'll adjust the spacing and colors, then check how it looks."
             />

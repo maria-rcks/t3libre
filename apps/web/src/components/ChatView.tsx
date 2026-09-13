@@ -8772,7 +8772,6 @@ export default function ChatView(props: ChatViewProps) {
                 "relative isolate flex min-h-0 flex-1 flex-col",
                 !hasTimelineBackground && "bg-background",
                 hasTimelineBackground && "-mt-[var(--workspace-topbar-height)]",
-                hasTimelineBackground && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
               )}
             >
               {/* Messages — LegendList handles virtualization and scrolling internally */}
@@ -8897,7 +8896,10 @@ export default function ChatView(props: ChatViewProps) {
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full z-0">
                       <div
-                        className="pb-8 group-has-data-[composer-shoulder-tab]/composer-stack:pb-4"
+                        className={cn(
+                          "pb-8 group-has-data-[composer-shoulder-tab]/composer-stack:pb-4",
+                          hasTimelineBackground && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
+                        )}
                         style={
                           forceExpandedMobileComposer
                             ? {

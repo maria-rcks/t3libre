@@ -145,7 +145,10 @@ import {
 } from "./SnapShotAttachmentDetails";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
-import { useHasTimelineBackground } from "./ChatTimelineBackground";
+import {
+  CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
+  useHasTimelineBackground,
+} from "./ChatTimelineBackground";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
   timelineContentOverflowsViewport,
@@ -1878,6 +1881,7 @@ export function AssistantMessageSurface({ children }: { children: ReactNode }) {
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
+  const hasTimelineBackground = useHasTimelineBackground();
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
 
   return (
@@ -1892,6 +1896,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           listRef={ctx.listRef}
         >
           <ChatMarkdown
+            className={cn(hasTimelineBackground && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES)}
             text={messageText}
             cwd={ctx.markdownCwd}
             threadRef={ctx.threadRef ?? undefined}
