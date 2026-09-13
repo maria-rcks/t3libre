@@ -38,6 +38,12 @@ import {
   formatUsd,
   makeWindow,
 } from "@t3tools/shared/usageFormat";
+import {
+  CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
+  ChatTimelineBackground,
+  useHasTimelineBackground,
+} from "../chat/ChatTimelineBackground";
+import { ChatTopbarBlur } from "../chat/ChatTopbarBlur";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -92,6 +98,7 @@ function isUsageWindowDays(value: number): value is UsagePagePreferences["window
 }
 
 export function UsagePage() {
+  const hasTimelineBackground = useHasTimelineBackground();
   const [preferences, setPreferences] = useState(readUsagePagePreferences);
   const [windowSelection, setWindowSelection] = useState(() => ({
     days: preferences.windowDays,
@@ -339,8 +346,18 @@ export function UsagePage() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader electron={isElectron} className="h-auto">
+      <ChatTimelineBackground className="z-0" />
+      {hasTimelineBackground ? <ChatTopbarBlur /> : null}
+      <div
+        className={cn(
+          "relative flex min-h-0 min-w-0 flex-1 flex-col text-foreground",
+          hasTimelineBackground ? CHAT_BACKGROUND_TEXT_SHADOW_CLASSES : "bg-background",
+        )}
+      >
+        <WorkspacePageHeader
+          electron={isElectron}
+          className={cn("h-auto", hasTimelineBackground && "relative isolate z-10")}
+        >
           {topbarContent}
         </WorkspacePageHeader>
 

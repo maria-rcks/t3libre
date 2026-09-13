@@ -117,6 +117,12 @@ import { isElectron } from "../env";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls";
+import {
+  ChatTimelineBackground,
+  CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
+  useHasTimelineBackground,
+} from "../components/chat/ChatTimelineBackground";
+import { ChatTopbarBlur } from "../components/chat/ChatTopbarBlur";
 import { Button } from "../components/ui/button";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../components/ui/menu";
 import { SidebarInset } from "../components/ui/sidebar";
@@ -2232,6 +2238,7 @@ function PullRequestsColumn({
   listBody: ReactNode;
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
+  const hasTimelineBackground = useHasTimelineBackground();
   const markerRef = useRef<HTMLDivElement | null>(null);
   const [condensed, setCondensed] = useState(false);
   useEffect(() => {
@@ -2288,9 +2295,9 @@ function PullRequestsColumn({
   }, [condensed]);
 
   return (
-    // Painted flat like the chat column: the inset underneath carries the chrome grain, and a
-    // content surface that lets it show reads as a different background than every thread.
-    <div className="@container/pr-list flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+    <div className="@container/pr-list relative isolate flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+      <ChatTimelineBackground className="z-0" />
+      {hasTimelineBackground ? <ChatTopbarBlur /> : null}
       {/* A closed right panel leaves this column full-width, so the shared header
           reserves native window controls and hosts the controls strip itself: on
           desktop the header is a drag-region, and only a no-drag descendant wins
@@ -2301,7 +2308,7 @@ function PullRequestsColumn({
       <WorkspacePageHeader
         electron={isElectron}
         reserveNativeControls={!rightPanelOpen}
-        className="relative bg-background"
+        className={cn("relative", hasTimelineBackground ? "isolate z-10" : "bg-background")}
       >
         {titlebarControls}
         {condensed ? (
@@ -2364,7 +2371,10 @@ function PullRequestsColumn({
 
       <div
         ref={scrollRef}
-        className="topbar-scroll-fade scrollbar-gutter-both min-h-0 flex-1 overflow-y-auto"
+        className={cn(
+          "topbar-scroll-fade scrollbar-gutter-both relative min-h-0 flex-1 overflow-y-auto",
+          hasTimelineBackground && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
+        )}
       >
         {/* The top padding is the shared fade band's height, the same pairing the
             settings page makes: at rest the controls sit fully below the mask, and only
