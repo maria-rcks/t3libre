@@ -29,6 +29,7 @@ import {
 import {
   dedupeProviderSkillsByName,
   getProviderSkillsForSlashMenu,
+  getProviderSlashCommandsForSlashMenu,
   isProviderSkillUserInvocable,
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
@@ -330,6 +331,7 @@ export function useComposerCommandMenu({
 
     if (trigger.kind === "slash-command") {
       const q = trigger.query.toLowerCase();
+      const visibleSkills = getProviderSkillsForSlashMenu(skills, true);
       const commandItems = buildComposerSlashCommandItems({
         query: q,
         atMessageStart: trigger.rangeStart === 0,
@@ -340,12 +342,15 @@ export function useComposerCommandMenu({
         selectedProviderStatus: selectedProviderStatus
           ? {
               ...selectedProviderStatus,
-              slashCommands: resolveProviderSlashCommandsForCwd(selectedProviderStatus, projectCwd),
+              slashCommands: getProviderSlashCommandsForSlashMenu(
+                resolveProviderSlashCommandsForCwd(selectedProviderStatus, projectCwd),
+                visibleSkills,
+              ),
             }
           : null,
       });
 
-      const skillItems = getProviderSkillsForSlashMenu(skills, true)
+      const skillItems = visibleSkills
         .filter((skill) => matchesSlashSkillQuery(skill, q))
         .map((skill) => ({
           id: `skill:${skill.name}`,

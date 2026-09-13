@@ -502,6 +502,10 @@ describe("Cursor command catalog", () => {
         const skills = [
           { name: "review", path: "/one/.cursor/skills/review/SKILL.md", enabled: true },
         ];
+        const probedSkills = [
+          { name: "explain", path: "/probed/.cursor/skills/explain/SKILL.md", enabled: true },
+        ];
+        yield* catalog.snapshotForCwd("/probed", probedSkills);
         yield* catalog.onAvailableCommands(
           [
             { name: "review", description: "Review changes", input: { hint: "target" } },
@@ -512,12 +516,23 @@ describe("Cursor command catalog", () => {
           skills,
         );
         yield* catalog.onAvailableCommands([{ name: "deploy", description: "Deploy" }], "/two", []);
+        const reprobed = yield* catalog.snapshotForCwd("/one", skills);
+        expect(reprobed.slashCommands.map((command) => command.name)).toEqual([
+          "compact",
+          "review",
+        ]);
         const published = yield* catalog.snapshot.streamChanges.pipe(
           Stream.take(1),
           Stream.runCollect,
         );
         expect(published[0]?.slashCommands.map((command) => command.name)).toEqual(["compact"]);
         const refreshed = yield* catalog.snapshot.refresh;
+        expect(
+          refreshed.workspaceSnapshots?.find((entry) => entry.cwd === "/probed"),
+        ).toMatchObject({
+          slashCommands: [{ name: "compact" }],
+          skills: probedSkills,
+        });
         expect(refreshed.workspaceSnapshots?.find((entry) => entry.cwd === "/one")).toMatchObject({
           slashCommands: [
             { name: "compact" },
@@ -527,6 +542,9 @@ describe("Cursor command catalog", () => {
         });
         yield* catalog.onAvailableCommands([], "/one", skills);
         const updated = yield* catalog.snapshot.getSnapshot;
+        expect(
+          updated.workspaceSnapshots?.find((entry) => entry.cwd === "/probed")?.skills,
+        ).toEqual(probedSkills);
         expect(
           updated.workspaceSnapshots
             ?.find((entry) => entry.cwd === "/one")

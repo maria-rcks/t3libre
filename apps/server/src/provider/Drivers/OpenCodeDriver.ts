@@ -169,7 +169,10 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         Effect.all(
           {
             skills: openCodeRuntime.loadOpenCodeSkills(client),
-            commands: loadOpenCodeCommands(client),
+            commands: loadOpenCodeCommands(client).pipe(
+              Effect.timeout("10 seconds"),
+              Effect.orElseSucceed(() => []),
+            ),
           },
           { concurrency: "unbounded" },
         );

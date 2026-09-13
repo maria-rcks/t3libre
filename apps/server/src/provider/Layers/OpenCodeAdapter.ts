@@ -216,6 +216,7 @@ interface OpenCodePromptAdmission {
   readonly generation: number;
   readonly turnId: TurnId;
   readonly messageId: string;
+  readonly requiresMessageReceipt: boolean;
   readonly priorAwaitingBusy: boolean;
   readonly priorIdle: { readonly turnId: TurnId; readonly raw: unknown } | undefined;
   idleDuringAdmission: { readonly turnId: TurnId; readonly raw: unknown } | undefined;
@@ -1353,8 +1354,14 @@ export function makeOpenCodeAdapter(
         return;
       }
       const recover = Effect.gen(function* () {
-        yield* Deferred.await(promptAdmission.acceptance);
-        for (let retryCount = 0; retryCount < 5; retryCount += 1) {
+        if (!promptAdmission.requiresMessageReceipt) {
+          yield* Deferred.await(promptAdmission.acceptance);
+        }
+        for (
+          let retryCount = 0;
+          retryCount < 5 || (promptAdmission.requiresMessageReceipt && !promptAdmission.accepted);
+          retryCount += 1
+        ) {
           if (
             context.promptAdmission !== promptAdmission ||
             context.activeTurnId !== promptAdmission.turnId ||
@@ -1389,10 +1396,22 @@ export function makeOpenCodeAdapter(
             const message = Option.isSome(response) ? response.value.data : undefined;
             if (message?.info.id === promptAdmission.messageId && message.info.role === "user") {
               promptAdmission.messageObserved = true;
+              yield* Deferred.succeed(promptAdmission.messageReceipt, undefined);
               context.messageRoleById.set(promptAdmission.messageId, "user");
               context.textPartsByMessageId.delete(promptAdmission.messageId);
             }
           }
+
+          // Native command responses wait for generation. Recover their receipt
+          // first, then let sendTurn acknowledge admission before reconciling idle.
+          if (promptAdmission.requiresMessageReceipt && !promptAdmission.accepted) {
+            if (!promptAdmission.messageObserved) {
+              yield* Effect.sleep(`${Math.min(250 * 2 ** retryCount, 2_000)} millis`);
+              continue;
+            }
+            retryCount = 0;
+          }
+          yield* Deferred.await(promptAdmission.acceptance);
 
           const statusResponse = yield* runOpenCodeSdk("session.status", (signal) =>
             context.client.session.status(undefined, { signal }),
@@ -1471,7 +1490,9 @@ export function makeOpenCodeAdapter(
           const delayMs = Math.min(250 * 2 ** retryCount, 2_000);
           yield* Effect.sleep(`${delayMs} millis`);
         }
-        yield* failPromptAdmissionRecovery(context, promptAdmission);
+        if (promptAdmission.accepted) {
+          yield* failPromptAdmissionRecovery(context, promptAdmission);
+        }
       }).pipe(
         Effect.catchCause(() => Effect.void),
         Effect.ensuring(
@@ -3162,6 +3183,7 @@ export function makeOpenCodeAdapter(
             generation: promptGeneration,
             turnId,
             messageId,
+            requiresMessageReceipt: nativeCommand !== undefined,
             priorAwaitingBusy,
             priorIdle: priorIdleCandidate,
             idleDuringAdmission: undefined,
@@ -3284,6 +3306,11 @@ export function makeOpenCodeAdapter(
                 );
               },
             }),
+            Effect.tapError(() =>
+              nativeCommand && promptAdmission.recoveryFiber
+                ? Fiber.interrupt(promptAdmission.recoveryFiber)
+                : Effect.void,
+            ),
             Effect.tapError((requestError) => {
               if (
                 nativeCommand &&
@@ -3421,6 +3448,7 @@ export function makeOpenCodeAdapter(
           if (nativeCommand) {
             context.commandFibers.add(promptFiber);
             promptFiber.addObserver(() => context.commandFibers.delete(promptFiber));
+            yield* schedulePromptAdmissionRecovery(context, undefined);
           }
           const promptExit = yield* Effect.exit(
             nativeCommand

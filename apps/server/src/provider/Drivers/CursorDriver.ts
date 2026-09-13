@@ -186,7 +186,8 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         ),
       );
 
-      const { snapshot, onAvailableCommands } = yield* makeCursorCommandCatalog(managedSnapshot);
+      const { snapshot, onAvailableCommands, snapshotForCwd } =
+        yield* makeCursorCommandCatalog(managedSnapshot);
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
@@ -210,29 +211,19 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         snapshotForCwd: (cwd) =>
           !effectiveConfig.enabled
             ? snapshot.getSnapshot
-            : Effect.all([
-                snapshot.getSnapshot,
-                probeCursorSkills(cwd, processEnv).pipe(
-                  Effect.provideService(FileSystem.FileSystem, fileSystem),
-                  Effect.provideService(Path.Path, path),
-                  Effect.mapError(
-                    (cause) =>
-                      new ProviderDriverError({
-                        driver: DRIVER_KIND,
-                        instanceId,
-                        detail: `Failed to discover Cursor skills for '${cwd}'`,
-                        cause,
-                      }),
-                  ),
+            : probeCursorSkills(cwd, processEnv).pipe(
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+                Effect.provideService(Path.Path, path),
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderDriverError({
+                      driver: DRIVER_KIND,
+                      instanceId,
+                      detail: `Failed to discover Cursor skills for '${cwd}'`,
+                      cause,
+                    }),
                 ),
-              ]).pipe(
-                Effect.map(([machineSnapshot, skills]) => ({
-                  ...machineSnapshot,
-                  slashCommands:
-                    machineSnapshot.workspaceSnapshots?.find((entry) => entry.cwd === cwd)
-                      ?.slashCommands ?? machineSnapshot.slashCommands,
-                  skills,
-                })),
+                Effect.flatMap((skills) => snapshotForCwd(cwd, skills)),
               ),
         adapter,
         textGeneration,

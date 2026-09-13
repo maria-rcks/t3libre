@@ -611,7 +611,10 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       assert.equal(completedItems.length, startedItems.length);
       assert.equal(new Set(startedItems.map((event) => event.itemId)).size, startedItems.length);
       for (const turnId of [sendTurnResult.turnId, secondTurn.turnId]) {
-        assert.isTrue(startedItems.some((event) => event.turnId === turnId));
+        assert.lengthOf(
+          startedItems.filter((event) => event.turnId === turnId),
+          1,
+        );
       }
       for (const started of startedItems) {
         const completions = completedItems.filter((event) => event.itemId === started.itemId);
@@ -1652,6 +1655,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       const runtimeEvents: ProviderRuntimeEvent[] = [];
       const activeTurnIdRef = yield* Ref.make<TurnId | undefined>(undefined);
       const trailingChunkTurnId = yield* Deferred.make<TurnId>();
+      let receivedText = "";
       const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
         Effect.gen(function* () {
           runtimeEvents.push(event);
@@ -1661,7 +1665,11 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
           if (event.type === "turn.started") {
             yield* Ref.set(activeTurnIdRef, event.turnId);
           }
-          if (event.type !== "content.delta" || event.payload.delta !== "mock") {
+          if (event.type !== "content.delta") {
+            return;
+          }
+          receivedText += event.payload.delta;
+          if (receivedText !== "hello from mock") {
             return;
           }
           const turnId = event.turnId ?? (yield* Ref.get(activeTurnIdRef));

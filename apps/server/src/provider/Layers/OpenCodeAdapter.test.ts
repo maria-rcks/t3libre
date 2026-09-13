@@ -1511,6 +1511,55 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("recovers a native command receipt when the user-message event is lost", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-native-command-recovered");
+      const started = promiseWithResolvers<void>();
+      const completion = promiseWithResolvers<void>();
+      runtimeMock.state.sessionStatus = "busy";
+      runtimeMock.state.commandImplementation = async (input) => {
+        NodeAssert.ok(typeof input.messageID === "string");
+        runtimeMock.state.messages.push({ info: { id: input.messageID, role: "user" }, parts: [] });
+        started.resolve(undefined);
+        await completion.promise;
+      };
+      runtimeMock.state.abortImplementation = async () => {
+        completion.resolve(undefined);
+      };
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const sendFiber = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "/review",
+          modelSelection: createModelSelection(ProviderInstanceId.make("opencode"), "openai/gpt-5"),
+        })
+        .pipe(Effect.forkChild);
+      yield* Effect.promise(() => started.promise);
+      yield* advanceTestClock(250);
+      const result = yield* Fiber.join(sendFiber);
+      NodeAssert.ok(
+        runtimeMock.state.messageCalls.some(
+          ({ messageID }) => messageID === runtimeMock.state.commandCalls[0]?.messageID,
+        ),
+      );
+      yield* advanceTestClock(11_000);
+      NodeAssert.equal(runtimeMock.state.abortCalls.length, 0);
+      NodeAssert.equal(
+        (yield* adapter.listSessions()).find((session) => session.threadId === threadId)
+          ?.activeTurnId,
+        result.turnId,
+      );
+      yield* adapter.interruptTurn(threadId, result.turnId);
+      NodeAssert.equal(runtimeMock.state.abortCalls.length, 1);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   for (const nativeStartsTurn of [true, false]) {
     it.effect(
       `reports a late native command failure after another steer (starts turn: ${nativeStartsTurn})`,
