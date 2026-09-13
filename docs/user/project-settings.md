@@ -54,6 +54,11 @@ prevent removal. Branches and thread history stay; starting another turn recreat
 Merge cleanup requires the commits to be included in the remote default branch, so squash merges
 may need the inactivity rule instead.
 
+Enable **Delete worktrees with deleted threads** to remove safe worktrees after their last
+thread is deleted, including archived threads and worktrees left by earlier deletions. The
+server waits for sessions and terminals to stop and retries skipped worktrees after restart.
+Existing prompts for deleting a worktree manually remain available when this policy is off.
+
 Browser captures and rotated logs have separate retention periods. Expired capture links stop
 working. Current logs, message attachments, and browser profiles are kept.
 

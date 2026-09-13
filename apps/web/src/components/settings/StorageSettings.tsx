@@ -9,13 +9,10 @@ import {
   NumberFieldInput,
 } from "../ui/number-field";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { StorageUsageSection } from "./StorageUsage";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
 import { useSettingsScope } from "./SettingsScopeContext";
-import {
-  useScopedSettings,
-  useScopedSettingsMixed,
-  useUpdateScopedSettings,
-} from "./useScopedSettings";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 function RetentionControl({
   label,
@@ -62,12 +59,11 @@ function RetentionControl({
 }
 
 export function StorageSettingsPanel() {
-  const { scope, connectedEnvironments, environments, targets } = useSettingsScope();
+  const { scope, connectedEnvironments, targets } = useSettingsScope();
   const settings = useScopedSettings(
     (value) => value.storageCleanup ?? DEFAULT_SERVER_SETTINGS.storageCleanup,
   );
   const updateSettings = useUpdateScopedSettings();
-  const mixed = useScopedSettingsMixed(["storageCleanup"]);
   const ruleStatus = (key: keyof StorageCleanupSettings) =>
     targets.some((target) => target.settings.storageCleanup[key] !== settings[key])
       ? "Mixed across selected machines"
@@ -107,25 +103,22 @@ export function StorageSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <div className="space-y-2 px-3 sm:px-4">
-        <h1 className="text-base font-medium">Storage</h1>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          Cleanup runs on each machine while its server is running. Select a machine above or apply
-          settings to all connected environments.
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {connectedEnvironments.length} of {environments.length} selected environments connected.
-          Offline machines keep their existing settings.
-        </p>
-        {mixed ? (
-          <p role="status" className="text-xs text-warning">
-            Policies differ across machines. Changing a control updates only that rule on every
-            connected machine in this selection.
-          </p>
-        ) : null}
-      </div>
+      <StorageUsageSection />
 
       <SettingsSection id="storage-worktrees" title="Worktrees">
+        <SettingsRow
+          title="Delete worktrees with deleted threads"
+          status={ruleStatus("worktreeOnDelete")}
+          description="Remove unused worktrees when active or archived threads are deleted. Worktrees with local changes are kept."
+          serverScoped
+          control={
+            <Switch
+              aria-label="Delete worktrees with deleted threads"
+              checked={settings.worktreeOnDelete}
+              onCheckedChange={(worktreeOnDelete) => update({ worktreeOnDelete })}
+            />
+          }
+        />
         <SettingsRow
           title="Delete inactive worktrees"
           status={ruleStatus("worktreeAfterDays")}
