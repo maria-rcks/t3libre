@@ -1422,7 +1422,12 @@ function PullRequestCodeTab({
           {reviewOverlay}
         </div>
         {fileTreeOpen ? (
-          <aside className="flex w-[min(20rem,40%)] min-w-48 shrink-0 border-l border-border/60">
+          <aside
+            className={cn(
+              "flex w-[min(20rem,40%)] min-w-48 shrink-0 border-l border-border/60",
+              detail.capabilities.comment && detail.viewerPermissions.comment && "pb-16",
+            )}
+          >
             <DiffFileTree
               ariaLabel={`Pull request #${detail.number} files`}
               entries={fileTreeEntries}
