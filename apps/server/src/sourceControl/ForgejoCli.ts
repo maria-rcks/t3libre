@@ -182,6 +182,7 @@ export function matchForgejoLogin(
   logins: ReturnType<typeof parseForgejoLogins>,
   remote: NonNullable<ReturnType<typeof parseForgejoRemote>>,
   requestedHost?: string,
+  hostOnly = false,
 ) {
   const matches = [
     ...new Map(
@@ -195,7 +196,10 @@ export function matchForgejoLogin(
                 login.ssh_host?.toLowerCase() === remote.hostname ||
                 url.hostname === remote.hostname
             : url.host === remote.host &&
-                (!url.path || remote.path === url.path || remote.path.startsWith(`${url.path}/`));
+                ((hostOnly && !remote.path) ||
+                  !url.path ||
+                  remote.path === url.path ||
+                  remote.path.startsWith(`${url.path}/`));
         })
         .map((login) => [login.name, login]),
     ).values(),
@@ -472,8 +476,9 @@ export const make = Effect.gen(function* () {
     return user.success.login;
   });
 
-  const resolveRepository = Effect.fn("ForgejoCli.resolveRepository")(function* (
+  const resolveTarget = Effect.fn("ForgejoCli.resolveTarget")(function* (
     input: ForgejoRepositoryInput,
+    hostOnly = false,
   ) {
     const referenceRemote = input.reference ? parseForgejoRemote(input.reference) : null;
     let remoteUrl = [input.reference, input.repository, input.context?.remoteUrl].find(
@@ -483,7 +488,7 @@ export const make = Effect.gen(function* () {
       referenceRemote ??
       (input.repository ? parseForgejoRemote(input.repository) : null) ??
       (input.context ? parseForgejoRemote(input.context.remoteUrl) : null);
-    if (!remote && (!input.repository || input.host)) {
+    if (!remote && (!input.repository || input.host) && !(hostOnly && input.host)) {
       const result = yield* process
         .run({
           operation: "ForgejoCli.remote",
@@ -527,7 +532,7 @@ export const make = Effect.gen(function* () {
     const requestedHost = input.host ?? input.context?.requestedHost;
     const selectLogin = (logins: ReturnType<typeof parseForgejoLogins>) =>
       remote
-        ? matchForgejoLogin(logins, remote, remote.ssh ? requestedHost : undefined)
+        ? matchForgejoLogin(logins, remote, remote.ssh ? requestedHost : undefined, hostOnly)
         : (logins.find((item) => item.default === "true") ??
           (new Set(logins.map((item) => item.name)).size === 1 ? logins[0] : undefined));
     let login = selectLogin(fjLogins);
@@ -536,7 +541,8 @@ export const make = Effect.gen(function* () {
       !login &&
       fjLogins.some(
         (item) =>
-          !remote || matchForgejoLogin([item], remote, remote.ssh ? requestedHost : undefined),
+          !remote ||
+          matchForgejoLogin([item], remote, remote.ssh ? requestedHost : undefined, hostOnly),
       )
     ) {
       const available = yield* execute({ command: "fj", cwd: input.cwd, args: ["version"] }).pipe(
@@ -570,6 +576,8 @@ export const make = Effect.gen(function* () {
         detail:
           "No matching Forgejo login. Use `fj auth login`, `fj auth add-token`, or `tea login add` for this server; choose a default when multiple tea accounts match.",
       });
+    if (hostOnly)
+      return { command, login: login.name, repository: "", baseUrl: login.url.replace(/\/+$/, "") };
     const path =
       referenceRemote?.path ??
       (input.repository && !parseForgejoRemote(input.repository)
@@ -594,8 +602,12 @@ export const make = Effect.gen(function* () {
       });
     return { command, login: login.name, repository, baseUrl: login.url.replace(/\/+$/, "") };
   });
+  const resolveRepository = (input: ForgejoRepositoryInput) => resolveTarget(input);
   const api = Effect.fn("ForgejoCli.api")(function* (input: ForgejoApiInput) {
-    const repository = yield* resolveRepository(input);
+    const repository = yield* resolveTarget(
+      input,
+      input.path.replace(/^\/+/, "") === "user" && (!input.method || input.method === "GET"),
+    );
     const stdin =
       input.body === undefined
         ? undefined
@@ -643,8 +655,7 @@ export const make = Effect.gen(function* () {
         "--include",
         "--login",
         repository.login,
-        "--repo",
-        repository.repository,
+        ...(repository.repository ? ["--repo", repository.repository] : []),
         "--method",
         input.method ?? "GET",
         ...(input.body === undefined ? [] : ["--data", "@-"]),

@@ -1136,9 +1136,9 @@ const PROVIDER_REQUIREMENT: Partial<
   },
   forgejo: {
     missing:
-      "Install the official Gitea CLI (`tea` 0.16 or later) from https://gitea.com/gitea/tea to browse Forgejo pull requests.",
+      "Install Forgejo CLI (`fj` 0.6 or later) from https://codeberg.org/forgejo-contrib/forgejo-cli or Gitea CLI (`tea` 0.16 or later) from https://gitea.com/gitea/tea to browse Forgejo pull requests.",
     unauthenticated:
-      "Run `tea login add` on the T3 Code server to authenticate your Forgejo or Gitea server.",
+      "Authenticate your Forgejo or Gitea server with `fj --host <server-url> auth add-token` on the T3 Code server. If fj is missing or unconfigured for that server, use `tea login add`. A configured fj account must be repaired with fj.",
   },
   gitlab: {
     missing:

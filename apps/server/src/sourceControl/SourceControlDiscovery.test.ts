@@ -743,6 +743,16 @@ it.effect("does not choose a default Forgejo login across ambiguous SSH server p
     const https = ForgejoCli.parseForgejoRemote("http://forgejo.local:4000/maria/project.git");
     assert.isNotNull(https);
     assert.strictEqual(ForgejoCli.matchForgejoLogin(logins, https!)?.name, "two");
+    const hostOnly = ForgejoCli.parseForgejoRemote("http://forgejo.local:4000");
+    assert.strictEqual(
+      ForgejoCli.matchForgejoLogin(logins, hostOnly!, undefined, true)?.name,
+      "two",
+    );
+    const mounted = logins.map((login) => ({
+      ...login,
+      url: `http://forgejo.local:4000/${login.name}`,
+    }));
+    assert.isUndefined(ForgejoCli.matchForgejoLogin(mounted, hostOnly!, undefined, true));
   }),
 );
 
@@ -812,6 +822,8 @@ it.effect("rejects HTTP failures even when tea exits successfully", () =>
 it.effect("routes mounted Forgejo repositories without repeating the mount in API paths", () =>
   Effect.gen(function* () {
     const cli = yield* ForgejoCli.make;
+    const viewer = yield* cli.api({ cwd: "/upstream-only", host: "code.test", path: "user" });
+    assert.strictEqual(viewer.stdout, "[]");
     for (const path of [
       "repos/forgejo/maria/project/pulls?state=open",
       "repos/forgejo/maria/project",
@@ -860,10 +872,13 @@ it.effect("routes mounted Forgejo repositories without repeating the mount in AP
               ),
             );
           const supported = [
+            "https://code.test/forgejo/api/v1/user",
             "https://code.test/forgejo/api/v1/repos/maria/project/pulls?state=open",
             "https://code.test/forgejo/api/v1/repos/maria/project",
             "https://code.test/forgejo/api/v1/repos/reviewer/project/contents/file.ts",
           ];
+          if (input.args.at(-1)?.endsWith("/user")) assert.notInclude(input.args, "--repo");
+          assert.strictEqual(input.command, "tea");
           return Effect.succeed(
             supported.includes(input.args.at(-1) ?? "")
               ? processOutput("[]", { stderr: "HTTP/1.1 200 OK\n" })
@@ -910,6 +925,13 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
       "http://forgejo.local:3000/forgejo/api/v1/repos/maria/project/issues/42/comments",
       "http://forgejo.local:3000/forgejo/api/v1/repos/maria/project/issues/42/comments",
     ]);
+    const viewer = yield* cli.api({
+      cwd: "/upstream-only",
+      host: "forgejo.local:3000",
+      path: "user",
+    });
+    assert.strictEqual(viewer.stdout, '{"login":"maria"}');
+    assert.strictEqual(requests.at(-1), "https://forgejo.local:3000/forgejo/api/v1/user");
   }).pipe(
     Effect.provideService(
       FileSystem.FileSystem,
@@ -931,6 +953,13 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
       HttpClient.HttpClient,
       HttpClient.make((request) => {
         requests.push(request.url);
+        if (request.url.endsWith("/user")) {
+          assert.strictEqual(request.method, "GET");
+          assert.strictEqual(request.headers.authorization, "token test-token");
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(request, new Response('{"login":"maria"}')),
+          );
+        }
         assert.strictEqual(request.method, "POST");
         assert.strictEqual(request.headers.authorization, "token test-token");
         assert.strictEqual(request.body._tag, "Uint8Array");
@@ -950,7 +979,9 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
           assert.strictEqual(input.command, "fj");
           assert.deepStrictEqual(input.args, [
             "--host",
-            "http://forgejo.local:3000/forgejo",
+            input.cwd === "/upstream-only"
+              ? "https://forgejo.local:3000/forgejo"
+              : "http://forgejo.local:3000/forgejo",
             "whoami",
           ]);
           return Effect.succeed(processOutput(""));
@@ -1081,6 +1112,12 @@ it.effect("falls back to tea when fj is missing or has no account for this serve
           commands,
           scenario === "missing-account" ? ["tea", "tea"] : ["fj", "tea", "tea"],
         );
+        const viewer = yield* cli.api({
+          cwd: "/upstream-only",
+          host: "forgejo.local:3000",
+          path: "user",
+        });
+        assert.strictEqual(viewer.stdout, "[]");
       }).pipe(
         Effect.provideService(
           FileSystem.FileSystem,
@@ -1121,6 +1158,7 @@ it.effect("falls back to tea when fj is missing or has no account for this serve
                   }),
                 );
               assert.strictEqual(input.command, "tea");
+              if (input.args.at(-1)?.endsWith("/user")) assert.notInclude(input.args, "--repo");
               return Effect.succeed(
                 input.args[0] === "login"
                   ? processOutput(

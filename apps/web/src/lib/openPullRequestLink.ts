@@ -26,6 +26,17 @@ export {
   changeRequestRepositoryUrl,
 } from "@t3tools/shared/changeRequestUrl";
 
+function resolvedForgejoRepository(project: EnvironmentProject): URL | null {
+  const identity = project.repositoryIdentity;
+  if (identity?.provider !== "forgejo" || !identity.webUrl) return null;
+  try {
+    const url = new URL(identity.webUrl);
+    return url.protocol === "http:" || url.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Keep Forgejo servers on different HTTP ports separate when selecting a project. */
 function matchesChangeRequestAuthority(
   project: EnvironmentProject,
@@ -58,6 +69,12 @@ export function findProjectForChangeRequest(
     if (!identity || !matchesChangeRequestAuthority(project, link)) return false;
     const kind = identity.provider as SourceControlProviderKind | undefined;
     if (kind === undefined) return false;
+    const web = resolvedForgejoRepository(project);
+    if (web)
+      return (
+        web.host.toLowerCase() === (link.authority ?? link.host).toLowerCase() &&
+        web.pathname.replace(/^\/+|\/+$/g, "").toLowerCase() === link.repository.toLowerCase()
+      );
     if (kind === "azure-devops") {
       return (
         canonicalRepositoryKey(identity.canonicalKey.toLowerCase()) ===
@@ -97,6 +114,18 @@ export function findProjectOnChangeRequestHost(
   return projects.find((project) => {
     const identity = project.repositoryIdentity;
     const kind = identity?.provider as SourceControlProviderKind | undefined;
+    const web = resolvedForgejoRepository(project);
+    if (web) {
+      const mount = web.pathname
+        .replace(/^\/+|\/+$/g, "")
+        .split("/")
+        .slice(0, -2)
+        .join("/");
+      return (
+        web.host.toLowerCase() === (link.authority ?? link.host).toLowerCase() &&
+        (!mount || link.repository.toLowerCase().startsWith(`${mount.toLowerCase()}/`))
+      );
+    }
     return (
       identity != null &&
       kind !== undefined &&
