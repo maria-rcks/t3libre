@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon, MessageCircleIcon, PlusIcon, XIcon } from "lucide-react";
-import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useClientSettings } from "~/hooks/useSettings";
@@ -49,7 +49,23 @@ export function DraftProjectPicker({
 }: DraftProjectPickerProps) {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const chipRef = useRef<HTMLSpanElement>(null);
-  const [chatOffset, setChatOffset] = useState<number | null>(null);
+  const [chatAnchor, setChatAnchor] = useState<{
+    draftId: DraftId | null;
+    width: number;
+    offset: number;
+  } | null>(null);
+  const chatOffset = chatAnchor?.draftId === draftId ? chatAnchor.offset : null;
+  useEffect(() => {
+    const title = titleRef.current;
+    if (!title || !chatAnchor) return;
+    const observer = new ResizeObserver(() => {
+      if (title.getBoundingClientRect().width !== chatAnchor.width) {
+        setChatAnchor(null);
+      }
+    });
+    observer.observe(title);
+    return () => observer.disconnect();
+  }, [chatAnchor]);
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments } = useEnvironments();
@@ -284,7 +300,11 @@ export function DraftProjectPicker({
                   const titleBounds = titleRef.current?.getBoundingClientRect();
                   const chipBounds = chipRef.current?.getBoundingClientRect();
                   if (titleBounds && chipBounds) {
-                    setChatOffset(chipBounds.left - titleBounds.left - titleBounds.width / 2);
+                    setChatAnchor({
+                      draftId,
+                      width: titleBounds.width,
+                      offset: chipBounds.left - titleBounds.left - titleBounds.width / 2,
+                    });
                   }
                   selectProject(chatEntry.group.projectKey);
                 }}
