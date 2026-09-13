@@ -2390,7 +2390,7 @@ function PullRequestsColumn({
                 outlined
                 iconOnly={host !== undefined}
                 triggerIcon={<Plug2Icon aria-hidden className="size-4" />}
-                triggerLabel={host === undefined ? "All" : undefined}
+                triggerLabel="All"
                 value={host ?? ""}
                 options={hostMenuOptions}
                 onChange={(next) => onHost(next === "" ? undefined : next)}
