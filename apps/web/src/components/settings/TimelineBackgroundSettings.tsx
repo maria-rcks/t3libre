@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { ArrowRightIcon, ImageIcon, ImagePlusIcon, LinkIcon, XIcon } from "lucide-react";
+import { ArrowRightIcon, ImagePlusIcon, LinkIcon } from "lucide-react";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import {
   persistClientSettingsUpdate,
@@ -21,52 +21,11 @@ import {
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
-import { Popover, PopoverClose, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
+
+const MAX_BLUR = 30;
 
 export function TimelineBackgroundSettings() {
-  const [open, setOpen] = useState(false);
-  const image = useClientSettings((settings) => settings.timelineBackgroundImage);
-  const opacity = useClientSettings((settings) => settings.timelineBackgroundOpacity);
-  const blur = useClientSettings((settings) => settings.timelineBackgroundBlur);
-
-  return (
-    <SettingsSection id="timeline-background" title="Wallpaper">
-      <SettingsRow
-        title="Wallpaper"
-        description="Personalize your chat background with an image, opacity, and blur."
-        control={
-          <Popover open={open} onOpenChange={setOpen}>
-            <div className="flex items-center gap-3">
-              <div
-                className="relative isolate flex h-10 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background"
-                aria-hidden="true"
-              >
-                {image ? (
-                  <TimelineBackgroundImage image={image} opacity={opacity} blur={blur} />
-                ) : (
-                  <ImageIcon className="size-4 text-muted-foreground" />
-                )}
-              </div>
-              <PopoverTrigger render={<Button variant="outline" size="sm" />}>
-                Customize
-              </PopoverTrigger>
-            </div>
-            <PopoverPopup
-              align="end"
-              className="w-[min(30rem,calc(100vw-2rem))]"
-              viewportClassName="p-0 [--viewport-inline-padding:0px]"
-            >
-              {open && <TimelineBackgroundEditor />}
-            </PopoverPopup>
-          </Popover>
-        }
-      />
-    </SettingsSection>
-  );
-}
-
-function TimelineBackgroundEditor() {
   const image = useClientSettings((settings) => settings.timelineBackgroundImage);
   const opacity = useClientSettings((settings) => settings.timelineBackgroundOpacity);
   const blur = useClientSettings((settings) => settings.timelineBackgroundBlur);
@@ -165,8 +124,22 @@ function TimelineBackgroundEditor() {
     }
   }
 
+  function removeImage() {
+    request.current++;
+    setBusy(false);
+    setError("");
+    setUrl("");
+    updateSettings({
+      timelineBackgroundImage: "",
+      timelineBackgroundOpacity: DEFAULT_CLIENT_SETTINGS.timelineBackgroundOpacity,
+      timelineBackgroundBlur: DEFAULT_CLIENT_SETTINGS.timelineBackgroundBlur,
+    });
+  }
+
   return (
-    <div
+    <SettingsSection
+      id="timeline-background"
+      title="Wallpaper"
       onPaste={(event) => {
         const file = Array.from(event.clipboardData.files).find((item) =>
           item.type.startsWith("image/"),
@@ -177,72 +150,62 @@ function TimelineBackgroundEditor() {
         void applyImage(file);
       }}
     >
-      <div className="flex items-center gap-2 px-4 py-3">
-        <PopoverTitle className="mr-auto text-sm">Wallpaper</PopoverTitle>
-        <Button
-          variant="ghost"
-          size="xs"
-          disabled={!image && !busy}
-          onClick={() => {
-            request.current++;
-            setBusy(false);
-            setError("");
-            setUrl("");
-            updateSettings({
-              timelineBackgroundImage: "",
-              timelineBackgroundOpacity: DEFAULT_CLIENT_SETTINGS.timelineBackgroundOpacity,
-              timelineBackgroundBlur: DEFAULT_CLIENT_SETTINGS.timelineBackgroundBlur,
-            });
-          }}
-        >
-          Remove image
-        </Button>
-        <PopoverClose
-          render={<Button variant="ghost" size="icon-xs" aria-label="Close background settings" />}
-        >
-          <XIcon />
-        </PopoverClose>
-      </div>
-      <div className="overflow-hidden rounded-b-lg">
+      <div
+        className="relative isolate overflow-hidden rounded-t-xl bg-background px-5 py-5"
+        aria-label="Wallpaper preview"
+      >
+        <TimelineBackgroundImage image={image} opacity={previewOpacity} blur={previewBlur} />
         <div
-          className="relative isolate overflow-hidden bg-background p-5 sm:p-6"
-          aria-label="Wallpaper preview"
+          className={cn(
+            "mx-auto max-w-lg space-y-4 text-sm leading-relaxed",
+            image && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
+          )}
         >
-          <TimelineBackgroundImage image={image} opacity={previewOpacity} blur={previewBlur} />
-          <div
-            className={cn(
-              "mx-auto max-w-xl space-y-5 text-sm leading-relaxed",
-              image && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
-            )}
-          >
-            <div className="flex justify-end">
-              <UserMessageBubble>Can you give this page a softer look?</UserMessageBubble>
-            </div>
-            <WorkingIndicator createdAt={previewStartedAt} />
-            <AssistantMessageSurface>
-              <ChatMarkdown
-                cwd={undefined}
-                text="I'll adjust the spacing and colors, then check how it looks."
-              />
-            </AssistantMessageSurface>
-            <LiveActivityRow label="Reading styles.css" iconName="eye" active />
+          <div className="flex justify-end">
+            <UserMessageBubble>Can you give this page a softer look?</UserMessageBubble>
           </div>
+          <WorkingIndicator createdAt={previewStartedAt} />
+          <AssistantMessageSurface>
+            <ChatMarkdown
+              cwd={undefined}
+              text="I'll adjust the spacing and colors, then check how it looks."
+            />
+          </AssistantMessageSurface>
+          <LiveActivityRow label="Reading styles.css" iconName="eye" active />
         </div>
-        <div className="space-y-4 border-t border-border/60 p-4">
+      </div>
+      <SettingsRow
+        title="Image"
+        description="Paste an image, enter an image URL, or choose a file."
+        resetAction={
+          image ? (
+            <SettingResetButton label="wallpaper" tooltip="Remove image" onClick={removeImage} />
+          ) : null
+        }
+        status={
+          busy ? (
+            <span role="status">Loading image…</span>
+          ) : error ? (
+            <span role="alert" className="text-destructive">
+              {error}
+            </span>
+          ) : null
+        }
+        control={
           <form
-            className="flex flex-wrap items-center gap-2"
+            className="flex w-full items-center gap-2 sm:w-96"
             onSubmit={(event) => {
               event.preventDefault();
               void applyImage(url);
             }}
           >
-            <InputGroup className="min-w-48 flex-1">
+            <InputGroup className="min-w-0 flex-1">
               <InputGroupAddon>
                 <LinkIcon className="size-3.5 text-muted-foreground" />
               </InputGroupAddon>
               <InputGroupInput
                 aria-label="Background image URL"
-                placeholder="Paste an image or image URL"
+                placeholder="https://…"
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
                 size="sm"
@@ -283,84 +246,121 @@ function TimelineBackgroundEditor() {
               }}
             />
           </form>
-          {busy && (
-            <p role="status" className="text-xs text-muted-foreground">
-              Loading image…
-            </p>
-          )}
-          {error && (
-            <p role="alert" className="text-xs text-destructive">
-              {error}
-            </p>
-          )}
-          <div className="grid grid-cols-2 gap-5 sm:gap-8">
-            <div className="min-w-0">
-              <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                <label htmlFor="timeline-background-opacity" className="text-muted-foreground">
-                  Opacity
-                </label>
-                <output htmlFor="timeline-background-opacity" className="font-mono tabular-nums">
-                  {previewOpacity}%
-                </output>
-              </div>
-              <input
-                id="timeline-background-opacity"
-                aria-label="Background opacity"
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={previewOpacity}
-                style={
-                  {
-                    "--settings-slider-progress": `${previewOpacity}%`,
-                    "--settings-slider-fill-offset": `${0.5 - previewOpacity / 100}rem`,
-                  } as CSSProperties
-                }
-                disabled={!image}
-                className="settings-slider w-full"
-                onChange={(event) => setOpacityDraft(Number(event.target.value))}
-                onPointerUp={(event) => saveOpacity(Number(event.currentTarget.value))}
-                onPointerCancel={() => setOpacityDraft(null)}
-                onKeyUp={(event) => saveOpacity(Number(event.currentTarget.value))}
-                onBlur={(event) => saveOpacity(Number(event.currentTarget.value))}
-              />
-            </div>
-            <div className="min-w-0">
-              <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                <label htmlFor="timeline-background-blur" className="text-muted-foreground">
-                  Blur
-                </label>
-                <output htmlFor="timeline-background-blur" className="font-mono tabular-nums">
-                  {previewBlur}px
-                </output>
-              </div>
-              <input
-                id="timeline-background-blur"
-                aria-label="Background blur"
-                type="range"
-                min={0}
-                max={30}
-                step={1}
-                value={previewBlur}
-                style={
-                  {
-                    "--settings-slider-progress": `${(previewBlur / 30) * 100}%`,
-                    "--settings-slider-fill-offset": `${0.5 - previewBlur / 30}rem`,
-                  } as CSSProperties
-                }
-                disabled={!image}
-                className="settings-slider w-full"
-                onChange={(event) => setBlurDraft(Number(event.target.value))}
-                onPointerUp={(event) => saveBlur(Number(event.currentTarget.value))}
-                onPointerCancel={() => setBlurDraft(null)}
-                onKeyUp={(event) => saveBlur(Number(event.currentTarget.value))}
-                onBlur={(event) => saveBlur(Number(event.currentTarget.value))}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
+        }
+      />
+      <SettingsRow
+        title="Opacity"
+        description="How strongly the image shows through the chat."
+        aria-disabled={!image || undefined}
+        resetAction={
+          opacity !== DEFAULT_CLIENT_SETTINGS.timelineBackgroundOpacity ? (
+            <SettingResetButton
+              label="wallpaper opacity"
+              onClick={() =>
+                updateSettings({
+                  timelineBackgroundOpacity: DEFAULT_CLIENT_SETTINGS.timelineBackgroundOpacity,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <WallpaperSlider
+            id="timeline-background-opacity"
+            label="Background opacity"
+            value={previewOpacity}
+            max={100}
+            unit="%"
+            disabled={!image}
+            onDraft={setOpacityDraft}
+            onCommit={saveOpacity}
+          />
+        }
+      />
+      <SettingsRow
+        title="Blur"
+        description="Softens the image behind messages."
+        aria-disabled={!image || undefined}
+        resetAction={
+          blur !== DEFAULT_CLIENT_SETTINGS.timelineBackgroundBlur ? (
+            <SettingResetButton
+              label="wallpaper blur"
+              onClick={() =>
+                updateSettings({
+                  timelineBackgroundBlur: DEFAULT_CLIENT_SETTINGS.timelineBackgroundBlur,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <WallpaperSlider
+            id="timeline-background-blur"
+            label="Background blur"
+            value={previewBlur}
+            max={MAX_BLUR}
+            unit="px"
+            disabled={!image}
+            onDraft={setBlurDraft}
+            onCommit={saveBlur}
+          />
+        }
+      />
+    </SettingsSection>
+  );
+}
+
+function WallpaperSlider({
+  id,
+  label,
+  value,
+  max,
+  unit,
+  disabled,
+  onDraft,
+  onCommit,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  max: number;
+  unit: string;
+  disabled: boolean;
+  onDraft: (value: number | null) => void;
+  onCommit: (value: number) => void;
+}) {
+  const progress = value / max;
+  return (
+    <div className="flex w-full items-center gap-3 sm:w-52">
+      <output
+        htmlFor={id}
+        className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+      >
+        {value}
+        {unit}
+      </output>
+      <input
+        id={id}
+        aria-label={label}
+        type="range"
+        min={0}
+        max={max}
+        step={1}
+        value={value}
+        disabled={disabled}
+        className="settings-slider min-w-0 flex-1"
+        style={
+          {
+            "--settings-slider-progress": `${progress * 100}%`,
+            "--settings-slider-fill-offset": `${0.5 - progress}rem`,
+          } as CSSProperties
+        }
+        onChange={(event) => onDraft(Number(event.target.value))}
+        onPointerUp={(event) => onCommit(Number(event.currentTarget.value))}
+        onPointerCancel={() => onDraft(null)}
+        onKeyUp={(event) => onCommit(Number(event.currentTarget.value))}
+        onBlur={(event) => onCommit(Number(event.currentTarget.value))}
+      />
     </div>
   );
 }
