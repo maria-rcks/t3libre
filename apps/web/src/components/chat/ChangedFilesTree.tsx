@@ -57,9 +57,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
         data-changed-files-header=""
         className={cn(
           "sticky top-2 z-10 flex items-center justify-between gap-2 rounded-t-lg px-3 py-2",
-          glass
-            ? "surface-glass"
-            : "bg-secondary dark:bg-[color-mix(in_srgb,var(--input)_20%,var(--background))]",
+          !glass && "bg-secondary dark:bg-[color-mix(in_srgb,var(--input)_20%,var(--background))]",
         )}
       >
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-foreground">
