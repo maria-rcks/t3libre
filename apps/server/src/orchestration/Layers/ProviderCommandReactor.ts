@@ -79,7 +79,9 @@ type ProviderIntentEvent = Extract<
       | "thread.user-input-response-requested"
       | "thread.session-stop-requested"
       | "thread.settled"
-      | "thread.session-set";
+      | "thread.session-set"
+      | "thread.goal-set-requested"
+      | "thread.goal-clear-requested";
   }
 >;
 
@@ -267,7 +269,8 @@ const make = Effect.gen(function* () {
       | "provider.turn.interrupt.failed"
       | "provider.approval.respond.failed"
       | "provider.user-input.respond.failed"
-      | "provider.session.stop.failed";
+      | "provider.session.stop.failed"
+      | "provider.goal.failed";
     readonly summary: string;
     readonly detail: string;
     readonly turnId: TurnId | null;
@@ -1234,6 +1237,50 @@ const make = Effect.gen(function* () {
         createdAt: event.payload.createdAt,
         requestId: event.payload.messageId,
       });
+    const goalCommand = /^\/goal(?:\s+([\s\S]*))?$/.exec(message.text.trim());
+    if (goalCommand && (message.attachments?.length ?? 0) === 0) {
+      yield* Effect.gen(function* () {
+        yield* ensureSessionForThread(
+          thread.id,
+          event.payload.createdAt,
+          event.payload.modelSelection !== undefined
+            ? { modelSelection: event.payload.modelSelection }
+            : {},
+        );
+        const argument = goalCommand[1]?.trim() ?? "";
+        if (argument === "clear") yield* providerService.clearGoal(thread.id);
+        else if (argument === "pause")
+          yield* providerService.setGoal(thread.id, { status: "paused" });
+        else if (argument === "resume")
+          yield* providerService.setGoal(thread.id, { status: "active" });
+        else if (argument.startsWith("edit "))
+          yield* providerService.setGoal(thread.id, { objective: argument.slice(5).trim() });
+        else if (argument) {
+          if (thread.goal?.status === "complete") yield* providerService.clearGoal(thread.id);
+          yield* providerService.setGoal(thread.id, { objective: argument, status: "active" });
+        } else yield* providerService.refreshGoal(thread.id);
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: yield* serverCommandId("goal-command"),
+          threadId: thread.id,
+          activity: {
+            id: yield* serverEventId(),
+            tone: "info",
+            kind: "goal-command",
+            summary: argument ? "Goal updated" : "Goal status refreshed",
+            payload: { requestId: event.payload.messageId },
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          },
+          createdAt: event.payload.createdAt,
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          appendTurnStartFailure("Goal update failed", formatFailureDetail(cause)),
+        ),
+      );
+      return;
+    }
     if (resumed && turnsAfterCompaction.get(event.payload.threadId) !== resumed.queued) {
       return yield* appendTurnStartFailure(
         "Queued message was not sent",
@@ -1791,6 +1838,26 @@ const make = Effect.gen(function* () {
         );
         return;
       }
+      case "thread.goal-set-requested":
+      case "thread.goal-clear-requested":
+        yield* Effect.gen(function* () {
+          yield* ensureSessionForThread(event.payload.threadId, event.occurredAt);
+          if (event.type === "thread.goal-set-requested")
+            yield* providerService.setGoal(event.payload.threadId, event.payload);
+          else yield* providerService.clearGoal(event.payload.threadId);
+        }).pipe(
+          Effect.catchCause((cause) =>
+            appendProviderFailureActivity({
+              threadId: event.payload.threadId,
+              kind: "provider.goal.failed",
+              summary: "Goal update failed",
+              detail: formatFailureDetail(cause),
+              turnId: null,
+              createdAt: event.occurredAt,
+            }),
+          ),
+        );
+        return;
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
@@ -1874,6 +1941,8 @@ const make = Effect.gen(function* () {
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
         event.type === "thread.session-stop-requested" ||
+        event.type === "thread.goal-set-requested" ||
+        event.type === "thread.goal-clear-requested" ||
         event.type === "thread.settled"
       ) {
         return yield* worker.enqueue(event);

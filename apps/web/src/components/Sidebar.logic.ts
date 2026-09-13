@@ -509,6 +509,7 @@ export function buildBulkUnpinContextMenuItem(input: {
 export interface ThreadStatusPill {
   label:
     | "Working"
+    | "Goaling"
     | "Monitoring"
     | "Connecting"
     | "Completed"
@@ -527,6 +528,7 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 6,
   "Awaiting Input": 5,
   Working: 4,
+  Goaling: 4,
   Connecting: 4,
   "Plan Ready": 3,
   Monitoring: 2,
@@ -542,6 +544,7 @@ type ThreadStatusInput = Pick<
   | "latestTurn"
   | "session"
   | "backgroundLiveness"
+  | "goal"
 > & {
   lastVisitedAt?: string | undefined;
 };
@@ -1001,6 +1004,15 @@ export function resolveThreadStatusPill(input: {
       label: "Awaiting Input",
       colorClass: "text-indigo-600 dark:text-indigo-300/90",
       dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
+      pulse: false,
+    };
+  }
+
+  if (thread.goal?.status === "active" && thread.session?.status !== "error") {
+    return {
+      label: "Goaling",
+      colorClass: "text-purple-600 dark:text-purple-400",
+      dotClass: "bg-purple-500 dark:bg-purple-400",
       pulse: false,
     };
   }

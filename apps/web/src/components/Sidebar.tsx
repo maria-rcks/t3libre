@@ -1,5 +1,6 @@
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
+import { formatGoalDuration } from "./chat/GoalToolbar";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
@@ -57,6 +58,7 @@ import {
   ShieldQuestionIcon,
   SquarePenIcon,
   TerminalIcon,
+  TargetIcon,
   Undo2Icon,
   XIcon,
 } from "lucide-react";
@@ -1133,8 +1135,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // Status hues follow the system-wide convention set by sidebar v1 and the
   // mobile Live Activity/widgets (amber approval, indigo input, sky working)
   // so a thread reads the same color everywhere it surfaces.
-  const topStatus =
-    status === "working"
+  const goalActive =
+    thread.goal?.status === "active" &&
+    status !== "approval" &&
+    status !== "input" &&
+    status !== "failed";
+  const topStatus = goalActive
+    ? { label: "Goaling", icon: "goal" as const, className: "text-purple-600 dark:text-purple-400" }
+    : status === "working"
       ? {
           label: "Working",
           icon: "working" as const,
@@ -1822,7 +1830,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             topStatus.className,
                           )}
                         >
-                          {topStatus.icon === "working" ? (
+                          {topStatus.icon === "goal" ? (
+                            <TargetIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "working" ? (
                             <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
                           ) : topStatus.icon === "input" ? (
                             <MessageCircleQuestionIcon aria-hidden className="size-4 shrink-0" />
@@ -1839,7 +1849,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             wrapper around the ticking duration would make
                             screen readers announce every second. */}
                           <span role="status">{topStatus.label}</span>
-                          {status === "working" ? (
+                          {goalActive && thread.goal?.timeUsedSeconds != null ? (
+                            <span
+                              className="tabular-nums"
+                              aria-label="Provider-reported goal run time"
+                            >
+                              {formatGoalDuration(thread.goal.timeUsedSeconds)}
+                            </span>
+                          ) : status === "working" ? (
                             <span aria-hidden>
                               <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
                             </span>

@@ -12,6 +12,19 @@ becomes an attachment when inserting it would exceed the message limit. On a
 hardware keyboard, use `Cmd+Shift+V` on Apple devices or `Ctrl+Shift+V` elsewhere
 to keep a large paste editable in the composer instead.
 
+## Goals
+
+With a provider that supports goals, send `/goal <objective>` to start working
+toward a persistent target. Use `/goal` to refresh its status, `/goal edit <objective>`
+to revise it, and `/goal clear` to remove it. Codex also supports `/goal pause`
+and `/goal resume`; pausing the goal prevents further goal continuation but
+does not interrupt work already running.
+
+Goal progress stays with the thread across reconnects. Time, token usage, and
+rounds appear when the provider reports them. Codex reports goal token usage and
+supports a token budget; Claude reports rounds and resets its counters when its
+native session resumes. Availability depends on the installed provider version.
+
 ## Attach files
 
 Attach up to eight files per message. Images can be up to 10 MB; other files can

@@ -1792,6 +1792,52 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const refreshGoal: ProviderServiceMethod<"refreshGoal"> = Effect.fn("refreshGoal")(
+    function* (threadId) {
+      const routed = yield* resolveRoutableSession({
+        threadId,
+        operation: "ProviderService.refreshGoal",
+        allowRecovery: true,
+      });
+      if (!routed.adapter.goals?.refresh)
+        return yield* toValidationError(
+          "ProviderService.refreshGoal",
+          `Provider '${routed.adapter.provider}' does not support native goals.`,
+        );
+      yield* routed.adapter.goals.refresh(routed.threadId);
+    },
+  );
+  const setGoal: ProviderServiceMethod<"setGoal"> = Effect.fn("setGoal")(
+    function* (threadId, input) {
+      const routed = yield* resolveRoutableSession({
+        threadId,
+        operation: "ProviderService.setGoal",
+        allowRecovery: true,
+      });
+      if (!routed.adapter.goals)
+        return yield* toValidationError(
+          "ProviderService.setGoal",
+          `Provider '${routed.adapter.provider}' does not support native goals.`,
+        );
+      yield* routed.adapter.goals.set(routed.threadId, input);
+    },
+  );
+  const clearGoal: ProviderServiceMethod<"clearGoal"> = Effect.fn("clearGoal")(
+    function* (threadId) {
+      const routed = yield* resolveRoutableSession({
+        threadId,
+        operation: "ProviderService.clearGoal",
+        allowRecovery: true,
+      });
+      if (!routed.adapter.goals)
+        return yield* toValidationError(
+          "ProviderService.clearGoal",
+          `Provider '${routed.adapter.provider}' does not support native goals.`,
+        );
+      yield* routed.adapter.goals.clear(routed.threadId);
+    },
+  );
+
   const compactThread: ProviderServiceMethod<"compactThread"> = Effect.fn("compactThread")(
     function* (threadId, modelSelection, requestId) {
       const routed = yield* resolveRoutableSession({
@@ -2402,6 +2448,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     startSession,
     sendTurn,
     compactThread,
+    setGoal,
+    refreshGoal,
+    clearGoal,
     interruptTurn,
     respondToRequest,
     respondToUserInput,
