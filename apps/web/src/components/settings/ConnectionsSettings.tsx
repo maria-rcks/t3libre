@@ -1499,36 +1499,39 @@ function SavedBackendListRow({
     <div className={cn(ITEM_ROW_CLASSNAME, !enabled && "opacity-60")}>
       <div className={ITEM_ROW_INNER_CLASSNAME}>
         <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex min-h-5 items-center gap-1.5">
-            <ConnectionStatusDot
-              tooltipText={statusTooltip}
-              dotClassName={stateDotClassName}
-              pingClassName={
-                enabled && (connectionState === "connecting" || connectionState === "reconnecting")
-                  ? "bg-warning/60 duration-2000"
-                  : null
-              }
-            />
-            <EnvironmentMachineIcon
-              aria-hidden
-              kind={resolveEnvironmentMachineKind(environment.serverConfig)}
-              className="size-3.5 shrink-0 text-muted-foreground"
-            />
-            <h3 className="min-w-0 truncate text-sm font-medium text-foreground">
-              {environment.label}
-            </h3>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="flex min-h-5 min-w-0 max-w-full items-center gap-1.5">
+              <ConnectionStatusDot
+                tooltipText={statusTooltip}
+                dotClassName={stateDotClassName}
+                pingClassName={
+                  enabled &&
+                  (connectionState === "connecting" || connectionState === "reconnecting")
+                    ? "bg-warning/60 duration-2000"
+                    : null
+                }
+              />
+              <EnvironmentMachineIcon
+                aria-hidden
+                kind={resolveEnvironmentMachineKind(environment.serverConfig)}
+                className="size-3.5 shrink-0 text-muted-foreground"
+              />
+              <h3 className="min-w-0 truncate text-sm font-medium text-foreground">
+                {environment.label}
+              </h3>
+            </div>
+            {isConnected ? (
+              <div className="w-full sm:w-auto">
+                <EnvironmentIconPicker
+                  environmentId={environmentId}
+                  serverConfig={environment.serverConfig}
+                  size="xs"
+                />
+              </div>
+            ) : null}
           </div>
           {metadataBits.length > 0 ? (
             <p className="truncate text-xs text-muted-foreground">{metadataBits.join(" · ")}</p>
-          ) : null}
-          {isConnected ? (
-            <div className="pt-1">
-              <EnvironmentIconPicker
-                environmentId={environmentId}
-                serverConfig={environment.serverConfig}
-                size="xs"
-              />
-            </div>
           ) : null}
           {serverUpdateState.status !== "idle" ? (
             <div className="max-w-md">
