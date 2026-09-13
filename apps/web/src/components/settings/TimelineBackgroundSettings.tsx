@@ -6,7 +6,7 @@ import {
   useClientSettings,
   useUpdatePrimarySettings,
 } from "../../hooks/useSettings";
-import { compressImageForStash, MAX_COMPRESSIBLE_SOURCE_BYTES } from "../../lib/imageCompression";
+import { compressImageForWallpaper } from "../../lib/imageCompression";
 import {
   TimelineBackgroundImage,
   CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
@@ -91,13 +91,17 @@ export function TimelineBackgroundSettings() {
         }
         nextImage = parsed.href;
       } else {
-        if (!source.type.startsWith("image/") || source.size > MAX_COMPRESSIBLE_SOURCE_BYTES) {
-          throw new Error("Choose an image smaller than 50 MB.");
+        const result = await compressImageForWallpaper(source);
+        if (!result.ok) {
+          throw new Error(
+            result.reason === "too-large"
+              ? "Choose an image no larger than 50 MB and 64 megapixels."
+              : "Could not read this image. Choose a PNG, JPEG, GIF, or WebP file.",
+          );
         }
-        const result = await compressImageForStash(source);
-        if (!result.ok) throw new Error("This image could not be saved. Try a smaller image.");
         nextImage = result.image.dataUrl;
       }
+      if (generation !== request.current) return;
       await new Promise<void>((resolve, reject) => {
         const probe = new Image();
         const timeout = window.setTimeout(() => finish(false), 15000);
@@ -265,7 +269,7 @@ export function TimelineBackgroundSettings() {
             <input
               ref={fileInput}
               type="file"
-              accept="image/*"
+              accept="image/png,image/jpeg,image/gif,image/webp"
               className="hidden"
               aria-label="Choose background image"
               onChange={(event) => {
