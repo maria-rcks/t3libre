@@ -286,6 +286,10 @@ export default function FileBrowserPanel({
   };
   const expandedPathsRef = useRef(new Set<string>());
   useEffect(() => {
+    const currentPaths = new Set(directoryPaths);
+    for (const path of expandedPathsRef.current) {
+      if (!currentPaths.has(path)) expandedPathsRef.current.delete(path);
+    }
     const loadExpanded = () => {
       if (model.isSearchOpen()) return;
       for (const path of directoryPaths) {
@@ -296,6 +300,7 @@ export default function FileBrowserPanel({
             void load(path.replace(/\/$/, ""));
           }
         } else {
+          if (item?.isDirectory() && expandedPathsRef.current.has(path)) setExpandAll(false);
           expandedPathsRef.current.delete(path);
         }
       }

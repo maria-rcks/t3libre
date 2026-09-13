@@ -52,11 +52,11 @@ export function useFileTreeEntries(input: {
     [directories],
   );
   const loadDirectory = useCallback(
-    (directoryPath: string) => {
+    (directoryPath: string, refresh = false) => {
       if (
         cwd === null ||
         environmentId === null ||
-        directories.entries.has(directoryPath) ||
+        (!refresh && directories.entries.has(directoryPath)) ||
         directories.pending.has(directoryPath)
       ) {
         return;
@@ -97,13 +97,33 @@ export function useFileTreeEntries(input: {
   );
   const { refresh: refreshRoot, data: rootData } = root;
   const { refresh: refreshSearch, data: searchData } = search;
+  const snapshot = useMemo(() => {
+    const merged = new Map<string, ProjectEntry>();
+    if (searching) {
+      for (const entry of searchData?.entries ?? []) merged.set(entry.path, entry);
+    }
+    const reachableDirectories = new Set<string>();
+    const visit = (items: ReadonlyArray<ProjectEntry>) => {
+      for (const entry of items) {
+        merged.set(entry.path, entry);
+        if (entry.kind === "directory") {
+          reachableDirectories.add(entry.path);
+          visit(directories.entries.get(entry.path) ?? []);
+        }
+      }
+    };
+    visit((rootData?.entries ?? []).filter((entry) => !entry.path.includes("/")));
+    return { revision, entries: [...merged.values()], reachableDirectories };
+  }, [directories, revision, rootData, searchData, searching]);
+
   const refresh = useCallback(() => {
     refreshRoot();
     if (searching) refreshSearch();
-    const paths = new Set(directories.requested);
+    const paths = new Set(
+      [...directories.requested].filter((path) => snapshot.reachableDirectories.has(path)),
+    );
     for (const controller of directories.pending.values()) controller.abort();
     directories.pending.clear();
-    directories.entries.clear();
     directories.errors.clear();
     const version = ++refreshVersion.current;
     const remaining = paths.values();
@@ -111,33 +131,26 @@ export function useFileTreeEntries(input: {
       while (version === refreshVersion.current) {
         const next = remaining.next();
         if (next.done) return;
-        await loadDirectory(next.value);
+        await loadDirectory(next.value, true);
       }
     };
     for (let index = 0; index < Math.min(4, paths.size); index++) void worker();
     render();
-  }, [directories, loadDirectory, refreshRoot, refreshSearch, searching]);
-  const snapshot = useMemo(() => {
-    const merged = new Map<string, ProjectEntry>();
-    if (searching) {
-      for (const entry of searchData?.entries ?? []) merged.set(entry.path, entry);
-    }
-    const visit = (items: ReadonlyArray<ProjectEntry>) => {
-      for (const entry of items) {
-        merged.set(entry.path, entry);
-        if (entry.kind === "directory") visit(directories.entries.get(entry.path) ?? []);
-      }
-    };
-    visit((rootData?.entries ?? []).filter((entry) => !entry.path.includes("/")));
-    return { revision, entries: [...merged.values()] };
-  }, [directories, revision, rootData, searchData, searching]);
+  }, [
+    directories,
+    loadDirectory,
+    refreshRoot,
+    refreshSearch,
+    searching,
+    snapshot.reachableDirectories,
+  ]);
 
   return {
     entries: snapshot.entries,
     error:
       root.error ??
       (searching ? search.error : null) ??
-      directories.errors.values().next().value ??
+      [...directories.errors].find(([path]) => snapshot.reachableDirectories.has(path))?.[1] ??
       null,
     isPending:
       root.isPending ||

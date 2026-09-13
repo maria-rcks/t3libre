@@ -91,19 +91,6 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
     };
   }, [load]);
 
-  const refresh = useCallback(() => {
-    // Refresh folders already visited, preserving the current expansion state.
-    const paths = [...requested.current];
-    let next = 0;
-    const worker = async () => {
-      while (next < paths.length && active.current) {
-        const path = paths[next++];
-        if (path !== undefined) await load(path, true);
-      }
-    };
-    for (let index = 0; index < Math.min(4, paths.length); index++) void worker();
-  }, [load]);
-
   const entries = useMemo(() => {
     const result: ProjectEntry[] = [];
     const visit = (path: string) => {
@@ -116,12 +103,34 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
     return result;
   }, [directories]);
 
+  const reachableDirectories = useMemo(
+    () =>
+      new Set([
+        "",
+        ...entries.filter((entry) => entry.kind === "directory").map((entry) => entry.path),
+      ]),
+    [entries],
+  );
+
+  const refresh = useCallback(() => {
+    // Refresh folders already visited, preserving the current expansion state.
+    const paths = [...requested.current].filter((path) => reachableDirectories.has(path));
+    let next = 0;
+    const worker = async () => {
+      while (next < paths.length && active.current) {
+        const path = paths[next++];
+        if (path !== undefined) await load(path, true);
+      }
+    };
+    for (let index = 0; index < Math.min(4, paths.length); index++) void worker();
+  }, [load, reachableDirectories]);
+
   return {
     entries,
     load,
     refresh,
     isPending: pending > 0,
     ready: directories.has(""),
-    error: errors.values().next().value ?? null,
+    error: [...errors].find(([path]) => reachableDirectories.has(path))?.[1] ?? null,
   };
 }
