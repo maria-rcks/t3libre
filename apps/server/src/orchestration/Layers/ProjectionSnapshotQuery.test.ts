@@ -2377,6 +2377,32 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       });
       assert.equal(archived.matches[0]?.messageId, MessageId.make("message-hidden"));
       yield* sql`
+        INSERT INTO projection_thread_messages
+          (message_id, thread_id, role, text, is_streaming, created_at, updated_at)
+        VALUES
+          ('async-answer:answered-request', 'thread-active', 'user', 'duplicate answer needle', 0, '2026-05-01T00:00:18.000Z', '2026-05-01T00:00:18.000Z'),
+          ('async-answer:legacy-request', 'thread-active', 'user', 'legacy answer needle', 0, '2026-05-01T00:00:19.000Z', '2026-05-01T00:00:19.000Z')
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_activities
+          (activity_id, thread_id, tone, kind, summary, payload_json, sequence, created_at)
+        VALUES ('answer-card', 'thread-active', 'info', 'user-input.answer-submitted', 'Answered', '{"requestId":"answered-request","answers":{"q":"duplicate answer needle"},"attachmentsByQuestionId":{}}', 1, '2026-05-01T00:00:18.000Z')
+      `;
+      assert.deepStrictEqual(
+        (yield* snapshotQuery.searchThreads({
+          query: "duplicate answer",
+          threadId: ThreadId.make("thread-active"),
+        })).matches,
+        [],
+      );
+      assert.equal(
+        (yield* snapshotQuery.searchThreads({
+          query: "legacy answer",
+          threadId: ThreadId.make("thread-active"),
+        })).matches[0]?.messageId,
+        "async-answer:legacy-request",
+      );
+      yield* sql`
         UPDATE projection_threads
         SET deleted_at = '2026-05-01T00:00:20.000Z'
         WHERE thread_id = 'thread-active'
