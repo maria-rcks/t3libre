@@ -3338,6 +3338,7 @@ export function ConnectionsSettings() {
           {isLocalBackendRemotelyReachable ? (
             <SettingsSection
               title="Authorized clients"
+              className="[&>div:first-child]:flex-wrap"
               headerAction={
                 <AuthorizedClientsHeaderAction
                   onPairingLinkCreated={handlePairingLinkCreated}
