@@ -53,14 +53,14 @@ export function GoalToolbar(props: {
     <ComposerBanner.Attachment>
       <ComposerBanner.Root
         data-goal-toolbar="true"
-        className="text-purple-700 dark:text-purple-300 [--chat-composer-attached-outline:color-mix(in_srgb,var(--color-purple-500)_30%,transparent)] [--chat-composer-attached-tint:color-mix(in_srgb,var(--color-purple-500)_9%,transparent)]"
+        className="text-foreground before:border-purple-500/40"
       >
         <ComposerBanner.Row layout="wrap-actions">
           <ComposerBanner.Icon className="text-purple-600 dark:text-purple-400">
             <TargetIcon />
           </ComposerBanner.Icon>
-          <ComposerBanner.Content className="flex-wrap gap-x-2 gap-y-0.5">
-            <span role="status" className="font-medium">
+          <ComposerBanner.Content className="flex-wrap gap-x-2 gap-y-0.5 text-muted-foreground">
+            <span role="status" className="font-medium text-purple-700 dark:text-purple-300">
               {goalStatusLabels[goal.status]}
             </span>
             {goal.timeUsedSeconds !== null ? (
@@ -85,6 +85,7 @@ export function GoalToolbar(props: {
               type="button"
               variant="ghost"
               size="icon-xs"
+              className="text-purple-700 dark:text-purple-300 [--control-icon-color:currentColor]"
               aria-label="Edit goal"
               disabled={disabled}
               onClick={() => {
@@ -100,6 +101,7 @@ export function GoalToolbar(props: {
                 type="button"
                 variant="ghost"
                 size="icon-xs"
+                className="text-purple-700 dark:text-purple-300 [--control-icon-color:currentColor]"
                 disabled={disabled}
                 aria-label={goal.status === "active" ? "Pause goal" : "Resume goal"}
                 onClick={() =>
@@ -119,6 +121,7 @@ export function GoalToolbar(props: {
               type="button"
               variant="ghost"
               size="icon-xs"
+              className="text-purple-700 dark:text-purple-300 [--control-icon-color:currentColor]"
               aria-label="Clear goal"
               disabled={disabled}
               onClick={() => void run(props.onClear)}
@@ -189,11 +192,7 @@ export function GoalToolbar(props: {
           )}
           {goal.lastReason ? (
             <Tooltip>
-              <TooltipTrigger
-                render={
-                  <p className="mt-0.5 line-clamp-2 text-purple-600/80 dark:text-purple-300/70" />
-                }
-              >
+              <TooltipTrigger render={<p className="mt-0.5 line-clamp-2 text-muted-foreground" />}>
                 {goal.lastReason}
               </TooltipTrigger>
               <TooltipPopup>{goal.lastReason}</TooltipPopup>
