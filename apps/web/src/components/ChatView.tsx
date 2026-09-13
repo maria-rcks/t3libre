@@ -3550,6 +3550,16 @@ export default function ChatView(props: ChatViewProps) {
       (environment) => environment.environmentId === loadBalancing.environmentId,
     );
     if (!target) return;
+    const targetProject = allProjects.find(
+      (p) => p.environmentId === target.environmentId && p.id === target.projectId,
+    );
+    if (targetProject && isChatProject(targetProject)) {
+      setLogicalProjectDraftThreadId(
+        deriveLogicalProjectKeyFromSettings(targetProject, projectGroupingSettings),
+        scopeProjectRef(target.environmentId, target.projectId),
+        draftId,
+      );
+    }
     setDraftThreadContext(draftId, {
       projectRef: scopeProjectRef(target.environmentId, target.projectId),
       environmentSelection: "auto",
@@ -3562,6 +3572,9 @@ export default function ChatView(props: ChatViewProps) {
     draftId,
     logicalProjectEnvironments,
     setDraftThreadContext,
+    allProjects,
+    projectGroupingSettings,
+    setLogicalProjectDraftThreadId,
   ]);
   const onAutoEnvironment = useCallback(() => {
     if (envLocked || !draftId) return;
