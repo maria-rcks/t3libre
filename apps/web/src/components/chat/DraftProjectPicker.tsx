@@ -333,7 +333,7 @@ export function DraftProjectPicker({
       ref={titleRef}
       className={
         isChat && chatOffset !== null
-          ? "mx-auto grid w-full grid-cols-1 items-end gap-y-2 font-normal text-2xl text-foreground tracking-tight sm:grid-cols-[var(--chat-context-start)_minmax(0,1fr)] sm:items-baseline sm:text-3xl"
+          ? "mx-auto grid w-full grid-cols-1 items-end gap-y-2 font-normal text-2xl text-foreground tracking-tight sm:grid-cols-[var(--chat-context-start)_minmax(0,1fr)] sm:text-3xl sm:[align-items:last_baseline]"
           : "mx-auto w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
       }
       style={
