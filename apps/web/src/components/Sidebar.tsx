@@ -1,4 +1,5 @@
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
+import { useCompactSidebarEnabled } from "../hooks/useSettings";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
@@ -321,6 +322,7 @@ function SidebarThreadTooltip({
   branchMismatch,
   terminalStatus,
   terminalProcessCount,
+  compactStatus,
 }: {
   thread: SidebarThreadSummary;
   project: ProjectFaviconProject | null;
@@ -337,6 +339,7 @@ function SidebarThreadTooltip({
   } | null;
   terminalStatus: TerminalStatusIndicator | null;
   terminalProcessCount: number;
+  compactStatus?: string | undefined;
 }) {
   const driverKind = providerEntry?.driverKind ?? null;
   const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
@@ -353,6 +356,7 @@ function SidebarThreadTooltip({
           {thread.title}
         </div>
         <div className="grid gap-1.5 pl-0.5 text-xs text-muted-foreground">
+          {compactStatus ? <div>{compactStatus}</div> : null}
           {projectDisplayName ? (
             <div className="flex min-w-0 items-center gap-2">
               {project ? <ProjectFavicon project={project} className="size-3 shrink-0" /> : null}
@@ -639,20 +643,32 @@ function SidebarSectionHeader(props: {
   isDropTarget?: boolean;
   toggle: { expanded: boolean; onToggle: () => void };
 }) {
+  const compactEnabled = useCompactSidebarEnabled();
+  const { state, isMobile } = useSidebar();
+  const compact = compactEnabled && state === "collapsed" && !isMobile;
   const snoozed = props.marker === "snoozed-header";
   const className = cn(
     "flex h-full w-full items-center gap-2 px-2 text-left text-xs font-medium",
+    compact && "justify-center px-0",
     snoozed ? "text-blue-600 dark:text-blue-400" : "text-sidebar-muted-foreground/60",
     props.dragging && "text-sidebar-foreground/80",
     props.isDropTarget && "text-primary",
   );
   const content = (
     <>
-      <span className="shrink-0">{props.label}</span>
+      <span className={compact ? "sr-only" : "shrink-0"}>{props.label}</span>
+      {compact ? (
+        snoozed ? (
+          <AlarmClockIcon aria-hidden className="size-3.5" />
+        ) : (
+          <CheckIcon aria-hidden className="size-3.5" />
+        )
+      ) : null}
       <span
         aria-hidden
         className={cn(
           "h-px min-w-2 flex-1",
+          compact && "hidden",
           snoozed ? "bg-blue-500/20 dark:bg-blue-400/15" : "bg-sidebar-border/60",
           props.dragging && "bg-sidebar-foreground/25",
           props.isDropTarget && "bg-primary/50",
@@ -662,6 +678,7 @@ function SidebarSectionHeader(props: {
         aria-hidden
         className={cn(
           "size-3 shrink-0 transition-transform",
+          compact && "hidden",
           props.toggle.expanded && "rotate-180",
         )}
       />
@@ -673,15 +690,22 @@ function SidebarSectionHeader(props: {
       data-testid={`sidebar-${props.marker}`}
       className="mx-0.5 h-8"
     >
-      <button
-        type="button"
-        onClick={props.toggle.onToggle}
-        aria-expanded={props.toggle.expanded}
-        data-testid={`sidebar-${snoozed ? "snoozed" : "settled"}-shelf-toggle`}
-        className={cn(className, "cursor-pointer")}
-      >
-        {content}
-      </button>
+      <Tooltip disabled={!compact}>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              onClick={props.toggle.onToggle}
+              aria-expanded={props.toggle.expanded}
+              data-testid={`sidebar-${snoozed ? "snoozed" : "settled"}-shelf-toggle`}
+              className={cn(className, "cursor-pointer")}
+            />
+          }
+        >
+          {content}
+        </TooltipTrigger>
+        <TooltipPopup side="right">{props.label}</TooltipPopup>
+      </Tooltip>
     </SortableSidebarMarker>
   );
 }
@@ -704,6 +728,9 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   onDiscard: (draftId: DraftId) => void;
 }) {
   const { composer, draftId, onDiscard, onNavigate, session } = props;
+  const compactEnabled = useCompactSidebarEnabled();
+  const { state, isMobile } = useSidebar();
+  const compact = compactEnabled && state === "collapsed" && !isMobile;
   const promptPreview =
     replaceComposerContextReferences(composer.prompt, (occurrence) => occurrence.label)
       .trim()
@@ -742,6 +769,34 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
     },
     [draftId, onDiscard],
   );
+  if (compact) {
+    return (
+      <li className="list-none py-0.5">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                data-testid="sidebar-draft-row"
+                aria-label={`Draft: ${preview}`}
+                onClick={handleActivate}
+                className={cn(
+                  "relative flex h-9 w-full cursor-pointer items-center justify-center rounded-md outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring",
+                  props.isActive ? "bg-sidebar-row-active" : draftSurfaceClassName,
+                )}
+              />
+            }
+          >
+            <SquarePenIcon aria-hidden className={cn(draftPenClassName, "size-4")} />
+          </TooltipTrigger>
+          <TooltipPopup side="right" className="max-w-80 whitespace-normal">
+            <div className="font-medium">{props.projectDisplayName}</div>
+            <div>{preview}</div>
+          </TooltipPopup>
+        </Tooltip>
+      </li>
+    );
+  }
   return (
     <li className="list-none py-0.5">
       <div
@@ -1031,6 +1086,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     variant,
     variantAction,
   } = props;
+  const compactEnabled = useCompactSidebarEnabled();
+  const { state, isMobile } = useSidebar();
+  const compact = compactEnabled && state === "collapsed" && !isMobile;
   const threadRef = useMemo(
     () => scopeThreadRef(thread.environmentId, thread.id),
     [thread.environmentId, thread.id],
@@ -1208,6 +1266,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       branchMismatch={branchMismatch}
       terminalStatus={terminalStatus}
       terminalProcessCount={terminalProcessCount}
+      compactStatus={
+        compact
+          ? (topStatus?.label ??
+            (variantAction === "unsnooze"
+              ? "Snoozed"
+              : variantAction === "unsettle"
+                ? "Settled"
+                : "Ready"))
+          : undefined
+      }
     />
   );
 
@@ -1556,6 +1624,68 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       />
     )
   ) : null;
+
+  if (compact) {
+    return (
+      <li
+        data-thread-item
+        {...sortableRootProps}
+        {...(fileDropHandlers ?? {})}
+        className="list-none py-0.5"
+      >
+        <Tooltip disabled={sortable?.isDragging}>
+          <TooltipTrigger
+            render={
+              <div
+                ref={rowRef}
+                role="button"
+                tabIndex={0}
+                aria-label={`${thread.title}${topStatus ? `, ${topStatus.label}` : ""}`}
+                aria-current={props.isActive ? "page" : undefined}
+                aria-busy={isRegeneratingTitle || undefined}
+                className={cn(
+                  rowSurfaceClassName,
+                  "flex h-9 items-center justify-center focus-visible:ring-2 focus-visible:ring-ring",
+                )}
+                onClick={handleClick}
+                onDoubleClick={handleDoubleClick}
+                onKeyDown={handleKeyDown}
+                onContextMenu={handleContextMenu}
+              />
+            }
+          >
+            {props.project ? (
+              <ProjectFavicon project={props.project} className="size-4 shrink-0" />
+            ) : driverKind ? (
+              <ProviderInstanceIcon
+                driverKind={driverKind}
+                displayName={providerEntry?.displayName ?? modelInstanceId}
+                iconClassName="size-4"
+              />
+            ) : (
+              <SquarePenIcon aria-hidden className="size-4" />
+            )}
+            {topStatus ? (
+              <span
+                aria-hidden
+                className={cn(
+                  "absolute right-0.5 bottom-0.5 size-1.5 rounded-full bg-current",
+                  topStatus.className,
+                )}
+              />
+            ) : hasUnsentDraft ? (
+              <span
+                aria-hidden
+                className="absolute right-0.5 bottom-0.5 size-1.5 rounded-full bg-primary"
+              />
+            ) : null}
+            {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+          </TooltipTrigger>
+          {detailsTooltip}
+        </Tooltip>
+      </li>
+    );
+  }
 
   if (variant === "slim") {
     return (
@@ -1989,6 +2119,9 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
 }) {
   const { thread } = props;
+  const compactEnabled = useCompactSidebarEnabled();
+  const { state, isMobile } = useSidebar();
+  const compact = compactEnabled && state === "collapsed" && !isMobile;
   const threadRef = useMemo(
     () => scopeThreadRef(thread.environmentId, thread.id),
     [thread.environmentId, thread.id],
@@ -2074,6 +2207,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
               onClick={props.onSelect}
               className={cn(
                 "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm outline-none",
+                compact && "justify-center px-0",
                 props.isHighlighted || props.isRouteActive
                   ? "bg-sidebar-row-active text-sidebar-foreground"
                   : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
@@ -2085,9 +2219,15 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
         >
           {props.project ? (
             <ProjectFavicon project={props.project} className="size-4 shrink-0" />
+          ) : compact ? (
+            <SquarePenIcon aria-hidden className="size-4" />
           ) : null}
-          <span className="min-w-0 flex-1 truncate">{thread.title}</span>
-          <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
+          <span className={compact ? "sr-only" : "min-w-0 flex-1 truncate"}>{thread.title}</span>
+          <span
+            className={
+              compact ? "sr-only" : "shrink-0 text-xs text-muted-foreground/55 tabular-nums"
+            }
+          >
             {threadTimeLabel(thread)}
           </span>
         </TooltipTrigger>
@@ -2115,7 +2255,9 @@ export default function Sidebar() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
   const router = useRouter();
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile, setOpen, state: sidebarState } = useSidebar();
+  const compactEnabled = useCompactSidebarEnabled();
+  const compact = compactEnabled && sidebarState === "collapsed" && !isMobile;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -2922,10 +3064,14 @@ export default function Sidebar() {
 
   const [renamingThreadKey, setRenamingThreadKey] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
-  const startThreadRename = useCallback((threadRef: ScopedThreadRef, title: string) => {
-    setRenamingThreadKey(scopedThreadKey(threadRef));
-    setRenamingTitle(title);
-  }, []);
+  const startThreadRename = useCallback(
+    (threadRef: ScopedThreadRef, title: string) => {
+      if (compact) setOpen(true);
+      setRenamingThreadKey(scopedThreadKey(threadRef));
+      setRenamingTitle(title);
+    },
+    [compact, setOpen],
+  );
   const cancelThreadRename = useCallback(() => setRenamingThreadKey(null), []);
   const commitThreadRename = useCallback(
     (threadRef: ScopedThreadRef, title: string, originalTitle: string) => {
@@ -4381,8 +4527,12 @@ export default function Sidebar() {
                     // popup opens under the field, is at least as wide as it,
                     // and grows to fit project names up to a cap, past which
                     // the rows truncate.
-                    anchor={headerSearchRef}
-                    className="max-w-[min(18rem,var(--available-width))] overflow-hidden"
+                    anchor={compact ? undefined : headerSearchRef}
+                    side={compact ? "right" : "bottom"}
+                    className={cn(
+                      "max-w-[min(18rem,var(--available-width))] overflow-hidden",
+                      compact && "min-w-56",
+                    )}
                   >
                     <ComboboxSearchInput
                       aria-label="Search projects"
@@ -4537,7 +4687,10 @@ export default function Sidebar() {
             ) : (
               <p
                 role="status"
-                className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
+                className={cn(
+                  "px-2 py-6 text-center text-xs text-sidebar-muted-foreground",
+                  compact && "sr-only",
+                )}
               >
                 No threads found
               </p>
@@ -4836,20 +4989,29 @@ export default function Sidebar() {
             snoozedThreads.length +
             settledThreads.length ===
             0 ? (
-            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
+            <div
+              className={cn(
+                "flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60",
+                compact && "px-0",
+              )}
+            >
               {projects.length === 0 ? (
                 <>
-                  <span>No projects yet</span>
+                  <span className={compact ? "sr-only" : undefined}>No projects yet</span>
                   <button
                     type="button"
                     onClick={openAddProjectCommandPalette}
-                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                    aria-label="Add project"
+                    className={cn(
+                      "inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+                      compact && "justify-center px-1.5",
+                    )}
                   >
                     <PlusIcon className="-mx-0.5 size-3" />
-                    Add project
+                    <span className={compact ? "sr-only" : undefined}>Add project</span>
                   </button>
                 </>
-              ) : scopedProjectGroup ? (
+              ) : compact ? null : scopedProjectGroup ? (
                 `No threads in ${scopedProjectGroup.displayName} yet`
               ) : (
                 "No threads yet"

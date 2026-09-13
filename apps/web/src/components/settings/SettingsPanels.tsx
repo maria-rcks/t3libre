@@ -501,6 +501,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(theme !== "system" ? ["Theme"] : []),
       ...(!followSystem ? ["Follow system"] : []),
       ...(themeHalves !== null ? ["Theme mix"] : []),
+      ...(settings.compactSidebarEnabled !== DEFAULT_UNIFIED_SETTINGS.compactSidebarEnabled
+        ? ["Compact sidebar"]
+        : []),
       ...(settings.appearanceContrast !== DEFAULT_UNIFIED_SETTINGS.appearanceContrast
         ? ["Contrast"]
         : []),
@@ -605,6 +608,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.browserLinkTarget,
       settings.browserAutoShowFloatingPreview,
       settings.appearanceContrast,
+      settings.compactSidebarEnabled,
       settings.diffColorScheme,
       settings.enableAgentBrowserAccess,
       settings.confirmQuit,
@@ -712,6 +716,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     }
     updateSettings({
       appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
+      compactSidebarEnabled: DEFAULT_UNIFIED_SETTINGS.compactSidebarEnabled,
       diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
@@ -1357,6 +1362,22 @@ export function AppearanceSettingsPanel() {
       </SettingsSection>
 
       <TypographySection />
+
+      <SettingsSection id="appearance-advanced" title="Advanced">
+        <SettingsRow
+          {...searchableSetting("compact-sidebar")}
+          description="Keep an icon rail when the sidebar is collapsed."
+          control={
+            <Switch
+              checked={settings.compactSidebarEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ compactSidebarEnabled: Boolean(checked) })
+              }
+              aria-label="Compact sidebar"
+            />
+          }
+        />
+      </SettingsSection>
     </SettingsPageContainer>
   );
 }
