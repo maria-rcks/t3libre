@@ -12,6 +12,7 @@ export interface ThreadNotificationSnapshot {
   completion: number | null;
   goal: Pick<ThreadGoal, "createdAt" | "status"> | null;
   suppressedTurnId: TurnId | null;
+  baselineGoalUpdatedAt: string | null;
 }
 
 const goalNotificationTitles: Partial<Record<ThreadGoal["status"], string>> = {
@@ -48,13 +49,24 @@ export function resolveThreadNotification(
   // The native turn disappears from the session before its checkpoint reaches
   // latestTurn. Keep its identity through that gap, including after clear/pause.
   const suppressedTurnId =
-    goal?.status === "active" || goalTitle || (!prior && goal)
+    goal?.status === "active" || goalTitle
       ? (thread.session?.activeTurnId ??
         prior?.suppressedTurnId ??
         thread.latestTurn?.turnId ??
         null)
       : (prior?.suppressedTurnId ?? null);
-  const snapshot = { input, completion, goal, suppressedTurnId };
+  // A retained terminal goal at reconnect does not own a newer manual turn.
+  // Keep its cutoff through clear until the delayed checkpoint identifies when
+  // the finishing turn began.
+  const baselineGoalUpdatedAt = prior
+    ? prior.baselineGoalUpdatedAt
+    : goal?.status !== "active"
+      ? (goal?.updatedAt ?? null)
+      : null;
+  const baselineGoalCompletion =
+    baselineGoalUpdatedAt !== null &&
+    Date.parse(thread.latestTurn?.requestedAt ?? "") <= Date.parse(baselineGoalUpdatedAt);
+  const snapshot = { input, completion, goal, suppressedTurnId, baselineGoalUpdatedAt };
   if (!prior) return { snapshot, notification: null };
   if (input && input !== prior.input) {
     return {
@@ -85,6 +97,7 @@ export function resolveThreadNotification(
     completion !== null &&
     (prior.completion === null || completion > prior.completion) &&
     goal?.status !== "active" &&
+    !baselineGoalCompletion &&
     thread.latestTurn?.turnId !== suppressedTurnId
   ) {
     return {

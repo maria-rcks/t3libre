@@ -435,6 +435,26 @@ describe("thread goal notifications", () => {
       expect(baseline.notification).toBeNull();
       expect(gap.notification).toBeNull();
       expect(checkpoint.notification).toBeNull();
+
+      const laterManual = makeThread({
+        ...thread,
+        session: { ...thread.session!, activeTurnId: TurnId.make("manual-turn") },
+      });
+      const reconnected = resolveThreadNotification(laterManual, "working", undefined);
+      const manualCompletion = resolveThreadNotification(
+        {
+          ...laterManual,
+          session: null,
+          latestTurn: {
+            ...makeLatestTurn(),
+            turnId: TurnId.make("manual-turn"),
+            requestedAt: "2026-03-09T10:03:00.000Z",
+          },
+        },
+        "ready",
+        reconnected.snapshot,
+      );
+      expect(manualCompletion.notification?.title).toBe("Thread completed");
     },
   );
 

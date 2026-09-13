@@ -27,6 +27,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
@@ -370,15 +371,23 @@ export const make = Effect.gen(function* () {
   const publishConfirmDeadlines = new Map<ThreadId, number>();
   // Clearing a native goal must not reinterpret its last round as a new Done
   // alert. A subsequent explicit turn restores ordinary completion behavior.
-  const goalThreads = new Map<ThreadId, GoalAwarenessTracking>();
-  const trackGoal = (
-    threadId: ThreadId,
-    update: Parameters<typeof updateGoalAwarenessTracking>[1],
-  ) => {
-    const next = updateGoalAwarenessTracking(goalThreads.get(threadId), update);
-    if (next) goalThreads.set(threadId, next);
-    return next;
-  };
+  const goalThreads = new Map<
+    ThreadId,
+    { state: GoalAwarenessTracking | undefined; sequence: number }
+  >();
+  const goalTrackingLock = yield* Semaphore.make(1);
+  const loadGoalTracking = Effect.fn("loadGoalTracking")(function* (threadId: ThreadId) {
+    const cached = goalThreads.get(threadId);
+    if (cached) return cached;
+    const history = yield* snapshotQuery.getThreadGoalAwarenessHistory(threadId);
+    const state = history.updates.reduce<GoalAwarenessTracking | undefined>(
+      updateGoalAwarenessTracking,
+      undefined,
+    );
+    const restored = { state, sequence: history.snapshotSequence };
+    goalThreads.set(threadId, restored);
+    return restored;
+  });
   let schedulePublishConfirm: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
 
   const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (threadId: ThreadId) {
@@ -446,7 +455,12 @@ export const make = Effect.gen(function* () {
 
     const thread = yield* snapshotQuery.getThreadShellById(threadId);
     if (Option.isNone(thread)) goalThreads.delete(threadId);
-    else trackGoal(threadId, { goal: thread.value.goal ?? null });
+    const trackedGoal = Option.isSome(thread)
+      ? (yield* goalTrackingLock.withPermit(loadGoalTracking(threadId))).state
+      : undefined;
+    const goalTracking = Option.isSome(thread)
+      ? updateGoalAwarenessTracking(trackedGoal, { goal: thread.value.goal ?? null })
+      : undefined;
     const project = Option.isSome(thread)
       ? yield* snapshotQuery.getProjectShellById(thread.value.projectId)
       : Option.none<OrchestrationProjectShell>();
@@ -455,9 +469,8 @@ export const make = Effect.gen(function* () {
       threadId,
       thread,
       project,
-      suppressClearedGoalCompletion:
-        goalThreads.has(threadId) && !goalThreads.get(threadId)?.ignore,
-      ignoreRetainedGoal: goalThreads.get(threadId)?.ignore ?? false,
+      suppressClearedGoalCompletion: goalTracking !== undefined && !goalTracking.ignore,
+      ignoreRetainedGoal: goalTracking?.ignore ?? false,
     });
     const publishIdentity = agentAwarenessPublishIdentity(snapshot.state);
     const publishedStateByThread = yield* Ref.get(publishedStateByThreadRef);
@@ -658,51 +671,65 @@ export const make = Effect.gen(function* () {
               eventType: event.type,
             });
           }
-          if (event.type === "thread.turn-start-requested") {
-            return Effect.gen(function* () {
-              if (!goalThreads.has(threadId)) {
-                const thread = yield* snapshotQuery.getThreadShellById(threadId);
-                if (Option.isSome(thread)) trackGoal(threadId, { goal: thread.value.goal ?? null });
-              }
-              if (
-                !goalThreads.has(threadId) ||
-                goalThreads.get(threadId)?.goal?.status === "active"
-              ) {
-                return;
-              }
-              const start = yield* snapshotQuery.getTurnStartMessage({
-                threadId,
-                messageId: event.payload.messageId,
-              });
-              if (
-                Option.isSome(start) &&
-                (start.value.message.attachments?.length ?? 0) === 0 &&
-                /^\/goal(?:\s|$)/.test(start.value.message.text.trim())
-              )
-                return;
-              trackGoal(threadId, { manualTurn: true });
-            }).pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("agent goal awareness update failed", cause),
+          const updateGoalTracking = (
+            event.type === "thread.turn-start-requested" ||
+            (event.type === "thread.meta-updated" && event.payload.goal !== undefined)
+              ? goalTrackingLock.withPermit(
+                  Effect.gen(function* () {
+                    const cached = yield* loadGoalTracking(threadId);
+                    if (event.sequence <= cached.sequence) return;
+                    let next = cached.state;
+                    if (event.type === "thread.meta-updated" && event.payload.goal !== undefined) {
+                      next = updateGoalAwarenessTracking(next, { goal: event.payload.goal });
+                    } else if (
+                      event.type === "thread.turn-start-requested" &&
+                      next?.goal?.status !== "active"
+                    ) {
+                      const start = yield* snapshotQuery.getTurnStartMessage({
+                        threadId,
+                        messageId: event.payload.messageId,
+                      });
+                      if (
+                        !(
+                          Option.isSome(start) &&
+                          (start.value.message.attachments?.length ?? 0) === 0 &&
+                          /^\/goal(?:\s|$)/.test(start.value.message.text.trim())
+                        )
+                      ) {
+                        next = updateGoalAwarenessTracking(next, { manualTurn: true });
+                      }
+                    }
+                    goalThreads.set(threadId, { state: next, sequence: event.sequence });
+                  }),
+                )
+              : Effect.void
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("agent goal awareness update failed", cause),
+            ),
+          );
+          if (!shouldPublishAgentAwarenessEvent(event)) {
+            return updateGoalTracking.pipe(
+              Effect.andThen(
+                Effect.logDebug(
+                  "agent activity publishing ignored event without activity changes",
+                  {
+                    eventType: event.type,
+                    threadId,
+                  },
+                ),
               ),
             );
           }
-          if (event.type === "thread.meta-updated" && event.payload.goal !== undefined) {
-            trackGoal(threadId, { goal: event.payload.goal });
-          }
-          if (!shouldPublishAgentAwarenessEvent(event)) {
-            return Effect.logDebug(
-              "agent activity publishing ignored event without activity changes",
-              {
+          return updateGoalTracking.pipe(
+            Effect.andThen(
+              Effect.logDebug("agent activity publishing queued thread publish", {
                 eventType: event.type,
                 threadId,
-              },
-            );
-          }
-          return Effect.logDebug("agent activity publishing queued thread publish", {
-            eventType: event.type,
-            threadId,
-          }).pipe(Effect.andThen(worker.enqueue(threadId)));
+              }),
+            ),
+            Effect.andThen(worker.enqueue(threadId)),
+          );
         }),
       );
     },
