@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon, MessageCircleIcon, PlusIcon, XIcon } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useClientSettings } from "~/hooks/useSettings";
@@ -47,6 +47,9 @@ export function DraftProjectPicker({
   activeProjectRef,
   activeProjectTitle,
 }: DraftProjectPickerProps) {
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const chipRef = useRef<HTMLSpanElement>(null);
+  const [chatOffset, setChatOffset] = useState<number | null>(null);
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments } = useEnvironments();
@@ -266,7 +269,10 @@ export function DraftProjectPicker({
   );
 
   const chip = (
-    <span className="inline-flex max-w-full items-center rounded-xl bg-muted/70 align-middle text-[0.85em]">
+    <span
+      ref={chipRef}
+      className="inline-flex max-w-full items-center rounded-xl bg-muted/70 align-middle text-[0.85em]"
+    >
       {!isChat && chatEntry && activeProject ? (
         <Tooltip>
           <TooltipTrigger
@@ -274,7 +280,14 @@ export function DraftProjectPicker({
               <button
                 type="button"
                 aria-label="Remove project"
-                onClick={() => selectProject(chatEntry.group.projectKey)}
+                onClick={() => {
+                  const titleBounds = titleRef.current?.getBoundingClientRect();
+                  const chipBounds = chipRef.current?.getBoundingClientRect();
+                  if (titleBounds && chipBounds) {
+                    setChatOffset(chipBounds.left - titleBounds.left - titleBounds.width / 2);
+                  }
+                  selectProject(chatEntry.group.projectKey);
+                }}
                 className="group/project-icon relative ms-1 flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               />
             }
@@ -296,14 +309,32 @@ export function DraftProjectPicker({
   );
 
   return (
-    <h1 className="mx-auto grid w-full grid-cols-1 items-end gap-2 font-normal text-2xl text-foreground tracking-tight sm:grid-cols-2 sm:text-3xl">
-      <span className="text-center sm:text-end">
-        {isChat ? "What would you like to" : "What should we build in"}
-      </span>
-      <span className="flex w-64 min-w-0 max-w-full items-center gap-x-1 justify-self-center text-start sm:w-full">
-        {chip}
-        <span className={isChat ? "ms-1 shrink-0" : "shrink-0"}>{isChat ? "about?" : "?"}</span>
-      </span>
+    <h1
+      ref={titleRef}
+      className={
+        isChat && chatOffset !== null
+          ? "mx-auto grid w-full grid-cols-1 items-end gap-y-2 font-normal text-2xl text-foreground tracking-tight sm:grid-cols-[var(--chat-context-start)_minmax(0,1fr)] sm:text-3xl"
+          : "mx-auto w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
+      }
+      style={
+        isChat && chatOffset !== null
+          ? ({ "--chat-context-start": `calc(50% + ${chatOffset}px)` } as CSSProperties)
+          : undefined
+      }
+    >
+      {isChat && chatOffset !== null ? (
+        <>
+          <span className="text-center sm:pe-2 sm:text-end">What would you like to</span>
+          <span className="ms-[var(--chat-context-start)] flex min-w-0 items-center gap-x-2 text-start sm:ms-0">
+            {chip}
+            <span className="shrink-0">about?</span>
+          </span>
+        </>
+      ) : isChat ? (
+        <>What would you like to {chip} about?</>
+      ) : (
+        <>What should we build in {chip}?</>
+      )}
     </h1>
   );
 }
