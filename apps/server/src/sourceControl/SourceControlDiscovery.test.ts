@@ -841,11 +841,28 @@ it.effect("routes mounted Forgejo repositories without repeating the mount in AP
       });
       assert.strictEqual(result.stdout, "[]");
     }
+    const sameOwnerAsMount = yield* cli.resolveRepository({
+      cwd: "/repo",
+      repository: "forgejo/project",
+      context: {
+        provider: { kind: "forgejo", name: "Forgejo", baseUrl: "https://code.test/forgejo" },
+        remoteName: "origin",
+        remoteUrl: "ssh://git@code.test/forgejo/project.git",
+      },
+    });
+    assert.strictEqual(sameOwnerAsMount.command, "tea");
+    assert.strictEqual(sameOwnerAsMount.repository, "forgejo/project");
   }).pipe(
     Effect.provideService(
       FileSystem.FileSystem,
       FileSystem.makeNoop({
-        exists: () => Effect.succeed(false),
+        exists: () => Effect.succeed(true),
+        readFileString: () =>
+          Effect.succeed(
+            encodeJson({
+              hosts: { "code.test/forgejo": { type: "Application", token: "test-token" } },
+            }),
+          ),
       }),
     ),
     Effect.provideService(
@@ -857,6 +874,8 @@ it.effect("routes mounted Forgejo repositories without repeating the mount in AP
     Effect.provide(
       Layer.mock(VcsProcess.VcsProcess)({
         run: (input) => {
+          if (input.command === "git")
+            return Effect.succeed(processOutput("", { exitCode: ChildProcessSpawner.ExitCode(2) }));
           if (input.args[0] === "login")
             return Effect.succeed(
               processOutput(
@@ -890,30 +909,30 @@ it.effect("routes mounted Forgejo repositories without repeating the mount in AP
   ),
 );
 
-it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API mount", () => {
+it.effect("prefers fj for HTTP and ported SSH aliases on root servers", () => {
   const commands: string[] = [];
   const requests: string[] = [];
   return Effect.gen(function* () {
     const cli = yield* ForgejoCli.make;
     for (const remoteUrl of [
-      "http://forgejo.local:3000/forgejo/maria/project.git",
+      "http://forgejo.local:3000/maria/project.git",
       "ssh://git@ssh.forgejo.local:2222/maria/project.git",
       "ssh://git@forgejo.local:2222/maria/project.git",
     ]) {
       const result = yield* cli.api({
         cwd: "/repo",
-        repository: "forgejo/maria/project",
+        repository: "maria/project",
         context: {
           provider: {
             kind: "forgejo",
             name: "Forgejo",
-            baseUrl: "http://forgejo.local:3000/forgejo",
+            baseUrl: "http://forgejo.local:3000",
           },
           remoteName: "origin",
           remoteUrl,
           requestedHost: "forgejo.local:3000",
         },
-        path: "repos/forgejo/maria/project/issues/42/comments",
+        path: "repos/maria/project/issues/42/comments",
         method: "POST",
         body: { body: "verified through fj" },
       });
@@ -921,9 +940,9 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
     }
     assert.deepStrictEqual(commands, ["fj"]);
     assert.deepStrictEqual(requests, [
-      "http://forgejo.local:3000/forgejo/api/v1/repos/maria/project/issues/42/comments",
-      "http://forgejo.local:3000/forgejo/api/v1/repos/maria/project/issues/42/comments",
-      "http://forgejo.local:3000/forgejo/api/v1/repos/maria/project/issues/42/comments",
+      "http://forgejo.local:3000/api/v1/repos/maria/project/issues/42/comments",
+      "http://forgejo.local:3000/api/v1/repos/maria/project/issues/42/comments",
+      "http://forgejo.local:3000/api/v1/repos/maria/project/issues/42/comments",
     ]);
     const viewer = yield* cli.api({
       cwd: "/upstream-only",
@@ -931,7 +950,10 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
       path: "user",
     });
     assert.strictEqual(viewer.stdout, '{"login":"maria"}');
-    assert.strictEqual(requests.at(-1), "https://forgejo.local:3000/forgejo/api/v1/user");
+    assert.strictEqual(requests.at(-1), "https://forgejo.local:3000/api/v1/user");
+    const httpViewer = yield* cli.api({ cwd: "/repo", host: "forgejo.local:3000", path: "user" });
+    assert.strictEqual(httpViewer.stdout, '{"login":"maria"}');
+    assert.strictEqual(requests.at(-1), "http://forgejo.local:3000/api/v1/user");
   }).pipe(
     Effect.provideService(
       FileSystem.FileSystem,
@@ -941,10 +963,10 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
           Effect.succeed(
             encodeJson({
               hosts: {
-                "forgejo.local:3000/forgejo": { type: "Application", token: "test-token" },
-                "forgejo.local:4000/forgejo": { type: "Application", token: "other-token" },
+                "forgejo.local:3000": { type: "Application", token: "test-token" },
+                "forgejo.local:4000": { type: "Application", token: "other-token" },
               },
-              aliases: { "ssh.forgejo.local:2222": "forgejo.local:3000/forgejo" },
+              aliases: { "ssh.forgejo.local:2222": "forgejo.local:3000" },
             }),
           ),
       }),
@@ -976,12 +998,18 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
       Layer.mock(VcsProcess.VcsProcess)({
         run: (input) => {
           commands.push(input.command);
+          if (input.command === "git")
+            return Effect.succeed(
+              input.cwd === "/upstream-only"
+                ? processOutput("", { exitCode: ChildProcessSpawner.ExitCode(2) })
+                : processOutput("http://forgejo.local:3000/maria/project.git"),
+            );
           assert.strictEqual(input.command, "fj");
           assert.deepStrictEqual(input.args, [
             "--host",
             input.cwd === "/upstream-only"
-              ? "https://forgejo.local:3000/forgejo"
-              : "http://forgejo.local:3000/forgejo",
+              ? "https://forgejo.local:3000"
+              : "http://forgejo.local:3000",
             "whoami",
           ]);
           return Effect.succeed(processOutput(""));
@@ -1148,6 +1176,10 @@ it.effect("falls back to tea when fj is missing or has no account for this serve
           Layer.mock(VcsProcess.VcsProcess)({
             run: (input) => {
               commands.push(input.command);
+              if (input.command === "git")
+                return Effect.succeed(
+                  processOutput("", { exitCode: ChildProcessSpawner.ExitCode(2) }),
+                );
               if (input.command === "fj")
                 return Effect.fail(
                   new VcsProcessSpawnError({

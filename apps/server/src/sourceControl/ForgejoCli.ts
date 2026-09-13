@@ -300,7 +300,8 @@ export const make = Effect.gen(function* () {
     const remote = remoteUrl ? parseForgejoRemote(remoteUrl) : null;
     return Object.keys(keys.hosts).flatMap((host) => {
       const url = parseForgejoRemote(`https://${host}`);
-      if (!url) return [];
+      // fj 0.6 drops URL mounts during whoami and OAuth renewal; tea supports them.
+      if (!url || url.path) return [];
       // fj omits the scheme in storage. Only an explicit matching HTTP remote opts into HTTP.
       const scheme =
         remote && !remote.ssh && remote.host === url.host && /^http:\/\//i.test(remoteUrl ?? "")
@@ -488,7 +489,7 @@ export const make = Effect.gen(function* () {
       referenceRemote ??
       (input.repository ? parseForgejoRemote(input.repository) : null) ??
       (input.context ? parseForgejoRemote(input.context.remoteUrl) : null);
-    if (!remote && (!input.repository || input.host) && !(hostOnly && input.host)) {
+    if (!remote && (!input.repository || input.host)) {
       const result = yield* process
         .run({
           operation: "ForgejoCli.remote",
@@ -586,7 +587,9 @@ export const make = Effect.gen(function* () {
       "";
     const basePath = new URL(login.url).pathname.replace(/^\/+|\/+$/g, "");
     const relativePath =
-      basePath && path.startsWith(`${basePath}/`) ? path.slice(basePath.length + 1) : path;
+      basePath && path.split("/").length > 2 && path.startsWith(`${basePath}/`)
+        ? path.slice(basePath.length + 1)
+        : path;
     const repositoryPath = relativePath.replace(/\/pulls\/\d+.*$/, "").replace(/\.git$/, "");
     if (command === "fj" && !repositoryPath.includes("/")) {
       login = { ...login, user: yield* getAccount({ cwd: input.cwd, baseUrl: login.url }) };

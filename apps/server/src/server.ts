@@ -357,7 +357,7 @@ const RepositoryIdentityResolverLayerLive = Layer.effect(
         const baseUrl = handle.context.provider.baseUrl.replace(/\/+$/, "");
         const basePath = new URL(baseUrl).pathname.replace(/^\/+|\/+$/g, "");
         const path =
-          basePath && remote.path.startsWith(`${basePath}/`)
+          !remote.ssh && basePath && remote.path.startsWith(`${basePath}/`)
             ? remote.path.slice(basePath.length + 1)
             : remote.path;
         return { ...identity, provider: "forgejo", webUrl: `${baseUrl}/${path}` };
