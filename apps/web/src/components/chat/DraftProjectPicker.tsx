@@ -137,7 +137,7 @@ export function DraftProjectPicker({
       project.id === activeProjectRef?.projectId &&
       project.environmentId === activeProjectRef.environmentId,
   );
-  const activeProjectDisplayName = isChat ? "chat" : activeProjectTitle;
+  const activeProjectDisplayName = isChat ? "Chat" : activeProjectTitle;
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
@@ -202,7 +202,7 @@ export function DraftProjectPicker({
               <MessageCircleIcon className="size-5" />
             </span>
           ) : null}
-          <span className={isChat ? "truncate px-2 py-1" : "truncate"}>
+          <span className={isChat ? "truncate ps-1 pe-3 py-1" : "truncate"}>
             {activeProjectDisplayName ?? "Add project"}
           </span>
         </TooltipTrigger>
@@ -302,7 +302,7 @@ export function DraftProjectPicker({
       </span>
       <span className="flex w-64 min-w-0 max-w-full items-center gap-x-1 justify-self-center text-start sm:w-full">
         {chip}
-        <span className="shrink-0">{isChat ? "about?" : "?"}</span>
+        <span className={isChat ? "ms-1 shrink-0" : "shrink-0"}>{isChat ? "about?" : "?"}</span>
       </span>
     </h1>
   );
