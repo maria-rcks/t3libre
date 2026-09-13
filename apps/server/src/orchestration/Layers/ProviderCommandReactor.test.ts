@@ -678,7 +678,7 @@ describe("ProviderCommandReactor", () => {
     }).pipe(Effect.scoped),
   );
 
-  effectIt.effect.each(["model", "options", "default options", "untracked session"] as const)(
+  effectIt.effect.each(["model", "options", "default options", "recovered", "provider"] as const)(
     "rejects a pending Codex %s change only when reusing a live goal session",
     (change) =>
       Effect.gen(function* () {
@@ -697,7 +697,7 @@ describe("ProviderCommandReactor", () => {
         );
         const sendGoal = (
           index: number,
-          modelSelection: ModelSelection,
+          modelSelection: ModelSelection | undefined,
           failed: boolean,
           text = "/goal review files",
         ) =>
@@ -713,7 +713,7 @@ describe("ProviderCommandReactor", () => {
                 text,
                 attachments: [],
               },
-              modelSelection,
+              ...(modelSelection ? { modelSelection } : {}),
               interactionMode: "default",
               runtimeMode: "approval-required",
               createdAt: "2026-01-01T00:00:00.000Z",
@@ -732,11 +732,15 @@ describe("ProviderCommandReactor", () => {
             yield* Effect.promise(() => harness.drain());
             expect(yield* Effect.promise(() => harness.readPendingTurnStarts())).toEqual([]);
           });
-        if (change === "untracked session") {
+        if (change === "recovered" || change === "provider") {
+          const nativeSelection =
+            change === "provider"
+              ? createModelSelection(ProviderInstanceId.make("claude"), "claude-sonnet-4-6")
+              : initial;
           yield* harness.startSession(undefined, {
             threadId: ThreadId.make("thread-1"),
-            providerInstanceId: initial.instanceId,
-            modelSelection: initial,
+            providerInstanceId: nativeSelection.instanceId,
+            modelSelection: nativeSelection,
             runtimeMode: "approval-required",
             cwd: "/tmp/provider-project",
           });
@@ -747,8 +751,8 @@ describe("ProviderCommandReactor", () => {
             session: {
               threadId: ThreadId.make("thread-1"),
               status: "ready",
-              providerName: "codex",
-              providerInstanceId: initial.instanceId,
+              providerName: change === "provider" ? "claudeAgent" : "codex",
+              providerInstanceId: nativeSelection.instanceId,
               runtimeMode: "approval-required",
               activeTurnId: null,
               lastError: null,
@@ -756,8 +760,21 @@ describe("ProviderCommandReactor", () => {
             },
             createdAt: "2026-01-01T00:00:00.000Z",
           });
-          yield* sendGoal(0, initial, true);
+          yield* sendGoal(0, change === "provider" ? undefined : initial, true);
           expect(harness.startSession).toHaveBeenCalledTimes(1);
+          expect(harness.stopSession).not.toHaveBeenCalled();
+          expect(harness.sendTurn).not.toHaveBeenCalled();
+          if (change === "provider") {
+            expect(harness.generateThreadTitle).not.toHaveBeenCalled();
+            expect(harness.generateBranchName).not.toHaveBeenCalled();
+            expect(harness.createWorktree).not.toHaveBeenCalled();
+            const state = yield* Effect.promise(() => harness.readModel());
+            expect(
+              state.threads[0]?.activities.find(
+                (activity) => activity.summary === "Goal update failed",
+              )?.payload,
+            ).toMatchObject({ detail: expect.stringContaining("Explicitly select a provider") });
+          }
           return;
         }
         yield* sendGoal(0, initial, false);
