@@ -1989,6 +1989,23 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     </Tooltip>
                   ) : null}
                 </span>
+              ) : compactRows && isRemote ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        role="img"
+                        aria-label={props.environmentLabel ?? "Remote environment"}
+                        className="inline-flex size-4 shrink-0 items-center justify-center text-sidebar-muted-foreground/70"
+                      />
+                    }
+                  >
+                    <EnvironmentMachineIcon kind={props.environmentMachine} className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">
+                    {props.environmentLabel ?? "Remote environment"}
+                  </TooltipPopup>
+                </Tooltip>
               ) : null}
               {compactRows ? (
                 title
