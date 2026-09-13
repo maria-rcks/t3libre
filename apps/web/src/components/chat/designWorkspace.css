@@ -1,0 +1,226 @@
+/* These opt-in directions keep the transcript and its controls on the real render path. */
+[data-design-direction]:not([data-design-direction="current"]) [data-chat-header] {
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+[data-design-direction]:not([data-design-direction="current"]) [data-timeline-root] {
+  padding-top: 24px;
+  padding-inline: 12px;
+}
+[data-design-direction]:not([data-design-direction="current"]) .design-project-context {
+  font-size: 12px;
+}
+[data-design-direction]:not([data-design-direction="current"])
+  [data-timeline-row-kind="work-toggle"],
+[data-design-direction]:not([data-design-direction="current"])
+  [data-timeline-row-kind="work-live"] {
+  color: var(--muted-foreground);
+}
+
+/* Linen: a title-led page, with project context below the title. */
+[data-design-direction="linen"] [data-chat-header] {
+  height: 116px;
+  min-height: 116px;
+  padding-inline: 38px;
+  border-bottom: 0;
+}
+[data-design-direction="linen"] .design-workspace-breadcrumb ol,
+[data-design-direction="gallery"] .design-workspace-breadcrumb ol {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 9px;
+}
+[data-design-direction="linen"] .design-chat-heading .design-thread-title {
+  width: 100%;
+  font-size: 27px;
+  letter-spacing: -0.9px;
+  line-height: 1.25;
+  font-weight: 550;
+}
+[data-design-direction="linen"] [data-timeline-root] {
+  max-width: 800px;
+  padding-top: 34px;
+}
+[data-design-direction="linen"] [data-message-role="user"] > div {
+  align-items: stretch;
+}
+[data-design-direction="linen"] [data-message-role="user"] > div > div:first-child {
+  max-width: 100%;
+  border-radius: 0;
+  background: transparent;
+  border-left: 2px solid #b3a18c;
+  padding: 8px 0 8px 22px;
+}
+[data-design-direction="linen"] [data-message-role="assistant"] {
+  padding-block: 22px 32px;
+}
+[data-design-direction="linen"] [data-message-role="assistant"] p {
+  line-height: 1.8;
+}
+
+/* Noir: one narrow, uninterrupted reading surface. */
+[data-design-direction="noir"] [data-chat-header] {
+  height: 62px;
+  min-height: 62px;
+  padding-inline: 30px;
+  border-bottom-color: transparent;
+}
+[data-design-direction="noir"] .design-chat-heading .design-thread-title {
+  font-size: 12px;
+  font-weight: 450;
+}
+[data-design-direction="noir"] .design-project-context {
+  font-size: 11px;
+}
+[data-design-direction="noir"] [data-timeline-root] {
+  max-width: 704px;
+  padding-top: 52px;
+}
+[data-design-direction="noir"] [data-message-role="user"] > div > div:first-child {
+  max-width: 88%;
+  border-radius: 18px 18px 4px 18px;
+  background: #272729;
+  padding: 16px 20px;
+}
+[data-design-direction="noir"] [data-message-role="assistant"] {
+  padding-block: 24px;
+}
+[data-design-direction="noir"] [data-message-role="assistant"] p {
+  line-height: 1.8;
+  color: #d1d0ce;
+}
+
+/* Capsule: messages become separate objects within the floating workspace. */
+[data-design-direction="capsule"] [data-chat-header] {
+  min-height: 64px;
+  height: 64px;
+  padding-inline: 28px;
+  border-bottom: 0;
+}
+[data-design-direction="capsule"] .design-project-context {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 5px 9px;
+}
+[data-design-direction="capsule"] [data-timeline-root] {
+  max-width: 820px;
+  padding-top: 28px;
+}
+[data-design-direction="capsule"] [data-message-role="user"] > div > div:first-child {
+  border-radius: 24px 24px 7px 24px;
+  background: #dbe4ec;
+  padding: 18px 22px;
+}
+[data-design-direction="capsule"] [data-message-role="assistant"] > div:first-child {
+  border: 1px solid #e4e8ed;
+  border-radius: 24px;
+  background: #fff;
+  padding: 24px 28px;
+  box-shadow: 0 5px 22px #24324406;
+}
+[data-design-direction="capsule"] [data-message-role="assistant"] {
+  padding-block: 12px 24px;
+}
+[data-design-direction="capsule"] [data-timeline-row-kind="work-toggle"],
+[data-design-direction="capsule"] [data-timeline-row-kind="work-live"] {
+  padding-inline: 20px;
+}
+
+/* Terminal: context stays on the toolbar and the transcript stays dense. */
+[data-design-direction="terminal"] [data-chat-header] {
+  height: 44px;
+  min-height: 44px;
+  padding-inline: 18px;
+}
+[data-design-direction="terminal"] .design-workspace-breadcrumb,
+[data-design-direction="terminal"] [data-chat-header-actions] {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+[data-design-direction="terminal"] .design-chat-heading .design-thread-title {
+  font-size: 12px;
+}
+[data-design-direction="terminal"] [data-timeline-root] {
+  max-width: 1100px;
+  padding: 20px 28px 0;
+}
+[data-design-direction="terminal"] [data-message-role="user"] > div {
+  align-items: stretch;
+}
+[data-design-direction="terminal"] [data-message-role="user"] > div > div:first-child {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--foreground);
+  border-radius: 0;
+  max-width: 100%;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+[data-design-direction="terminal"] [data-message-role="assistant"] {
+  padding-block: 8px 16px;
+}
+[data-design-direction="terminal"] [data-message-role="assistant"] p {
+  font-size: 13px;
+  line-height: 1.65;
+}
+[data-design-direction="terminal"] [data-timeline-row-kind="work-toggle"],
+[data-design-direction="terminal"] [data-timeline-row-kind="work-live"] {
+  font-family: var(--font-mono);
+  border-left: 1px solid var(--border);
+  padding-left: 16px;
+}
+
+/* Gallery: generous page margins, a large title, and quiet ruled sections. */
+[data-design-direction="gallery"] [data-chat-header] {
+  min-height: 136px;
+  height: 136px;
+  padding-inline: 56px;
+  border-bottom: 0;
+}
+[data-design-direction="gallery"] .design-chat-heading .design-thread-title {
+  width: 100%;
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: -1.4px;
+  line-height: 1.2;
+}
+[data-design-direction="gallery"] [data-timeline-root] {
+  max-width: 920px;
+  padding-top: 42px;
+  padding-inline: 32px;
+}
+[data-design-direction="gallery"] [data-message-role="user"] > div {
+  align-items: stretch;
+}
+[data-design-direction="gallery"] [data-message-role="user"] > div > div:first-child {
+  max-width: 100%;
+  border-radius: 0;
+  border-block: 1px solid var(--border);
+  background: transparent;
+  padding: 26px 0;
+}
+[data-design-direction="gallery"] [data-message-role="assistant"] {
+  padding-block: 30px 42px;
+}
+[data-design-direction="gallery"] [data-message-role="assistant"] p {
+  font-size: 16px;
+  line-height: 1.85;
+}
+
+@media (max-width: 767px) {
+  [data-design-direction]:not([data-design-direction="current"]) [data-chat-header] {
+    padding-inline: 14px;
+    min-height: 64px;
+    height: 64px;
+  }
+  [data-design-direction="linen"] .design-chat-heading .design-thread-title,
+  [data-design-direction="gallery"] .design-chat-heading .design-thread-title {
+    font-size: 18px;
+    letter-spacing: -0.4px;
+  }
+  [data-design-direction]:not([data-design-direction="current"]) [data-timeline-root] {
+    padding-inline: 8px;
+    padding-top: 16px;
+  }
+  [data-design-direction="capsule"] [data-message-role="assistant"] > div:first-child {
+    padding: 16px;
+  }
+}

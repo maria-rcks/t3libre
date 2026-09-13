@@ -45,6 +45,9 @@ import {
   useSidebarVisibility,
 } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { useDesignDirection, type DesignDirection } from "~/designDirections";
+import { DesignDirectionPicker } from "./DesignDirectionPicker";
+import "./designDirections.css";
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "90px";
 
@@ -70,12 +73,13 @@ function readInitialThreadSidebarWidth(): number {
 }
 
 function SidebarControl() {
+  const direction = useDesignDirection();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { toggleSidebar } = useSidebar();
   const isSidebarVisible = useSidebarVisibility();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const stageBackdropVariant = useSidebarStageBackdropVariant(
-    environmentIdentificationMode === "artwork",
+    environmentIdentificationMode === "artwork" && direction === "current",
   );
   const shortcutLabel = shortcutLabelForCommand(keybindings, "sidebar.toggle");
 
@@ -142,6 +146,20 @@ function ProjectProjectionRetention() {
 }
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
+  const direction = useDesignDirection();
+  const [designSidebarStates, setDesignSidebarStates] = useState<
+    Partial<Record<DesignDirection, boolean>>
+  >({});
+  const designSidebarOpen = designSidebarStates[direction] ?? direction !== "noir";
+  const setDesignSidebarOpen = (open: boolean) =>
+    setDesignSidebarStates((states) => ({ ...states, [direction]: open }));
+  useEffect(() => {
+    if (direction === "current") delete document.documentElement.dataset.designDirection;
+    else document.documentElement.dataset.designDirection = direction;
+    return () => {
+      delete document.documentElement.dataset.designDirection;
+    };
+  }, [direction]);
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
@@ -174,7 +192,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       : false;
   });
   const sidebarProviderStyle = {
-    "--sidebar-width": `${sidebarWidth}px`,
+    "--sidebar-width": `${direction === "gallery" ? 340 : direction === "capsule" ? 300 : direction === "linen" ? 244 : direction === "terminal" ? 260 : sidebarWidth}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
     ...(isMacosDesktop && !isWindowFullscreen
       ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
@@ -222,6 +240,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
       <SidebarProvider
         className="h-dvh! min-h-0!"
+        data-design-direction={direction}
+        {...(direction !== "current"
+          ? { open: designSidebarOpen, onOpenChange: setDesignSidebarOpen }
+          : {})}
         data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
         defaultOpen
         style={sidebarProviderStyle}
@@ -256,6 +278,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         </Sidebar>
         {children}
         <SidebarControl />
+        <DesignDirectionPicker />
       </SidebarProvider>
     </PanelAnimationSuppressionProvider>
   );

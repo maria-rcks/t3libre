@@ -1,4 +1,6 @@
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
+import { useDesignDirection } from "~/designDirections";
+import "./sidebar/designNavigation.css";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
@@ -1031,6 +1033,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     variant,
     variantAction,
   } = props;
+  const designDirection = useDesignDirection();
   const threadRef = useMemo(
     () => scopeThreadRef(thread.environmentId, thread.id),
     [thread.environmentId, thread.id],
@@ -1557,7 +1560,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     )
   ) : null;
 
-  if (variant === "slim") {
+  if (
+    variant === "slim" ||
+    designDirection === "noir" ||
+    designDirection === "terminal" ||
+    designDirection === "linen"
+  ) {
     return (
       <li
         data-thread-item
@@ -1577,6 +1585,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 role="button"
                 tabIndex={0}
                 data-testid="sidebar-row-slim"
+                data-design-thread-row
+                data-active={props.isActive || undefined}
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
                 onClick={handleClick}
@@ -1599,6 +1609,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             </span>
             {draftIndicator}
             {title}
+            {designDirection !== "current" && topStatus ? (
+              <span
+                role="img"
+                aria-label={topStatus.label}
+                className={cn("inline-flex shrink-0", topStatus.className)}
+              >
+                {topStatus.icon === "failed" ||
+                topStatus.icon === "approval" ||
+                topStatus.icon === "input" ? (
+                  <CircleAlertIcon className="size-3.5" />
+                ) : (
+                  <span className="size-1.5 rounded-full bg-current" />
+                )}
+              </span>
+            ) : null}
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1730,6 +1755,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               role="button"
               tabIndex={0}
               data-testid="sidebar-row-card"
+              data-design-thread-row
+              data-active={props.isActive || undefined}
               aria-busy={isRegeneratingTitle || undefined}
               className={rowSurfaceClassName}
               onClick={handleClick}
@@ -1739,8 +1766,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
-            <div className="flex h-5 min-w-0 items-center gap-1.5">
+          <div className="design-thread-card relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+            {(designDirection === "capsule" || designDirection === "gallery") && (
+              <div className="design-thread-title flex min-w-0">{title}</div>
+            )}
+            <div className="design-thread-context flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
               {props.project ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />
@@ -1895,18 +1925,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               )}
             </div>
             <div className="mt-1 flex min-w-0">
-              {title}
+              {designDirection !== "capsule" && designDirection !== "gallery" ? title : null}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
                   Regenerating title
                 </span>
               ) : null}
             </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+            <div className="design-thread-metadata mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
-              {thread.branch ? (
+              {thread.branch && designDirection !== "capsule" && designDirection !== "gallery" ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
                   <span className="min-w-0 flex-1 truncate whitespace-nowrap text-muted-foreground/40">

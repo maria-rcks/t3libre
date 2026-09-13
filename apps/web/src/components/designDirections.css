@@ -1,0 +1,169 @@
+.design-direction-picker {
+  position: fixed;
+  right: 12px;
+  bottom: 10px;
+  z-index: 110;
+  color: var(--muted-foreground);
+}
+
+/* Development palettes also reach the existing portaled menus. */
+html[data-design-direction] {
+  --background: var(--design-canvas) !important;
+  --foreground: var(--design-text) !important;
+  --card: var(--design-surface) !important;
+  --card-foreground: var(--design-text) !important;
+  --popover: var(--design-surface) !important;
+  --popover-foreground: var(--design-text) !important;
+  --muted: var(--design-hover) !important;
+  --muted-foreground: var(--design-muted) !important;
+  --secondary: var(--design-hover) !important;
+  --secondary-foreground: var(--design-text) !important;
+  --accent: var(--design-hover) !important;
+  --accent-foreground: var(--design-text) !important;
+  --border: var(--design-border) !important;
+  --input: var(--design-border) !important;
+  --primary: var(--design-text) !important;
+  --primary-foreground: var(--design-canvas) !important;
+  --placeholder: var(--design-muted) !important;
+  --secondary-label: var(--design-muted) !important;
+  --icon-muted: var(--design-muted) !important;
+  --message: var(--design-hover) !important;
+  --message-surface: var(--design-hover) !important;
+  --message-foreground: var(--design-text) !important;
+  --surface-raised: var(--design-surface) !important;
+  --sidebar: var(--design-sidebar) !important;
+  --sidebar-foreground: var(--design-text) !important;
+  --sidebar-muted-foreground: var(--design-muted) !important;
+  --sidebar-border: var(--design-border) !important;
+  --sidebar-control-surface: var(--design-hover) !important;
+  --sidebar-row-hover: var(--design-hover) !important;
+  --sidebar-row-active: var(--design-surface) !important;
+  --sidebar-row-selected: var(--design-surface) !important;
+  --toolbar-background: var(--design-canvas) !important;
+  --toolbar-foreground: var(--design-text) !important;
+  --toolbar-border: var(--design-border) !important;
+  --toolbar-control: var(--design-surface) !important;
+  --toolbar-control-foreground: var(--design-muted) !important;
+  --ring: var(--design-muted) !important;
+  --appearance-contrast-boost: 0%;
+  --appearance-contrast-border-boost: 0%;
+}
+
+html[data-design-direction="linen"] {
+  --design-canvas: #f8f6f1;
+  --design-sidebar: #eeece5;
+  --design-surface: #fffdf8;
+  --design-text: #33372e;
+  --design-muted: #777b6f;
+  --design-hover: #e9e9df;
+  --design-border: #dcded1;
+  --design-radius: 6px;
+}
+
+html[data-design-direction="noir"] {
+  --design-canvas: #121212;
+  --design-sidebar: #171717;
+  --design-surface: #1e1e1e;
+  --design-text: #e7e5df;
+  --design-muted: #94938e;
+  --design-hover: #252525;
+  --design-border: #30302d;
+  --design-radius: 22px;
+}
+
+html[data-design-direction="capsule"] {
+  --design-canvas: #f3f4f7;
+  --design-sidebar: #e8ebf1;
+  --design-surface: #ffffff;
+  --design-text: #303748;
+  --design-muted: #758094;
+  --design-hover: #e8ecf3;
+  --design-border: #dce1ea;
+  --design-radius: 32px;
+}
+
+html[data-design-direction="terminal"] {
+  --design-canvas: #151718;
+  --design-sidebar: #1b1e20;
+  --design-surface: #1c2022;
+  --design-text: #d9dfde;
+  --design-muted: #899390;
+  --design-hover: #282d2e;
+  --design-border: #343a3b;
+  --design-radius: 2px;
+  --workspace-topbar-height: 44px;
+}
+
+html[data-design-direction="gallery"] {
+  --design-canvas: #ffffff;
+  --design-sidebar: #f5f5f4;
+  --design-surface: #ffffff;
+  --design-text: #242726;
+  --design-muted: #727875;
+  --design-hover: #eff2ef;
+  --design-border: #e1e5e1;
+  --design-radius: 18px;
+}
+
+html[data-design-direction] [data-app-sidebar] {
+  --sidebar: var(--design-sidebar) !important;
+  --sidebar-foreground: var(--design-text) !important;
+  --sidebar-muted-foreground: var(--design-muted) !important;
+  --sidebar-border: var(--design-border) !important;
+  background: var(--design-sidebar);
+}
+
+html[data-design-direction] .surface-grain::after {
+  display: none;
+}
+html[data-design-direction] [data-slot="composer-host"],
+html[data-design-direction] [data-slot="composer-shell"]::before {
+  border-radius: var(--design-radius);
+}
+
+@media (min-width: 768px) {
+  html[data-design-direction] [data-sidebar-state="collapsed"] [data-chat-header] {
+    padding-left: max(72px, var(--workspace-titlebar-content-left));
+  }
+  html[data-design-direction="capsule"] [data-slot="sidebar-wrapper"] {
+    padding: 16px;
+    gap: 16px;
+    background: #dce1eb;
+  }
+  html[data-design-direction="capsule"] [data-slot="sidebar-container"] {
+    top: 16px;
+    bottom: 16px;
+    left: 16px;
+    height: calc(100dvh - 32px);
+    border: 0;
+    border-radius: 24px;
+    overflow: hidden;
+  }
+  html[data-design-direction="capsule"] [data-slot="sidebar-inset"] {
+    height: calc(100dvh - 32px);
+    border-radius: 24px;
+    box-shadow: 0 8px 40px #28344908;
+  }
+  html[data-design-direction="capsule"] [data-sidebar-control] {
+    left: 26px;
+    top: 16px;
+  }
+  html[data-design-direction="capsule"] [data-workspace-titlebar-controls] {
+    right: 28px;
+    top: 16px;
+  }
+  html[data-design-direction="gallery"] [data-slot="sidebar-inset"] {
+    border-left: 1px solid var(--design-border);
+  }
+}
+
+@media (max-width: 767px) {
+  html[data-design-direction] [data-slot="composer-shell"] {
+    max-width: 100%;
+  }
+  .design-direction-picker {
+    bottom: auto;
+    top: 54px;
+    right: 8px;
+  }
+}

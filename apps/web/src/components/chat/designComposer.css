@@ -1,0 +1,172 @@
+/* These variants keep the live editor, provider menus, and submission controls. */
+[data-design-direction]:not([data-design-direction="current"]) [data-slot="composer-shell"] {
+  --chat-composer-glass-surface: var(--card);
+  --chat-composer-outline: var(--border);
+  --chat-composer-highlight: transparent;
+}
+
+[data-design-direction="noir"] [data-slot="composer-shell"] {
+  max-width: 720px;
+}
+
+[data-design-direction="capsule"] [data-slot="composer-shell"] {
+  max-width: 820px;
+}
+
+[data-design-direction="gallery"] [data-slot="composer-shell"] {
+  max-width: 880px;
+}
+
+[data-design-direction="terminal"] [data-slot="composer-shell"] {
+  max-width: none;
+}
+
+[data-design-composer] > .relative,
+[data-design-composer] [data-chat-composer-main-surface] {
+  border-radius: inherit;
+}
+
+[data-design-composer] [data-chat-composer-surface] {
+  background: var(--card);
+  border-radius: inherit;
+}
+
+[data-design-composer] [data-testid="composer-editor"] {
+  min-height: 44px;
+}
+
+.design-composer-heading {
+  display: flex;
+  align-items: center;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.design-composer-heading-controls {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+[data-design-composer="linen"] {
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+[data-design-composer="linen"] [data-chat-composer-body] {
+  padding: 20px 22px 4px;
+}
+
+[data-design-composer="linen"] [data-chat-composer-footer] {
+  padding: 8px 20px 14px;
+}
+
+[data-design-composer="noir"] {
+  max-width: 720px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  box-shadow: 0 18px 70px rgb(0 0 0 / 18%);
+}
+
+[data-design-composer="noir"] [data-chat-composer-body] {
+  padding: 20px 22px 0;
+}
+
+[data-design-composer="noir"] [data-chat-composer-footer] {
+  padding: 6px 16px 12px;
+}
+
+[data-design-composer="capsule"] {
+  max-width: 820px;
+  border: 1px solid var(--border);
+  border-radius: 32px;
+  box-shadow: 0 8px 36px rgb(0 0 0 / 10%);
+}
+
+[data-design-composer="capsule"] [data-chat-composer-body] {
+  padding: 18px 24px 0;
+}
+
+[data-design-composer="capsule"] [data-chat-composer-footer] {
+  padding: 8px 16px 14px;
+}
+
+[data-design-composer="terminal"] {
+  max-width: none;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+}
+
+[data-design-composer="terminal"] .design-composer-heading {
+  padding: 5px 14px;
+  background: var(--muted);
+}
+
+[data-design-composer="terminal"] [data-chat-composer-body] {
+  --font-composer: var(--font-mono);
+  padding: 14px 16px 0;
+}
+
+[data-design-composer="terminal"] [data-chat-composer-footer] {
+  justify-content: flex-end;
+  padding: 4px 12px 8px;
+}
+
+[data-design-composer="gallery"] {
+  max-width: 880px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 6px 28px rgb(0 0 0 / 4%);
+}
+
+[data-design-composer="gallery"] .design-composer-heading {
+  padding: 12px 24px;
+}
+
+[data-design-composer="gallery"] [data-chat-composer-body] {
+  --font-size-prompt: 1rem;
+  padding: 22px 24px 0;
+}
+
+[data-design-composer="gallery"] [data-testid="composer-editor"] {
+  min-height: 64px;
+}
+
+[data-design-composer="gallery"] [data-chat-composer-footer] {
+  justify-content: flex-end;
+  padding: 4px 20px 16px;
+}
+
+@container composer-surface (min-width: 640px) {
+  [data-design-composer="capsule"]:not(:has([data-chat-composer-top-drawer]))
+    [data-chat-composer-surface][data-chat-composer-mobile-collapsed="false"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  [data-design-composer="capsule"] [data-chat-composer-body] {
+    padding: 18px 8px 10px 26px;
+    min-width: 0;
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  [data-design-composer="capsule"] [data-testid="composer-editor"] {
+    min-height: 36px;
+  }
+
+  [data-design-composer="capsule"] [data-chat-composer-footer] {
+    padding: 14px;
+    gap: 10px;
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  [data-design-composer="capsule"] [data-chat-composer-validation] {
+    grid-column: 1 / -1;
+  }
+}
