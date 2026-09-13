@@ -1008,7 +1008,11 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.goal?.status === "active" && thread.session?.status !== "error") {
+  if (
+    thread.goal?.status === "active" &&
+    thread.session?.status !== "error" &&
+    thread.latestTurn?.state !== "error"
+  ) {
     return {
       label: "Goaling",
       colorClass: "text-purple-600 dark:text-purple-400",
