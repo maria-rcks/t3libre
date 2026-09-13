@@ -68,7 +68,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { EnvironmentIconPicker } from "./EnvironmentIconPicker";
-import { LoadBalancingSettings } from "./LoadBalancingSettings";
+import { LoadBalancingPreference, LoadBalancingSettings } from "./LoadBalancingSettings";
 import { GitHubRoutingSettings } from "./GitHubRoutingSettings";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
@@ -3722,7 +3722,7 @@ export function ConnectionsSettings() {
           </div>
         }
       >
-        <div className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5 lg:grid lg:h-[min(38rem,calc(100dvh-15rem))] lg:min-h-[28rem] lg:grid-cols-[17rem_minmax(0,1fr)]">
+        <div className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5 lg:grid lg:h-[min(34rem,calc(100dvh-18rem))] lg:min-h-[28rem] lg:grid-cols-[17rem_minmax(0,1fr)]">
           <div className="border-b border-border/60 bg-muted/10 lg:flex lg:min-h-0 lg:flex-col lg:border-r lg:border-b-0">
             <ScrollArea
               scrollFade
@@ -3815,6 +3815,11 @@ export function ConnectionsSettings() {
                     />
                   </SettingsSection>
                 )}
+                {selectedEnvironment.entry.enabled && loadBalancingEnvironments.length > 1 ? (
+                  <SettingsSection title="Thread placement">
+                    <LoadBalancingPreference environment={selectedEnvironment} />
+                  </SettingsSection>
+                ) : null}
                 <GitHubRoutingSettings
                   environments={environments}
                   selectedEnvironmentId={selectedEnvironment.environmentId}
