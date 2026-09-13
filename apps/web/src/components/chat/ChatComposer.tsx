@@ -1027,6 +1027,7 @@ function useRestingComposerControlsLayout(host: HTMLDivElement | null) {
 }
 
 const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
+  supportsSupervised?: boolean;
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
@@ -1038,6 +1039,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   const size = props.size ?? "sm";
   const [open, setOpen] = useComposerMenuState(props.hidden);
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
+  const availableRuntimeModes = runtimeModeOptions.filter(
+    (mode) => props.supportsSupervised !== false || mode !== "approval-required",
+  );
   const RuntimeModeIcon = runtimeModeOption.icon;
   const interactionModeTooltip =
     props.interactionMode === "plan"
@@ -1112,7 +1116,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             <SelectValue>{runtimeModeOption.label}</SelectValue>
           </TooltipTrigger>
           <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
-            {runtimeModeOptions.map((mode) => {
+            {availableRuntimeModes.map((mode) => {
               const option = runtimeModeConfig[mode];
               const OptionIcon = option.icon;
               return (
@@ -4845,6 +4849,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       id: "mode",
       content: (
         <ComposerFooterModeControls
+          supportsSupervised={selectedProvider !== "devin"}
           showInteractionModeToggle={planModeUiEnabled}
           interactionMode={interactionMode}
           runtimeMode={runtimeMode}
@@ -4933,6 +4938,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
       {composerControlsCompact ? (
         <CompactComposerControlsMenu
+          supportsSupervised={selectedProvider !== "devin"}
           interactionMode={interactionMode}
           runtimeMode={runtimeMode}
           showInteractionModeToggle={planModeUiEnabled}
@@ -4973,6 +4979,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               )}
             >
               <CompactComposerControlsMenu
+                supportsSupervised={selectedProvider !== "devin"}
                 interactionMode={interactionMode}
                 runtimeMode={runtimeMode}
                 size="xs"

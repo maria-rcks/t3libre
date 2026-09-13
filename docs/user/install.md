@@ -80,7 +80,10 @@ computer.
 | Cursor      | Install [Cursor CLI](https://cursor.com/cli), then run `agent login`.                        |
 | Grok Build  | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                           |
 | OpenCode    | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                     |
+| Devin       | Install Devin CLI, then run `devin auth login`.                                              |
 | Antigravity | Install and sign in with Google from T3 Code's provider settings.                            |
+
+Devin shows the models available to its CLI session. Update Devin with `devin update`; T3 Code does not update it automatically.
 
 Provider CLIs must be on the server's `PATH`. If T3 Code cannot find one, set its
 **Binary path** in provider settings, especially when using a version manager.

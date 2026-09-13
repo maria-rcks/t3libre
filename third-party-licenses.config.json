@@ -1,6 +1,21 @@
 {
   "customNotices": [
     {
+      "bundles": ["assets", "desktop", "mobile", "web"],
+      "license": "MIT",
+      "name": "LobeHub Icons - Devin",
+      "sourceUrl": "https://github.com/lobehub/lobe-icons",
+      "generatedNotices": [
+        {
+          "licenseId": "MIT",
+          "copyrights": ["Copyright (c) 2023 LobeHub"],
+          "preamble": [
+            "The Devin icon is adapted from LobeHub Icons for the web and mobile clients."
+          ]
+        }
+      ]
+    },
+    {
       "bundles": ["assets", "desktop", "web"],
       "license": "CC0-1.0",
       "name": "Notification Sound 1 by deadrobotmusic",

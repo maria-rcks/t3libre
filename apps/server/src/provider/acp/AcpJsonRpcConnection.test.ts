@@ -496,6 +496,31 @@ describe("AcpSessionRuntime", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  for (const authMethodId of [undefined, "test"]) {
+    it.effect(
+      `starts and prompts with ${authMethodId ? "explicit" : "existing CLI"} authentication`,
+      () =>
+        Effect.gen(function* () {
+          const methods: string[] = [];
+          const runtime = yield* AcpSessionRuntime.make({
+            ...mockRuntimeOptions,
+            authMethodId,
+            requestLogger: (event) =>
+              Effect.sync(() => {
+                if (event.status === "started") methods.push(event.method);
+              }),
+          });
+          yield* runtime.start();
+          const response = yield* runtime.prompt({ prompt: [{ type: "text", text: "hi" }] });
+          expect(response.stopReason).toBe("end_turn");
+          expect(methods.filter((method) => method === "authenticate")).toHaveLength(
+            authMethodId ? 1 : 0,
+          );
+          expect(methods).toContain("session/new");
+        }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    );
+  }
+
   it.effect("merges custom initialize client capabilities into the ACP handshake", () => {
     const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
     return Effect.gen(function* () {

@@ -631,7 +631,20 @@ describe("provider enabled defaults", () => {
     expect(decoded.providers.claudeAgent.enabled).toBe(true);
     expect(decoded.providers.cursor.enabled).toBe(false);
     expect(decoded.providers.grok.enabled).toBe(false);
+    expect(decoded.providers.devin.enabled).toBe(false);
+    expect(decoded.providers.devin.binaryPath).toBe("devin");
     expect(decoded.providers.opencode.enabled).toBe(false);
+  });
+
+  it("round-trips Devin configuration and accepts updates", () => {
+    const input = {
+      providers: { devin: { enabled: true, binaryPath: "/opt/bin/devin" } },
+    };
+    expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
+    expect(decodeServerSettingsPatch(input)).toEqual(input);
+    expect(
+      resolveProviderInstanceEnabled({ driver: ProviderDriverKind.make("devin"), config: {} }),
+    ).toBe(false);
   });
 
   it("keeps Cursor enabled when an existing user explicitly opted in", () => {

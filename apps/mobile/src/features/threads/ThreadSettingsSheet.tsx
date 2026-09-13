@@ -78,6 +78,7 @@ import {
 const PRIMARY_PROVIDER_DRIVERS: ReadonlySet<string> = new Set([
   "claudeAgent",
   "codex",
+  "devin",
   "antigravity",
 ]);
 /**
@@ -907,10 +908,17 @@ function ThreadSettingsChoiceContent(props: {
         )
       : undefined;
 
+  const selectedDriver =
+    session.pendingModel?.providerDriver ??
+    session.providerGroups.find((group) => group.providerKey === session.providerInstanceId)
+      ?.models[0]?.providerDriver;
+
   const submenuContent =
     props.submenu.kind === "runtime"
       ? {
-          rows: RUNTIME_MODE_CHOICES.map((choice) => ({
+          rows: RUNTIME_MODE_CHOICES.filter(
+            (choice) => selectedDriver !== "devin" || choice.mode !== "approval-required",
+          ).map((choice) => ({
             id: choice.mode,
             label: choice.label,
             description: choice.description,

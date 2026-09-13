@@ -1,3 +1,14 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FileSystem from "effect/FileSystem";
+import * as Schema from "effect/Schema";
+import { DevinSettings } from "@t3tools/contracts";
+import { writeFakeCli } from "../testUtils/fakeCli.ts";
+import {
+  buildDevinModelsFromConfigOptions,
+  buildDevinNativeCommands,
+  buildInitialDevinProviderSnapshot,
+  checkDevinProviderStatus,
+} from "./Layers/DevinProvider.ts";
 import { describe, expect, it } from "@effect/vitest";
 import type { ModelCapabilities } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -14,6 +25,8 @@ import {
   providerModelsFromSettings,
   spawnAndCollect,
 } from "./providerSnapshot.ts";
+
+const decodeDevinSettings = Schema.decodeEffect(DevinSettings);
 
 const OPENCODE_CUSTOM_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [
@@ -154,4 +167,85 @@ describe("ProviderCommandNotFoundError", () => {
       expect(error.message).not.toContain("secret-token-value");
     });
   });
+});
+
+describe("Devin provider discovery", () => {
+  it("preserves native command arguments and removes empty or duplicate commands", () => {
+    expect(
+      buildDevinNativeCommands([
+        { name: " review ", description: " Review changes ", input: { hint: " instructions " } },
+        { name: "review", description: "Duplicate" },
+        { name: " ", description: "Empty" },
+      ]),
+    ).toEqual([{ name: "review", description: "Review changes", input: { hint: "instructions" } }]);
+  });
+  it("offers only ACP models and preserves grouped models and the active default", () => {
+    const models = buildDevinModelsFromConfigOptions([
+      {
+        id: "model",
+        name: "Model",
+        type: "select",
+        currentValue: "second",
+        options: [
+          {
+            group: "first-group",
+            name: "First group",
+            options: [{ value: "first", name: "First" }],
+          },
+          { group: "other", name: "Other", options: [{ value: "second", name: "Second" }] },
+        ],
+      },
+    ]);
+    expect(
+      models.map(({ slug, name, isDefault }) => ({ slug, name, isDefault: isDefault ?? false })),
+    ).toEqual([
+      { slug: "first", name: "First", isDefault: false },
+      { slug: "second", name: "Second", isDefault: true },
+    ]);
+    expect(buildDevinModelsFromConfigOptions(undefined)).toEqual([]);
+  });
+
+  it.effect("does not advertise unverified custom models while discovery is pending", () =>
+    Effect.gen(function* () {
+      const settings = yield* decodeDevinSettings({ customModels: ["unavailable"] });
+      const snapshot = yield* buildInitialDevinProviderSnapshot(settings);
+      expect(snapshot.models).toEqual([]);
+      expect(snapshot.auth.status).toBe("unknown");
+    }),
+  );
+
+  for (const scenario of [
+    { output: "Not logged in.", code: 1, auth: "unauthenticated", status: "error" },
+    {
+      output: "Could not reach server: secret-token-value",
+      code: 1,
+      auth: "unknown",
+      status: "warning",
+    },
+    { output: "Logged in (via Devin).", code: 1, auth: "unknown", status: "warning" },
+  ]) {
+    it.effect(
+      `reports ${scenario.auth} for auth output '${scenario.output}' with exit ${scenario.code}`,
+      () =>
+        Effect.gen(function* () {
+          const filesystem = yield* FileSystem.FileSystem;
+          const directory = yield* filesystem.makeTempDirectoryScoped({ prefix: "t3-devin-auth-" });
+          const binaryPath = writeFakeCli({
+            directory,
+            name: "devin",
+            source: [
+              'if (process.argv.includes("--version")) { process.stdout.write("devin 3000.10.21\\n"); process.exit(0); }',
+              // @effect-diagnostics-next-line preferSchemaOverJson:off
+              `process.stdout.write(${JSON.stringify(scenario.output)}); process.exit(${scenario.code});`,
+            ].join("\n"),
+          });
+          const settings = yield* decodeDevinSettings({ enabled: true, binaryPath });
+          const snapshot = yield* checkDevinProviderStatus(settings);
+          expect(snapshot.auth.status).toBe(scenario.auth);
+          expect(snapshot.status).toBe(scenario.status);
+          expect(snapshot.models).toEqual([]);
+          expect(snapshot.message).not.toContain("secret-token-value");
+        }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    );
+  }
 });

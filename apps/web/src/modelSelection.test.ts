@@ -163,6 +163,22 @@ describe("instance-scoped model selection", () => {
     ).toBe("opus");
   });
 
+  it("uses Devin's account catalog even when custom models were saved", () => {
+    const driver = ProviderDriverKind.make("devin");
+    const instanceId = ProviderInstanceId.make("devin");
+    const providers = [provider({ provider: driver, instanceId, models: ["available-model"] })];
+    const settings: UnifiedSettings = {
+      ...settingsWithProviderInstances(),
+      providerInstances: {
+        [instanceId]: { driver, config: { customModels: ["unavailable-model"] } },
+      },
+    };
+    const entry = deriveProviderInstanceEntries(providers)[0]!;
+    expect(getAppModelOptionsForInstance(settings, entry).map((option) => option.slug)).toEqual([
+      "available-model",
+    ]);
+  });
+
   it("includes Grok custom models from the selected provider instance", () => {
     const providers = [provider({ provider: ProviderDriverKind.make("grok"), instanceId: "grok" })];
     const settings: UnifiedSettings = {

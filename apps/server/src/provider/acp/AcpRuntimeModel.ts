@@ -123,6 +123,10 @@ export type AcpParsedSessionEvent =
       readonly _tag: "ThoughtDelta";
       readonly text: string;
       readonly rawPayload: unknown;
+    }
+  | {
+      readonly _tag: "UsageUpdated";
+      readonly usage: EffectAcpSchema.UsageUpdate;
     };
 
 type AcpSessionSetupResponse =
@@ -793,6 +797,10 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
   let modeId: string | undefined;
 
   switch (upd.sessionUpdate) {
+    case "usage_update": {
+      events.push({ _tag: "UsageUpdated", usage: upd });
+      break;
+    }
     case "config_option_update": {
       events.push({
         _tag: "ConfigOptionsUpdated",

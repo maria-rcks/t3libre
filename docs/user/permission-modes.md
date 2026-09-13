@@ -30,4 +30,8 @@ actions still require approval.
 Antigravity can still send native approval requests in **Full access**. It only offers remembered
 approvals for actions that support them.
 
+Devin supports **Auto-accept edits**, **Auto**, and **Full access**. Its CLI does not support
+**Supervised** file edits. **Allow for this thread** grants permission only for the current
+Devin session and does not save a workspace or global rule.
+
 See the [provider guides](./install.md#providers) for setup and provider-specific limits.
