@@ -67,7 +67,8 @@ function EnvironmentNotifications({ environmentId }: { environmentId: Environmen
       const kind =
         input && input !== prior.input
           ? "input"
-          : completion && completion !== prior.completion
+          : completion &&
+              (prior.completion === null || Date.parse(completion) > Date.parse(prior.completion))
             ? "completion"
             : null;
       if (!kind) continue;
