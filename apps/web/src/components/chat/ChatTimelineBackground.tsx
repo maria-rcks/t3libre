@@ -44,3 +44,8 @@ export function ChatTimelineBackground({ className }: { className?: string | und
     <TimelineBackgroundImage image={image} opacity={opacity} blur={blur} className={className} />
   );
 }
+
+/** Timeline cards only pay for backdrop blur when there is a wallpaper to show through. */
+export function useHasTimelineBackground() {
+  return useClientSettings((settings) => Boolean(settings.timelineBackgroundImage));
+}

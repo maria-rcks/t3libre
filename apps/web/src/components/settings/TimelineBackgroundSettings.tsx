@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { ArrowRightIcon, ImagePlusIcon, LinkIcon } from "lucide-react";
+import { ArrowRightIcon, ImagePlusIcon, LinkIcon, XIcon } from "lucide-react";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import {
   persistClientSettingsUpdate,
@@ -22,6 +22,7 @@ import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const MAX_BLUR = 30;
 
@@ -176,10 +177,24 @@ export function TimelineBackgroundSettings() {
       </div>
       <SettingsRow
         title="Image"
-        description="Paste an image, enter an image URL, or choose a file."
+        description="Enter an image URL, paste an image into the field, or choose a file."
         resetAction={
-          image ? (
-            <SettingResetButton label="wallpaper" tooltip="Remove image" onClick={removeImage} />
+          image || busy ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-micro"
+                    variant="ghost-muted"
+                    aria-label={image ? "Remove image" : "Cancel import"}
+                    onClick={removeImage}
+                  >
+                    <XIcon className="size-3" />
+                  </Button>
+                }
+              />
+              <TooltipPopup side="top">{image ? "Remove image" : "Cancel import"}</TooltipPopup>
+            </Tooltip>
           ) : null
         }
         status={
@@ -205,7 +220,7 @@ export function TimelineBackgroundSettings() {
               </InputGroupAddon>
               <InputGroupInput
                 aria-label="Background image URL"
-                placeholder="https://…"
+                placeholder="Paste an image or URL"
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
                 size="sm"

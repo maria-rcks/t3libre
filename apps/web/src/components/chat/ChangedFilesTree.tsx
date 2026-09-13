@@ -15,6 +15,7 @@ import {
   FolderClosedIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
+import { useHasTimelineBackground } from "./ChatTimelineBackground";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { Button } from "../ui/button";
@@ -40,15 +41,26 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   } = props;
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
   const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
+  const glass = useHasTimelineBackground();
 
   return (
     <div
-      className="@container/changed-files surface-glass mt-4 rounded-lg [--surface-glass-color:var(--secondary)] [text-shadow:none] dark:[--surface-glass-color:color-mix(in_srgb,var(--input)_20%,var(--background))]"
+      className={cn(
+        "@container/changed-files mt-4 rounded-lg",
+        glass
+          ? "surface-glass [--surface-glass-color:var(--secondary)] [text-shadow:none] dark:[--surface-glass-color:color-mix(in_srgb,var(--input)_20%,var(--background))]"
+          : "bg-secondary dark:bg-input/20",
+      )}
       data-changed-files-state="tree"
     >
       <div
         data-changed-files-header=""
-        className="surface-glass sticky top-2 z-10 flex items-center justify-between gap-2 rounded-t-lg px-3 py-2"
+        className={cn(
+          "sticky top-2 z-10 flex items-center justify-between gap-2 rounded-t-lg px-3 py-2",
+          glass
+            ? "surface-glass"
+            : "bg-secondary dark:bg-[color-mix(in_srgb,var(--input)_20%,var(--background))]",
+        )}
       >
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-foreground">
           <span>
