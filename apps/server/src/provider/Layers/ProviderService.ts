@@ -1097,12 +1097,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* observeModelReroutedForAnalytics(source, canonicalEvent);
       } else if (
         canonicalEvent.type === "turn.completed" ||
-        canonicalEvent.type === "turn.aborted"
+        canonicalEvent.type === "turn.aborted" ||
+        canonicalEvent.type === "thread.goal.updated"
       ) {
-        yield* recordTurnCompletedAnalytics(source, canonicalEvent);
+        if (canonicalEvent.type !== "thread.goal.updated") {
+          yield* recordTurnCompletedAnalytics(source, canonicalEvent);
+        }
         if (source.provider === "claudeAgent") {
-          // Background Claude turns have no sendTurn response to persist their
-          // new native boundary. Save it before clients can checkpoint the turn.
+          // Background turns and local goal commands have no sendTurn response
+          // to persist their native state. Save it before publishing the event.
           yield* Effect.gen(function* () {
             const adapter = yield* registry.getByInstance(source.instanceId);
             const session = (yield* adapter.listSessions()).find(
@@ -1125,7 +1128,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             }
           }).pipe(
             Effect.catch((cause) =>
-              Effect.logWarning("failed to persist Claude turn resume state", { cause }),
+              Effect.logWarning("failed to persist Claude resume state", { cause }),
             ),
           );
         }

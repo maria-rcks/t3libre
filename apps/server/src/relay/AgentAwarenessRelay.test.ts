@@ -518,6 +518,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
         } satisfies OrchestrationEngineShape;
 
         const snapshotQuery = {
+          getThreadGoalAwarenessHistory: () => Effect.succeed({ snapshotSequence: 0, updates: [] }),
           getShellSnapshot: () =>
             Effect.succeed({
               snapshotSequence: 1,
@@ -743,6 +744,8 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
             latestSequence: Effect.succeed(0),
           } satisfies OrchestrationEngineShape),
           Layer.succeed(ProjectionSnapshotQuery, {
+            getThreadGoalAwarenessHistory: () =>
+              Effect.succeed({ snapshotSequence: 0, updates: [] }),
             getShellSnapshot: () =>
               Effect.succeed({
                 snapshotSequence: 1,

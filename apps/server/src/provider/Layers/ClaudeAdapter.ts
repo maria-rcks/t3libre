@@ -47,7 +47,7 @@ import {
   type ProviderSession,
   type ThreadTokenUsageSnapshot,
   type ThreadGoalSetInput,
-  type ThreadGoal,
+  ThreadGoal,
   type TurnTokenUsage,
   type ProviderUserInputAnswers,
   type RuntimeContentStreamKind,
@@ -82,6 +82,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -167,6 +168,7 @@ interface ClaudeResumeState {
   readonly resumeSessionAt?: string;
   readonly turnCount?: number;
   readonly turnStartMessageIds?: ReadonlyArray<string | null>;
+  readonly nativeGoal?: ThreadGoal | null;
 }
 
 interface ClaudeTurnState {
@@ -366,6 +368,7 @@ interface ClaudeSessionContext {
   stopped: boolean;
   nativeGoal?: ThreadGoal | null;
   goalStatusRequestId?: string;
+  goalClearRequestId?: string;
   goalStartTurnId?: TurnId;
   restoreGoalOnInit?: boolean;
 }
@@ -377,6 +380,7 @@ const ClaudeGoalCommandOutput = Schema.Struct({
   message: Schema.Struct({ model: Schema.Literals(["<synthetic>"]) }),
 });
 const decodeClaudeGoalCommandOutput = Schema.decodeUnknownExit(ClaudeGoalCommandOutput);
+const decodeClaudeResumeGoal = Schema.decodeUnknownOption(Schema.NullOr(ThreadGoal));
 
 /** Only native local-command output can confirm a goal; model prose cannot. */
 export function parseClaudeGoalCommandOutput(
@@ -933,6 +937,7 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     resumeSessionAt?: unknown;
     turnCount?: unknown;
     turnStartMessageIds?: unknown;
+    nativeGoal?: unknown;
   };
 
   const threadIdCandidate = typeof cursor.threadId === "string" ? cursor.threadId : undefined;
@@ -955,12 +960,14 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     cursor.turnStartMessageIds.every((id: unknown) => id === null || typeof id === "string")
       ? (cursor.turnStartMessageIds as Array<string | null>)
       : undefined;
+  const nativeGoal = Option.getOrUndefined(decodeClaudeResumeGoal(cursor.nativeGoal));
 
   return {
     ...(threadId ? { threadId } : {}),
     ...(resume ? { resume } : {}),
     ...(resumeSessionAt ? { resumeSessionAt } : {}),
     ...(turnStartMessageIds ? { turnStartMessageIds } : {}),
+    ...(nativeGoal !== undefined ? { nativeGoal } : {}),
     ...(turnCountValue !== undefined && Number.isInteger(turnCountValue) && turnCountValue >= 0
       ? { turnCount: turnCountValue }
       : {}),
@@ -2134,6 +2141,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ...(context.lastAssistantUuid ? { resumeSessionAt: context.lastAssistantUuid } : {}),
       turnCount: context.turnStartMessageIds.length,
       turnStartMessageIds: [...context.turnStartMessageIds],
+      ...(context.nativeGoal !== undefined ? { nativeGoal: context.nativeGoal } : {}),
     };
 
     context.session = {
@@ -4018,6 +4026,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (command === "/goal" && context.goalStatusRequestId) return;
     const uuid = yield* randomUUIDv4;
     if (command === "/goal") context.goalStatusRequestId = uuid;
+    else context.goalClearRequestId = uuid;
     yield* Queue.offer(context.promptQueue, {
       type: "message",
       message: {
@@ -4055,6 +4064,43 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       "local_command" in message &&
       message.local_command === "goal"
     ) {
+      if (
+        context.goalStatusRequestId &&
+        context.nativeGoal?.status === "active" &&
+        !context.goalClearRequestId &&
+        "user_message_uuid" in message &&
+        message.user_message_uuid === context.goalStatusRequestId &&
+        "result" in message &&
+        (message.result === "No goal set" ||
+          message.result === "No goal set. Usage: `/goal <condition>`")
+      ) {
+        const stamp = yield* makeEventStamp();
+        context.nativeGoal = {
+          ...context.nativeGoal,
+          status: "complete",
+          updatedAt: stamp.createdAt,
+        };
+        yield* updateResumeCursor(context);
+        yield* offerRuntimeEvent({
+          type: "thread.goal.updated",
+          ...stamp,
+          provider: PROVIDER,
+          threadId: context.session.threadId,
+          payload: { goal: context.nativeGoal },
+          providerRefs: nativeProviderRefs(context),
+          raw: { source: "claude.sdk.message", method: "claude/result", payload: message },
+        });
+      }
+      if (
+        context.goalClearRequestId &&
+        "user_message_uuid" in message &&
+        message.user_message_uuid === context.goalClearRequestId &&
+        "result" in message &&
+        typeof message.result === "string" &&
+        message.result !== "No goal set" &&
+        !message.result.startsWith("Goal cleared: ")
+      )
+        delete context.goalClearRequestId;
       // Native clear aliases and rejections both return is_error:false.
       // Settle only this request, never a concurrently running model turn.
       if (
@@ -4086,9 +4132,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (commandGoal !== undefined) {
       const stamp = yield* makeEventStamp();
       const previous = context.nativeGoal;
+      const explicitlyCleared =
+        message.type === "assistant" &&
+        "local_command_source" in message &&
+        typeof message.local_command_source === "string" &&
+        message.local_command_source.startsWith("<local-command-stdout>Goal cleared: ");
       context.nativeGoal =
         commandGoal === null
-          ? null
+          ? (previous?.status === "complete" ||
+              (previous?.status === "active" && context.goalStatusRequestId)) &&
+            !context.goalClearRequestId &&
+            !explicitlyCleared
+            ? previous
+            : null
           : {
               objective: commandGoal.objective,
               status: "active",
@@ -4103,6 +4159,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               rounds: commandGoal.rounds,
               ...(commandGoal.lastReason ? { lastReason: commandGoal.lastReason } : {}),
             };
+      if (commandGoal === null) delete context.goalClearRequestId;
+      yield* updateResumeCursor(context);
       yield* offerRuntimeEvent({
         type: "thread.goal.updated",
         ...stamp,
@@ -4118,6 +4176,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (message.type === "active_goal") {
       const stamp = yield* makeEventStamp();
       const value = message.value;
+      const previous = context.nativeGoal;
       context.nativeGoal = value
         ? {
             objective: value.condition,
@@ -4130,7 +4189,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             rounds: value.iterations,
             ...(value.last_reason ? { lastReason: value.last_reason } : {}),
           }
-        : null;
+        : context.goalClearRequestId
+          ? null
+          : previous?.status === "active"
+            ? { ...previous, status: "complete", updatedAt: stamp.createdAt }
+            : (previous ?? null);
+      if (!value) delete context.goalClearRequestId;
+      yield* updateResumeCursor(context);
       yield* offerRuntimeEvent({
         type: "thread.goal.updated",
         ...stamp,
@@ -4157,7 +4222,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         delete context.goalStartTurnId;
         yield* handleResultMessage(context, message);
         // Standard SDK mode reports goal changes through local /goal output.
-        if (context.nativeGoal) yield* enqueueGoalCommand(context, "/goal");
+        if (context.nativeGoal?.status === "active") yield* enqueueGoalCommand(context, "/goal");
         return;
       case "system":
         yield* handleSystemMessage(context, message);
@@ -4994,6 +5059,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...(sessionId ? { resume: sessionId } : {}),
           ...(resumeState?.resumeSessionAt ? { resumeSessionAt: resumeState.resumeSessionAt } : {}),
           turnCount: resumeState?.turnCount ?? 0,
+          ...(resumeState?.nativeGoal !== undefined ? { nativeGoal: resumeState.nativeGoal } : {}),
           ...(resumeState?.turnStartMessageIds
             ? { turnStartMessageIds: resumeState.turnStartMessageIds }
             : {}),
@@ -5033,6 +5099,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastThreadStartedId: undefined,
         announcedUsageLimits: undefined,
         stopped: false,
+        ...(resumeState?.nativeGoal !== undefined ? { nativeGoal: resumeState.nativeGoal } : {}),
         restoreGoalOnInit: existingResumeSessionId !== undefined,
       };
       yield* Ref.set(contextRef, context);
@@ -5246,11 +5313,21 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     if (steeringTurnState === null) context.turnStartMessageIds.push(turnId);
     if (isGoalStart && steeringTurnState === null) context.goalStartTurnId = turnId;
+    const goalArgument =
+      (input.attachments?.length ?? 0) === 0
+        ? /^\/goal\s+([\s\S]+)$/.exec(input.input?.trim() ?? "")?.[1]?.trim()
+        : undefined;
+    const clearsGoal =
+      goalArgument !== undefined && /^(clear|stop|off|reset|none|cancel)$/i.test(goalArgument);
+    if (clearsGoal) {
+      context.goalClearRequestId = steeringTurnState === null ? turnId : yield* randomUUIDv4;
+    }
     yield* updateResumeCursor(context);
     yield* Queue.offer(context.promptQueue, {
       type: "message",
-      message:
-        steeringTurnState === null
+      message: clearsGoal
+        ? { ...message, uuid: context.goalClearRequestId as NonNullable<SDKUserMessage["uuid"]> }
+        : steeringTurnState === null
           ? { ...message, uuid: turnId as NonNullable<SDKUserMessage["uuid"]> }
           : message,
     }).pipe(Effect.mapError((cause) => toRequestError(input.threadId, "turn/start", cause)));
