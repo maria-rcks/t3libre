@@ -276,7 +276,7 @@ export function DraftProjectPicker({
           <TooltipPopup>Enter chat mode</TooltipPopup>
         </Tooltip>
       ) : (
-        <span className="ms-3 flex shrink-0 items-center">
+        <span className="ms-1 flex size-9 shrink-0 items-center justify-center">
           <MessageCircleIcon className="size-5" />
         </span>
       )}
@@ -286,13 +286,7 @@ export function DraftProjectPicker({
 
   return (
     <h1 className="mx-auto w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-      {isChat ? (
-        <>
-          What would you like to know?<span className="mt-3 block text-base">{chip}</span>
-        </>
-      ) : (
-        <>What should we build in {chip}?</>
-      )}
+      {isChat ? <>What would you like to know? {chip}</> : <>What should we build in {chip}?</>}
     </h1>
   );
 }
