@@ -6,6 +6,7 @@ import {
   TerminalIcon,
 } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
+import { useLocation } from "@tanstack/react-router";
 import { Atom } from "effect/unstable/reactivity";
 import {
   type KeyboardEvent,
@@ -41,7 +42,7 @@ import {
   type EnvironmentId,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
-import { connectionStatusText } from "@t3tools/client-runtime/connection";
+import { connectionStatusText, connectionStatusTitle } from "@t3tools/client-runtime/connection";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -157,7 +158,7 @@ import {
 import { requestConfirmDialog } from "~/confirmDialog";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "~/state/server";
-import { ConnectionStatusDot } from "../ConnectionStatusDot";
+import { ConnectionStatusDot, connectionPhaseDotClassName } from "../ConnectionStatusDot";
 import {
   ServerUpdateAction,
   ServerUpdateProgress,
@@ -1586,12 +1587,12 @@ function SavedBackendListRow({
               <TooltipTrigger
                 render={
                   <Button size="xs" variant="outline" disabled>
-                    Managed above
+                    Managed locally
                   </Button>
                 }
               />
               <TooltipPopup side="top" className="max-w-80 whitespace-pre-wrap leading-tight">
-                The WSL backend is managed by the WSL setting above — turn it on or off there.
+                Select the primary environment to turn the WSL backend on or off.
               </TooltipPopup>
             </Tooltip>
           ) : (
@@ -1813,6 +1814,19 @@ export function ConnectionsSettings() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
+  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(null);
+  const searchTargetId = useLocation({ select: (location) => location.hash.replace(/^#/, "") });
+  if (
+    ["connections-environment", "wsl-backend"].includes(searchTargetId) &&
+    primaryEnvironment &&
+    selectedEnvironmentId !== primaryEnvironment.environmentId
+  ) {
+    setSelectedEnvironmentId(primaryEnvironment.environmentId);
+  }
+  const selectedEnvironment =
+    environments.find((environment) => environment.environmentId === selectedEnvironmentId) ??
+    primaryEnvironment ??
+    environments[0];
   const connectPairing = useAtomCommand(connectPairingAtom, { reportFailure: false });
   const connectSshEnvironment = useAtomCommand(connectSshEnvironmentAtom, {
     reportFailure: false,
@@ -3235,8 +3249,8 @@ export function ConnectionsSettings() {
     />
   );
 
-  return (
-    <SettingsPageContainer>
+  const primarySettings = (
+    <>
       {canManageLocalBackend ? (
         <>
           <SettingsSection
@@ -3626,9 +3640,15 @@ export function ConnectionsSettings() {
           <CloudLinkRow canManageRelay={canManageRelay} />
         </SettingsSection>
       )}
+    </>
+  );
 
+  return (
+    <SettingsPageContainer width="wide">
       <SettingsSection
         {...searchableSetting("remote-environments")}
+        title="Environments"
+        variant="plain"
         headerAction={
           <div className="flex items-center gap-1">
             {savedServerUpdateTargets.length > 0 ? (
@@ -3701,22 +3721,116 @@ export function ConnectionsSettings() {
           </div>
         }
       >
-        {savedEnvironments.map((environment) => (
-          <SavedBackendListRow
-            key={environment.environmentId}
-            environment={environment}
-            removingEnvironmentId={removingSavedEnvironmentId}
-            onSetEnabled={handleSetSavedBackendEnabled}
-            onRemove={handleRemoveSavedBackend}
-          />
-        ))}
+        <div className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5 lg:grid lg:h-[min(44rem,calc(100dvh-11rem))] lg:min-h-[32rem] lg:grid-cols-[17rem_minmax(0,1fr)]">
+          <div className="border-b border-border/60 bg-muted/10 lg:flex lg:min-h-0 lg:flex-col lg:border-r lg:border-b-0">
+            <ScrollArea
+              scrollFade
+              chainVerticalScroll
+              className="max-h-64 lg:max-h-none lg:min-h-0 lg:flex-1"
+            >
+              <div className="divide-y divide-border/50" aria-label="Environments">
+                {(primaryEnvironment
+                  ? [primaryEnvironment, ...savedEnvironments]
+                  : savedEnvironments
+                ).map((environment) => {
+                  const selected = environment.environmentId === selectedEnvironment?.environmentId;
+                  const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
+                  return (
+                    <button
+                      key={environment.environmentId}
+                      type="button"
+                      aria-label={"Select " + environment.label}
+                      aria-pressed={selected}
+                      onClick={() => setSelectedEnvironmentId(environment.environmentId)}
+                      className={cn(
+                        "flex min-h-18 w-full cursor-pointer items-start gap-3 px-3 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-4",
+                        selected ? "bg-muted/45" : "hover:bg-muted/25",
+                        !environment.entry.enabled && !selected && "opacity-60",
+                      )}
+                    >
+                      <EnvironmentMachineIcon
+                        aria-hidden
+                        kind={resolveEnvironmentMachineKind(environment.serverConfig)}
+                        className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                      />
+                      <span className="min-w-0 flex-1 space-y-1">
+                        <span className="flex items-center gap-2">
+                          <span className="truncate text-sm font-medium">{environment.label}</span>
+                          {isPrimary ? (
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              Primary
+                            </span>
+                          ) : null}
+                        </span>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <span className="block truncate text-xs text-muted-foreground" />
+                            }
+                          >
+                            {environment.displayUrl ?? "T3 Connect"}
+                          </TooltipTrigger>
+                          <TooltipPopup>{environment.displayUrl ?? "T3 Connect"}</TooltipPopup>
+                        </Tooltip>
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <span
+                            aria-hidden
+                            className={cn(
+                              "size-1.5 shrink-0 rounded-full",
+                              !environment.entry.enabled
+                                ? "bg-muted-foreground/40"
+                                : connectionPhaseDotClassName(environment.connection.phase),
+                            )}
+                          />
+                          {environment.entry.enabled
+                            ? connectionStatusTitle(environment.connection)
+                            : "Off"}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          </div>
+          <ScrollArea
+            key={selectedEnvironment?.environmentId}
+            scrollFade
+            chainVerticalScroll
+            className="min-w-0 lg:min-h-0 lg:h-full"
+          >
+            {selectedEnvironment ? (
+              <div className="space-y-6 p-4">
+                {selectedEnvironment.entry.target._tag === "PrimaryConnectionTarget" ? (
+                  primarySettings
+                ) : (
+                  <SettingsSection title="Connection">
+                    <SavedBackendListRow
+                      key={selectedEnvironment.environmentId}
+                      environment={selectedEnvironment}
+                      removingEnvironmentId={removingSavedEnvironmentId}
+                      onSetEnabled={handleSetSavedBackendEnabled}
+                      onRemove={handleRemoveSavedBackend}
+                    />
+                  </SettingsSection>
+                )}
+                <GitHubRoutingSettings
+                  environments={environments}
+                  selectedEnvironmentId={selectedEnvironment.environmentId}
+                />
+                <LoadBalancingSettings
+                  environments={loadBalancingEnvironments}
+                  selectedEnvironmentId={selectedEnvironment.environmentId}
+                />
+              </div>
+            ) : null}
+          </ScrollArea>
+        </div>
         <CloudRemoteEnvironmentRows
           primaryEnvironmentId={primaryEnvironmentId}
           savedEnvironments={savedEnvironments}
         />
       </SettingsSection>
-      <GitHubRoutingSettings environments={environments} />
-      <LoadBalancingSettings environments={loadBalancingEnvironments} />
     </SettingsPageContainer>
   );
 }

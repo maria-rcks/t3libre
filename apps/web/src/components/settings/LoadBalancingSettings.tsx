@@ -1,4 +1,5 @@
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
+import type { EnvironmentId } from "@t3tools/contracts";
 
 import {
   useClientSettings,
@@ -20,12 +21,17 @@ const preferences = [
 
 export function LoadBalancingSettings({
   environments,
+  selectedEnvironmentId,
 }: {
   environments: ReadonlyArray<EnvironmentPresentation>;
+  selectedEnvironmentId: EnvironmentId;
 }) {
   const settings = useClientSettings();
   const settingsHydrated = useClientSettingsHydrated();
   const updateSettings = useUpdateClientSettings();
+  const selectedEnvironments = environments.filter(
+    (environment) => environment.environmentId === selectedEnvironmentId,
+  );
 
   if (environments.length < 2) {
     return (
@@ -51,7 +57,7 @@ export function LoadBalancingSettings({
           />
         }
       />
-      {environments.map((environment) => {
+      {selectedEnvironments.map((environment) => {
         const weight = settings.loadBalancingWeights[environment.environmentId] ?? 50;
         // Keep saved slider weights until the user chooses a different preference.
         const preference = weight === 0 ? 0 : weight < 50 ? 25 : weight === 50 ? 50 : 100;
@@ -59,7 +65,7 @@ export function LoadBalancingSettings({
         return (
           <SettingsRow
             key={environment.environmentId}
-            title={environment.label}
+            title="Load preference"
             description={connectionStatusText(environment.connection)}
             control={
               <Select
