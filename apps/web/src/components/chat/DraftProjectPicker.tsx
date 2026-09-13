@@ -189,11 +189,22 @@ export function DraftProjectPicker({
           render={
             <MenuTrigger
               aria-label={!isChat && hasResolvedProject ? "Change project" : "Add project"}
-              className="inline-flex min-w-0 max-w-64 items-center gap-2 rounded-r-xl px-2 py-1 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+              className={
+                isChat
+                  ? "inline-flex min-w-0 items-center rounded-xl text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  : "inline-flex min-w-0 max-w-64 items-center gap-2 rounded-r-xl px-2 py-1 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+              }
             />
           }
         >
-          <span className="truncate">{activeProjectDisplayName ?? "Add project"}</span>
+          {isChat ? (
+            <span className="pointer-events-none ms-1 flex size-9 shrink-0 items-center justify-center">
+              <MessageCircleIcon className="size-5" />
+            </span>
+          ) : null}
+          <span className={isChat ? "truncate px-2 py-1" : "truncate"}>
+            {activeProjectDisplayName ?? "Add project"}
+          </span>
         </TooltipTrigger>
         {activeProjectDisplayName ? (
           <TooltipPopup side="top" className="max-w-80">
@@ -275,11 +286,11 @@ export function DraftProjectPicker({
           </TooltipTrigger>
           <TooltipPopup>Enter chat mode</TooltipPopup>
         </Tooltip>
-      ) : (
+      ) : !isChat || !shouldShowProjectMenu ? (
         <span className="ms-1 flex size-9 shrink-0 items-center justify-center">
           <MessageCircleIcon className="size-5" />
         </span>
-      )}
+      ) : null}
       {projectSelector}
     </span>
   );
