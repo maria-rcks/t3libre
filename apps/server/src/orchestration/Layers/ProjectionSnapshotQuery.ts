@@ -639,14 +639,17 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       projectId: ProjectId,
       branch: Schema.String,
       worktreePath: Schema.String,
+      workspaceRoot: Schema.String,
       deletedAt: IsoDateTime,
     }),
     execute: () => sql`
-      SELECT thread_id AS "id", project_id AS "projectId", branch,
-        worktree_path AS "worktreePath", deleted_at AS "deletedAt"
-      FROM projection_threads
-      WHERE deleted_at IS NOT NULL AND worktree_path IS NOT NULL AND branch IS NOT NULL
-      ORDER BY deleted_at DESC, thread_id ASC
+      SELECT t.thread_id AS "id", t.project_id AS "projectId", t.branch,
+        t.worktree_path AS "worktreePath", p.workspace_root AS "workspaceRoot",
+        t.deleted_at AS "deletedAt"
+      FROM projection_threads t
+      JOIN projection_projects p ON p.project_id = t.project_id
+      WHERE t.deleted_at IS NOT NULL AND t.worktree_path IS NOT NULL AND t.branch IS NOT NULL
+      ORDER BY t.deleted_at DESC, t.thread_id ASC
     `,
   });
   const getDeletedWorktreeThreads: ProjectionSnapshotQueryShape["getDeletedWorktreeThreads"] = () =>

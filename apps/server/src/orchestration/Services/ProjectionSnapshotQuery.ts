@@ -129,6 +129,7 @@ export interface ProjectionSnapshotQueryShape {
       readonly projectId: ProjectId;
       readonly branch: string;
       readonly worktreePath: string;
+      readonly workspaceRoot: string;
       readonly deletedAt: string;
     }>,
     ProjectionRepositoryError
