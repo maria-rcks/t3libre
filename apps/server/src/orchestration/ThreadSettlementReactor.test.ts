@@ -1346,7 +1346,14 @@ describe("storage cleanup", () => {
     "deleted-ignored",
     "deleted-shared",
     "deleted-project",
+    "deleted-owner",
+    "deleted-owner-root",
+    "deleted-owner-nested",
     "deleted-provider",
+    "policy-disabled",
+    "policy-extended",
+    "files-disabled",
+    "files-extended",
   ] as const) {
     it.effect(
       `retains protected worktrees (${protection}) and expires only old artifacts and rotated logs`,
@@ -1423,18 +1430,44 @@ describe("storage cleanup", () => {
           let snapshotReads = 0;
           let defaultRefFetched = false;
           let fetches = 0;
+          const settingsService = yield* ServerSettingsService.pipe(
+            Effect.provide(
+              ServerSettingsService.layerTest({
+                storageCleanup: {
+                  worktreeAfterDays: deleteRule || mergeRule || unchangedRule ? null : 8,
+                  worktreeOnDelete: deleteRule,
+                  worktreeOnMerge: mergeRule,
+                  worktreeUnchanged: unchangedRule,
+                  browserArtifactsAfterDays: 8,
+                  logsAfterDays: 8,
+                },
+              }),
+            ),
+          );
           const cleanup = yield* StorageCleanup.make.pipe(
             Effect.provide(
               Layer.mergeAll(
-                ServerSettingsService.layerTest({
-                  storageCleanup: {
-                    worktreeAfterDays: deleteRule || mergeRule || unchangedRule ? null : 8,
-                    worktreeOnDelete: deleteRule,
-                    worktreeOnMerge: mergeRule,
-                    worktreeUnchanged: unchangedRule,
-                    browserArtifactsAfterDays: 8,
-                    logsAfterDays: 8,
-                  },
+                Layer.succeed(ServerSettingsService, settingsService),
+                Layer.succeed(FileSystem.FileSystem, {
+                  ...fs,
+                  stat: (target) =>
+                    fs.stat(target).pipe(
+                      Effect.tap(() => {
+                        if (
+                          !protection.startsWith("files-") ||
+                          (target !== oldImage && target !== oldLog)
+                        )
+                          return Effect.void;
+                        return settingsService
+                          .updateSettings({
+                            storageCleanup: {
+                              [target === oldImage ? "browserArtifactsAfterDays" : "logsAfterDays"]:
+                                protection === "files-disabled" ? null : 60,
+                            },
+                          })
+                          .pipe(Effect.orDie);
+                      }),
+                    ),
                 }),
                 Layer.mock(ProjectionSnapshotQuery)({
                   getDeletedWorktreeThreads: () =>
@@ -1446,6 +1479,12 @@ describe("storage cleanup", () => {
                               projectId: thread.projectId,
                               branch: "feature",
                               worktreePath,
+                              workspaceRoot:
+                                protection === "deleted-owner-root"
+                                  ? worktreePath
+                                  : protection === "deleted-owner-nested"
+                                    ? path.join(worktreePath, "nested")
+                                    : config.baseDir,
                               deletedAt: NOW,
                             },
                           ]
@@ -1457,7 +1496,9 @@ describe("storage cleanup", () => {
                       Effect.andThen(
                         Effect.sync(() => {
                           snapshotReads++;
-                          const projects = [makeProject(PROJECT_ID, config.baseDir)];
+                          const projects = protection.startsWith("deleted-owner")
+                            ? []
+                            : [makeProject(PROJECT_ID, config.baseDir)];
                           const threads = tombstoned ? [] : [thread];
                           if (protection === "deleted-shared")
                             threads.push({ ...thread, id: ThreadId.make("surviving-thread") });
@@ -1604,7 +1645,19 @@ describe("storage cleanup", () => {
                       stderr: "",
                       stdoutTruncated: false,
                       stderrTruncated: false,
-                    }),
+                    }).pipe(
+                      Effect.tap(() =>
+                        protection.startsWith("policy-") && headReads > 1
+                          ? settingsService
+                              .updateSettings({
+                                storageCleanup: {
+                                  worktreeAfterDays: protection === "policy-disabled" ? null : 60,
+                                },
+                              })
+                              .pipe(Effect.orDie)
+                          : Effect.void,
+                      ),
+                    ),
                   removeWorktree: (input) => {
                     assert.strictEqual(input.force, false);
                     removals.push(input.path);
@@ -1672,6 +1725,9 @@ describe("storage cleanup", () => {
             protection === "none" ||
             protection === "deleted" ||
             protection === "deleted-event" ||
+            protection === "deleted-owner" ||
+            protection === "files-disabled" ||
+            protection === "files-extended" ||
             protection === "merged" ||
             protection === "unchanged" ||
             protection === "unchanged-two-worktrees";
@@ -1687,9 +1743,9 @@ describe("storage cleanup", () => {
           assert.strictEqual(fetches, mergeRule || unchangedRule ? 1 : 0);
           assert.strictEqual(thread.worktreePath, worktreePath);
           assert.strictEqual(thread.branch, "feature");
-          assert.strictEqual(yield* fs.exists(oldImage), false);
+          assert.strictEqual(yield* fs.exists(oldImage), protection.startsWith("files-"));
           assert.strictEqual(yield* fs.exists(recentImage), true);
-          assert.strictEqual(yield* fs.exists(oldLog), false);
+          assert.strictEqual(yield* fs.exists(oldLog), protection.startsWith("files-"));
           assert.strictEqual(yield* fs.exists(activeLog), true);
         }).pipe(
           Effect.provide(

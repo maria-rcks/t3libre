@@ -1081,10 +1081,27 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           projectId: ProjectId.make("project-archive-test"),
           branch: "retained-branch",
           worktreePath: "/tmp/archived-worktree",
+          workspaceRoot: "/tmp/archive-test",
           deletedAt: "2026-04-06T00:00:09.000Z",
         },
       ]);
       assert.deepEqual((yield* snapshotQuery.getArchivedShellSnapshot()).threads, []);
+      yield* sql`
+        UPDATE projection_projects
+        SET deleted_at = '2026-04-06T00:00:10.000Z', updated_at = '2026-04-06T00:00:10.000Z'
+        WHERE project_id = 'project-archive-test'
+      `;
+      assert.deepEqual((yield* snapshotQuery.getShellSnapshot()).projects, []);
+      assert.deepEqual(yield* snapshotQuery.getDeletedWorktreeThreads(), [
+        {
+          id: ThreadId.make("thread-archived"),
+          projectId: ProjectId.make("project-archive-test"),
+          branch: "retained-branch",
+          worktreePath: "/tmp/archived-worktree",
+          workspaceRoot: "/tmp/archive-test",
+          deletedAt: "2026-04-06T00:00:09.000Z",
+        },
+      ]);
     }),
   );
 

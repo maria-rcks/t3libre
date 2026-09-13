@@ -1,4 +1,9 @@
-import type { OrchestrationThreadShell, ServerSettings, TerminalSummary } from "@t3tools/contracts";
+import type {
+  OrchestrationThreadShell,
+  ServerSettings,
+  ServerSettingsError,
+  TerminalSummary,
+} from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -165,7 +170,9 @@ export const make = Effect.gen(function* () {
     for (const thread of candidates) {
       const worktreePath = path.resolve(thread.worktreePath!);
       const deleted = "deletedAt" in thread;
-      const project = snapshot.projects.find((entry) => entry.id === thread.projectId);
+      const project = deleted
+        ? { workspaceRoot: thread.workspaceRoot }
+        : snapshot.projects.find((entry) => entry.id === thread.projectId);
       if (
         project === undefined ||
         (!deleted && !storageCleanupThreadIdle(thread, now)) ||
@@ -175,7 +182,7 @@ export const make = Effect.gen(function* () {
       yield* Effect.gen(function* () {
         if (!inside(root, worktreePath) || !(yield* fs.exists(worktreePath))) return;
         if ((yield* fs.realPath(worktreePath)) !== worktreePath) return;
-        if (yield* containsProjectRoot(worktreePath, snapshot.projects)) return;
+        if (yield* containsProjectRoot(worktreePath, [project, ...snapshot.projects])) return;
         // A linked worktree has a .git file. Never remove a main checkout.
         if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File") return;
         const status = yield* git.statusDetailsLocal(worktreePath);
@@ -242,7 +249,7 @@ export const make = Effect.gen(function* () {
         // Re-read after Git/host calls so a queued turn, resumed session or new
         // thread sharing this path cancels the removal.
         const latestSnapshot = yield* readThreads();
-        if (yield* containsProjectRoot(worktreePath, latestSnapshot.projects)) return;
+        if (yield* containsProjectRoot(worktreePath, [project, ...latestSnapshot.projects])) return;
         const latest = latestSnapshot.threads.filter(
           (entry) =>
             entry.worktreePath !== null && path.resolve(entry.worktreePath) === worktreePath,
@@ -299,6 +306,7 @@ export const make = Effect.gen(function* () {
             .some((entry) => entry !== "" && !/(^|\/)node_modules\/$/.test(entry))
         )
           return;
+        if (!Equal.equals((yield* settingsService.getSettings).storageCleanup, settings)) return;
         yield* git.removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: false });
         yield* gitManager.invalidateStatus(project.workspaceRoot);
         // Preserve branch and path: ProviderCommandReactor recreates the checkout
@@ -324,7 +332,7 @@ export const make = Effect.gen(function* () {
     if (realRoot !== path.resolve(root)) return;
     const visit = Effect.fn("StorageCleanup.visitFiles")(function* (
       directory: string,
-    ): Effect.fn.Return<void, PlatformError> {
+    ): Effect.fn.Return<void, PlatformError | ServerSettingsError> {
       for (const name of yield* fs.readDirectory(directory)) {
         const target = path.join(directory, name);
         if ((yield* fs.realPath(target)) !== target || !inside(realRoot, target)) continue;
@@ -333,8 +341,12 @@ export const make = Effect.gen(function* () {
           yield* visit(target);
         } else if (stat.type === "File" && (!rotatedLogs || /\.(?:log|ndjson)\.\d+$/.test(name))) {
           const modified = Option.getOrNull(stat.mtime);
-          if (modified !== null && modified.getTime() < now - days * DAY_MS)
+          if (modified !== null && modified.getTime() < now - days * DAY_MS) {
+            const current = (yield* settingsService.getSettings).storageCleanup;
+            if ((rotatedLogs ? current.logsAfterDays : current.browserArtifactsAfterDays) !== days)
+              return;
             yield* fs.remove(target);
+          }
         }
       }
     });
