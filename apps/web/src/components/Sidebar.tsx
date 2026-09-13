@@ -3630,9 +3630,7 @@ export default function Sidebar() {
       const item = sidebarListItems[args.index];
       // Footer rows stay anchored while the main list previews a reorder.
       if (
-        (item?.kind === "thread"
-          ? item.section === "snoozed"
-          : item?.marker === "snoozed-header")
+        item?.kind === "thread" ? item.section === "snoozed" : item?.marker === "snoozed-header"
       ) {
         return null;
       }
