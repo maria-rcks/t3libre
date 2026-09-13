@@ -2123,6 +2123,27 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Working", pulse: true });
   });
 
+  it("does not label a failed goal turn as goaling", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          session: { ...baseThread.session, status: "ready", activeTurnId: null },
+          latestTurn: { ...makeLatestTurn(), state: "error" },
+          goal: {
+            objective: "Finish task",
+            status: "active",
+            createdAt: "2026-03-09T10:00:00.000Z",
+            updatedAt: "2026-03-09T10:00:00.000Z",
+            timeUsedSeconds: 1,
+            tokensUsed: 10,
+            tokenBudget: null,
+          },
+        },
+      }),
+    ).toBeNull();
+  });
+
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
     expect(
       resolveThreadStatusPill({
