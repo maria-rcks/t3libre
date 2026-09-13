@@ -285,6 +285,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
         threadId: asThreadId("thread-1"),
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
           { id: "serviceTier", value: "priority" },
+          { id: "reasoningEffort", value: "high" },
         ]),
         runtimeMode: "full-access",
       });
@@ -296,6 +297,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
         model: "gpt-5.3-codex",
         providerInstanceId: ProviderInstanceId.make("codex"),
         serviceTier: "priority",
+        reasoningEffort: "high",
         threadId: asThreadId("thread-1"),
         runtimeMode: "full-access",
       });
