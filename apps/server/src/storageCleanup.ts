@@ -18,6 +18,9 @@ import * as Stream from "effect/Stream";
 import { ServerConfig } from "./config.ts";
 import { GitManager } from "./git/GitManager.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
+import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
+import { ProviderService } from "./provider/Services/ProviderService.ts";
 import { threadHasQueuedTurnStart } from "./orchestration/ThreadSettlementPolicy.ts";
 import { forkParked } from "./serverActivation.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
@@ -66,6 +69,9 @@ export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
   const settingsService = yield* ServerSettingsService;
   const snapshots = yield* ProjectionSnapshotQuery;
+  const engine = yield* OrchestrationEngineService;
+  const threadDeletion = yield* ThreadDeletionReactor;
+  const providers = yield* ProviderService;
   const git = yield* GitVcsDriver;
   const gitManager = yield* GitManager;
   const terminals = yield* TerminalManager;
@@ -131,10 +137,20 @@ export const make = Effect.gen(function* () {
     if (
       settings.worktreeAfterDays === null &&
       !settings.worktreeOnMerge &&
+      !settings.worktreeOnDelete &&
       !settings.worktreeUnchanged
     )
       return;
     if (!(yield* fs.exists(config.worktreesDir))) return;
+    const deletedThreads = settings.worktreeOnDelete
+      ? yield* snapshots.getDeletedWorktreeThreads()
+      : [];
+    if (deletedThreads.length > 0) {
+      // Read tombstones before taking this fence. A later deletion waits for the
+      // next sweep; every captured deletion must finish stopping its resources.
+      const { snapshotSequence } = yield* snapshots.getSnapshotSequence();
+      yield* threadDeletion.drainThrough(snapshotSequence);
+    }
     const snapshot = yield* readThreads();
     const root = yield* fs.realPath(config.worktreesDir);
     const refreshedDefaultRefs = new Map<string, Set<string>>();
@@ -142,13 +158,17 @@ export const make = Effect.gen(function* () {
       snapshot.threads.filter((thread) => thread.worktreePath !== null),
       (thread) => path.resolve(thread.worktreePath!),
     );
-    for (const [worktreePath, group] of groups) {
-      if (group.length !== 1) continue;
-      const thread = group[0]!;
+    const candidates = [
+      ...[...groups.values()].flatMap((group) => (group.length === 1 ? [group[0]!] : [])),
+      ...deletedThreads.filter((thread) => !groups.has(path.resolve(thread.worktreePath))),
+    ];
+    for (const thread of candidates) {
+      const worktreePath = path.resolve(thread.worktreePath!);
+      const deleted = "deletedAt" in thread;
       const project = snapshot.projects.find((entry) => entry.id === thread.projectId);
       if (
         project === undefined ||
-        !storageCleanupThreadIdle(thread, now) ||
+        (!deleted && !storageCleanupThreadIdle(thread, now)) ||
         hasTerminal(worktreePath)
       )
         continue;
@@ -178,9 +198,10 @@ export const make = Effect.gen(function* () {
         )
           return;
         const old =
+          !deleted &&
           settings.worktreeAfterDays !== null &&
           storageCleanupActivityAt(thread) < now - settings.worktreeAfterDays * DAY_MS;
-        let eligible = old;
+        let eligible = deleted || old;
         if (!eligible && (settings.worktreeUnchanged || settings.worktreeOnMerge)) {
           const repositoryCwd = path.resolve(project.workspaceRoot);
           const remote = yield* git.resolvePrimaryRemoteName(repositoryCwd);
@@ -226,12 +247,31 @@ export const make = Effect.gen(function* () {
           (entry) =>
             entry.worktreePath !== null && path.resolve(entry.worktreePath) === worktreePath,
         );
-        if (
+        if (hasTerminal(worktreePath)) return;
+        if (deleted) {
+          if (
+            latest.length > 0 ||
+            !(yield* settingsService.getSettings).storageCleanup.worktreeOnDelete
+          )
+            return;
+          // A failed session stop is logged by the deletion reactor. Its drain
+          // alone is not proof that a provider released this checkout.
+          if (
+            (yield* providers.listSessions()).some(
+              (session) =>
+                session.status !== "closed" &&
+                (session.threadId === thread.id ||
+                  (session.cwd !== undefined &&
+                    (path.resolve(session.cwd) === worktreePath ||
+                      inside(worktreePath, path.resolve(session.cwd))))),
+            )
+          )
+            return;
+        } else if (
           latest.length !== 1 ||
           latest[0]!.id !== thread.id ||
           !storageCleanupThreadIdle(latest[0]!, now) ||
-          storageCleanupActivityAt(latest[0]!) !== storageCleanupActivityAt(thread) ||
-          hasTerminal(worktreePath)
+          storageCleanupActivityAt(latest[0]!) !== storageCleanupActivityAt(thread)
         )
           return;
         const finalStatus = yield* git.statusDetailsLocal(worktreePath);
@@ -346,6 +386,7 @@ export const make = Effect.gen(function* () {
     );
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
     const changes = yield* settingsService.subscribeChanges;
+    const events = yield* engine.subscribeDomainEvents;
     let lastSettings = (yield* settingsService.getSettings.pipe(Effect.orDie)).storageCleanup;
     yield* forkParked(
       worker
@@ -363,6 +404,13 @@ export const make = Effect.gen(function* () {
         lastSettings = next;
         return worker.enqueue(undefined);
       }),
+    );
+    yield* forkParked(
+      Stream.runForEach(events, (event) =>
+        event.type === "thread.deleted" && lastSettings.worktreeOnDelete
+          ? worker.enqueue(undefined)
+          : Effect.void,
+      ),
     );
   });
   return { start, drain: worker.drain } satisfies StorageCleanup["Service"];

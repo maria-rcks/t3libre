@@ -1,10 +1,13 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  EventId,
   ProjectId,
   ProviderInstanceId,
+  ProviderDriverKind,
   PullRequestOperationError,
   ThreadId,
   type OrchestrationCommand,
+  type OrchestrationEvent,
   type OrchestrationProjectShell,
   type OrchestrationShellSnapshot,
   type OrchestrationThreadShell,
@@ -49,6 +52,8 @@ import * as StorageCleanup from "../storageCleanup.ts";
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
+import { ThreadDeletionReactor } from "./Services/ThreadDeletionReactor.ts";
+import { ProviderService } from "../provider/Services/ProviderService.ts";
 
 const NOW = "2026-08-28T12:00:00.000Z";
 const PROJECT_ID = ProjectId.make("settlement-project");
@@ -1335,6 +1340,13 @@ describe("storage cleanup", () => {
     "unchanged-two-worktrees",
     "diverged",
     "head-moved",
+    "deleted",
+    "deleted-event",
+    "deleted-dirty",
+    "deleted-ignored",
+    "deleted-shared",
+    "deleted-project",
+    "deleted-provider",
   ] as const) {
     it.effect(
       `retains protected worktrees (${protection}) and expires only old artifacts and rotated logs`,
@@ -1355,7 +1367,7 @@ describe("storage cleanup", () => {
               "gitdir: /test/admin-two",
             );
           }
-          if (protection === "ignored")
+          if (protection === "ignored" || protection === "deleted-ignored")
             yield* fs.writeFileString(path.join(worktreePath, ".env"), "secret");
           if (protection === "ignored-directory") {
             yield* fs.makeDirectory(path.join(worktreePath, ".cache"));
@@ -1394,6 +1406,12 @@ describe("storage cleanup", () => {
               : {}),
           });
           const snapshotRead = yield* Deferred.make<void>();
+          const deletionStarted = yield* Deferred.make<void>();
+          const deletionStopped = yield* Deferred.make<void>();
+          if (protection !== "deleted-event") yield* Deferred.succeed(deletionStopped, undefined);
+          const domainEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+          const deleteRule = protection.startsWith("deleted");
+          let tombstoned = deleteRule && protection !== "deleted-event";
           const removals: string[] = [];
           const mergeRule = protection === "merged" || protection === "unmerged";
           const unchangedRule =
@@ -1410,7 +1428,8 @@ describe("storage cleanup", () => {
               Layer.mergeAll(
                 ServerSettingsService.layerTest({
                   storageCleanup: {
-                    worktreeAfterDays: mergeRule || unchangedRule ? null : 8,
+                    worktreeAfterDays: deleteRule || mergeRule || unchangedRule ? null : 8,
+                    worktreeOnDelete: deleteRule,
                     worktreeOnMerge: mergeRule,
                     worktreeUnchanged: unchangedRule,
                     browserArtifactsAfterDays: 8,
@@ -1418,13 +1437,32 @@ describe("storage cleanup", () => {
                   },
                 }),
                 Layer.mock(ProjectionSnapshotQuery)({
+                  getDeletedWorktreeThreads: () =>
+                    Effect.succeed(
+                      tombstoned
+                        ? [
+                            {
+                              id: thread.id,
+                              projectId: thread.projectId,
+                              branch: "feature",
+                              worktreePath,
+                              deletedAt: NOW,
+                            },
+                          ]
+                        : [],
+                    ),
+                  getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 2 }),
                   getShellSnapshot: () =>
                     Deferred.succeed(snapshotRead, undefined).pipe(
                       Effect.andThen(
                         Effect.sync(() => {
                           snapshotReads++;
                           const projects = [makeProject(PROJECT_ID, config.baseDir)];
-                          const threads = [thread];
+                          const threads = tombstoned ? [] : [thread];
+                          if (protection === "deleted-shared")
+                            threads.push({ ...thread, id: ThreadId.make("surviving-thread") });
+                          if (protection === "deleted-project")
+                            projects.push(makeProject(LINKED_PROJECT_ID, worktreePath));
                           if (
                             protection === "project-root" ||
                             protection === "nested-project" ||
@@ -1478,6 +1516,37 @@ describe("storage cleanup", () => {
                     );
                   },
                 }),
+                Layer.mock(OrchestrationEngineService)({
+                  subscribeDomainEvents: PubSub.subscribe(domainEvents).pipe(
+                    Effect.map((subscription) => Stream.fromSubscription(subscription)),
+                  ),
+                }),
+                Layer.mock(ThreadDeletionReactor)({
+                  drainThrough: (sequence) => {
+                    assert.strictEqual(sequence, 2);
+                    return Deferred.succeed(deletionStarted, undefined).pipe(
+                      Effect.andThen(Deferred.await(deletionStopped)),
+                    );
+                  },
+                }),
+                Layer.mock(ProviderService)({
+                  listSessions: () =>
+                    Effect.succeed(
+                      protection === "deleted-provider"
+                        ? [
+                            {
+                              threadId: thread.id,
+                              provider: ProviderDriverKind.make("codex"),
+                              status: "ready",
+                              runtimeMode: "full-access",
+                              cwd: worktreePath,
+                              createdAt: NOW,
+                              updatedAt: NOW,
+                            },
+                          ]
+                        : [],
+                    ),
+                }),
                 Layer.mock(GitVcsDriver)({
                   resolvePrimaryRemoteName: () => Effect.succeed("origin"),
                   resolveDefaultBranchName: () => Effect.succeed("main"),
@@ -1510,7 +1579,8 @@ describe("storage cleanup", () => {
                       isDefaultBranch: false,
                       branch: cwd === secondWorktreePath ? "feature-two" : "feature",
                       upstreamRef: null,
-                      hasWorkingTreeChanges: protection === "dirty",
+                      hasWorkingTreeChanges:
+                        protection === "dirty" || protection === "deleted-dirty",
                       workingTree: { files: [], insertions: 0, deletions: 0 },
                       hasUpstream: false,
                       aheadCount: 0,
@@ -1526,7 +1596,7 @@ describe("storage cleanup", () => {
                           : 0,
                       ),
                       stdout:
-                        protection === "ignored"
+                        protection === "ignored" || protection === "deleted-ignored"
                           ? ".env\0"
                           : protection === "ignored-directory"
                             ? ".cache/\0"
@@ -1577,8 +1647,31 @@ describe("storage cleanup", () => {
           yield* cleanup.start();
           yield* Deferred.await(snapshotRead);
           yield* cleanup.drain;
+          if (protection === "deleted-event") {
+            assert.strictEqual(yield* fs.exists(worktreePath), true);
+            tombstoned = true;
+            yield* PubSub.publish(domainEvents, {
+              type: "thread.deleted",
+              sequence: 2,
+              eventId: EventId.make("storage-thread-deleted"),
+              aggregateKind: "thread",
+              aggregateId: thread.id,
+              occurredAt: NOW,
+              commandId: null,
+              causationEventId: null,
+              correlationId: null,
+              metadata: {},
+              payload: { threadId: thread.id, deletedAt: NOW },
+            });
+            yield* Deferred.await(deletionStarted);
+            assert.strictEqual(yield* fs.exists(worktreePath), true);
+            yield* Deferred.succeed(deletionStopped, undefined);
+            yield* cleanup.drain;
+          }
           const removed =
             protection === "none" ||
+            protection === "deleted" ||
+            protection === "deleted-event" ||
             protection === "merged" ||
             protection === "unchanged" ||
             protection === "unchanged-two-worktrees";
