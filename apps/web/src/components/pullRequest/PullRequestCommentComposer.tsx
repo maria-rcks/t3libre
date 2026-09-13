@@ -84,7 +84,13 @@ export function PullRequestCommentComposer({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        render={<Button size="icon" variant="glass" className="rounded-full shadow-lg" />}
+        render={
+          <Button
+            size="icon"
+            variant="glass"
+            className="rounded-full shadow-lg [--glass-opacity:50%]"
+          />
+        }
         aria-label="Comment on pull request"
       >
         <MessageSquareIcon className="size-4" />

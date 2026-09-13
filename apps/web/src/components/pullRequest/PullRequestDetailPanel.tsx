@@ -2662,6 +2662,7 @@ export function PullRequestDetailPanel({
         ) : null}
       </div>
 
+      {/* Float over the content; do not reserve a footer or padding in the PR tabs. */}
       {detail?.capabilities.comment && detail.viewerPermissions.comment ? (
         <div className="absolute right-4 bottom-3 z-20">
           <PullRequestCommentComposer
