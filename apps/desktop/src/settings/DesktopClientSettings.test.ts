@@ -18,6 +18,7 @@ import * as DesktopClientSettings from "./DesktopClientSettings.ts";
 
 const clientSettings: ClientSettings = {
   ...DEFAULT_CLIENT_SETTINGS,
+  notificationMode: "notifications-and-sound",
   appearanceContrast: 100,
   timelineBackgroundImage: "https://example.com/wallpaper.png",
   timelineBackgroundOpacity: 47,
@@ -37,6 +38,7 @@ const clientSettings: ClientSettings = {
   contextWindowMeterEnabled: false,
   composerCollapseOnScroll: true,
   dismissedProviderUpdateNotificationKeys: [],
+  diffFilesCollapsed: true,
   diffIgnoreWhitespace: true,
   diffLayout: "stacked",
   environmentIdentificationMode: "artwork",
