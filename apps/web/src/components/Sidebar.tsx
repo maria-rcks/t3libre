@@ -3604,6 +3604,7 @@ export default function Sidebar() {
     () =>
       createSidebarSortingStrategy({
         items: sidebarListItems,
+        compact,
         boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
         settledOrder: draggedSettledOrder,
         settledExpanded: settledShelfExpanded,
@@ -3612,6 +3613,7 @@ export default function Sidebar() {
         snoozedThreadCount: snoozedThreads.length,
       }),
     [
+      compact,
       draggedSettledOrder,
       routeThreadKey,
       settledShelfExpanded,
@@ -3628,7 +3630,6 @@ export default function Sidebar() {
       const item = sidebarListItems[args.index];
       // Footer rows stay anchored while the main list previews a reorder.
       if (
-        draggingCompactSnoozed ||
         (item?.kind === "thread"
           ? item.section === "snoozed"
           : item?.marker === "snoozed-header")
@@ -3637,7 +3638,7 @@ export default function Sidebar() {
       }
       return sidebarSortingStrategy(args);
     },
-    [draggingCompactSnoozed, sidebarListItems, sidebarSortingStrategy],
+    [sidebarListItems, sidebarSortingStrategy],
   );
   // Hidden and filtered threads keep their keys. Reserve those slots without
   // including the rows in the visible drop order or writing to them.
@@ -4542,7 +4543,7 @@ export default function Sidebar() {
     <>
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
-        className="gap-0"
+        className={cn("gap-0", compact && "group-data-[collapsible=icon]:overflow-visible")}
         fixedFooter={
           compact && !isSearchingThreads && snoozedThreads.length > 0 ? (
             <ul
@@ -4946,6 +4947,11 @@ export default function Sidebar() {
                         );
                       };
                       const from = dragState?.activeSection ?? null;
+                      const showDragLabels =
+                        from !== null &&
+                        (!compact ||
+                          dragTargetSection === "active" ||
+                          dragTargetSection === "pinned");
                       const snoozedItems: ReactNode[] = [];
                       const items: ReactNode[] = [
                         <SidebarDraftBlock
@@ -4978,7 +4984,7 @@ export default function Sidebar() {
                                 key="pinned-header"
                                 marker="pinned-header"
                                 label="Pinned"
-                                visible={from !== null}
+                                visible={showDragLabels}
                                 isDropTarget={dragTargetSection === "pinned"}
                               />,
                             );
@@ -4989,7 +4995,7 @@ export default function Sidebar() {
                                 key="pinned-divider"
                                 marker="pinned-divider"
                                 label="Active"
-                                visible={from !== null}
+                                visible={showDragLabels}
                                 isDropTarget={dragTargetSection === "active"}
                               />,
                             );
@@ -5075,24 +5081,18 @@ export default function Sidebar() {
                         compact && snoozedFooter
                           ? createPortal(snoozedItems, snoozedFooter, "snoozed-footer")
                           : null,
-                        compact
+                        compactSnoozedDragThread
                           ? createPortal(
                               <DragOverlay dropAnimation={null}>
-                                {compactSnoozedDragThread ? (
-                                  <ul className="pointer-events-none">
-                                    {renderThreadRowInner(
-                                      compactSnoozedDragThread,
-                                      "snoozed",
-                                      {
-                                        isDragging: true,
-                                        listeners: undefined,
-                                        setNodeRef: () => {},
-                                        transform: null,
-                                        transition: undefined,
-                                      },
-                                    )}
-                                  </ul>
-                                ) : null}
+                                <ul className="pointer-events-none">
+                                  {renderThreadRowInner(compactSnoozedDragThread, "snoozed", {
+                                    isDragging: true,
+                                    listeners: undefined,
+                                    setNodeRef: () => {},
+                                    transform: null,
+                                    transition: undefined,
+                                  })}
+                                </ul>
                               </DragOverlay>,
                               document.body,
                               "compact-snoozed-drag",
