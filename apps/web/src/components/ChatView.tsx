@@ -10,6 +10,7 @@ import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import {
   ChatTimelineBackground,
   CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
+  useHasTimelineBackground,
 } from "./chat/ChatTimelineBackground";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
@@ -1545,9 +1546,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [routeKind, routeThreadRef, routeThreadState]);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const settings = useEnvironmentSettings(environmentId);
-  const hasTimelineBackground = useClientSettings((settings) =>
-    Boolean(settings.timelineBackgroundImage),
-  );
+  const hasTimelineBackground = useHasTimelineBackground();
   const [chatHeaderElement, setChatHeaderElement] = useState<HTMLElement | null>(null);
   const [chatHeaderHeight, setChatHeaderHeight] = useState(0);
   useLayoutEffect(() => {

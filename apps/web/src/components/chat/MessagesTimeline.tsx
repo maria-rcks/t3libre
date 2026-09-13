@@ -145,6 +145,7 @@ import {
 } from "./SnapShotAttachmentDetails";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
+import { useHasTimelineBackground } from "./ChatTimelineBackground";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
   timelineContentOverflowsViewport,
@@ -1464,8 +1465,16 @@ function UserVideoAttachment({ file }: { readonly file: ChatFileAttachment }) {
 }
 
 export function UserMessageBubble({ children }: { children: ReactNode }) {
+  const glass = useHasTimelineBackground();
   return (
-    <div className="surface-glass relative max-w-[80%] rounded-2xl p-3 text-message-foreground [text-shadow:none] [--surface-glass-color:var(--message-surface)]">
+    <div
+      className={cn(
+        "relative max-w-[80%] rounded-2xl p-3 text-message-foreground",
+        glass
+          ? "surface-glass [text-shadow:none] [--surface-glass-color:var(--message-surface)]"
+          : "bg-message",
+      )}
+    >
       {children}
     </div>
   );
