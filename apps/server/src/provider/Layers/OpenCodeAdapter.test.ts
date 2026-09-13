@@ -1560,6 +1560,54 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("bounds native admission recovery when timeout cleanup cannot abort the session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-native-command-timeout-abort-failure");
+      const started = promiseWithResolvers<void>();
+      runtimeMock.state.commandImplementation = async () => {
+        started.resolve(undefined);
+        await new Promise<void>(() => {});
+      };
+      runtimeMock.state.abortImplementation = async () => {
+        throw new Error("abort failed");
+      };
+      runtimeMock.state.sessionStatus = "idle";
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const exitedFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "session.exited"),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+      const sendFiber = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "/review",
+          modelSelection: createModelSelection(ProviderInstanceId.make("opencode"), "openai/gpt-5"),
+        })
+        .pipe(Effect.exit, Effect.forkChild);
+      yield* Effect.promise(() => started.promise);
+      yield* advanceTestClock(10_000);
+      NodeAssert.equal(Exit.isFailure(yield* Fiber.join(sendFiber)), true);
+      yield* advanceTestClock(6_000);
+      const exited = Option.getOrThrow(yield* Fiber.join(exitedFiber));
+      NodeAssert.ok(exited.type === "session.exited");
+      NodeAssert.equal(exited.payload.exitKind, "error");
+      NodeAssert.ok(runtimeMock.state.sessionStatusCalls > 0);
+      NodeAssert.equal(
+        (yield* adapter.listSessions()).some((session) => session.threadId === threadId),
+        false,
+      );
+      const messageCalls = runtimeMock.state.messageCalls.length;
+      yield* advanceTestClock(5_000);
+      NodeAssert.equal(runtimeMock.state.messageCalls.length, messageCalls);
+    }),
+  );
+
   for (const nativeStartsTurn of [true, false]) {
     it.effect(
       `reports a late native command failure after another steer (starts turn: ${nativeStartsTurn})`,
