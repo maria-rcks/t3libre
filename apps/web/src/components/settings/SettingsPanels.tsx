@@ -512,7 +512,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
       ...(settings.timelineBackgroundImage !== DEFAULT_UNIFIED_SETTINGS.timelineBackgroundImage ||
       settings.timelineBackgroundOpacity !== DEFAULT_UNIFIED_SETTINGS.timelineBackgroundOpacity ||
-      settings.timelineBackgroundBlur !== DEFAULT_UNIFIED_SETTINGS.timelineBackgroundBlur
+      settings.timelineBackgroundBlur !== DEFAULT_UNIFIED_SETTINGS.timelineBackgroundBlur ||
+      settings.timelineTextShadowOpacity !== DEFAULT_UNIFIED_SETTINGS.timelineTextShadowOpacity ||
+      settings.timelineTextShadowBlur !== DEFAULT_UNIFIED_SETTINGS.timelineTextShadowBlur
         ? ["Wallpaper"]
         : []),
       ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
@@ -621,6 +623,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.timelineBackgroundImage,
       settings.timelineBackgroundOpacity,
       settings.timelineBackgroundBlur,
+      settings.timelineTextShadowOpacity,
+      settings.timelineTextShadowBlur,
       settings.compactSidebarEnabled,
       settings.diffColorScheme,
       settings.enableAgentBrowserAccess,
@@ -733,6 +737,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       timelineBackgroundImage: DEFAULT_UNIFIED_SETTINGS.timelineBackgroundImage,
       timelineBackgroundOpacity: DEFAULT_UNIFIED_SETTINGS.timelineBackgroundOpacity,
       timelineBackgroundBlur: DEFAULT_UNIFIED_SETTINGS.timelineBackgroundBlur,
+      timelineTextShadowOpacity: DEFAULT_UNIFIED_SETTINGS.timelineTextShadowOpacity,
+      timelineTextShadowBlur: DEFAULT_UNIFIED_SETTINGS.timelineTextShadowBlur,
       compactSidebarEnabled: DEFAULT_UNIFIED_SETTINGS.compactSidebarEnabled,
       diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,

@@ -11,6 +11,7 @@ import {
   ChatTimelineBackground,
   CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
   useHasTimelineBackground,
+  useTimelineTextShadowStyle,
 } from "./chat/ChatTimelineBackground";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
@@ -1547,6 +1548,7 @@ export default function ChatView(props: ChatViewProps) {
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const settings = useEnvironmentSettings(environmentId);
   const hasTimelineBackground = useHasTimelineBackground();
+  const timelineTextShadowStyle = useTimelineTextShadowStyle();
   const [chatHeaderElement, setChatHeaderElement] = useState<HTMLElement | null>(null);
   const [chatHeaderHeight, setChatHeaderHeight] = useState(0);
   useLayoutEffect(() => {
@@ -8678,6 +8680,7 @@ export default function ChatView(props: ChatViewProps) {
           rightPanelMaximized ? "w-0 flex-none" : "flex-1",
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
+        style={timelineTextShadowStyle}
       >
         <ChatTimelineBackground className="z-0" />
         {hasTimelineBackground ? <ChatTopbarBlur /> : null}

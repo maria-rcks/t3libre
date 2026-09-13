@@ -24,6 +24,8 @@ const clientSettings: ClientSettings = {
   timelineBackgroundImage: "https://example.com/wallpaper.png",
   timelineBackgroundOpacity: 47,
   timelineBackgroundBlur: 8,
+  timelineTextShadowOpacity: 72,
+  timelineTextShadowBlur: 4,
   browserDefaultViewport: { _tag: "preset", width: 1024, height: 600, presetId: "nest-hub" },
   browserDefaultZoomFactor: 1.25,
   browserDefaultAppearance: "dark",

@@ -110,6 +110,12 @@ export const TimelineBackgroundOpacity = Schema.Int.check(
 export const TimelineBackgroundBlur = Schema.Int.check(
   Schema.isBetween({ minimum: 0, maximum: 30 }),
 );
+export const TimelineTextShadowOpacity = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: 100 }),
+);
+export const TimelineTextShadowBlur = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: 8 }),
+);
 export const MIN_PANEL_ANIMATION_DURATION_MS = 0;
 export const MAX_PANEL_ANIMATION_DURATION_MS = 400;
 export const PanelAnimationDurationMs = Schema.Int.check(
@@ -315,6 +321,12 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   timelineBackgroundBlur: TimelineBackgroundBlur.pipe(
     Schema.withDecodingDefault(Effect.succeed(0)),
+  ),
+  timelineTextShadowOpacity: TimelineTextShadowOpacity.pipe(
+    Schema.withDecodingDefault(Effect.succeed(65)),
+  ),
+  timelineTextShadowBlur: TimelineTextShadowBlur.pipe(
+    Schema.withDecodingDefault(Effect.succeed(2)),
   ),
   // Panel motion defaults to zero because width and height transitions cause
   // layout work on every frame, which is noticeable on lower-power clients.
@@ -1454,6 +1466,8 @@ export const ClientSettingsPatch = Schema.Struct({
   timelineBackgroundImage: Schema.optionalKey(TimelineBackgroundImage),
   timelineBackgroundOpacity: Schema.optionalKey(TimelineBackgroundOpacity),
   timelineBackgroundBlur: Schema.optionalKey(TimelineBackgroundBlur),
+  timelineTextShadowOpacity: Schema.optionalKey(TimelineTextShadowOpacity),
+  timelineTextShadowBlur: Schema.optionalKey(TimelineTextShadowBlur),
   panelAnimationDurationMs: Schema.optionalKey(PanelAnimationDurationMs),
   browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),
   browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),

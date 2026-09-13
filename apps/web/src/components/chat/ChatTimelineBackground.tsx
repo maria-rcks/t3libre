@@ -1,8 +1,24 @@
+import type { CSSProperties } from "react";
 import { cn } from "../../lib/utils";
 import { useClientSettings } from "../../hooks/useSettings";
 
 export const CHAT_BACKGROUND_TEXT_SHADOW_CLASSES =
-  "[text-shadow:0_1px_2px_color-mix(in_oklab,var(--background)_65%,transparent)] [&_:is(button,[role=button],code,.chat-markdown-codeblock,.chat-markdown-file-link,.chat-markdown-artifact-template)]:[text-shadow:none]";
+  "[text-shadow:var(--chat-text-shadow)] [&_:is(button,[role=button],code,.chat-markdown-codeblock,.chat-markdown-file-link,.chat-markdown-artifact-template)]:[text-shadow:none]";
+
+export function timelineTextShadowStyle(opacity: number, blur: number): CSSProperties {
+  return {
+    "--chat-text-shadow":
+      opacity === 0
+        ? "none"
+        : `0 1px ${blur}px color-mix(in oklab, var(--background) ${opacity}%, transparent)`,
+  } as CSSProperties;
+}
+
+export function useTimelineTextShadowStyle() {
+  const opacity = useClientSettings((settings) => settings.timelineTextShadowOpacity);
+  const blur = useClientSettings((settings) => settings.timelineTextShadowBlur);
+  return timelineTextShadowStyle(opacity, blur);
+}
 
 export function TimelineBackgroundImage({
   image,

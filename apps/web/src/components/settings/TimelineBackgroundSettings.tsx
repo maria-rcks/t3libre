@@ -10,6 +10,7 @@ import { compressImageForStash, MAX_COMPRESSIBLE_SOURCE_BYTES } from "../../lib/
 import {
   TimelineBackgroundImage,
   CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
+  timelineTextShadowStyle,
 } from "../chat/ChatTimelineBackground";
 import ChatMarkdown from "../ChatMarkdown";
 import {
@@ -30,6 +31,8 @@ export function TimelineBackgroundSettings() {
   const image = useClientSettings((settings) => settings.timelineBackgroundImage);
   const opacity = useClientSettings((settings) => settings.timelineBackgroundOpacity);
   const blur = useClientSettings((settings) => settings.timelineBackgroundBlur);
+  const shadowOpacity = useClientSettings((settings) => settings.timelineTextShadowOpacity);
+  const shadowBlur = useClientSettings((settings) => settings.timelineTextShadowBlur);
   const updateSettings = useUpdatePrimarySettings();
   const [draft, setDraft] = useState({ image, url: image.startsWith("http") ? image : "" });
   const url = draft.image === image ? draft.url : image.startsWith("http") ? image : "";
@@ -39,8 +42,12 @@ export function TimelineBackgroundSettings() {
   const [previewStartedAt] = useState(() => new Date().toISOString());
   const [opacityDraft, setOpacityDraft] = useState<number | null>(null);
   const [blurDraft, setBlurDraft] = useState<number | null>(null);
+  const [shadowOpacityDraft, setShadowOpacityDraft] = useState<number | null>(null);
+  const [shadowBlurDraft, setShadowBlurDraft] = useState<number | null>(null);
   const previewOpacity = opacityDraft ?? opacity;
   const previewBlur = blurDraft ?? blur;
+  const previewShadowOpacity = shadowOpacityDraft ?? shadowOpacity;
+  const previewShadowBlur = shadowBlurDraft ?? shadowBlur;
   const fileInput = useRef<HTMLInputElement>(null);
   const request = useRef(0);
 
@@ -52,6 +59,16 @@ export function TimelineBackgroundSettings() {
   function saveBlur(value: number) {
     setBlurDraft(null);
     if (value !== blur) updateSettings({ timelineBackgroundBlur: value });
+  }
+
+  function saveShadowOpacity(value: number) {
+    setShadowOpacityDraft(null);
+    if (value !== shadowOpacity) updateSettings({ timelineTextShadowOpacity: value });
+  }
+
+  function saveShadowBlur(value: number) {
+    setShadowBlurDraft(null);
+    if (value !== shadowBlur) updateSettings({ timelineTextShadowBlur: value });
   }
 
   useEffect(
@@ -154,6 +171,7 @@ export function TimelineBackgroundSettings() {
       <div
         className="relative isolate overflow-hidden rounded-t-xl bg-background px-5 py-5"
         aria-label="Wallpaper preview"
+        style={timelineTextShadowStyle(previewShadowOpacity, previewShadowBlur)}
       >
         <TimelineBackgroundImage image={image} opacity={previewOpacity} blur={previewBlur} />
         <div className="mx-auto max-w-lg space-y-4 text-sm leading-relaxed">
@@ -314,6 +332,64 @@ export function TimelineBackgroundSettings() {
             disabled={!image}
             onDraft={setBlurDraft}
             onCommit={saveBlur}
+          />
+        }
+      />
+      <SettingsRow
+        title="Text shadow"
+        description="Strength behind message text and the new-thread heading. Set to 0% to turn it off."
+        aria-disabled={!image || undefined}
+        resetAction={
+          shadowOpacity !== DEFAULT_CLIENT_SETTINGS.timelineTextShadowOpacity ? (
+            <SettingResetButton
+              label="text shadow strength"
+              onClick={() =>
+                updateSettings({
+                  timelineTextShadowOpacity: DEFAULT_CLIENT_SETTINGS.timelineTextShadowOpacity,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <WallpaperSlider
+            id="timeline-text-shadow-opacity"
+            label="Text shadow strength"
+            value={previewShadowOpacity}
+            max={100}
+            unit="%"
+            disabled={!image}
+            onDraft={setShadowOpacityDraft}
+            onCommit={saveShadowOpacity}
+          />
+        }
+      />
+      <SettingsRow
+        title="Shadow blur"
+        description="Softens the text shadow."
+        aria-disabled={!image || undefined}
+        resetAction={
+          shadowBlur !== DEFAULT_CLIENT_SETTINGS.timelineTextShadowBlur ? (
+            <SettingResetButton
+              label="text shadow blur"
+              onClick={() =>
+                updateSettings({
+                  timelineTextShadowBlur: DEFAULT_CLIENT_SETTINGS.timelineTextShadowBlur,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <WallpaperSlider
+            id="timeline-text-shadow-blur"
+            label="Text shadow blur"
+            value={previewShadowBlur}
+            max={8}
+            unit="px"
+            disabled={!image}
+            onDraft={setShadowBlurDraft}
+            onCommit={saveShadowBlur}
           />
         }
       />
