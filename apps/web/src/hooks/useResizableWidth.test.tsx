@@ -40,13 +40,13 @@ function pointer(clientX = 100) {
   } as unknown as PointerEvent<HTMLElement>;
 }
 
-function Panel() {
+function Panel({ edge = "left" }: { edge?: "left" | "right" }) {
   const resize = useResizableWidth({
     storageKey: "test-panel-width",
     defaultWidth: 400,
     minWidth: 200,
     maxWidth: 800,
-    edge: "left",
+    edge,
   });
   useLayoutEffect(() => {
     result = resize;
@@ -107,10 +107,47 @@ describe("panel resize cleanup", () => {
       expect(style.userSelect).toBe("");
       expect(captured).toBe(false);
       expect(cancelAnimationFrame).toHaveBeenCalledWith(42);
-      expect(setItem).not.toHaveBeenCalled();
-      if (reason !== "unmount") expect(result.width).toBe(400);
+      if (reason === "unmount") {
+        expect(setItem).not.toHaveBeenCalled();
+      } else {
+        expect(result.width).toBe(475);
+        expect(setItem).toHaveBeenCalledExactlyOnceWith("test-panel-width", "475");
+      }
     },
   );
+
+  it.each(["left", "right"] as const)(
+    "uses the release position for a fast %s-edge drag",
+    async (edge) => {
+      await act(() => renderer.update(<Panel edge={edge} />));
+      await act(() => {
+        result.handlers.onPointerDown(pointer());
+        result.handlers.onPointerMove(pointer(edge === "left" ? 50 : 150));
+        result.handlers.onPointerUp(pointer(edge === "left" ? 25 : 175));
+      });
+      expect(result.width).toBe(475);
+      expect(setItem).toHaveBeenCalledExactlyOnceWith("test-panel-width", "475");
+      expect(cancelAnimationFrame).toHaveBeenCalledWith(42);
+    },
+  );
+
+  it("handles release before any move event", async () => {
+    await act(() => {
+      result.handlers.onPointerDown(pointer());
+      result.handlers.onPointerUp(pointer(25));
+    });
+    expect(result.width).toBe(475);
+    expect(setItem).toHaveBeenCalledExactlyOnceWith("test-panel-width", "475");
+  });
+
+  it("clamps the release position to the panel bounds", async () => {
+    await act(() => {
+      result.handlers.onPointerDown(pointer());
+      result.handlers.onPointerUp(pointer(-1000));
+    });
+    expect(result.width).toBe(800);
+    expect(setItem).toHaveBeenCalledExactlyOnceWith("test-panel-width", "800");
+  });
 
   it("saves the final width when release is followed by lost capture", async () => {
     await act(() => {
