@@ -91,7 +91,7 @@ export function PullRequestCommentComposer({
       </PopoverTrigger>
       <PopoverPopup
         side="top"
-        align="start"
+        align="end"
         sideOffset={8}
         className="w-96 max-w-[calc(100vw-2rem)]"
         initialFocus={textareaRef}

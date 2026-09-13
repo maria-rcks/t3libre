@@ -2663,7 +2663,7 @@ export function PullRequestDetailPanel({
       </div>
 
       {detail?.capabilities.comment && detail.viewerPermissions.comment ? (
-        <div className="absolute bottom-3 left-4 z-20">
+        <div className="absolute right-4 bottom-3 z-20">
           <PullRequestCommentComposer
             key={JSON.stringify([
               environmentId,

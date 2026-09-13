@@ -993,10 +993,11 @@ function PullRequestCodeTab({
             />
           </div>
         ) : (
-          // Bottom-right, clear of the vertical scrollbar the diff view keeps to its own right
-          // edge.
           <Button
-            className="pointer-events-auto absolute right-4 bottom-3 rounded-full shadow-lg"
+            className={cn(
+              "pointer-events-auto absolute bottom-3 rounded-full shadow-lg",
+              detail.capabilities.comment && detail.viewerPermissions.comment ? "right-16" : "right-4",
+            )}
             onClick={() => setReviewOpen(true)}
             size="compact"
             variant="glass"
