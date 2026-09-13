@@ -2347,6 +2347,35 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         (yield* snapshotQuery.searchThreads({ query: "hidden needle" })).matches,
         [],
       );
+      const scoped = yield* snapshotQuery.searchThreads({
+        query: "NEEDLE",
+        threadId: ThreadId.make("thread-active"),
+      });
+      assert.deepStrictEqual(
+        scoped.matches.map((match) => [match.messageId, match.source]),
+        [
+          [MessageId.make("message-interim"), "assistant"],
+          [MessageId.make("message-final"), "assistant"],
+          [MessageId.make("message-user"), "user"],
+        ],
+      );
+      assert.ok(scoped.matches.every((match) => match.threadId === "thread-active"));
+      const limited = yield* snapshotQuery.searchThreads({
+        query: "needle",
+        threadId: ThreadId.make("thread-active"),
+        limit: 1,
+      });
+      assert.deepStrictEqual(limited.matches, scoped.matches.slice(0, 1));
+      const scopedPercent = yield* snapshotQuery.searchThreads({
+        query: "100%",
+        threadId: ThreadId.make("thread-percent-decoy"),
+      });
+      assert.deepStrictEqual(scopedPercent.matches, []);
+      const archived = yield* snapshotQuery.searchThreads({
+        query: "hidden needle",
+        threadId: ThreadId.make("thread-hidden"),
+      });
+      assert.equal(archived.matches[0]?.messageId, MessageId.make("message-hidden"));
       yield* sql`
         UPDATE projection_threads
         SET deleted_at = '2026-05-01T00:00:20.000Z'
@@ -2354,6 +2383,13 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       `;
       assert.deepStrictEqual(
         (yield* snapshotQuery.searchThreads({ query: "user needle" })).matches,
+        [],
+      );
+      assert.deepStrictEqual(
+        (yield* snapshotQuery.searchThreads({
+          query: "needle",
+          threadId: ThreadId.make("thread-active"),
+        })).matches,
         [],
       );
     }),
