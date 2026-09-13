@@ -284,13 +284,19 @@ export default function FileBrowserPanel({
     setQuery("");
     search.close();
   };
+  const expandedPathsRef = useRef(new Set<string>());
   useEffect(() => {
     const loadExpanded = () => {
       if (model.isSearchOpen()) return;
       for (const path of directoryPaths) {
         const item = model.getItem(path);
         if (item?.isDirectory() && "isExpanded" in item && item.isExpanded()) {
-          void load(path.replace(/\/$/, ""));
+          if (!expandedPathsRef.current.has(path)) {
+            expandedPathsRef.current.add(path);
+            void load(path.replace(/\/$/, ""));
+          }
+        } else {
+          expandedPathsRef.current.delete(path);
         }
       }
     };
@@ -335,7 +341,10 @@ export default function FileBrowserPanel({
   };
   useWorkspaceMutationRefresh({
     mutationId: workspaceMutationId,
-    refresh,
+    refresh: () => {
+      refresh();
+      if (query.trim()) pathSearch.refresh();
+    },
     resourceKey: `files:${environmentId}:${cwd}`,
   });
 
@@ -362,6 +371,10 @@ export default function FileBrowserPanel({
       handledRevealRef.current = null;
       return;
     }
+    if (entryKinds.get(selectedPath) !== "file") {
+      handledRevealRef.current = null;
+      return;
+    }
     const revealRequest = { path: selectedPath, revealId: selectedPathRevealId };
     const handledReveal = handledRevealRef.current;
     // Entry refreshes rebuild treePaths while the same preview stays open.
@@ -372,7 +385,6 @@ export default function FileBrowserPanel({
     ) {
       return;
     }
-    if (entryKinds.get(selectedPath) !== "file") return;
     const selectedItem = model.getItem(selectedPath);
     if (!selectedItem) return;
 
@@ -413,7 +425,7 @@ export default function FileBrowserPanel({
     queueMicrotask(() => {
       syncingSelectionRef.current = false;
     });
-  }, [entryKinds, model, selectedPath, selectedPathRevealId, treePaths]);
+  }, [entryKinds, model, selectedPath, selectedPathRevealId]);
 
   // Tag tree drags with the composer mention payload. The row is read from
   // the composed event path (the tree's shadow root is open), so this does

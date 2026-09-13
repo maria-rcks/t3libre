@@ -324,7 +324,7 @@ export const make = Effect.gen(function* () {
             .run({
               operation: "WorkspaceEntries.list",
               command: "git",
-              args: ["-c", "core.fsmonitor=false", "check-ignore", "--no-index", "-z", "--stdin"],
+              args: ["-c", "core.fsmonitor=false", "check-ignore", "-z", "--stdin"],
               cwd: normalizedCwd,
               stdin: `${chunk.map((entry) => entry.path).join("\0")}\0`,
               allowNonZeroExit: true,

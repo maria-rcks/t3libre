@@ -101,7 +101,9 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
         const cwd = yield* makeTempDir({ git: true });
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        yield* writeTextFile(cwd, ".gitignore", "node_modules/\n.env\n");
+        yield* writeTextFile(cwd, "tracked.txt");
+        yield* git(cwd, ["add", "tracked.txt"]);
+        yield* writeTextFile(cwd, ".gitignore", "node_modules/\n.env\ntracked.txt\n");
         yield* writeTextFile(cwd, ".env", "secret=value");
         yield* writeTextFile(cwd, "node_modules/pkg/index.js");
         yield* writeTextFile(cwd, "src/index.ts");
@@ -115,6 +117,7 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
             { path: "node_modules", kind: "directory", ignored: true },
             { path: "src", kind: "directory" },
             { path: "empty", kind: "directory" },
+            { path: "tracked.txt", kind: "file" },
           ]),
         );
         expect(root.entries.some((entry) => entry.path.includes("/"))).toBe(false);

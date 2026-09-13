@@ -13,6 +13,7 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
   const [pending, setPending] = useState(0);
   const requests = useRef(new Map<string, Promise<void>>());
   const loaded = useRef(new Set<string>());
+  const requested = useRef(new Set<string>());
   const active = useRef(true);
   const running = useRef(0);
   const waiting = useRef<Array<() => void>>([]);
@@ -24,6 +25,7 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
         return refresh ? existing.then(() => loadDirectory(directoryPath, true)) : existing;
       if (!refresh && loaded.current.has(directoryPath)) return Promise.resolve();
       loaded.current.add(directoryPath);
+      requested.current.add(directoryPath);
       const atom = projectEnvironment.listEntries({ environmentId, input: { cwd, directoryPath } });
       setPending((count) => count + 1);
       const request = (async () => {
@@ -33,7 +35,7 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
         try {
           if (!active.current) return undefined;
           return await executeAtomQuery(appAtomRegistry, atom, {
-            refresh,
+            refresh: true,
             reportFailure: false,
             reportDefect: false,
           });
@@ -61,6 +63,7 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
               return next;
             });
           } else {
+            loaded.current.delete(directoryPath);
             const cause = Cause.squash(result.cause);
             setErrors((previous) =>
               new Map(previous).set(
@@ -90,7 +93,7 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
 
   const refresh = useCallback(() => {
     // Refresh folders already visited, preserving the current expansion state.
-    const paths = [...loaded.current];
+    const paths = [...requested.current];
     let next = 0;
     const worker = async () => {
       while (next < paths.length && active.current) {
