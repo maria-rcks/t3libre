@@ -1367,7 +1367,7 @@ export function AppearanceSettingsPanel() {
           {...searchableSetting("compact-sidebar")}
           description="Keep an icon rail when the sidebar is collapsed. Click the preview to try it."
           control={
-            <div className="grid w-full grid-cols-[5rem_minmax(0,1fr)] items-center gap-3 sm:w-auto sm:grid-cols-[7rem_13rem] sm:gap-4">
+            <div className="grid w-full grid-cols-[5rem_auto] items-center justify-end gap-3 sm:w-auto sm:grid-cols-[7rem_auto] sm:gap-4">
               <CompactSidebarPreview />
               <div className="flex justify-end">
                 <Switch
