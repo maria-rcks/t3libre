@@ -693,27 +693,29 @@ function PullRequestCodeTab({
   // screen on any tab re-render (a drag-selection, a keystroke in the draft, a review-store
   // update), which is the jank this file is otherwise clean of.
   const renderCodeViewFooter = useCallback(
-    () =>
-      // Only while something is still owed. A finished diff whose query fails on a later
-      // refresh — a reconnect re-runs every one of them — is whole on screen already, and
-      // saying otherwise sends the reader looking for files that are all there.
-      nextCursor === null ? null : (
-        <div
-          ref={setSentinel}
-          className="flex items-center justify-center gap-2 py-2 text-xs text-muted-foreground"
-        >
-          {diffQuery.error !== null ? (
-            <>
-              <span>The rest of this diff could not be loaded.</span>
-              <Button size="xs" variant="outline" onClick={() => diffQuery.refresh()}>
-                Retry
-              </Button>
-            </>
-          ) : diffQuery.isPending ? (
-            "Loading more files..."
-          ) : null}
-        </div>
-      ),
+    () => (
+      <div className="pb-16">
+        {/* Only while something is still owed. A finished diff whose query fails on a later
+            refresh is whole on screen already; keep clearance for the floating controls. */}
+        {nextCursor === null ? null : (
+          <div
+            ref={setSentinel}
+            className="flex items-center justify-center gap-2 py-2 text-xs text-muted-foreground"
+          >
+            {diffQuery.error !== null ? (
+              <>
+                <span>The rest of this diff could not be loaded.</span>
+                <Button size="xs" variant="outline" onClick={() => diffQuery.refresh()}>
+                  Retry
+                </Button>
+              </>
+            ) : diffQuery.isPending ? (
+              "Loading more files..."
+            ) : null}
+          </div>
+        )}
+      </div>
+    ),
     [nextCursor, diffQuery.error, diffQuery.isPending, diffQuery.refresh],
   );
 
@@ -1221,7 +1223,7 @@ function PullRequestCodeTab({
           inside an overflowing element tracks the content's bottom edge, which would carry
           the trigger away with the first scroll. */}
       <div className="relative min-h-0 flex-1">
-        <div className="h-full overflow-auto">{body}</div>
+        <div className="h-full overflow-auto pb-16">{body}</div>
         {reviewOverlay}
       </div>
     </div>
