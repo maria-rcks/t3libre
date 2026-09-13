@@ -996,7 +996,9 @@ function PullRequestCodeTab({
           <Button
             className={cn(
               "pointer-events-auto absolute bottom-3 rounded-full shadow-lg",
-              detail.capabilities.comment && detail.viewerPermissions.comment ? "right-16" : "right-4",
+              detail.capabilities.comment && detail.viewerPermissions.comment
+                ? "right-16"
+                : "right-4",
             )}
             onClick={() => setReviewOpen(true)}
             size="compact"
