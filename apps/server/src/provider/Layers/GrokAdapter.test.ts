@@ -232,7 +232,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
     }),
   );
 
-  it.effect("sends runtime context with the current model without changing saved prompts", () =>
+  it.effect("keeps runtime context out of native command arguments", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-runtime-context");
       const tempDir = yield* Effect.promise(() =>
@@ -277,6 +277,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
           ],
         ],
       );
+      yield* adapter.sendTurn({ threadId, input: "/goal status" });
       yield* adapter.stopSession(threadId);
       const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
       const prompts = requests
@@ -284,7 +285,8 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
         .map(
           (request) => (request.params as { prompt: Array<{ type: string; text: string }> }).prompt,
         );
-      assert.equal(prompts.length, 2);
+      assert.equal(prompts.length, 3);
+      assert.deepEqual(prompts[2], [{ type: "text", text: "/goal status" }]);
       assert.deepEqual(prompts[0]?.[0], { type: "text", text: "First prompt" });
       assert.include(prompts[0]?.[1]?.text, "Grok harness, as grok-mock-alt");
       assert.deepEqual(prompts[1]?.[0], { type: "text", text: "Second prompt" });
@@ -511,13 +513,19 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       const runtimeEvents: ProviderRuntimeEvent[] = [];
       const turnCompleted = yield* Deferred.make<void>();
+      const secondTurnCompleted = yield* Deferred.make<void>();
       const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
         Effect.sync(() => {
           runtimeEvents.push(event);
         }).pipe(
-          Effect.andThen(
+          Effect.andThen(() =>
             event.type === "turn.completed"
-              ? Deferred.succeed(turnCompleted, undefined)
+              ? Deferred.succeed(
+                  runtimeEvents.filter((entry) => entry.type === "turn.completed").length === 2
+                    ? secondTurnCompleted
+                    : turnCompleted,
+                  undefined,
+                )
               : Effect.void,
           ),
         ),
@@ -583,6 +591,41 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       assert.equal(turnCompletedEvent?.payload.stopReason, "end_turn");
       assert.equal(readySession?.status, "ready");
       assert.isUndefined(readySession?.activeTurnId);
+
+      const firstItemCompletion = runtimeEvents.findIndex(
+        (event) =>
+          event.type === "item.completed" && event.payload.itemType === "assistant_message",
+      );
+      assert.isAtLeast(firstItemCompletion, 0);
+      assert.isBelow(firstItemCompletion, terminalIndex);
+
+      const secondTurn = yield* adapter.sendTurn({ threadId, input: "/goal status" });
+      yield* Deferred.await(secondTurnCompleted);
+      const assistantItems = runtimeEvents.filter(
+        (event) =>
+          (event.type === "item.started" || event.type === "item.completed") &&
+          event.payload.itemType === "assistant_message",
+      );
+      const startedItems = assistantItems.filter((event) => event.type === "item.started");
+      const completedItems = assistantItems.filter((event) => event.type === "item.completed");
+      assert.equal(completedItems.length, startedItems.length);
+      assert.equal(new Set(startedItems.map((event) => event.itemId)).size, startedItems.length);
+      for (const turnId of [sendTurnResult.turnId, secondTurn.turnId]) {
+        assert.isTrue(startedItems.some((event) => event.turnId === turnId));
+      }
+      for (const started of startedItems) {
+        const completions = completedItems.filter((event) => event.itemId === started.itemId);
+        assert.lengthOf(completions, 1);
+        const completed = completions[0]!;
+        assert.equal(completed.turnId, started.turnId);
+        assert.isAbove(runtimeEvents.indexOf(completed), runtimeEvents.indexOf(started));
+        assert.isBelow(
+          runtimeEvents.indexOf(completed),
+          runtimeEvents.findIndex(
+            (event) => event.type === "turn.completed" && event.turnId === started.turnId,
+          ),
+        );
+      }
 
       yield* Fiber.interrupt(runtimeEventsFiber);
       yield* adapter.stopSession(threadId);
