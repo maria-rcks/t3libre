@@ -2,16 +2,17 @@ import type { EnvironmentPresentation } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { Button } from "../ui/button";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { SettingsSection } from "./settingsLayout";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 const CATEGORIES = [
-  { key: "worktrees", label: "Worktrees" },
-  { key: "browserArtifacts", label: "Browser captures" },
-  { key: "logs", label: "Logs" },
-  { key: "attachments", label: "Attachments" },
-  { key: "other", label: "Other T3 files" },
+  { key: "worktrees", label: "Worktrees", color: "bg-blue-400" },
+  { key: "browserArtifacts", label: "Browser captures", color: "bg-violet-400" },
+  { key: "logs", label: "Logs", color: "bg-sky-400" },
+  { key: "attachments", label: "Attachments", color: "bg-amber-400" },
+  { key: "other", label: "Other T3 files", color: "bg-muted-foreground/50" },
 ] as const;
 
 function formatBytes(bytes: number) {
@@ -34,22 +35,21 @@ function MachineStorageUsage({ environment }: { environment: EnvironmentPresenta
       : null,
   );
   return (
-    <div className="space-y-4 px-3 py-4 sm:px-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-sm font-medium">{environment.label}</div>
+    <div className="space-y-1 px-3 py-3 sm:px-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <div className="max-w-1/2 shrink-0 truncate text-sm font-medium">{environment.label}</div>
           {environment.displayUrl ? (
             <div className="truncate text-xs text-muted-foreground">{environment.displayUrl}</div>
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {data ? (
-            <div className="text-right">
-              <div className="text-sm font-medium tabular-nums">
-                {data.partial ? "At least " : ""}
-                {formatBytes(data.totalBytes)}
-              </div>
-              <div className="text-xs text-muted-foreground">T3 files</div>
+            <div className="text-xs text-muted-foreground">
+              <span className="tabular-nums">
+                {data.partial ? "≥ " : ""}
+                {formatBytes(data.totalBytes)} T3 files
+              </span>
             </div>
           ) : null}
           {connected && supported ? (
@@ -81,38 +81,68 @@ function MachineStorageUsage({ environment }: { environment: EnvironmentPresenta
         </p>
       ) : null}
       {data ? (
-        <>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
-            {CATEGORIES.map(({ key, label }) => (
-              <div key={key}>
-                <dt className="text-xs text-muted-foreground">{label}</dt>
-                <dd className="mt-1 text-sm tabular-nums">
-                  {data.categories[key].partial ? "≥ " : ""}
-                  {formatBytes(data.categories[key].bytes)}
-                </dd>
-              </div>
-            ))}
-          </dl>
-          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span>
-              {data.disk
-                ? `${formatBytes(data.disk.availableBytes)} available of ${formatBytes(data.disk.totalBytes)}`
-                : "Disk capacity unavailable"}
+        <Popover>
+          <PopoverTrigger
+            openOnHover
+            delay={150}
+            render={
+              <button
+                type="button"
+                aria-label={`Storage breakdown for ${environment.label}`}
+                className="flex h-6 w-full items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            }
+          >
+            <span
+              className="flex h-2 w-full overflow-hidden rounded-full bg-muted"
+              aria-hidden="true"
+            >
+              {CATEGORIES.map(({ key, color }) => (
+                <span
+                  key={key}
+                  className={color}
+                  style={{
+                    width: `${data.totalBytes > 0 ? (data.categories[key].bytes / data.totalBytes) * 100 : 0}%`,
+                  }}
+                />
+              ))}
             </span>
-            <span>
-              Measured{" "}
-              {new Date(data.sampledAt).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-          </div>
-          {data.partial ? (
-            <p className="text-xs text-warning">
-              Some files couldn't be measured. Sizes shown are a lower bound.
-            </p>
-          ) : null}
-        </>
+          </PopoverTrigger>
+          <PopoverPopup side="bottom" align="start" className="w-72 max-w-[calc(100vw-2rem)]">
+            <dl className="space-y-2 text-xs">
+              {CATEGORIES.map(({ key, label, color }) => (
+                <div key={key} className="flex items-center justify-between gap-4">
+                  <dt className="flex items-center gap-2">
+                    <span className={`size-2 rounded-full ${color}`} aria-hidden="true" />
+                    {label}
+                  </dt>
+                  <dd className="tabular-nums text-muted-foreground">
+                    {data.categories[key].partial ? "≥ " : ""}
+                    {formatBytes(data.categories[key].bytes)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <div className="mt-3 space-y-1 border-t border-border/50 pt-3 text-xs text-muted-foreground">
+              <p>
+                {data.disk
+                  ? `${formatBytes(data.disk.availableBytes)} free of ${formatBytes(data.disk.totalBytes)}`
+                  : "Disk capacity unavailable"}
+              </p>
+              <p>
+                Measured{" "}
+                {new Date(data.sampledAt).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </p>
+              <p>Linked files aren't followed.</p>
+              {data.partial ? (
+                <p className="text-warning">Incomplete scan. Sizes are lower bounds.</p>
+              ) : null}
+            </div>
+          </PopoverPopup>
+        </Popover>
       ) : null}
     </div>
   );
@@ -130,9 +160,6 @@ export function StorageUsageSection() {
           Connect an environment to see storage usage.
         </p>
       ) : null}
-      <p className="px-3 py-3 text-xs text-muted-foreground sm:px-4">
-        File sizes in this environment's T3 storage. Linked files aren't followed.
-      </p>
     </SettingsSection>
   );
 }
