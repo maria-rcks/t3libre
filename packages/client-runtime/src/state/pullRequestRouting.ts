@@ -98,7 +98,7 @@ const routingAllowed = Effect.fn("PullRequestRouting.allowed")(function* (
   const entries = yield* SubscriptionRef.get(registry.entries);
   const origin = entries.get(originId);
   const destination = entries.get(destinationId);
-  if (origin === undefined || destination === undefined) return false;
+  if (!origin?.enabled || !destination?.enabled) return false;
   const permissions = yield* GitHubRoutingPermissions;
   const source = yield* permissions.get(origin);
   const target = yield* permissions.get(destination);
@@ -119,6 +119,34 @@ const routingAllowed = Effect.fn("PullRequestRouting.allowed")(function* (
   return true;
 });
 
+function matchesReference(reference: PullRequestRef, filter: PullRequestRef): boolean {
+  return (
+    reference.projectId === filter.projectId &&
+    reference.repository.toLowerCase() === filter.repository.toLowerCase() &&
+    reference.number === filter.number &&
+    (filter.host === undefined || reference.host?.toLowerCase() === filter.host.toLowerCase())
+  );
+}
+
+const invalidateTarget = Effect.fn("PullRequestRouting.invalidateTarget")(function* (
+  registry: EnvironmentRegistry["Service"],
+  origin: EnvironmentId,
+  target: EnvironmentId,
+  inputs: ReadonlyArray<PullRequestInvalidateInput>,
+) {
+  if (target !== origin && !(yield* routingAllowed(registry, origin, target, false))) return;
+  yield* Effect.forEach(
+    inputs,
+    (input) =>
+      registry.run(target, request(WS_METHODS.pullRequestsInvalidate, input)).pipe(
+        // GitHub already accepted the write. A stalled reader must not delay its confirmation.
+        Effect.timeoutOption("1 second"),
+        Effect.orElseSucceed(() => undefined),
+      ),
+    { concurrency: 3, discard: true },
+  );
+});
+
 /** Credentials stay on their environments. Only a verified host and account cross the wire. */
 export function createPullRequestRouter() {
   const routedRequest = Effect.fn("PullRequestRouting.request")(function* <
@@ -134,15 +162,7 @@ export function createPullRequestRouter() {
       for (const entry of used?.values() ?? []) {
         if (entry.origin !== origin.target.environmentId) continue;
         const ref = input.reference;
-        if (
-          ref !== undefined &&
-          (entry.reference.projectId !== ref.projectId ||
-            entry.reference.repository.toLowerCase() !== ref.repository.toLowerCase() ||
-            entry.reference.number !== ref.number ||
-            (ref.host !== undefined &&
-              entry.reference.host?.toLowerCase() !== ref.host.toLowerCase()))
-        )
-          continue;
+        if (ref !== undefined && !matchesReference(entry.reference, ref)) continue;
         for (const target of entry.targets) targets.set(target, entry.reference);
         if (input.reference !== undefined)
           targets.set(origin.target.environmentId, entry.reference);
@@ -150,27 +170,9 @@ export function createPullRequestRouter() {
       yield* Effect.forEach(
         targets,
         ([target, reference]) =>
-          (target === origin.target.environmentId
-            ? Effect.succeed(true)
-            : routingAllowed(registry, origin.target.environmentId, target, false)
-          ).pipe(
-            Effect.flatMap((allowed) =>
-              allowed
-                ? registry
-                    .run(
-                      target,
-                      request(
-                        WS_METHODS.pullRequestsInvalidate,
-                        input.reference === undefined ? {} : { reference },
-                      ),
-                    )
-                    .pipe(
-                      Effect.timeoutOption("1 second"),
-                      Effect.orElseSucceed(() => undefined),
-                    )
-                : Effect.void,
-            ),
-          ),
+          invalidateTarget(registry, origin.target.environmentId, target, [
+            input.reference === undefined ? {} : { reference },
+          ]),
         { concurrency: 4, discard: true },
       );
       return result;
@@ -202,11 +204,7 @@ export function createPullRequestRouter() {
           for (const entry of used.values()) {
             if (
               entry.origin !== origin.target.environmentId ||
-              entry.reference.projectId !== ref.projectId ||
-              entry.reference.repository.toLowerCase() !== ref.repository.toLowerCase() ||
-              entry.reference.number !== ref.number ||
-              (ref.host !== undefined &&
-                entry.reference.host?.toLowerCase() !== ref.host.toLowerCase())
+              !matchesReference(entry.reference, ref)
             )
               continue;
             for (const target of [...entry.targets, origin.target.environmentId]) {
@@ -219,31 +217,10 @@ export function createPullRequestRouter() {
           return Effect.forEach(
             targets,
             ([target, refs]) =>
-              (target === origin.target.environmentId
-                ? Effect.succeed(true)
-                : routingAllowed(registry, origin.target.environmentId, target, false)
-              ).pipe(
-                Effect.flatMap((allowed) =>
-                  allowed
-                    ? registry
-                        .run(
-                          target,
-                          Effect.forEach(
-                            [...refs.map((reference) => ({ reference })), {}],
-                            (invalidation) =>
-                              request(WS_METHODS.pullRequestsInvalidate, invalidation).pipe(
-                                // GitHub already accepted the write. A stalled reader on another
-                                // environment must not keep its confirmation pending indefinitely.
-                                Effect.timeoutOption("1 second"),
-                                Effect.orElseSucceed(() => undefined),
-                              ),
-                            { concurrency: 3, discard: true },
-                          ),
-                        )
-                        .pipe(Effect.orElseSucceed(() => undefined))
-                    : Effect.void,
-                ),
-              ),
+              invalidateTarget(registry, origin.target.environmentId, target, [
+                ...refs.map((reference) => ({ reference })),
+                {},
+              ]),
             { concurrency: 4, discard: true },
           );
         }),

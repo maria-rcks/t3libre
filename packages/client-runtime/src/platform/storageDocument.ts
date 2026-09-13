@@ -1,3 +1,5 @@
+import { EnvironmentId } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import {
@@ -22,6 +24,12 @@ export const ConnectionCatalogDocument = Schema.Struct({
   credentials: Schema.Array(StoredConnectionCredential),
   remoteDpopTokens: Schema.Array(TokenStore.RemoteDpopAccessToken),
   githubRoutingPermissions: Schema.optionalKey(Schema.Array(StoredGitHubRoutingPermission)),
+  // Saved environments the user switched off. They stay registered with their
+  // credentials and cache but never connect until switched back on. Older
+  // documents predate the key, so decoding defaults it to none.
+  disabledEnvironmentIds: Schema.Array(EnvironmentId).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
 });
 export type ConnectionCatalogDocument = typeof ConnectionCatalogDocument.Type;
 
@@ -31,6 +39,7 @@ export const EMPTY_CONNECTION_CATALOG_DOCUMENT: ConnectionCatalogDocument = Obje
   profiles: [],
   credentials: [],
   remoteDpopTokens: [],
+  disabledEnvironmentIds: [],
 });
 
 export function replaceCatalogValue<A>(
@@ -89,6 +98,11 @@ function removeConnectionMetadata(
           target.environmentId,
         )
       : document.remoteDpopTokens,
+    // Re-registration passes `removeRemoteToken: false` and must keep the
+    // switched-off flag; only a real removal clears it.
+    disabledEnvironmentIds: removeRemoteToken
+      ? removeCatalogValue(document.disabledEnvironmentIds, (value) => value, target.environmentId)
+      : document.disabledEnvironmentIds,
   };
 }
 
@@ -102,6 +116,8 @@ export function registerConnectionInCatalog(
   );
   const cleaned =
     previous === undefined ? document : removeConnectionMetadata(document, previous, false);
+  // Re-registering (for example editing a label or URL) keeps the disabled
+  // flag; only `setConnectionEnabledInCatalog` or removal changes it.
   const next: ConnectionCatalogDocument = {
     ...cleaned,
     targets: replaceCatalogValue(cleaned.targets, (value) => value.environmentId, target),
@@ -148,6 +164,24 @@ export function removeConnectionFromCatalog(
           (permission) => permission.environmentId !== target.environmentId,
         ),
       };
+}
+
+/** Flips the disabled flag for a saved environment; unknown ids are ignored. */
+export function setConnectionEnabledInCatalog(
+  document: ConnectionCatalogDocument,
+  environmentId: EnvironmentId,
+  enabled: boolean,
+): ConnectionCatalogDocument {
+  const registered = document.targets.some((target) => target.environmentId === environmentId);
+  const without = removeCatalogValue(
+    document.disabledEnvironmentIds,
+    (value) => value,
+    environmentId,
+  );
+  return {
+    ...document,
+    disabledEnvironmentIds: registered && !enabled ? [...without, environmentId] : without,
+  };
 }
 
 export function putRemoteDpopTokenInCatalog(

@@ -59,6 +59,8 @@ for (const scenario of [
   "skips an old alternate server before dispatching a mutation",
   "returns a successful mutation when source invalidation stalls",
   "does not dispatch after routing permission is revoked during the probe",
+  "keeps mutations on the origin when the alternate is disabled",
+  "does not dispatch after the alternate is disabled during the probe",
   "preserves a local source account rejection when alternate accounts differ",
 ] as const) {
   (scenario === "returns a successful mutation when source invalidation stalls"
@@ -69,6 +71,7 @@ for (const scenario of [
         const calls: string[] = [];
         const inputs: unknown[] = [];
         let trusted = true;
+        let disableAlternate = Effect.void;
         const switchedAccount =
           scenario === "preserves a local source account rejection when alternate accounts differ";
         const mismatch =
@@ -97,6 +100,11 @@ for (const scenario of [
               Effect.gen(function* () {
                 if (local) expect(input).toEqual({ host: "github.com" });
                 calls.push(`${name}:identity`);
+                if (
+                  local &&
+                  scenario === "does not dispatch after the alternate is disabled during the probe"
+                )
+                  yield* disableAlternate;
                 if (
                   local &&
                   scenario ===
@@ -151,6 +159,21 @@ for (const scenario of [
           single ? undefined : clientFor(true),
           localOrigin,
         );
+        disableAlternate = SubscriptionRef.update(
+          environmentRegistry.entries,
+          (entries) =>
+            new Map(
+              [...entries].map(([id, entry]) => [
+                id,
+                id === TARGET.environmentId ? entry : { ...entry, enabled: false },
+              ]),
+            ),
+        );
+        const disabled =
+          scenario === "keeps mutations on the origin when the alternate is disabled";
+        const disabledDuringProbe =
+          scenario === "does not dispatch after the alternate is disabled during the probe";
+        if (disabled) yield* disableAlternate;
         const input = {
           projectId: ProjectId.make("project-1"),
           host: "github.com",
@@ -182,12 +205,19 @@ for (const scenario of [
           expect(calls.filter((call) => call.endsWith(":mutation"))).toEqual(["local:mutation"]);
         } else {
           expect(result._tag).toBe("Success");
-          if (single) {
+          if (single || disabled) {
             expect(calls.filter((call) => !call.endsWith(":invalidate"))).toEqual([
               "origin:mutation",
             ]);
           } else if (reading) expect(calls).toEqual(["origin:read"]);
-          else if (mismatch || localOrigin || oldOrigin || oldAlternate || !trusted)
+          else if (
+            mismatch ||
+            localOrigin ||
+            oldOrigin ||
+            oldAlternate ||
+            !trusted ||
+            disabledDuringProbe
+          )
             expect(calls.filter((call) => call.endsWith(":mutation"))).toEqual(["origin:mutation"]);
           else {
             expect(calls.filter((call) => call.endsWith(":mutation"))).toEqual(["local:mutation"]);
@@ -265,11 +295,17 @@ const makeTestRuntime = Effect.fn("makeTestRuntime")(function* (
   const environmentRegistry = EnvironmentRegistry.EnvironmentRegistry.of({
     entries: yield* SubscriptionRef.make<ReadonlyMap<EnvironmentId, ConnectionCatalogEntry>>(
       new Map([
-        [originTarget.environmentId, { target: originTarget, profile: Option.none() }],
+        [
+          originTarget.environmentId,
+          { target: originTarget, profile: Option.none(), enabled: true },
+        ],
         ...(localClient === undefined
           ? []
           : [
-              [localTarget.environmentId, { target: localTarget, profile: Option.none() }] as const,
+              [
+                localTarget.environmentId,
+                { target: localTarget, profile: Option.none(), enabled: true },
+              ] as const,
             ]),
       ]),
     ),
@@ -422,6 +458,7 @@ for (const side of ["origin", "destination"] as const) {
                 label: "SSH",
               }),
               profile: Option.some(profile),
+              enabled: true,
             }),
           );
           const read = Effect.suspend(() =>

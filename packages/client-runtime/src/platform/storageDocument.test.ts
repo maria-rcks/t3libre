@@ -30,11 +30,13 @@ import {
   putRemoteDpopTokenInCatalog,
   registerConnectionInCatalog,
   removeConnectionFromCatalog,
+  setConnectionEnabledInCatalog,
 } from "./storageDocument.ts";
 
 const decodeConnectionCatalogDocument = Schema.decodeUnknownEffect(ConnectionCatalogDocument);
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
+const decodeCatalogDocument = Schema.decodeUnknownSync(ConnectionCatalogDocument);
 
 const RELAY_TARGET = new RelayConnectionTarget({
   environmentId: ENVIRONMENT_ID,
@@ -72,7 +74,7 @@ describe("ConnectionCatalogDocument", () => {
   it.effect("persists explicit GitHub trust and forgets it when a connection is removed", () =>
     Effect.gen(function* () {
       let document = EMPTY_CONNECTION_CATALOG_DOCUMENT;
-      const entry = { target: BEARER_TARGET, profile: Option.some(BEARER_PROFILE) };
+      const entry = { target: BEARER_TARGET, profile: Option.some(BEARER_PROFILE), enabled: true };
       const storage = {
         read: Effect.sync(() => document.githubRoutingPermissions ?? []),
         write: (githubRoutingPermissions: NonNullable<typeof document.githubRoutingPermissions>) =>
@@ -110,7 +112,9 @@ describe("ConnectionCatalogDocument", () => {
           ),
         }),
       ).toBe("off");
-      expect(yield* restarted.get({ target: RELAY_TARGET, profile: Option.none() })).toBe("off");
+      expect(
+        yield* restarted.get({ target: RELAY_TARGET, profile: Option.none(), enabled: true }),
+      ).toBe("off");
       yield* restarted.set(entry, "read-write");
       expect(yield* restarted.get(entry)).toBe("read-write");
       yield* restarted.forget(ENVIRONMENT_ID);
@@ -140,9 +144,11 @@ describe("ConnectionCatalogDocument", () => {
             wsBaseUrl: "ws://localhost:3000",
           }),
           profile: Option.none(),
+          enabled: true,
         },
-        { target: RELAY_TARGET, profile: Option.none() },
+        { target: RELAY_TARGET, profile: Option.none(), enabled: true },
         {
+          enabled: true,
           target: new SshConnectionTarget({
             environmentId: ENVIRONMENT_ID,
             label: "SSH",
@@ -170,7 +176,7 @@ describe("ConnectionCatalogDocument", () => {
 
   it.effect("does not enable GitHub routing when permission persistence fails", () =>
     Effect.gen(function* () {
-      const entry = { target: BEARER_TARGET, profile: Option.some(BEARER_PROFILE) };
+      const entry = { target: BEARER_TARGET, profile: Option.some(BEARER_PROFILE), enabled: true };
       expect(yield* (yield* GitHubRoutingPermissions).get(entry)).toBe("off");
       const permissions = yield* makeGitHubRoutingPermissions({
         read: Effect.succeed([]),
@@ -329,6 +335,54 @@ describe("ConnectionCatalogDocument", () => {
 
     expect(putRemoteDpopTokenInCatalog(bearer, REMOTE_TOKEN)).toBe(bearer);
     expect(putRemoteDpopTokenInCatalog(otherRelay, REMOTE_TOKEN)).toBe(otherRelay);
+  });
+
+  it("decodes a document written before the disabled list existed", () => {
+    const decoded = decodeCatalogDocument({
+      schemaVersion: 1,
+      targets: [],
+      profiles: [],
+      credentials: [],
+      remoteDpopTokens: [],
+    });
+
+    expect(decoded.disabledEnvironmentIds).toEqual([]);
+  });
+
+  it("switches a saved environment off and back on without touching its records", () => {
+    const registered = registerConnectionInCatalog(
+      EMPTY_CONNECTION_CATALOG_DOCUMENT,
+      new BearerConnectionRegistration({
+        target: BEARER_TARGET,
+        profile: BEARER_PROFILE,
+        credential: BEARER_CREDENTIAL,
+      }),
+    );
+
+    const disabled = setConnectionEnabledInCatalog(registered, ENVIRONMENT_ID, false);
+    expect(disabled.disabledEnvironmentIds).toEqual([ENVIRONMENT_ID]);
+    expect(disabled.targets).toEqual(registered.targets);
+    expect(disabled.credentials).toEqual(registered.credentials);
+    // Idempotent: switching off twice stores the id once.
+    expect(
+      setConnectionEnabledInCatalog(disabled, ENVIRONMENT_ID, false).disabledEnvironmentIds,
+    ).toEqual([ENVIRONMENT_ID]);
+
+    expect(
+      setConnectionEnabledInCatalog(disabled, ENVIRONMENT_ID, true).disabledEnvironmentIds,
+    ).toEqual([]);
+    // Re-registering (editing label or URL) keeps the flag.
+    expect(
+      registerConnectionInCatalog(
+        disabled,
+        new BearerConnectionRegistration({
+          target: BEARER_TARGET,
+          profile: BEARER_PROFILE,
+          credential: BEARER_CREDENTIAL,
+        }),
+      ).disabledEnvironmentIds,
+    ).toEqual([ENVIRONMENT_ID]);
+    expect(removeConnectionFromCatalog(disabled, BEARER_TARGET).disabledEnvironmentIds).toEqual([]);
   });
 
   it("persists the normalized SSH profile beside its target", () => {

@@ -197,7 +197,6 @@ export function createPullRequestEnvironmentAtoms<R, E>(
     linkedThreads: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:linked-threads",
       tag: WS_METHODS.pullRequestsLinkedThreads,
-      execute: (input) => routedRequest(WS_METHODS.pullRequestsLinkedThreads, input),
       staleTimeMs: 0,
       refreshIntervalMs: 10_000,
       refreshTrigger: ({ environmentId }) => refreshes({ environmentId, input: {} }),
@@ -205,7 +204,6 @@ export function createPullRequestEnvironmentAtoms<R, E>(
     list: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:list",
       tag: WS_METHODS.pullRequestsList,
-      execute: (input) => routedRequest(WS_METHODS.pullRequestsList, input),
       staleTimeMs: 30_000,
       refreshTrigger: ({ environmentId, input }) =>
         input.cursors === undefined ? refreshes({ environmentId, input: {} }) : undefined,
@@ -219,7 +217,6 @@ export function createPullRequestEnvironmentAtoms<R, E>(
     listStats: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:list-stats",
       tag: WS_METHODS.pullRequestsListStats,
-      execute: (input) => routedRequest(WS_METHODS.pullRequestsListStats, input),
       staleTimeMs: 60_000,
       refreshTrigger: ({ environmentId }) => refreshes({ environmentId, input: {} }),
     }),

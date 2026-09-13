@@ -24,6 +24,7 @@ const emptyCatalog = {
   profiles: [],
   credentials: [],
   remoteDpopTokens: [],
+  disabledEnvironmentIds: [],
 } as const;
 const decodeCatalog = Schema.decodeUnknownSync(Schema.fromJsonString(ConnectionCatalogDocument));
 const encodeCatalog = Schema.encodeSync(Schema.fromJsonString(ConnectionCatalogDocument));
@@ -120,6 +121,7 @@ describe("browser GitHub routing permissions", () => {
           wsBaseUrl: "ws://localhost:3000",
         }),
         profile: Option.none(),
+        enabled: true,
       };
       const other = {
         ...entry,
