@@ -1689,17 +1689,37 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               />
             }
           >
-            {props.project ? (
-              <ProjectFavicon project={props.project} className="size-4 shrink-0" />
-            ) : driverKind ? (
-              <ProviderInstanceIcon
-                driverKind={driverKind}
-                displayName={providerEntry?.displayName ?? modelInstanceId}
-                iconClassName="size-4"
-              />
-            ) : (
-              <SquarePenIcon aria-hidden className="size-4" />
-            )}
+            <span className="relative inline-flex size-4 shrink-0 items-center justify-center">
+              {props.project ? (
+                <ProjectFavicon project={props.project} className="size-4" />
+              ) : driverKind ? (
+                <ProviderInstanceIcon
+                  driverKind={driverKind}
+                  displayName={providerEntry?.displayName ?? modelInstanceId}
+                  iconClassName="size-4"
+                />
+              ) : (
+                <SquarePenIcon aria-hidden className="size-4" />
+              )}
+              {isRemote ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        role="img"
+                        aria-label={props.environmentLabel ?? "Remote environment"}
+                        className="absolute -left-1 -bottom-1 inline-flex size-3 items-center justify-center rounded-full bg-sidebar text-sidebar-muted-foreground ring-1 ring-sidebar"
+                      />
+                    }
+                  >
+                    <EnvironmentMachineIcon kind={props.environmentMachine} className="size-2.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="right">
+                    {props.environmentLabel ?? "Remote environment"}
+                  </TooltipPopup>
+                </Tooltip>
+              ) : null}
+            </span>
             {topStatus ? (
               <span
                 aria-hidden
