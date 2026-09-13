@@ -1111,6 +1111,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           AND threads.deleted_at IS NULL
           AND projects.deleted_at IS NULL
           AND messages.role IN ('user', 'assistant')
+          AND (messages.message_id NOT LIKE 'async-answer:%' OR NOT EXISTS (
+            SELECT 1 FROM projection_thread_activities AS activity
+            WHERE activity.thread_id = messages.thread_id
+              AND activity.kind = 'user-input.answer-submitted'
+              AND messages.message_id = 'async-answer:' || json_extract(activity.payload_json, '$.requestId')
+          ))
           AND messages.text LIKE ${pattern} ESCAPE '!'
         ORDER BY messages.created_at DESC, messages.message_id ASC
         LIMIT ${limit}

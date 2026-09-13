@@ -1,6 +1,7 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { ChevronDownIcon, ChevronUpIcon, SearchIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type RefObject } from "react";
+import { useServerConfigs } from "../../state/entities";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { useDebouncedValue } from "../../state/queries";
 import { useEnvironmentQuery } from "../../state/query";
@@ -22,19 +23,22 @@ export function ChatSearch({
   onSelect: (request: ChatSearchRequest | null) => void;
   onClose: () => void;
 }) {
+  const supportsSearch =
+    useServerConfigs().get(threadRef.environmentId)?.environment.capabilities
+      .threadMessageSearch === true;
   const [query, setQuery] = useState("");
   const normalized = query.trim();
   const debounced = useDebouncedValue(normalized, 200);
   const [selection, setSelection] = useState({ index: 0, activation: 0 });
   const atom = useMemo(
     () =>
-      debounced.length >= 2
+      supportsSearch && debounced.length >= 2
         ? orchestrationEnvironment.threadSearch({
             environmentId: threadRef.environmentId,
             input: { threadId: threadRef.threadId, query: debounced, limit: 50 },
           })
         : null,
-    [debounced, threadRef.environmentId, threadRef.threadId],
+    [debounced, supportsSearch, threadRef.environmentId, threadRef.threadId],
   );
   const search = useEnvironmentQuery(atom);
   useEffect(() => {
@@ -80,7 +84,11 @@ export function ChatSearch({
           event.stopPropagation();
           onClose();
         }
-        if (event.key === "Enter") {
+        if (
+          event.key === "Enter" &&
+          !event.nativeEvent.isComposing &&
+          event.target === inputRef.current
+        ) {
           event.preventDefault();
           move(event.shiftKey ? -1 : 1);
         }
@@ -104,15 +112,17 @@ export function ChatSearch({
           }}
         />
         <span role="status" className="shrink-0 text-xs text-muted-foreground">
-          {normalized.length < 2
-            ? "2+ characters"
-            : pending
-              ? "Searching…"
-              : search.error
-                ? "Search failed"
-                : matches.length === 0
-                  ? "No matches"
-                  : `${selection.index + 1} of ${matches.length}${matches.length === 50 ? "+" : ""} ${matches.length === 1 ? "message" : "messages"}`}
+          {!supportsSearch
+            ? "Unavailable"
+            : normalized.length < 2
+              ? "2+ characters"
+              : pending
+                ? "Searching…"
+                : search.error
+                  ? "Search failed"
+                  : matches.length === 0
+                    ? "No matches"
+                    : `${selection.index + 1} of ${matches.length}${matches.length === 50 ? "+" : ""} ${matches.length === 1 ? "message" : "messages"}`}
         </span>
         <Button
           variant="ghost"
@@ -144,6 +154,11 @@ export function ChatSearch({
           <XIcon />
         </Button>
       </div>
+      {!supportsSearch ? (
+        <p role="status" className="mt-1 text-xs text-muted-foreground">
+          Update this environment's server to search within a chat.
+        </p>
+      ) : null}
       {search.error ? (
         <p role="alert" className="mt-1 text-xs text-destructive">
           {search.error}

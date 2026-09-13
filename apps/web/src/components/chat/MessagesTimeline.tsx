@@ -763,7 +763,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     onListLoad: onCitationListLoad,
     alwaysRender: citationAlwaysRender,
   } = useAssistantCitationTarget({
-    request: searchRequest ? null : citationRequest,
+    request: citationRequest,
+    suspended: searchRequest !== null,
     entries: timelineEntries,
     rows,
     listRef,
