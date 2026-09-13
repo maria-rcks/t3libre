@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon, MessageCircleIcon, PlusIcon, XIcon } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useClientSettings } from "~/hooks/useSettings";
@@ -137,9 +137,7 @@ export function DraftProjectPicker({
       project.id === activeProjectRef?.projectId &&
       project.environmentId === activeProjectRef.environmentId,
   );
-  const activeProjectDisplayName = isChat ? "Chat" : activeProjectTitle;
-  const [removedProjectTitle, setRemovedProjectTitle] = useState<string | null>(null);
-  const reservedProjectTitle = isChat ? removedProjectTitle : activeProjectTitle;
+  const activeProjectDisplayName = isChat ? "chat" : activeProjectTitle;
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
@@ -157,9 +155,6 @@ export function DraftProjectPicker({
     // place. The prompt stays in the same composer session, so the
     // sidebar only gets a draft row if the user later navigates away.
     const currentDraft = getComposerDraft(draftId);
-    if (isChatProject(project) && !isChat) {
-      setRemovedProjectTitle(activeProjectTitle);
-    }
     setLogicalProjectDraftThreadId(
       entry.group.projectKey,
       scopeProjectRef(project.environmentId, project.id),
@@ -207,16 +202,8 @@ export function DraftProjectPicker({
               <MessageCircleIcon className="size-5" />
             </span>
           ) : null}
-          <span className={isChat ? "grid min-w-0 max-w-64 px-2 py-1" : "grid min-w-0"}>
-            <span aria-hidden className="invisible col-start-1 row-start-1 truncate">
-              {reservedProjectTitle}
-            </span>
-            <span aria-hidden className="invisible col-start-1 row-start-1">
-              Chat
-            </span>
-            <span className="col-start-1 row-start-1 truncate text-start">
-              {activeProjectDisplayName ?? "Add project"}
-            </span>
+          <span className={isChat ? "truncate px-2 py-1" : "truncate"}>
+            {activeProjectDisplayName ?? "Add project"}
           </span>
         </TooltipTrigger>
         {activeProjectDisplayName ? (
@@ -309,26 +296,13 @@ export function DraftProjectPicker({
   );
 
   return (
-    <h1 className="mx-auto flex w-full flex-wrap items-center justify-center gap-x-2 text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-      <span className="inline-grid">
-        <span
-          aria-hidden={isChat}
-          className={`col-start-1 row-start-1 ${isChat ? "invisible" : ""}`}
-        >
-          What should we build in
-        </span>
-        <span
-          aria-hidden={!isChat}
-          className={`col-start-1 row-start-1 ${isChat ? "" : "invisible"}`}
-        >
-          What would you like to ask?
-        </span>
+    <h1 className="mx-auto grid w-full grid-cols-1 items-center gap-2 font-normal text-2xl text-foreground tracking-tight sm:grid-cols-2 sm:text-3xl">
+      <span className="text-center sm:text-end">
+        {isChat ? "What would you like to" : "What should we build in"}
       </span>
-      <span className="inline-flex max-w-full items-center">
+      <span className="flex w-64 min-w-0 max-w-full items-center gap-x-1 justify-self-center text-start sm:w-full">
         {chip}
-        <span aria-hidden={isChat} className={isChat ? "invisible" : undefined}>
-          ?
-        </span>
+        <span className="shrink-0">{isChat ? "about?" : "?"}</span>
       </span>
     </h1>
   );
