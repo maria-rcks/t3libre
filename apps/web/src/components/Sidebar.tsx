@@ -1891,6 +1891,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const compactRows = props.compact;
   const CompactStatusIcon = topStatus
     ? {
+        goal: TargetIcon,
         working: CircleDashedIcon,
         monitoring: EyeIcon,
         approval: ShieldQuestionIcon,
@@ -2038,7 +2039,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     )}
                   >
                     {compactRows ? (
-                      status === "working" ? (
+                      goalActive ? (
+                        thread.goal?.timeUsedSeconds != null ? (
+                          <span
+                            className="text-purple-600 dark:text-purple-400"
+                            aria-label="Provider-reported goal run time"
+                          >
+                            {formatGoalDuration(thread.goal.timeUsedSeconds)}
+                          </span>
+                        ) : null
+                      ) : status === "working" ? (
                         <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
                       ) : compactCompletedAt ? (
                         <SidebarCompletedTime completedAt={compactCompletedAt} />
