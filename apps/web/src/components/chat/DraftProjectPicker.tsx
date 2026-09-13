@@ -7,7 +7,7 @@ import {
   type ScopedProjectRef,
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { FolderIcon, FolderPlusIcon, PlusIcon, XIcon } from "lucide-react";
+import { FolderPlusIcon, MessageCircleIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
@@ -132,9 +132,12 @@ export function DraftProjectPicker({
         ) ?? null);
   const activeProjectKey = activeProjectGroup?.projectKey ?? "";
   const isChat = activeProjectRef?.projectId === CHAT_PROJECT_ID;
-  const activeProjectDisplayName = isChat
-    ? null
-    : (activeProjectGroup?.displayName ?? activeProjectTitle);
+  const activeProject = projects.find(
+    (project) =>
+      project.id === activeProjectRef?.projectId &&
+      project.environmentId === activeProjectRef.environmentId,
+  );
+  const activeProjectDisplayName = isChat ? "Chat" : activeProjectTitle;
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
@@ -186,11 +189,10 @@ export function DraftProjectPicker({
           render={
             <MenuTrigger
               aria-label={!isChat && hasResolvedProject ? "Change project" : "Add project"}
-              className="inline-flex h-8 min-w-0 max-w-64 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+              className="inline-flex min-w-0 max-w-64 items-center gap-2 rounded-r-xl px-2 py-1 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             />
           }
         >
-          {isChat ? <PlusIcon className="size-3.5" /> : <FolderIcon className="size-3.5" />}
           <span className="truncate">{activeProjectDisplayName ?? "Add project"}</span>
         </TooltipTrigger>
         {activeProjectDisplayName ? (
@@ -206,7 +208,7 @@ export function DraftProjectPicker({
         >
           {projectPickerEntries
             .filter(({ targetProject }) => !isChatProject(targetProject))
-            .map(({ group }) => {
+            .map(({ group, targetProject }) => {
               return (
                 <MenuRadioItem
                   key={group.projectKey}
@@ -217,7 +219,7 @@ export function DraftProjectPicker({
                   <ProjectFavicon project={group} className="size-4 shrink-0" />
                   <Tooltip>
                     <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
-                      {group.displayName}
+                      {targetProject.title}
                     </TooltipTrigger>
                     <TooltipPopup side="top" className="max-w-80">
                       {group.displayName}
@@ -252,28 +254,45 @@ export function DraftProjectPicker({
     </button>
   );
 
+  const chip = (
+    <span className="inline-flex max-w-full items-center rounded-xl bg-muted/70 align-middle text-[0.85em]">
+      {!isChat && chatEntry && activeProject ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label="Remove project"
+                onClick={() => selectProject(chatEntry.group.projectKey)}
+                className="group/project-icon relative ms-1 flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            }
+          >
+            <span className="group-hover/project-icon:opacity-0 group-focus-visible/project-icon:opacity-0">
+              <ProjectFavicon project={activeProject} className="size-6" />
+            </span>
+            <XIcon className="absolute size-5 opacity-0 group-hover/project-icon:opacity-100 group-focus-visible/project-icon:opacity-100" />
+          </TooltipTrigger>
+          <TooltipPopup>Enter chat mode</TooltipPopup>
+        </Tooltip>
+      ) : (
+        <span className="ms-3 flex shrink-0 items-center">
+          <MessageCircleIcon className="size-5" />
+        </span>
+      )}
+      {projectSelector}
+    </span>
+  );
+
   return (
-    <div className="flex items-center px-2 pt-1.5">
-      <div className="inline-flex min-w-0 items-center rounded-lg">
-        {projectSelector}
-        {!isChat && chatEntry ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label="Remove project"
-                  onClick={() => selectProject(chatEntry.group.projectKey)}
-                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                />
-              }
-            >
-              <XIcon className="size-3.5" />
-            </TooltipTrigger>
-            <TooltipPopup>Don't work in a project</TooltipPopup>
-          </Tooltip>
-        ) : null}
-      </div>
-    </div>
+    <h1 className="mx-auto w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
+      {isChat ? (
+        <>
+          What would you like to know?<span className="mt-3 block text-base">{chip}</span>
+        </>
+      ) : (
+        <>What should we build in {chip}?</>
+      )}
+    </h1>
   );
 }

@@ -2414,8 +2414,10 @@ export default function ChatView(props: ChatViewProps) {
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
-    const memberProjects = allProjects.filter(
-      (p) => deriveLogicalProjectKeyFromSettings(p, projectGroupingSettings) === logicalKey,
+    const memberProjects = allProjects.filter((p) =>
+      isChatProject(activeProject)
+        ? isChatProject(p)
+        : deriveLogicalProjectKeyFromSettings(p, projectGroupingSettings) === logicalKey,
     );
     const seen = new Set<string>();
     const envs: EnvironmentOption[] = [];
@@ -2444,10 +2446,12 @@ export default function ChatView(props: ChatViewProps) {
     logicalProjectEnvironments.find(
       (environment) => environment.environmentId === activeThread?.environmentId,
     ) ?? null;
-  const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
-    activeEnvironment: activeEnvironmentOption,
-    canPickEnvironment: hasMultipleEnvironments,
-  });
+  const showComposerEnvironmentIndicator =
+    (activeProject !== null && isChatProject(activeProject)) ||
+    shouldShowEnvironmentIndicator({
+      activeEnvironment: activeEnvironmentOption,
+      canPickEnvironment: hasMultipleEnvironments,
+    });
 
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -3888,13 +3892,31 @@ export default function ChatView(props: ChatViewProps) {
         (env) => env.environmentId === nextEnvironmentId,
       );
       if (!target) return;
+      const targetProject = allProjects.find(
+        (p) => p.environmentId === target.environmentId && p.id === target.projectId,
+      );
+      if (targetProject && isChatProject(targetProject)) {
+        setLogicalProjectDraftThreadId(
+          deriveLogicalProjectKeyFromSettings(targetProject, projectGroupingSettings),
+          scopeProjectRef(target.environmentId, target.projectId),
+          draftId,
+        );
+      }
       setDraftThreadContext(draftId, {
         projectRef: scopeProjectRef(target.environmentId, target.projectId),
         environmentSelection: "manual",
         loadBalancedEnvironmentId: null,
       });
     },
-    [draftId, envLocked, logicalProjectEnvironments, setDraftThreadContext],
+    [
+      draftId,
+      envLocked,
+      logicalProjectEnvironments,
+      setDraftThreadContext,
+      allProjects,
+      projectGroupingSettings,
+      setLogicalProjectDraftThreadId,
+    ],
   );
 
   const activeTerminalGroup =
@@ -9623,9 +9645,11 @@ export default function ChatView(props: ChatViewProps) {
                             : undefined
                         }
                       >
-                        <h1 className="mx-auto w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-                          What should we work on?
-                        </h1>
+                        <DraftProjectPicker
+                          draftId={draftId}
+                          activeProjectRef={activeProjectRef}
+                          activeProjectTitle={activeProject?.title ?? null}
+                        />
                       </div>
                     </div>
                   ) : null}
@@ -9820,13 +9844,6 @@ export default function ChatView(props: ChatViewProps) {
                         </div>
                       </div>
                     </ComposerSurface.Shell>
-                    {isDraftHeroState ? (
-                      <DraftProjectPicker
-                        draftId={draftId}
-                        activeProjectRef={activeProjectRef}
-                        activeProjectTitle={activeProject?.title ?? null}
-                      />
-                    ) : null}
                     <div
                       aria-hidden
                       className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
