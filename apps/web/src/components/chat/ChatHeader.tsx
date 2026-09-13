@@ -456,7 +456,7 @@ export const ChatHeader = memo(function ChatHeader({
             >
               <EllipsisIcon className="size-4" />
             </PopoverTrigger>
-            <PopoverPopup align="end" className="w-auto" viewportClassName="p-3">
+            <PopoverPopup keepMounted align="end" className="w-auto" viewportClassName="p-3">
               <div
                 className="@container/header-actions flex items-center gap-3"
                 data-chat-header-actions
