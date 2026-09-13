@@ -78,7 +78,7 @@ export function GoalToolbar(props: {
             ) : null}
             {goal.tokensUsed !== null ? (
               <span
-                aria-label="Goal token usage"
+                title="Goal token usage"
                 className="ml-auto whitespace-nowrap text-purple-700 tabular-nums dark:text-purple-300"
               >
                 {formatTokens(goal.tokensUsed).replace("K", "k")}
