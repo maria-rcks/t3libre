@@ -16,6 +16,7 @@ import {
   type PermissionResult,
   type PermissionUpdate,
   type SDKMessage,
+  type SDKActiveGoalMessage,
   type SDKRateLimitInfo,
   type SDKResultMessage,
   type SettingSource,
@@ -42,6 +43,8 @@ import {
   type ProviderSendTurnInput,
   type ProviderSession,
   type ThreadTokenUsageSnapshot,
+  type ThreadGoalSetInput,
+  type ThreadGoal,
   type TurnTokenUsage,
   type ProviderUserInputAnswers,
   type RuntimeContentStreamKind,
@@ -357,9 +360,52 @@ interface ClaudeSessionContext {
   /** Limits already announced for the running turn, keyed `window:resetsAt`. */
   announcedUsageLimits: { turnId: string; keys: Set<string> } | undefined;
   stopped: boolean;
+  nativeGoal?: ThreadGoal | null;
 }
 
-interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
+const ClaudeGoalCommandOutput = Schema.Struct({
+  type: Schema.Literals(["assistant"]),
+  parent_tool_use_id: Schema.Null,
+  local_command_source: Schema.String,
+  message: Schema.Struct({ model: Schema.Literals(["<synthetic>"]) }),
+});
+const decodeClaudeGoalCommandOutput = Schema.decodeUnknownExit(ClaudeGoalCommandOutput);
+
+/** Only native local-command output can confirm a goal; model prose cannot. */
+export function parseClaudeGoalCommandOutput(
+  message: unknown,
+):
+  | { readonly objective: string; readonly rounds: number; readonly lastReason?: string }
+  | null
+  | undefined {
+  const decoded = decodeClaudeGoalCommandOutput(message);
+  if (Exit.isFailure(decoded)) return undefined;
+  const output = decoded.value.local_command_source.match(
+    /^<local-command-stdout>([\s\S]*)<\/local-command-stdout>$/,
+  )?.[1];
+  if (!output) return undefined;
+  if (output.startsWith("Goal set: ")) return { objective: output.slice(10), rounds: 0 };
+  if (
+    output.startsWith("Goal cleared: ") ||
+    output === "No goal set" ||
+    output === "No goal set. Usage: `/goal <condition>`"
+  )
+    return null;
+  const active = output.match(
+    /^Goal active: ([\s\S]+) \((not yet evaluated|\d+ turns?)\)(?:\nLast check: ([\s\S]+))?$/,
+  );
+  if (!active) return undefined;
+  return {
+    objective: active[1]!,
+    rounds: active[2] === "not yet evaluated" ? 0 : Number.parseInt(active[2]!, 10),
+    ...(active[3] ? { lastReason: active[3] } : {}),
+  };
+}
+
+// The SDK forwards active_goal messages but omits them from its query union.
+type ClaudeInboundMessage = SDKMessage | SDKActiveGoalMessage;
+
+interface ClaudeQueryRuntime extends AsyncIterable<ClaudeInboundMessage> {
   readonly setModel: (model?: string) => Promise<void>;
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
@@ -390,7 +436,7 @@ function isSyntheticClaudeThreadId(value: string): boolean {
   return value.startsWith("claude-thread-");
 }
 
-function hasDurableClaudeSessionId(message: SDKMessage): boolean {
+function hasDurableClaudeSessionId(message: ClaudeInboundMessage): boolean {
   if (message.type !== "system") {
     return true;
   }
@@ -1464,8 +1510,11 @@ function buildPromptText(
     input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection.model : undefined;
   const caps = getClaudeCatalogModelCapabilities(catalog, claudeModel);
 
+  const text = input.input?.trim() ?? "";
+  // Native commands must remain at the start of the final text block.
+  if (/^\/goal(?:\s|$)/.test(text)) return text;
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort);
-  return applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort);
+  return applyClaudePromptEffortPrefix(text, promptEffort);
 }
 
 function buildUserMessage(input: {
@@ -1852,7 +1901,7 @@ function sdkMessageSubtype(value: unknown): string | undefined {
   return typeof record.subtype === "string" ? record.subtype : undefined;
 }
 
-function sdkNativeMethod(message: SDKMessage): string {
+function sdkNativeMethod(message: ClaudeInboundMessage): string {
   const subtype = sdkMessageSubtype(message);
   if (subtype) {
     return `claude/${message.type}/${subtype}`;
@@ -1921,7 +1970,7 @@ function describeUnknownSdkMessage(kind: string, message: unknown): string {
   return preview ? `${kind} — ${preview}` : `${kind} (no displayable text content)`;
 }
 
-function sdkNativeItemId(message: SDKMessage): string | undefined {
+function sdkNativeItemId(message: ClaudeInboundMessage): string | undefined {
   if (message.type === "assistant") {
     const maybeId = (message.message as { id?: unknown }).id;
     if (typeof maybeId === "string") {
@@ -2011,7 +2060,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const logNativeSdkMessage = Effect.fnUntraced(function* (
     context: ClaudeSessionContext,
-    message: SDKMessage,
+    message: ClaudeInboundMessage,
   ) {
     if (!nativeEventLogger) {
       return;
@@ -2268,7 +2317,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const ensureThreadId = Effect.fn("ensureThreadId")(function* (
     context: ClaudeSessionContext,
-    message: SDKMessage,
+    message: ClaudeInboundMessage,
   ) {
     if (typeof message.session_id !== "string" || message.session_id.length === 0) {
       return;
@@ -3957,13 +4006,76 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const handleSdkMessage = Effect.fn("handleSdkMessage")(function* (
     context: ClaudeSessionContext,
-    message: SDKMessage,
+    message: ClaudeInboundMessage,
   ) {
     yield* logNativeSdkMessage(context, message);
     yield* ensureThreadId(context, message);
 
     // Wire-only command bookkeeping has no user-facing T3 lifecycle.
     if (sdkMessageType(message) === "command_lifecycle") {
+      return;
+    }
+
+    const commandGoal = parseClaudeGoalCommandOutput(message);
+    if (commandGoal !== undefined) {
+      const stamp = yield* makeEventStamp();
+      const previous = context.nativeGoal;
+      context.nativeGoal =
+        commandGoal === null
+          ? null
+          : {
+              objective: commandGoal.objective,
+              status: "active",
+              createdAt:
+                previous?.objective === commandGoal.objective
+                  ? previous.createdAt
+                  : stamp.createdAt,
+              updatedAt: stamp.createdAt,
+              timeUsedSeconds: null,
+              tokensUsed: null,
+              tokenBudget: null,
+              rounds: commandGoal.rounds,
+              ...(commandGoal.lastReason ? { lastReason: commandGoal.lastReason } : {}),
+            };
+      yield* offerRuntimeEvent({
+        type: "thread.goal.updated",
+        ...stamp,
+        provider: PROVIDER,
+        threadId: context.session.threadId,
+        payload: { goal: context.nativeGoal },
+        providerRefs: nativeProviderRefs(context),
+        raw: { source: "claude.sdk.message", method: "claude/assistant", payload: message },
+      });
+    }
+
+    if (message.type === "active_goal") {
+      const stamp = yield* makeEventStamp();
+      const value = message.value;
+      context.nativeGoal = value
+        ? {
+            objective: value.condition,
+            status: "active",
+            createdAt: DateTime.formatIso(DateTime.makeUnsafe(value.set_at)),
+            updatedAt: stamp.createdAt,
+            timeUsedSeconds: Math.max(
+              0,
+              Math.floor((Date.parse(stamp.createdAt) - value.set_at) / 1000),
+            ),
+            tokensUsed: null,
+            tokenBudget: null,
+            rounds: value.iterations,
+            ...(value.last_reason ? { lastReason: value.last_reason } : {}),
+          }
+        : null;
+      yield* offerRuntimeEvent({
+        type: "thread.goal.updated",
+        ...stamp,
+        provider: PROVIDER,
+        threadId: context.session.threadId,
+        payload: { goal: context.nativeGoal },
+        providerRefs: nativeProviderRefs(context),
+        raw: { source: "claude.sdk.message", method: "claude/active_goal", payload: message },
+      });
       return;
     }
 
@@ -3979,6 +4091,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         return;
       case "result":
         yield* handleResultMessage(context, message);
+        // Standard SDK mode only reports goal changes through local /goal output.
+        // A status command does not call a model and must never refresh itself.
+        if (
+          context.nativeGoal &&
+          !("local_command" in message && message.local_command === "goal")
+        ) {
+          yield* sendTurn({ threadId: context.session.threadId, input: "/goal" }).pipe(
+            Effect.catch((cause) =>
+              emitRuntimeWarning(context, "Could not refresh the native Claude goal.", cause),
+            ),
+          );
+        }
         return;
       case "system":
         yield* handleSystemMessage(context, message);
@@ -5080,6 +5204,21 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     };
   });
 
+  const setGoal = Effect.fn("setGoal")(function* (threadId: ThreadId, input: ThreadGoalSetInput) {
+    if (!input.objective || input.status === "paused" || input.tokenBudget !== undefined) {
+      return yield* new ProviderAdapterValidationError({
+        provider: PROVIDER,
+        operation: "setGoal",
+        issue: "Claude goals require an objective and do not support pausing or token budgets.",
+      });
+    }
+    yield* sendTurn({ threadId, input: `/goal ${input.objective}` });
+  });
+
+  const clearGoal = Effect.fn("clearGoal")(function* (threadId: ThreadId) {
+    yield* sendTurn({ threadId, input: "/goal clear" });
+  });
+
   const interruptTurn: ClaudeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
     function* (threadId, _turnId) {
       const context = yield* requireSession(threadId);
@@ -5373,6 +5512,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       sessionModelSwitch: "in-session",
     },
     compaction: { type: "slash-command", command: "/compact" },
+    goals: {
+      set: setGoal,
+      clear: clearGoal,
+      refresh: (threadId) => sendTurn({ threadId, input: "/goal" }).pipe(Effect.asVoid),
+    },
     startSession,
     sendTurn,
     interruptTurn,

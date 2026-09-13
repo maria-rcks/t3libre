@@ -1470,6 +1470,8 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const setThreadGoal = useAtomCommand(threadEnvironment.setGoal, { reportFailure: true });
+  const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: true });
   const createAttachmentAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
     reportFailure: false,
     refresh: true,
@@ -8892,6 +8894,22 @@ export default function ChatView(props: ChatViewProps) {
                       <ComposerSurface.Host>
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                           <ChatComposer
+                            onSetGoal={async (input) => {
+                              if (!activeThread) return false;
+                              const result = await setThreadGoal({
+                                environmentId,
+                                input: { threadId: activeThread.id, ...input },
+                              });
+                              return result._tag !== "Failure";
+                            }}
+                            onClearGoal={async () => {
+                              if (!activeThread) return false;
+                              const result = await clearThreadGoal({
+                                environmentId,
+                                input: { threadId: activeThread.id },
+                              });
+                              return result._tag !== "Failure";
+                            }}
                             composerRef={composerRef}
                             composerDraftTarget={composerDraftTarget}
                             environmentId={environmentId}

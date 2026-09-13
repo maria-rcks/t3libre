@@ -1,3 +1,4 @@
+import type { ThreadGoalSetInput } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
   DEFAULT_MODEL,
@@ -211,6 +212,9 @@ export interface CodexSessionRuntimeShape {
   readonly sendTurn: (
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
+  readonly refreshGoal: Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly setGoal: (input: ThreadGoalSetInput) => Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly clearGoal: Effect.Effect<void, CodexSessionRuntimeError>;
   readonly compactThread: Effect.Effect<void, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
@@ -805,6 +809,8 @@ function readNotificationThreadId(notification: CodexServerNotification): string
     case "item/reasoning/summaryTextDelta":
     case "item/reasoning/summaryPartAdded":
     case "item/reasoning/textDelta":
+    case "thread/goal/updated":
+    case "thread/goal/cleared":
     case "thread/compacted":
     case "thread/realtime/started":
     case "thread/realtime/itemAdded":
@@ -1047,6 +1053,8 @@ function shouldSuppressChildConversationNotification(
     method === "thread/archived" ||
     method === "thread/unarchived" ||
     method === "thread/closed" ||
+    method === "thread/goal/updated" ||
+    method === "thread/goal/cleared" ||
     method === "thread/compacted" ||
     method === "thread/name/updated" ||
     method === "thread/settings/updated" ||
@@ -1110,6 +1118,8 @@ const CHILD_CHATTER_METHODS: ReadonlySet<string> = new Set([
   "thread/archived",
   "thread/unarchived",
   "thread/compacted",
+  "thread/goal/updated",
+  "thread/goal/cleared",
   // Registration path 1 handles a child's first thread/started; a repeat
   // must not reach the parent (it would restart the parent's thread state).
   "thread/started",
@@ -2390,6 +2400,17 @@ export const makeCodexSessionRuntime = (
       } satisfies ProviderSession;
       yield* Ref.set(sessionRef, session);
       yield* emitSessionEvent("session/ready", "Codex App Server session ready.");
+      yield* client.request("thread/goal/get", { threadId: providerThreadId }).pipe(
+        Effect.flatMap(({ goal }) =>
+          emitEvent({
+            kind: "notification",
+            threadId: options.threadId,
+            method: goal ? "thread/goal/updated" : "thread/goal/cleared",
+            payload: goal ? { threadId: providerThreadId, goal } : { threadId: providerThreadId },
+          }),
+        ),
+        Effect.catch(() => Effect.void),
+      );
       return session;
     });
 
@@ -2427,6 +2448,42 @@ export const makeCodexSessionRuntime = (
     return {
       start,
       getSession: Ref.get(sessionRef),
+      refreshGoal: Effect.gen(function* () {
+        const threadId = yield* readProviderThreadId;
+        const { goal } = yield* client.request("thread/goal/get", { threadId });
+        yield* emitEvent({
+          kind: "notification",
+          threadId: options.threadId,
+          method: goal ? "thread/goal/updated" : "thread/goal/cleared",
+          payload: goal ? { threadId, goal } : { threadId },
+        });
+      }),
+      setGoal: (input) =>
+        Effect.gen(function* () {
+          const threadId = yield* readProviderThreadId;
+          const { goal } = yield* client.request("thread/goal/set", {
+            threadId,
+            ...(input.objective !== undefined ? { objective: input.objective } : {}),
+            ...(input.status !== undefined ? { status: input.status } : {}),
+            ...(input.tokenBudget !== undefined ? { tokenBudget: input.tokenBudget } : {}),
+          });
+          yield* emitEvent({
+            kind: "notification",
+            threadId: options.threadId,
+            method: "thread/goal/updated",
+            payload: { threadId, goal },
+          });
+        }),
+      clearGoal: Effect.gen(function* () {
+        const threadId = yield* readProviderThreadId;
+        yield* client.request("thread/goal/clear", { threadId });
+        yield* emitEvent({
+          kind: "notification",
+          threadId: options.threadId,
+          method: "thread/goal/cleared",
+          payload: { threadId },
+        });
+      }),
       compactThread: Effect.gen(function* () {
         const providerThreadId = yield* readProviderThreadId;
         yield* client.request("thread/compact/start", { threadId: providerThreadId });

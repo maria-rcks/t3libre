@@ -576,6 +576,9 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     slashCommands: dedupedSlashCommands,
     skills,
     probe: {
+      ...(dedupedSlashCommands.some((command) => command.name === "goal")
+        ? { goal: { pause: false, tokenBudget: false } }
+        : {}),
       installed: true,
       version: parsedVersion,
       status: "ready",
