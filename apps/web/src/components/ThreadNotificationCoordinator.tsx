@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useEffect, useRef } from "react";
@@ -11,13 +11,19 @@ import {
   hasDesktopNotifications,
   hasNotificationSound,
   playNotificationSound,
+  resolveThreadNotification,
+  type ThreadNotificationSnapshot,
   unlockNotificationAudio,
 } from "../threadNotifications";
 import { resolveSidebarThreadStatus } from "./Sidebar.logic";
+import { toastManager } from "./ui/toast";
 
 export function ThreadNotificationCoordinator() {
   const { environments } = useEnvironments();
   const mode = useClientSettings((settings) => settings.notificationMode);
+  const inAppNotificationsEnabled = useClientSettings(
+    (settings) => settings.inAppNotificationsEnabled,
+  );
 
   useEffect(() => {
     if (!hasNotificationSound(mode)) return;
@@ -29,7 +35,7 @@ export function ThreadNotificationCoordinator() {
     };
   }, [mode]);
 
-  if (mode === "off") return null;
+  if (mode === "off" && !inAppNotificationsEnabled) return null;
 
   return environments.map((environment) => (
     <EnvironmentNotifications
@@ -42,42 +48,58 @@ export function ThreadNotificationCoordinator() {
 function EnvironmentNotifications({ environmentId }: { environmentId: EnvironmentId }) {
   const shell = useAtomValue(environmentShell.stateValueAtom(environmentId));
   const mode = useClientSettings((settings) => settings.notificationMode);
+  const inAppNotificationsEnabled = useClientSettings(
+    (settings) => settings.inAppNotificationsEnabled,
+  );
   const navigate = useNavigate();
-  const previous = useRef(new Map<ThreadId, { input: string | null; completion: number | null }>());
+  const { environmentId: activeEnvironmentId, threadId: activeThreadId } = useParams({
+    strict: false,
+  });
+  const previous = useRef(new Map<ThreadId, ThreadNotificationSnapshot>());
 
   useEffect(() => {
     if (shell.status !== "live" || Option.isNone(shell.snapshot)) {
       previous.current.clear();
       return;
     }
-    const next = new Map<ThreadId, { input: string | null; completion: number | null }>();
+    const next = new Map<ThreadId, ThreadNotificationSnapshot>();
     for (const thread of shell.snapshot.value.threads) {
-      const status = resolveSidebarThreadStatus(thread);
+      let status = resolveSidebarThreadStatus(thread);
+      if (status === "ready" && thread.latestTurn?.state === "error") status = "failed";
       const prior = previous.current.get(thread.id);
-      const input =
-        status === "input" || status === "approval"
-          ? `${thread.latestTurn?.turnId ?? ""}:${status}`
-          : null;
-      const completedAt = Date.parse(thread.latestTurn?.completedAt ?? "");
-      const completion =
-        status === "ready" &&
-        thread.latestTurn?.state === "completed" &&
-        Number.isFinite(completedAt)
-          ? completedAt
-          : (prior?.completion ?? null);
-      next.set(thread.id, { input, completion });
-      if (!prior || mode === "off" || thread.archivedAt !== null) continue;
-      const kind =
-        input && input !== prior.input
-          ? "input"
-          : completion !== null && (prior.completion === null || completion > prior.completion)
-            ? "completion"
-            : null;
-      if (!kind) continue;
+      const { snapshot, notification: notice } = resolveThreadNotification(thread, status, prior);
+      next.set(thread.id, snapshot);
+      if (!prior || thread.archivedAt !== null) continue;
+      if (!notice) continue;
       if (hasNotificationSound(mode)) {
-        void playNotificationSound(kind, () =>
+        void playNotificationSound(notice.kind, () =>
           hasNotificationSound(getClientSettings().notificationMode),
         );
+      }
+      if (
+        inAppNotificationsEnabled &&
+        document.visibilityState === "visible" &&
+        document.hasFocus() &&
+        (activeEnvironmentId !== environmentId || activeThreadId !== thread.id)
+      ) {
+        const toastId = toastManager.add({
+          type:
+            notice.kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
+          title: notice.title,
+          description: notice.body,
+          data: { hideCopyButton: true },
+          actionProps: {
+            children: "Open thread",
+            onClick: () => {
+              toastManager.close(toastId);
+              void navigate({
+                to: "/$environmentId/$threadId",
+                params: { environmentId, threadId: thread.id },
+              });
+            },
+          },
+        });
+        continue;
       }
       if (
         !hasDesktopNotifications(mode) ||
@@ -86,14 +108,11 @@ function EnvironmentNotifications({ environmentId }: { environmentId: Environmen
       )
         continue;
       try {
-        const notification = new Notification(
-          kind === "completion"
-            ? "Thread completed"
-            : status === "approval"
-              ? "Approval needed"
-              : "Input needed",
-          { body: thread.title, tag: `${environmentId}:${thread.id}`, silent: true },
-        );
+        const notification = new Notification(notice.title, {
+          body: notice.body,
+          tag: `${environmentId}:${thread.id}`,
+          silent: true,
+        });
         notification.addEventListener("click", () => {
           notification.close();
           window.focus();
@@ -107,7 +126,15 @@ function EnvironmentNotifications({ environmentId }: { environmentId: Environmen
       }
     }
     previous.current = next;
-  }, [environmentId, mode, navigate, shell]);
+  }, [
+    activeEnvironmentId,
+    activeThreadId,
+    environmentId,
+    inAppNotificationsEnabled,
+    mode,
+    navigate,
+    shell,
+  ]);
 
   return null;
 }

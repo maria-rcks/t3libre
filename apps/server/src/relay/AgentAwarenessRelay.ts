@@ -3,6 +3,7 @@ import type {
   OrchestrationEvent,
   OrchestrationProjectShell,
   OrchestrationThreadShell,
+  ThreadGoal,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -73,6 +74,8 @@ export function shouldPublishAgentAwarenessEvent(event: OrchestrationEvent): boo
   switch (event.type) {
     case "thread.message-sent":
     case "thread.turn-start-requested":
+    case "thread.goal-set-requested":
+    case "thread.goal-clear-requested":
       // These events express intent to start work, but the shell still contains
       // the previous turn's terminal state until the provider acknowledges the
       // new turn. Publishing that snapshot can queue a fresh "Done" alert just
@@ -230,11 +233,31 @@ function describeThreadShellForAwareness(
   };
 }
 
+type GoalAwarenessTracking = { readonly goal: ThreadGoal | null; readonly ignore: boolean };
+
+export function updateGoalAwarenessTracking(
+  previous: GoalAwarenessTracking | undefined,
+  update: { readonly goal: ThreadGoal | null } | { readonly manualTurn: true },
+): GoalAwarenessTracking | undefined {
+  if ("manualTurn" in update) {
+    return previous ? { ...previous, ignore: previous.goal?.status !== "active" } : undefined;
+  }
+  const { goal } = update;
+  if (!goal && !previous) return undefined;
+  const unchanged =
+    goal?.createdAt === previous?.goal?.createdAt &&
+    goal?.objective === previous?.goal?.objective &&
+    goal?.status === previous?.goal?.status;
+  return { goal, ignore: unchanged || goal === null ? (previous?.ignore ?? false) : false };
+}
+
 export function resolveAgentAwarenessRelayPublishSnapshot(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly thread: Option.Option<OrchestrationThreadShell>;
   readonly project: Option.Option<OrchestrationProjectShell>;
+  readonly suppressClearedGoalCompletion?: boolean;
+  readonly ignoreRetainedGoal?: boolean;
 }): {
   readonly projectId: string | null;
   readonly state: RelayAgentActivityState | null;
@@ -254,14 +277,19 @@ export function resolveAgentAwarenessRelayPublishSnapshot(input: {
       reason: "project-not-found",
     };
   }
+  const state = projectThreadAwareness({
+    environmentId: input.environmentId,
+    project: input.project.value,
+    thread: input.ignoreRetainedGoal ? { ...input.thread.value, goal: null } : input.thread.value,
+  });
   return {
     projectId: input.thread.value.projectId,
     state: sanitizeRelayAgentActivityState(
-      projectThreadAwareness({
-        environmentId: input.environmentId,
-        project: input.project.value,
-        thread: input.thread.value,
-      }),
+      input.suppressClearedGoalCompletion &&
+        !input.thread.value.goal &&
+        state?.phase === "completed"
+        ? null
+        : state,
     ),
     reason: "snapshot",
   };
@@ -340,6 +368,17 @@ export const make = Effect.gen(function* () {
   // tombstone can never race an in-flight live update; a recovered state
   // clears the deadline. Assigned after the worker exists.
   const publishConfirmDeadlines = new Map<ThreadId, number>();
+  // Clearing a native goal must not reinterpret its last round as a new Done
+  // alert. A subsequent explicit turn restores ordinary completion behavior.
+  const goalThreads = new Map<ThreadId, GoalAwarenessTracking>();
+  const trackGoal = (
+    threadId: ThreadId,
+    update: Parameters<typeof updateGoalAwarenessTracking>[1],
+  ) => {
+    const next = updateGoalAwarenessTracking(goalThreads.get(threadId), update);
+    if (next) goalThreads.set(threadId, next);
+    return next;
+  };
   let schedulePublishConfirm: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
 
   const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (threadId: ThreadId) {
@@ -406,6 +445,8 @@ export const make = Effect.gen(function* () {
       });
 
     const thread = yield* snapshotQuery.getThreadShellById(threadId);
+    if (Option.isNone(thread)) goalThreads.delete(threadId);
+    else trackGoal(threadId, { goal: thread.value.goal ?? null });
     const project = Option.isSome(thread)
       ? yield* snapshotQuery.getProjectShellById(thread.value.projectId)
       : Option.none<OrchestrationProjectShell>();
@@ -414,6 +455,9 @@ export const make = Effect.gen(function* () {
       threadId,
       thread,
       project,
+      suppressClearedGoalCompletion:
+        goalThreads.has(threadId) && !goalThreads.get(threadId)?.ignore,
+      ignoreRetainedGoal: goalThreads.get(threadId)?.ignore ?? false,
     });
     const publishIdentity = agentAwarenessPublishIdentity(snapshot.state);
     const publishedStateByThread = yield* Ref.get(publishedStateByThreadRef);
@@ -613,6 +657,38 @@ export const make = Effect.gen(function* () {
             return Effect.logDebug("agent activity publishing ignored event without thread id", {
               eventType: event.type,
             });
+          }
+          if (event.type === "thread.turn-start-requested") {
+            return Effect.gen(function* () {
+              if (!goalThreads.has(threadId)) {
+                const thread = yield* snapshotQuery.getThreadShellById(threadId);
+                if (Option.isSome(thread)) trackGoal(threadId, { goal: thread.value.goal ?? null });
+              }
+              if (
+                !goalThreads.has(threadId) ||
+                goalThreads.get(threadId)?.goal?.status === "active"
+              ) {
+                return;
+              }
+              const start = yield* snapshotQuery.getTurnStartMessage({
+                threadId,
+                messageId: event.payload.messageId,
+              });
+              if (
+                Option.isSome(start) &&
+                (start.value.message.attachments?.length ?? 0) === 0 &&
+                /^\/goal(?:\s|$)/.test(start.value.message.text.trim())
+              )
+                return;
+              trackGoal(threadId, { manualTurn: true });
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("agent goal awareness update failed", cause),
+              ),
+            );
+          }
+          if (event.type === "thread.meta-updated" && event.payload.goal !== undefined) {
+            trackGoal(threadId, { goal: event.payload.goal });
           }
           if (!shouldPublishAgentAwarenessEvent(event)) {
             return Effect.logDebug(
