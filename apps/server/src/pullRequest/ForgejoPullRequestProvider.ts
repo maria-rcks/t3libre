@@ -295,7 +295,8 @@ export const make = Effect.gen(function* () {
             ),
           { concurrency: 4 },
         );
-        const inline = reviewComments.flat();
+        const allInline = reviewComments.flat();
+        const inline = allInline.slice(0, 500);
         const entries = [
           ...comments.items.map((comment) => ({
             comment: forgejoComment(comment),
@@ -335,7 +336,8 @@ export const make = Effect.gen(function* () {
         return {
           comments: timeline,
           commentCount: timeline.length,
-          commentsTruncated: comments.truncated || reviews.truncated,
+          commentsTruncated:
+            comments.truncated || reviews.truncated || allInline.length > inline.length,
           reviewThreads: inline.map((comment) => ({
             ...forgejoReviewThread(comment),
             comments: [byId.get(String(comment.id)) ?? forgejoComment(comment)],

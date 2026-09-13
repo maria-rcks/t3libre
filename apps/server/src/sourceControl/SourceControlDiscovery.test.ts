@@ -249,6 +249,7 @@ it.effect(
       ],
     };
     const writes: ForgejoCli.ForgejoApiInput[] = [];
+    let reactionReads = 0;
     return Effect.gen(function* () {
       const provider = yield* ForgejoPullRequestProvider.make;
       const input = { cwd: "/repo", repository: "maria/project", host: "forgejo.test", number: 2 };
@@ -317,6 +318,31 @@ it.effect(
       assert.strictEqual(missing._tag, "Failure");
       if (missing._tag === "Failure") assert.include(missing.failure.detail, "comment ID");
       assert.strictEqual(writes.length, 4);
+      responses["repos/maria/project/pulls/2/reviews/8/comments"] = Array.from(
+        { length: 501 },
+        (_, index) => ({
+          ...comment,
+          id: 1000 + index,
+          path: "file.ts",
+          position: 1,
+          original_position: 1,
+          commit_id: "head",
+          original_commit_id: "head",
+          resolver: null,
+        }),
+      );
+      for (let index = 0; index < 500; index++) {
+        responses[`repos/maria/project/issues/comments/${1000 + index}/reactions`] = [];
+      }
+      reactionReads = 0;
+      const bounded = yield* provider.getChangeRequestActivity(input);
+      assert.strictEqual(bounded.reviewThreads.length, 500);
+      assert.strictEqual(
+        bounded.comments.filter((entry) => entry.kind === "review-comment").length,
+        500,
+      );
+      assert.strictEqual(bounded.commentsTruncated, true);
+      assert.strictEqual(reactionReads, 502);
     }).pipe(
       Effect.provide(
         Layer.mock(ForgejoCli.ForgejoCli)({
@@ -326,6 +352,7 @@ it.effect(
               return Effect.succeed(processOutput("{}"));
             }
             const path = input.path.split("?")[0]!;
+            if (/\/issues\/comments\/\d+\/reactions$/.test(path)) reactionReads++;
             assert.ok(Object.hasOwn(responses, path), `Unexpected Forgejo request: ${path}`);
             const page = Number(new URLSearchParams(input.path.split("?")[1]).get("page"));
             return encodeJsonEffect(page > 1 ? [] : responses[path]).pipe(
