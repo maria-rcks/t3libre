@@ -43,14 +43,14 @@ function EnvironmentNotifications({ environmentId }: { environmentId: Environmen
   const shell = useAtomValue(environmentShell.stateValueAtom(environmentId));
   const mode = useClientSettings((settings) => settings.notificationMode);
   const navigate = useNavigate();
-  const previous = useRef(new Map<ThreadId, { input: string | null; completion: string | null }>());
+  const previous = useRef(new Map<ThreadId, { input: string | null; completion: number | null }>());
 
   useEffect(() => {
     if (shell.status !== "live" || Option.isNone(shell.snapshot)) {
       previous.current.clear();
       return;
     }
-    const next = new Map<ThreadId, { input: string | null; completion: string | null }>();
+    const next = new Map<ThreadId, { input: string | null; completion: number | null }>();
     for (const thread of shell.snapshot.value.threads) {
       const status = resolveSidebarThreadStatus(thread);
       const prior = previous.current.get(thread.id);
@@ -58,17 +58,19 @@ function EnvironmentNotifications({ environmentId }: { environmentId: Environmen
         status === "input" || status === "approval"
           ? `${thread.latestTurn?.turnId ?? ""}:${status}`
           : null;
+      const completedAt = Date.parse(thread.latestTurn?.completedAt ?? "");
       const completion =
-        status === "ready" && thread.latestTurn?.state === "completed"
-          ? thread.latestTurn.completedAt
+        status === "ready" &&
+        thread.latestTurn?.state === "completed" &&
+        Number.isFinite(completedAt)
+          ? completedAt
           : (prior?.completion ?? null);
       next.set(thread.id, { input, completion });
       if (!prior || mode === "off" || thread.archivedAt !== null) continue;
       const kind =
         input && input !== prior.input
           ? "input"
-          : completion &&
-              (prior.completion === null || Date.parse(completion) > Date.parse(prior.completion))
+          : completion !== null && (prior.completion === null || completion > prior.completion)
             ? "completion"
             : null;
       if (!kind) continue;
