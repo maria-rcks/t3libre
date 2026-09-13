@@ -52,6 +52,7 @@ import {
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
 import { ProviderIcon } from "../../components/ProviderIcon";
+import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { hasProviderUsageLimits, isUsageLimitsCommand } from "@t3tools/shared/usageLimits";
@@ -1246,39 +1247,64 @@ export function NewTaskDraftScreen(props: {
     <View className="items-center gap-6 px-6" testID="new-task-hero">
       <View className="w-full items-center gap-1.5">
         <Text className="text-center text-2xl font-t3-medium tracking-tight text-foreground">
-          What should we work on?
+          {isChatProject(selectedProject) ? "What should we work on?" : "What should we build"}
         </Text>
         <View className="max-w-full flex-row items-center justify-center">
-          <ComposerInlineControl
-            accessibilityHint="Opens the project picker"
-            accessibilityLabel={
+          {!isChatProject(selectedProject) ? (
+            <Text className="text-2xl font-t3-medium tracking-tight text-foreground">in </Text>
+          ) : null}
+          <View
+            className={
               isChatProject(selectedProject)
-                ? "Add project"
-                : `Change project from ${selectedProject.title}`
+                ? ""
+                : "min-w-0 flex-row items-center rounded-xl bg-subtle"
             }
-            disabled={isComposerInteractionLocked}
-            icon={isChatProject(selectedProject) ? "plus" : "folder"}
-            label={isChatProject(selectedProject) ? "Add project" : selectedProject.title}
-            maxWidth={250}
-            onPress={chooseProject}
-            showChevron={!isChatProject(selectedProject)}
-          />
-          {!isChatProject(selectedProject) && chatProject ? (
-            <Pressable
-              accessibilityLabel="Don't work in a project"
-              accessibilityRole="button"
+          >
+            <ComposerInlineControl
+              accessibilityHint="Opens the project picker"
+              accessibilityLabel={
+                isChatProject(selectedProject)
+                  ? "Add project"
+                  : `Change project from ${selectedProject.title}`
+              }
               disabled={isComposerInteractionLocked}
-              onPress={() => setProject(chatProject)}
-              className="size-11 items-center justify-center rounded-xl active:bg-subtle"
-              style={{ opacity: isComposerInteractionLocked ? 0.45 : 1 }}
-            >
-              <SymbolView
-                name="xmark"
-                size={14}
-                tintColorClassName="accent-icon-muted"
-                type="monochrome"
-              />
-            </Pressable>
+              icon={isChatProject(selectedProject) ? "plus" : undefined}
+              iconNode={
+                isChatProject(selectedProject) ? undefined : (
+                  <ProjectFavicon
+                    environmentId={selectedProject.environmentId}
+                    projectTitle={selectedProject.title}
+                    workspaceRoot={selectedProject.workspaceRoot}
+                    faviconPath={selectedProject.faviconPath}
+                    size={16}
+                  />
+                )
+              }
+              label={isChatProject(selectedProject) ? "Add project" : selectedProject.title}
+              maxWidth={200}
+              onPress={chooseProject}
+              showChevron={!isChatProject(selectedProject)}
+            />
+            {!isChatProject(selectedProject) && chatProject ? (
+              <Pressable
+                accessibilityLabel="Don't work in a project"
+                accessibilityRole="button"
+                disabled={isComposerInteractionLocked}
+                onPress={() => setProject(chatProject)}
+                className="size-11 items-center justify-center rounded-xl active:bg-subtle"
+                style={{ opacity: isComposerInteractionLocked ? 0.45 : 1 }}
+              >
+                <SymbolView
+                  name="xmark"
+                  size={14}
+                  tintColorClassName="accent-icon-muted"
+                  type="monochrome"
+                />
+              </Pressable>
+            ) : null}
+          </View>
+          {!isChatProject(selectedProject) ? (
+            <Text className="text-2xl font-t3-medium tracking-tight text-foreground">?</Text>
           ) : null}
         </View>
       </View>

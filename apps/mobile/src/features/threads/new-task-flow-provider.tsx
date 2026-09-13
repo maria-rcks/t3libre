@@ -342,6 +342,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   // workspaceRoot, and an "" basename would reject every real host below.
   const selectedWorkspaceBasename = selectedProject?.workspaceRoot.split("/").at(-1) || null;
   const selectedProjectTitle = selectedProject?.title ?? null;
+  const selectedProjectIsChat = selectedProject !== null && isChatProject(selectedProject);
   const environments = useMemo(() => {
     const seen = new Set<EnvironmentId>();
     const result: Array<{
@@ -349,6 +350,9 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       readonly environmentLabel: string;
     }> = [];
     const hostsSelectedRepository = (project: EnvironmentProject) => {
+      if (selectedProjectIsChat) {
+        return isChatProject(project);
+      }
       if (selectedRepositoryKey === null && selectedWorkspaceBasename === null) {
         return true;
       }
@@ -385,6 +389,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     selectedRepositoryKey,
     selectedWorkspaceBasename,
     selectedProjectTitle,
+    selectedProjectIsChat,
   ]);
 
   const selectedEnvironmentServerConfig = useEnvironmentServerConfig(
