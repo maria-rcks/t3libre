@@ -2388,7 +2388,9 @@ function PullRequestsColumn({
               <CompactFilterMenu
                 label="Filter by provider"
                 outlined
-                iconOnly
+                iconOnly={host !== undefined}
+                triggerIcon={<Plug2Icon aria-hidden className="size-4" />}
+                triggerLabel={host === undefined ? "All" : undefined}
                 value={host ?? ""}
                 options={hostMenuOptions}
                 onChange={(next) => onHost(next === "" ? undefined : next)}
