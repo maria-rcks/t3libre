@@ -1,4 +1,5 @@
 import type { ThreadGoal } from "@t3tools/contracts";
+import { formatTokens } from "@t3tools/shared/usageFormat";
 import { PauseIcon, PencilIcon, PlayIcon, TargetIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -9,6 +10,7 @@ import { ComposerBanner } from "./ComposerBanner";
 
 export function formatGoalDuration(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
+  if (total < 60) return `${total}s`;
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   return hours > 0 ? `${hours}h ${minutes}m ${total % 60}s` : `${minutes}m ${total % 60}s`;
@@ -56,11 +58,12 @@ export function GoalToolbar(props: {
         className="text-foreground before:border-purple-500/40"
       >
         <ComposerBanner.Row layout="wrap-actions">
-          <ComposerBanner.Icon className="text-purple-600 dark:text-purple-400">
-            <TargetIcon />
-          </ComposerBanner.Icon>
           <ComposerBanner.Content className="flex-wrap gap-x-2 gap-y-0.5 text-muted-foreground">
-            <span role="status" className="font-medium text-purple-700 dark:text-purple-300">
+            <span
+              role="status"
+              className="inline-flex shrink-0 items-center gap-2 font-medium text-purple-700 dark:text-purple-300"
+            >
+              <TargetIcon className="size-3 shrink-0 text-purple-600 dark:text-purple-400" />
               {goalStatusLabels[goal.status]}
             </span>
             {goal.timeUsedSeconds !== null ? (
@@ -68,15 +71,18 @@ export function GoalToolbar(props: {
                 {formatGoalDuration(goal.timeUsedSeconds)}
               </span>
             ) : null}
-            {goal.tokensUsed !== null ? (
-              <span className="tabular-nums">
-                {goal.tokensUsed.toLocaleString()}
-                {goal.tokenBudget !== null ? ` / ${goal.tokenBudget.toLocaleString()}` : ""} tokens
-              </span>
-            ) : null}
             {goal.rounds !== undefined ? (
               <span className="tabular-nums">
                 {goal.rounds} {goal.rounds === 1 ? "round" : "rounds"}
+              </span>
+            ) : null}
+            {goal.tokensUsed !== null ? (
+              <span className="ml-auto whitespace-nowrap tabular-nums">
+                {formatTokens(goal.tokensUsed).replace("K", "k")}
+                {goal.tokenBudget !== null
+                  ? ` / ${formatTokens(goal.tokenBudget).replace("K", "k")}`
+                  : ""}{" "}
+                tokens
               </span>
             ) : null}
           </ComposerBanner.Content>
