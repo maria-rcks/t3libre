@@ -1721,7 +1721,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 </Tooltip>
               ) : null}
               {hasPrBadge ? (
-                <span className="absolute -top-1 -right-1">{renderPrBadge(true, "badge")}</span>
+                <span className="absolute -top-1 -right-1 inline-flex">
+                  {renderPrBadge(true, "badge")}
+                </span>
               ) : null}
             </span>
             {topStatus ? (
