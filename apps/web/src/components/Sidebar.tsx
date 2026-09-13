@@ -4568,7 +4568,10 @@ export default function Sidebar() {
                   <ul
                     ref={attachListMotionRef}
                     role="list"
-                    className="relative flex flex-1 flex-col gap-px"
+                    className={cn(
+                      "relative flex flex-col gap-px",
+                      sidebarListItems.length > 0 && "flex-1",
+                    )}
                   >
                     {(() => {
                       const renderThreadRowInner = (
