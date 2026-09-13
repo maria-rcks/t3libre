@@ -41,6 +41,22 @@ on each selected environment, and reset returns to the environment's shared list
 For workspace mode, a project's `t3.json` preference applies when the project has no override.
 Browser access changes apply when an agent session next starts.
 
+## Storage cleanup
+
+Open **Settings → Storage** to enable automatic cleanup on one machine or all connected
+environments. Policies are off by default and run on the server at startup, when changed, and
+hourly. Offline machines keep their existing policies.
+
+Worktrees can be removed after a chosen number of inactive days, after merging, or when they
+have no commits beyond the default branch. Only T3-managed worktrees are eligible. Active
+sessions, shared worktrees, uncommitted changes, and ignored files other than `node_modules`
+prevent removal. Branches and thread history stay; starting another turn recreates the checkout.
+Merge cleanup requires the commits to be included in the remote default branch, so squash merges
+may need the inactivity rule instead.
+
+Browser captures and rotated logs have separate retention periods. Expired capture links stop
+working. Current logs, message attachments, and browser profiles are kept.
+
 ## Project icons
 
 Select the project and open Project to choose an icon, emoji, monogram, or image. The choice applies to

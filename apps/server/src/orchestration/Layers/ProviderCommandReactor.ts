@@ -1,3 +1,4 @@
+import { withThreadWorkspaceLease } from "../../workspace/threadWorkspaceLease.ts";
 import {
   type ChatAttachment,
   CommandId,
@@ -1792,7 +1793,7 @@ const make = Effect.gen(function* () {
         return;
       }
       case "thread.turn-start-requested":
-        yield* processTurnStartRequested(event);
+        yield* withThreadWorkspaceLease(event.payload.threadId, processTurnStartRequested(event));
         return;
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);

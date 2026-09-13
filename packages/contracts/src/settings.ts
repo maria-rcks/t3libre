@@ -1007,7 +1007,27 @@ export const ProjectSettingsOverrides = Schema.Struct({
 } satisfies Record<ProjectScopedServerSettingKey, unknown>);
 export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
 
+const StorageRetentionDays = Schema.NullOr(
+  Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3650 })),
+);
+
+export const StorageCleanupSettings = Schema.Struct({
+  worktreeAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  worktreeOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  worktreeUnchanged: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  browserArtifactsAfterDays: StorageRetentionDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
+
 export const ServerSettings = Schema.Struct({
+  storageCleanup: StorageCleanupSettings.pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed(Schema.decodeUnknownSync(StorageCleanupSettings)({})),
+    ),
+  ),
   // How assistant text reaches clients during a turn. Deliberately a fresh
   // key (was `enableLegacyTokenStreaming`, before that
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
@@ -1347,6 +1367,15 @@ const OpenCodeSettingsPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  storageCleanup: Schema.optionalKey(
+    Schema.Struct({
+      worktreeAfterDays: Schema.optionalKey(StorageRetentionDays),
+      worktreeOnMerge: Schema.optionalKey(Schema.Boolean),
+      worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
+      browserArtifactsAfterDays: Schema.optionalKey(StorageRetentionDays),
+      logsAfterDays: Schema.optionalKey(StorageRetentionDays),
+    }),
+  ),
   // Server settings
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
