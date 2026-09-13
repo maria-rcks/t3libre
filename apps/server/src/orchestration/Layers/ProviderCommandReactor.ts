@@ -859,6 +859,9 @@ const make = Effect.gen(function* () {
           },
           createdAt,
         });
+        if (options?.goalStartsWork !== undefined) {
+          threadModelSelections.set(threadId, desiredModelSelection);
+        }
       });
 
     const existingSessionThreadId =
@@ -1491,9 +1494,6 @@ const make = Effect.gen(function* () {
             ? { modelSelection: event.payload.modelSelection }
             : {}),
         });
-        if (event.payload.modelSelection !== undefined) {
-          threadModelSelections.set(thread.id, event.payload.modelSelection);
-        }
         const argument = goalCommand[1]?.trim() ?? "";
         if (argument === "clear") yield* providerService.clearGoal(thread.id);
         else if (argument === "pause")

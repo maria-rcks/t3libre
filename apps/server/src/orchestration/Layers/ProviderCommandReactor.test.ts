@@ -692,7 +692,12 @@ describe("ProviderCommandReactor", () => {
         const harness = yield* Effect.promise(() =>
           createHarness({ threadModelSelection: initial }),
         );
-        const sendGoal = (index: number, modelSelection: ModelSelection, failed: boolean) =>
+        const sendGoal = (
+          index: number,
+          modelSelection: ModelSelection,
+          failed: boolean,
+          text = "/goal review files",
+        ) =>
           Effect.gen(function* () {
             const events = yield* harness.engine.subscribeDomainEvents;
             yield* harness.engine.dispatch({
@@ -702,7 +707,7 @@ describe("ProviderCommandReactor", () => {
               message: {
                 messageId: MessageId.make(`goal-config-message-${index}`),
                 role: "user",
-                text: "/goal review files",
+                text,
                 attachments: [],
               },
               modelSelection,
@@ -725,8 +730,9 @@ describe("ProviderCommandReactor", () => {
             expect(yield* Effect.promise(() => harness.readPendingTurnStarts())).toEqual([]);
           });
         yield* sendGoal(0, initial, false);
-        yield* sendGoal(1, changed, true);
-        yield* sendGoal(2, initial, false);
+        yield* sendGoal(1, changed, false, "/goal");
+        yield* sendGoal(2, changed, true);
+        yield* sendGoal(3, initial, false);
         expect(harness.startSession).toHaveBeenCalledTimes(1);
         const state = yield* Effect.promise(() => harness.readModel());
         expect(
@@ -734,7 +740,7 @@ describe("ProviderCommandReactor", () => {
             ?.payload,
         ).toMatchObject({ detail: expect.stringContaining("current session model and options") });
         harness.runtimeSessions.splice(0);
-        yield* sendGoal(3, changed, false);
+        yield* sendGoal(4, changed, false);
         expect(harness.startSession).toHaveBeenCalledTimes(2);
         expect(harness.startSession.mock.calls.at(-1)?.[1]).toMatchObject({
           modelSelection: changed,
