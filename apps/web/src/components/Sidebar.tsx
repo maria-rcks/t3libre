@@ -6,6 +6,7 @@ import { replaceComposerContextReferences } from "@t3tools/shared/composerContex
 import * as Schema from "effect/Schema";
 import {
   DndContext,
+  DragOverlay,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -73,6 +74,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useRouter } from "@tanstack/react-router";
 
 import { useRightPanelStore } from "../rightPanelStore";
@@ -506,7 +508,7 @@ function SnoozePopoverButton(props: {
 type SortableThreadRowBag = Pick<
   ReturnType<typeof useSortable>,
   "listeners" | "setNodeRef" | "transform" | "transition" | "isDragging"
->;
+> & { hidden?: boolean };
 
 function SortableThreadRow(props: {
   id: string;
@@ -793,7 +795,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   );
   if (compact) {
     return (
-      <li className="list-none py-0.5">
+      <li className="list-none">
         <Tooltip>
           <TooltipTrigger
             render={
@@ -803,7 +805,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
                 aria-label={`Draft: ${preview}`}
                 onClick={handleActivate}
                 className={cn(
-                  "relative flex h-9 w-full cursor-pointer items-center justify-center rounded-md outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring",
+                  "relative flex h-7 w-full cursor-pointer items-center justify-center rounded-md outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring",
                   props.isActive ? "bg-sidebar-row-active" : draftSurfaceClassName,
                 )}
               />
@@ -1507,7 +1509,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           // A zero-height boundary also makes dnd-kit scale the source to
           // zero. Only projected peers use scaleY as a visibility sentinel.
           visibility:
-            !sortable.isDragging && sortable.transform?.scaleY === 0
+            sortable.hidden || (!sortable.isDragging && sortable.transform?.scaleY === 0)
               ? ("hidden" as const)
               : undefined,
         },
@@ -1654,10 +1656,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         data-thread-item
         {...sortableRootProps}
         {...(fileDropHandlers ?? {})}
-        className={cn("list-none py-0.5", sortable?.isDragging && "relative z-20")}
+        className={cn("list-none", sortable?.isDragging && "relative z-20")}
       >
         <Tooltip
-          open={sortable?.isDragging ? dragDestination !== null : tooltipOpen}
+          open={
+            sortable?.hidden ? false : sortable?.isDragging ? dragDestination !== null : tooltipOpen
+          }
           onOpenChange={setTooltipOpen}
         >
           <TooltipTrigger
@@ -1671,7 +1675,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(
                   rowSurfaceClassName,
-                  "flex h-9 items-center justify-center focus-visible:ring-2 focus-visible:ring-ring",
+                  "flex h-7 items-center justify-center focus-visible:ring-2 focus-visible:ring-ring",
                 )}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
@@ -2296,6 +2300,7 @@ export default function Sidebar() {
   const { isMobile, setOpenMobile, setOpen, state: sidebarState } = useSidebar();
   const compactEnabled = useCompactSidebarEnabled();
   const compact = compactEnabled && sidebarState === "collapsed" && !isMobile;
+  const [snoozedFooter, setSnoozedFooter] = useState<HTMLUListElement | null>(null);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -2867,6 +2872,7 @@ export default function Sidebar() {
     [setSettledShelfExpanded],
   );
   const renderedSettledThreads = useMemo(() => {
+    if (compact) return EMPTY_THREADS;
     if (settledShelfExpanded) return visibleSettledThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
     const routeThread = visibleSettledThreads.find(
@@ -2874,7 +2880,7 @@ export default function Sidebar() {
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
     );
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
-  }, [routeThreadKey, settledShelfExpanded, visibleSettledThreads]);
+  }, [compact, routeThreadKey, settledShelfExpanded, visibleSettledThreads]);
 
   // The snoozed shelf is collapsed by default: out of the way, never gone.
   // Collapsed threads don't render (and so don't participate in jump
@@ -3271,8 +3277,18 @@ export default function Sidebar() {
   const threadListRef = useRef<HTMLUListElement | null>(null);
   const dragLabelOffsetRef = useRef(0);
   const restrictBelowPins = useCallback<Modifier>(
-    (args) => restrictBelowSidebarLabel(args, dragLabelOffsetRef.current),
-    [],
+    (args) =>
+      restrictBelowSidebarLabel(
+        {
+          ...args,
+          // The fixed snoozed shelf shares the main list's drag boundary.
+          containerNodeRect: compact
+            ? (threadListRef.current?.getBoundingClientRect() ?? args.containerNodeRect)
+            : args.containerNodeRect,
+        },
+        dragLabelOffsetRef.current,
+      ),
+    [compact],
   );
   const listMotionRef = useRef<ReturnType<typeof createSidebarListMotion> | null>(null);
   const attachListMotionRef = useCallback((node: HTMLUListElement | null) => {
@@ -3494,7 +3510,7 @@ export default function Sidebar() {
       pinnedThreads.length +
         activeThreads.length +
         snoozedThreads.length +
-        settledThreads.length ===
+        (compact ? 0 : settledThreads.length) ===
       0
     ) {
       return [];
@@ -3510,13 +3526,15 @@ export default function Sidebar() {
       items.push({ kind: "marker", marker: "snoozed-header" });
       items.push(...rowsOf(visibleSnoozedThreads, "snoozed"));
     }
-    items.push({ kind: "marker", marker: "settled-header" });
-    const settledRows = rowsOf(renderedSettledThreads, "settled");
-    items.push({ kind: "marker", marker: "settled-placeholder" });
-    items.push(...settledRows);
+    if (!compact) {
+      items.push({ kind: "marker", marker: "settled-header" });
+      items.push({ kind: "marker", marker: "settled-placeholder" });
+      items.push(...rowsOf(renderedSettledThreads, "settled"));
+    }
     return items;
   }, [
     activeThreads,
+    compact,
     pinnedThreads,
     renderedSettledThreads,
     settledThreads.length,
@@ -3601,6 +3619,25 @@ export default function Sidebar() {
       sidebarListItems,
       snoozedThreads.length,
     ],
+  );
+  const draggingCompactSnoozed = compact && dragState?.activeSection === "snoozed";
+  const compactSnoozedDragThread =
+    draggingCompactSnoozed && dragState ? threadByKey.get(dragState.activeKey) : undefined;
+  const compactSidebarSortingStrategy = useCallback<typeof sidebarSortingStrategy>(
+    (args) => {
+      const item = sidebarListItems[args.index];
+      // Footer rows stay anchored while the main list previews a reorder.
+      if (
+        draggingCompactSnoozed ||
+        (item?.kind === "thread"
+          ? item.section === "snoozed"
+          : item?.marker === "snoozed-header")
+      ) {
+        return null;
+      }
+      return sidebarSortingStrategy(args);
+    },
+    [draggingCompactSnoozed, sidebarListItems, sidebarSortingStrategy],
   );
   // Hidden and filtered threads keep their keys. Reserve those slots without
   // including the rows in the visible drop order or writing to them.
@@ -4506,6 +4543,15 @@ export default function Sidebar() {
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
         className="gap-0"
+        fixedFooter={
+          compact && !isSearchingThreads && snoozedThreads.length > 0 ? (
+            <ul
+              ref={setSnoozedFooter}
+              aria-label="Snoozed threads"
+              className="relative flex max-h-[min(30vh,16rem)] flex-col gap-px overflow-y-auto px-[var(--sidebar-content-inset)] pb-1"
+            />
+          ) : null
+        }
         fixedHeader={
           // Lifted above the stage backdrop, whose fade bleeds below the
           // header and would otherwise paint across the search row's outline.
@@ -4747,14 +4793,17 @@ export default function Sidebar() {
                 modifiers={[
                   restrictToVerticalAxis,
                   restrictBelowPins,
-                  restrictToFirstScrollableAncestor,
+                  ...(compact ? [] : [restrictToFirstScrollableAncestor]),
                 ]}
                 onDragStart={handleThreadDragStart}
                 onDragOver={handleThreadDragOver}
                 onDragEnd={handleThreadDragEnd}
               >
                 <SidebarDragLifecycle onUnmount={cancelThreadDrag} />
-                <SortableContext items={sortableIds} strategy={sidebarSortingStrategy}>
+                <SortableContext
+                  items={sortableIds}
+                  strategy={compact ? compactSidebarSortingStrategy : sidebarSortingStrategy}
+                >
                   <ul
                     ref={attachListMotionRef}
                     role="list"
@@ -4884,11 +4933,20 @@ export default function Sidebar() {
                               !draggableThreadKeys.has(threadKey) || optimisticDrop !== null
                             }
                           >
-                            {(bag) => renderThreadRowInner(thread, section, bag)}
+                            {(bag) =>
+                              renderThreadRowInner(
+                                thread,
+                                section,
+                                draggingCompactSnoozed && bag.isDragging
+                                  ? { ...bag, hidden: true }
+                                  : bag,
+                              )
+                            }
                           </SortableThreadRow>
                         );
                       };
                       const from = dragState?.activeSection ?? null;
+                      const snoozedItems: ReactNode[] = [];
                       const items: ReactNode[] = [
                         <SidebarDraftBlock
                           key="draft-sessions"
@@ -4900,8 +4958,17 @@ export default function Sidebar() {
                         />,
                       ];
                       for (const item of sidebarListItems) {
+                        const destination =
+                          compact &&
+                          (item.kind === "thread"
+                            ? item.section === "snoozed"
+                            : item.marker === "snoozed-header")
+                            ? snoozedItems
+                            : items;
                         if (item.kind === "thread") {
-                          items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
+                          destination.push(
+                            renderThreadRow(threadByKey.get(item.key)!, item.section),
+                          );
                           continue;
                         }
                         switch (item.marker) {
@@ -4946,7 +5013,7 @@ export default function Sidebar() {
                             );
                             break;
                           case "snoozed-header":
-                            items.push(
+                            destination.push(
                               <SidebarSectionHeader
                                 key="snoozed-shelf-header"
                                 marker="snoozed-header"
@@ -5001,9 +5068,39 @@ export default function Sidebar() {
                             break;
                         }
                       }
-                      return items;
+                      // Keep the shelf inside this drag context while anchoring
+                      // its DOM outside the main thread scroller.
+                      return [
+                        ...items,
+                        compact && snoozedFooter
+                          ? createPortal(snoozedItems, snoozedFooter, "snoozed-footer")
+                          : null,
+                        compact
+                          ? createPortal(
+                              <DragOverlay dropAnimation={null}>
+                                {compactSnoozedDragThread ? (
+                                  <ul className="pointer-events-none">
+                                    {renderThreadRowInner(
+                                      compactSnoozedDragThread,
+                                      "snoozed",
+                                      {
+                                        isDragging: true,
+                                        listeners: undefined,
+                                        setNodeRef: () => {},
+                                        transform: null,
+                                        transition: undefined,
+                                      },
+                                    )}
+                                  </ul>
+                                ) : null}
+                              </DragOverlay>,
+                              document.body,
+                              "compact-snoozed-drag",
+                            )
+                          : null,
+                      ];
                     })()}
-                    {settledShelfExpanded && hiddenSettledCount > 0 ? (
+                    {!compact && settledShelfExpanded && hiddenSettledCount > 0 ? (
                       <li className="list-none">
                         <Tooltip disabled={!compact}>
                           <TooltipTrigger

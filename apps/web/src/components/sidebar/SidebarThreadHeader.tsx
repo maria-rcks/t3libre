@@ -10,19 +10,21 @@
  * of the sidebar's scope logic. `searchFieldRef` lands on the search field so
  * the picker's popup can anchor to that width rather than to its 28px trigger.
  */
-import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { EllipsisIcon, FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
+  useState,
 } from "react";
 
 import { cn } from "~/lib/utils";
 import { useCompactSidebarEnabled } from "../../hooks/useSettings";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SidebarMenuButton, useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -73,6 +75,7 @@ export function SidebarThreadHeader({
   const compactEnabled = useCompactSidebarEnabled();
   const { state, isMobile, setOpen } = useSidebar();
   const compact = compactEnabled && state === "collapsed" && !isMobile;
+  const [actionsOpen, setActionsOpen] = useState(false);
   const resultsVisible = isSearching && searchResultCount > 0;
   // Results shrink as the query narrows, so the active index can outrun the
   // list; pointing aria-activedescendant at a removed option strands the
@@ -82,12 +85,13 @@ export function SidebarThreadHeader({
     ? `New thread (${newThreadShortcutLabel})`
     : "New thread";
 
-  return (
-    <div className={cn("flex items-center gap-1", compact && "flex-col")}>
+  const actions = (
+    <div className="flex shrink-0 items-center rounded-md bg-sidebar-control-surface/60 p-px">
       {compact ? (
         <SidebarHeaderIconButton
           label="Search threads"
           onClick={() => {
+            setActionsOpen(false);
             setOpen(true);
             requestAnimationFrame(() => searchInputRef.current?.focus());
           }}
@@ -95,6 +99,48 @@ export function SidebarThreadHeader({
           <SearchIcon />
         </SidebarHeaderIconButton>
       ) : null}
+      {hasProjects ? (
+        <>
+          {projectScope}
+          <SidebarHeaderIconButton
+            label="New project"
+            onClick={() => {
+              setActionsOpen(false);
+              onNewProject();
+            }}
+          >
+            <FolderPlusIcon />
+          </SidebarHeaderIconButton>
+        </>
+      ) : null}
+      <SidebarHeaderIconButton
+        label="New thread"
+        tooltip={
+          showNewThreadInProjectHint ? (
+            <span className="flex flex-col gap-0.5">
+              <span>{newThreadLabel}</span>
+              <span className="text-muted-foreground">
+                New thread in current project: Shift+click
+                {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
+              </span>
+            </span>
+          ) : (
+            newThreadLabel
+          )
+        }
+        disabled={newThreadDisabled}
+        onClick={(event) => {
+          setActionsOpen(false);
+          onNewThread(event);
+        }}
+      >
+        <SquarePenIcon />
+      </SidebarHeaderIconButton>
+    </div>
+  );
+
+  return (
+    <div className={cn("flex items-center gap-1", compact && "flex-col")}>
       <div
         ref={searchFieldRef}
         className={cn(
@@ -142,41 +188,18 @@ export function SidebarThreadHeader({
       </div>
       {/* Segmented well: the icons read as one control instead of three loose
           buttons competing with the search field beside them. */}
-      <div
-        className={cn(
-          "flex shrink-0 items-center rounded-md bg-sidebar-control-surface/60 p-px",
-          compact && "flex-col",
-        )}
-      >
-        {hasProjects ? (
-          <>
-            {projectScope}
-            <SidebarHeaderIconButton label="New project" onClick={onNewProject}>
-              <FolderPlusIcon />
-            </SidebarHeaderIconButton>
-          </>
-        ) : null}
-        <SidebarHeaderIconButton
-          label="New thread"
-          tooltip={
-            showNewThreadInProjectHint ? (
-              <span className="flex flex-col gap-0.5">
-                <span>{newThreadLabel}</span>
-                <span className="text-muted-foreground">
-                  New thread in current project: Shift+click
-                  {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
-                </span>
-              </span>
-            ) : (
-              newThreadLabel
-            )
-          }
-          disabled={newThreadDisabled}
-          onClick={onNewThread}
-        >
-          <SquarePenIcon />
-        </SidebarHeaderIconButton>
-      </div>
+      {compact ? (
+        <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
+          <PopoverTrigger render={<SidebarHeaderIconButton label="Sidebar actions" />}>
+            <EllipsisIcon />
+          </PopoverTrigger>
+          <PopoverPopup side="right" align="start" viewportClassName="p-1">
+            {actions}
+          </PopoverPopup>
+        </Popover>
+      ) : (
+        actions
+      )}
     </div>
   );
 }
