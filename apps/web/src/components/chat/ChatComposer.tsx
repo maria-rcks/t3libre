@@ -5957,7 +5957,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               key={`goal:${activeThreadId}`}
               goal={activeGoal}
               capability={selectedProviderStatus?.goal}
-              disabled={isConnecting || Boolean(props.environmentUnavailable)}
+              disabled={isConnecting || Boolean(props.environmentUnavailable) || !activeThread}
               onSet={props.onSetGoal}
               onClear={props.onClearGoal}
             />
