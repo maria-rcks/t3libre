@@ -63,7 +63,7 @@ export function GoalToolbar(props: {
               role="status"
               className="inline-flex shrink-0 items-center gap-2 font-medium text-purple-700 dark:text-purple-300"
             >
-              <TargetIcon className="size-3 shrink-0 text-purple-600 dark:text-purple-400" />
+              <TargetIcon className="size-3 translate-y-px shrink-0 text-purple-600 dark:text-purple-400" />
               {goalStatusLabels[goal.status]}
             </span>
             {goal.timeUsedSeconds !== null ? (
