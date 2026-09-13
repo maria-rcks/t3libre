@@ -19,6 +19,7 @@ import * as DesktopClientSettings from "./DesktopClientSettings.ts";
 const clientSettings: ClientSettings = {
   ...DEFAULT_CLIENT_SETTINGS,
   notificationMode: "notifications-and-sound",
+  inAppNotificationsEnabled: true,
   appearanceContrast: 100,
   timelineBackgroundImage: "https://example.com/wallpaper.png",
   timelineBackgroundOpacity: 47,
