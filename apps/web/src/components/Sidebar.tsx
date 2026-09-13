@@ -1631,7 +1631,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         data-thread-item
         {...sortableRootProps}
         {...(fileDropHandlers ?? {})}
-        className="list-none py-0.5"
+        className={cn("list-none py-0.5", sortable?.isDragging && "relative z-20")}
       >
         <Tooltip disabled={sortable?.isDragging}>
           <TooltipTrigger
@@ -4967,14 +4967,28 @@ export default function Sidebar() {
                     })()}
                     {settledShelfExpanded && hiddenSettledCount > 0 ? (
                       <li className="list-none">
-                        <button
-                          type="button"
-                          onClick={showMoreSettled}
-                          className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                        >
-                          <PlusIcon aria-hidden className="size-4 shrink-0" />
-                          Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
-                        </button>
+                        <Tooltip disabled={!compact}>
+                          <TooltipTrigger
+                            render={
+                              <button
+                                type="button"
+                                onClick={showMoreSettled}
+                                className={cn(
+                                  "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+                                  compact && "justify-center px-0",
+                                )}
+                              />
+                            }
+                          >
+                            <PlusIcon aria-hidden className="size-4 shrink-0" />
+                            <span className={compact ? "sr-only" : undefined}>
+                              Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipPopup side="right">
+                            Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
+                          </TooltipPopup>
+                        </Tooltip>
                       </li>
                     ) : null}
                   </ul>
