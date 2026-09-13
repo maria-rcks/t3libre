@@ -15,7 +15,10 @@ import {
   FolderClosedIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
-import { useHasTimelineBackground } from "./ChatTimelineBackground";
+import {
+  CHAT_BACKGROUND_GLASS_SURFACE_CLASSES,
+  useHasTimelineBackground,
+} from "./ChatTimelineBackground";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { Button } from "../ui/button";
@@ -47,9 +50,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
     <div
       className={cn(
         "@container/changed-files mt-4 rounded-lg",
-        glass
-          ? "surface-glass [--surface-glass-color:var(--secondary)] [text-shadow:none] dark:[--surface-glass-color:color-mix(in_srgb,var(--input)_20%,var(--background))]"
-          : "bg-secondary dark:bg-input/20",
+        glass ? CHAT_BACKGROUND_GLASS_SURFACE_CLASSES : "bg-secondary dark:bg-input/20",
       )}
       data-changed-files-state="tree"
     >

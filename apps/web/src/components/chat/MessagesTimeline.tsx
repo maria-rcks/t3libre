@@ -147,6 +147,7 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import {
   CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
+  CHAT_BACKGROUND_GLASS_SURFACE_CLASSES,
   useHasTimelineBackground,
 } from "./ChatTimelineBackground";
 import {
@@ -1896,6 +1897,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           listRef={ctx.listRef}
         >
           <ChatMarkdown
+            glassSurfaces={hasTimelineBackground}
             className={cn(hasTimelineBackground && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES)}
             text={messageText}
             cwd={ctx.markdownCwd}
@@ -3264,11 +3266,13 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   markdownCwd: string | undefined;
 }) {
   const ctx = use(TimelineRowCtx);
+  const glass = useHasTimelineBackground();
   if (props.text.length === 0) {
     return null;
   }
   return (
     <ChatMarkdown
+      glassSurfaces={glass}
       text={props.text}
       cwd={props.markdownCwd}
       threadRef={ctx.threadRef ?? undefined}
@@ -3875,6 +3879,7 @@ function AgentSpawnMemberRow({
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
+  const glass = useHasTimelineBackground();
   const activeStatus = isActiveSubagentStatus(agent.status);
   const activity = activeStatus
     ? (agent.progress ?? (agent.lastToolName ? `▸ ${agent.lastToolName}` : null))
@@ -3961,7 +3966,10 @@ function AgentSpawnMemberRow({
       ) : null}
       {open ? (
         <div
-          className="mt-1 cursor-default rounded-md bg-muted/40 px-3 py-2"
+          className={cn(
+            "mt-1 cursor-default rounded-md px-3 py-2",
+            glass ? CHAT_BACKGROUND_GLASS_SURFACE_CLASSES : "bg-muted/40",
+          )}
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
@@ -4008,6 +4016,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   displayLabel?: string | undefined;
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 }) {
+  const glass = useHasTimelineBackground();
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry, displayLabel } = props;
   const { threadRef, onImageExpand } = use(TimelineRowCtx);
   const groupView = use(WorkGroupViewCtx);
@@ -4204,7 +4213,10 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       ) : null}
       {expanded && canExpand && expandedBody && !workEntry.questionAnswer ? (
         <div
-          className="mt-1 ms-7 cursor-default rounded-md bg-muted/40 px-3 py-2"
+          className={cn(
+            "mt-1 ms-7 cursor-default rounded-md px-3 py-2",
+            glass ? CHAT_BACKGROUND_GLASS_SURFACE_CLASSES : "bg-muted/40",
+          )}
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >

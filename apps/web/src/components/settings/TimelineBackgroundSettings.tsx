@@ -185,6 +185,7 @@ export function TimelineBackgroundSettings() {
           <WorkingIndicator createdAt={previewStartedAt} />
           <AssistantMessageSurface>
             <ChatMarkdown
+              glassSurfaces={Boolean(image)}
               className={cn(image && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES)}
               cwd={undefined}
               text="I'll adjust the spacing and colors, then check how it looks."

@@ -1340,8 +1340,15 @@ html[data-theme-id] [data-chat-header] [data-slot="separator"] {
 /* Chat code blocks join the other code surfaces on the code tokens. The
    default look keeps its secondary/input tints; themed palettes tint those
    surfaces with the accent, which fights syntax highlighting. */
-html[data-theme-id] .chat-markdown .chat-markdown-codeblock {
+html[data-theme-id] .chat-markdown .chat-markdown-codeblock:not(.surface-glass) {
   background-color: var(--code-background);
+}
+
+html[data-theme-id] .chat-markdown .chat-markdown-codeblock.surface-glass {
+  --surface-glass-color: var(--code-background);
+}
+
+html[data-theme-id] .chat-markdown .chat-markdown-codeblock {
   border-color: var(--contrast-border);
   color: var(--code-foreground);
 }
