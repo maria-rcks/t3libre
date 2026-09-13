@@ -397,7 +397,7 @@ export const make = Effect.gen(function* () {
       return {
         exitCode: ChildProcessSpawner.ExitCode(0),
         stdout: body.text,
-        stderr: `HTTP/1.1 ${status}\n`,
+        stderr: `HTTP/1.1 ${status}\n${response.headers.link ? `link: ${response.headers.link}\n` : ""}`,
         stdoutTruncated: false,
         stderrTruncated: false,
       };
@@ -524,9 +524,10 @@ export const make = Effect.gen(function* () {
       command: "fj",
       ...(schemeRemoteUrl ? { remoteUrl: schemeRemoteUrl } : {}),
     });
+    const requestedHost = input.host ?? input.context?.requestedHost;
     const selectLogin = (logins: ReturnType<typeof parseForgejoLogins>) =>
       remote
-        ? matchForgejoLogin(logins, remote, remote.ssh ? input.host : undefined)
+        ? matchForgejoLogin(logins, remote, remote.ssh ? requestedHost : undefined)
         : (logins.find((item) => item.default === "true") ??
           (new Set(logins.map((item) => item.name)).size === 1 ? logins[0] : undefined));
     let login = selectLogin(fjLogins);
@@ -534,7 +535,8 @@ export const make = Effect.gen(function* () {
     if (
       !login &&
       fjLogins.some(
-        (item) => !remote || matchForgejoLogin([item], remote, remote.ssh ? input.host : undefined),
+        (item) =>
+          !remote || matchForgejoLogin([item], remote, remote.ssh ? requestedHost : undefined),
       )
     ) {
       const available = yield* execute({ command: "fj", cwd: input.cwd, args: ["version"] }).pipe(

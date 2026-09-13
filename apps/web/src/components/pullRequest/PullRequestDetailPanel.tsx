@@ -727,6 +727,7 @@ export function PullRequestDetailPanel({
         detail.number,
         detail.headBranch,
         detail.headRepositoryNameWithOwner,
+        repositoryUrl,
       )
     : null;
   const branchRefsQuery = useEnvironmentQuery(

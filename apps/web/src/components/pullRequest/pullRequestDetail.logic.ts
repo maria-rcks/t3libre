@@ -104,6 +104,7 @@ export function pullRequestCheckoutCommand(
   number: number,
   headBranch: string,
   headRepositoryNameWithOwner?: string | null,
+  repositoryUrl?: string | null,
 ): string | null {
   switch (provider) {
     case "github":
@@ -111,7 +112,9 @@ export function pullRequestCheckoutCommand(
     case "gitlab":
       return `glab mr checkout ${number}`;
     case "forgejo":
-      return `git fetch origin refs/pull/${number}/head && git checkout -B pulls/${number} FETCH_HEAD`;
+      return repositoryUrl
+        ? `git fetch '${repositoryUrl.replaceAll("'", "'\\''")}' refs/pull/${number}/head && git checkout -B pulls/${number} FETCH_HEAD`
+        : null;
     case "azure-devops":
       return `az repos pr checkout --id ${number}`;
     case "bitbucket": {

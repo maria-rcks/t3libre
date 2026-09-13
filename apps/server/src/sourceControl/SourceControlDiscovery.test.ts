@@ -327,7 +327,11 @@ it.effect(
             }
             const path = input.path.split("?")[0]!;
             assert.ok(Object.hasOwn(responses, path), `Unexpected Forgejo request: ${path}`);
-            return encodeJsonEffect(responses[path]).pipe(Effect.orDie, Effect.map(processOutput));
+            const page = Number(new URLSearchParams(input.path.split("?")[1]).get("page"));
+            return encodeJsonEffect(page > 1 ? [] : responses[path]).pipe(
+              Effect.orDie,
+              Effect.map(processOutput),
+            );
           },
         }),
       ),
@@ -852,6 +856,7 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
     for (const remoteUrl of [
       "http://forgejo.local:3000/forgejo/maria/project.git",
       "ssh://git@ssh.forgejo.local:2222/maria/project.git",
+      "ssh://git@forgejo.local:2222/maria/project.git",
     ]) {
       const result = yield* cli.api({
         cwd: "/repo",
@@ -864,6 +869,7 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
           },
           remoteName: "origin",
           remoteUrl,
+          requestedHost: "forgejo.local:3000",
         },
         path: "repos/forgejo/maria/project/issues/42/comments",
         method: "POST",
@@ -873,6 +879,7 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
     }
     assert.deepStrictEqual(commands, ["fj"]);
     assert.deepStrictEqual(requests, [
+      "http://forgejo.local:3000/forgejo/api/v1/repos/maria/project/issues/42/comments",
       "http://forgejo.local:3000/forgejo/api/v1/repos/maria/project/issues/42/comments",
       "http://forgejo.local:3000/forgejo/api/v1/repos/maria/project/issues/42/comments",
     ]);
@@ -886,6 +893,7 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
             encodeJson({
               hosts: {
                 "forgejo.local:3000/forgejo": { type: "Application", token: "test-token" },
+                "forgejo.local:4000/forgejo": { type: "Application", token: "other-token" },
               },
               aliases: { "ssh.forgejo.local:2222": "forgejo.local:3000/forgejo" },
             }),
@@ -918,6 +926,111 @@ it.effect("prefers fj for HTTP and ported SSH aliases while preserving the API m
             "http://forgejo.local:3000/forgejo",
             "whoami",
           ]);
+          return Effect.succeed(processOutput(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("loads later fj review pages when the server caps pages below the requested size", () => {
+  const pages: number[] = [];
+  let issueCommentRequests = 0;
+  return Effect.gen(function* () {
+    const cli = yield* ForgejoCli.make;
+    const provider = yield* ForgejoPullRequestProvider.make.pipe(
+      Effect.provideService(ForgejoCli.ForgejoCli, cli),
+    );
+    const activity = yield* provider.getChangeRequestActivity({
+      cwd: "/repo",
+      repository: "maria/project",
+      host: "forgejo.test",
+      number: 42,
+    });
+    assert.strictEqual(activity.commentCount, 42);
+    assert.strictEqual(activity.comments.at(-1)?.id, "review:41");
+    assert.strictEqual(activity.commentsTruncated, false);
+    assert.deepStrictEqual(pages, [1, 2, 3]);
+    assert.strictEqual(issueCommentRequests, 1);
+  }).pipe(
+    Effect.provideService(
+      FileSystem.FileSystem,
+      FileSystem.makeNoop({
+        exists: () => Effect.succeed(true),
+        readFileString: () =>
+          Effect.succeed(
+            encodeJson({ hosts: { "forgejo.test": { type: "Application", token: "test-token" } } }),
+          ),
+      }),
+    ),
+    Effect.provideService(
+      HttpClient.HttpClient,
+      HttpClient.make((request) => {
+        const url = new URL(request.url);
+        if (url.pathname === "/api/v1/repos/maria/project/issues/42/comments") {
+          issueCommentRequests++;
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(
+                encodeJson([
+                  {
+                    id: 100,
+                    body: "Unpaginated issue comment",
+                    user: { login: "maria" },
+                    created_at: "2026-09-13T00:00:00Z",
+                  },
+                ]),
+              ),
+            ),
+          );
+        }
+        if (url.pathname.endsWith("/reviews")) {
+          const page = Number(url.searchParams.get("page"));
+          pages.push(page);
+          assert.ok(page >= 1 && page <= 3);
+          const reviews = Array.from({ length: page < 3 ? 20 : 1 }, (_, index) => ({
+            id: (page - 1) * 20 + index + 1,
+            body: "Review from a capped page",
+            user: { login: "maria" },
+            state: "COMMENT",
+            submitted_at: "2026-09-13T00:00:00Z",
+            comments_count: 0,
+          }));
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(encodeJson(reviews), {
+                headers:
+                  page === 2
+                    ? {}
+                    : {
+                        Link:
+                          page === 1
+                            ? `<${url.origin}${url.pathname}?limit=50&page=2>; rel="next"`
+                            : `<${url.origin}${url.pathname}?limit=50&page=1>; rel="prev"`,
+                      },
+              }),
+            ),
+          );
+        }
+        return Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(encodeJson(url.pathname === "/api/v1/user" ? { login: "maria" } : [])),
+          ),
+        );
+      }),
+    ),
+    Effect.provide(
+      Layer.mock(VcsProcess.VcsProcess)({
+        run: (input) => {
+          if (input.command === "git") {
+            assert.deepStrictEqual(input.args, ["remote", "get-url", "origin"]);
+            return Effect.succeed(processOutput("https://forgejo.test/maria/project.git"));
+          }
+          assert.strictEqual(input.command, "fj");
+          assert.deepStrictEqual(input.args, ["--host", "https://forgejo.test", "whoami"]);
           return Effect.succeed(processOutput(""));
         },
       }),

@@ -123,8 +123,7 @@ export const make = Effect.gen(function* () {
     const links = /^link:\s*(.*)$/im.exec(result.stderr)?.[1];
     return {
       rows,
-      more:
-        rows.length > 0 && (links === undefined ? rows.length === 50 : /rel="?next"?/i.test(links)),
+      more: rows.length > 0 && (links === undefined || /rel="?next"?/i.test(links)),
     };
   });
   // Use a stable, small page size that also works with Forgejo's default maximum of 50.
@@ -273,7 +272,13 @@ export const make = Effect.gen(function* () {
       function* (input) {
         const [comments, reviews, commits, reactions, viewer] = yield* Effect.all(
           [
-            page({ ...input, path: `${issuePath(input)}/comments` }, ForgejoComment),
+            // Issue comments ignore page/limit; fetch this unpaginated endpoint once.
+            readArray({ ...input, path: `${issuePath(input)}/comments` }, ForgejoComment).pipe(
+              Effect.map((items) => ({
+                items: items.slice(0, 500),
+                truncated: items.length > 500,
+              })),
+            ),
             page({ ...input, path: `${pullPath(input)}/reviews` }, ForgejoReview),
             page({ ...input, path: `${pullPath(input)}/commits` }, ForgejoCommit),
             page({ ...input, path: `${issuePath(input)}/reactions` }, ForgejoReaction),
