@@ -324,9 +324,9 @@ const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
 const SYNTHETIC_SUBAGENT_MODEL = "claude-synthetic-subagent[expanded]";
 
 describe("ClaudeAdapterLive", () => {
-  it.effect(
-    "restores default permission mode for a goal and settles its exact native rejection",
-    () => {
+  it.effect.each(["rejected", "cleared"] as const)(
+    "restores default permission mode and settles an exact native goal %s result",
+    (outcome) => {
       const harness = makeHarness();
       return Effect.gen(function* () {
         const adapter = yield* ClaudeAdapter;
@@ -373,12 +373,15 @@ describe("ClaudeAdapterLive", () => {
           is_error: false,
           local_command: "goal",
           user_message_uuid: request?.uuid,
-          result: "/goal can't run while hooks are restricted",
+          result:
+            outcome === "cleared"
+              ? "Goal cleared: finish migration"
+              : "/goal can't run while hooks are restricted",
           session_id: "sdk-session",
           uuid: "rejected-goal",
         } as unknown as SDKMessage);
         const events = yield* Fiber.join(goalComplete);
-        assert.equal(events[0]?.payload.state, "failed");
+        assert.equal(events[0]?.payload.state, outcome === "cleared" ? "completed" : "failed");
         assert.equal((yield* adapter.listSessions())[0]?.activeTurnId, undefined);
         assert.equal((yield* adapter.readThread(THREAD_ID)).turns.length, 2);
       }).pipe(

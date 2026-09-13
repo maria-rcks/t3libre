@@ -4052,8 +4052,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       "local_command" in message &&
       message.local_command === "goal"
     ) {
-      // A rejected new goal never starts model work. Settle only its exact
-      // request; status, clear, and goal edits cannot close an existing turn.
+      // Native clear aliases and rejections both return is_error:false.
+      // Settle only this request, never a concurrently running model turn.
       if (
         context.goalStartTurnId &&
         context.turnState?.turnId === context.goalStartTurnId &&
@@ -4061,12 +4061,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         message.user_message_uuid === context.goalStartTurnId
       ) {
         delete context.goalStartTurnId;
+        const resultText =
+          "result" in message && typeof message.result === "string" ? message.result : undefined;
+        const cleared = resultText === "No goal set" || resultText?.startsWith("Goal cleared: ");
         yield* completeTurn(
           context,
-          "failed",
-          "result" in message && typeof message.result === "string"
-            ? message.result
-            : "Claude could not start the requested goal.",
+          cleared ? "completed" : "failed",
+          cleared ? undefined : (resultText ?? "Claude could not start the requested goal."),
         );
       }
       if (
