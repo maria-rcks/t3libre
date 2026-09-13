@@ -3,6 +3,7 @@ import {
   CommandId,
   EventId,
   type ModelSelection,
+  ProviderOptionSelections,
   type OrchestrationEvent,
   ProviderDriverKind,
   type ProjectId,
@@ -246,6 +247,7 @@ const make = Effect.gen(function* () {
     );
 
   const threadModelSelections = new Map<string, ModelSelection>();
+  const goalOptionsEqual = Schema.toEquivalence(ProviderOptionSelections);
   const compactingThreadIds = new Set<ThreadId>();
   type QueuedTurnStart = Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>;
   // Turn starts received while a thread compacts, replayed in order once its session is restored.
@@ -560,6 +562,7 @@ const make = Effect.gen(function* () {
     options?: {
       readonly modelSelection?: ModelSelection;
       readonly pendingTurnStart?: boolean;
+      readonly goalStartsWork?: boolean;
     },
   ) {
     const thread = yield* resolveThreadShell(threadId);
@@ -771,6 +774,24 @@ const make = Effect.gen(function* () {
         !shouldRestartForModelChange &&
         !shouldRestartForModelSelectionChange
       ) {
+        if (
+          options?.goalStartsWork === true &&
+          preferredProvider === "codex" &&
+          ((activeSession?.model !== undefined &&
+            activeSession.model !== desiredModelSelection.model) ||
+            (previousModelSelection?.options !== undefined &&
+              !goalOptionsEqual(
+                previousModelSelection.options,
+                desiredModelSelection.options ?? [],
+              )))
+        ) {
+          return yield* new ProviderAdapterRequestError({
+            provider: preferredProvider,
+            method: "thread.goal.set",
+            detail:
+              "Codex goals use the current session model and options. Send a normal message with the selected settings before starting, editing, or resuming a goal.",
+          });
+        }
         yield* refreshWorkspaceSnapshot;
         return existingSessionThreadId;
       }
@@ -1237,50 +1258,6 @@ const make = Effect.gen(function* () {
         createdAt: event.payload.createdAt,
         requestId: event.payload.messageId,
       });
-    const goalCommand = /^\/goal(?:\s+([\s\S]*))?$/.exec(message.text.trim());
-    if (goalCommand && (message.attachments?.length ?? 0) === 0) {
-      yield* Effect.gen(function* () {
-        yield* ensureSessionForThread(
-          thread.id,
-          event.payload.createdAt,
-          event.payload.modelSelection !== undefined
-            ? { modelSelection: event.payload.modelSelection }
-            : {},
-        );
-        const argument = goalCommand[1]?.trim() ?? "";
-        if (argument === "clear") yield* providerService.clearGoal(thread.id);
-        else if (argument === "pause")
-          yield* providerService.setGoal(thread.id, { status: "paused" });
-        else if (argument === "resume")
-          yield* providerService.setGoal(thread.id, { status: "active" });
-        else if (argument.startsWith("edit "))
-          yield* providerService.setGoal(thread.id, { objective: argument.slice(5).trim() });
-        else if (argument) {
-          if (thread.goal?.status === "complete") yield* providerService.clearGoal(thread.id);
-          yield* providerService.setGoal(thread.id, { objective: argument, status: "active" });
-        } else yield* providerService.refreshGoal(thread.id);
-        yield* orchestrationEngine.dispatch({
-          type: "thread.activity.append",
-          commandId: yield* serverCommandId("goal-command"),
-          threadId: thread.id,
-          activity: {
-            id: yield* serverEventId(),
-            tone: "info",
-            kind: "goal-command",
-            summary: argument ? "Goal updated" : "Goal status refreshed",
-            payload: { requestId: event.payload.messageId },
-            turnId: null,
-            createdAt: event.payload.createdAt,
-          },
-          createdAt: event.payload.createdAt,
-        });
-      }).pipe(
-        Effect.catchCause((cause) =>
-          appendTurnStartFailure("Goal update failed", formatFailureDetail(cause)),
-        ),
-      );
-      return;
-    }
     if (resumed && turnsAfterCompaction.get(event.payload.threadId) !== resumed.queued) {
       return yield* appendTurnStartFailure(
         "Queued message was not sent",
@@ -1366,10 +1343,27 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    const goalCommand =
+      (message.attachments?.length ?? 0) === 0
+        ? /^\/goal(?:\s+([\s\S]*))?$/.exec(message.text.trim())
+        : null;
+    const goalArgument = goalCommand?.[1]?.trim() ?? "";
+    const goalStartsWork =
+      goalCommand !== null &&
+      goalArgument !== "" &&
+      goalArgument !== "clear" &&
+      goalArgument !== "pause";
+    if (goalStartsWork && (event.payload.interactionMode ?? thread.interactionMode) === "plan") {
+      return yield* appendTurnStartFailure(
+        "Goal update failed",
+        "Switch out of Plan mode before starting or editing a goal.",
+      );
+    }
+
     yield* ensureThreadWorktree(thread);
 
     const isCompactCommand = isCompactCommandMessage(message);
-    if (!hasOtherUserMessages && !isCompactCommand) {
+    if (!hasOtherUserMessages && !isCompactCommand && (!goalCommand || goalStartsWork)) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
         resolveThreadWorkspaceCwd({
@@ -1403,6 +1397,60 @@ const make = Effect.gen(function* () {
       }
     }
 
+    if (goalCommand) {
+      yield* Effect.gen(function* () {
+        const instanceId =
+          event.payload.modelSelection?.instanceId ?? thread.modelSelection.instanceId;
+        const providers = yield* providerRegistry.getProviders;
+        if (!providers.find((provider) => provider.instanceId === instanceId)?.goal) {
+          return yield* appendTurnStartFailure(
+            "Goal update failed",
+            "This provider does not advertise native goal support.",
+          );
+        }
+        yield* ensureSessionForThread(thread.id, event.payload.createdAt, {
+          goalStartsWork,
+          ...(event.payload.modelSelection !== undefined
+            ? { modelSelection: event.payload.modelSelection }
+            : {}),
+        });
+        if (event.payload.modelSelection !== undefined) {
+          threadModelSelections.set(thread.id, event.payload.modelSelection);
+        }
+        const argument = goalCommand[1]?.trim() ?? "";
+        if (argument === "clear") yield* providerService.clearGoal(thread.id);
+        else if (argument === "pause")
+          yield* providerService.setGoal(thread.id, { status: "paused" });
+        else if (argument === "resume")
+          yield* providerService.setGoal(thread.id, { status: "active" });
+        else if (argument.startsWith("edit "))
+          yield* providerService.setGoal(thread.id, { objective: argument.slice(5).trim() });
+        else if (argument) {
+          if (thread.goal?.status === "complete") yield* providerService.clearGoal(thread.id);
+          yield* providerService.setGoal(thread.id, { objective: argument, status: "active" });
+        } else yield* providerService.refreshGoal(thread.id);
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: yield* serverCommandId("goal-command"),
+          threadId: thread.id,
+          activity: {
+            id: yield* serverEventId(),
+            tone: "info",
+            kind: "goal-command",
+            summary: argument ? "Goal updated" : "Goal status refreshed",
+            payload: { requestId: event.payload.messageId },
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          },
+          createdAt: event.payload.createdAt,
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          appendTurnStartFailure("Goal update failed", formatFailureDetail(cause)),
+        ),
+      );
+      return;
+    }
     let compactionSessionEnsured = false;
     const handleCompactionFailure = (cause: Cause.Cause<unknown>) => {
       if (Cause.hasInterruptsOnly(cause)) {
@@ -1841,6 +1889,35 @@ const make = Effect.gen(function* () {
       case "thread.goal-set-requested":
       case "thread.goal-clear-requested":
         yield* Effect.gen(function* () {
+          const thread = yield* resolveThreadShell(event.payload.threadId);
+          if (!thread) return;
+          const instanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
+          const providers = yield* providerRegistry.getProviders;
+          if (!providers.find((provider) => provider.instanceId === instanceId)?.goal) {
+            return yield* appendProviderFailureActivity({
+              threadId: thread.id,
+              kind: "provider.goal.failed",
+              summary: "Goal update failed",
+              detail: "This provider does not advertise native goal support.",
+              turnId: null,
+              createdAt: event.occurredAt,
+            });
+          }
+          if (
+            event.type === "thread.goal-set-requested" &&
+            thread.interactionMode === "plan" &&
+            (event.payload.objective !== undefined || event.payload.status === "active")
+          ) {
+            return yield* appendProviderFailureActivity({
+              threadId: thread.id,
+              kind: "provider.goal.failed",
+              summary: "Goal update failed",
+              detail: "Switch out of Plan mode before starting or editing a goal.",
+              turnId: null,
+              createdAt: event.occurredAt,
+            });
+          }
+          yield* ensureThreadWorktree(thread);
           yield* ensureSessionForThread(event.payload.threadId, event.occurredAt);
           if (event.type === "thread.goal-set-requested")
             yield* providerService.setGoal(event.payload.threadId, event.payload);

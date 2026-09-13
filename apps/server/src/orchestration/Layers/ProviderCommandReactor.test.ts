@@ -348,6 +348,7 @@ describe("ProviderCommandReactor", () => {
     const providerSnapshots = [
       {
         instanceId: modelSelection.instanceId,
+        goal: { pause: true, tokenBudget: true },
         ...(input?.requiresNewThreadForModelChange === true
           ? { requiresNewThreadForModelChange: true }
           : {}),
@@ -637,6 +638,161 @@ describe("ProviderCommandReactor", () => {
       },
     };
   }
+
+  effectIt.effect("keeps the Claude session after a goal starts the conversation", () =>
+    Effect.gen(function* () {
+      const modelSelection = createModelSelection(
+        ProviderInstanceId.make("claudeAgent"),
+        "claude-opus-4-6",
+      );
+      const harness = yield* Effect.promise(() =>
+        createHarness({ threadModelSelection: modelSelection }),
+      );
+      for (const [index, text] of ["/goal review the files", "/goal"].entries()) {
+        const events = yield* harness.engine.subscribeDomainEvents;
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`goal-session-${index}`),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: MessageId.make(`goal-message-${index}`),
+            role: "user",
+            text,
+            attachments: [],
+          },
+          modelSelection,
+          interactionMode: "default",
+          runtimeMode: "approval-required",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        });
+        yield* events.pipe(
+          Stream.filter(
+            (event) =>
+              event.type === "thread.activity-appended" &&
+              event.payload.activity.kind === "goal-command",
+          ),
+          Stream.take(1),
+          Stream.runDrain,
+        );
+        yield* Effect.promise(() => harness.drain());
+        expect(yield* Effect.promise(() => harness.readPendingTurnStarts())).toEqual([]);
+      }
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+      expect(harness.stopSession).not.toHaveBeenCalled();
+      expect(harness.sendTurn).not.toHaveBeenCalled();
+    }).pipe(Effect.scoped),
+  );
+
+  effectIt.effect.each(["model", "options"] as const)(
+    "rejects a pending Codex %s change only when reusing a live goal session",
+    (change) =>
+      Effect.gen(function* () {
+        const initial = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5-codex", [
+          { id: "reasoningEffort", value: "high" },
+        ]);
+        const changed = createModelSelection(
+          ProviderInstanceId.make("codex"),
+          change === "model" ? "gpt-5.4" : initial.model,
+          [{ id: "reasoningEffort", value: change === "options" ? "low" : "high" }],
+        );
+        const harness = yield* Effect.promise(() =>
+          createHarness({ threadModelSelection: initial }),
+        );
+        const sendGoal = (index: number, modelSelection: ModelSelection, failed: boolean) =>
+          Effect.gen(function* () {
+            const events = yield* harness.engine.subscribeDomainEvents;
+            yield* harness.engine.dispatch({
+              type: "thread.turn.start",
+              commandId: CommandId.make(`goal-config-${index}`),
+              threadId: ThreadId.make("thread-1"),
+              message: {
+                messageId: MessageId.make(`goal-config-message-${index}`),
+                role: "user",
+                text: "/goal review files",
+                attachments: [],
+              },
+              modelSelection,
+              interactionMode: "default",
+              runtimeMode: "approval-required",
+              createdAt: "2026-01-01T00:00:00.000Z",
+            });
+            yield* events.pipe(
+              Stream.filter(
+                (event) =>
+                  event.type === "thread.activity-appended" &&
+                  (failed
+                    ? event.payload.activity.summary === "Goal update failed"
+                    : event.payload.activity.kind === "goal-command"),
+              ),
+              Stream.take(1),
+              Stream.runDrain,
+            );
+            yield* Effect.promise(() => harness.drain());
+            expect(yield* Effect.promise(() => harness.readPendingTurnStarts())).toEqual([]);
+          });
+        yield* sendGoal(0, initial, false);
+        yield* sendGoal(1, changed, true);
+        yield* sendGoal(2, initial, false);
+        expect(harness.startSession).toHaveBeenCalledTimes(1);
+        const state = yield* Effect.promise(() => harness.readModel());
+        expect(
+          state.threads[0]?.activities.find((activity) => activity.summary === "Goal update failed")
+            ?.payload,
+        ).toMatchObject({ detail: expect.stringContaining("current session model and options") });
+        harness.runtimeSessions.splice(0);
+        yield* sendGoal(3, changed, false);
+        expect(harness.startSession).toHaveBeenCalledTimes(2);
+        expect(harness.startSession.mock.calls.at(-1)?.[1]).toMatchObject({
+          modelSelection: changed,
+        });
+        expect(harness.sendTurn).not.toHaveBeenCalled();
+      }).pipe(Effect.scoped),
+  );
+
+  effectIt.effect("rejects model-starting goals in Plan mode", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      const events = yield* harness.engine.subscribeDomainEvents;
+      yield* harness.engine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.make("goal-select-plan"),
+        threadId: ThreadId.make("thread-1"),
+        interactionMode: "plan",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("goal-plan"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: MessageId.make("goal-plan-message"),
+          role: "user",
+          text: "/goal edit files",
+          attachments: [],
+        },
+        interactionMode: "plan",
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      yield* events.pipe(
+        Stream.filter(
+          (event) =>
+            event.type === "thread.activity-appended" &&
+            event.payload.activity.summary === "Goal update failed",
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      yield* Effect.promise(() => harness.drain());
+      expect(harness.startSession).not.toHaveBeenCalled();
+      expect(harness.sendTurn).not.toHaveBeenCalled();
+      const state = yield* Effect.promise(() => harness.readModel());
+      expect(
+        state.threads[0]?.activities.some((activity) => activity.summary === "Goal update failed"),
+      ).toBe(true);
+      expect(yield* Effect.promise(() => harness.readPendingTurnStarts())).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
 
   effectIt.effect.each(["new", "ready", "stopped"] as const)(
     "handles sign-out for a %s thread before worktree repair, text helpers, or startup",

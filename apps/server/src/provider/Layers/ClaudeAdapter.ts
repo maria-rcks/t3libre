@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
 /**
  * ClaudeAdapterLive - Scoped live implementation for the Claude Agent provider adapter.
  *
@@ -364,6 +365,9 @@ interface ClaudeSessionContext {
   announcedUsageLimits: { turnId: string; keys: Set<string> } | undefined;
   stopped: boolean;
   nativeGoal?: ThreadGoal | null;
+  goalStatusRequestId?: string;
+  goalStartTurnId?: TurnId;
+  restoreGoalOnInit?: boolean;
 }
 
 const ClaudeGoalCommandOutput = Schema.Struct({
@@ -4007,6 +4011,22 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
   });
 
+  const enqueueGoalCommand = Effect.fn("enqueueGoalCommand")(function* (
+    context: ClaudeSessionContext,
+    command: "/goal" | "/goal clear",
+  ) {
+    if (command === "/goal" && context.goalStatusRequestId) return;
+    const uuid = yield* randomUUIDv4;
+    if (command === "/goal") context.goalStatusRequestId = uuid;
+    yield* Queue.offer(context.promptQueue, {
+      type: "message",
+      message: {
+        ...buildUserMessage({ sdkContent: [{ type: "text", text: command }] }),
+        uuid: uuid as NonNullable<SDKUserMessage["uuid"]>,
+      },
+    });
+  });
+
   const handleSdkMessage = Effect.fn("handleSdkMessage")(function* (
     context: ClaudeSessionContext,
     message: ClaudeInboundMessage,
@@ -4016,6 +4036,48 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     // Wire-only command bookkeeping has no user-facing T3 lifecycle.
     if (sdkMessageType(message) === "command_lifecycle") {
+      return;
+    }
+
+    if (message.type === "system" && message.subtype === "init" && context.restoreGoalOnInit) {
+      context.restoreGoalOnInit = false;
+      if (
+        typeof message.claude_code_version === "string" &&
+        parseSemver(message.claude_code_version) &&
+        compareSemverVersions(message.claude_code_version, "2.1.270") >= 0 &&
+        message.slash_commands.includes("goal")
+      )
+        yield* enqueueGoalCommand(context, "/goal");
+    }
+
+    if (
+      message.type === "result" &&
+      "local_command" in message &&
+      message.local_command === "goal"
+    ) {
+      // A rejected new goal never starts model work. Settle only its exact
+      // request; status, clear, and goal edits cannot close an existing turn.
+      if (
+        context.goalStartTurnId &&
+        context.turnState?.turnId === context.goalStartTurnId &&
+        "user_message_uuid" in message &&
+        message.user_message_uuid === context.goalStartTurnId
+      ) {
+        delete context.goalStartTurnId;
+        yield* completeTurn(
+          context,
+          "failed",
+          "result" in message && typeof message.result === "string"
+            ? message.result
+            : "Claude could not start the requested goal.",
+        );
+      }
+      if (
+        !("user_message_uuid" in message) ||
+        message.user_message_uuid === context.goalStatusRequestId
+      ) {
+        delete context.goalStatusRequestId;
+      }
       return;
     }
 
@@ -4049,6 +4111,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         providerRefs: nativeProviderRefs(context),
         raw: { source: "claude.sdk.message", method: "claude/assistant", payload: message },
       });
+      return;
     }
 
     if (message.type === "active_goal") {
@@ -4060,10 +4123,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             status: "active",
             createdAt: DateTime.formatIso(DateTime.makeUnsafe(value.set_at)),
             updatedAt: stamp.createdAt,
-            timeUsedSeconds: Math.max(
-              0,
-              Math.floor((Date.parse(stamp.createdAt) - value.set_at) / 1000),
-            ),
+            timeUsedSeconds: null,
             tokensUsed: null,
             tokenBudget: null,
             rounds: value.iterations,
@@ -4093,19 +4153,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         yield* handleAssistantMessage(context, message);
         return;
       case "result":
+        delete context.goalStartTurnId;
         yield* handleResultMessage(context, message);
-        // Standard SDK mode only reports goal changes through local /goal output.
-        // A status command does not call a model and must never refresh itself.
-        if (
-          context.nativeGoal &&
-          !("local_command" in message && message.local_command === "goal")
-        ) {
-          yield* sendTurn({ threadId: context.session.threadId, input: "/goal" }).pipe(
-            Effect.catch((cause) =>
-              emitRuntimeWarning(context, "Could not refresh the native Claude goal.", cause),
-            ),
-          );
-        }
+        // Standard SDK mode reports goal changes through local /goal output.
+        if (context.nativeGoal) yield* enqueueGoalCommand(context, "/goal");
         return;
       case "system":
         yield* handleSystemMessage(context, message);
@@ -4981,6 +5032,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastThreadStartedId: undefined,
         announcedUsageLimits: undefined,
         stopped: false,
+        restoreGoalOnInit: existingResumeSessionId !== undefined,
       };
       yield* Ref.set(contextRef, context);
       sessions.set(threadId, context);
@@ -5059,7 +5111,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     },
   );
 
-  const sendTurn: ClaudeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
+  const sendTurn = Effect.fn("sendTurn")(function* (
+    input: ProviderSendTurnInput,
+    isGoalStart = false,
+  ) {
     const context = yield* requireSession(input.threadId);
     const modelCatalog = yield* modelCatalogEffect;
     const selectedModel =
@@ -5189,6 +5244,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
 
     if (steeringTurnState === null) context.turnStartMessageIds.push(turnId);
+    if (isGoalStart && steeringTurnState === null) context.goalStartTurnId = turnId;
     yield* updateResumeCursor(context);
     yield* Queue.offer(context.promptQueue, {
       type: "message",
@@ -5215,11 +5271,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         issue: "Claude goals require an objective and do not support pausing or token budgets.",
       });
     }
-    yield* sendTurn({ threadId, input: `/goal ${input.objective}` });
+    yield* sendTurn(
+      { threadId, input: `/goal ${input.objective}`, interactionMode: "default" },
+      true,
+    );
   });
 
   const clearGoal = Effect.fn("clearGoal")(function* (threadId: ThreadId) {
-    yield* sendTurn({ threadId, input: "/goal clear" });
+    yield* enqueueGoalCommand(yield* requireSession(threadId), "/goal clear");
   });
 
   const interruptTurn: ClaudeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
@@ -5524,7 +5583,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     goals: {
       set: setGoal,
       clear: clearGoal,
-      refresh: (threadId) => sendTurn({ threadId, input: "/goal" }).pipe(Effect.asVoid),
+      refresh: (threadId) =>
+        requireSession(threadId).pipe(
+          Effect.flatMap((context) => enqueueGoalCommand(context, "/goal")),
+        ),
     },
     startSession,
     sendTurn,

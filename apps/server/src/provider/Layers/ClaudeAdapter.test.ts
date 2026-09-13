@@ -324,6 +324,113 @@ const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
 const SYNTHETIC_SUBAGENT_MODEL = "claude-synthetic-subagent[expanded]";
 
 describe("ClaudeAdapterLive", () => {
+  it.effect(
+    "restores default permission mode for a goal and settles its exact native rejection",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+        const planComplete = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.completed"),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "plan this change",
+          interactionMode: "plan",
+        });
+        yield* Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput()));
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          session_id: "sdk-session",
+          uuid: "plan-result",
+        } as unknown as SDKMessage);
+        yield* Fiber.join(planComplete);
+        const goalComplete = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.completed"),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        assert.ok(adapter.goals);
+        yield* adapter.goals.set(THREAD_ID, { objective: "finish migration" });
+        assert.deepEqual(harness.query.setPermissionModeCalls, ["plan", "bypassPermissions"]);
+        const request = yield* Effect.promise(() =>
+          readFirstPromptMessage(harness.getLastCreateQueryInput()),
+        );
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          local_command: "goal",
+          user_message_uuid: request?.uuid,
+          result: "/goal can't run while hooks are restricted",
+          session_id: "sdk-session",
+          uuid: "rejected-goal",
+        } as unknown as SDKMessage);
+        const events = yield* Fiber.join(goalComplete);
+        assert.equal(events[0]?.payload.state, "failed");
+        assert.equal((yield* adapter.listSessions())[0]?.activeTurnId, undefined);
+        assert.equal((yield* adapter.readThread(THREAD_ID)).turns.length, 2);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect("does not close existing work when a steered goal is rejected locally", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "thread.goal.updated"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const turn = yield* adapter.sendTurn({ threadId: THREAD_ID, input: "real work" });
+      yield* Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput()));
+      assert.ok(adapter.goals);
+      yield* adapter.goals.set(THREAD_ID, { objective: "finish migration" });
+      yield* Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput()));
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        local_command: "goal",
+        result: "/goal can't run while hooks are restricted",
+        session_id: "sdk-session",
+        uuid: "rejected-edit",
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "active_goal",
+        value: null,
+        uuid: "00000000-0000-4000-8000-000000000002",
+        session_id: "sdk-session",
+      });
+      const events = yield* Fiber.join(eventsFiber);
+      assert.equal(events.filter((event) => event.type === "turn.completed").length, 0);
+      assert.equal((yield* adapter.listSessions())[0]?.activeTurnId, turn.turnId);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it("recognizes native goal confirmations without treating model prose as goal state", () => {
     const native = (text: string) => ({
       type: "assistant",
@@ -352,8 +459,115 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("keeps goal status and clear responses out of concurrent model turn lifecycles", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil(
+          (event) => event.type === "thread.goal.updated" && event.payload.goal === null,
+        ),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "/goal all checks pass" });
+      yield* Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput()));
+      harness.query.emit({
+        type: "assistant",
+        parent_tool_use_id: null,
+        session_id: "sdk-session",
+        uuid: "confirmation",
+        local_command_source:
+          "<local-command-stdout>Goal set: all checks pass</local-command-stdout>",
+        message: {
+          id: "confirmation",
+          model: "<synthetic>",
+          content: [{ type: "text", text: "Goal set: all checks pass" }],
+        },
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        errors: ["original failure"],
+        session_id: "sdk-session",
+        uuid: "result",
+      } as unknown as SDKMessage);
+      const statusMessage = yield* Effect.promise(() =>
+        readFirstPromptMessage(harness.getLastCreateQueryInput()),
+      );
+      assert.deepEqual(statusMessage?.message.content, [{ type: "text", text: "/goal" }]);
+      const nextTurn = yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "continue real work",
+      });
+      assert.equal(
+        yield* Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput())),
+        "continue real work",
+      );
+      harness.query.emit({
+        type: "assistant",
+        parent_tool_use_id: null,
+        session_id: "sdk-session",
+        uuid: "status",
+        local_command_source:
+          "<local-command-stdout>Goal active: all checks pass (1 turn)</local-command-stdout>",
+        message: {
+          id: "status",
+          model: "<synthetic>",
+          content: [{ type: "text", text: "Goal active: all checks pass (1 turn)" }],
+        },
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        local_command: "goal",
+        user_message_uuid: statusMessage?.uuid,
+        session_id: "sdk-session",
+        uuid: "status-result",
+      } as unknown as SDKMessage);
+      assert.ok(adapter.goals);
+      yield* adapter.goals.clear(THREAD_ID);
+      assert.equal(
+        yield* Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput())),
+        "/goal clear",
+      );
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        local_command: "goal",
+        session_id: "sdk-session",
+        uuid: "clear-result",
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "active_goal",
+        value: null,
+        uuid: "00000000-0000-4000-8000-000000000002",
+        session_id: "sdk-session",
+      });
+      const events = yield* Fiber.join(eventsFiber);
+      assert.equal(events.filter((event) => event.type === "turn.started").length, 2);
+      const completed = events.filter((event) => event.type === "turn.completed");
+      assert.equal(completed.length, 1);
+      assert.equal(completed[0]?.payload.state, "failed");
+      assert.equal(events.filter((event) => event.type === "content.delta").length, 0);
+      assert.equal((yield* adapter.readThread(THREAD_ID)).turns.length, 1);
+      assert.equal((yield* adapter.listSessions())[0]?.activeTurnId, nextTurn.turnId);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect(
-    "refreshes native goal state once after a real turn and accepts native clearing",
+    "restores resumed goal state from advertised native status without starting a turn",
     () => {
       const harness = makeHarness();
       return Effect.gen(function* () {
@@ -362,34 +576,20 @@ describe("ClaudeAdapterLive", () => {
           threadId: THREAD_ID,
           provider: ProviderDriverKind.make("claudeAgent"),
           runtimeMode: "full-access",
+          resumeCursor: { resume: "550e8400-e29b-41d4-a716-446655440000", turnCount: 2 },
         });
-        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "/goal all checks pass" });
-        yield* Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput()));
         const eventsFiber = yield* adapter.streamEvents.pipe(
-          Stream.filter((event) => event.type === "thread.goal.updated"),
-          Stream.take(2),
+          Stream.takeUntil((event) => event.type === "thread.goal.updated"),
           Stream.runCollect,
           Effect.forkChild,
         );
         harness.query.emit({
-          type: "assistant",
-          parent_tool_use_id: null,
+          type: "system",
+          subtype: "init",
           session_id: "sdk-session",
-          uuid: "confirmation",
-          local_command_source:
-            "<local-command-stdout>Goal set: all checks pass</local-command-stdout>",
-          message: {
-            id: "confirmation",
-            model: "<synthetic>",
-            content: [{ type: "text", text: "Goal set: all checks pass" }],
-          },
-        } as unknown as SDKMessage);
-        harness.query.emit({
-          type: "result",
-          subtype: "success",
-          is_error: false,
-          session_id: "sdk-session",
-          uuid: "result",
+          uuid: "init",
+          claude_code_version: "2.1.270",
+          slash_commands: ["goal"],
         } as unknown as SDKMessage);
         assert.equal(
           yield* Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput())),
@@ -399,17 +599,20 @@ describe("ClaudeAdapterLive", () => {
           type: "assistant",
           parent_tool_use_id: null,
           session_id: "sdk-session",
-          uuid: "status",
-          local_command_source: "<local-command-stdout>No goal set</local-command-stdout>",
+          uuid: "restored",
+          local_command_source:
+            "<local-command-stdout>Goal active: finish migration (not yet evaluated)</local-command-stdout>",
           message: {
-            id: "status",
+            id: "restored",
             model: "<synthetic>",
-            content: [{ type: "text", text: "No goal set" }],
+            content: [{ type: "text", text: "Goal active: finish migration (not yet evaluated)" }],
           },
         } as unknown as SDKMessage);
         const events = yield* Fiber.join(eventsFiber);
-        assert.equal(events[0]?.payload.goal?.objective, "all checks pass");
-        assert.equal(events[1]?.payload.goal, null);
+        assert.equal(events.filter((event) => event.type === "turn.started").length, 0);
+        const goal = events.find((event) => event.type === "thread.goal.updated");
+        assert.equal(goal?.payload.goal?.objective, "finish migration");
+        assert.equal(goal?.payload.goal?.timeUsedSeconds, null);
       }).pipe(
         Effect.provideService(Random.Random, makeDeterministicRandomService()),
         Effect.provide(harness.layer),
