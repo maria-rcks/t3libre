@@ -77,14 +77,12 @@ export function GoalToolbar(props: {
               </span>
             ) : null}
             {goal.tokensUsed !== null ? (
-              <span
-                title="Goal token usage"
-                className="ml-auto whitespace-nowrap text-purple-700 tabular-nums dark:text-purple-300"
-              >
+              <span className="ml-auto whitespace-nowrap text-purple-700 tabular-nums dark:text-purple-300">
                 {formatTokens(goal.tokensUsed).replace("K", "k")}
                 {goal.tokenBudget !== null
                   ? ` / ${formatTokens(goal.tokenBudget).replace("K", "k")}`
                   : ""}
+                <span className="sr-only"> tokens</span>
               </span>
             ) : null}
           </ComposerBanner.Content>
