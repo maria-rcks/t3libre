@@ -163,7 +163,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "compact-sidebar",
     title: "Compact sidebar",
     to: "/settings/appearance",
-    searchTerms: ["advanced collapsed icons rail hover navigation"],
+    searchTerms: ["collapsed icons rail hover navigation preview"],
   },
   {
     id: "environment-identification",

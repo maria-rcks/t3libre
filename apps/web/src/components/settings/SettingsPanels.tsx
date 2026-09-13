@@ -160,6 +160,7 @@ import {
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
+import { CompactSidebarPreview } from "./CompactSidebarPreview";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
@@ -1361,23 +1362,28 @@ export function AppearanceSettingsPanel() {
         />
       </SettingsSection>
 
-      <TypographySection />
-
-      <SettingsSection id="appearance-advanced" title="Advanced">
+      <SettingsSection id="appearance-sidebar" title="Sidebar">
         <SettingsRow
           {...searchableSetting("compact-sidebar")}
-          description="Keep an icon rail when the sidebar is collapsed."
+          description="Keep an icon rail when the sidebar is collapsed. Click the preview to try it."
           control={
-            <Switch
-              checked={settings.compactSidebarEnabled}
-              onCheckedChange={(checked) =>
-                updateSettings({ compactSidebarEnabled: Boolean(checked) })
-              }
-              aria-label="Compact sidebar"
-            />
+            <div className="grid w-full grid-cols-[5rem_minmax(0,1fr)] items-center gap-3 sm:w-auto sm:grid-cols-[7rem_13rem] sm:gap-4">
+              <CompactSidebarPreview />
+              <div className="flex justify-end">
+                <Switch
+                  checked={settings.compactSidebarEnabled}
+                  onCheckedChange={(checked) =>
+                    updateSettings({ compactSidebarEnabled: Boolean(checked) })
+                  }
+                  aria-label="Compact sidebar"
+                />
+              </div>
+            </div>
           }
         />
       </SettingsSection>
+
+      <TypographySection />
     </SettingsPageContainer>
   );
 }
