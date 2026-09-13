@@ -1,0 +1,195 @@
+import { DEFAULT_SERVER_SETTINGS, type StorageCleanupSettings } from "@t3tools/contracts";
+
+import { Switch } from "../ui/switch";
+import {
+  NumberField,
+  NumberFieldDecrement,
+  NumberFieldGroup,
+  NumberFieldIncrement,
+  NumberFieldInput,
+} from "../ui/number-field";
+import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsScopeNotice } from "./SettingsScopeNotice";
+import { useSettingsScope } from "./SettingsScopeContext";
+import {
+  useScopedSettings,
+  useScopedSettingsMixed,
+  useUpdateScopedSettings,
+} from "./useScopedSettings";
+
+function RetentionControl({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number | null;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      {value !== null ? (
+        <>
+          <NumberField
+            value={value}
+            min={1}
+            max={3650}
+            step={1}
+            size="sm"
+            className="w-28"
+            onValueChange={(next) => {
+              if (next !== null) onChange(next);
+            }}
+          >
+            <NumberFieldGroup>
+              <NumberFieldDecrement aria-label={`Decrease ${label}`} />
+              <NumberFieldInput aria-label={`${label} in days`} />
+              <NumberFieldIncrement aria-label={`Increase ${label}`} />
+            </NumberFieldGroup>
+          </NumberField>
+          <span className="text-xs text-muted-foreground">days</span>
+        </>
+      ) : (
+        <span className="text-xs text-muted-foreground">Off</span>
+      )}
+      <Switch
+        aria-label={label}
+        checked={value !== null}
+        onCheckedChange={(enabled) => onChange(enabled ? 8 : null)}
+      />
+    </div>
+  );
+}
+
+export function StorageSettingsPanel() {
+  const { scope, connectedEnvironments, environments } = useSettingsScope();
+  const settings = useScopedSettings(
+    (value) => value.storageCleanup ?? DEFAULT_SERVER_SETTINGS.storageCleanup,
+  );
+  const updateSettings = useUpdateScopedSettings();
+  const mixed = useScopedSettingsMixed(["storageCleanup"]);
+  const update = (patch: Partial<StorageCleanupSettings>) =>
+    updateSettings({ storageCleanup: patch });
+
+  if (scope.kind === "project" || scope.kind === "checkout") {
+    return (
+      <SettingsScopeNotice target="all">
+        Storage cleanup applies to machines. Choose all environments or a single machine to manage
+        its files.
+      </SettingsScopeNotice>
+    );
+  }
+
+  if (
+    connectedEnvironments.some(
+      (environment) => environment.serverConfig?.environment.capabilities.storageCleanup !== true,
+    )
+  ) {
+    return (
+      <SettingsScopeNotice
+        target="environment"
+        eligibleEnvironmentIds={connectedEnvironments
+          .filter(
+            (environment) =>
+              environment.serverConfig?.environment.capabilities.storageCleanup === true,
+          )
+          .map((environment) => environment.environmentId)}
+      >
+        Update the selected environments to use storage cleanup, or choose a machine that supports
+        it.
+      </SettingsScopeNotice>
+    );
+  }
+
+  return (
+    <SettingsPageContainer>
+      <div className="space-y-2 px-3 sm:px-4">
+        <h1 className="text-base font-medium">Storage</h1>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Cleanup runs on each machine while its server is running. Select a machine above or apply
+          settings to all connected environments.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {connectedEnvironments.length} of {environments.length} selected environments connected.
+          Offline machines keep their existing settings.
+        </p>
+        {mixed ? (
+          <p role="status" className="text-xs text-warning">
+            Policies differ across machines. Changing a control updates only that rule on every
+            connected machine in this selection.
+          </p>
+        ) : null}
+      </div>
+
+      <SettingsSection id="storage-worktrees" title="Worktrees">
+        <SettingsRow
+          title="Delete inactive worktrees"
+          description="Remove worktrees after their threads have been inactive for this many days. Branches and thread history are kept."
+          serverScoped
+          control={
+            <RetentionControl
+              label="Delete inactive worktrees"
+              value={settings.worktreeAfterDays}
+              onChange={(worktreeAfterDays) => update({ worktreeAfterDays })}
+            />
+          }
+        />
+        <SettingsRow
+          title="Delete merged worktrees"
+          description="Remove worktrees whose pull request is merged and whose commits are included in the default branch."
+          serverScoped
+          control={
+            <Switch
+              aria-label="Delete merged worktrees"
+              checked={settings.worktreeOnMerge}
+              onCheckedChange={(worktreeOnMerge) => update({ worktreeOnMerge })}
+            />
+          }
+        />
+        <SettingsRow
+          title="Delete unchanged worktrees"
+          description="Remove worktrees with no commits beyond the default branch."
+          serverScoped
+          control={
+            <Switch
+              aria-label="Delete unchanged worktrees"
+              checked={settings.worktreeUnchanged}
+              onCheckedChange={(worktreeUnchanged) => update({ worktreeUnchanged })}
+            />
+          }
+        />
+        <p className="px-3 py-3 text-xs leading-relaxed text-muted-foreground sm:px-4">
+          Only T3-managed worktrees are eligible. Active threads, shared worktrees, and uncommitted
+          work are preserved. Opening a new turn recreates a removed worktree from its saved branch.
+        </p>
+      </SettingsSection>
+
+      <SettingsSection id="storage-artifacts" title="Artifacts and logs">
+        <SettingsRow
+          title="Delete old browser artifacts"
+          description="Delete saved browser captures after this many days. Older capture links will no longer open."
+          serverScoped
+          control={
+            <RetentionControl
+              label="Delete old browser artifacts"
+              value={settings.browserArtifactsAfterDays}
+              onChange={(browserArtifactsAfterDays) => update({ browserArtifactsAfterDays })}
+            />
+          }
+        />
+        <SettingsRow
+          title="Delete old rotated logs"
+          description="Delete inactive rotated log files after this many days. Current logs are kept."
+          serverScoped
+          control={
+            <RetentionControl
+              label="Delete old rotated logs"
+              value={settings.logsAfterDays}
+              onChange={(logsAfterDays) => update({ logsAfterDays })}
+            />
+          }
+        />
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}

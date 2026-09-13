@@ -6,6 +6,7 @@
  *
  * @module TerminalManager
  */
+import { withThreadWorkspaceLease } from "../workspace/threadWorkspaceLease.ts";
 import {
   DEFAULT_TERMINAL_ID,
   TerminalCwdError,
@@ -2516,7 +2517,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     }).pipe(Effect.ignoreCause({ log: true })),
   );
 
-  const openLocked = Effect.fn("terminal.openLocked")(function* (input: TerminalOpenInput) {
+  const openWithWorkspaceLease = Effect.fn("terminal.openLocked")(function* (
+    input: TerminalOpenInput,
+  ) {
     const terminalId = input.terminalId;
     yield* assertValidCwd(input.cwd);
 
@@ -2638,6 +2641,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
     return snapshot(liveSession);
   });
+
+  const openLocked = (input: TerminalOpenInput) =>
+    withThreadWorkspaceLease(input.threadId, openWithWorkspaceLease(input));
 
   const open: TerminalManager["Service"]["open"] = (input) =>
     withThreadLock(

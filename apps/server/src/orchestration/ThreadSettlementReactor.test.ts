@@ -15,6 +15,7 @@ import {
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import { assert, describe, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -39,6 +40,13 @@ import {
 } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 import * as ThreadSettlementReactor from "./ThreadSettlementReactor.ts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Path from "effect/Path";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import { ServerConfig } from "../config.ts";
+import * as StorageCleanup from "../storageCleanup.ts";
+import { TerminalManager } from "../terminal/Manager.ts";
+import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 
 const NOW = "2026-08-28T12:00:00.000Z";
 const PROJECT_ID = ProjectId.make("settlement-project");
@@ -1282,4 +1290,196 @@ describe("ThreadSettlementReactor", () => {
       }),
     ),
   );
+});
+
+describe("storage cleanup", () => {
+  for (const protection of [
+    "none",
+    "dirty",
+    "ignored",
+    "ignored-directory",
+    "shared",
+    "session",
+    "recent",
+    "merged",
+    "unmerged",
+    "unchanged",
+    "diverged",
+    "head-moved",
+  ] as const) {
+    it.effect(
+      `retains protected worktrees (${protection}) and expires only old artifacts and rotated logs`,
+      () =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(Date.parse(NOW));
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const config = yield* ServerConfig;
+          const worktreePath = path.join(config.worktreesDir, "feature");
+          yield* fs.makeDirectory(worktreePath, { recursive: true });
+          yield* fs.writeFileString(path.join(worktreePath, ".git"), "gitdir: /test/admin");
+          if (protection === "ignored")
+            yield* fs.writeFileString(path.join(worktreePath, ".env"), "secret");
+          if (protection === "ignored-directory") {
+            yield* fs.makeDirectory(path.join(worktreePath, ".cache"));
+            yield* fs.writeFileString(path.join(worktreePath, ".cache", "local-data"), "keep");
+          }
+          yield* fs.makeDirectory(config.browserArtifactsDir, { recursive: true });
+          const oldImage = path.join(config.browserArtifactsDir, "old.png");
+          const recentImage = path.join(config.browserArtifactsDir, "recent.png");
+          const oldLog = path.join(config.logsDir, "server.log.1");
+          const activeLog = path.join(config.logsDir, "server.log");
+          const old = DateTime.toDateUtc(DateTime.makeUnsafe("2026-08-01T00:00:00.000Z"));
+          for (const file of [oldImage, oldLog, activeLog]) {
+            yield* fs.writeFileString(file, "keep or remove");
+            yield* fs.utimes(file, old, old);
+          }
+          yield* fs.writeFileString(recentImage, "recent");
+          const recent = DateTime.toDateUtc(DateTime.makeUnsafe(NOW));
+          yield* fs.utimes(recentImage, recent, recent);
+          const thread = makeThread("storage-thread", {
+            branch: "feature",
+            worktreePath,
+            latestUserMessageAt:
+              protection === "recent" ? "2026-08-26T00:00:00.000Z" : "2026-08-01T00:00:00.000Z",
+            ...(protection === "session"
+              ? {
+                  session: {
+                    threadId: ThreadId.make("storage-thread"),
+                    status: "ready",
+                    providerName: "codex",
+                    runtimeMode: "full-access",
+                    activeTurnId: null,
+                    lastError: null,
+                    updatedAt: NOW,
+                  },
+                }
+              : {}),
+          });
+          const snapshotRead = yield* Deferred.make<void>();
+          const removals: string[] = [];
+          const mergeRule = protection === "merged" || protection === "unmerged";
+          const unchangedRule =
+            protection === "unchanged" || protection === "diverged" || protection === "head-moved";
+          let headReads = 0;
+          const cleanup = yield* StorageCleanup.make.pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                ServerSettingsService.layerTest({
+                  storageCleanup: {
+                    worktreeAfterDays: mergeRule || unchangedRule ? null : 8,
+                    worktreeOnMerge: mergeRule,
+                    worktreeUnchanged: unchangedRule,
+                    browserArtifactsAfterDays: 8,
+                    logsAfterDays: 8,
+                  },
+                }),
+                Layer.mock(ProjectionSnapshotQuery)({
+                  getShellSnapshot: () =>
+                    Deferred.succeed(snapshotRead, undefined).pipe(
+                      Effect.as(makeSnapshot([thread], [makeProject(PROJECT_ID, config.baseDir)])),
+                    ),
+                  getArchivedShellSnapshot: () =>
+                    Effect.succeed(
+                      makeSnapshot(
+                        protection === "shared"
+                          ? [
+                              {
+                                ...thread,
+                                id: ThreadId.make("archived-sharing-thread"),
+                                archivedAt: NOW,
+                              },
+                            ]
+                          : [],
+                      ),
+                    ),
+                }),
+                Layer.mock(GitManager)({
+                  invalidateStatus: () => Effect.void,
+                  branchPullRequest: (_input, options) => {
+                    assert.strictEqual(options?.refresh, true);
+                    return Effect.succeed(
+                      makeBranchPullRequest(protection === "unmerged" ? "open" : "merged"),
+                    );
+                  },
+                }),
+                Layer.mock(GitVcsDriver)({
+                  resolvePrimaryRemoteName: () => Effect.succeed("origin"),
+                  resolveDefaultBranchName: () => Effect.succeed("main"),
+                  resolveCommit: ({ revision }) =>
+                    Effect.sync(() => {
+                      if (revision !== "HEAD") return { commitSha: "b".repeat(40) };
+                      headReads++;
+                      return {
+                        commitSha:
+                          protection === "head-moved" && headReads > 1
+                            ? "c".repeat(40)
+                            : "a".repeat(40),
+                      };
+                    }),
+                  statusDetailsLocal: () =>
+                    Effect.succeed({
+                      isRepo: true,
+                      hasOriginRemote: false,
+                      isDefaultBranch: false,
+                      branch: "feature",
+                      upstreamRef: null,
+                      hasWorkingTreeChanges: protection === "dirty",
+                      workingTree: { files: [], insertions: 0, deletions: 0 },
+                      hasUpstream: false,
+                      aheadCount: 0,
+                      behindCount: 0,
+                      aheadOfDefaultCount: 0,
+                    }),
+                  execute: (input) =>
+                    Effect.succeed({
+                      exitCode: ChildProcessSpawner.ExitCode(
+                        input.operation === "StorageCleanup.integratedBranch" &&
+                          protection === "diverged"
+                          ? 1
+                          : 0,
+                      ),
+                      stdout:
+                        protection === "ignored"
+                          ? ".env\0"
+                          : protection === "ignored-directory"
+                            ? ".cache/\0"
+                            : "",
+                      stderr: "",
+                      stdoutTruncated: false,
+                      stderrTruncated: false,
+                    }),
+                  removeWorktree: (input) => {
+                    assert.strictEqual(input.force, false);
+                    removals.push(input.path);
+                    return fs.remove(input.path, { recursive: true }).pipe(Effect.orDie);
+                  },
+                }),
+                Layer.mock(TerminalManager)({ subscribeMetadata: () => Effect.succeed(() => {}) }),
+              ),
+            ),
+          );
+          yield* cleanup.start();
+          yield* Deferred.await(snapshotRead);
+          yield* cleanup.drain;
+          const removed =
+            protection === "none" || protection === "merged" || protection === "unchanged";
+          assert.strictEqual(yield* fs.exists(worktreePath), !removed);
+          assert.deepStrictEqual(removals, removed ? [worktreePath] : []);
+          assert.strictEqual(thread.worktreePath, worktreePath);
+          assert.strictEqual(thread.branch, "feature");
+          assert.strictEqual(yield* fs.exists(oldImage), false);
+          assert.strictEqual(yield* fs.exists(recentImage), true);
+          assert.strictEqual(yield* fs.exists(oldLog), false);
+          assert.strictEqual(yield* fs.exists(activeLog), true);
+        }).pipe(
+          Effect.provide(
+            ServerConfig.layerTest(process.cwd(), { prefix: "t3-storage-cleanup-" }).pipe(
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
+          Effect.scoped,
+        ),
+    );
+  }
 });
