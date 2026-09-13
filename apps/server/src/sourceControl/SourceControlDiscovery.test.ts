@@ -143,8 +143,10 @@ it.effect("submits a Forgejo review without sending its summary in the prelimina
       Layer.mock(VcsProcess.VcsProcess)({
         run: (input) => {
           if (input.command === "git") {
-            assert.deepStrictEqual(input.args, ["remote", "get-url", "origin"]);
-            return Effect.succeed(processOutput("https://forgejo.test/maria/project.git"));
+            assert.deepStrictEqual(input.args, ["remote", "-v"]);
+            return Effect.succeed(
+              processOutput("origin\thttps://forgejo.test/maria/project.git (fetch)"),
+            );
           }
           assert.strictEqual(input.command, "fj");
           assert.deepStrictEqual(input.args, ["--host", "https://forgejo.test", "whoami"]);
@@ -824,6 +826,13 @@ it.effect("routes mounted Forgejo repositories without repeating the mount in AP
     const cli = yield* ForgejoCli.make;
     const viewer = yield* cli.api({ cwd: "/upstream-only", host: "code.test", path: "user" });
     assert.strictEqual(viewer.stdout, "[]");
+    const mountedRepository = yield* cli.resolveRepository({
+      cwd: "/upstream-only",
+      host: "code.test",
+      repository: "maria/project",
+    });
+    assert.strictEqual(mountedRepository.baseUrl, "https://code.test/forgejo");
+    assert.strictEqual(mountedRepository.repository, "maria/project");
     for (const path of [
       "repos/forgejo/maria/project/pulls?state=open",
       "repos/forgejo/maria/project",
@@ -945,12 +954,26 @@ it.effect("prefers fj for HTTP and ported SSH aliases on root servers", () => {
       "http://forgejo.local:3000/api/v1/repos/maria/project/issues/42/comments",
     ]);
     const viewer = yield* cli.api({
-      cwd: "/upstream-only",
+      cwd: "/no-remotes",
       host: "forgejo.local:3000",
       path: "user",
     });
     assert.strictEqual(viewer.stdout, '{"login":"maria"}');
     assert.strictEqual(requests.at(-1), "https://forgejo.local:3000/api/v1/user");
+    const upstreamViewer = yield* cli.api({
+      cwd: "/upstream-only",
+      host: "forgejo.local:3000",
+      path: "user",
+    });
+    assert.strictEqual(upstreamViewer.stdout, '{"login":"maria"}');
+    assert.strictEqual(requests.at(-1), "http://forgejo.local:3000/api/v1/user");
+    const upstreamRepository = yield* cli.resolveRepository({
+      cwd: "/upstream-only",
+      host: "forgejo.local:3000",
+      repository: "maria/project",
+    });
+    assert.strictEqual(upstreamRepository.baseUrl, "http://forgejo.local:3000");
+    assert.strictEqual(upstreamRepository.repository, "maria/project");
     const httpViewer = yield* cli.api({ cwd: "/repo", host: "forgejo.local:3000", path: "user" });
     assert.strictEqual(httpViewer.stdout, '{"login":"maria"}');
     assert.strictEqual(requests.at(-1), "http://forgejo.local:3000/api/v1/user");
@@ -1000,14 +1023,16 @@ it.effect("prefers fj for HTTP and ported SSH aliases on root servers", () => {
           commands.push(input.command);
           if (input.command === "git")
             return Effect.succeed(
-              input.cwd === "/upstream-only"
+              input.cwd === "/no-remotes"
                 ? processOutput("", { exitCode: ChildProcessSpawner.ExitCode(2) })
-                : processOutput("http://forgejo.local:3000/maria/project.git"),
+                : processOutput(
+                    `${input.cwd === "/upstream-only" ? "upstream" : "origin"}\thttp://forgejo.local:3000/maria/project.git (fetch)\nother\thttp://forgejo.local:3000/maria/other.git (fetch)\nunrelated\thttp://other.local:3000/maria/project.git (fetch)`,
+                  ),
             );
           assert.strictEqual(input.command, "fj");
           assert.deepStrictEqual(input.args, [
             "--host",
-            input.cwd === "/upstream-only"
+            input.cwd === "/no-remotes"
               ? "https://forgejo.local:3000"
               : "http://forgejo.local:3000",
             "whoami",
@@ -1112,8 +1137,10 @@ it.effect("loads later fj review pages when the server caps pages below the requ
       Layer.mock(VcsProcess.VcsProcess)({
         run: (input) => {
           if (input.command === "git") {
-            assert.deepStrictEqual(input.args, ["remote", "get-url", "origin"]);
-            return Effect.succeed(processOutput("https://forgejo.test/maria/project.git"));
+            assert.deepStrictEqual(input.args, ["remote", "-v"]);
+            return Effect.succeed(
+              processOutput("origin\thttps://forgejo.test/maria/project.git (fetch)"),
+            );
           }
           assert.strictEqual(input.command, "fj");
           assert.deepStrictEqual(input.args, ["--host", "https://forgejo.test", "whoami"]);

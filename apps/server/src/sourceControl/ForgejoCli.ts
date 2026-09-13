@@ -494,7 +494,7 @@ export const make = Effect.gen(function* () {
         .run({
           operation: "ForgejoCli.remote",
           command: "git",
-          args: ["remote", "get-url", "origin"],
+          args: input.host ? ["remote", "-v"] : ["remote", "get-url", "origin"],
           cwd: input.cwd,
           allowNonZeroExit: true,
         })
@@ -509,8 +509,28 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
-      remoteUrl = result.stdout.trim();
-      remote = parseForgejoRemote(remoteUrl);
+      if (input.host) {
+        const matchingUrls = [
+          ...new Set(
+            result.stdout.split("\n").flatMap((line) => {
+              const url = /^\S+\s+(https?:\/\/\S+)\s+\(fetch\)$/.exec(line.trim())?.[1];
+              return url && parseForgejoRemote(url)?.host === input.host?.toLowerCase()
+                ? [url]
+                : [];
+            }),
+          ),
+        ];
+        const origins = [...new Set(matchingUrls.map((url) => new URL(url).origin))];
+        remoteUrl =
+          matchingUrls.length === 1
+            ? matchingUrls[0]
+            : origins.length === 1
+              ? origins[0]
+              : undefined;
+      } else {
+        remoteUrl = result.stdout.trim();
+      }
+      remote = remoteUrl ? parseForgejoRemote(remoteUrl) : null;
     }
     if (
       input.host &&
@@ -531,9 +551,10 @@ export const make = Effect.gen(function* () {
       ...(schemeRemoteUrl ? { remoteUrl: schemeRemoteUrl } : {}),
     });
     const requestedHost = input.host ?? input.context?.requestedHost;
+    const matchHostOnly = hostOnly || (!!input.host && !remote?.path);
     const selectLogin = (logins: ReturnType<typeof parseForgejoLogins>) =>
       remote
-        ? matchForgejoLogin(logins, remote, remote.ssh ? requestedHost : undefined, hostOnly)
+        ? matchForgejoLogin(logins, remote, remote.ssh ? requestedHost : undefined, matchHostOnly)
         : (logins.find((item) => item.default === "true") ??
           (new Set(logins.map((item) => item.name)).size === 1 ? logins[0] : undefined));
     let login = selectLogin(fjLogins);
@@ -543,7 +564,7 @@ export const make = Effect.gen(function* () {
       fjLogins.some(
         (item) =>
           !remote ||
-          matchForgejoLogin([item], remote, remote.ssh ? requestedHost : undefined, hostOnly),
+          matchForgejoLogin([item], remote, remote.ssh ? requestedHost : undefined, matchHostOnly),
       )
     ) {
       const available = yield* execute({ command: "fj", cwd: input.cwd, args: ["version"] }).pipe(
