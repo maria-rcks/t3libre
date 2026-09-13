@@ -40,6 +40,7 @@ export function GitHubRoutingSettings({
     <SettingsSection {...searchableSetting("github-routing")}>
       <SettingsRow
         title="Share GitHub access"
+        className="sm:[&>div]:grid-cols-1 [&_p]:max-w-none"
         description="Choose environments you trust to share PR data and use each other's GitHub access. Enable both environments. Read and act may use broader permissions than the original environment. This applies only to this client."
       />
       {selectedEnvironments.map((environment) => (
