@@ -296,7 +296,7 @@ export function DraftProjectPicker({
   );
 
   return (
-    <h1 className="mx-auto grid w-full grid-cols-1 items-center gap-2 font-normal text-2xl text-foreground tracking-tight sm:grid-cols-2 sm:text-3xl">
+    <h1 className="mx-auto grid w-full grid-cols-1 items-end gap-2 font-normal text-2xl text-foreground tracking-tight sm:grid-cols-2 sm:text-3xl">
       <span className="text-center sm:text-end">
         {isChat ? "What would you like to" : "What should we build in"}
       </span>
