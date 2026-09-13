@@ -186,6 +186,7 @@ const ProjectionThreadSearchRequest = Schema.Struct({
 });
 const ProjectionThreadSearchRow = Schema.Struct({
   threadId: ThreadId,
+  messageId: Schema.optionalKey(MessageId),
   projectId: ProjectId,
   source: OrchestrationThreadSearchSource,
   matchText: Schema.String,
@@ -1081,6 +1082,37 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           match_rank ASC,
           thread_updated_at DESC,
           thread_id ASC
+        LIMIT ${limit}
+      `,
+  });
+
+  const searchThreadMessageRows = SqlSchema.findAll({
+    Request: Schema.Struct({
+      threadId: ThreadId,
+      pattern: Schema.String,
+      limit: Schema.Int,
+    }),
+    Result: ProjectionThreadSearchRow,
+    execute: ({ threadId, pattern, limit }) =>
+      sql`
+        SELECT
+          threads.thread_id AS "threadId",
+          threads.project_id AS "projectId",
+          messages.message_id AS "messageId",
+          messages.role AS source,
+          messages.text AS "matchText",
+          messages.created_at AS "messageCreatedAt"
+        FROM projection_thread_messages AS messages
+        INNER JOIN projection_threads AS threads
+          ON threads.thread_id = messages.thread_id
+        INNER JOIN projection_projects AS projects
+          ON projects.project_id = threads.project_id
+        WHERE messages.thread_id = ${threadId}
+          AND threads.deleted_at IS NULL
+          AND projects.deleted_at IS NULL
+          AND messages.role IN ('user', 'assistant')
+          AND messages.text LIKE ${pattern} ESCAPE '!'
+        ORDER BY messages.created_at DESC, messages.message_id ASC
         LIMIT ${limit}
       `,
   });
@@ -2945,10 +2977,15 @@ pending_approval_requests AS (
     "ProjectionSnapshotQuery.searchThreads",
   )(function* (input) {
     const escapedQuery = escapeLikePattern(input.query);
-    const rows = yield* searchActiveThreadRows({
+    const request = {
       pattern: `%${escapedQuery}%`,
       limit: input.limit ?? 50,
-    }).pipe(
+    };
+    const rows = yield* (
+      input.threadId === undefined
+        ? searchActiveThreadRows(request)
+        : searchThreadMessageRows({ ...request, threadId: input.threadId })
+    ).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
           "ProjectionSnapshotQuery.searchThreads:query",
@@ -2959,6 +2996,7 @@ pending_approval_requests AS (
     return {
       matches: rows.map((row) => ({
         threadId: row.threadId,
+        ...(row.messageId === undefined ? {} : { messageId: row.messageId }),
         projectId: row.projectId,
         source: row.source,
         snippet: buildSearchSnippet(row.matchText, input.query),
