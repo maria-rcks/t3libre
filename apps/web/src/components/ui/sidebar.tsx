@@ -422,7 +422,11 @@ function SidebarRail({
         suppressClickRef.current = moved;
         const options = latestResizable.current;
         if (options?.storageKey) {
-          setLocalStorageItem(options.storageKey, finalWidth, Schema.Finite);
+          try {
+            setLocalStorageItem(options.storageKey, finalWidth, Schema.Finite);
+          } catch (error) {
+            console.error("Could not persist sidebar width.", error);
+          }
         }
         options?.onResize?.(finalWidth);
       },
