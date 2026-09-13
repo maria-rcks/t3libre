@@ -780,8 +780,9 @@ const make = Effect.gen(function* () {
         if (
           options?.goalStartsWork === true &&
           preferredProvider === "codex" &&
-          ((activeSession?.model !== undefined &&
-            activeSession.model !== desiredModelSelection.model) ||
+          (previousModelSelection === undefined ||
+            (activeSession?.model !== undefined &&
+              activeSession.model !== desiredModelSelection.model) ||
             (previousModelSelection !== undefined &&
               !goalOptionsEqual(
                 previousModelSelection.options ?? [],
@@ -1362,6 +1363,17 @@ const make = Effect.gen(function* () {
         "Switch out of Plan mode before starting or editing a goal.",
       );
     }
+    if (goalCommand) {
+      const instanceId =
+        event.payload.modelSelection?.instanceId ?? thread.modelSelection.instanceId;
+      const providers = yield* providerRegistry.getProviders;
+      if (!providers.find((provider) => provider.instanceId === instanceId)?.goal) {
+        return yield* appendTurnStartFailure(
+          "Goal update failed",
+          "This provider does not advertise native goal support.",
+        );
+      }
+    }
 
     yield* ensureThreadWorktree(thread);
 
@@ -1402,15 +1414,6 @@ const make = Effect.gen(function* () {
 
     if (goalCommand) {
       yield* Effect.gen(function* () {
-        const instanceId =
-          event.payload.modelSelection?.instanceId ?? thread.modelSelection.instanceId;
-        const providers = yield* providerRegistry.getProviders;
-        if (!providers.find((provider) => provider.instanceId === instanceId)?.goal) {
-          return yield* appendTurnStartFailure(
-            "Goal update failed",
-            "This provider does not advertise native goal support.",
-          );
-        }
         yield* ensureSessionForThread(thread.id, event.payload.createdAt, {
           goalStartsWork,
           ...(event.payload.modelSelection !== undefined
