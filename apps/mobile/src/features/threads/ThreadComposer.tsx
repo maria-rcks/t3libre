@@ -280,6 +280,15 @@ export function ComposerSurface(props: {
   );
 }
 
+const goalStatusLabels: Record<ThreadGoal["status"], string> = {
+  active: "Goaling",
+  paused: "Goal paused",
+  blocked: "Goal blocked",
+  usageLimited: "Usage limit",
+  budgetLimited: "Goal budget reached",
+  complete: "Goal complete",
+};
+
 function ComposerGoalStatus({
   goal,
   threadId,
@@ -318,7 +327,7 @@ function ComposerGoalStatus({
         </Text>
         <Text className="text-xs" style={{ color: "#8b5cf6" }}>
           {[
-            goal.status,
+            goalStatusLabels[goal.status],
             elapsed,
             goal.tokensUsed === null ? null : `${goal.tokensUsed.toLocaleString()} tokens`,
             goal.rounds === undefined ? null : `${goal.rounds} rounds`,

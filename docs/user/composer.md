@@ -20,6 +20,11 @@ to revise it, and `/goal clear` to remove it. Codex also supports `/goal pause`
 and `/goal resume`; pausing the goal prevents further goal continuation but
 does not interrupt work already running.
 
+Switch out of Plan mode before starting or editing a goal.
+Codex goals reuse the current session model and options. After changing these
+settings, send a normal message to apply them before starting, editing, or resuming a goal.
+Claude may apply a queued goal command after its current response finishes.
+
 Goal progress stays with the thread across reconnects. Time, token usage, and
 rounds appear when the provider reports them. Codex reports goal token usage and
 supports a token budget; Claude reports rounds and resets its counters when its
