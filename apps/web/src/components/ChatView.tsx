@@ -3783,7 +3783,9 @@ export default function ChatView(props: ChatViewProps) {
           cwd: cwdForOpen,
           ...(activeThreadWorktreePath != null ? { worktreePath: activeThreadWorktreePath } : {}),
           env: projectScriptRuntimeEnv({
-            project: { cwd: activeProject.workspaceRoot },
+            project: {
+              cwd: isChatProject(activeProject) ? cwdForOpen : activeProject.workspaceRoot,
+            },
             worktreePath: activeThreadWorktreePath,
           }),
         },
@@ -3830,7 +3832,9 @@ export default function ChatView(props: ChatViewProps) {
           cwd: cwdForOpen,
           ...(activeThreadWorktreePath != null ? { worktreePath: activeThreadWorktreePath } : {}),
           env: projectScriptRuntimeEnv({
-            project: { cwd: activeProject.workspaceRoot },
+            project: {
+              cwd: isChatProject(activeProject) ? cwdForOpen : activeProject.workspaceRoot,
+            },
             worktreePath: activeThreadWorktreePath,
           }),
         },
@@ -3870,7 +3874,7 @@ export default function ChatView(props: ChatViewProps) {
         cwd: cwdForOpen,
         ...(activeThreadWorktreePath != null ? { worktreePath: activeThreadWorktreePath } : {}),
         env: projectScriptRuntimeEnv({
-          project: { cwd: activeProject.workspaceRoot },
+          project: { cwd: isChatProject(activeProject) ? cwdForOpen : activeProject.workspaceRoot },
           worktreePath: activeThreadWorktreePath,
         }),
       },
@@ -3962,7 +3966,7 @@ export default function ChatView(props: ChatViewProps) {
 
       const runtimeEnv = projectScriptRuntimeEnv({
         project: {
-          cwd: activeProject.workspaceRoot,
+          cwd: isChatProject(activeProject) ? targetCwd : activeProject.workspaceRoot,
         },
         worktreePath: targetWorktreePath,
         ...(options?.env ? { extraEnv: options.env } : {}),
@@ -4596,7 +4600,7 @@ export default function ChatView(props: ChatViewProps) {
         cwd,
         ...(activeThreadWorktreePath != null ? { worktreePath: activeThreadWorktreePath } : {}),
         env: projectScriptRuntimeEnv({
-          project: { cwd: activeProject.workspaceRoot },
+          project: { cwd: isChatProject(activeProject) ? cwd : activeProject.workspaceRoot },
           worktreePath: activeThreadWorktreePath,
         }),
       },
@@ -4636,7 +4640,7 @@ export default function ChatView(props: ChatViewProps) {
           cwd,
           ...(activeThreadWorktreePath != null ? { worktreePath: activeThreadWorktreePath } : {}),
           env: projectScriptRuntimeEnv({
-            project: { cwd: activeProject.workspaceRoot },
+            project: { cwd: isChatProject(activeProject) ? cwd : activeProject.workspaceRoot },
             worktreePath: activeThreadWorktreePath,
           }),
         },
