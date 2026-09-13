@@ -1385,7 +1385,6 @@ export function AppearanceSettingsPanel() {
         />
       </SettingsSection>
 
-      <TimelineBackgroundSettings />
       <SettingsSection id="appearance-sidebar" title="Sidebar">
         <SettingsRow
           {...searchableSetting("compact-sidebar")}
@@ -1408,6 +1407,7 @@ export function AppearanceSettingsPanel() {
       </SettingsSection>
 
       <TypographySection />
+      <TimelineBackgroundSettings />
     </SettingsPageContainer>
   );
 }
