@@ -143,7 +143,15 @@ export const make = Effect.gen(function* () {
   });
   const write = (input: ForgejoApiInput) => request(input).pipe(Effect.asVoid);
   const getPull = (input: ProviderRepositoryRef & { readonly number: number }) =>
-    read({ ...input, path: pullPath(input) }, ForgejoPullRequest);
+    read(
+      {
+        cwd: input.cwd,
+        repository: input.repository,
+        host: input.host,
+        path: pullPath(input),
+      },
+      ForgejoPullRequest,
+    );
   const getRepo = (input: ProviderRepositoryRef) =>
     read({ ...input, path: repoPath(input) }, ForgejoRepository);
   const getViewer = (input: {

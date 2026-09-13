@@ -1,13 +1,14 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
+import type * as Context from "effect/Context";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { VcsProcessSpawnError } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
@@ -61,6 +62,98 @@ const processOutput = (
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const encodeJsonEffect = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
+it.effect("submits a Forgejo review without sending its summary in the preliminary GET", () => {
+  const methods: string[] = [];
+  const fetchReview = async (
+    ...[input, init]: Parameters<Context.Service.Shape<typeof FetchHttpClient.Fetch>>
+  ) => {
+    const request = new Request(input instanceof Request ? input.url : String(input), {
+      ...(init?.method === undefined ? {} : { method: init.method }),
+      ...(init?.headers === undefined ? {} : { headers: init.headers }),
+      ...(init?.body === undefined ? {} : { body: init.body }),
+    });
+    methods.push(request.method);
+    if (request.method === "GET") {
+      assert.strictEqual(request.url, "https://forgejo.test/api/v1/repos/maria/project/pulls/42");
+      return new Response(
+        encodeJson({
+          number: 42,
+          title: "Review target",
+          body: "",
+          html_url: "https://forgejo.test/maria/project/pulls/42",
+          user: { login: "maria" },
+          state: "open",
+          merged: false,
+          head: { ref: "feature", sha: "head", repo: null },
+          base: { ref: "main", sha: "base", repo: null },
+          created_at: "2026-09-13T00:00:00Z",
+          updated_at: "2026-09-13T00:00:00Z",
+          closed_at: null,
+          merged_at: null,
+          labels: [],
+        }),
+      );
+    }
+    assert.strictEqual(request.method, "POST");
+    assert.strictEqual(
+      request.url,
+      "https://forgejo.test/api/v1/repos/maria/project/pulls/42/reviews",
+    );
+    assert.deepStrictEqual(JSON.parse(await request.text()), {
+      event: "COMMENT",
+      body: "Review summary",
+      commit_id: "head",
+      comments: [],
+    });
+    return new Response('{"id":1}', { status: 200 });
+  };
+  return Effect.gen(function* () {
+    const cli = yield* ForgejoCli.make;
+    const provider = yield* ForgejoPullRequestProvider.make.pipe(
+      Effect.provideService(ForgejoCli.ForgejoCli, cli),
+    );
+    yield* provider.submitReview({
+      cwd: "/repo",
+      repository: "maria/project",
+      host: "forgejo.test",
+      number: 42,
+      verdict: "comment",
+      body: "Review summary",
+      comments: [],
+    });
+    assert.deepStrictEqual(methods, ["GET", "POST"]);
+  }).pipe(
+    Effect.provideService(
+      FetchHttpClient.Fetch,
+      Object.assign(fetchReview, { preconnect: () => undefined }),
+    ),
+    Effect.provide(FetchHttpClient.layer),
+    Effect.provideService(
+      FileSystem.FileSystem,
+      FileSystem.makeNoop({
+        exists: () => Effect.succeed(true),
+        readFileString: () =>
+          Effect.succeed(
+            encodeJson({ hosts: { "forgejo.test": { type: "Application", token: "test-token" } } }),
+          ),
+      }),
+    ),
+    Effect.provide(
+      Layer.mock(VcsProcess.VcsProcess)({
+        run: (input) => {
+          if (input.command === "git") {
+            assert.deepStrictEqual(input.args, ["remote", "get-url", "origin"]);
+            return Effect.succeed(processOutput("https://forgejo.test/maria/project.git"));
+          }
+          assert.strictEqual(input.command, "fj");
+          assert.deepStrictEqual(input.args, ["--host", "https://forgejo.test", "whoami"]);
+          return Effect.succeed(processOutput(""));
+        },
+      }),
+    ),
+  );
+});
 
 it.effect("loads Forgejo pull request references from files and commits views", () =>
   Effect.gen(function* () {
