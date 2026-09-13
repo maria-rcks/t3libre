@@ -339,6 +339,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       ) ?? null
     );
   }, [props.serverConfig, props.selectedThread.modelSelection.instanceId]);
+  const unsupportedRuntimeModeReason =
+    selectedProviderStatus?.driver === "devin" && currentRuntimeMode === "approval-required"
+      ? "Devin does not support Supervised mode. Choose another permission mode to send."
+      : null;
   const composerOwnerKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
   const openDraftDocument = (attachment: ComposerDocumentAttachment) => {
     Keyboard.dismiss();
@@ -425,6 +429,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const contextImports = useAtomValue(composerContextImportsAtom);
   const sendBlockedReason =
     props.sendBlockedReason ??
+    unsupportedRuntimeModeReason ??
     (pendingPastedTextAttachmentCount > 0 ? "Attaching pasted text" : null) ??
     attachmentBlockReason;
   const canSend =
@@ -482,7 +487,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     onEditorFocusChange?.(false);
   }, [onEditorFocusChange, onExpandedChange, settingsSheetPresentation.keepsComposerExpanded]);
   const handleSend = useCallback(async () => {
-    if (voiceInput.blocksSubmission || pendingPastedTextAttachmentCountRef.current > 0) return;
+    if (
+      unsupportedRuntimeModeReason ||
+      voiceInput.blocksSubmission ||
+      pendingPastedTextAttachmentCountRef.current > 0
+    )
+      return;
     // Typed out in full rather than picked from the menu. Attachments mean the
     // user is sending a prompt, so those go through as usual.
     if (
@@ -525,6 +535,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     props.selectedThread.id,
     props.selectedThread.title,
     voiceInput.blocksSubmission,
+    unsupportedRuntimeModeReason,
   ]);
 
   // ── Model menu ───────────────────────────────────────────
@@ -657,6 +668,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               onSelect={composerMenu.onSelect}
             />
           </View>
+        ) : null}
+
+        {unsupportedRuntimeModeReason ? (
+          <Pressable accessibilityRole="button" className="px-3 py-2" onPress={openSettings}>
+            <Text className="text-xs text-foreground">{unsupportedRuntimeModeReason}</Text>
+          </Pressable>
         ) : null}
 
         {modelUnavailable ? (

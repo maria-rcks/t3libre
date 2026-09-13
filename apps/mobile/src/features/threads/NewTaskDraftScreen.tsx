@@ -198,6 +198,10 @@ export function NewTaskDraftScreen(props: {
       (environment) => environment.environmentId === selectedProject.environmentId,
     )?.connectionState === "connected";
   const modelUnavailable = environmentConnected && flow.selectedModelOption?.isUnavailable === true;
+  const unsupportedRuntimeModeReason =
+    flow.selectedModelOption?.providerDriver === "devin" && flow.runtimeMode === "approval-required"
+      ? "Devin does not support Supervised mode. Choose another permission mode to send."
+      : null;
   const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
   const attachmentBlockReason = selectedProject
     ? composerAttachmentUploadBlockReason({
@@ -1099,7 +1103,12 @@ export function NewTaskDraftScreen(props: {
   );
 
   async function handleStart(): Promise<void> {
-    if (voiceInput.blocksSubmission || pendingPastedTextAttachmentCountRef.current > 0) return;
+    if (
+      unsupportedRuntimeModeReason ||
+      voiceInput.blocksSubmission ||
+      pendingPastedTextAttachmentCountRef.current > 0
+    )
+      return;
     const selectedProject = flow.selectedProject;
     const draftKey = flow.draftKey;
     if (!selectedProject || !draftKey) {
@@ -1263,6 +1272,7 @@ export function NewTaskDraftScreen(props: {
     !isImportingContext &&
     attachmentBlockReason === null &&
     !modelUnavailable &&
+    unsupportedRuntimeModeReason === null &&
     Boolean(flow.selectedProject) &&
     Boolean(flow.selectedModel) &&
     flow.prompt.trim().length > 0 &&
@@ -1478,6 +1488,17 @@ export function NewTaskDraftScreen(props: {
         </View>
       ) : null}
       <View className="pb-1">{workspaceControls}</View>
+
+      {unsupportedRuntimeModeReason ? (
+        <Pressable
+          accessibilityRole="button"
+          className="px-3 py-2"
+          disabled={isComposerInteractionLocked}
+          onPress={settingsSheetPresentation.open}
+        >
+          <Text className="text-xs text-foreground">{unsupportedRuntimeModeReason}</Text>
+        </Pressable>
+      ) : null}
 
       {modelUnavailable ? (
         <Pressable

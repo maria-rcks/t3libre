@@ -223,6 +223,7 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings"
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
+  AlertTriangleIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
   GitBranchIcon,
@@ -2649,6 +2650,10 @@ export default function ChatView(props: ChatViewProps) {
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
   const activeProviderInstanceId = selectedProviderEntry?.instanceId ?? null;
   const activeProviderStatus = selectedProviderEntry?.snapshot ?? null;
+  const unsupportedRuntimeModeReason =
+    selectedProvider === "devin" && runtimeMode === "approval-required"
+      ? "Devin does not support Supervised mode. Choose another permission mode to send."
+      : null;
   const { enabled: interactionModeEnabled, interactionMode } = resolveComposerInteractionMode({
     planModeEnabled: settings.planModeEnabled,
     provider: activeProviderStatus,
@@ -6109,6 +6114,16 @@ export default function ChatView(props: ChatViewProps) {
     [feedbackSubmissions, routeThreadKey],
   );
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
+    const runtimeModeItems: ComposerBannerStackItem[] = unsupportedRuntimeModeReason
+      ? [
+          {
+            id: "unsupported-runtime-mode",
+            variant: "warning",
+            icon: <AlertTriangleIcon />,
+            title: unsupportedRuntimeModeReason,
+          },
+        ]
+      : [];
     const backgroundLivenessItems =
       backgroundLivenessBannerItem === null ? [] : [backgroundLivenessBannerItem];
     const resumeCompactionItems =
@@ -6119,6 +6134,7 @@ export default function ChatView(props: ChatViewProps) {
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
+        ...runtimeModeItems,
         ...feedbackBannerItems,
         ...usageLimitsItems,
         ...systemComposerBannerItems,
@@ -6129,6 +6145,7 @@ export default function ChatView(props: ChatViewProps) {
       ];
     }
     return [
+      ...runtimeModeItems,
       ...feedbackBannerItems,
       ...usageLimitsItems,
       ...systemComposerBannerItems,
@@ -6186,6 +6203,7 @@ export default function ChatView(props: ChatViewProps) {
     resumeCompactionBannerItem,
     showBranchMismatchBanner,
     systemComposerBannerItems,
+    unsupportedRuntimeModeReason,
     usageLimitsBanner,
     wokeThreadBannerItem,
   ]);
@@ -6809,6 +6827,7 @@ export default function ChatView(props: ChatViewProps) {
     };
     if (
       !activeThread ||
+      unsupportedRuntimeModeReason !== null ||
       isSendBusy ||
       isConnecting ||
       isRevertingCheckpoint ||
@@ -8923,7 +8942,7 @@ export default function ChatView(props: ChatViewProps) {
                                   ? "Sending feedback"
                                   : threadDetailLoading
                                     ? "Messages loading"
-                                    : null
+                                    : unsupportedRuntimeModeReason
                             }
                             isPreparingWorktree={isPreparingWorktree}
                             bannerItems={composerBannerItems}
