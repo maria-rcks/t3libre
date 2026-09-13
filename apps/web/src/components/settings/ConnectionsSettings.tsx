@@ -3722,7 +3722,7 @@ export function ConnectionsSettings() {
           </div>
         }
       >
-        <div className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5 lg:grid lg:h-[min(44rem,calc(100dvh-11rem))] lg:min-h-[32rem] lg:grid-cols-[17rem_minmax(0,1fr)]">
+        <div className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5 lg:grid lg:h-[min(38rem,calc(100dvh-15rem))] lg:min-h-[28rem] lg:grid-cols-[17rem_minmax(0,1fr)]">
           <div className="border-b border-border/60 bg-muted/10 lg:flex lg:min-h-0 lg:flex-col lg:border-r lg:border-b-0">
             <ScrollArea
               scrollFade
@@ -3819,10 +3819,6 @@ export function ConnectionsSettings() {
                   environments={environments}
                   selectedEnvironmentId={selectedEnvironment.environmentId}
                 />
-                <LoadBalancingSettings
-                  environments={loadBalancingEnvironments}
-                  selectedEnvironmentId={selectedEnvironment.environmentId}
-                />
               </div>
             ) : null}
           </ScrollArea>
@@ -3832,6 +3828,7 @@ export function ConnectionsSettings() {
           savedEnvironments={savedEnvironments}
         />
       </SettingsSection>
+      <LoadBalancingSettings environments={loadBalancingEnvironments} />
     </SettingsPageContainer>
   );
 }
