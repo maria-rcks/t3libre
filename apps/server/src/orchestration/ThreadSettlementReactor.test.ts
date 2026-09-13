@@ -1322,6 +1322,9 @@ describe("storage cleanup", () => {
     "ignored",
     "ignored-directory",
     "shared",
+    "project-root",
+    "nested-project",
+    "new-nested-project",
     "session",
     "terminal-cwd",
     "terminal-worktree",
@@ -1329,6 +1332,7 @@ describe("storage cleanup", () => {
     "merged",
     "unmerged",
     "unchanged",
+    "unchanged-two-worktrees",
     "diverged",
     "head-moved",
   ] as const) {
@@ -1343,6 +1347,14 @@ describe("storage cleanup", () => {
           const worktreePath = path.join(config.worktreesDir, "feature");
           yield* fs.makeDirectory(worktreePath, { recursive: true });
           yield* fs.writeFileString(path.join(worktreePath, ".git"), "gitdir: /test/admin");
+          const secondWorktreePath = path.join(config.worktreesDir, "feature-two");
+          if (protection === "unchanged-two-worktrees") {
+            yield* fs.makeDirectory(secondWorktreePath);
+            yield* fs.writeFileString(
+              path.join(secondWorktreePath, ".git"),
+              "gitdir: /test/admin-two",
+            );
+          }
           if (protection === "ignored")
             yield* fs.writeFileString(path.join(worktreePath, ".env"), "secret");
           if (protection === "ignored-directory") {
@@ -1385,8 +1397,14 @@ describe("storage cleanup", () => {
           const removals: string[] = [];
           const mergeRule = protection === "merged" || protection === "unmerged";
           const unchangedRule =
-            protection === "unchanged" || protection === "diverged" || protection === "head-moved";
+            protection === "unchanged" ||
+            protection === "unchanged-two-worktrees" ||
+            protection === "diverged" ||
+            protection === "head-moved";
           let headReads = 0;
+          let snapshotReads = 0;
+          let defaultRefFetched = false;
+          let fetches = 0;
           const cleanup = yield* StorageCleanup.make.pipe(
             Effect.provide(
               Layer.mergeAll(
@@ -1402,7 +1420,39 @@ describe("storage cleanup", () => {
                 Layer.mock(ProjectionSnapshotQuery)({
                   getShellSnapshot: () =>
                     Deferred.succeed(snapshotRead, undefined).pipe(
-                      Effect.as(makeSnapshot([thread], [makeProject(PROJECT_ID, config.baseDir)])),
+                      Effect.andThen(
+                        Effect.sync(() => {
+                          snapshotReads++;
+                          const projects = [makeProject(PROJECT_ID, config.baseDir)];
+                          const threads = [thread];
+                          if (
+                            protection === "project-root" ||
+                            protection === "nested-project" ||
+                            (protection === "new-nested-project" && snapshotReads > 1)
+                          ) {
+                            projects.push(
+                              makeProject(
+                                LINKED_PROJECT_ID,
+                                protection === "project-root"
+                                  ? worktreePath
+                                  : path.join(worktreePath, "nested"),
+                              ),
+                            );
+                            threads.push(
+                              makeThread("local-project-thread", { projectId: LINKED_PROJECT_ID }),
+                            );
+                          }
+                          if (protection === "unchanged-two-worktrees") {
+                            threads.push({
+                              ...thread,
+                              id: ThreadId.make("second-worktree-thread"),
+                              branch: "feature-two",
+                              worktreePath: secondWorktreePath,
+                            });
+                          }
+                          return makeSnapshot(threads, projects);
+                        }),
+                      ),
                     ),
                   getArchivedShellSnapshot: () =>
                     Effect.succeed(
@@ -1431,9 +1481,20 @@ describe("storage cleanup", () => {
                 Layer.mock(GitVcsDriver)({
                   resolvePrimaryRemoteName: () => Effect.succeed("origin"),
                   resolveDefaultBranchName: () => Effect.succeed("main"),
+                  fetchRemoteTrackingBranch: (input) =>
+                    Effect.sync(() => {
+                      assert.deepStrictEqual(input, {
+                        cwd: config.baseDir,
+                        remoteName: "origin",
+                        remoteBranch: "main",
+                      });
+                      defaultRefFetched = true;
+                      fetches++;
+                    }),
                   resolveCommit: ({ revision }) =>
                     Effect.sync(() => {
-                      if (revision !== "HEAD") return { commitSha: "b".repeat(40) };
+                      if (revision !== "HEAD")
+                        return { commitSha: (defaultRefFetched ? "b" : "d").repeat(40) };
                       headReads++;
                       return {
                         commitSha:
@@ -1442,12 +1503,12 @@ describe("storage cleanup", () => {
                             : "a".repeat(40),
                       };
                     }),
-                  statusDetailsLocal: () =>
+                  statusDetailsLocal: (cwd) =>
                     Effect.succeed({
                       isRepo: true,
                       hasOriginRemote: false,
                       isDefaultBranch: false,
-                      branch: "feature",
+                      branch: cwd === secondWorktreePath ? "feature-two" : "feature",
                       upstreamRef: null,
                       hasWorkingTreeChanges: protection === "dirty",
                       workingTree: { files: [], insertions: 0, deletions: 0 },
@@ -1460,7 +1521,7 @@ describe("storage cleanup", () => {
                     Effect.succeed({
                       exitCode: ChildProcessSpawner.ExitCode(
                         input.operation === "StorageCleanup.integratedBranch" &&
-                          protection === "diverged"
+                          (protection === "diverged" || input.args.at(-1) !== "b".repeat(40))
                           ? 1
                           : 0,
                       ),
@@ -1517,9 +1578,20 @@ describe("storage cleanup", () => {
           yield* Deferred.await(snapshotRead);
           yield* cleanup.drain;
           const removed =
-            protection === "none" || protection === "merged" || protection === "unchanged";
+            protection === "none" ||
+            protection === "merged" ||
+            protection === "unchanged" ||
+            protection === "unchanged-two-worktrees";
           assert.strictEqual(yield* fs.exists(worktreePath), !removed);
-          assert.deepStrictEqual(removals, removed ? [worktreePath] : []);
+          assert.deepStrictEqual(
+            removals,
+            protection === "unchanged-two-worktrees"
+              ? [worktreePath, secondWorktreePath]
+              : removed
+                ? [worktreePath]
+                : [],
+          );
+          assert.strictEqual(fetches, mergeRule || unchangedRule ? 1 : 0);
           assert.strictEqual(thread.worktreePath, worktreePath);
           assert.strictEqual(thread.branch, "feature");
           assert.strictEqual(yield* fs.exists(oldImage), false);

@@ -108,6 +108,22 @@ export const make = Effect.gen(function* () {
     return { projects: active.projects, threads: [...active.threads, ...archived.threads] };
   });
 
+  // Local threads under another project need not have a worktreePath of their own.
+  const containsProjectRoot = Effect.fn("StorageCleanup.containsProjectRoot")(function* (
+    worktreePath: string,
+    projects: ReadonlyArray<{ readonly workspaceRoot: string }>,
+  ) {
+    for (const project of projects) {
+      const projectPath = path.resolve(project.workspaceRoot);
+      if (projectPath === worktreePath || inside(worktreePath, projectPath)) return true;
+      const realPath = yield* fs
+        .realPath(projectPath)
+        .pipe(Effect.orElseSucceed(() => projectPath));
+      if (realPath === worktreePath || inside(worktreePath, realPath)) return true;
+    }
+    return false;
+  });
+
   const cleanWorktrees = Effect.fn("StorageCleanup.cleanWorktrees")(function* (
     settings: ServerSettings["storageCleanup"],
     now: number,
@@ -121,6 +137,7 @@ export const make = Effect.gen(function* () {
     if (!(yield* fs.exists(config.worktreesDir))) return;
     const snapshot = yield* readThreads();
     const root = yield* fs.realPath(config.worktreesDir);
+    const refreshedDefaultRefs = new Map<string, Set<string>>();
     const groups = Map.groupBy(
       snapshot.threads.filter((thread) => thread.worktreePath !== null),
       (thread) => path.resolve(thread.worktreePath!),
@@ -138,7 +155,7 @@ export const make = Effect.gen(function* () {
       yield* Effect.gen(function* () {
         if (!inside(root, worktreePath) || !(yield* fs.exists(worktreePath))) return;
         if ((yield* fs.realPath(worktreePath)) !== worktreePath) return;
-        if ((yield* fs.realPath(project.workspaceRoot)) === worktreePath) return;
+        if (yield* containsProjectRoot(worktreePath, snapshot.projects)) return;
         // A linked worktree has a .git file. Never remove a main checkout.
         if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File") return;
         const status = yield* git.statusDetailsLocal(worktreePath);
@@ -165,12 +182,24 @@ export const make = Effect.gen(function* () {
           storageCleanupActivityAt(thread) < now - settings.worktreeAfterDays * DAY_MS;
         let eligible = old;
         if (!eligible && (settings.worktreeUnchanged || settings.worktreeOnMerge)) {
-          const remote = yield* git.resolvePrimaryRemoteName(worktreePath);
-          const branch = yield* git.resolveDefaultBranchName(worktreePath, remote);
+          const repositoryCwd = path.resolve(project.workspaceRoot);
+          const remote = yield* git.resolvePrimaryRemoteName(repositoryCwd);
+          const branch = yield* git.resolveDefaultBranchName(repositoryCwd, remote);
           if (branch === null) return;
+          const defaultRef = `refs/remotes/${remote}/${branch}`;
+          const refreshed = refreshedDefaultRefs.get(repositoryCwd) ?? new Set<string>();
+          if (!refreshed.has(defaultRef)) {
+            yield* git.fetchRemoteTrackingBranch({
+              cwd: repositoryCwd,
+              remoteName: remote,
+              remoteBranch: branch,
+            });
+            refreshed.add(defaultRef);
+            refreshedDefaultRefs.set(repositoryCwd, refreshed);
+          }
           const base = yield* git.resolveCommit({
             cwd: worktreePath,
-            revision: `refs/remotes/${remote}/${branch}`,
+            revision: defaultRef,
           });
           const ancestor = yield* git.execute({
             operation: "StorageCleanup.integratedBranch",
@@ -191,7 +220,9 @@ export const make = Effect.gen(function* () {
         if (!eligible) return;
         // Re-read after Git/host calls so a queued turn, resumed session or new
         // thread sharing this path cancels the removal.
-        const latest = (yield* readThreads()).threads.filter(
+        const latestSnapshot = yield* readThreads();
+        if (yield* containsProjectRoot(worktreePath, latestSnapshot.projects)) return;
+        const latest = latestSnapshot.threads.filter(
           (entry) =>
             entry.worktreePath !== null && path.resolve(entry.worktreePath) === worktreePath,
         );
