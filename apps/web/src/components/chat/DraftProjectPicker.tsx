@@ -210,14 +210,14 @@ export function DraftProjectPicker({
               aria-label={!isChat && hasResolvedProject ? "Change project" : "Add project"}
               className={
                 isChat
-                  ? "inline-flex min-w-0 items-center rounded-xl text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                  : "inline-flex min-w-0 max-w-64 items-center gap-2 rounded-r-xl px-2 py-1 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  ? "inline-flex min-w-0 items-baseline rounded-xl text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  : "inline-flex min-w-0 max-w-64 items-baseline gap-2 rounded-r-xl px-2 py-1 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               }
             />
           }
         >
           {isChat ? (
-            <span className="pointer-events-none ms-1 flex size-9 shrink-0 items-center justify-center">
+            <span className="pointer-events-none ms-1 flex size-9 shrink-0 items-center justify-center self-center">
               <MessageCircleIcon className="size-5" />
             </span>
           ) : null}
@@ -287,7 +287,7 @@ export function DraftProjectPicker({
   const chip = (
     <span
       ref={chipRef}
-      className="inline-flex max-w-full items-center rounded-xl bg-muted/70 align-middle text-[0.85em]"
+      className="inline-flex max-w-full items-baseline rounded-xl bg-muted/70 align-baseline"
     >
       {!isChat && chatEntry && activeProject ? (
         <Tooltip>
@@ -308,7 +308,7 @@ export function DraftProjectPicker({
                   }
                   selectProject(chatEntry.group.projectKey);
                 }}
-                className="group/project-icon relative ms-1 flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                className="group/project-icon relative ms-1 flex size-9 shrink-0 items-center justify-center self-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               />
             }
           >
@@ -320,7 +320,7 @@ export function DraftProjectPicker({
           <TooltipPopup>Enter chat mode</TooltipPopup>
         </Tooltip>
       ) : !isChat || !shouldShowProjectMenu ? (
-        <span className="ms-1 flex size-9 shrink-0 items-center justify-center">
+        <span className="ms-1 flex size-9 shrink-0 items-center justify-center self-center">
           <MessageCircleIcon className="size-5" />
         </span>
       ) : null}
@@ -333,7 +333,7 @@ export function DraftProjectPicker({
       ref={titleRef}
       className={
         isChat && chatOffset !== null
-          ? "mx-auto grid w-full grid-cols-1 items-end gap-y-2 font-normal text-2xl text-foreground tracking-tight sm:grid-cols-[var(--chat-context-start)_minmax(0,1fr)] sm:text-3xl"
+          ? "mx-auto grid w-full grid-cols-1 items-end gap-y-2 font-normal text-2xl text-foreground tracking-tight sm:grid-cols-[var(--chat-context-start)_minmax(0,1fr)] sm:items-baseline sm:text-3xl"
           : "mx-auto w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
       }
       style={
@@ -345,7 +345,7 @@ export function DraftProjectPicker({
       {isChat && chatOffset !== null ? (
         <>
           <span className="text-center sm:pe-2 sm:text-end">What would you like to</span>
-          <span className="ms-[var(--chat-context-start)] flex min-w-0 items-center gap-x-2 text-start sm:ms-0">
+          <span className="ms-[var(--chat-context-start)] flex min-w-0 items-baseline gap-x-2 text-start sm:ms-0">
             {chip}
             <span className="shrink-0">about?</span>
           </span>
