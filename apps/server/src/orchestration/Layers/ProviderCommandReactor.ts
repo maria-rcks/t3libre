@@ -1366,6 +1366,19 @@ const make = Effect.gen(function* () {
     if (goalCommand) {
       const instanceId =
         event.payload.modelSelection?.instanceId ?? thread.modelSelection.instanceId;
+      if (!event.payload.modelSelection && thread.session && thread.session.status !== "stopped") {
+        const sessions = yield* providerService.listSessions();
+        const activeSession = sessions.find((session) => session.threadId === thread.id);
+        if (
+          activeSession?.providerInstanceId !== undefined &&
+          activeSession.providerInstanceId !== instanceId
+        ) {
+          return yield* appendTurnStartFailure(
+            "Goal update failed",
+            "Explicitly select a provider and model before updating this goal because the active session uses a different provider.",
+          );
+        }
+      }
       const providers = yield* providerRegistry.getProviders;
       if (!providers.find((provider) => provider.instanceId === instanceId)?.goal) {
         return yield* appendTurnStartFailure(
