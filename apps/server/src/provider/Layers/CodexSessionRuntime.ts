@@ -177,6 +177,7 @@ export interface CodexSessionRuntimeOptions {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
   readonly model?: string;
+  readonly reasoningEffort?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
   readonly appServerArgs?: ReadonlyArray<string>;
@@ -550,6 +551,7 @@ function buildThreadStartParams(input: {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
+  readonly reasoningEffort?: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
 }): EffectCodexSchema.V2ThreadStartParams {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
@@ -559,6 +561,7 @@ function buildThreadStartParams(input: {
     sandbox: config.sandbox,
     approvalsReviewer: config.approvalsReviewer,
     ...(input.model ? { model: input.model } : {}),
+    ...(input.reasoningEffort ? { config: { model_reasoning_effort: input.reasoningEffort } } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   };
 }
@@ -726,6 +729,7 @@ export const openCodexThread = (input: {
   readonly runtimeMode: RuntimeMode;
   readonly cwd: string;
   readonly requestedModel: string | undefined;
+  readonly reasoningEffort?: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
 }): Effect.Effect<typeof CodexThreadResumeMetadata.Type, CodexErrors.CodexAppServerError> => {
@@ -734,6 +738,7 @@ export const openCodexThread = (input: {
     cwd: input.cwd,
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
+    reasoningEffort: input.reasoningEffort,
     serviceTier: input.serviceTier,
   });
 
@@ -2385,6 +2390,7 @@ export const makeCodexSessionRuntime = (
         runtimeMode: options.runtimeMode,
         cwd: options.cwd,
         requestedModel,
+        reasoningEffort: options.reasoningEffort,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
       });

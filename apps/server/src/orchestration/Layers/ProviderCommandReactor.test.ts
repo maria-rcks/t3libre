@@ -677,13 +677,15 @@ describe("ProviderCommandReactor", () => {
     }).pipe(Effect.scoped),
   );
 
-  effectIt.effect.each(["model", "options"] as const)(
+  effectIt.effect.each(["model", "options", "default options"] as const)(
     "rejects a pending Codex %s change only when reusing a live goal session",
     (change) =>
       Effect.gen(function* () {
-        const initial = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5-codex", [
-          { id: "reasoningEffort", value: "high" },
-        ]);
+        const initial = createModelSelection(
+          ProviderInstanceId.make("codex"),
+          "gpt-5-codex",
+          change === "default options" ? [] : [{ id: "reasoningEffort", value: "high" }],
+        );
         const changed = createModelSelection(
           ProviderInstanceId.make("codex"),
           change === "model" ? "gpt-5.4" : initial.model,

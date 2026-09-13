@@ -896,9 +896,9 @@ const make = Effect.gen(function* () {
           preferredProvider === "codex" &&
           ((activeSession?.model !== undefined &&
             activeSession.model !== desiredModelSelection.model) ||
-            (previousModelSelection?.options !== undefined &&
+            (previousModelSelection !== undefined &&
               !goalOptionsEqual(
-                previousModelSelection.options,
+                previousModelSelection.options ?? [],
                 desiredModelSelection.options ?? [],
               )))
         ) {

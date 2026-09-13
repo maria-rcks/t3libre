@@ -1840,7 +1840,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             >
                               {formatGoalDuration(thread.goal.timeUsedSeconds)}
                             </span>
-                          ) : status === "working" ? (
+                          ) : !goalActive && status === "working" ? (
                             <span aria-hidden>
                               <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
                             </span>

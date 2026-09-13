@@ -2286,6 +2286,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           input.modelSelection?.instanceId === boundInstanceId
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
+        const reasoningEffort =
+          input.modelSelection?.instanceId === boundInstanceId
+            ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
+            : undefined;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
@@ -2303,6 +2307,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { model: input.modelSelection.model }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
+          ...(reasoningEffort ? { reasoningEffort } : {}),
           ...(mcpSession
             ? {
                 environment: {
