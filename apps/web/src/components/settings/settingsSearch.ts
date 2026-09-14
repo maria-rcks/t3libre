@@ -172,7 +172,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Hide window controls",
     to: "/settings/appearance",
     searchTerms: ["traffic lights close minimize zoom buttons macos collapsed rail titlebar"],
-    // macOS desktop with the rail on; the section is the stable destination.
+    desktopOnly: true,
+    macOnly: true,
+    // Also needs the rail on; the section is the stable destination.
     targetId: "appearance-sidebar",
   },
   {

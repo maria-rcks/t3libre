@@ -11,6 +11,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
 import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
@@ -50,6 +51,12 @@ import {
   useSidebarVisibility,
 } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+
+// Older desktop builds ship a bridge without this method. Probed once, like
+// `isElectron`: the preload script installs the bridge before app code runs.
+const canToggleWindowButtons =
+  typeof window !== "undefined" &&
+  typeof window.desktopBridge?.setWindowButtonsVisible === "function";
 
 function subscribeToViewportWidth(onChange: () => void): () => void {
   window.addEventListener("resize", onChange);
@@ -150,8 +157,8 @@ function ProjectProjectionRetention() {
  * setting, fullscreen, or the mobile sheet layout takes over.
  */
 function MacosWindowControls({ autoHide }: { autoHide: boolean }) {
-  const { isMobile, state } = useSidebar();
-  const hidden = autoHide && !isMobile && state === "collapsed";
+  const { state } = useSidebar();
+  const hidden = autoHide && state === "collapsed";
 
   useEffect(() => {
     const setWindowButtonsVisible = window.desktopBridge?.setWindowButtonsVisible;
@@ -186,6 +193,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const hideWindowControlsWhenSidebarCollapsed = useHideWindowControlsWhenSidebarCollapsed();
+  const isMobileLayout = useIsMobile();
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,
   // and a clamped drag ends with an unchanged width, which skips the re-render
@@ -213,11 +221,16 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // Drives the traffic-light strip reservation in index.css, and, in
   // "auto-hide", the collapsed-rail hide below. Fullscreen has no buttons to
   // reserve for or hide.
+  // The mobile sheet layout collapses the sidebar without leaving a rail under
+  // the buttons, so auto-hide would drop the reservation while they stay put.
   const macosWindowControls = !isMacosDesktop
     ? undefined
     : isWindowFullscreen
       ? undefined
-      : hideWindowControlsWhenSidebarCollapsed && compactSidebarEnabled
+      : hideWindowControlsWhenSidebarCollapsed &&
+          compactSidebarEnabled &&
+          canToggleWindowButtons &&
+          !isMobileLayout
         ? "auto-hide"
         : "visible";
 

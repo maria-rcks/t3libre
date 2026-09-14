@@ -503,7 +503,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(!followSystem ? ["Follow system"] : []),
       ...(themeHalves !== null ? ["Theme mix"] : []),
       ...(settings.compactSidebarEnabled !== DEFAULT_UNIFIED_SETTINGS.compactSidebarEnabled ||
-      settings.sidebarCompactThreadRows !== DEFAULT_UNIFIED_SETTINGS.sidebarCompactThreadRows
+      settings.sidebarCompactThreadRows !== DEFAULT_UNIFIED_SETTINGS.sidebarCompactThreadRows ||
+      settings.hideWindowControlsWhenSidebarCollapsed !==
+        DEFAULT_UNIFIED_SETTINGS.hideWindowControlsWhenSidebarCollapsed
         ? ["Compact sidebar"]
         : []),
       ...(settings.appearanceContrast !== DEFAULT_UNIFIED_SETTINGS.appearanceContrast
@@ -614,6 +616,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.browserAutoShowFloatingPreview,
       settings.appearanceContrast,
       settings.compactSidebarEnabled,
+      settings.hideWindowControlsWhenSidebarCollapsed,
       settings.diffColorScheme,
       settings.enableAgentBrowserAccess,
       settings.confirmQuit,
@@ -724,6 +727,8 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
       compactSidebarEnabled: DEFAULT_UNIFIED_SETTINGS.compactSidebarEnabled,
+      hideWindowControlsWhenSidebarCollapsed:
+        DEFAULT_UNIFIED_SETTINGS.hideWindowControlsWhenSidebarCollapsed,
       diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
