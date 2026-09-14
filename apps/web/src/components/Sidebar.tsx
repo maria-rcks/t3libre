@@ -2031,6 +2031,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {compactRows ? (
                 <>
                   {terminalStatusIcon}
+                  {renderPrBadge(true)}
                   {topStatus && CompactStatusIcon ? (
                     isWokeStatus ? (
                       <button
@@ -2057,7 +2058,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       </span>
                     )
                   ) : null}
-                  {renderPrBadge(true)}
                 </>
               ) : null}
               {/* The visible state owns this slot's width: status at rest,
