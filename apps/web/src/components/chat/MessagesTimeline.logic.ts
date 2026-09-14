@@ -768,7 +768,15 @@ function attachTrailingToolGroupsToAssistant(
     let hasTrailingToolGroup = false;
     for (let index = messageIndex + 1; index < rows.length; index += 1) {
       const candidate = rows[index];
-      if (!candidate || candidate.kind === "message") {
+      if (!candidate) {
+        break;
+      }
+      // A thinking block can follow the answer (the next one starts before its
+      // tool call); it is not another message in the conversation.
+      if (candidate.kind === "message" && candidate.message.role === "reasoning") {
+        continue;
+      }
+      if (candidate.kind === "message") {
         break;
       }
       if (candidate.kind === "work-toggle" && candidate.turnId === turnId) {
@@ -1295,7 +1303,12 @@ export function deriveMessagesTimelineRows(input: {
   // A live thinking block is the real version of the placeholder below, so it
   // suppresses it rather than sitting under a second "Thinking" row.
   const hasStreamingReasoningRow = nextRows.some(
-    (row) => row.kind === "message" && row.message.role === "reasoning" && row.message.streaming,
+    (row) =>
+      row.kind === "message" &&
+      row.message.role === "reasoning" &&
+      row.message.streaming &&
+      row.message.turnId !== null &&
+      row.message.turnId === unsettledTurnId,
   );
   if (input.isWorking && !hasStreamingReasoningRow && (!hasActivityRow || latestToolFailed)) {
     nextRows.push({

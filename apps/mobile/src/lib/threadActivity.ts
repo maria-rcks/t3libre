@@ -1833,6 +1833,15 @@ export function deriveThreadFeedPresentation(
     !result.some(
       (row) =>
         (row.type === "work-toggle" && row.shimmer) ||
+        // A live thinking block is the real version of this row, so it takes
+        // the slot instead of sitting under a second "Thinking". Scoped to the
+        // live turn: a block stranded by a killed server must not silence this
+        // row for every turn that follows.
+        (row.type === "message" &&
+          row.message.role === "reasoning" &&
+          row.message.streaming &&
+          row.message.turnId !== null &&
+          row.message.turnId === unsettledTurnId) ||
         // A working spawn card is the live activity: its status line shows
         // what the agents are doing, so a Thinking row under it would lie.
         (row.type === "agent-spawn" &&

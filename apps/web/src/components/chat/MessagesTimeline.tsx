@@ -645,7 +645,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const onToggleReasoning = useCallback(
     (messageId: string, expanded: boolean) => {
-      suspendEndScrollMaintenanceForDisclosure(`reasoning:${messageId}`, !expanded);
+      // The anchor must be the timeline row id, which for a message row is the
+      // message id, or position restoration is skipped for every row.
+      suspendEndScrollMaintenanceForDisclosure(messageId, !expanded);
       setExpandedReasoningMessageIds((current) => {
         if (current.has(messageId) === expanded) return current;
         const next = new Set(current);
@@ -2173,36 +2175,34 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
   const toggle = useCallback(() => {
     onToggleReasoning(message.id, !expanded);
   }, [expanded, message.id, onToggleReasoning]);
-  const elapsed = streaming ? null : formatWorkingTimer(message.createdAt, message.updatedAt);
+  const elapsedMs = streaming
+    ? null
+    : Date.parse(message.updatedAt) - Date.parse(message.createdAt);
+  const elapsed =
+    elapsedMs !== null && Number.isFinite(elapsedMs) && elapsedMs >= 0
+      ? formatDuration(elapsedMs)
+      : null;
   const label = streaming ? "Thinking" : elapsed ? `Thought for ${elapsed}` : "Thought";
 
   return (
-    <div
-      className={cn(
-        "flex flex-col rounded-md px-0.5 py-0.5 transition-colors",
-        expanded && "mb-1",
-        "cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-      )}
-      role="button"
-      tabIndex={0}
-      aria-expanded={expanded}
-      onClick={toggle}
-      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          toggle();
-        }
-      }}
-    >
-      <div className="flex select-none items-center gap-1.5">
+    <div className={cn("flex flex-col", expanded && "mb-1")}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={toggle}
+        className="flex cursor-pointer select-none items-center gap-1.5 rounded-md px-0.5 py-0.5 text-start transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      >
         <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
           <BrainIcon aria-hidden className="block size-4 shrink-0 stroke-[1.8] opacity-70" />
         </span>
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <p className="relative min-w-0 flex-1 truncate text-secondary-label text-sm leading-relaxed">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span
+            ref={streaming ? observeVisibleAnimation : undefined}
+            className="relative min-w-0 flex-1 truncate text-secondary-label text-sm leading-relaxed"
+          >
             {label}
             {streaming ? <ActivityShimmerOverlay>{label}</ActivityShimmerOverlay> : null}
-          </p>
+          </span>
           <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
             <ChevronRightIcon
               className={cn(
@@ -2211,14 +2211,10 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
               )}
             />
           </span>
-        </div>
-      </div>
+        </span>
+      </button>
       {expanded ? (
-        <div
-          className="mt-1 ms-7 max-h-96 cursor-default overflow-auto rounded-md bg-muted/40 px-3 py-2 text-secondary-label select-text"
-          onClick={stopRowToggle}
-          onPointerDown={stopRowToggle}
-        >
+        <div className="mt-1 ms-7 max-h-96 overflow-auto rounded-md bg-muted/40 px-3 py-2 text-secondary-label select-text">
           <ChatMarkdown
             text={message.text}
             cwd={ctx.markdownCwd}

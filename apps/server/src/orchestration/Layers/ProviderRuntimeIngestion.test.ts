@@ -1500,6 +1500,81 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.text).toBe("**First**\n\n**Second**");
   });
 
+  it("uses a reasoning item's detail when no reasoning deltas were streamed", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-reasoning-snapshot"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-snapshot"),
+      itemId: asItemId("item-snapshot"),
+      payload: {
+        itemType: "reasoning",
+        status: "completed",
+        detail: "reasoning reported in one piece",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) => message.role === "reasoning" && !message.streaming,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.role === "reasoning",
+    );
+    expect(message?.text).toBe("reasoning reported in one piece");
+  });
+
+  it("keeps interleaved summary and raw reasoning in separate blocks", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    // Distinct timestamps: blocks are ordered by when the provider opened them.
+    for (const [tag, at, streamKind, delta] of [
+      ["a", "2026-01-01T00:00:01.000Z", "reasoning_summary_text", "summary one"],
+      ["b", "2026-01-01T00:00:02.000Z", "reasoning_text", "raw one"],
+      ["c", "2026-01-01T00:00:03.000Z", "reasoning_summary_text", "summary two"],
+    ] as const) {
+      harness.emit({
+        type: "content.delta",
+        eventId: asEventId(`evt-interleaved-${tag}`),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: at,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-interleaved"),
+        itemId: asItemId("item-interleaved"),
+        payload: { streamKind, delta },
+      });
+    }
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-interleaved-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-interleaved"),
+      itemId: asItemId("item-interleaved"),
+      payload: { itemType: "reasoning", status: "completed" },
+    });
+
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.messages.filter((message: ProviderRuntimeTestMessage) => message.role === "reasoning")
+          .length === 3,
+    );
+    const reasoning = thread.messages.filter(
+      (entry: ProviderRuntimeTestMessage) => entry.role === "reasoning",
+    );
+    expect(reasoning.map((entry) => entry.text)).toEqual(["summary one", "raw one", "summary two"]);
+    expect(new Set(reasoning.map((entry) => entry.id)).size).toBe(3);
+  });
+
   it("closes the reasoning block when the assistant starts answering", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

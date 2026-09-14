@@ -2565,7 +2565,13 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     if (disclosureAnchorKeyRef.current !== null) {
       settleDisclosureAfterLayout();
     }
-  }, [expandedTurnIds, expandedWorkGroups, expandedWorkRows, settleDisclosureAfterLayout]);
+  }, [
+    expandedTurnIds,
+    expandedWorkGroups,
+    expandedWorkRows,
+    expandedReasoningMessageIds,
+    settleDisclosureAfterLayout,
+  ]);
 
   const handleItemSizeChanged = useCallback(() => {
     if (disclosureAnchorKeyRef.current !== null) {
@@ -2650,7 +2656,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
 
   const onToggleReasoning = useCallback(
     (messageId: string) => {
-      suspendEndScrollMaintenanceForDisclosure(`reasoning:${messageId}`);
+      // The anchor must be the feed row id, which for a message row is the
+      // message id, or position restoration is skipped for every row.
+      suspendEndScrollMaintenanceForDisclosure(messageId);
       setInteractionState((current) => {
         const next = new Set(current.expandedReasoningMessageIds);
         if (next.has(messageId)) {
