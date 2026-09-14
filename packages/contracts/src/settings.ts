@@ -438,6 +438,13 @@ export const ClientSettingsSchema = Schema.Struct({
   // default sidebar.
   legacySidebarEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   compactSidebarEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // macOS desktop only: with the icon rail collapsed the traffic lights overhang
+  // the 48px rail into the content area, so this hides them until the sidebar
+  // expands again. Opt-in, because it takes away the only pointer path to
+  // close/minimize while collapsed.
+  hideWindowControlsWhenSidebarCollapsed: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -1495,6 +1502,7 @@ export const ClientSettingsPatch = Schema.Struct({
   showSkillsInSlashMenu: Schema.optionalKey(Schema.Boolean),
   legacySidebarEnabled: Schema.optionalKey(Schema.Boolean),
   compactSidebarEnabled: Schema.optionalKey(Schema.Boolean),
+  hideWindowControlsWhenSidebarCollapsed: Schema.optionalKey(Schema.Boolean),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),

@@ -89,6 +89,25 @@ export const getWindowFullscreenState = DesktopIpc.makeSyncIpcMethod({
   }),
 });
 
+// The collapsed icon rail is 48px wide, so the traffic lights overhang it into
+// the content area. The renderer asks for them to be hidden while the rail is
+// collapsed (opt-in setting) and restores them on expand, fullscreen, and
+// unmount. macOS only: `setWindowButtonVisibility` does not exist elsewhere,
+// and the Windows/Linux overlay controls sit top-right, clear of the rail.
+export const setWindowButtonsVisible = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.SET_WINDOW_BUTTONS_VISIBLE_CHANNEL,
+  payload: Schema.Boolean,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.setWindowButtonsVisible")(function* (visible) {
+    const environment = yield* DesktopEnvironment.DesktopEnvironment;
+    if (environment.platform !== "darwin") return;
+    const electronWindow = yield* ElectronWindow.ElectronWindow;
+    const window = yield* electronWindow.currentMainOrFirst;
+    if (Option.isNone(window) || window.value.isDestroyed()) return;
+    window.value.setWindowButtonVisibility(visible);
+  }),
+});
+
 export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
   channel: IpcChannels.GET_LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANNEL,
   result: Schema.Array(DesktopEnvironmentBootstrapSchema),

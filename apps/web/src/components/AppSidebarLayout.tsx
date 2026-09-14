@@ -17,6 +17,7 @@ import { primaryServerKeybindingsAtom } from "../state/server";
 import {
   useCompactSidebarEnabled,
   useEnvironmentIdentificationMode,
+  useHideWindowControlsWhenSidebarCollapsed,
   useLegacySidebarEnabled,
 } from "../hooks/useSettings";
 import {
@@ -49,8 +50,6 @@ import {
   useSidebarVisibility,
 } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
-
-const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "90px";
 
 function subscribeToViewportWidth(onChange: () => void): () => void {
   window.addEventListener("resize", onChange);
@@ -145,6 +144,34 @@ function ProjectProjectionRetention() {
   return null;
 }
 
+/**
+ * Hides the macOS traffic lights while the collapsed icon rail is the only
+ * thing under them, and puts them back on expand, on unmount, and whenever the
+ * setting, fullscreen, or the mobile sheet layout takes over.
+ */
+function MacosWindowControls({ autoHide }: { autoHide: boolean }) {
+  const { isMobile, state } = useSidebar();
+  const hidden = autoHide && !isMobile && state === "collapsed";
+
+  useEffect(() => {
+    const setWindowButtonsVisible = window.desktopBridge?.setWindowButtonsVisible;
+    if (typeof setWindowButtonsVisible !== "function") return;
+    void setWindowButtonsVisible(!hidden);
+  }, [hidden]);
+
+  // Restoring only on unmount, never on the dependency change above, keeps the
+  // buttons from flashing back in between two hidden states.
+  useEffect(() => {
+    return () => {
+      const setWindowButtonsVisible = window.desktopBridge?.setWindowButtonsVisible;
+      if (typeof setWindowButtonsVisible !== "function") return;
+      void setWindowButtonsVisible(true);
+    };
+  }, []);
+
+  return null;
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
@@ -158,6 +185,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
+  const hideWindowControlsWhenSidebarCollapsed = useHideWindowControlsWhenSidebarCollapsed();
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,
   // and a clamped drag ends with an unchanged width, which skips the re-render
@@ -181,10 +209,17 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const sidebarProviderStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
-    ...(isMacosDesktop && !isWindowFullscreen
-      ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
-      : {}),
   } as CSSProperties;
+  // Drives the traffic-light strip reservation in index.css, and, in
+  // "auto-hide", the collapsed-rail hide below. Fullscreen has no buttons to
+  // reserve for or hide.
+  const macosWindowControls = !isMacosDesktop
+    ? undefined
+    : isWindowFullscreen
+      ? undefined
+      : hideWindowControlsWhenSidebarCollapsed && compactSidebarEnabled
+        ? "auto-hide"
+        : "visible";
 
   useEffect(() => {
     if (!isMacosDesktop) return;
@@ -227,11 +262,15 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
       <SidebarProvider
         className="h-dvh! min-h-0!"
+        data-macos-window-controls={macosWindowControls}
         data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
         defaultOpen
         style={sidebarProviderStyle}
       >
         <ProjectProjectionRetention />
+        {macosWindowControls === undefined ? null : (
+          <MacosWindowControls autoHide={macosWindowControls === "auto-hide"} />
+        )}
         <Sidebar
           side="left"
           collapsible={compactSidebarEnabled ? "icon" : "offcanvas"}

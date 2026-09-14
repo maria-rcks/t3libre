@@ -386,6 +386,13 @@ export function useCompactSidebarEnabled(): boolean {
   return settingsHydrated && compactSidebarEnabled;
 }
 
+/** macOS desktop opt-in: hide the traffic lights while the icon rail is collapsed. */
+export function useHideWindowControlsWhenSidebarCollapsed(): boolean {
+  const settingsHydrated = useClientSettingsHydrated();
+  const hideWindowControls = useClientSettingsValue().hideWindowControlsWhenSidebarCollapsed;
+  return settingsHydrated && hideWindowControls;
+}
+
 /** Read current settings for one environment, merged with client-local preferences. */
 export function useEnvironmentSettings<T = UnifiedSettings>(
   environmentId: EnvironmentId,

@@ -122,6 +122,14 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+/* macOS traffic lights overlay the sidebar header, so titlebar content starts
+   clear of them. `auto-hide` drops the reservation while the collapsed icon
+   rail is under them and they are hidden (see AppSidebarLayout). */
+[data-macos-window-controls="visible"],
+[data-macos-window-controls="auto-hide"][data-sidebar-state="expanded"] {
+  --workspace-controls-left: 90px;
+}
+
 .wco {
   --workspace-topbar-height: env(titlebar-area-height, 52px);
   --workspace-controls-top: env(titlebar-area-y, 0px);

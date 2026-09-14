@@ -1439,6 +1439,7 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
+        <HideWindowControlsRow />
       </SettingsSection>
 
       <TypographySection />
@@ -1604,6 +1605,47 @@ function TerminalFontRow() {
             terminal: settings.fontFamilyTerminal,
           })}
           size={settings.fontSizeTerminal}
+        />
+      }
+    />
+  );
+}
+
+/**
+ * macOS desktop only, and only with the icon rail on: the traffic lights are
+ * wider than the collapsed rail, so they spill into the content area.
+ */
+function HideWindowControlsRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  if (!isElectron || !isMacPlatform(navigator.platform) || !settings.compactSidebarEnabled) {
+    return null;
+  }
+  return (
+    <SettingsRow
+      {...searchableSetting("hide-window-controls")}
+      description="Hide the red, yellow, and green buttons while the rail is collapsed. They come back when you expand the sidebar."
+      resetAction={
+        settings.hideWindowControlsWhenSidebarCollapsed !==
+        DEFAULT_UNIFIED_SETTINGS.hideWindowControlsWhenSidebarCollapsed ? (
+          <SettingResetButton
+            label="window controls"
+            onClick={() =>
+              updateSettings({
+                hideWindowControlsWhenSidebarCollapsed:
+                  DEFAULT_UNIFIED_SETTINGS.hideWindowControlsWhenSidebarCollapsed,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={settings.hideWindowControlsWhenSidebarCollapsed}
+          onCheckedChange={(checked) =>
+            updateSettings({ hideWindowControlsWhenSidebarCollapsed: Boolean(checked) })
+          }
+          aria-label="Hide window controls when the sidebar is collapsed"
         />
       }
     />

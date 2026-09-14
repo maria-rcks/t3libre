@@ -1320,6 +1320,12 @@ export interface DesktopBridge {
    */
   onQuitShortcut?: (listener: (event: QuitShortcutHintEvent) => void) => () => void;
   getWindowFullscreenState: () => boolean;
+  /**
+   * Show or hide the macOS traffic lights. Optional: older desktop builds lack
+   * it, and it is a no-op off macOS. Callers must restore visibility, since
+   * hidden buttons leave no pointer path to close the window.
+   */
+  setWindowButtonsVisible?: (visible: boolean) => Promise<void>;
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;

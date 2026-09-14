@@ -47,6 +47,7 @@ import {
   pickProjectFavicon,
   pickThemeFiles,
   setTheme,
+  setWindowButtonsVisible,
   showContextMenu,
 } from "./methods/window.ts";
 import {
@@ -78,6 +79,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handleSync(getAppBranding);
   yield* ipc.handleSync(getSystemLocale);
   yield* ipc.handleSync(getWindowFullscreenState);
+  yield* ipc.handle(setWindowButtonsVisible);
   yield* ipc.handleSync(getLocalEnvironmentBootstraps);
   yield* ipc.handle(getLocalEnvironmentBearerToken);
 

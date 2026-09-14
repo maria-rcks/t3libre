@@ -168,6 +168,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "hide-window-controls",
+    title: "Hide window controls",
+    to: "/settings/appearance",
+    searchTerms: ["traffic lights close minimize zoom buttons macos collapsed rail titlebar"],
+    // macOS desktop with the rail on; the section is the stable destination.
+    targetId: "appearance-sidebar",
+  },
+  {
     id: "environment-identification",
     title: "Environment identification",
     to: "/settings/appearance",

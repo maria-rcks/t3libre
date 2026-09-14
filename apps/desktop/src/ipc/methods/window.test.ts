@@ -15,6 +15,7 @@ vi.mock("electron", () => ({
   BrowserWindow: { fromWebContents: ownerWindow },
 }));
 
+import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
@@ -24,6 +25,7 @@ import {
   getWindowFullscreenState,
   pasteAsText,
   pickProjectFavicon,
+  setWindowButtonsVisible,
 } from "./window.ts";
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
@@ -158,6 +160,64 @@ describe("getWindowFullscreenState", () => {
         Layer.mock(ElectronWindow.ElectronWindow)({
           currentMainOrFirst: Effect.succeed(Option.some(window)),
         }),
+      ),
+    );
+  });
+});
+
+describe("setWindowButtonsVisible", () => {
+  const environmentLayer = (platform: NodeJS.Platform) =>
+    Layer.succeed(
+      DesktopEnvironment.DesktopEnvironment,
+      DesktopEnvironment.DesktopEnvironment.of({
+        platform,
+      } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]),
+    );
+
+  it.effect("toggles the traffic lights on macOS", () => {
+    const setVisibility = vi.fn();
+    const window = {
+      isDestroyed: () => false,
+      setWindowButtonVisibility: setVisibility,
+    } as unknown as Electron.BrowserWindow;
+
+    return Effect.gen(function* () {
+      yield* setWindowButtonsVisible.handler(false);
+      yield* setWindowButtonsVisible.handler(true);
+      assert.deepEqual(
+        setVisibility.mock.calls.map(([visible]) => visible),
+        [false, true],
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          Layer.mock(ElectronWindow.ElectronWindow)({
+            currentMainOrFirst: Effect.succeed(Option.some(window)),
+          }),
+          environmentLayer("darwin"),
+        ),
+      ),
+    );
+  });
+
+  it.effect("leaves the window alone off macOS", () => {
+    const setVisibility = vi.fn();
+    const window = {
+      isDestroyed: () => false,
+      setWindowButtonVisibility: setVisibility,
+    } as unknown as Electron.BrowserWindow;
+
+    return Effect.gen(function* () {
+      yield* setWindowButtonsVisible.handler(false);
+      assert.equal(setVisibility.mock.calls.length, 0);
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          Layer.mock(ElectronWindow.ElectronWindow)({
+            currentMainOrFirst: Effect.succeed(Option.some(window)),
+          }),
+          environmentLayer("win32"),
+        ),
       ),
     );
   });
