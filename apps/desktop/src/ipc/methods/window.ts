@@ -37,6 +37,7 @@ import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as Electron from "electron";
 import * as MacPermissions from "../../permissions/MacPermissions.ts";
 import { safariPermissionCheck } from "../../preview/BrowserImport/SafariPermission.ts";
+import { setWindowButtonsVisible as applyWindowButtonsVisible } from "../../window/WindowButtons.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 import {
@@ -104,7 +105,7 @@ export const setWindowButtonsVisible = DesktopIpc.makeIpcMethod({
     const electronWindow = yield* ElectronWindow.ElectronWindow;
     const window = yield* electronWindow.currentMainOrFirst;
     if (Option.isNone(window) || window.value.isDestroyed()) return;
-    window.value.setWindowButtonVisibility(visible);
+    applyWindowButtonsVisible(window.value, visible);
   }),
 });
 

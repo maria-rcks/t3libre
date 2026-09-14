@@ -29,6 +29,7 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import { makeQuitShortcutHandler } from "./QuitHold.ts";
+import { setWindowButtonsVisible } from "./WindowButtons.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
@@ -661,6 +662,13 @@ export const make = Effect.gen(function* () {
       });
       window.on("leave-full-screen", () => {
         window.webContents.send(WINDOW_FULLSCREEN_STATE_CHANNEL, false);
+      });
+      // A fresh document has no component tracking the collapsed-rail
+      // auto-hide, so the shell restores the traffic lights and lets the next
+      // renderer hide them again. No-ops for a window nobody hid.
+      window.webContents.on("did-start-navigation", (details) => {
+        if (!details.isMainFrame || details.isSameDocument) return;
+        setWindowButtonsVisible(window, true);
       });
     }
 
