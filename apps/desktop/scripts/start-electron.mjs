@@ -5,7 +5,7 @@ import { desktopDir, resolveElectronLaunchCommand } from "./electron-launcher.mj
 
 NodeChildProcess.execFileSync(
   process.execPath,
-  [NodePath.join(desktopDir, "scripts/build-browser-secret.mjs")],
+  [NodePath.join(desktopDir, "scripts/build-browser-secret.mjs"), "--optional"],
   { stdio: "inherit" },
 );
 

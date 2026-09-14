@@ -55,7 +55,7 @@ const hostPlatform = NodeOS.platform();
 
 NodeChildProcess.execFileSync(
   process.execPath,
-  [NodePath.join(desktopDir, "scripts/build-browser-secret.mjs")],
+  [NodePath.join(desktopDir, "scripts/build-browser-secret.mjs"), "--optional"],
   { stdio: "inherit" },
 );
 

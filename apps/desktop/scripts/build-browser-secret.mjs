@@ -10,7 +10,16 @@ const hostArch = process.arch;
 const hostPlatform = process.platform;
 
 const { values } = NodeUtil.parseArgs({
-  options: { output: { type: "string" }, arch: { type: "string", default: hostArch } },
+  options: {
+    output: { type: "string" },
+    arch: { type: "string", default: hostArch },
+    // Dev launches pass this: a workstation without the libsecret headers still
+    // gets a running desktop app, with Linux browser import degraded until the
+    // headers are installed (LinuxBrowserSecret resolves to undefined when the
+    // helper is missing). Packaging never passes it, so a release build still
+    // fails loudly rather than shipping without the helper.
+    optional: { type: "boolean", default: false },
+  },
 });
 
 if (hostPlatform === "linux") {
@@ -34,7 +43,7 @@ if (hostPlatform === "linux") {
   } catch {
     /* The first build has no output yet. */
   }
-  if (!current) {
+  const build = () => {
     let flags;
     try {
       flags = NodeChildProcess.execFileSync("pkg-config", ["--cflags", "--libs", "libsecret-1"], {
@@ -61,6 +70,16 @@ if (hostPlatform === "linux") {
       NodeFS.renameSync(temporary, output);
     } finally {
       NodeFS.rmSync(temporary, { force: true });
+    }
+  };
+  if (!current) {
+    try {
+      build();
+    } catch (error) {
+      if (!values.optional) throw error;
+      console.warn(
+        `Skipping the Linux browser import helper: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 }
