@@ -353,6 +353,97 @@ export function resetHeldThreadTimeline(): void {
   lastReadyThreadKey = null;
 }
 
+/**
+ * A send that is waiting on a bootstrap worktree setup, kept at module scope so
+ * leaving the thread and coming back does not drop the optimistic message or
+ * the setup card. ChatView remounts when the route changes, so component state
+ * cannot carry the pending send across that navigation.
+ *
+ * The record is addressed by both keys a route can present: the draft's owner
+ * key (a draft id on the draft route) and the scoped thread key (the server
+ * route the bootstrap thread is reachable from). It holds the optimistic
+ * message until the server persists it, and the thread ref so a remount can
+ * re-subscribe to the running setup.
+ */
+interface PendingWorktreeSetup {
+  readonly ownerKey: string;
+  readonly threadKey: string;
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly messages: ReadonlyArray<ChatMessage>;
+}
+
+let pendingWorktreeSetups: PendingWorktreeSetup[] = [];
+
+export function rememberPendingWorktreeSetup(input: {
+  readonly ownerKey: string;
+  readonly threadKey: string;
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly messages: ReadonlyArray<ChatMessage>;
+}): void {
+  pendingWorktreeSetups = [
+    ...pendingWorktreeSetups.filter(
+      (entry) => entry.ownerKey !== input.ownerKey && entry.threadKey !== input.threadKey,
+    ),
+    input,
+  ];
+}
+
+export function peekPendingWorktreeSetup(input: {
+  readonly ownerKey: string;
+  readonly threadKey: string | null;
+}): PendingWorktreeSetup | null {
+  return (
+    pendingWorktreeSetups.find(
+      (entry) =>
+        entry.ownerKey === input.ownerKey ||
+        (input.threadKey !== null && entry.threadKey === input.threadKey),
+    ) ?? null
+  );
+}
+
+/** Drops a pending message once the server owns it; the card record survives. */
+export function forgetPendingWorktreeSetupMessage(input: {
+  readonly ownerKey: string;
+  readonly threadKey: string | null;
+  readonly messageId: string;
+}): void {
+  pendingWorktreeSetups = pendingWorktreeSetups.map((entry) => {
+    if (
+      entry.ownerKey !== input.ownerKey &&
+      !(input.threadKey !== null && entry.threadKey === input.threadKey)
+    ) {
+      return entry;
+    }
+    return {
+      ...entry,
+      messages: entry.messages.filter((message) => message.id !== input.messageId),
+    };
+  });
+}
+
+export function forgetPendingWorktreeSetup(input: {
+  readonly ownerKey?: string | null;
+  readonly threadKey?: string | null;
+}): void {
+  pendingWorktreeSetups = pendingWorktreeSetups.filter(
+    (entry) =>
+      !(
+        (input.ownerKey !== undefined &&
+          input.ownerKey !== null &&
+          entry.ownerKey === input.ownerKey) ||
+        (input.threadKey !== undefined &&
+          input.threadKey !== null &&
+          entry.threadKey === input.threadKey)
+      ),
+  );
+}
+
+export function resetPendingWorktreeSetups(): void {
+  pendingWorktreeSetups = [];
+}
+
 export function threadKeysShareEnvironment(left: string | null, right: string | null): boolean {
   if (left === null || right === null) {
     return false;

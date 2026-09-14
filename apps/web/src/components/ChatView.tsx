@@ -449,6 +449,10 @@ import {
   toolGroupConsumesUpwardNavigation,
   waitForStartedServerThread,
   shouldRefocusComposerOnWindowFocus,
+  forgetPendingWorktreeSetup,
+  forgetPendingWorktreeSetupMessage,
+  peekPendingWorktreeSetup,
+  rememberPendingWorktreeSetup,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -3390,6 +3394,20 @@ export default function ChatView(props: ChatViewProps) {
   // the card belongs to the send, and the agent takes over from there.
   const worktreeSetupDoneAndTurnVisible =
     worktreeSetup?.phase === "done" && activeThread?.latestTurn?.startedAt != null;
+  // The pending record only needs to survive navigation while the setup can
+  // still be resumed: running, or a terminal state whose card the live thread
+  // still shows. Once the server owns the turn, forget it so a later remount
+  // does not re-subscribe to a finished setup.
+  const worktreeSetupTurnOwned =
+    activeThread?.latestTurn?.startedAt != null || (activeThread?.messages.length ?? 0) > 0;
+  useEffect(() => {
+    if (worktreeSetup === null || worktreeSetup.phase === "running") return;
+    if (!worktreeSetupTurnOwned) return;
+    forgetPendingWorktreeSetup({
+      ownerKey: worktreeSetupOwnerKey,
+      threadKey: routeThreadKey,
+    });
+  }, [worktreeSetup?.phase, worktreeSetupOwnerKey, routeThreadKey, worktreeSetupTurnOwned]);
   useEffect(() => {
     if (!worktreeSetupDoneAndTurnVisible) return;
     setWorktreeSetupRef(null);
@@ -5555,6 +5573,12 @@ export default function ChatView(props: ChatViewProps) {
       );
     }, 0);
     for (const removedMessage of removedMessages) {
+      // The server now owns this message, so a remount must not restore it.
+      forgetPendingWorktreeSetupMessage({
+        ownerKey: worktreeSetupOwnerKey,
+        threadKey: routeThreadKey,
+        messageId: removedMessage.id,
+      });
       const previewUrls = collectUserMessageBlobPreviewUrls(removedMessage);
       if (previewUrls.length > 0) {
         handoffAttachmentPreviews(removedMessage.id, previewUrls);
@@ -5565,18 +5589,45 @@ export default function ChatView(props: ChatViewProps) {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [activeThread?.id, activeThread?.messages, handoffAttachmentPreviews, optimisticUserMessages]);
+  }, [
+    activeThread?.id,
+    activeThread?.messages,
+    handoffAttachmentPreviews,
+    optimisticUserMessages,
+    routeThreadKey,
+    worktreeSetupOwnerKey,
+  ]);
 
   useEffect(() => {
+    const pending = peekPendingWorktreeSetup({
+      ownerKey: worktreeSetupOwnerKey,
+      threadKey: routeThreadKey,
+    });
+    const pendingMessageIds = new Set(pending?.messages.map((message) => message.id) ?? []);
     setOptimisticUserMessages((existing) => {
       for (const message of existing) {
-        revokeUserMessagePreviewUrls(message);
+        // A message the pending record still owns keeps its blob preview URLs;
+        // revoking them would break the row restored after a remount.
+        if (!pendingMessageIds.has(message.id)) {
+          revokeUserMessagePreviewUrls(message);
+        }
       }
-      return [];
+      return pending ? [...pending.messages] : [];
     });
+    // Recover the setup card for a bootstrap that outlived this mount. The
+    // server keeps the running snapshot, so the subscription refills it.
+    setWorktreeSetupRef(
+      pending
+        ? {
+            environmentId: pending.environmentId,
+            threadId: pending.threadId,
+            ownerKey: worktreeSetupOwnerKey,
+          }
+        : null,
+    );
     resetLocalDispatch();
     setExpandedImage(null);
-  }, [draftId, resetLocalDispatch, threadId]);
+  }, [draftId, resetLocalDispatch, routeThreadKey, threadId, worktreeSetupOwnerKey]);
 
   const closeExpandedImage = useCallback(() => {
     setExpandedImage(null);
@@ -7367,6 +7418,14 @@ export default function ChatView(props: ChatViewProps) {
         ? { environmentId, threadId: threadIdForSend, ownerKey: worktreeSetupOwnerKey }
         : null,
     );
+    if (!baseBranchForWorktree) {
+      // A local send supersedes any pending worktree setup on this composer, so
+      // a remount must not resurrect its card.
+      forgetPendingWorktreeSetup({
+        ownerKey: worktreeSetupOwnerKey,
+        threadKey: routeThreadKey,
+      });
+    }
 
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
@@ -7433,20 +7492,29 @@ export default function ChatView(props: ChatViewProps) {
     } else {
       scrollToEnd();
     }
-    setOptimisticUserMessages((existing) => [
-      ...existing,
-      {
-        id: messageIdForSend,
-        role: "user",
-        text: outgoingMessageText,
-        ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
-        ...(outgoingMessageContext !== undefined ? { context: outgoingMessageContext } : {}),
-        turnId: null,
-        createdAt: messageCreatedAt,
-        updatedAt: messageCreatedAt,
-        streaming: false,
-      },
-    ]);
+    const optimisticUserMessage: ChatMessage = {
+      id: messageIdForSend,
+      role: "user",
+      text: outgoingMessageText,
+      ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+      ...(outgoingMessageContext !== undefined ? { context: outgoingMessageContext } : {}),
+      turnId: null,
+      createdAt: messageCreatedAt,
+      updatedAt: messageCreatedAt,
+      streaming: false,
+    };
+    setOptimisticUserMessages((existing) => [...existing, optimisticUserMessage]);
+    if (baseBranchForWorktree) {
+      // Hold the send at module scope so a remount restores the message and
+      // re-subscribes to the setup the server is still running.
+      rememberPendingWorktreeSetup({
+        ownerKey: worktreeSetupOwnerKey,
+        threadKey: routeThreadKey,
+        environmentId,
+        threadId: threadIdForSend,
+        messages: [optimisticUserMessage],
+      });
+    }
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
       const toastCopy = buildExpiredTerminalContextToastCopy(
@@ -7687,6 +7755,12 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     if (failure !== null) {
+      // The send did not leave a running setup behind, so a remount must not
+      // restore the optimistic message or re-subscribe.
+      forgetPendingWorktreeSetup({
+        ownerKey: worktreeSetupOwnerKey,
+        threadKey: routeThreadKey,
+      });
       if (
         promptRef.current.length === 0 &&
         composerImagesRef.current.length === 0 &&

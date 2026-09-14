@@ -88,6 +88,11 @@ import {
   toolGroupConsumesUpwardNavigation,
   waitForRevertedMessage,
   prepareRevertedMessageAttachments,
+  forgetPendingWorktreeSetup,
+  forgetPendingWorktreeSetupMessage,
+  peekPendingWorktreeSetup,
+  rememberPendingWorktreeSetup,
+  resetPendingWorktreeSetups,
 } from "./ChatView.logic";
 
 describe("agent browser close confirmation", () => {
@@ -2470,5 +2475,70 @@ describe("restorePlanFollowUpComposer", () => {
       prompt: "Follow up on the plan",
       detectTrigger: true,
     });
+  });
+});
+
+describe("pending worktree setup handoff", () => {
+  const ownerKey = "draft-1";
+  const threadKey = "environment-1:thread-1";
+  const message = {
+    id: MessageId.make("pending-message"),
+    role: "user" as const,
+    text: "start in a new worktree",
+    turnId: null,
+    createdAt: now,
+    updatedAt: now,
+    streaming: false,
+  };
+
+  beforeEach(() => {
+    resetPendingWorktreeSetups();
+  });
+
+  it("is addressable by the draft owner key and by the server thread key", () => {
+    rememberPendingWorktreeSetup({
+      ownerKey,
+      threadKey,
+      environmentId: EnvironmentId.make("environment-1"),
+      threadId: ThreadId.make("thread-1"),
+      messages: [message],
+    });
+
+    const byOwner = peekPendingWorktreeSetup({ ownerKey, threadKey: null });
+    const byThread = peekPendingWorktreeSetup({
+      ownerKey: "server-route-owner",
+      threadKey,
+    });
+    expect(byOwner?.messages).toEqual([message]);
+    expect(byThread?.messages).toEqual([message]);
+    expect(peekPendingWorktreeSetup({ ownerKey: "other", threadKey: "other" })).toBeNull();
+  });
+
+  it("keeps the card record after the server owns the message", () => {
+    rememberPendingWorktreeSetup({
+      ownerKey,
+      threadKey,
+      environmentId: EnvironmentId.make("environment-1"),
+      threadId: ThreadId.make("thread-1"),
+      messages: [message],
+    });
+
+    forgetPendingWorktreeSetupMessage({ ownerKey, threadKey, messageId: message.id });
+    const pending = peekPendingWorktreeSetup({ ownerKey, threadKey });
+    expect(pending?.messages).toEqual([]);
+    expect(pending?.threadId).toBe(ThreadId.make("thread-1"));
+  });
+
+  it("forgets the record by either key", () => {
+    rememberPendingWorktreeSetup({
+      ownerKey,
+      threadKey,
+      environmentId: EnvironmentId.make("environment-1"),
+      threadId: ThreadId.make("thread-1"),
+      messages: [message],
+    });
+
+    forgetPendingWorktreeSetup({ ownerKey: null, threadKey });
+    expect(peekPendingWorktreeSetup({ ownerKey, threadKey: null })).toBeNull();
   });
 });
