@@ -90,6 +90,7 @@ import {
   prepareRevertedMessageAttachments,
   forgetPendingWorktreeSetup,
   forgetPendingWorktreeSetupMessage,
+  isPendingWorktreeSetupMessage,
   peekPendingWorktreeSetup,
   rememberPendingWorktreeSetup,
   resetPendingWorktreeSetups,
@@ -2540,5 +2541,19 @@ describe("pending worktree setup handoff", () => {
 
     forgetPendingWorktreeSetup({ ownerKey: null, threadKey });
     expect(peekPendingWorktreeSetup({ ownerKey, threadKey: null })).toBeNull();
+  });
+
+  it("reports the messages a pending setup still owns", () => {
+    rememberPendingWorktreeSetup({
+      ownerKey,
+      threadKey,
+      environmentId: EnvironmentId.make("environment-1"),
+      threadId: ThreadId.make("thread-1"),
+      messages: [message],
+    });
+
+    expect(isPendingWorktreeSetupMessage(message.id)).toBe(true);
+    forgetPendingWorktreeSetupMessage({ ownerKey, threadKey, messageId: message.id });
+    expect(isPendingWorktreeSetupMessage(message.id)).toBe(false);
   });
 });

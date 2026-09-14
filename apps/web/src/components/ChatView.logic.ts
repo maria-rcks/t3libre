@@ -374,6 +374,8 @@ interface PendingWorktreeSetup {
 }
 
 let pendingWorktreeSetups: PendingWorktreeSetup[] = [];
+/** Bounds records left behind by setups the user started and navigated away from. */
+const MAX_PENDING_WORKTREE_SETUPS = 8;
 
 export function rememberPendingWorktreeSetup(input: {
   readonly ownerKey: string;
@@ -382,12 +384,27 @@ export function rememberPendingWorktreeSetup(input: {
   readonly threadId: ThreadId;
   readonly messages: ReadonlyArray<ChatMessage>;
 }): void {
-  pendingWorktreeSetups = [
+  const next = [
     ...pendingWorktreeSetups.filter(
       (entry) => entry.ownerKey !== input.ownerKey && entry.threadKey !== input.threadKey,
     ),
     input,
   ];
+  // Drop the oldest abandoned records; their messages are no longer rendered
+  // or handed off, so their preview URLs can be released.
+  for (const evicted of next.splice(0, Math.max(0, next.length - MAX_PENDING_WORKTREE_SETUPS))) {
+    for (const message of evicted.messages) {
+      revokeUserMessagePreviewUrls(message);
+    }
+  }
+  pendingWorktreeSetups = next;
+}
+
+/** True while a pending setup still owns the optimistic message and its preview URLs. */
+export function isPendingWorktreeSetupMessage(messageId: string): boolean {
+  return pendingWorktreeSetups.some((entry) =>
+    entry.messages.some((message) => message.id === messageId),
+  );
 }
 
 export function peekPendingWorktreeSetup(input: {

@@ -451,6 +451,7 @@ import {
   shouldRefocusComposerOnWindowFocus,
   forgetPendingWorktreeSetup,
   forgetPendingWorktreeSetupMessage,
+  isPendingWorktreeSetupMessage,
   peekPendingWorktreeSetup,
   rememberPendingWorktreeSetup,
 } from "./ChatView.logic";
@@ -3114,6 +3115,9 @@ export default function ChatView(props: ChatViewProps) {
     return () => {
       clearAttachmentPreviewHandoffs();
       for (const message of optimisticUserMessagesRef.current) {
+        // A message a pending worktree setup still owns keeps its preview URLs
+        // so a remount can restore it; the record releases them when it clears.
+        if (isPendingWorktreeSetupMessage(message.id)) continue;
         revokeUserMessagePreviewUrls(message);
       }
     };
