@@ -1576,6 +1576,18 @@ function groupAdjacentActivities(entries: ReadonlyArray<RawThreadFeedEntry>): Th
   return grouped;
 }
 
+/**
+ * Row label for a provider thinking trace: live while the trace streams, then
+ * how long it took, in the same duration format as the "Worked for" fold.
+ */
+export function reasoningRowLabel(message: OrchestrationThread["messages"][number]): string {
+  if (message.streaming) {
+    return "Thinking";
+  }
+  const elapsedMs = computeElapsedMs(message.createdAt, message.updatedAt);
+  return elapsedMs === null ? "Thought" : `Thought for ${formatDuration(elapsedMs)}`;
+}
+
 function computeElapsedMs(startIso: string, endIso: string): number | null {
   const start = Date.parse(startIso);
   const end = Date.parse(endIso);
@@ -1636,6 +1648,9 @@ function deriveThreadFeedTurnFolds(
       pendingUserBoundary = entry.message.createdAt;
       continue;
     }
+    // Reasoning is deliberately not grouped here: a thinking row stays a
+    // visible one-click disclosure after its turn folds, instead of hiding
+    // behind "Worked for ...".
     const turnId =
       entry.type === "message" && entry.message.role === "assistant"
         ? entry.message.turnId

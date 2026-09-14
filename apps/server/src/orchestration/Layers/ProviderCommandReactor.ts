@@ -4,6 +4,7 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type OrchestrationMessageRole,
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
@@ -118,13 +119,15 @@ const THREAD_TITLE_CONTEXT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n"
 const FIRST_USER_CONTEXT_TRUNCATION_MARKER = "\n[First user message truncated]";
 
 type ThreadTitleMessage = {
-  readonly role: "user" | "assistant" | "system";
+  readonly role: OrchestrationMessageRole;
   readonly text: string;
   readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
 };
 
 function formatThreadTitleSection(message: ThreadTitleMessage): string | undefined {
-  if (message.role === "system") {
+  // A thinking trace is working notes, not what the thread is about, and it
+  // dwarfs the answer it precedes. Titling on it would be worse and costlier.
+  if (message.role === "system" || message.role === "reasoning") {
     return undefined;
   }
   const text = assistantCitationsToPlainText(message.text).trim();

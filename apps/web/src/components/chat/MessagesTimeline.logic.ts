@@ -298,7 +298,7 @@ function maxIsoTimestamp(a: string | null, b: string | null): string | null {
 
 export interface TimelineDurationMessage {
   id: string;
-  role: "user" | "assistant" | "system";
+  role: ChatMessage["role"];
   createdAt: string;
   updatedAt: string;
   streaming: boolean;
@@ -531,7 +531,9 @@ function lastUserMessageIndex(timelineEntries: ReadonlyArray<TimelineEntry>): nu
 
 function timelineEntryTurnId(entry: TimelineEntry): TurnId | null {
   if (entry.kind === "message") {
-    return entry.message.role === "assistant" ? (entry.message.turnId ?? null) : null;
+    return entry.message.role === "assistant" || entry.message.role === "reasoning"
+      ? (entry.message.turnId ?? null)
+      : null;
   }
   if (entry.kind === "proposed-plan") {
     return entry.proposedPlan.turnId;
@@ -609,6 +611,9 @@ function deriveTurnFolds(input: {
       pendingUserBoundary = entry.message.createdAt;
       continue;
     }
+    // Reasoning is deliberately not grouped here: a thinking block stays a
+    // visible one-click disclosure after its turn folds, instead of hiding
+    // behind "Worked for ...".
     const turnId =
       entry.kind === "message" && entry.message.role === "assistant"
         ? (entry.message.turnId ?? null)
@@ -1287,7 +1292,12 @@ export function deriveMessagesTimelineRows(input: {
   if (input.isWorking && activeTurnHeaderIndex === input.timelineEntries.length) {
     appendWorkingRow();
   }
-  if (input.isWorking && (!hasActivityRow || latestToolFailed)) {
+  // A live thinking block is the real version of the placeholder below, so it
+  // suppresses it rather than sitting under a second "Thinking" row.
+  const hasStreamingReasoningRow = nextRows.some(
+    (row) => row.kind === "message" && row.message.role === "reasoning" && row.message.streaming,
+  );
+  if (input.isWorking && !hasStreamingReasoningRow && (!hasActivityRow || latestToolFailed)) {
     nextRows.push({
       kind: "thinking",
       id: LIVE_ACTIVITY_ROW_ID,

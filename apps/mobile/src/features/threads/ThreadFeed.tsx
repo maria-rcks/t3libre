@@ -145,6 +145,7 @@ import {
 import {
   deriveThreadFeedPresentation,
   isContextCompactionActivityGroup,
+  reasoningRowLabel,
   type ThreadFeedEntry,
   type ThreadFeedLatestTurn,
 } from "../../lib/threadActivity";
@@ -158,6 +159,7 @@ import {
   collapsedWorkLogHeight,
   ThreadAgentSpawnCard,
   ThreadDisclosureChevron,
+  ThreadReasoningRow,
   ThreadWorkGroupToggle,
   ThreadThinkingRow,
   ThreadWorkLog,
@@ -192,6 +194,9 @@ import {
   ThreadMarkdownImageUnavailable,
   ThreadMarkdownImageView,
 } from "./ThreadMarkdownImage";
+
+/** `ml-7` gutter plus the `px-3` padding of the expanded reasoning container. */
+const REASONING_CONTENT_INSET = 52;
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
   // Native iOS blockquotes and adjacent selectable text are separate layout
@@ -1350,6 +1355,7 @@ function renderFeedEntry(
   > & {
     readonly copiedRowId: string | null;
     readonly expandedWorkRows: Record<string, boolean>;
+    readonly expandedReasoningMessageIds: ReadonlySet<string>;
     readonly workRowSizing: ReturnType<typeof deriveThreadWorkLogSizing>;
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
@@ -1358,6 +1364,7 @@ function renderFeedEntry(
     readonly onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
     readonly onToggleWorkRow: (rowId: string, anchorKey: string) => void;
     readonly onToggleTurnFold: (turnId: TurnId) => void;
+    readonly onToggleReasoning: (messageId: string) => void;
     readonly onPressPreview: (source: FilePreviewSource) => void;
     readonly onPressVideo: (attachment: ChatFileAttachment, sourceIdentifier: string) => void;
     readonly markdownLinkHandlers: MarkdownLinkHandlers;
@@ -1469,6 +1476,35 @@ function renderFeedEntry(
 
   if (entry.type === "message") {
     const { message } = entry;
+    if (message.role === "reasoning") {
+      // An empty trace would render as a bare label; the live "Thinking" row
+      // already covers that window.
+      if (message.text.trim().length === 0) {
+        return null;
+      }
+      return (
+        <ThreadReasoningRow
+          rowSizing={props.workRowSizing}
+          iconSubtleColor={iconSubtleColor}
+          expanded={props.expandedReasoningMessageIds.has(message.id)}
+          label={reasoningRowLabel(message)}
+          streaming={Boolean(message.streaming)}
+          onToggle={() => props.onToggleReasoning(message.id)}
+        >
+          <MarkdownImageAvailableWidthContext
+            value={props.markdownContentWidth - REASONING_CONTENT_INSET}
+          >
+            <AssistantMarkdownContent
+              markdown={message.text}
+              markdownStyles={markdownStyles.assistant}
+              linkHandlers={props.markdownLinkHandlers}
+              renderImage={props.renderMarkdownImage}
+              skills={props.skills}
+            />
+          </MarkdownImageAvailableWidthContext>
+        </ThreadReasoningRow>
+      );
+    }
     const isUser = message.role === "user";
     const renderedText = renderAssistantCitationsAsText(message.text);
     const styles = isUser ? markdownStyles.user : markdownStyles.assistant;
@@ -1962,13 +1998,21 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     readonly expandedWorkGroups: Record<string, boolean>;
     readonly expandedWorkRows: Record<string, boolean>;
     readonly expandedTurnIds: ReadonlySet<TurnId>;
+    readonly expandedReasoningMessageIds: ReadonlySet<string>;
   }>({
     copiedRowId: null,
     expandedWorkGroups: {},
     expandedWorkRows: {},
     expandedTurnIds: new Set(),
+    expandedReasoningMessageIds: new Set(),
   });
-  const { copiedRowId, expandedWorkGroups, expandedWorkRows, expandedTurnIds } = interactionState;
+  const {
+    copiedRowId,
+    expandedWorkGroups,
+    expandedWorkRows,
+    expandedTurnIds,
+    expandedReasoningMessageIds,
+  } = interactionState;
   const [expandedFile, setExpandedFile] = useState<FilePreviewSource | null>(null);
   const [expandedVideo, setExpandedVideo] = useState<VideoPreviewSource | null>(null);
   const fileShareSourceIdentifier = useId();
@@ -2234,6 +2278,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       unsettledTurnId,
       copiedRowId,
       expandedWorkRows,
+      expandedReasoningMessageIds,
       workRowSizing,
       iconSubtleColor,
       markdownStyles,
@@ -2247,6 +2292,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       unsettledTurnId,
       copiedRowId,
       expandedWorkRows,
+      expandedReasoningMessageIds,
       workRowSizing,
       iconSubtleColor,
       markdownStyles,
@@ -2602,6 +2648,22 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     [suspendEndScrollMaintenanceForDisclosure],
   );
 
+  const onToggleReasoning = useCallback(
+    (messageId: string) => {
+      suspendEndScrollMaintenanceForDisclosure(`reasoning:${messageId}`);
+      setInteractionState((current) => {
+        const next = new Set(current.expandedReasoningMessageIds);
+        if (next.has(messageId)) {
+          next.delete(messageId);
+        } else {
+          next.add(messageId);
+        }
+        return { ...current, expandedReasoningMessageIds: next };
+      });
+    },
+    [suspendEndScrollMaintenanceForDisclosure],
+  );
+
   const onPressPreview = useCallback((source: FilePreviewSource) => {
     setExpandedFile((current) => current ?? source);
   }, []);
@@ -2628,6 +2690,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         return undefined;
       }
       switch (entry.type) {
+        case "message":
+          // A collapsed reasoning row is the same chrome as a work toggle.
+          return entry.message.role === "reasoning" &&
+            !expandedReasoningMessageIds.has(entry.message.id)
+            ? WORK_GROUP_TOGGLE_HEIGHT
+            : undefined;
         case "turn-fold":
           return TURN_FOLD_HEIGHT;
         case "work-toggle":
@@ -2646,7 +2714,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
           return undefined;
       }
     },
-    [expandedWorkRows, workRowSizing.fixedRowHeight],
+    [expandedReasoningMessageIds, expandedWorkRows, workRowSizing.fixedRowHeight],
   );
 
   // Disclosures can mount existing offscreen rows as well as new work rows.
@@ -2664,6 +2732,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             onEditPendingMessage: props.onEditPendingMessage,
             copiedRowId,
             expandedWorkRows,
+            expandedReasoningMessageIds,
             workRowSizing,
             workGroupScrollPositions,
             terminalAssistantMessageIds,
@@ -2672,6 +2741,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             onToggleWorkGroup,
             onToggleWorkRow,
             onToggleTurnFold,
+            onToggleReasoning,
             onPressPreview,
             onPressVideo,
             markdownLinkHandlers,
@@ -2698,6 +2768,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       copiedRowId,
       disclosureToggleSettling,
       expandedWorkRows,
+      expandedReasoningMessageIds,
       workRowSizing,
       workGroupScrollPositions,
       terminalAssistantMessageIds,
@@ -2715,6 +2786,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       markdownLinkHandlers,
       onPressPreview,
       onPressVideo,
+      onToggleReasoning,
       onToggleTurnFold,
       onToggleWorkGroup,
       onToggleWorkRow,
