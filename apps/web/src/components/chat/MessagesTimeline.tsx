@@ -2168,8 +2168,16 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
   row: Extract<TimelineRow, { kind: "message" }>;
 }) {
   const ctx = use(TimelineRowCtx);
+  const { isWorking, latestTurnId } = use(TimelineRowActivityCtx);
   const { message } = row;
-  const streaming = Boolean(message.streaming);
+  // A block left open by a crashed provider or a restarted server never gets
+  // its completion. Only the live turn may claim to still be thinking, so a
+  // settled turn cannot shimmer "Thinking" at the user forever.
+  const streaming =
+    Boolean(message.streaming) &&
+    isWorking &&
+    message.turnId !== null &&
+    message.turnId === latestTurnId;
   const expanded = ctx.expandedReasoningMessageIds.has(message.id);
   const { onToggleReasoning } = ctx;
   const toggle = useCallback(() => {
@@ -2179,10 +2187,14 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
     ? null
     : Date.parse(message.updatedAt) - Date.parse(message.createdAt);
   const elapsed =
-    elapsedMs !== null && Number.isFinite(elapsedMs) && elapsedMs >= 0
+    elapsedMs !== null && Number.isFinite(elapsedMs) && elapsedMs > 0
       ? formatDuration(elapsedMs)
       : null;
   const label = streaming ? "Thinking" : elapsed ? `Thought for ${elapsed}` : "Thought";
+
+  if (message.text.trim().length === 0 && !streaming) {
+    return null;
+  }
 
   return (
     <div className={cn("flex flex-col", expanded && "mb-1")}>

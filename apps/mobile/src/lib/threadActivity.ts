@@ -1580,12 +1580,17 @@ function groupAdjacentActivities(entries: ReadonlyArray<RawThreadFeedEntry>): Th
  * Row label for a provider thinking trace: live while the trace streams, then
  * how long it took, in the same duration format as the "Worked for" fold.
  */
-export function reasoningRowLabel(message: OrchestrationThread["messages"][number]): string {
-  if (message.streaming) {
+export function reasoningRowLabel(
+  message: OrchestrationThread["messages"][number],
+  live: boolean,
+): string {
+  if (live) {
     return "Thinking";
   }
   const elapsedMs = computeElapsedMs(message.createdAt, message.updatedAt);
-  return elapsedMs === null ? "Thought" : `Thought for ${formatDuration(elapsedMs)}`;
+  return elapsedMs === null || elapsedMs <= 0
+    ? "Thought"
+    : `Thought for ${formatDuration(elapsedMs)}`;
 }
 
 function computeElapsedMs(startIso: string, endIso: string): number | null {

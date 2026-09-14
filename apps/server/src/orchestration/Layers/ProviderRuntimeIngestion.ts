@@ -1036,10 +1036,10 @@ const make = Effect.gen(function* () {
     lookup: () => Effect.succeed(""),
   });
 
-  // Codex splits a reasoning summary into indexed parts. The index is the only
-  // signal that one part ended and the next began, so the blank line that keeps
-  // them readable has to be inserted here.
-  const reasoningSummaryIndexByMessageId = yield* Cache.make<MessageId, number>({
+  // Codex splits a reasoning trace into indexed parts, summary and raw alike.
+  // The index is the only signal that one part ended and the next began, so the
+  // blank line that keeps them readable has to be inserted here.
+  const reasoningPartIndexByMessageId = yield* Cache.make<MessageId, number>({
     capacity: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY,
     timeToLive: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL,
     lookup: () => Effect.succeed(-1),
@@ -1375,7 +1375,7 @@ const make = Effect.gen(function* () {
 
   const clearAssistantMessageState = (messageId: MessageId) =>
     clearBufferedAssistantText(messageId).pipe(
-      Effect.andThen(Cache.invalidate(reasoningSummaryIndexByMessageId, messageId)),
+      Effect.andThen(Cache.invalidate(reasoningPartIndexByMessageId, messageId)),
       Effect.andThen(Cache.invalidate(reasoningStartedAtByMessageId, messageId)),
     );
 
@@ -1922,6 +1922,7 @@ const make = Effect.gen(function* () {
               streamKind: event.payload.streamKind,
               delta: event.payload.delta,
               summaryIndex: event.payload.summaryIndex,
+              contentIndex: event.payload.contentIndex,
             }
           : undefined;
       const proposedPlanDelta =
@@ -1952,19 +1953,16 @@ const make = Effect.gen(function* () {
         }
 
         let delta = reasoningDelta.delta;
-        if (reasoningDelta.summaryIndex !== undefined) {
+        const partIndex = reasoningDelta.summaryIndex ?? reasoningDelta.contentIndex;
+        if (partIndex !== undefined) {
           const lastIndex = Option.getOrElse(
-            yield* Cache.getOption(reasoningSummaryIndexByMessageId, reasoningMessageId),
+            yield* Cache.getOption(reasoningPartIndexByMessageId, reasoningMessageId),
             () => -1,
           );
-          if (lastIndex >= 0 && lastIndex !== reasoningDelta.summaryIndex) {
+          if (lastIndex >= 0 && lastIndex !== partIndex) {
             delta = `\n\n${delta}`;
           }
-          yield* Cache.set(
-            reasoningSummaryIndexByMessageId,
-            reasoningMessageId,
-            reasoningDelta.summaryIndex,
-          );
+          yield* Cache.set(reasoningPartIndexByMessageId, reasoningMessageId, partIndex);
         }
 
         // Reasoning is never delivered token by token, even when the project
@@ -2150,28 +2148,50 @@ const make = Effect.gen(function* () {
               ? event.payload.detail
               : undefined;
 
-          // A provider can report a whole block at once without streaming it.
-          // Open a segment so the snapshot has somewhere to land.
-          if (Option.isNone(activeReasoningMessageId) && fallbackText !== undefined) {
-            yield* startAssistantSegmentForTurn({
+          if (Option.isNone(activeReasoningMessageId)) {
+            // A provider can report a whole block at once without streaming it.
+            // The id is derived from the item rather than the segment counter so
+            // a repeated completion rewrites that row instead of adding a copy.
+            if (fallbackText !== undefined) {
+              const snapshotMessageId = assistantSegmentMessageId(
+                `snapshot:${event.itemId ?? event.eventId}`,
+                0,
+                "reasoning",
+              );
+              const existingSnapshot = yield* getThreadMessageById(thread.id, snapshotMessageId);
+              if (existingSnapshot === undefined) {
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.message.reasoning.delta",
+                  commandId: yield* providerCommandId(event, "reasoning-delta-snapshot"),
+                  threadId: thread.id,
+                  messageId: snapshotMessageId,
+                  delta: fallbackText,
+                  turnId,
+                  createdAt: now,
+                });
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.message.reasoning.complete",
+                  commandId: yield* providerCommandId(event, "reasoning-complete-snapshot"),
+                  threadId: thread.id,
+                  messageId: snapshotMessageId,
+                  turnId,
+                  createdAt: now,
+                });
+              }
+            }
+          } else {
+            yield* finalizeActiveSegmentForTurn({
+              event,
               threadId: thread.id,
               turnId,
-              baseKey: reasoningSegmentBaseKeyFromEvent(event, "reasoning_text"),
+              createdAt: now,
+              commandTag: "reasoning-complete",
+              finalDeltaCommandTag: "reasoning-delta-finalize",
+              hasProjectedMessage: existingReasoningMessage !== undefined,
               role: "reasoning",
+              ...(fallbackText !== undefined ? { fallbackText } : {}),
             });
           }
-
-          yield* finalizeActiveSegmentForTurn({
-            event,
-            threadId: thread.id,
-            turnId,
-            createdAt: now,
-            commandTag: "reasoning-complete",
-            finalDeltaCommandTag: "reasoning-delta-finalize",
-            hasProjectedMessage: existingReasoningMessage !== undefined,
-            role: "reasoning",
-            ...(fallbackText !== undefined ? { fallbackText } : {}),
-          });
         }
       }
 

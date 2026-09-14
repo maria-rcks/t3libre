@@ -1482,13 +1482,19 @@ function renderFeedEntry(
       if (message.text.trim().length === 0) {
         return null;
       }
+      // Only the live turn may claim to still be thinking: a block left open by
+      // a crashed provider must not shimmer on a turn that settled long ago.
+      const liveReasoning =
+        Boolean(message.streaming) &&
+        message.turnId !== null &&
+        message.turnId === props.unsettledTurnId;
       return (
         <ThreadReasoningRow
           rowSizing={props.workRowSizing}
           iconSubtleColor={iconSubtleColor}
           expanded={props.expandedReasoningMessageIds.has(message.id)}
-          label={reasoningRowLabel(message)}
-          streaming={Boolean(message.streaming)}
+          label={reasoningRowLabel(message, liveReasoning)}
+          streaming={liveReasoning}
           onToggle={() => props.onToggleReasoning(message.id)}
         >
           <MarkdownImageAvailableWidthContext
