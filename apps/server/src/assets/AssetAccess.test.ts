@@ -1089,10 +1089,24 @@ describe("AssetAccess", () => {
         url: "https://raw.githubusercontent.com/owner/repo/main/docs/shot.png",
       });
 
+      // The pre-`user-attachments` form, Git LFS bytes, and a name no `decodeURIComponent`
+      // accepts all arrive from real bodies.
+      const legacy = yield* issue("https://github.com/owner/repo/assets/45952064/1a1842fb");
+      expect(yield* resolve(legacy.relativeUrl)).toMatchObject({
+        url: "https://github.com/owner/repo/assets/45952064/1a1842fb",
+      });
+      const lfs = yield* issue("https://media.githubusercontent.com/media/owner/repo/main/a.mp4");
+      expect(yield* resolve(lfs.relativeUrl)).toMatchObject({
+        url: "https://media.githubusercontent.com/media/owner/repo/main/a.mp4",
+      });
+      const awkward = yield* issue("https://raw.githubusercontent.com/o/r/main/100%.png");
+      expect(awkward.relativeUrl.endsWith("/100%25.png")).toBe(true);
+
       for (const url of [
         "https://example.com/shot.png",
         "http://github.com/user-attachments/assets/1a1842fb",
         "https://github.com/owner/repo/pull/1",
+        "https://github.com/owner/repo/blob/main/",
       ]) {
         expect((yield* issue(url).pipe(Effect.flip))._tag).toBe(
           "AssetGitHubMediaUrlValidationError",

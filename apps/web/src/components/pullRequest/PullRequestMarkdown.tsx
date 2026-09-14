@@ -34,10 +34,12 @@ function PullRequestGitHubVideo({
   const resource = useMemo<AssetResource>(() => ({ _tag: "github-media", cwd, url }), [cwd, url]);
   const assetUrl = useAssetUrlState(environmentId, resource);
   const refreshAssetUrl = useAssetUrlRefresh(environmentId, resource);
+  // A server too old to sign this resource, or one with no route to GitHub, still leaves a
+  // public repository's video playing exactly as it did before.
+  const src = assetUrl._tag === "Success" ? assetUrl.url : assetUrl._tag === "Failure" ? url : null;
   return (
     <MediaVideoPlayer
-      src={assetUrl._tag === "Success" ? assetUrl.url : null}
-      sourceFailed={assetUrl._tag === "Failure"}
+      src={src}
       originalUrl={url}
       label="Pull request video"
       className="w-full"

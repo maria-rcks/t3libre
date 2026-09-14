@@ -1588,6 +1588,16 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
   /** Caps the box height in rem while keeping the image's ratio; 30 by default. */
   readonly maxHeightRem?: number | undefined;
   readonly style?: CSSProperties | undefined;
+  readonly className?: string | undefined;
+  /** Sanitized authored attributes (`id`, `align`, …) that fragment links and layout rely on. */
+  readonly imageProps?:
+    | Omit<ComponentProps<"img">, "src" | "alt" | "className" | "style">
+    | undefined;
+  /** Where the media also lives on the web, for the failure state's escape hatch. */
+  readonly originalUrl?: string | undefined;
+  /** Loaded instead of the failure state when no URL can be signed, such as against a server
+      too old to know this resource. Only safe when the client can reach it directly. */
+  readonly fallbackSrc?: string | undefined;
   readonly workspaceRoot?: string | undefined;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }) {
@@ -1600,9 +1610,15 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
       : resource._tag === "workspace-file" && props.workspaceRoot
         ? `${props.workspaceRoot.replace(/[\\/]+$/, "")}/${resource.path}`
         : undefined;
-  const reference = path ? mediaFileReference(path, props.workspaceRoot) : undefined;
-  const relativePath = reference?.relativePath;
-  const src = assetUrl._tag === "Success" ? assetUrl.url + (props.srcFragment ?? "") : null;
+  const reference = path
+    ? mediaFileReference(path, props.workspaceRoot)
+    : props.originalUrl
+      ? mediaUrlReference(props.originalUrl)
+      : undefined;
+  const relativePath = reference?.kind === "file" ? reference.relativePath : undefined;
+  const fallbackSrc = assetUrl._tag === "Failure" ? props.fallbackSrc : undefined;
+  const src =
+    assetUrl._tag === "Success" ? assetUrl.url + (props.srcFragment ?? "") : (fallbackSrc ?? null);
   // The server reads the pixel size from the file header, so the slot can be
   // the image's final box instead of a 16:9 guess. An authored size wins; a
   // caller's height cap shrinks the box while keeping the ratio.
@@ -1638,9 +1654,10 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
     return (
       <ChatMarkdownVideo
         src={src}
-        sourceFailed={assetUrl._tag === "Failure"}
+        sourceFailed={assetUrl._tag === "Failure" && fallbackSrc === undefined}
         alt={props.alt}
         copyMarkdown={props.copyMarkdown}
+        originalUrl={props.originalUrl}
         style={props.style}
         mediaIdentity={JSON.stringify([props.environmentId, props.resource, props.srcFragment])}
         onRetry={refreshAssetUrl}
@@ -1653,13 +1670,15 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
     <ChatMarkdownImage
       key={JSON.stringify([props.environmentId, props.resource, props.srcFragment])}
       src={src}
-      sourceFailed={assetUrl._tag === "Failure"}
+      sourceFailed={assetUrl._tag === "Failure" && fallbackSrc === undefined}
       alt={props.alt}
       copyMarkdown={props.copyMarkdown}
       standalone={props.standalone ?? true}
-      className={CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME}
+      className={cn(CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME, props.className)}
       style={style}
+      imageProps={props.imageProps}
       actionsSource={actionsSource}
+      originalUrl={props.originalUrl}
       onImageExpand={props.onImageExpand}
     />
   );
@@ -3137,7 +3156,13 @@ const CHAT_MARKDOWN_COMPONENTS = {
           kind={kind}
           copyMarkdown={copyMarkdown}
           standalone={standalone}
+          className={className}
           style={authoredSizeStyle}
+          imageProps={imageProps}
+          originalUrl={imageSource.uri}
+          // A server too old to sign this resource, or one with no route to GitHub, still leaves
+          // the public half of these working exactly as it did before.
+          fallbackSrc={imageSource.uri}
           onImageExpand={imageExpand}
         />
       );
