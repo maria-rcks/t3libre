@@ -200,6 +200,28 @@ describe("setWindowButtonsVisible", () => {
     );
   });
 
+  it.effect("never redraws the buttons of a window nobody hid", () => {
+    const setVisibility = vi.fn();
+    const window = {
+      isDestroyed: () => false,
+      setWindowButtonVisibility: setVisibility,
+    } as unknown as Electron.BrowserWindow;
+
+    return Effect.gen(function* () {
+      yield* setWindowButtonsVisible.handler(true);
+      assert.equal(setVisibility.mock.calls.length, 0);
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          Layer.mock(ElectronWindow.ElectronWindow)({
+            currentMainOrFirst: Effect.succeed(Option.some(window)),
+          }),
+          environmentLayer("darwin"),
+        ),
+      ),
+    );
+  });
+
   it.effect("leaves the window alone off macOS", () => {
     const setVisibility = vi.fn();
     const window = {

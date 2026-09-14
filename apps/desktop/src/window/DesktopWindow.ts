@@ -668,6 +668,12 @@ export const make = Effect.gen(function* () {
       // renderer hide them again. No-ops for a window nobody hid.
       window.webContents.on("did-start-navigation", (details) => {
         if (!details.isMainFrame || details.isSameDocument) return;
+        // Chromium emits this alongside `will-navigate`, which cancels
+        // off-origin links. Those keep the current document, and its renderer
+        // is still tracking the buttons, so only a real app load restores them.
+        if (!isSameOriginRendererNavigation({ applicationUrl, navigationUrl: details.url })) {
+          return;
+        }
         setWindowButtonsVisible(window, true);
       });
     }
