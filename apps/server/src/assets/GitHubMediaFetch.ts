@@ -13,6 +13,16 @@ import {
 
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 
+/** Hosts the credential is for. A redirect off them is answered with its own signature instead. */
+const GITHUB_HOST_PATTERN = /^(?:[\w-]+\.)*github(?:usercontent)?\.com$/iu;
+const isGitHubHost = (url: string) => {
+  try {
+    return GITHUB_HOST_PATTERN.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
+
 /** GitHub answers an asset request with a 302 to a signed object URL that needs no credential. */
 const MAX_REDIRECTS = 3;
 /** Following the redirect here, rather than in `fetch`, is what keeps the token on GitHub. */
@@ -47,7 +57,9 @@ const githubToken = Effect.fn("GitHubMediaFetch.githubToken")(function* (input: 
   readonly cwd: string;
   readonly host: string;
 }) {
-  const key = `${input.host} ${input.cwd}`;
+  // `gh` stores a token per host, not per repository, so the directory it runs in is not part
+  // of the answer and must not fragment the cache a client could otherwise churn.
+  const key = input.host;
   const now = yield* Clock.currentTimeMillis;
   const cached = tokenCache.get(key);
   if (cached !== undefined && now - cached.at < TOKEN_CACHE_TTL_MS) return cached.token;
@@ -85,8 +97,12 @@ const fetchFollowingRedirects = Effect.fn("GitHubMediaFetch.fetchFollowingRedire
 ) {
   const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
   let target = url;
-  let authorization = token === null ? null : `Bearer ${Redacted.value(token)}`;
   for (let hop = 0; ; hop += 1) {
+    // The credential rides only on a request to GitHub itself. A redirect leads to a signed
+    // object URL that authorizes on its own, and the store it lives in has no business seeing
+    // a token — deciding that from the target, not from the hop count, is what makes it so.
+    const authorization =
+      token !== null && isGitHubHost(target) ? `Bearer ${Redacted.value(token)}` : null;
     const response: HttpClientResponse.HttpClientResponse = yield* httpClient
       .execute(
         HttpClientRequest.get(target).pipe(
@@ -100,11 +116,12 @@ const fetchFollowingRedirects = Effect.fn("GitHubMediaFetch.fetchFollowingRedire
       )
       .pipe(Effect.provideService(FetchHttpClient.RequestInit, MANUAL_REDIRECT));
     const location = response.headers.location;
-    if (response.status < 300 || response.status >= 400 || !location || hop >= MAX_REDIRECTS) {
-      return response;
-    }
-    target = new URL(location, target).toString();
-    authorization = null;
+    if (response.status < 300 || response.status >= 400) return response;
+    // A chain this long is not GitHub answering with bytes, and its body is not the media.
+    if (!location || hop >= MAX_REDIRECTS) return null;
+    const next = new URL(location, target);
+    if (next.protocol !== "https:") return null;
+    target = next.toString();
   }
 });
 
@@ -129,16 +146,19 @@ export const githubMediaResponse = Effect.fn("GitHubMediaFetch.githubMediaRespon
     "cache-control": "private, no-store",
     "x-content-type-options": "nosniff",
   };
-  for (const name of FORWARDED_RESPONSE_HEADERS) {
-    const value = response.headers[name];
-    if (value !== undefined) headers[name] = value;
-  }
+  if (response === null) return HttpServerResponse.empty({ status: 502, headers });
   // An upstream refusal is the client's answer, not this server's fault; only a broken hop is.
+  // It carries none of the upstream entity headers: a `content-length` with no body behind it
+  // holds the connection open until the browser gives up on it.
   if (response.status >= 400) {
     return HttpServerResponse.empty({
       status: response.status >= 500 ? 502 : response.status,
       headers,
     });
+  }
+  for (const name of FORWARDED_RESPONSE_HEADERS) {
+    const value = response.headers[name];
+    if (value !== undefined) headers[name] = value;
   }
   // Only pictures and recordings leave this origin, and never on GitHub's word alone: the raw
   // host labels every committed binary `application/octet-stream`, so the name decides those.

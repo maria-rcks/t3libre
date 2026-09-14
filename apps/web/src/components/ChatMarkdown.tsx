@@ -1595,6 +1595,8 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
     | undefined;
   /** Where the media also lives on the web, for the failure state's escape hatch. */
   readonly originalUrl?: string | undefined;
+  /** The workspace media frame, on by default; off for media that keeps the author's own box. */
+  readonly framed?: boolean | undefined;
   /** Loaded instead of the failure state when no URL can be signed, such as against a server
       too old to know this resource. Only safe when the client can reach it directly. */
   readonly fallbackSrc?: string | undefined;
@@ -1674,7 +1676,10 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
       alt={props.alt}
       copyMarkdown={props.copyMarkdown}
       standalone={props.standalone ?? true}
-      className={cn(CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME, props.className)}
+      className={cn(
+        props.framed === false ? undefined : CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME,
+        props.className,
+      )}
       style={style}
       imageProps={props.imageProps}
       actionsSource={actionsSource}
@@ -3141,17 +3146,20 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const authoredSizeStyle = authoredImageSizeStyle(width, height);
     const imageSource = classifyMarkdownImageSource(classifiedSrc, imageBaseDir ?? cwd);
     const kind = mediaKindFromPath(classifiedSrc) ?? "image";
+    const directUri = imageSource._tag === "Direct" ? imageSource.uri : null;
+    const githubMediaUrl =
+      directUri === null ? null : githubMediaFetchUrl(resolveProtocolRelativeMediaUrl(directUri));
     if (
       githubMedia &&
       cwd !== undefined &&
       environmentId !== null &&
-      imageSource._tag === "Direct" &&
-      githubMediaFetchUrl(imageSource.uri) !== null
+      directUri !== null &&
+      githubMediaUrl !== null
     ) {
       return (
         <ChatMarkdownAssetImage
           environmentId={environmentId}
-          resource={{ _tag: "github-media", cwd, url: imageSource.uri }}
+          resource={{ _tag: "github-media", cwd, url: githubMediaUrl }}
           alt={altText}
           kind={kind}
           copyMarkdown={copyMarkdown}
@@ -3159,10 +3167,14 @@ const CHAT_MARKDOWN_COMPONENTS = {
           className={className}
           style={authoredSizeStyle}
           imageProps={imageProps}
-          originalUrl={imageSource.uri}
+          srcFragment={markdownImageSourceFragment(classifiedSrc)}
+          originalUrl={directUri}
+          // A pull request body draws its own boxes; keep the author's, not the workspace frame.
+          framed={false}
           // A server too old to sign this resource, or one with no route to GitHub, still leaves
-          // the public half of these working exactly as it did before.
-          fallbackSrc={imageSource.uri}
+          // the public half of these working exactly as it did before. The canonical URL, not the
+          // authored one: a `blob` link addresses the page, and only the raw host has the bytes.
+          fallbackSrc={githubMediaUrl}
           onImageExpand={imageExpand}
         />
       );
