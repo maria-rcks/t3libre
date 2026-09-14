@@ -228,7 +228,7 @@ describe("AssetAccess", () => {
             suffix.slice(0, separator),
             suffix.slice(separator + 1),
           );
-          if (!asset) throw new Error("Expected a resolved media file");
+          if (asset?.kind !== "file") throw new Error("Expected a resolved media file");
 
           yield* fs.rename(filePath, savedPath);
           yield* fs.symlink(secretPath, filePath);
@@ -391,7 +391,7 @@ describe("AssetAccess", () => {
       const name = suffix.slice(separator + 1);
       yield* fs.writeFileString(filePath, "in-place edit");
       const edited = yield* resolveAsset(token, name);
-      if (!edited) throw new Error("Expected the edited media file");
+      if (edited?.kind !== "file") throw new Error("Expected the edited media file");
       const editedResponse = HttpServerResponse.toWeb(yield* assetFileResponse(edited));
       expect(yield* Effect.promise(() => editedResponse.text())).toBe("in-place edit");
 
@@ -407,7 +407,7 @@ describe("AssetAccess", () => {
         renewedSuffix.slice(0, renewedSeparator),
         renewedSuffix.slice(renewedSeparator + 1),
       );
-      if (!renewedAsset) throw new Error("Expected the replacement media file");
+      if (renewedAsset?.kind !== "file") throw new Error("Expected the replacement media file");
       const renewedResponse = HttpServerResponse.toWeb(yield* assetFileResponse(renewedAsset));
       expect(yield* Effect.promise(() => renewedResponse.text())).toBe("replacement");
       yield* fs.remove(filePath);
@@ -1060,6 +1060,44 @@ describe("AssetAccess", () => {
       expect(error.message).toBe("Failed to resolve project favicon.");
       expect(error._tag).toBe("AssetProjectFaviconResolutionError");
       expect(error.cause).toBe(resolutionCause);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("serves GitHub-hosted pull request media through the repository's credential", () =>
+    Effect.gen(function* () {
+      const resolve = (relativeUrl: string) => {
+        const suffix = relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+        const separator = suffix.indexOf("/");
+        return resolveAsset(suffix.slice(0, separator), suffix.slice(separator + 1));
+      };
+      const issue = (url: string) =>
+        issueAssetUrl({ resource: { _tag: "github-media", cwd: "/repo", url } });
+
+      const attachment = yield* issue(
+        "https://github.com/user-attachments/assets/1a1842fb-6383-492f-873c-57aa0033fa6c",
+      );
+      expect(attachment.relativeUrl.endsWith("/1a1842fb-6383-492f-873c-57aa0033fa6c")).toBe(true);
+      expect(yield* resolve(attachment.relativeUrl)).toEqual({
+        kind: "github-media",
+        url: "https://github.com/user-attachments/assets/1a1842fb-6383-492f-873c-57aa0033fa6c",
+        cwd: "/repo",
+      });
+
+      // A `blob` link addresses the page; only the raw host answers a credential with bytes.
+      const committed = yield* issue("https://github.com/owner/repo/blob/main/docs/shot.png");
+      expect(yield* resolve(committed.relativeUrl)).toMatchObject({
+        url: "https://raw.githubusercontent.com/owner/repo/main/docs/shot.png",
+      });
+
+      for (const url of [
+        "https://example.com/shot.png",
+        "http://github.com/user-attachments/assets/1a1842fb",
+        "https://github.com/owner/repo/pull/1",
+      ]) {
+        expect((yield* issue(url).pipe(Effect.flip))._tag).toBe(
+          "AssetGitHubMediaUrlValidationError",
+        );
+      }
     }).pipe(Effect.provide(testLayer)),
   );
 });
