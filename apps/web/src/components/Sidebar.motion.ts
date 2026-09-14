@@ -1,4 +1,8 @@
 const motionTiming = { duration: 150, easing: "ease-out" };
+// Rows normally ride their displaced neighbour's travel. Absent a moving
+// neighbour, a row still travels on its own, clamped so a tall card does not
+// slide its full height.
+const rowTravel = (height: number) => Math.min(height, 40);
 // A project filter change or a bulk snooze swaps a large part of the list at
 // once. Fades are the expensive part: every removed row gets a deep clone and
 // every clone and entering row gets its own animation, and the layout reads
@@ -39,7 +43,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     entering.clear();
     exiting.clear();
   };
-  const fadeOut = (node: HTMLElement, position: RowPosition) => {
+  const fadeOut = (node: HTMLElement, position: RowPosition, travel: number) => {
     if (position.height === 0) return;
     // React owns the removed row; only a noninteractive copy stays for the fade.
     const clone = node.cloneNode(true) as HTMLElement;
@@ -72,8 +76,12 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     });
     parent.append(clone);
     const entry = entering.get(node);
+    const entryProgress = entry ? progress(entry) : 1;
     const animation = clone.animate(
-      [{ opacity: entry ? progress(entry) : 1 }, { opacity: 0 }],
+      [
+        { opacity: entryProgress, transform: "translateY(0px)" },
+        { opacity: 0, transform: `translateY(${travel}px)` },
+      ],
       motionTiming,
     );
     exiting.set(clone, animation);
@@ -146,25 +154,59 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         fadeCount <= MAX_FADED_ROWS_PER_UPDATE;
       if (!shouldAnimate) clearFades();
       else {
-        for (const [node, position] of positions!) {
-          if (!next.has(node)) fadeOut(node, position);
-        }
-      }
-      for (const [node, animation] of entering) {
-        if (!next.has(node)) {
-          animation.cancel();
-          entering.delete(node);
-        }
-      }
-      for (const node of running.keys()) {
-        if (!shouldAnimate || !next.has(node)) cancel(node);
-      }
-      if (shouldAnimate) {
+        // A shelf that opens above its collapsed anchor shifts every retained
+        // row by the same amount. Entering rows take that same displacement so
+        // the shelf arrives as one moving block instead of rows popping into
+        // their final slots; exiting rows leave by it.
+        const movedDelta = new Map<HTMLElement, number>();
         for (const [node, position] of next) {
-          const previousTop = positions?.get(node)?.top;
+          const previousTop = positions!.get(node)?.top;
+          if (previousTop === undefined || previousTop === position.top) continue;
+          movedDelta.set(node, previousTop + remainingOffset(node) - position.top);
+        }
+        const nextOrder = [...next.keys()];
+        const oldOrder = [...positions!.keys()];
+        const ridingDelta = (
+          order: readonly HTMLElement[],
+          index: number,
+          retained: (node: HTMLElement) => boolean,
+        ) => {
+          for (let cursor = index - 1; cursor >= 0; cursor--) {
+            const node = order[cursor]!;
+            const delta = movedDelta.get(node);
+            if (delta !== undefined) return delta;
+            if (retained(node)) return 0;
+          }
+          return undefined;
+        };
+        for (const [node, position] of positions!) {
+          if (next.has(node)) continue;
+          const delta = ridingDelta(oldOrder, oldOrder.indexOf(node), (n) => next.has(n));
+          fadeOut(node, position, delta === undefined ? rowTravel(position.height) : -delta);
+        }
+        for (const [node, animation] of entering) {
+          if (!next.has(node)) {
+            animation.cancel();
+            entering.delete(node);
+          }
+        }
+        for (const node of running.keys()) {
+          if (!shouldAnimate || !next.has(node)) cancel(node);
+        }
+        for (const [index, node] of nextOrder.entries()) {
+          const position = next.get(node)!;
+          const previousTop = positions!.get(node)?.top;
           if (previousTop === undefined) {
             if (position.height > 0) {
-              const animation = node.animate([{ opacity: 0 }, { opacity: 1 }], motionTiming);
+              const delta = ridingDelta(nextOrder, index, (n) => positions!.has(n));
+              const travel = delta === undefined ? -rowTravel(position.height) : delta;
+              const animation = node.animate(
+                [
+                  { opacity: 0, transform: `translateY(${travel}px)` },
+                  { opacity: 1, transform: "translateY(0px)" },
+                ],
+                motionTiming,
+              );
               entering.set(node, animation);
               animation.addEventListener(
                 "finish",
@@ -176,10 +218,10 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
             }
             continue;
           }
-          if (previousTop === position.top) continue;
+          const delta = movedDelta.get(node);
           // Computed progress includes the effect's easing. Only our own
           // translate is carried forward; dnd-kit's transforms are never read.
-          move(node, previousTop + remainingOffset(node) - position.top);
+          if (delta !== undefined) move(node, delta);
         }
       }
       if (released !== null) {

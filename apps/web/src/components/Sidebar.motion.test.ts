@@ -281,10 +281,16 @@ describe("sidebar list motion", () => {
     layout([b, fresh]);
     motion.update(true);
     expect(a.animations[0]!.cancel).toHaveBeenCalledOnce();
-    expect(fresh.animate).toHaveBeenLastCalledWith([{ opacity: 0 }, { opacity: 1 }], {
-      duration: 150,
-      easing: "ease-out",
-    });
+    expect(fresh.animate).toHaveBeenLastCalledWith(
+      [
+        { opacity: 0, transform: "translateY(0px)" },
+        { opacity: 1, transform: "translateY(0px)" },
+      ],
+      {
+        duration: 150,
+        easing: "ease-out",
+      },
+    );
     const clone = a.clones[0]!;
     expect(clone.style).toMatchObject({
       position: "absolute",
@@ -299,16 +305,54 @@ describe("sidebar list motion", () => {
     expect(clone.attributes).toEqual([{ name: "aria-hidden", value: "true" }]);
     expect(clone.children[0]!.attributes).toEqual([{ name: "data-state", value: "open" }]);
     expect(clone.children[1]!.attributes).toEqual(icon.attributes);
-    expect(clone.animate).toHaveBeenCalledWith([{ opacity: 1 }, { opacity: 0 }], {
-      duration: 150,
-      easing: "ease-out",
-    });
+    expect(clone.animate).toHaveBeenCalledWith(
+      [
+        { opacity: 1, transform: "translateY(0px)" },
+        { opacity: 0, transform: "translateY(0px)" },
+      ],
+      {
+        duration: 150,
+        easing: "ease-out",
+      },
+    );
     expect(parent.children.includes(clone)).toBe(true);
     motion.update(true);
     expect(clone.animations).toHaveLength(1);
     expect(clone.clones).toHaveLength(0);
     clone.animations[0]!.finish();
     expect(parent.children.includes(clone)).toBe(false);
+  });
+
+  it("rides entering rows on the shelf displacement so an opened shelf moves as one block", () => {
+    const a = new TestRow("a", 40);
+    const header = new TestRow("header", 32);
+    const x = new TestRow("x", 36);
+    const y = new TestRow("y", 36);
+    const z = new TestRow("z", 36);
+    const { motion, layout } = fixture([a, header, x]);
+    motion.update(true);
+    // The shelf is anchored below the list, so two revealed rows lift the
+    // header and its existing rows by the same 72px.
+    layout([a, header, x, y, z]);
+    for (const row of [header, x, y, z]) row.offsetTop -= 72;
+    motion.update(true);
+    expectMove(header, 72);
+    expectMove(x, 72);
+    expect(a.animate).not.toHaveBeenCalled();
+    expect(y.animate).toHaveBeenLastCalledWith(
+      [
+        { opacity: 0, transform: "translateY(72px)" },
+        { opacity: 1, transform: "translateY(0px)" },
+      ],
+      { duration: 150, easing: "ease-out" },
+    );
+    expect(z.animate).toHaveBeenLastCalledWith(
+      [
+        { opacity: 0, transform: "translateY(72px)" },
+        { opacity: 1, transform: "translateY(0px)" },
+      ],
+      { duration: 150, easing: "ease-out" },
+    );
   });
 
   it("clears exit clones on pickup and does not fade the release commit", () => {
@@ -329,10 +373,16 @@ describe("sidebar list motion", () => {
     expect(c.animations).toHaveLength(0);
     layout([c, a]);
     motion.update(true);
-    expect(a.animate).toHaveBeenCalledWith([{ opacity: 0 }, { opacity: 1 }], {
-      duration: 150,
-      easing: "ease-out",
-    });
+    expect(a.animate).toHaveBeenCalledWith(
+      [
+        { opacity: 0, transform: "translateY(0px)" },
+        { opacity: 1, transform: "translateY(0px)" },
+      ],
+      {
+        duration: 150,
+        easing: "ease-out",
+      },
+    );
     motion.dispose();
     expect(a.animations.at(-1)!.cancel).toHaveBeenCalledOnce();
   });
@@ -349,10 +399,16 @@ describe("sidebar list motion", () => {
     motion.update(true);
     expect(marker.clones).toHaveLength(0);
     const clone = a.clones[0]!;
-    expect(clone.animate).toHaveBeenCalledWith([{ opacity: 0.4 }, { opacity: 0 }], {
-      duration: 150,
-      easing: "ease-out",
-    });
+    expect(clone.animate).toHaveBeenCalledWith(
+      [
+        { opacity: 0.4, transform: "translateY(0px)" },
+        { opacity: 0, transform: "translateY(40px)" },
+      ],
+      {
+        duration: 150,
+        easing: "ease-out",
+      },
+    );
     motion.update(false);
     expect(parent.children).toEqual([]);
     expect(clone.animations[0]!.cancel).toHaveBeenCalledOnce();
