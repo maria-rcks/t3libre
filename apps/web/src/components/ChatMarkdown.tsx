@@ -1620,7 +1620,11 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
   const relativePath = reference?.kind === "file" ? reference.relativePath : undefined;
   const fallbackSrc = assetUrl._tag === "Failure" ? props.fallbackSrc : undefined;
   const src =
-    assetUrl._tag === "Success" ? assetUrl.url + (props.srcFragment ?? "") : (fallbackSrc ?? null);
+    assetUrl._tag === "Success"
+      ? assetUrl.url + (props.srcFragment ?? "")
+      : fallbackSrc === undefined
+        ? null
+        : fallbackSrc + (props.srcFragment ?? "");
   // The server reads the pixel size from the file header, so the slot can be
   // the image's final box instead of a 16:9 guess. An authored size wins; a
   // caller's height cap shrinks the box while keeping the ratio.
@@ -3168,7 +3172,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
           style={authoredSizeStyle}
           imageProps={imageProps}
           srcFragment={markdownImageSourceFragment(classifiedSrc)}
-          originalUrl={directUri}
+          originalUrl={resolveProtocolRelativeMediaUrl(directUri)}
           // A pull request body draws its own boxes; keep the author's, not the workspace frame.
           framed={false}
           // A server too old to sign this resource, or one with no route to GitHub, still leaves

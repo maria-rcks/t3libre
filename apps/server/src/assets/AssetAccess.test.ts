@@ -1081,6 +1081,8 @@ describe("AssetAccess", () => {
         kind: "github-media",
         url: "https://github.com/user-attachments/assets/1a1842fb-6383-492f-873c-57aa0033fa6c",
         cwd: "/repo",
+        // The signed URL's own expiry, which is how long a client may keep the bytes.
+        expiresAt: attachment.expiresAt,
       });
 
       // A `blob` link addresses the page; only the raw host answers a credential with bytes.

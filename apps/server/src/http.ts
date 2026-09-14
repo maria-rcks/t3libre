@@ -395,7 +395,12 @@ export const assetRouteLayer = HttpRouter.add(
         Effect.tapError((cause) =>
           Effect.logWarning("Failed to fetch GitHub media.", { url: asset.url, cause }),
         ),
-        Effect.orElseSucceed(() => HttpServerResponse.empty({ status: 502 })),
+        Effect.orElseSucceed(() =>
+          HttpServerResponse.empty({
+            status: 502,
+            headers: { "cache-control": "private, no-store", "x-content-type-options": "nosniff" },
+          }),
+        ),
       );
     }
     return yield* assetFileResponse(

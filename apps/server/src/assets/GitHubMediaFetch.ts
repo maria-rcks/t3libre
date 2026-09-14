@@ -13,11 +13,20 @@ import {
 
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 
-/** Hosts the credential is for. A redirect off them is answered with its own signature instead. */
-const GITHUB_HOST_PATTERN = /^(?:[\w-]+\.)*github(?:usercontent)?\.com$/iu;
-const isGitHubHost = (url: string) => {
+/**
+ * Exactly the hosts the credential is for. Everything a redirect leads to — the presigned
+ * object stores GitHub hands assets off to — authorizes with its own signature, and some of
+ * them reject a request that also carries a bearer token.
+ */
+const CREDENTIALED_HOSTS = new Set([
+  "github.com",
+  "www.github.com",
+  "raw.githubusercontent.com",
+  "media.githubusercontent.com",
+]);
+const isCredentialedHost = (url: string) => {
   try {
-    return GITHUB_HOST_PATTERN.test(new URL(url).hostname);
+    return CREDENTIALED_HOSTS.has(new URL(url).hostname.toLowerCase());
   } catch {
     return false;
   }
@@ -51,14 +60,18 @@ const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inlin
  * The token is what `gh auth token` would print again on the next call, and it is held no longer
  * than a signed asset URL lives.
  */
-const tokenCache = new Map<string, { readonly at: number; readonly token: Redacted.Redacted }>();
+const tokenCache = new Map<
+  string,
+  { readonly at: number; readonly token: Redacted.Redacted | null }
+>();
 
 const githubToken = Effect.fn("GitHubMediaFetch.githubToken")(function* (input: {
   readonly cwd: string;
   readonly host: string;
 }) {
   // `gh` stores a token per host, not per repository, so the directory it runs in is not part
-  // of the answer and must not fragment the cache a client could otherwise churn.
+  // of the answer and must not fragment the cache a client could otherwise churn. This route
+  // pins no credential; if it ever does, the pin belongs in this key.
   const key = input.host;
   const now = yield* Clock.currentTimeMillis;
   const cached = tokenCache.get(key);
@@ -76,11 +89,12 @@ const githubToken = Effect.fn("GitHubMediaFetch.githubToken")(function* (input: 
       Effect.map((output) => output.stdout.trim()),
       Effect.orElseSucceed(() => ""),
     );
-  if (token.length === 0) return null;
   if (tokenCache.size >= TOKEN_CACHE_MAX_ENTRIES) {
     tokenCache.delete(tokenCache.keys().next().value!);
   }
-  const redacted = Redacted.make(token);
+  // The absence of a credential is cached too, or an unauthenticated machine spawns `gh` again
+  // for every image and every video range request.
+  const redacted = token.length === 0 ? null : Redacted.make(token);
   tokenCache.set(key, { at: now, token: redacted });
   return redacted;
 });
@@ -102,7 +116,7 @@ const fetchFollowingRedirects = Effect.fn("GitHubMediaFetch.fetchFollowingRedire
     // object URL that authorizes on its own, and the store it lives in has no business seeing
     // a token — deciding that from the target, not from the hop count, is what makes it so.
     const authorization =
-      token !== null && isGitHubHost(target) ? `Bearer ${Redacted.value(token)}` : null;
+      token !== null && isCredentialedHost(target) ? `Bearer ${Redacted.value(token)}` : null;
     const response: HttpClientResponse.HttpClientResponse = yield* httpClient
       .execute(
         HttpClientRequest.get(target).pipe(
@@ -130,7 +144,7 @@ const fetchFollowingRedirects = Effect.fn("GitHubMediaFetch.fetchFollowingRedire
  * only thing that distinguishes a readable private attachment from a 404.
  */
 export const githubMediaResponse = Effect.fn("GitHubMediaFetch.githubMediaResponse")(function* (
-  asset: { readonly url: string; readonly cwd: string },
+  asset: { readonly url: string; readonly cwd: string; readonly expiresAt: number },
   requestHeaders: Record<string, string | undefined>,
 ) {
   // Both media hosts are served by github.com's account, which is the host `gh` stores it under.
@@ -141,9 +155,12 @@ export const githubMediaResponse = Effect.fn("GitHubMediaFetch.githubMediaRespon
     if (value !== undefined) forwarded[name] = value;
   }
   const response = yield* fetchFollowingRedirects(asset.url, forwarded, token);
+  // An upload GitHub hosts never changes under its URL, so the only thing a cached copy must
+  // not outlive is the signed URL that granted it — which is the same bound the URL itself has.
+  const remainingSeconds = Math.floor((asset.expiresAt - (yield* Clock.currentTimeMillis)) / 1000);
   const headers: Record<string, string> = {
-    // The signed asset URL is the grant; a cached copy must not outlive it.
-    "cache-control": "private, no-store",
+    "cache-control":
+      remainingSeconds > 0 ? `private, max-age=${remainingSeconds}` : "private, no-store",
     "x-content-type-options": "nosniff",
   };
   if (response === null) return HttpServerResponse.empty({ status: 502, headers });
@@ -167,7 +184,7 @@ export const githubMediaResponse = Effect.fn("GitHubMediaFetch.githubMediaRespon
     ? upstreamType
     : (Mime.getType(githubMediaFileName(asset.url))?.toLowerCase() ?? "");
   if (!MEDIA_CONTENT_TYPE_PATTERN.test(contentType)) {
-    return HttpServerResponse.empty({ status: 415 });
+    return HttpServerResponse.empty({ status: 415, headers });
   }
   headers["content-type"] = contentType;
   if (contentType === SVG_CONTENT_TYPE) {

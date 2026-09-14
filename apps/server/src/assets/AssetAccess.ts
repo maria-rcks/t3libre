@@ -165,6 +165,9 @@ export type ResolvedAsset =
       readonly kind: "github-media";
       readonly url: string;
       readonly cwd: string;
+      /** When the signed URL that granted this stops working, which bounds how long a client
+          may keep the bytes it fetched with it. */
+      readonly expiresAt: number;
     };
 
 function decodeClaims(encodedPayload: string): AssetClaims | null {
@@ -789,7 +792,12 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
   }
 
   if (claims.kind === "github-media") {
-    return { kind: "github-media", url: claims.url, cwd: claims.cwd } satisfies ResolvedAsset;
+    return {
+      kind: "github-media",
+      url: claims.url,
+      cwd: claims.cwd,
+      expiresAt: claims.expiresAt,
+    } satisfies ResolvedAsset;
   }
 
   if (claims.kind === "native-app-icon") {
