@@ -384,6 +384,18 @@ export function rememberPendingWorktreeSetup(input: {
   readonly threadId: ThreadId;
   readonly messages: ReadonlyArray<ChatMessage>;
 }): void {
+  const newMessageIds = new Set(input.messages.map((message) => message.id));
+  const displaced = pendingWorktreeSetups.filter(
+    (entry) => entry.ownerKey === input.ownerKey || entry.threadKey === input.threadKey,
+  );
+  // A record this send supersedes is no longer reachable from a remount, so
+  // release the preview URLs it held apart from any message still carried over.
+  for (const record of displaced) {
+    for (const message of record.messages) {
+      if (newMessageIds.has(message.id)) continue;
+      revokeUserMessagePreviewUrls(message);
+    }
+  }
   const next = [
     ...pendingWorktreeSetups.filter(
       (entry) => entry.ownerKey !== input.ownerKey && entry.threadKey !== input.threadKey,
