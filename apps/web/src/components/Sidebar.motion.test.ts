@@ -355,6 +355,54 @@ describe("sidebar list motion", () => {
     );
   });
 
+  it("cancels in-flight row travel when a bulk update skips animation", () => {
+    const a = new TestRow("a");
+    const b = new TestRow("b");
+    const { motion, layout } = fixture([a, b]);
+    motion.update(true);
+    layout([b, a]);
+    motion.update(true);
+    const first = a.animations[0]!;
+    first.progress = 0.4;
+    const incoming = Array.from({ length: 41 }, (_, index) => new TestRow(`new-${index}`));
+    layout(incoming);
+    motion.update(true);
+    expect(first.cancel).toHaveBeenCalledOnce();
+    expect(incoming.every((row) => row.animate.mock.calls.length === 0)).toBe(true);
+  });
+
+  it("keeps in-flight shelf entry travel when the shelf closes mid-animation", () => {
+    const a = new TestRow("a", 40);
+    const header = new TestRow("header", 32);
+    const x = new TestRow("x", 36);
+    const y = new TestRow("y", 36);
+    const { motion, layout } = fixture([a, header, x]);
+    motion.update(true);
+    layout([a, header, x, y]);
+    for (const row of [header, x, y]) row.offsetTop -= 36;
+    motion.update(true);
+    const entry = y.animations[0]!;
+    header.animations[0]!.progress = 0.25;
+    x.animations[0]!.progress = 0.25;
+    entry.progress = 0.25;
+    layout([a, header, x]);
+    motion.update(true);
+    expect(entry.cancel).toHaveBeenCalledOnce();
+    const clone = y.clones[0]!;
+    // Remaining entry travel (36 * 0.75) is baked into the clone's box so the
+    // fade starts from the row's current visual top instead of jumping to 0.
+    expect(clone.style.top).toBe("110px");
+    expect(clone.animate).toHaveBeenCalledWith(
+      [
+        { opacity: 0.25, transform: "translateY(0px)" },
+        { opacity: 0, transform: "translateY(9px)" },
+      ],
+      { duration: 150, easing: "ease-out" },
+    );
+    expectMove(header, -9);
+    expectMove(x, -9);
+  });
+
   it("clears exit clones on pickup and does not fade the release commit", () => {
     const [a, b, c] = [new TestRow("a"), new TestRow("b"), new TestRow("c")];
     const { motion, layout, parent } = fixture([a, b]);
@@ -412,6 +460,25 @@ describe("sidebar list motion", () => {
     motion.update(false);
     expect(parent.children).toEqual([]);
     expect(clone.animations[0]!.cancel).toHaveBeenCalledOnce();
+  });
+
+  it("retargets an in-flight entry when a later layout shift moves the row", () => {
+    const a = new TestRow("a", 40);
+    const header = new TestRow("header", 32);
+    const x = new TestRow("x", 36);
+    const y = new TestRow("y", 36);
+    const { motion, layout } = fixture([a, header, x]);
+    motion.update(true);
+    layout([a, header, x, y]);
+    for (const row of [header, x, y]) row.offsetTop -= 36;
+    motion.update(true);
+    const entry = y.animations[0]!;
+    entry.progress = 0.25;
+    for (const row of [header, x, y]) row.offsetTop += 40;
+    motion.update(true);
+    expect(entry.cancel).toHaveBeenCalledOnce();
+    // Remaining 27px of the 36px entry plus the new 40px shift.
+    expectMove(y, -13);
   });
 
   it("skips fades when a large list change would clone too many rows", () => {

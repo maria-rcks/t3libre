@@ -27,7 +27,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     "(prefers-reduced-motion: reduce)",
   );
   const running = new Map<HTMLElement, { animation: Animation; offset: number }>();
-  const entering = new Map<HTMLElement, Animation>();
+  const entering = new Map<HTMLElement, { animation: Animation; travel: number }>();
   const exiting = new Map<HTMLElement, Animation>();
   // Visual tops at drag release, relative to the list, so the release
   // commit can glide every row from where dnd-kit left it into its slot.
@@ -35,10 +35,14 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
 
   const remainingOffset = (node: HTMLElement) => {
     const current = running.get(node);
-    return current ? current.offset * (1 - progress(current.animation)) : 0;
+    const run = current ? current.offset * (1 - progress(current.animation)) : 0;
+    const entry = entering.get(node);
+    const enter = entry ? entry.travel * (1 - progress(entry.animation)) : 0;
+    return run + enter;
   };
   const clearFades = () => {
-    for (const animation of [...entering.values(), ...exiting.values()]) animation.cancel();
+    for (const entry of entering.values()) entry.animation.cancel();
+    for (const animation of exiting.values()) animation.cancel();
     for (const node of exiting.keys()) node.remove();
     entering.clear();
     exiting.clear();
@@ -76,7 +80,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     });
     parent.append(clone);
     const entry = entering.get(node);
-    const entryProgress = entry ? progress(entry) : 1;
+    const entryProgress = entry ? progress(entry.animation) : 1;
     const animation = clone.animate(
       [
         { opacity: entryProgress, transform: "translateY(0px)" },
@@ -99,6 +103,10 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     running.get(node)?.animation.cancel();
     running.delete(node);
   };
+  const cancelEntry = (node: HTMLElement) => {
+    entering.get(node)?.animation.cancel();
+    entering.delete(node);
+  };
   const suspend = () => {
     for (const node of running.keys()) cancel(node);
     clearFades();
@@ -107,6 +115,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
   };
   const move = (node: HTMLElement, offset: number) => {
     cancel(node);
+    cancelEntry(node);
     if (offset === 0) return;
     const animation = node.animate(
       [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0px)" }],
@@ -152,47 +161,49 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         positions !== null &&
         !reducedMotion?.matches &&
         fadeCount <= MAX_FADED_ROWS_PER_UPDATE;
+      const movedDelta = new Map<HTMLElement, number>();
+      const nextOrder = [...next.keys()];
+      const oldOrder = positions === null ? [] : [...positions.keys()];
+      const ridingDelta = (
+        order: readonly HTMLElement[],
+        index: number,
+        retained: (node: HTMLElement) => boolean,
+      ) => {
+        for (let cursor = index - 1; cursor >= 0; cursor--) {
+          const node = order[cursor]!;
+          const delta = movedDelta.get(node);
+          if (delta !== undefined) return delta;
+          if (retained(node)) return 0;
+        }
+        return undefined;
+      };
       if (!shouldAnimate) clearFades();
       else {
         // A shelf that opens above its collapsed anchor shifts every retained
         // row by the same amount. Entering rows take that same displacement so
         // the shelf arrives as one moving block instead of rows popping into
         // their final slots; exiting rows leave by it.
-        const movedDelta = new Map<HTMLElement, number>();
         for (const [node, position] of next) {
           const previousTop = positions!.get(node)?.top;
           if (previousTop === undefined || previousTop === position.top) continue;
           movedDelta.set(node, previousTop + remainingOffset(node) - position.top);
         }
-        const nextOrder = [...next.keys()];
-        const oldOrder = [...positions!.keys()];
-        const ridingDelta = (
-          order: readonly HTMLElement[],
-          index: number,
-          retained: (node: HTMLElement) => boolean,
-        ) => {
-          for (let cursor = index - 1; cursor >= 0; cursor--) {
-            const node = order[cursor]!;
-            const delta = movedDelta.get(node);
-            if (delta !== undefined) return delta;
-            if (retained(node)) return 0;
-          }
-          return undefined;
-        };
         for (const [node, position] of positions!) {
           if (next.has(node)) continue;
           const delta = ridingDelta(oldOrder, oldOrder.indexOf(node), (n) => next.has(n));
           fadeOut(node, position, delta === undefined ? rowTravel(position.height) : -delta);
         }
-        for (const [node, animation] of entering) {
-          if (!next.has(node)) {
-            animation.cancel();
-            entering.delete(node);
-          }
+      }
+      for (const [node, entry] of entering) {
+        if (!next.has(node)) {
+          entry.animation.cancel();
+          entering.delete(node);
         }
-        for (const node of running.keys()) {
-          if (!shouldAnimate || !next.has(node)) cancel(node);
-        }
+      }
+      for (const node of running.keys()) {
+        if (!shouldAnimate || !next.has(node)) cancel(node);
+      }
+      if (shouldAnimate) {
         for (const [index, node] of nextOrder.entries()) {
           const position = next.get(node)!;
           const previousTop = positions!.get(node)?.top;
@@ -207,11 +218,11 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
                 ],
                 motionTiming,
               );
-              entering.set(node, animation);
+              entering.set(node, { animation, travel });
               animation.addEventListener(
                 "finish",
                 () => {
-                  if (entering.get(node) === animation) entering.delete(node);
+                  if (entering.get(node)?.animation === animation) entering.delete(node);
                 },
                 { once: true },
               );
