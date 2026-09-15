@@ -290,6 +290,7 @@ interface TimelineRowActivityState {
   isCompacting: boolean;
   isRevertingCheckpoint: boolean;
   latestTurnId: TurnId | null;
+  runningTurnId: TurnId | null;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -990,8 +991,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isCompacting,
       isRevertingCheckpoint,
       latestTurnId: latestTurn?.turnId ?? null,
+      runningTurnId,
     }),
-    [isCompacting, isRevertingCheckpoint, isWorking, isPreparingWorktree, latestTurn?.turnId],
+    [
+      isCompacting,
+      isRevertingCheckpoint,
+      isWorking,
+      isPreparingWorktree,
+      latestTurn?.turnId,
+      runningTurnId,
+    ],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -2168,16 +2177,17 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
   row: Extract<TimelineRow, { kind: "message" }>;
 }) {
   const ctx = use(TimelineRowCtx);
-  const { isWorking, latestTurnId } = use(TimelineRowActivityCtx);
+  const { isWorking, latestTurnId, runningTurnId } = use(TimelineRowActivityCtx);
   const { message } = row;
   // A block left open by a crashed provider or a restarted server never gets
   // its completion. Only the live turn may claim to still be thinking, so a
   // settled turn cannot shimmer "Thinking" at the user forever.
+  const liveTurnId = runningTurnId ?? latestTurnId;
   const streaming =
     Boolean(message.streaming) &&
     isWorking &&
     message.turnId !== null &&
-    message.turnId === latestTurnId;
+    message.turnId === liveTurnId;
   const expanded = ctx.expandedReasoningMessageIds.has(message.id);
   const { onToggleReasoning } = ctx;
   const toggle = useCallback(() => {

@@ -611,11 +611,13 @@ function deriveTurnFolds(input: {
       pendingUserBoundary = entry.message.createdAt;
       continue;
     }
-    // Reasoning is deliberately not grouped here: a thinking block stays a
-    // visible one-click disclosure after its turn folds, instead of hiding
-    // behind "Worked for ...".
+    // Thinking is work, so it folds with the rest of it. A provider that
+    // interleaves a block with every tool call would otherwise leave dozens of
+    // "Thought for ..." rows standing beside the "Worked for ..." summary.
+    // Nothing folds while the turn is live, which is when traces are watched.
     const turnId =
-      entry.kind === "message" && entry.message.role === "assistant"
+      entry.kind === "message" &&
+      (entry.message.role === "assistant" || entry.message.role === "reasoning")
         ? (entry.message.turnId ?? null)
         : entry.kind === "work"
           ? (entry.entry.turnId ?? null)
