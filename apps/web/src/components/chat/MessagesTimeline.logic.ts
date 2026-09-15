@@ -665,20 +665,21 @@ function deriveTurnFolds(input: {
     const terminalEntryIndex = group.terminalEntry
       ? group.entries.findIndex((entry) => entry.id === group.terminalEntry?.id)
       : group.entries.length;
+    // Thinking blocks do not count toward "one trailing activity": a block can
+    // follow the answer, and it must not stop that lone tool call from folding
+    // the way it did before traces existed. Loop-invariant, so it is counted
+    // once: a long turn re-derives these rows on every work-log change.
+    const trailingEntryCount = group.entries.filter(
+      (candidate, candidateIndex) =>
+        candidateIndex > terminalEntryIndex &&
+        !(candidate.kind === "message" && candidate.message.role === "reasoning"),
+    ).length;
     for (const [index, entry] of group.entries.entries()) {
       if (entry.id === group.terminalEntry?.id) {
         continue;
       }
       const isCompaction =
         entry.kind === "work" && entry.entry.sourceActivityKind === "context-compaction";
-      // Thinking blocks do not count toward "one trailing activity": a block
-      // can follow the answer, and it must not stop that lone tool call from
-      // folding the way it did before traces existed.
-      const trailingEntryCount = group.entries.filter(
-        (candidate, candidateIndex) =>
-          candidateIndex > terminalEntryIndex &&
-          !(candidate.kind === "message" && candidate.message.role === "reasoning"),
-      ).length;
       const isSingleTrailingActivity =
         trailingEntryCount === 1 &&
         entry.kind === "work" &&

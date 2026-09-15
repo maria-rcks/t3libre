@@ -1001,7 +1001,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isRevertingCheckpoint,
       isWorking,
       isPreparingWorktree,
-      latestTurn,
+      // Deliberately the fields `deriveUnsettledTurnId` reads, not the object:
+      // its identity changes on every thread-shell patch.
+      latestTurn?.turnId,
+      latestTurn?.state,
+      latestTurn?.completedAt,
       runningTurnId,
     ],
   );

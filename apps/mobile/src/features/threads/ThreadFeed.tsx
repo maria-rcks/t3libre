@@ -1360,6 +1360,7 @@ function renderFeedEntry(
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: TurnId | null;
+    readonly isWorking: boolean;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
     readonly onToggleWorkRow: (rowId: string, anchorKey: string) => void;
@@ -1477,10 +1478,12 @@ function renderFeedEntry(
   if (entry.type === "message") {
     const { message } = entry;
     if (message.role === "reasoning") {
-      // Only the live turn may claim to still be thinking: a block left open by
-      // a crashed provider must not shimmer on a turn that settled long ago.
+      // Only the live turn may claim to still be thinking, and only while the
+      // thread is actually working: a block left open by a crashed provider
+      // must not shimmer on a turn that settled long ago. Same test as web.
       const liveReasoning =
         Boolean(message.streaming) &&
+        props.isWorking &&
         message.turnId !== null &&
         message.turnId === props.unsettledTurnId;
       return (
@@ -2746,6 +2749,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             workGroupScrollPositions,
             terminalAssistantMessageIds,
             unsettledTurnId,
+            isWorking: props.activeWorkStartedAt !== null,
             onCopyWorkRow,
             onToggleWorkGroup,
             onToggleWorkRow,
@@ -2782,6 +2786,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       workGroupScrollPositions,
       terminalAssistantMessageIds,
       unsettledTurnId,
+      props.activeWorkStartedAt,
       iconSubtleColor,
       screenColor,
       userBubbleColor,
