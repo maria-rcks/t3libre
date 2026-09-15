@@ -1612,7 +1612,7 @@ function maxIsoTimestamp(a: string | null, b: string | null): string | null {
   return bMs > aMs ? b : a;
 }
 
-function deriveUnsettledTurnId(latestTurn: ThreadFeedLatestTurn | null): TurnId | null {
+export function deriveUnsettledTurnId(latestTurn: ThreadFeedLatestTurn | null): TurnId | null {
   if (!latestTurn) {
     return null;
   }

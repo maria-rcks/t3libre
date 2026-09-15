@@ -144,6 +144,7 @@ import {
 } from "@t3tools/mobile-markdown-text/links";
 import {
   deriveThreadFeedPresentation,
+  deriveUnsettledTurnId,
   isContextCompactionActivityGroup,
   reasoningRowLabel,
   type ThreadFeedEntry,
@@ -2268,11 +2269,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   );
   const markdownStyles = useMarkdownStyles(onMarkdownLinkPress, renderMarkdownImage);
   const reviewCommentColors = useReviewCommentColors();
-  const unsettledTurnId =
-    props.latestTurn &&
-    (props.latestTurn.completedAt === null || props.latestTurn.state === "running")
-      ? props.latestTurn.turnId
-      : null;
+  // One definition of "still live", shared with the fold derivation: two
+  // copies of this test are what let a row and the fold beside it disagree.
+  const unsettledTurnId = deriveUnsettledTurnId(props.latestTurn ?? null);
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Include turn completion so unchanged message rows reveal their footer and spacing
   // even when the final message update arrives before the turn settles.
