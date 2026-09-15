@@ -1450,7 +1450,10 @@ describe("ProviderRuntimeIngestion", () => {
 
     const thread = await waitForThread(harness.readModel, (entry) =>
       entry.messages.some(
-        (message: ProviderRuntimeTestMessage) => message.role === "reasoning" && !message.streaming,
+        (message: ProviderRuntimeTestMessage) =>
+          message.role === "reasoning" &&
+          !message.streaming &&
+          message.text === "Weighing the options",
       ),
     );
     const message = thread.messages.find(
@@ -1492,7 +1495,12 @@ describe("ProviderRuntimeIngestion", () => {
     });
 
     const thread = await waitForThread(harness.readModel, (entry) =>
-      entry.messages.some((message: ProviderRuntimeTestMessage) => message.text.includes("Second")),
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.role === "reasoning" &&
+          !message.streaming &&
+          message.text === "**First**\n\n**Second**",
+      ),
     );
     const message = thread.messages.find(
       (entry: ProviderRuntimeTestMessage) => entry.role === "reasoning",
@@ -1521,7 +1529,10 @@ describe("ProviderRuntimeIngestion", () => {
 
     const thread = await waitForThread(harness.readModel, (entry) =>
       entry.messages.some(
-        (message: ProviderRuntimeTestMessage) => message.role === "reasoning" && !message.streaming,
+        (message: ProviderRuntimeTestMessage) =>
+          message.role === "reasoning" &&
+          !message.streaming &&
+          message.text === "reasoning reported in one piece",
       ),
     );
     const message = thread.messages.find(
@@ -1588,8 +1599,10 @@ describe("ProviderRuntimeIngestion", () => {
     const thread = await waitForThread(
       harness.readModel,
       (entry) =>
-        entry.messages.filter((message: ProviderRuntimeTestMessage) => message.role === "reasoning")
-          .length === 3,
+        entry.messages.filter(
+          (message: ProviderRuntimeTestMessage) =>
+            message.role === "reasoning" && !message.streaming,
+        ).length === 3,
     );
     const reasoning = thread.messages.filter(
       (entry: ProviderRuntimeTestMessage) => entry.role === "reasoning",
@@ -1632,10 +1645,17 @@ describe("ProviderRuntimeIngestion", () => {
       payload: { itemType: "assistant_message", status: "completed" },
     });
 
-    const thread = await waitForThread(harness.readModel, (entry) =>
-      entry.messages.some(
-        (message: ProviderRuntimeTestMessage) => message.role === "reasoning" && !message.streaming,
-      ),
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.role === "reasoning" && !message.streaming,
+        ) &&
+        entry.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.role === "assistant" && !message.streaming,
+        ),
     );
     const reasoning = thread.messages.find(
       (entry: ProviderRuntimeTestMessage) => entry.role === "reasoning",
@@ -1693,8 +1713,10 @@ describe("ProviderRuntimeIngestion", () => {
     const thread = await waitForThread(
       harness.readModel,
       (entry) =>
-        entry.messages.filter((message: ProviderRuntimeTestMessage) => message.role === "reasoning")
-          .length === 2,
+        entry.messages.filter(
+          (message: ProviderRuntimeTestMessage) =>
+            message.role === "reasoning" && !message.streaming,
+        ).length === 2,
     );
     const reasoning = thread.messages.filter(
       (entry: ProviderRuntimeTestMessage) => entry.role === "reasoning",
