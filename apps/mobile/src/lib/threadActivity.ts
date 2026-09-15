@@ -1686,7 +1686,15 @@ function deriveThreadFeedTurnFolds(
     if (turnId === unsettledTurnId) {
       continue;
     }
-    if (entries.some((entry) => entry.type === "message" && entry.message.streaming)) {
+    // A live turn is already excluded above, so only an answer still being
+    // written may hold a fold open. A thinking block stranded by a crashed
+    // provider keeps its streaming flag forever and must not.
+    if (
+      entries.some(
+        (entry) =>
+          entry.type === "message" && entry.message.streaming && entry.message.role !== "reasoning",
+      )
+    ) {
       continue;
     }
 
