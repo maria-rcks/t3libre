@@ -1483,11 +1483,6 @@ function renderFeedEntry(
         Boolean(message.streaming) &&
         message.turnId !== null &&
         message.turnId === props.unsettledTurnId;
-      // A settled trace with no text would render as a bare label. A live one
-      // keeps its row, which is what suppresses the "Thinking" placeholder.
-      if (message.text.trim().length === 0 && !liveReasoning) {
-        return null;
-      }
       return (
         <ThreadReasoningRow
           rowSizing={props.workRowSizing}

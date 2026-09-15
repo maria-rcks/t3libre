@@ -164,6 +164,7 @@ import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssis
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
+  deriveUnsettledTurnId,
   type MessagesTimelineRowsProjection,
   liveWorkEntryLabel,
   resolveAssistantMessageCopyState,
@@ -290,7 +291,7 @@ interface TimelineRowActivityState {
   isCompacting: boolean;
   isRevertingCheckpoint: boolean;
   latestTurnId: TurnId | null;
-  runningTurnId: TurnId | null;
+  unsettledTurnId: TurnId | null;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -991,14 +992,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isCompacting,
       isRevertingCheckpoint,
       latestTurnId: latestTurn?.turnId ?? null,
-      runningTurnId,
+      // The same value the row-derivation uses, so a block and the placeholder
+      // beside it can never disagree about whether a turn is still live.
+      unsettledTurnId: deriveUnsettledTurnId(latestTurn ?? null, runningTurnId),
     }),
     [
       isCompacting,
       isRevertingCheckpoint,
       isWorking,
       isPreparingWorktree,
-      latestTurn?.turnId,
+      latestTurn,
       runningTurnId,
     ],
   );
@@ -2177,17 +2180,16 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
   row: Extract<TimelineRow, { kind: "message" }>;
 }) {
   const ctx = use(TimelineRowCtx);
-  const { isWorking, latestTurnId, runningTurnId } = use(TimelineRowActivityCtx);
+  const { isWorking, unsettledTurnId } = use(TimelineRowActivityCtx);
   const { message } = row;
   // A block left open by a crashed provider or a restarted server never gets
   // its completion. Only the live turn may claim to still be thinking, so a
   // settled turn cannot shimmer "Thinking" at the user forever.
-  const liveTurnId = runningTurnId ?? latestTurnId;
   const streaming =
     Boolean(message.streaming) &&
     isWorking &&
     message.turnId !== null &&
-    message.turnId === liveTurnId;
+    message.turnId === unsettledTurnId;
   const expanded = ctx.expandedReasoningMessageIds.has(message.id);
   const { onToggleReasoning } = ctx;
   const toggle = useCallback(() => {

@@ -2149,10 +2149,15 @@ const make = Effect.gen(function* () {
               : undefined;
 
           if (Option.isNone(activeReasoningMessageId)) {
+            // Segment state outlives a closed block, so its presence means this
+            // turn already streamed a trace and the snapshot would duplicate it.
+            const turnAlreadyStreamedReasoning = Option.isSome(
+              yield* getAssistantSegmentStateForTurn(thread.id, turnId, "reasoning"),
+            );
             // A provider can report a whole block at once without streaming it.
             // The id is derived from the item rather than the segment counter so
             // a repeated completion rewrites that row instead of adding a copy.
-            if (fallbackText !== undefined) {
+            if (fallbackText !== undefined && !turnAlreadyStreamedReasoning) {
               const snapshotMessageId = assistantSegmentMessageId(
                 `snapshot:${event.itemId ?? event.eventId}`,
                 0,
