@@ -2430,14 +2430,7 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
   const toggle = useCallback(() => {
     onToggleReasoning(message.id, !expanded);
   }, [expanded, message.id, onToggleReasoning]);
-  const elapsedMs = streaming
-    ? null
-    : Date.parse(message.updatedAt) - Date.parse(message.createdAt);
-  const elapsed =
-    elapsedMs !== null && Number.isFinite(elapsedMs) && elapsedMs > 0
-      ? formatDuration(elapsedMs)
-      : null;
-  const label = streaming ? "Thinking" : elapsed ? `Thought for ${elapsed}` : "Thought";
+  const label = streaming ? "Thinking" : "Thought";
 
   if (message.text.trim().length === 0 && !streaming) {
     return null;

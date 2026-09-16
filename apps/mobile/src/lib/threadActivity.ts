@@ -1577,23 +1577,6 @@ function groupAdjacentActivities(entries: ReadonlyArray<RawThreadFeedEntry>): Th
   return grouped;
 }
 
-/**
- * Row label for a provider thinking trace: live while the trace streams, then
- * how long it took, in the same duration format as the "Worked for" fold.
- */
-export function reasoningRowLabel(
-  message: OrchestrationThread["messages"][number],
-  live: boolean,
-): string {
-  if (live) {
-    return "Thinking";
-  }
-  const elapsedMs = computeElapsedMs(message.createdAt, message.updatedAt);
-  return elapsedMs === null || elapsedMs <= 0
-    ? "Thought"
-    : `Thought for ${formatDuration(elapsedMs)}`;
-}
-
 function computeElapsedMs(startIso: string, endIso: string): number | null {
   const start = Date.parse(startIso);
   const end = Date.parse(endIso);
@@ -1656,7 +1639,7 @@ function deriveThreadFeedTurnFolds(
     }
     // Thinking is work, so it folds with the rest of it. A provider that
     // interleaves a block with every tool call would otherwise leave dozens of
-    // "Thought for ..." rows standing beside the "Worked for ..." summary.
+    // "Thought" rows standing beside the "Worked for ..." summary.
     // Nothing folds while the turn is live, which is when traces are watched.
     const turnId =
       entry.type === "message" &&
@@ -1716,7 +1699,7 @@ function deriveThreadFeedTurnFolds(
     }
     // A lone compaction row stays visible on its own; it only folds away as
     // part of a turn that already folds other work. Thinking is the same: a
-    // question answered by thought alone keeps its "Thought for ..." row
+    // question answered by thought alone keeps its "Thought" row
     // rather than collapsing behind a "Worked for ..." that hides nothing else.
     const hidesFoldableWork = entries.some(
       (entry) =>

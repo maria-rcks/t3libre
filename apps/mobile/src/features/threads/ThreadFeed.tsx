@@ -146,7 +146,6 @@ import {
   deriveThreadFeedPresentation,
   deriveUnsettledTurnId,
   isContextCompactionActivityGroup,
-  reasoningRowLabel,
   type ThreadFeedEntry,
   type ThreadFeedLatestTurn,
 } from "../../lib/threadActivity";
@@ -1490,7 +1489,7 @@ function renderFeedEntry(
           rowSizing={props.workRowSizing}
           iconSubtleColor={iconSubtleColor}
           expanded={props.expandedReasoningMessageIds.has(message.id)}
-          label={reasoningRowLabel(message, liveReasoning)}
+          label={liveReasoning ? "Thinking" : "Thought"}
           streaming={liveReasoning}
           onToggle={() => props.onToggleReasoning(message.id)}
         >

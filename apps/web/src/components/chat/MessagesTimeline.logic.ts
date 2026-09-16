@@ -628,7 +628,7 @@ function deriveTurnFolds(input: {
     }
     // Thinking is work, so it folds with the rest of it. A provider that
     // interleaves a block with every tool call would otherwise leave dozens of
-    // "Thought for ..." rows standing beside the "Worked for ..." summary.
+    // "Thought" rows standing beside the "Worked for ..." summary.
     // Nothing folds while the turn is live, which is when traces are watched.
     const turnId =
       entry.kind === "message" &&
@@ -724,7 +724,7 @@ function deriveTurnFolds(input: {
     }
     // A lone compaction row stays visible on its own; it only folds away as
     // part of a turn that already folds other work. Thinking is the same: a
-    // question answered by thought alone keeps its "Thought for ..." row
+    // question answered by thought alone keeps its "Thought" row
     // rather than collapsing behind a "Worked for ..." that hides nothing else.
     const hidesFoldableWork = group.entries.some(
       (entry) =>
