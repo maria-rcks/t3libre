@@ -1772,7 +1772,7 @@ describe("ClaudeAdapterLive", () => {
         attachments: [],
       });
 
-      harness.query.emit({
+      const thinkingSnapshot = {
         type: "assistant",
         session_id: "sdk-session-thinking-snapshot",
         uuid: "assistant-thinking-snapshot",
@@ -1783,6 +1783,18 @@ describe("ClaudeAdapterLive", () => {
             { type: "thinking", thinking: "Use Euclidean algorithm." },
             { type: "text", text: "The gcd is 21." },
           ],
+        },
+      } as unknown as SDKMessage;
+      harness.query.emit(thinkingSnapshot);
+      harness.query.emit(thinkingSnapshot);
+      harness.query.emit({
+        type: "assistant",
+        session_id: "sdk-session-thinking-snapshot",
+        uuid: "assistant-thinking-snapshot-2",
+        parent_tool_use_id: null,
+        message: {
+          id: "assistant-message-thinking-2",
+          content: [{ type: "thinking", thinking: "Verify the result." }],
         },
       } as unknown as SDKMessage);
 
@@ -1800,13 +1812,19 @@ describe("ClaudeAdapterLive", () => {
         (event) =>
           event.type === "content.delta" && event.payload.streamKind === "reasoning_summary_text",
       );
-      assert.equal(reasoningDeltas.length, 1);
+      assert.equal(reasoningDeltas.length, 2);
       const reasoningDelta = reasoningDeltas[0];
       assert.equal(reasoningDelta?.type, "content.delta");
       if (reasoningDelta?.type === "content.delta") {
         assert.equal(reasoningDelta.payload.delta, "Use Euclidean algorithm.");
         assert.equal(String(reasoningDelta.turnId), String(turn.turnId));
       }
+      assert.deepEqual(
+        runtimeEvents.flatMap((event) =>
+          event.type === "content.delta" ? [event.payload.delta] : [],
+        ),
+        ["Use Euclidean algorithm.", "The gcd is 21.", "Verify the result."],
+      );
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

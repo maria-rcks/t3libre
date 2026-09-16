@@ -190,6 +190,7 @@ interface ClaudeTurnState {
   rejectedRateLimitTypes: Set<string>;
   latestAssistantRateLimited: boolean;
   emittedThinkingText: boolean;
+  readonly thinkingSnapshotIds: Set<string>;
 }
 
 interface AssistantTextBlockState {
@@ -2334,7 +2335,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     message: SDKMessage,
   ) {
     const turnState = context.turnState;
-    if (!turnState || turnState.emittedThinkingText) {
+    if (!turnState || message.type !== "assistant") {
+      return;
+    }
+    const snapshotId = message.uuid;
+    const alreadyEmitted =
+      turnState.emittedThinkingText || turnState.thinkingSnapshotIds.has(snapshotId);
+    turnState.thinkingSnapshotIds.add(snapshotId);
+    turnState.emittedThinkingText = false;
+    if (alreadyEmitted) {
       return;
     }
 
@@ -2346,6 +2355,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         rawPayload: message,
       });
     }
+    turnState.emittedThinkingText = false;
   });
 
   const ensureThreadId = Effect.fn("ensureThreadId")(function* (
@@ -2787,6 +2797,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       if (dropStart || dropDelta) {
         return;
       }
+    }
+
+    if (event.type === "message_start" && context.turnState && !streamParentToolUseId) {
+      context.turnState.emittedThinkingText = false;
     }
 
     if (event.type === "message_delta") {
@@ -3287,6 +3301,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         rejectedRateLimitTypes: new Set(),
         latestAssistantRateLimited: false,
         emittedThinkingText: false,
+        thinkingSnapshotIds: new Set(),
       };
       context.session = {
         ...context.session,
@@ -3368,8 +3383,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         context.turnState.latestAssistantUsage = message.message.usage;
         context.turnState.compactedSinceLatestAssistantUsage = false;
       }
-      yield* backfillAssistantTextBlocksFromSnapshot(context, message);
       yield* backfillThinkingFromSnapshot(context, message);
+      yield* backfillAssistantTextBlocksFromSnapshot(context, message);
     }
 
     context.lastAssistantUuid = message.uuid;
@@ -5113,6 +5128,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         rejectedRateLimitTypes: new Set(),
         latestAssistantRateLimited: false,
         emittedThinkingText: false,
+        thinkingSnapshotIds: new Set(),
       };
 
       const updatedAt = yield* nowIso;
