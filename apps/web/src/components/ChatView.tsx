@@ -4712,7 +4712,7 @@ export default function ChatView(props: ChatViewProps) {
     if (eligibleLink && pullRequestsCapabilityKnown) {
       if (
         pullRequestsSurfaceAvailable &&
-        (visiblePullRequestCount > 1 || linkedThreadPullRequest === null)
+        (visiblePullRequestCount > 1 || linkedThreadPullRequest === null || !supportsPullRequests)
       ) {
         panels.openProactive(
           activeThreadRef,
@@ -4760,8 +4760,9 @@ export default function ChatView(props: ChatViewProps) {
       : "ignore";
     proactivePanelObservationRef.current = {
       ...proactivePanelObservationRef.current,
-      // Preserve first-entry eligibility while the checkpoint or repository is loading.
-      runningTurnId: diffAction === "defer" ? previousRunningTurnId : activeRunningTurnId,
+      // Preserve first-entry eligibility while capabilities, checkpoint or repository load.
+      runningTurnId:
+        diffAction === "defer" || shouldDeferLink ? previousRunningTurnId : activeRunningTurnId,
     };
     if (diffAction !== "open" || newlyCompletedTurnId === null) return;
     if (!panels.openProactive(activeThreadRef, { id: "diff", kind: "diff" }, userActionRevision)) {
