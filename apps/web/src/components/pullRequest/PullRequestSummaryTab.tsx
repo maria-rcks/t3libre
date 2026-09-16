@@ -226,7 +226,7 @@ function CollapsedComment({
     <Collapsible open={open} onOpenChange={setOpen}>
       <article className="group rounded-lg border border-border/60 [contain-intrinsic-block-size:44px] [content-visibility:auto]">
         <div className="p-3">
-          <div className="flex items-start gap-2">
+          <div className="flex flex-wrap items-start gap-2">
             <CommentIdentity comment={comment} detail={detail} />
             <CollapsibleTrigger
               ref={statusTriggerRef}
@@ -238,6 +238,7 @@ function CollapsedComment({
                 className={cn("size-3.5 transition-transform", open && "rotate-180")}
               />
             </CollapsibleTrigger>
+            {reactionBar}
           </div>
           <CommentLocation comment={comment} thread={thread} />
           {!open && body ? (
@@ -264,7 +265,6 @@ function CollapsedComment({
               {body === null && !editing.canEdit(comment) ? null : (
                 <CommentBody className="mt-2" comment={comment} editing={editing} />
               )}
-              {reactionBar}
             </div>
           ) : null}
         </CollapsiblePanel>
@@ -812,10 +812,6 @@ export function PullRequestSummaryTab({
                           ? null
                           : { kind: "comment", comment }
                         : { kind: "thread", thread };
-                  // One bar, two homes. Under a card with words in it, it is the row beneath
-                  // them. A bodiless verdict has nothing above it, so a row reserved for an add
-                  // button nobody can see until they hover is a hole — there it rides the header
-                  // line instead, which keeps the affordance every sibling card offers.
                   const reactionBar = (
                     <PullRequestReactionBar
                       reactions={comment.reactions ?? []}
@@ -824,7 +820,7 @@ export function PullRequestSummaryTab({
                       environmentId={environmentId}
                       reference={reference}
                       onRefresh={onRefresh}
-                      {...(body === null ? {} : { className: "mt-2" })}
+                      className="ml-auto justify-end"
                     />
                   );
                   return (
@@ -842,7 +838,6 @@ export function PullRequestSummaryTab({
                           ) : comment.reviewState ? (
                             <span>{reviewStateLabel(comment.reviewState)}</span>
                           ) : null}
-                          {body === null ? reactionBar : null}
                         </div>
                         {/* Review remarks only. A plain conversation comment is talk, not a finding,
                       and offering to fix one would promise more than it says. */}
@@ -860,6 +855,7 @@ export function PullRequestSummaryTab({
                               : fixFindingLabel}
                           </Button>
                         ) : null}
+                        {reactionBar}
                       </div>
                       <div className="px-3">
                         <CommentLocation comment={comment} thread={thread} />
@@ -875,7 +871,6 @@ export function PullRequestSummaryTab({
                           editing={commentEditing}
                         />
                       )}
-                      {body === null ? null : <div className="px-3 pb-3">{reactionBar}</div>}
                     </article>
                   );
                 })}
@@ -917,7 +912,7 @@ export function PullRequestSummaryTab({
                               body={visibleBody(comment.body)}
                               reactionBar={
                                 <PullRequestReactionBar
-                                  className="mt-2"
+                                  className="ml-auto justify-end"
                                   reactions={comment.reactions ?? []}
                                   canReact={detail.capabilities.reactions === true}
                                   subjectId={comment.id}
