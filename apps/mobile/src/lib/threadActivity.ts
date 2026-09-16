@@ -1950,12 +1950,16 @@ function appendMixedActivityRun(
   const activities = history.flatMap((entry) =>
     entry.type === "activity-group" ? entry.activities : [],
   );
+  const trailingGroup = history.at(-1);
+  // A missing completion before the latest thought must not reclaim the live line.
+  const summaryActivities =
+    live && trailingGroup?.type === "activity-group" ? trailingGroup.activities : activities;
   const toolRows: ThreadFeedEntry[] = [];
-  if (activities.length > 0) {
+  if (summaryActivities.length > 0) {
     appendToolGroupRows(
       toolRows,
       { type: "activity-group", id: first.id, createdAt: first.createdAt, turnId, activities },
-      activities,
+      summaryActivities,
       new Set(),
       unsettledTurnId,
       isWorking,

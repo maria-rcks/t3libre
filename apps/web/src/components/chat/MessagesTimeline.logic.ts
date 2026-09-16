@@ -844,7 +844,9 @@ function attachTrailingToolGroupsToAssistant(
         break;
       }
       if (
-        (candidate.kind === "work-toggle" || candidate.kind === "activity-group") &&
+        (candidate.kind === "work-toggle" ||
+          (candidate.kind === "activity-group" &&
+            candidate.entries.some((entry) => entry.kind === "work"))) &&
         candidate.turnId === turnId
       ) {
         hasTrailingToolGroup = true;
@@ -1023,6 +1025,7 @@ export function deriveMessagesTimelineRows(input: {
       break;
     }
     activeToolEntries.unshift(entry);
+    if (workEntryDisplayIndicatesToolFailure(entry.entry)) break;
   }
   const visibleActiveToolEntries = omitSupersededLifecycleMarkers(
     activeToolEntries.filter((entry) => workEntryIsVisibleInGroup(entry.entry, true)),

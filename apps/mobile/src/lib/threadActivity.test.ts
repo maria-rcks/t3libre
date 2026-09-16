@@ -2460,6 +2460,36 @@ describe("buildThreadFeed", () => {
       expanded: true,
       summary: "Thinking",
     });
+    const strandedToolFeed = buildThreadFeed({
+      ...thread,
+      messages: [],
+      activities: [
+        makeActivity({
+          id: EventId.make("stranded-tool"),
+          kind: "tool.updated",
+          tone: "tool",
+          summary: "Running command",
+          createdAt: "2026-04-01T00:00:00.000Z",
+          turnId,
+          payload: {
+            toolCallId: "stranded-tool",
+            itemType: "command_execution",
+            command: "sleep 60",
+            status: "inProgress",
+          },
+        }),
+      ],
+    });
+    const afterStrandedTool = deriveThreadFeedPresentation(
+      [...strandedToolFeed, ...feedWithWork],
+      thread.latestTurn,
+      new Set(),
+      new Set(),
+      "now",
+    );
+    expect(afterStrandedTool).toMatchObject([
+      { type: "work-toggle", id: "live-activity-row", summary: toolFirst.summary, hiddenCount: 6 },
+    ]);
   });
 
   it.each(["tool", "failed-tool", "assistant", "turn", "unknown-turn"] as const)(

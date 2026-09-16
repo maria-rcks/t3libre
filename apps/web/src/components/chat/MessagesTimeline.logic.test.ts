@@ -2122,6 +2122,62 @@ describe("deriveMessagesTimelineRows", () => {
     });
   });
 
+  it("keeps the assistant footer before a trailing thought-only group", () => {
+    const answer = answerEntry("assistant-entry", "2026-01-01T00:00:01Z", "turn-1");
+    const thought = reasoningEntry("reasoning-after", "2026-01-01T00:00:02Z", "turn-1");
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [answer, thought],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+    expect(rows.map((row) => row.kind)).toEqual(["message", "activity-group"]);
+    expect(rows[0]).toMatchObject({ message: answer.message, showAssistantMeta: true });
+    expect(rows[1]).toMatchObject({ entries: [thought] });
+  });
+
+  it("shows each tool once across expanded activity histories separated by a failed tool", () => {
+    const thought = reasoningEntry("reasoning-entry", "2026-01-01T00:00:01Z", "turn-1");
+    const tools = ["a", "b", "c"].map((id, index) => {
+      const entry = toolEntry(id, `2026-01-01T00:00:0${index + 2}Z`, "turn-1");
+      return {
+        ...entry,
+        entry: {
+          ...entry.entry,
+          command: `echo ${id}`,
+          toolCallId: id,
+          toolLifecycleStatus: id === "b" ? ("failed" as const) : ("completed" as const),
+          sourceActivityKind: "tool.completed" as const,
+        },
+      };
+    });
+    const input = {
+      timelineEntries: [thought, ...tools],
+      runningTurnId: TurnId.make("turn-1"),
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    } satisfies Parameters<typeof deriveMessagesTimelineRows>[0];
+    const rows = deriveMessagesTimelineRows(input);
+    const expanded = deriveMessagesTimelineRows({
+      ...input,
+      expandedWorkGroupIds: new Set(rows.flatMap((row) => ("groupId" in row ? [row.groupId] : []))),
+    });
+    const visibleTools = expanded.flatMap((row) =>
+      row.kind === "activity-group" && row.expanded
+        ? row.entries.flatMap((entry) => (entry.kind === "work" ? [entry.entry.id] : []))
+        : row.kind === "work"
+          ? row.groupedEntries.map((entry) => entry.id)
+          : [],
+    );
+    expect(visibleTools).toEqual(["a", "b", "c"]);
+    expect(expanded.filter((row) => row.id === "live-activity-row")).toMatchObject([
+      { kind: "work-live", entry: { id: "c" } },
+    ]);
+  });
+
   it("folds mixed activity under worked-for and restores ordered details when expanded", () => {
     const entries = [
       reasoningEntry("reasoning-entry", "2026-01-01T00:00:01Z", "turn-1"),
