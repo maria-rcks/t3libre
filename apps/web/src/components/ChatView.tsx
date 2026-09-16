@@ -7196,6 +7196,7 @@ export default function ChatView(props: ChatViewProps) {
       isServerThread &&
       activeThread &&
       !directAnnotation &&
+      !queuedMessage &&
       !composerHasNonPromptContent &&
       /^\/share\s*$/i.test(promptRef.current.trim())
     ) {

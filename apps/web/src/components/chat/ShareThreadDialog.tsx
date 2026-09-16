@@ -10,6 +10,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from "../ui/dialog";
+import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 
 const OPTIONS = [
@@ -139,12 +140,13 @@ export function ShareThreadDialog({
           )}
           {createdUrl ? (
             <div className="mt-5 space-y-3">
-              <input
+              <Input
+                unstyled
                 aria-label="Share link"
                 value={createdUrl}
                 readOnly
                 onFocus={(event) => event.currentTarget.select()}
-                className="w-full rounded-md border border-border bg-muted/30 px-3 py-2 font-mono text-xs"
+                className="block w-full rounded-md border border-border bg-muted/30 font-mono text-xs [&>input]:h-auto [&>input]:px-3 [&>input]:py-2 [&>input]:leading-normal"
               />
               <div className="flex gap-2">
                 <Button className="flex-1" onClick={() => copyToClipboard(createdUrl, undefined)}>

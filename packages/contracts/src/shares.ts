@@ -46,7 +46,7 @@ export const SharedThread = Schema.Struct({
       ...SharedEntry,
       name: Schema.String,
       itemType: Schema.optional(ToolLifecycleItemType),
-      status: ItemLifecyclePayload.fields.status,
+      status: Schema.optional(ItemLifecyclePayload.fields.status),
       toolSurface: Schema.optional(ToolActivitySurface),
       title: Schema.optional(Schema.String),
       detail: Schema.optional(Schema.String),

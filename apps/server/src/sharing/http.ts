@@ -25,13 +25,10 @@ import {
   failEnvironmentNotFound,
   requireEnvironmentScope,
 } from "../auth/http.ts";
-import { ServerConfig } from "../config.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { ProjectionThreadActivityRepositoryLive } from "../persistence/Layers/ProjectionThreadActivities.ts";
-import {
-  ProjectionThreadActivityRepository,
-  type ProjectionThreadActivity,
-} from "../persistence/Services/ProjectionThreadActivities.ts";
+import * as ServerConfig from "../config.ts";
+import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectionThreadActivityRepositoryLive from "../persistence/Layers/ProjectionThreadActivities.ts";
+import * as ProjectionThreadActivities from "../persistence/Services/ProjectionThreadActivities.ts";
 
 const StoredShare = Schema.Struct({ threadId: ThreadId, snapshot: SharedThread });
 const decodeStoredShare = Schema.decodeUnknownEffect(Schema.fromJsonString(StoredShare));
@@ -54,7 +51,7 @@ function printable(value: unknown): string | undefined {
 
 /** Native payloads stay private. Only the selected tool input and result fields enter the snapshot. */
 export function projectSharedTools(
-  activities: readonly ProjectionThreadActivity[],
+  activities: readonly ProjectionThreadActivities.ProjectionThreadActivity[],
   options: ShareOptions,
 ): SharedThread["tools"] {
   if (!options.includeToolCalls && !options.includeToolResults) return [];
@@ -170,9 +167,9 @@ export const sharesHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "shares",
   Effect.fnUntraced(function* (handlers) {
-    const config = yield* ServerConfig;
-    const snapshots = yield* ProjectionSnapshotQuery;
-    const activities = yield* ProjectionThreadActivityRepository;
+    const config = yield* ServerConfig.ServerConfig;
+    const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+    const activities = yield* ProjectionThreadActivities.ProjectionThreadActivityRepository;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const directory = path.join(config.stateDir, "shares");
@@ -300,4 +297,6 @@ export const sharesHttpApiLayer = HttpApiBuilder.group(
         }),
       );
   }),
-).pipe(Layer.provide(ProjectionThreadActivityRepositoryLive));
+).pipe(
+  Layer.provide(ProjectionThreadActivityRepositoryLive.ProjectionThreadActivityRepositoryLive),
+);

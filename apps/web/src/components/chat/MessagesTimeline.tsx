@@ -2274,7 +2274,9 @@ function AssistantCopyButton({
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  return (
+    <MessageCopyButton text={assistantCopyState.text ?? ""} label="Copy message" variant="ghost" />
+  );
 }
 
 function ProposedPlanTimelineRow({
@@ -4706,6 +4708,12 @@ function QuestionAnswerHistoryBody({
           <div className="flex flex-wrap gap-2">
             {(answer.attachmentsByQuestionId[questionId] ?? []).map((attachment) => {
               const url = urls[attachments.indexOf(attachment)];
+              if (!url)
+                return (
+                  <span key={attachment.id} className="text-sm">
+                    {attachment.name}
+                  </span>
+                );
               return (
                 <a
                   key={attachment.id}

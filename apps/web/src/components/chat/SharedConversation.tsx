@@ -49,7 +49,7 @@ export function SharedConversation({ share }: { share: SharedThread }) {
                   <CollapsibleUserMessageBody text={row.message.text} readOnly />
                 </UserMessageBubble>
                 <UserMessageMeta createdAt={row.message.createdAt} timestampFormat="locale">
-                  <MessageCopyButton text={row.message.text} variant="ghost" />
+                  <MessageCopyButton text={row.message.text} label="Copy message" variant="ghost" />
                 </UserMessageMeta>
               </div>
             ) : (

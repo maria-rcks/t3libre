@@ -16,6 +16,7 @@ export const MessageCopyButton = memo(function MessageCopyButton({
   size = "xs",
   variant = "outline",
   className,
+  label = "Copy link",
 }: {
   text: string;
   /** Additional clipboard types written beside `text/plain` when the platform allows it. */
@@ -23,6 +24,7 @@ export const MessageCopyButton = memo(function MessageCopyButton({
   size?: "xs" | "icon-xs";
   variant?: "outline" | "ghost";
   className?: string;
+  label?: string;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
   const { copyToClipboard, isCopied } = useCopyToClipboard<void>({
@@ -37,7 +39,7 @@ export const MessageCopyButton = memo(function MessageCopyButton({
       <TooltipTrigger
         render={
           <Button
-            aria-label="Copy link"
+            aria-label={label}
             disabled={isCopied}
             onClick={() => copyToClipboard(text)}
             ref={ref}
