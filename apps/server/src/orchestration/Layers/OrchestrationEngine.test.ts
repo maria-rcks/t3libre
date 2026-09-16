@@ -147,7 +147,19 @@ describe("OrchestrationEngine", () => {
           createdAt: now(),
         }),
       );
-      for (const id of ["chat-one", "../chat-two"]) {
+      const uuidThreadId = "f9129f2d-4180-4966-8d87-33513fef905c";
+      const threadIds = [
+        "chat-one",
+        "../chat-two",
+        "Chat-A",
+        "chat-a",
+        "*",
+        "CON",
+        "NUL",
+        "con",
+        uuidThreadId,
+      ];
+      for (const id of threadIds) {
         await system.run(
           system.engine.dispatch({
             type: "thread.create",
@@ -176,7 +188,16 @@ describe("OrchestrationEngine", () => {
           }),
         ).toBe(cwd);
       }
-      expect((await NodeFSP.readdir(directory)).length).toBe(2);
+      const folders = await NodeFSP.readdir(directory);
+      expect(folders).toHaveLength(threadIds.length);
+      expect(new Set(folders.map((folder) => folder.toLowerCase())).size).toBe(threadIds.length);
+      for (const folder of folders) {
+        expect(folder).not.toMatch(/[<>:"/\\|?*]/);
+        expect(folder).not.toMatch(/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i);
+      }
+      expect(chatThreadWorkspacePath(directory, uuidThreadId)).toBe(
+        NodePath.join(directory, uuidThreadId),
+      );
       await expect(
         system.run(
           system.engine.dispatch({
@@ -187,7 +208,7 @@ describe("OrchestrationEngine", () => {
           }),
         ),
       ).rejects.toThrow("cannot be deleted");
-      expect((await system.readModel()).threads).toHaveLength(2);
+      expect((await system.readModel()).threads).toHaveLength(threadIds.length);
     } finally {
       await system.dispose();
       await NodeFSP.rm(directory, { recursive: true, force: true });

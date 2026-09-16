@@ -956,10 +956,6 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         readonly runtimeEnv: Record<string, string>;
       }
     >();
-    if (!project) {
-      return next;
-    }
-
     for (const session of drawerTerminalSessions) {
       const summary = session.state.summary;
       if (!summary) {
@@ -970,10 +966,12 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
       next.set(session.target.terminalId, {
         cwd: launchContext?.cwd ?? summary.cwd,
         worktreePath: worktreePathForLaunch,
-        runtimeEnv: projectScriptRuntimeEnv({
-          project: { cwd: project.workspaceRoot },
-          worktreePath: worktreePathForLaunch,
-        }),
+        runtimeEnv: project
+          ? projectScriptRuntimeEnv({
+              project: { cwd: project.workspaceRoot },
+              worktreePath: worktreePathForLaunch,
+            })
+          : {},
       });
     }
 
@@ -1018,13 +1016,17 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     reconcileTerminalIds(threadRef, serverOrderedTerminalIds);
   }, [reconcileTerminalIds, serverOrderedTerminalIds, terminalUiState.terminalIds, threadRef]);
   const [localFocusRequestId, setLocalFocusRequestId] = useState(0);
+  const activeSummary =
+    drawerTerminalSessions.find(
+      (session) => session.target.terminalId === terminalUiState.activeTerminalId,
+    )?.state.summary ?? drawerTerminalSessions[0]?.state.summary;
   const worktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
   const effectiveWorktreePath = useMemo(() => {
     if (launchContext !== null) {
       return launchContext.worktreePath;
     }
-    return worktreePath;
-  }, [launchContext, worktreePath]);
+    return project ? worktreePath : (activeSummary?.worktreePath ?? null);
+  }, [activeSummary?.worktreePath, launchContext, project, worktreePath]);
   const cwd = useMemo(
     () =>
       launchContext?.cwd ??
@@ -1033,8 +1035,8 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
             project: { cwd: project.workspaceRoot },
             worktreePath: effectiveWorktreePath,
           })
-        : null),
-    [effectiveWorktreePath, launchContext?.cwd, project],
+        : (activeSummary?.cwd ?? null)),
+    [activeSummary?.cwd, effectiveWorktreePath, launchContext?.cwd, project],
   );
   const runtimeEnv = useMemo(
     () =>
@@ -1200,7 +1202,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     [onAddTerminalContext, visible],
   );
 
-  if (!project || (!terminalUiState.terminalOpen && !active) || !cwd) {
+  if ((!terminalUiState.terminalOpen && !active) || !cwd) {
     return null;
   }
 
@@ -1370,14 +1372,16 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
               worktreePath: terminalWorktreePath,
             })
           : null);
-      if (!terminalCwd || !project) continue;
+      if (!terminalCwd) continue;
       locations.set(terminalId, {
         cwd: terminalCwd,
         worktreePath: terminalWorktreePath,
-        runtimeEnv: projectScriptRuntimeEnv({
-          project: { cwd: project.workspaceRoot },
-          worktreePath: terminalWorktreePath,
-        }),
+        runtimeEnv: project
+          ? projectScriptRuntimeEnv({
+              project: { cwd: project.workspaceRoot },
+              worktreePath: terminalWorktreePath,
+            })
+          : {},
       });
     }
     return locations;
@@ -1390,7 +1394,7 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
     threadWorktreePath,
   ]);
 
-  if (!project || !cwd) return null;
+  if (!cwd) return null;
 
   return (
     <ThreadTerminalDrawer

@@ -55,7 +55,9 @@ function IndexDraftLanding() {
         !isChatProject(project) ||
         threads.some(
           (thread) =>
-            thread.environmentId === project.environmentId && thread.projectId === project.id,
+            thread.environmentId === project.environmentId &&
+            thread.projectId === project.id &&
+            thread.archivedAt === null,
         ),
     );
     return (

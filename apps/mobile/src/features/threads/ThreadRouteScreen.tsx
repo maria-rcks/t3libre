@@ -279,6 +279,9 @@ function ThreadRouteContent(
   );
   const inspectorMode = (() => {
     if (inspectorSelection?.routeThreadIdentity === routeThreadIdentity) {
+      if (inspectorSelection.mode === "git" && isChat) {
+        return selectedThreadCwd === null ? null : "files";
+      }
       if (inspectorSelection.mode === "files" && selectedThreadCwd === null) {
         return null;
       }
@@ -305,6 +308,9 @@ function ThreadRouteContent(
 
   useEffect(() => {
     setInspectorSelection((current) => {
+      if (current?.mode === "git" && isChat) {
+        return { routeThreadIdentity, mode: "files" };
+      }
       if (props.renderInspector === undefined) {
         if (current === null || current.mode === "route") {
           return null;
@@ -318,7 +324,7 @@ function ThreadRouteContent(
 
       return { ...current, routeThreadIdentity };
     });
-  }, [props.renderInspector, routeThreadIdentity]);
+  }, [isChat, props.renderInspector, routeThreadIdentity]);
 
   useFocusEffect(
     useCallback(() => {

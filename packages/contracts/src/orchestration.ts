@@ -41,7 +41,15 @@ export function isChatProject(project: { readonly id: string }): boolean {
 
 export function chatThreadWorkspacePath(chatRoot: string, threadId: string): string {
   const separator = chatRoot.includes("\\") ? "\\" : "/";
-  const directory = encodeURIComponent(threadId).replaceAll(".", "%2E");
+  // Keep UUID paths stable while distinguishing ids on case-insensitive filesystems.
+  // Encoding UTF-16 units also handles lone surrogates without URIError.
+  let directory = threadId.replace(
+    /[^a-z0-9_-]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+  if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(directory)) {
+    directory = `%${directory.charCodeAt(0).toString(16).padStart(4, "0")}${directory.slice(1)}`;
+  }
   return `${chatRoot.replace(/[\\/]+$/, "")}${separator}${directory}`;
 }
 
