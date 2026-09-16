@@ -201,7 +201,7 @@ function CommentBody({
   );
 }
 
-/** Finished work — a resolved conversation or a dismissed approval — opens collapsed. */
+/** Finished work — a resolved conversation or a dismissed review — opens collapsed. */
 function CollapsedComment({
   comment,
   editing,
@@ -913,7 +913,7 @@ export function PullRequestSummaryTab({
                               editing={commentEditing}
                               detail={detail}
                               thread={thread}
-                              label={thread?.isResolved ? "Resolved" : "Approval dismissed"}
+                              label={thread?.isResolved ? "Resolved" : "Review dismissed"}
                               body={visibleBody(comment.body)}
                               reactionBar={
                                 <PullRequestReactionBar
