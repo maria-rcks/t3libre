@@ -1897,6 +1897,8 @@ function OpenCommandPaletteDialog(props: {
     if (openIntent?.kind !== "change-theme") return;
     clearOpenIntent();
     browseNavigation.invalidate();
+    cloneLookupGeneration.current += 1;
+    setIsRemoteProjectLookingUp(false);
     setAddProjectCloneFlow(null);
     setViewStack([]);
     pushPaletteView({
