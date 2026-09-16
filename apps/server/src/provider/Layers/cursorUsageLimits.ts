@@ -84,9 +84,10 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
             ? path.join(home, ".cursor")
             : path.join(environment.XDG_CONFIG_HOME || path.join(home, ".config"), "cursor");
       const credentials = yield* fs.readFileString(path.join(directory, "auth.json")).pipe(
-        Effect.catchTag("PlatformError", (error) =>
-          error.reason._tag === "NotFound" ? Effect.succeed("{}") : Effect.fail(error),
-        ),
+        Effect.catchTags({
+          PlatformError: (error) =>
+            error.reason._tag === "NotFound" ? Effect.succeed("{}") : Effect.fail(error),
+        }),
         Effect.flatMap(decodeCredentials),
       );
       token = credentials.accessToken?.trim();

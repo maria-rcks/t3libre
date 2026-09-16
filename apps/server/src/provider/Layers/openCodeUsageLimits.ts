@@ -47,13 +47,12 @@ export const readOpenCodeGoUsageLimits = Effect.fn("readOpenCodeGoUsageLimits")(
     const authPath = path.join(dataHome, "opencode", "auth.json");
     const contents =
       env.OPENCODE_AUTH_CONTENT ||
-      (yield* fs
-        .readFileString(authPath)
-        .pipe(
-          Effect.catch((error) =>
+      (yield* fs.readFileString(authPath).pipe(
+        Effect.catchTags({
+          PlatformError: (error) =>
             error.reason._tag === "NotFound" ? Effect.succeed("{}") : Effect.fail(error),
-          ),
-        ));
+        }),
+      ));
     const auth = yield* decodeAuthFile(contents);
     const apiAuth = decodeApiAuth(auth["opencode-go"]);
     // OpenCode overlays stored API credentials after environment credentials.
