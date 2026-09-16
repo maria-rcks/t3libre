@@ -6453,7 +6453,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       Effect.gen(function* () {
         const started = yield* Deferred.make<void>();
         const stalled = vi.mocked(NodeFSP.realpath).mockImplementationOnce(() => {
-          Effect.runSync(Deferred.succeed(started, undefined));
+          Deferred.doneUnsafe(started, Effect.void);
           return new Promise<never>(() => {});
         });
         try {
