@@ -2807,13 +2807,6 @@ export default function ChatView(props: ChatViewProps) {
     hasMultipleRegisteredEnvironments && activeThread
       ? `${environmentById.get(activeThread.environmentId)?.label ?? serverConfig?.environment.label ?? activeThread.environmentId} server`
       : "server";
-  const reconnectActiveEnvironment = useCallback(() => {
-    if (!activeEnvironmentUnavailableState) return;
-    void handleReconnectActiveEnvironment(activeEnvironmentUnavailableState.environmentId);
-  }, [activeEnvironmentUnavailableState, handleReconnectActiveEnvironment]);
-  const openConnectionSettings = useCallback(() => {
-    void navigate({ to: "/settings/connections" });
-  }, [navigate]);
   const handleDismissVersionMismatch = useCallback(() => {
     if (!versionMismatchDismissKey) return;
     dismissVersionMismatch(versionMismatchDismissKey);
@@ -9629,7 +9622,6 @@ export default function ChatView(props: ChatViewProps) {
   ) : null;
   const threadDetailsPanelProps: Omit<ThreadDetailsPanelProps, "mode"> = {
     environmentId: activeThread.environmentId,
-    environmentConnection: activeEnvironment?.connection ?? null,
     threadId: activeThread.id,
     ...(draftId ? { draftId } : {}),
     activeProjectName: activeProject?.title,
@@ -9660,8 +9652,6 @@ export default function ChatView(props: ChatViewProps) {
       : {}),
     onComposerFocusRequest: scheduleComposerFocus,
     ...(isServerThread && isGitRepo ? { onOpenChanges: openChangesFromThreadPanel } : {}),
-    onReconnectEnvironment: reconnectActiveEnvironment,
-    onOpenConnectionSettings: openConnectionSettings,
     versionMismatch:
       showVersionMismatchBanner && versionMismatch
         ? {
