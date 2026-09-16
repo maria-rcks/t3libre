@@ -1,9 +1,9 @@
 import type {
   EnvironmentId,
-  PullRequestActor,
   PullRequestComment,
   PullRequestDetailView,
   PullRequestRef,
+  PullRequestReviewThread,
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import {
@@ -28,7 +28,6 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collaps
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
-  PullRequestActorAvatar,
   PullRequestActorLabel,
   PullRequestCheckStatusIcon,
   PullRequestReviewOutcomeBadge,
@@ -53,6 +52,7 @@ import {
   canEditPullRequestComment,
 } from "./pullRequestEditing.logic";
 import { PullRequestMarkdown } from "./PullRequestMarkdown";
+import { PullRequestCommentBody } from "./PullRequestCommentBody";
 import { PullRequestMarkdownEditor } from "./PullRequestMarkdownEditor";
 import { PullRequestReactionBar } from "./PullRequestReactions";
 import { PullRequestConversationGhost } from "./PullRequestGhosts";
@@ -64,18 +64,69 @@ function reviewerKey(login: string): string {
   return login.toLowerCase();
 }
 
-/** The avatar carries the attribution alone; who it is arrives on hover, like the reviewer row. */
-function CommentAuthor({ actor }: { actor: PullRequestActor | null }) {
-  const login = actor?.login ?? "ghost";
+function CommentIdentity({
+  comment,
+  detail,
+}: {
+  comment: PullRequestComment;
+  detail: PullRequestDetailView;
+}) {
+  const actor = comment.author;
+  const profileUrl =
+    detail.provider === "github" && actor && !actor.login.endsWith("[bot]")
+      ? new URL(`/${encodeURIComponent(actor.login)}`, detail.url).toString()
+      : null;
   return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="shrink-0 rounded-full" aria-label={login} />}>
-        <PullRequestActorAvatar actor={actor} />
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">
-        {actor?.name && actor.name !== login ? `${actor.name} (@${login})` : login}
-      </TooltipPopup>
-    </Tooltip>
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      <PullRequestActorLabel
+        actor={actor}
+        profileUrl={profileUrl}
+        className="max-w-full font-medium text-foreground [&>img]:size-6 [&>span:first-child]:size-6"
+      />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            comment.url ? (
+              <a
+                href={comment.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-muted-foreground hover:text-foreground hover:underline"
+              />
+            ) : (
+              <span className="text-muted-foreground" />
+            )
+          }
+        >
+          <time dateTime={comment.createdAt}>{formatRelativeTimeLabel(comment.createdAt)}</time>
+        </TooltipTrigger>
+        <TooltipPopup>
+          {new Date(comment.createdAt).toLocaleString()}
+          {comment.url ? " · Open comment on host" : ""}
+        </TooltipPopup>
+      </Tooltip>
+    </div>
+  );
+}
+
+function CommentLocation({
+  comment,
+  thread,
+}: {
+  comment: PullRequestComment;
+  thread: PullRequestReviewThread | undefined;
+}) {
+  const path = thread?.path ?? comment.path;
+  if (!path) return null;
+  const label = `${path}${thread?.line ? `:${thread.line}` : ""}`;
+  return (
+    <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      <Tooltip>
+        <TooltipTrigger render={<span className="truncate font-mono" />}>{label}</TooltipTrigger>
+        <TooltipPopup>{label}</TooltipPopup>
+      </Tooltip>
+      {thread?.isOutdated ? <span className="shrink-0">Outdated</span> : null}
+    </div>
   );
 }
 
@@ -127,7 +178,8 @@ function CommentBody({
   }
   return (
     <div className={cn("flex items-start gap-1", className)}>
-      <PullRequestMarkdown
+      <PullRequestCommentBody
+        key={comment.id}
         className="min-w-0 flex-1"
         text={comment.body}
         cwd={editing.cwd}
@@ -156,6 +208,8 @@ function CollapsedComment({
   label,
   body,
   reactionBar,
+  detail,
+  thread,
 }: {
   comment: PullRequestComment;
   editing: CommentEditing;
@@ -163,43 +217,41 @@ function CollapsedComment({
   /** Null where the remark is nothing but its verdict, which a dismissal usually is. */
   body: string | null;
   reactionBar: ReactNode;
+  detail: PullRequestDetailView;
+  thread: PullRequestReviewThread | undefined;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <article className="group rounded-lg border border-border/60 [contain-intrinsic-block-size:44px] [content-visibility:auto]">
-        <CollapsibleTrigger
-          className={cn(
-            "flex w-full items-center gap-2 p-3 text-left transition-opacity hover:opacity-100",
-            open ? "opacity-100" : "opacity-65",
-          )}
-        >
-          <span className="flex min-w-0 flex-1 items-center gap-2 text-xs text-muted-foreground">
-            <CommentAuthor actor={comment.author} />
-            <span>{formatRelativeTimeLabel(comment.createdAt)}</span>
-            <span>{label}</span>
-          </span>
-          <ChevronDownIcon
-            aria-hidden
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground/60 transition-transform",
-              open && "rotate-180",
-            )}
-          />
-        </CollapsibleTrigger>
+        <div className="p-3">
+          <div className="flex items-start gap-2">
+            <CommentIdentity comment={comment} detail={detail} />
+            <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+              {label}
+              <ChevronDownIcon
+                aria-hidden
+                className={cn("size-3.5 transition-transform", open && "rotate-180")}
+              />
+            </CollapsibleTrigger>
+          </div>
+          <CommentLocation comment={comment} thread={thread} />
+          {!open && body ? (
+            <CollapsibleTrigger className="mt-2 block w-full truncate text-left text-xs text-muted-foreground hover:text-foreground">
+              {body
+                .replace(/<!--[\s\S]*?-->/gu, "")
+                .replace(/^\s*>?\s*\[!\w+\]\s*$/gmu, "")
+                .replace(/!?(\[([^\]]+)\])\([^)]*\)/gu, "$2")
+                .replace(/^[\s>#*-]+/gmu, "")
+                .replace(/[*`]/gu, "")
+                .replace(/\s+/g, " ")
+                .trim()}
+            </CollapsibleTrigger>
+          ) : null}
+        </div>
         <CollapsiblePanel>
           {open ? (
             <div className="px-3 pb-3">
-              {comment.path ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <p className="truncate text-xs text-muted-foreground">{comment.path}</p>
-                    }
-                  />
-                  <TooltipPopup side="top">{comment.path}</TooltipPopup>
-                </Tooltip>
-              ) : null}
               {/* A dismissal carries no more words than an approval does, and an empty markdown
                   block reads as a card somebody forgot to fill in. */}
               {body === null && !editing.canEdit(comment) ? null : (
@@ -306,7 +358,7 @@ function Section({
  * What a first render of the conversation carries. A pull request with two hundred comments is
  * two hundred markdown documents, and the ones worth arriving for are the recent ones.
  */
-const COMMENT_PAGE = 30;
+const COMMENT_PAGE = 10;
 
 export function PullRequestSummaryTab({
   environmentId,
@@ -352,12 +404,12 @@ export function PullRequestSummaryTab({
         className="w-full"
         onClick={() => setShown({ url: detail.url, count: shownComments + COMMENT_PAGE })}
       >
-        Show {Math.min(hiddenCommentCount, COMMENT_PAGE)} oldest{" "}
-        {hiddenCommentCount === 1 ? "comment" : "comments"}
+        Show {Math.min(hiddenCommentCount, COMMENT_PAGE)} older comments ({hiddenCommentCount}{" "}
+        hidden)
       </Button>
     ) : null;
   // Read from the whole conversation, not the window shown below it: a verdict older than the
-  // last thirty comments still stands.
+  // visible comments still stands.
   const reviewOutcomes = latestPullRequestReviewOutcomes(detail.comments, detail.commits);
   // Hosts do not promise one casing for a login across two fields of the same response, and
   // none of them lets `Octocat` and `octocat` be two people — so matching on the literal string
@@ -694,7 +746,7 @@ export function PullRequestSummaryTab({
       </Section>
 
       <Section
-        title="Comments"
+        title={`Comments (${detail.commentCount})`}
         actions={
           <Button
             size="xs"
@@ -739,6 +791,8 @@ export function PullRequestSummaryTab({
                         key={comment.id}
                         comment={comment}
                         editing={commentEditing}
+                        detail={detail}
+                        thread={thread}
                         label={thread?.isResolved ? "Resolved" : "Approval dismissed"}
                         body={body}
                         reactionBar={
@@ -787,19 +841,18 @@ export function PullRequestSummaryTab({
                       key={comment.id}
                       // Offscreen comments skip style, layout and paint. Bot comments carry pages of
                       // highlighted code, and the conversation is below the description either way.
-                      className="group rounded-lg border border-border/60 p-3 [contain-intrinsic-block-size:120px] [content-visibility:auto]"
+                      className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:160px] [content-visibility:auto]"
                     >
-                      <div className="flex items-start gap-2">
-                        <span className="flex min-w-0 flex-1 items-center gap-2 text-xs text-muted-foreground">
-                          <CommentAuthor actor={comment.author} />
-                          <span>{formatRelativeTimeLabel(comment.createdAt)}</span>
+                      <div className="flex flex-wrap items-start gap-2 rounded-t-lg bg-muted/25 px-3 py-2.5">
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <CommentIdentity comment={comment} detail={detail} />
                           {outcome ? (
                             <PullRequestReviewOutcomeBadge outcome={outcome} />
                           ) : comment.reviewState ? (
                             <span>{reviewStateLabel(comment.reviewState)}</span>
                           ) : null}
                           {body === null ? reactionBar : null}
-                        </span>
+                        </div>
                         {/* Review remarks only. A plain conversation comment is talk, not a finding,
                       and offering to fix one would promise more than it says. */}
                         {onFixFinding && finding ? (
@@ -817,30 +870,35 @@ export function PullRequestSummaryTab({
                           </Button>
                         ) : null}
                       </div>
-                      {comment.path ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <p className="mt-1 truncate text-xs text-muted-foreground">
-                                {comment.path}
-                              </p>
-                            }
-                          />
-                          <TooltipPopup side="top">{comment.path}</TooltipPopup>
-                        </Tooltip>
-                      ) : null}
+                      <div className="px-3">
+                        <CommentLocation comment={comment} thread={thread} />
+                      </div>
                       {/* A verdict usually carries no words, and an empty markdown block reads as
                           a card somebody forgot to fill in — the badge above already said it.
                           Kept where this reader may rewrite the remark: the pencil lives in here,
                           and hiding the block would take away the only way back to it. */}
                       {body === null && !commentEditing.canEdit(comment) ? null : (
-                        <CommentBody className="mt-2" comment={comment} editing={commentEditing} />
+                        <CommentBody
+                          className="px-3 py-3"
+                          comment={comment}
+                          editing={commentEditing}
+                        />
                       )}
-                      {body === null ? null : reactionBar}
+                      {body === null ? null : <div className="px-3 pb-3">{reactionBar}</div>}
                     </article>
                   );
                 })}
                 {commentOrder === "newest" ? showOldestCommentsButton : null}
+                {shownComments > COMMENT_PAGE ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="w-full"
+                    onClick={() => setShown({ url: detail.url, count: COMMENT_PAGE })}
+                  >
+                    Show only {COMMENT_PAGE} recent comments
+                  </Button>
+                ) : null}
               </div>
             )}
           </>
