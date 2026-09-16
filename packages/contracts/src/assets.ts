@@ -294,9 +294,7 @@ export class AssetSigningKeyLoadError extends Schema.TaggedError<AssetSigningKey
 
 export class AssetGitHubMediaUrlValidationError extends Schema.TaggedError<AssetGitHubMediaUrlValidationError>()(
   "AssetGitHubMediaUrlValidationError",
-  {
-    resource: AssetResource,
-  },
+  {},
 ) {
   override get message(): string {
     return "Only media hosted by GitHub can be fetched with a GitHub credential.";

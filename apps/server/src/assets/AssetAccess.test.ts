@@ -1106,13 +1106,14 @@ describe("AssetAccess", () => {
 
       for (const url of [
         "https://example.com/shot.png",
+        "https://example.com/shot.png?token=private-media-token",
         "http://github.com/user-attachments/assets/1a1842fb",
         "https://github.com/owner/repo/pull/1",
         "https://github.com/owner/repo/blob/main/",
       ]) {
-        expect((yield* issue(url).pipe(Effect.flip))._tag).toBe(
-          "AssetGitHubMediaUrlValidationError",
-        );
+        const error = yield* issue(url).pipe(Effect.flip);
+        expect(error._tag).toBe("AssetGitHubMediaUrlValidationError");
+        expect(JSON.stringify(error)).not.toContain(url);
       }
     }).pipe(Effect.provide(testLayer)),
   );

@@ -679,7 +679,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
     case "github-media": {
       const fetchUrl = githubMediaFetchUrl(input.resource.url);
       if (fetchUrl === null) {
-        return yield* new AssetGitHubMediaUrlValidationError({ resource: input.resource });
+        return yield* new AssetGitHubMediaUrlValidationError({});
       }
       claims = {
         version: 1,
