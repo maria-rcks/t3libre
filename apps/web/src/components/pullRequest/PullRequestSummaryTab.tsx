@@ -221,13 +221,17 @@ function CollapsedComment({
   thread: PullRequestReviewThread | undefined;
 }) {
   const [open, setOpen] = useState(false);
+  const statusTriggerRef = useRef<HTMLButtonElement>(null);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <article className="group rounded-lg border border-border/60 [contain-intrinsic-block-size:44px] [content-visibility:auto]">
         <div className="p-3">
           <div className="flex items-start gap-2">
             <CommentIdentity comment={comment} detail={detail} />
-            <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+            <CollapsibleTrigger
+              ref={statusTriggerRef}
+              className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
               {label}
               <ChevronDownIcon
                 aria-hidden
@@ -237,7 +241,10 @@ function CollapsedComment({
           </div>
           <CommentLocation comment={comment} thread={thread} />
           {!open && body ? (
-            <CollapsibleTrigger className="mt-2 block w-full truncate text-left text-xs text-muted-foreground hover:text-foreground">
+            <CollapsibleTrigger
+              className="mt-2 block w-full truncate text-left text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => statusTriggerRef.current?.focus({ preventScroll: true })}
+            >
               {body
                 .replace(/<!--[\s\S]*?-->/gu, "")
                 .replace(/^\s*>?\s*\[!\w+\]\s*$/gmu, "")
