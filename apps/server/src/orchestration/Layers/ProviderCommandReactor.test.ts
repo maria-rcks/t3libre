@@ -1,11 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import { chatThreadWorkspacePath } from "@t3tools/shared/chatWorkspace";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import {
   CHAT_PROJECT_ID,
-  chatThreadWorkspacePath,
   ModelSelection,
   ProviderRuntimeEvent,
   ProviderSession,

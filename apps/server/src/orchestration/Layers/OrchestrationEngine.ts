@@ -1,3 +1,4 @@
+import { chatThreadWorkspacePath } from "@t3tools/shared/chatWorkspace";
 import type {
   OrchestrationClientOrigin,
   OrchestrationEvent,
@@ -5,7 +6,7 @@ import type {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
-import { CHAT_PROJECT_ID, chatThreadWorkspacePath, OrchestrationCommand } from "@t3tools/contracts";
+import { CHAT_PROJECT_ID, OrchestrationCommand } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";

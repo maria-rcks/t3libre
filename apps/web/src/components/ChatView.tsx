@@ -1,3 +1,4 @@
+import { chatThreadWorkspacePath } from "@t3tools/shared/chatWorkspace";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
@@ -17,7 +18,6 @@ import {
 } from "../questionAttachments";
 import { useAttachmentUploadStore } from "../lib/attachmentUploadQueue";
 import {
-  chatThreadWorkspacePath,
   isChatProject,
   type AssistantCitation,
   type ApprovalRequestId,

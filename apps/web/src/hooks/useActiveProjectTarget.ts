@@ -1,10 +1,6 @@
+import { chatThreadWorkspacePath } from "@t3tools/shared/chatWorkspace";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import {
-  chatThreadWorkspacePath,
-  isChatProject,
-  type EnvironmentId,
-  type ScopedThreadRef,
-} from "@t3tools/contracts";
+import { isChatProject, type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
 
 import { useProjects } from "~/state/entities";
 

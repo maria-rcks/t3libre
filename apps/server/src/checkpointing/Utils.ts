@@ -1,11 +1,6 @@
+import { chatThreadWorkspacePath } from "@t3tools/shared/chatWorkspace";
 import * as Encoding from "effect/Encoding";
-import {
-  CHAT_PROJECT_ID,
-  chatThreadWorkspacePath,
-  CheckpointRef,
-  ProjectId,
-  type ThreadId,
-} from "@t3tools/contracts";
+import { CHAT_PROJECT_ID, CheckpointRef, ProjectId, type ThreadId } from "@t3tools/contracts";
 
 const CHECKPOINT_REFS_PREFIX = "refs/t3/checkpoints";
 

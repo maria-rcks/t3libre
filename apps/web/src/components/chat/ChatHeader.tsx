@@ -1,5 +1,5 @@
+import { chatThreadWorkspacePath } from "@t3tools/shared/chatWorkspace";
 import {
-  chatThreadWorkspacePath,
   isChatProject,
   type EnvironmentId,
   type EditorId,

@@ -1,11 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import { chatThreadWorkspacePath } from "@t3tools/shared/chatWorkspace";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import {
   CHAT_PROJECT_ID,
-  chatThreadWorkspacePath,
   ApprovalRequestId,
   EventId,
   CheckpointRef,
@@ -157,6 +157,8 @@ describe("OrchestrationEngine", () => {
         "CON",
         "NUL",
         "con",
+        "A".repeat(64),
+        "a".repeat(256),
         uuidThreadId,
       ];
       for (const id of threadIds) {
@@ -192,12 +194,17 @@ describe("OrchestrationEngine", () => {
       expect(folders).toHaveLength(threadIds.length);
       expect(new Set(folders.map((folder) => folder.toLowerCase())).size).toBe(threadIds.length);
       for (const folder of folders) {
+        expect(folder.length).toBeLessThanOrEqual(200);
         expect(folder).not.toMatch(/[<>:"/\\|?*]/);
         expect(folder).not.toMatch(/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i);
       }
       expect(chatThreadWorkspacePath(directory, uuidThreadId)).toBe(
         NodePath.join(directory, uuidThreadId),
       );
+      const surrogatePath = chatThreadWorkspacePath(directory, "\ud800");
+      expect(surrogatePath).toBe(chatThreadWorkspacePath(directory, "\ud800"));
+      expect(surrogatePath).not.toBe(chatThreadWorkspacePath(directory, "\ufffd"));
+      expect(NodePath.basename(surrogatePath)).toMatch(/^~[a-f0-9]{64}$/);
       await expect(
         system.run(
           system.engine.dispatch({

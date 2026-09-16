@@ -1,4 +1,5 @@
-import { chatThreadWorkspacePath, isChatProject } from "@t3tools/contracts";
+import { chatThreadWorkspacePath } from "@t3tools/shared/chatWorkspace";
+import { isChatProject } from "@t3tools/contracts";
 import { useMemo } from "react";
 
 import { useSelectedThreadDetail } from "./use-thread-detail";

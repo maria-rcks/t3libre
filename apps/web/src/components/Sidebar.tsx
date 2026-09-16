@@ -1,5 +1,6 @@
+import { chatThreadWorkspacePath } from "@t3tools/shared/chatWorkspace";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
-import { chatThreadWorkspacePath, isChatProject } from "@t3tools/contracts";
+import { isChatProject } from "@t3tools/contracts";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";

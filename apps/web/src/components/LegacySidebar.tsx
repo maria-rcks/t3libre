@@ -1,4 +1,5 @@
-import { chatThreadWorkspacePath, isChatProject } from "@t3tools/contracts";
+import { chatThreadWorkspacePath } from "@t3tools/shared/chatWorkspace";
+import { isChatProject } from "@t3tools/contracts";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { GitPullRequestIcon } from "lucide-react";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
