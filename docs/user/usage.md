@@ -76,6 +76,10 @@ its monthly allowance, including separate Auto and API usage, using a file-based
 On macOS, use `AGENT_CLI_CREDENTIAL_STORE=file` when signing in and in the provider's environment
 to use a file-based login.
 
+Grok reports the remaining subscription allowance and reset time for its current billing period
+after signing in with `grok login`. Explicit `XAI_API_KEY` connections and custom authentication
+or endpoint configurations do not report subscription limits.
+
 API-key accounts may not report subscription limits. This also applies to Claude connections
 using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 
