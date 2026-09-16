@@ -9,7 +9,6 @@ import {
   NumberFieldInput,
 } from "../ui/number-field";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
-import { StorageUsageSection } from "./StorageUsage";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
@@ -103,8 +102,6 @@ export function StorageSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <StorageUsageSection />
-
       <SettingsSection id="storage-worktrees" title="Worktrees">
         <SettingsRow
           title="Delete worktrees with deleted threads"

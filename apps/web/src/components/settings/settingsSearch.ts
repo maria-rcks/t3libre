@@ -93,13 +93,6 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  */
 export const SETTINGS_SEARCH_ITEMS = [
   {
-    id: "storage-usage",
-    title: "Disk usage",
-    to: "/settings/storage",
-    scope: "environment-defaults",
-    searchTerms: ["space bytes size storage machine disk worktrees captures logs attachments"],
-  },
-  {
     id: "storage-worktrees",
     title: "Worktree cleanup",
     to: "/settings/storage",
