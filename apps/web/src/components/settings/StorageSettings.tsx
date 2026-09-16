@@ -32,14 +32,19 @@ function RetentionControl({
           step={1}
           size="sm"
           className="w-40"
-          format={{ style: "unit", unit: "day", unitDisplay: "long" }}
           onValueChange={(next) => {
             if (next !== null) onChange(next);
           }}
         >
           <NumberFieldGroup>
             <NumberFieldDecrement aria-label={`Decrease ${label}`} />
-            <NumberFieldInput aria-label={`${label} in days`} />
+            <NumberFieldInput
+              aria-label={`${label} in days`}
+              className="text-right in-data-[size=sm]:px-1"
+            />
+            <span aria-hidden="true" className="self-center pr-2 text-xs">
+              days
+            </span>
             <NumberFieldIncrement aria-label={`Increase ${label}`} />
           </NumberFieldGroup>
         </NumberField>
