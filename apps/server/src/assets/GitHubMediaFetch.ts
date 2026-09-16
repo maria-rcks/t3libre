@@ -60,10 +60,7 @@ const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inlin
  * The token is what `gh auth token` would print again on the next call, and it is held no longer
  * than a signed asset URL lives.
  */
-const tokenCache = new Map<
-  string,
-  { readonly at: number; readonly token: Redacted.Redacted | null }
->();
+const tokenCache = new Map<string, { readonly at: number; readonly token: Redacted.Redacted }>();
 
 const githubToken = Effect.fn("GitHubMediaFetch.githubToken")(function* (input: {
   readonly cwd: string;
@@ -89,12 +86,12 @@ const githubToken = Effect.fn("GitHubMediaFetch.githubToken")(function* (input: 
       Effect.map((output) => output.stdout.trim()),
       Effect.orElseSucceed(() => ""),
     );
+  // A login or recovered CLI failure must take effect on the next media request.
+  if (token.length === 0) return null;
   if (tokenCache.size >= TOKEN_CACHE_MAX_ENTRIES) {
     tokenCache.delete(tokenCache.keys().next().value!);
   }
-  // The absence of a credential is cached too, or an unauthenticated machine spawns `gh` again
-  // for every image and every video range request.
-  const redacted = token.length === 0 ? null : Redacted.make(token);
+  const redacted = Redacted.make(token);
   tokenCache.set(key, { at: now, token: redacted });
   return redacted;
 });

@@ -13,7 +13,8 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpServerResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse, HttpServerResponse } from "effect/unstable/http";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { vi } from "vite-plus/test";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -26,6 +27,8 @@ import { ASSET_ROUTE_PREFIX, issueAssetUrl, resolveAsset } from "./AssetAccess.t
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 import { openMediaFile } from "./MediaFile.ts";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
+import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import { githubMediaResponse } from "./GitHubMediaFetch.ts";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof NodeFSP>();
@@ -48,6 +51,52 @@ const testLayer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 describe("AssetAccess", () => {
+  it.effect("loads private media immediately after login and reuses the found credential", () => {
+    let lookups = 0;
+    const authorizations: Array<string | undefined> = [];
+    return Effect.gen(function* () {
+      const asset = {
+        url: "https://raw.githubusercontent.com/owner/repo/main/shot.png",
+        cwd: "/repo",
+        expiresAt: Number.MAX_SAFE_INTEGER,
+      };
+      expect((yield* githubMediaResponse(asset, {})).status).toBe(404);
+      expect((yield* githubMediaResponse(asset, {})).status).toBe(200);
+      expect((yield* githubMediaResponse(asset, {})).status).toBe(200);
+      expect(lookups).toBe(2);
+      expect(authorizations).toEqual([undefined, "Bearer signed-in", "Bearer signed-in"]);
+    }).pipe(
+      Effect.provide(
+        Layer.mock(GitHubCli.GitHubCli)({
+          execute: () =>
+            Effect.sync(() => ({
+              exitCode: ChildProcessSpawner.ExitCode(0),
+              stdout: ++lookups === 1 ? "" : "signed-in",
+              stderr: "",
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            })),
+        }),
+      ),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make((request) => {
+          authorizations.push(request.headers.authorization);
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(null, {
+                status: request.headers.authorization ? 200 : 404,
+                headers: { "content-type": "image/png" },
+              }),
+            ),
+          );
+        }),
+      ),
+      Effect.scoped,
+    );
+  });
+
   it.effect("issues exact URLs for media and browser documents outside the workspace", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
