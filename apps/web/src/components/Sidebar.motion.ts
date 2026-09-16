@@ -103,10 +103,6 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     running.get(node)?.animation.cancel();
     running.delete(node);
   };
-  const cancelEntry = (node: HTMLElement) => {
-    entering.get(node)?.animation.cancel();
-    entering.delete(node);
-  };
   const suspend = () => {
     for (const node of running.keys()) cancel(node);
     clearFades();
@@ -115,8 +111,10 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
   };
   const move = (node: HTMLElement, offset: number) => {
     cancel(node);
-    cancelEntry(node);
-    if (offset === 0) return;
+    const entry = entering.get(node);
+    // The newer transform supersedes entry travel; its original opacity keeps fading.
+    if (entry) entry.travel = 0;
+    if (offset === 0 && !entry) return;
     const animation = node.animate(
       [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0px)" }],
       motionTiming,

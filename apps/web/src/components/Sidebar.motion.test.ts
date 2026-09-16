@@ -476,7 +476,7 @@ describe("sidebar list motion", () => {
     entry.progress = 0.25;
     for (const row of [header, x, y]) row.offsetTop += 40;
     motion.update(true);
-    expect(entry.cancel).toHaveBeenCalledOnce();
+    expect(entry.cancel).not.toHaveBeenCalled();
     // Remaining 27px of the 36px entry plus the new 40px shift.
     expectMove(y, -13);
   });
