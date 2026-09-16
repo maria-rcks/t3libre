@@ -337,6 +337,13 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
           ],
         ],
       );
+      const permissionError = yield* adapter
+        .sendTurn({ threadId, input: "/always-approve on" })
+        .pipe(Effect.flip);
+      if (permissionError._tag !== "ProviderAdapterRequestError") {
+        assert.fail(`Unexpected error: ${permissionError._tag}`);
+      }
+      assert.include(permissionError.detail, "permission selector");
       yield* adapter.sendTurn({ threadId, input: "/goal status" });
       yield* adapter.stopSession(threadId);
       const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
