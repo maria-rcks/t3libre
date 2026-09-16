@@ -2156,6 +2156,7 @@ const make = Effect.gen(function* () {
             : undefined;
           const fallbackText =
             event.payload.detail !== undefined &&
+            event.payload.detail.trim().length > 0 &&
             (existingReasoningMessage === undefined || existingReasoningMessage.text.length === 0)
               ? event.payload.detail
               : undefined;

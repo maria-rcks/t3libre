@@ -1540,6 +1540,19 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(message?.text).toBe("reasoning reported in one piece");
 
+    for (const [index, detail] of ["", " \n\t"].entries()) {
+      harness.emit({
+        type: "item.completed",
+        eventId: asEventId(`evt-empty-reasoning-${index}`),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId(`turn-empty-${index}`),
+        itemId: asItemId(`item-empty-${index}`),
+        payload: { itemType: "reasoning", status: "completed", detail },
+      });
+    }
+
     // A repeated completion must rewrite that row, not add a second copy.
     harness.emit({
       type: "item.completed",
