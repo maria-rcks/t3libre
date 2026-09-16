@@ -39,7 +39,11 @@ function RetentionControl({
           onValueChange={setDraft}
           onValueCommitted={(next) => {
             if (next === null) setDraft(value);
-            else onChange(next);
+            else {
+              const days = Math.min(3650, Math.max(1, Math.round(next)));
+              setDraft(days);
+              onChange(days);
+            }
           }}
         >
           <NumberFieldGroup>
