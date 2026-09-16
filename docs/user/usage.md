@@ -70,7 +70,8 @@ closes when you dismiss it or send your next message. It uses the same snapshot 
 anything. The command is offered only for providers that appear under **Usage → Limits**.
 
 OpenCode Go reports its session, weekly, and monthly allowance when OpenCode runs locally in
-the environment; external OpenCode servers do not expose their account limits. Cursor reports
+the environment. T3 cannot report limits for external OpenCode servers because their credentials
+belong to the remote server. Cursor reports
 its monthly allowance, including separate Auto and API usage, using a file-based CLI login or
 `CURSOR_AUTH_TOKEN`. Cursor's default macOS keychain login does not currently report limits.
 On macOS, use `AGENT_CLI_CREDENTIAL_STORE=file` when signing in and in the provider's environment
