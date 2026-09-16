@@ -5223,10 +5223,12 @@ export default function ChatView(props: ChatViewProps) {
   const settledTimelineAnchorRef = useRef<MessageId | null>(null);
   const activeTimelineAnchorIndexRef = useRef<number | null>(null);
   const anchorUserScrollGenerationRef = useRef(0);
+  const cancelPositionRestoreRef = useRef<(() => void) | null>(null);
   const liveFollowUserScrollGenerationRef = useRef<number | null>(0);
   // Manual navigation stops live-follow without removing anchored end space.
   // Collapsing that space during a gesture clamps the viewport back to the end.
   const cancelTimelineLiveFollowForUserNavigation = useCallback(() => {
+    cancelPositionRestoreRef.current?.();
     anchorUserScrollGenerationRef.current += 1;
     timelineScrollModeRef.current = "free-scrolling";
     liveFollowUserScrollGenerationRef.current = null;
@@ -5306,6 +5308,7 @@ export default function ChatView(props: ChatViewProps) {
   // Live-follow stays active after send/thread-open until an actual list scroll
   // gesture opts out.
   const scrollToEnd = useCallback((animated = false) => {
+    cancelPositionRestoreRef.current?.();
     isAtEndRef.current = true;
     timelineScrollModeRef.current = "following-end";
     liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
@@ -9502,6 +9505,7 @@ export default function ChatView(props: ChatViewProps) {
                 onContentOverflowChange={setTimelineOverflows}
                 onToolOutputCollapsedAtEnd={onToolOutputCollapsedAtEnd}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
+                cancelPositionRestoreRef={cancelPositionRestoreRef}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={paintOnlyDisplayedTimeline ? null : loadEarlierTurns}

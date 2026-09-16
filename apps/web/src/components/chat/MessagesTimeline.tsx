@@ -450,6 +450,7 @@ interface MessagesTimelineProps {
   onContentOverflowChange?: (overflows: boolean) => void;
   onToolOutputCollapsedAtEnd?: () => void;
   onManualNavigation: () => void;
+  cancelPositionRestoreRef?: React.RefObject<(() => void) | null>;
   hideEmptyPlaceholder?: boolean;
   topFadeEnabled?: boolean;
   /** Non-null when older turns exist beyond the loaded window. */
@@ -508,6 +509,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onContentOverflowChange,
   onToolOutputCollapsedAtEnd,
   onManualNavigation,
+  cancelPositionRestoreRef,
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   loadEarlier = null,
@@ -823,14 +825,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     let cancelled = false;
     let settleFrame: number | null = null;
     const viewport: HTMLElement | null = list.getScrollableNode();
-    const cancelForNavigation = () => {
+    const cancelRestoration = () => {
       if (cancelled) return;
       cancelled = true;
       if (settleFrame !== null) cancelAnimationFrame(settleFrame);
       // Supersede any pending estimated-index scroll before the browser applies the gesture.
       if (viewport) void list.scrollToOffset({ offset: viewport.scrollTop, animated: false });
-      onManualNavigation();
       setPositionedThreadKey(listIdentityKey);
+    };
+    const cancelForNavigation = () => {
+      cancelRestoration();
+      onManualNavigation();
     };
     const onScrollKey = (event: globalThis.KeyboardEvent) => {
       if (
@@ -849,6 +854,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     const position = rememberedPosition;
     const index = position ? rows.findIndex((row) => row.id === position.rowId) : -1;
     if (position?.atEnd === false) onManualNavigation();
+    if (cancelPositionRestoreRef) cancelPositionRestoreRef.current = cancelRestoration;
     const scrolling =
       position?.atEnd === false
         ? index >= 0
@@ -903,6 +909,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     });
     return () => {
       cancelled = true;
+      if (cancelPositionRestoreRef?.current === cancelRestoration) {
+        cancelPositionRestoreRef.current = null;
+      }
       if (settleFrame !== null) cancelAnimationFrame(settleFrame);
       viewport?.removeEventListener("wheel", cancelForNavigation);
       viewport?.removeEventListener("touchmove", cancelForNavigation);
@@ -911,6 +920,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [
     citationRequest,
+    cancelPositionRestoreRef,
     listIdentityKey,
     listRef,
     onManualNavigation,
