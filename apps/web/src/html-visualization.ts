@@ -16,6 +16,7 @@ const MEASURE_SCRIPT = `(() => {
   const send = parent.postMessage.bind(parent);
   const observe = ResizeObserver;
   const schedule = window.setTimeout.bind(window);
+  const visible = Element.prototype.checkVisibility;
   const ceil = Math.ceil;
   const min = Math.min;
   const max = Math.max;
@@ -28,7 +29,14 @@ const MEASURE_SCRIPT = `(() => {
       pending = true;
       schedule(() => {
         pending = false;
-        const height = min(10000, max(1, ceil(content.getBoundingClientRect().height)));
+        const bounds = content.getBoundingClientRect();
+        let bottom = bounds.bottom;
+        for (const element of content.querySelectorAll('*')) {
+          if (!visible.call(element)) continue;
+          const rect = element.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) bottom = max(bottom, rect.bottom);
+        }
+        const height = min(10000, max(1, ceil(bottom - bounds.top)));
         if (height === previous) return;
         previous = height;
         send({ type: 't3-visualization-height', height }, '*');
@@ -36,6 +44,9 @@ const MEASURE_SCRIPT = `(() => {
     };
     new observe(measure).observe(content);
     addEventListener('resize', measure);
+    addEventListener('input', measure);
+    addEventListener('change', measure);
+    addEventListener('toggle', measure, true);
     measure();
   }, { once: true });
 })();`;
@@ -58,7 +69,7 @@ const RELAY_SCRIPT = `(() => {
     });
   }, { once: true });
 })();`;
-const MEASURE_HASH = "'sha256-vHywAwkJBVNM9haxdbpCBTGVP8q60pgy+skng9yETwc='";
+const MEASURE_HASH = "'sha256-rOy+bLlVWQY5AviTEksAY+v4BRvgQ+OutLhSfIGk1JA='";
 const RELAY_HASH = "'sha256-pO9pImNqi1q9JfqcpZtUGxwPkFw/9ZcMOK+UTNpEDtI='";
 
 export function parseVisualizationHeight(data: unknown): number | null {

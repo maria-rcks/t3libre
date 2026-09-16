@@ -81,7 +81,7 @@ async function mountVisualization(page: Page, html: string, themeCSS = "") {
     { source: html, theme: themeCSS },
   );
   const content = page.frameLocator("#visualization").frameLocator("iframe");
-  await expect(content.locator("body")).toBeVisible();
+  await expect(content.locator("body")).toBeAttached();
   return content;
 }
 
@@ -376,4 +376,15 @@ test("embeds initial theme declarations without allowing style-element breakout"
   await expect(content.getByText("Theme boundary")).toHaveCSS("color", "rgb(12, 34, 56)");
   await expect(content.locator("body script")).toHaveCount(0);
   expect(await page.evaluate(() => window.visualizationMessages)).toEqual([]);
+});
+
+test("measures content outside normal document flow", async ({ page }) => {
+  const content = await mountVisualization(
+    page,
+    `<div style="position:absolute;top:40px;height:160px;width:200px">Absolute content</div>
+     <div style="position:fixed;top:220px;height:80px;width:200px">Fixed content</div>`,
+  );
+  await expect(page.locator("#visualization")).toHaveCSS("height", "300px");
+  await expect(content.getByText("Absolute content")).toBeVisible();
+  await expect(content.getByText("Fixed content")).toBeVisible();
 });
