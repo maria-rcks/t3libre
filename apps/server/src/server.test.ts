@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - tests inject stalled reads and root swaps at the native filesystem boundary.
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
