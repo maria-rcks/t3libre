@@ -3956,7 +3956,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             dispatchMode ??
               resolveComposerDispatchMode({
                 phase,
-                queueModifier: false,
+                alternateModifier: false,
                 activeTurnDefault: settings.followUpBehavior,
               }),
           );
@@ -3990,7 +3990,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         event,
         resolveComposerDispatchMode({
           phase,
-          queueModifier: event.metaKey || event.ctrlKey,
+          alternateModifier: event.metaKey || event.ctrlKey,
           activeTurnDefault: settings.followUpBehavior,
         }),
       );
@@ -4002,7 +4002,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       undefined,
       resolveComposerDispatchMode({
         phase,
-        queueModifier: false,
+        alternateModifier: false,
         activeTurnDefault: settings.followUpBehavior,
       }),
     );
@@ -4181,7 +4181,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         undefined,
         resolveComposerDispatchMode({
           phase,
-          queueModifier: event.metaKey || event.ctrlKey,
+          alternateModifier: event.metaKey || event.ctrlKey,
           activeTurnDefault: settings.followUpBehavior,
         }),
       );
