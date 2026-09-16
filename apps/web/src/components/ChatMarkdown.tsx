@@ -2701,7 +2701,7 @@ function markdownHeadingRenderer(level: 1 | 2 | 3 | 4 | 5 | 6) {
     node: _node,
     ...props
   }: ComponentProps<typeof Tag> & ReactMarkdownExtraProps) {
-    const { headingLevelOffset } = use(ChatMarkdownRendererContext);
+    const { headingLevelOffset } = use(ChatMarkdownPresentationContext);
     return (
       <Tag
         {...props}
@@ -2720,6 +2720,7 @@ const ChatMarkdownPresentationContext = React.createContext<
     | "resolvedTheme"
     | "diffThemeName"
     | "isStreaming"
+    | "headingLevelOffset"
   >
 >(null!);
 
@@ -3319,6 +3320,7 @@ const READ_ONLY_MARKDOWN_COMPONENTS = {
 
 function ReadOnlyChatMarkdown({
   text,
+  headingLevelOffset = 0,
   className,
   lineBreaks = false,
   parseRawHtml = true,
@@ -3327,6 +3329,7 @@ function ReadOnlyChatMarkdown({
   const presentation = useMemo(
     () => ({
       text,
+      headingLevelOffset,
       skills: EMPTY_MARKDOWN_SKILLS,
       onTaskListChange: undefined,
       onUseArtifactTemplate: undefined,
@@ -3334,7 +3337,7 @@ function ReadOnlyChatMarkdown({
       diffThemeName: resolveDiffThemeName(resolvedTheme),
       isStreaming: false,
     }),
-    [resolvedTheme, text],
+    [resolvedTheme, text, headingLevelOffset],
   );
   return (
     <div

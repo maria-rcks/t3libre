@@ -215,7 +215,7 @@ export const sharesHttpApiLayer = HttpApiBuilder.group(
             provider: thread.value.session?.providerName ?? null,
             options: payload.options,
             messages: thread.value.messages.flatMap((message) =>
-              message.role === "system"
+              message.role !== "user" && message.role !== "assistant"
                 ? []
                 : [
                     {
