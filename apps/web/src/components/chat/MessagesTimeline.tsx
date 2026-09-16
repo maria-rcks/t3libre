@@ -2100,15 +2100,23 @@ function TimelineRowTimestamp({
 
 function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-fold" }> }) {
   const ctx = use(TimelineRowCtx);
-  return <TurnFoldButton row={row} onToggle={() => ctx.onToggleTurnFold(row.turnId)} />;
+  return (
+    <TurnFoldButton
+      row={row}
+      timestampFormat={ctx.timestampFormat}
+      onToggle={() => ctx.onToggleTurnFold(row.turnId)}
+    />
+  );
 }
 
 export function TurnFoldButton({
   row,
   onToggle,
+  timestampFormat = "locale",
 }: {
   row: Extract<TimelineRow, { kind: "turn-fold" }>;
   onToggle: () => void;
+  timestampFormat?: TimestampFormat | undefined;
 }) {
   const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
 
@@ -2126,7 +2134,7 @@ export function TurnFoldButton({
       </button>
       <TimelineRowTimestamp
         createdAt={row.createdAt}
-        timestampFormat={ctx.timestampFormat}
+        timestampFormat={timestampFormat}
         className="ms-auto"
       />
     </div>
@@ -2863,7 +2871,11 @@ function WorkGroupToggleTimelineRow({
 }) {
   const ctx = use(TimelineRowCtx);
   return (
-    <WorkGroupToggleButton row={row} onToggle={() => ctx.onToggleWorkGroup(row.groupId, row.id)} />
+    <WorkGroupToggleButton
+      row={row}
+      timestampFormat={ctx.timestampFormat}
+      onToggle={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
+    />
   );
 }
 
@@ -2871,10 +2883,12 @@ export function WorkGroupToggleButton({
   row,
   onToggle,
   readOnly,
+  timestampFormat = "locale",
 }: {
   row: Extract<TimelineRow, { kind: "work-toggle" }>;
   onToggle: () => void;
   readOnly?: boolean | undefined;
+  timestampFormat?: TimestampFormat | undefined;
 }) {
   return (
     <button
@@ -2896,7 +2910,7 @@ export function WorkGroupToggleButton({
         />
       </span>
       <span className="min-w-0 flex-1 truncate text-secondary-label">{row.summary}</span>
-      <TimelineRowTimestamp createdAt={row.createdAt} timestampFormat={ctx.timestampFormat} />
+      <TimelineRowTimestamp createdAt={row.createdAt} timestampFormat={timestampFormat} />
     </button>
   );
 }
