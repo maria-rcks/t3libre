@@ -223,6 +223,11 @@ import {
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import { otlpSerializationLayer } from "@t3tools/shared/observability";
 
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeFSP>();
+  return { ...actual, realpath: vi.fn(actual.realpath) };
+});
+
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
 const defaultDesktopBootstrapToken = "test-desktop-bootstrap-token";
@@ -6446,7 +6451,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     () =>
       Effect.gen(function* () {
         const started = yield* Deferred.make<void>();
-        const stalled = vi.spyOn(NodeFSP, "realpath").mockImplementationOnce(() => {
+        const stalled = vi.mocked(NodeFSP.realpath).mockImplementationOnce(() => {
           Effect.runSync(Deferred.succeed(started, undefined));
           return new Promise<never>(() => {});
         });
@@ -6461,7 +6466,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           assert.strictEqual(yield* usage.read({}), sample);
           for (const category of Object.values(sample.categories)) assert.isTrue(category.partial);
         } finally {
-          stalled.mockRestore();
+          stalled.mockReset();
         }
       }).pipe(
         Effect.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-storage-stalled-" })),
@@ -6478,9 +6483,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         yield* fs.makeDirectory(config.worktreesDir, { recursive: true });
         const outside = yield* fs.makeTempDirectoryScoped({ prefix: "t3-storage-race-" });
         yield* fs.writeFileString(path.join(outside, "outside.txt"), "must not be counted");
-        const realpath = NodeFSP.realpath;
+        const { realpath } = yield* Effect.promise(() =>
+          vi.importActual<typeof NodeFSP>("node:fs/promises"),
+        );
         let rootReads = 0;
-        const replaced = vi.spyOn(NodeFSP, "realpath").mockImplementation(async (...args) => {
+        const replaced = vi.mocked(NodeFSP.realpath).mockImplementation(async (...args) => {
           // The first lookup builds category exclusions; the second follows lstat.
           if (args[0] === config.worktreesDir && ++rootReads === 2) {
             await NodeFSP.rename(config.worktreesDir, config.worktreesDir + "-original");
@@ -6493,7 +6500,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           const sample = yield* usage.read({});
           assert.deepEqual(sample.categories.worktrees, { bytes: 0, fileCount: 0, partial: true });
         } finally {
-          replaced.mockRestore();
+          replaced.mockReset();
         }
       }).pipe(
         Effect.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-storage-root-race-" })),
