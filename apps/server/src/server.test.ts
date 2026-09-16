@@ -6486,10 +6486,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         const { realpath } = yield* Effect.promise(() =>
           vi.importActual<typeof NodeFSP>("node:fs/promises"),
         );
+        const canonicalRoot = yield* fs.realPath(config.worktreesDir);
         let rootReads = 0;
         const replaced = vi.mocked(NodeFSP.realpath).mockImplementation(async (...args) => {
           // The first lookup builds category exclusions; the second follows lstat.
-          if (args[0] === config.worktreesDir && ++rootReads === 2) {
+          if ((args[0] === config.worktreesDir || args[0] === canonicalRoot) && ++rootReads === 2) {
             await NodeFSP.rename(config.worktreesDir, config.worktreesDir + "-original");
             await NodeFSP.symlink(outside, config.worktreesDir, "dir");
           }
