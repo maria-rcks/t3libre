@@ -2874,9 +2874,7 @@ export const make = Effect.gen(function* () {
         .pipe(Effect.andThen(SubscriptionRef.set(pullRequestRefreshes, listingsEpoch)));
     });
 
-  // A mutation's own client re-reads right after it, and every other client's next read must
-  // see the action too — so a write forgets the change request it touched and the listings its
-  // state change reorders, for everyone, without any client asking.
+  // Invalidate before notifying every client so mounted readers immediately fetch the edit.
   const invalidatedByMutation =
     <I extends PullRequestRef>(
       method: (input: I) => Effect.Effect<void, PullRequestError>,
@@ -2894,6 +2892,7 @@ export const make = Effect.gen(function* () {
             }),
           ),
         );
+        yield* SubscriptionRef.set(pullRequestRefreshes, listingsEpoch);
       });
   const runActionAndInvalidate: PullRequestService["Service"]["runAction"] = Effect.fn(
     "PullRequestService.runActionAndInvalidate",
@@ -2905,6 +2904,7 @@ export const make = Effect.gen(function* () {
     );
     bumpRefEpoch({ ...ref, repository });
     listingsEpoch = ++epochCounter;
+    yield* SubscriptionRef.set(pullRequestRefreshes, listingsEpoch);
     if (input.action === "merge") {
       // A successful merge action can merely enqueue the PR or enable auto-merge.
       const confirmed = yield* summaryUncached({ ...input, repository }).pipe(
