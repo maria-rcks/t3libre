@@ -735,7 +735,7 @@ function OpenCommandPaletteDialog(props: {
   const themeCards = useMemo(() => {
     const seen = new Set<string>();
     return [
-      ...STANDARD_THEME_CARDS,
+      ...STANDARD_THEME_CARDS.map((card) => ({ ...card, id: null })),
       ...[...BUILT_IN_THEMES, ...customThemes, ...environmentThemes]
         .filter((definition) => {
           if (seen.has(definition.id)) return false;
@@ -1859,32 +1859,33 @@ function OpenCommandPaletteDialog(props: {
         label: "Change theme",
         items: themeCards.map(({ id, label, previews }) => ({
           kind: "action",
-          value: `theme:${id}`,
+          value: id === null ? "theme:standard" : `theme:palette:${id}`,
           title: label,
-          description:
-            (themeHalves?.[resolvedTheme] ?? getThemeDefinition(theme)?.id ?? "default") === id
-              ? "Current"
-              : previews.length === 1
-                ? `For ${previews[0]!.mode} mode`
-                : undefined,
+          description: previews.length === 1 ? `For ${previews[0]!.mode} mode` : undefined,
           searchTerms: [label, "theme", "appearance"],
-          icon: (
-            <span className="flex shrink-0 items-center gap-1" aria-hidden>
-              {previews.map((preview) => (
-                <ThemePreviewCircle
-                  key={preview.mode}
-                  colors={preview.colors}
-                  mode={preview.mode}
-                  className="size-6 border"
-                />
-              ))}
+          icon: <PaletteIcon className={ITEM_ICON_CLASS} />,
+          titleTrailingContent: (
+            <span className="flex shrink-0 items-center gap-2">
+              {(themeHalves?.[resolvedTheme] ?? getThemeDefinition(theme)?.id ?? null) === id ? (
+                <span className="text-xs text-muted-foreground/70">Current</span>
+              ) : null}
+              <span className="flex items-center gap-1" aria-hidden>
+                {previews.map((preview) => (
+                  <ThemePreviewCircle
+                    key={preview.mode}
+                    colors={preview.colors}
+                    mode={preview.mode}
+                    className="size-3 border-0"
+                  />
+                ))}
+              </span>
             </span>
           ),
           run: async () => {
             const saved =
-              previews.length === 1
+              previews.length === 1 && id !== null
                 ? setThemeHalf(previews[0]!.mode, id)
-                : setTheme(id === "default" ? appearanceMode : id);
+                : setTheme(id ?? appearanceMode);
             if (!saved) notifyThemeSaveFailure();
           },
         })),
