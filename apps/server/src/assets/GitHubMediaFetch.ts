@@ -175,7 +175,8 @@ export const githubMediaResponse = Effect.fn("GitHubMediaFetch.githubMediaRespon
   }
   // Only pictures and recordings leave this origin, and never on GitHub's word alone: the raw
   // host labels every committed binary `application/octet-stream`, so the name decides those.
-  const upstreamType = response.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  const upstreamType =
+    response.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
   const contentType = MEDIA_CONTENT_TYPE_PATTERN.test(upstreamType)
     ? upstreamType
     : (Mime.getType(githubMediaFileName(asset.url))?.toLowerCase() ?? "");
