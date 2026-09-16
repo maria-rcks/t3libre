@@ -21,9 +21,9 @@ describe("diffPanelStore", () => {
   });
 
   it("defaults to working tree changes before a thread is selected", () => {
-    expect(
-      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, null),
-    ).toEqual({ kind: "unstaged" });
+    expect(selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, null)).toEqual({
+      kind: "unstaged",
+    });
   });
 
   it("preserves an explicit branch selection", () => {
