@@ -28,7 +28,7 @@ import * as ThreadDeletionReactor from "./orchestration/Services/ThreadDeletionR
 import * as ProviderService from "./provider/Services/ProviderService.ts";
 import { threadHasQueuedTurnStart } from "./orchestration/ThreadSettlementPolicy.ts";
 import { forkParked } from "./serverActivation.ts";
-import * as ServerSettings from "./serverSettings.ts";
+import * as Settings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "./workspace/workspaceLease.ts";
@@ -72,7 +72,7 @@ export class StorageCleanup extends Context.Service<
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
-  const settingsService = yield* ServerSettings.ServerSettingsService;
+  const settingsService = yield* Settings.ServerSettingsService;
   const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const threadDeletion = yield* ThreadDeletionReactor.ThreadDeletionReactor;
