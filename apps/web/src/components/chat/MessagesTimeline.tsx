@@ -3393,7 +3393,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   markdownCwd: string | undefined;
   footer?: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => props.searchExpanded ?? false);
   useEffect(() => {
     if (props.searchExpanded) setExpanded(true);
   }, [props.searchExpanded]);

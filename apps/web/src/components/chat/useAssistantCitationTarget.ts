@@ -79,11 +79,8 @@ export function useAssistantCitationTarget({
     }
     if (suspended) {
       const navigation = navigationRef.current;
-      navigation.target.activationRef.current.dismissed = true;
       navigation.target.activationRef.current.cancelScroll?.();
-      navigation.done = true;
       setReady(null);
-      setFinishedKey(request.key);
       return;
     }
     if (!viewport || historyLoading) return;
