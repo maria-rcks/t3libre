@@ -35,6 +35,8 @@ import {
 } from "../Drivers/CursorSkills.ts";
 import { execScriptSource, writeFakeCli } from "../../testUtils/fakeCli.ts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { cursorUsageResponseToLimits, readCursorUsageLimits } from "./cursorUsageLimits.ts";
 
 const runNode = <A, E>(
   effect: Effect.Effect<
@@ -950,5 +952,127 @@ describe("resolveCursorAcpConfigUpdates", () => {
       { configId: "effort", value: "max" },
       { configId: "thinking", value: "false" },
     ]);
+  });
+});
+
+describe("Cursor usage limits", () => {
+  const checkedAt = "2026-09-16T00:00:00.000Z";
+
+  it("uses the advertised percentages and billing-cycle reset", () => {
+    const limits = cursorUsageResponseToLimits(
+      {
+        billingCycleEnd: "1789876386000",
+        planUsage: { totalPercentUsed: 72.4, autoPercentUsed: 69.5, apiPercentUsed: 100 },
+      },
+      checkedAt,
+    );
+    expect(limits.windows).toEqual(
+      expect.arrayContaining([
+        {
+          id: "totalPercentUsed",
+          kind: "monthly",
+          label: "Monthly",
+          usedPercent: 72.4,
+          resetsAt: "2026-09-20T03:53:06.000Z",
+        },
+        {
+          id: "autoPercentUsed",
+          kind: "monthly",
+          label: "Monthly · Auto",
+          usedPercent: 69.5,
+          resetsAt: "2026-09-20T03:53:06.000Z",
+        },
+        {
+          id: "apiPercentUsed",
+          kind: "monthly",
+          label: "Monthly · API",
+          usedPercent: 100,
+          resetsAt: "2026-09-20T03:53:06.000Z",
+        },
+      ]),
+    );
+  });
+
+  it("does not invent unused allowance for absent buckets", () => {
+    expect(cursorUsageResponseToLimits({ planUsage: {} }, checkedAt).unavailable?.reason).toBe(
+      "unsupported",
+    );
+    expect(
+      cursorUsageResponseToLimits({ planUsage: { totalPercentUsed: 0 } }, checkedAt).windows,
+    ).toEqual([{ id: "totalPercentUsed", kind: "monthly", label: "Monthly", usedPercent: 0 }]);
+    expect(
+      cursorUsageResponseToLimits({ planUsage: { totalPercentUsed: 150 } }, checkedAt).windows,
+    ).toEqual([{ id: "totalPercentUsed", kind: "monthly", label: "Monthly", usedPercent: 100 }]);
+  });
+
+  it("reads the instance's credentials and endpoint even when usage enabled is false", async () => {
+    await runNode(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        yield* fs.makeDirectory(path.join(directory, "cursor"));
+        yield* fs.writeFileString(
+          path.join(directory, "cursor", "auth.json"),
+          '{"accessToken":"instance-token"}',
+        );
+        const client = HttpClient.make((request) => {
+          expect(request.url).toBe(
+            "https://cursor.example/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
+          );
+          expect(request.method).toBe("POST");
+          expect(request.headers.authorization).toBe("Bearer instance-token");
+          expect(request.headers["connect-protocol-version"]).toBe("1");
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              Response.json({ enabled: false, planUsage: { totalPercentUsed: 42 } }),
+            ),
+          );
+        });
+        const limits = yield* readCursorUsageLimits(
+          { apiEndpoint: "https://cursor.example/" },
+          { XDG_CONFIG_HOME: directory },
+        ).pipe(
+          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HttpClient.HttpClient, client),
+        );
+        expect(limits.windows[0]?.usedPercent).toBe(42);
+      }).pipe(Effect.scoped),
+    );
+  });
+
+  it("reports failed requests without exposing credentials or response bodies", async () => {
+    const limits = await runNode(
+      readCursorUsageLimits({ apiEndpoint: "" }, { CURSOR_AUTH_TOKEN: "private-token" }).pipe(
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                new Response("private response", { status: 401 }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(limits.unavailable).toEqual({
+      reason: "probeFailed",
+      message: "Cursor could not read usage limits.",
+    });
+  });
+
+  it("does not use a stored login for an explicit API key", async () => {
+    const limits = await runNode(
+      readCursorUsageLimits({ apiEndpoint: "" }, { CURSOR_API_KEY: "different-account" }).pipe(
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make(() => Effect.die("must not request usage")),
+        ),
+      ),
+    );
+    expect(limits.unavailable?.reason).toBe("unsupported");
   });
 });
