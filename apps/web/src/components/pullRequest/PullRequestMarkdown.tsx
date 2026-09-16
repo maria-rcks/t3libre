@@ -1,4 +1,5 @@
 import { ExternalLinkIcon, PaperclipIcon } from "lucide-react";
+import { markdownImageSourceFragment } from "@t3tools/client-runtime/markdown-images";
 import { githubMediaFetchUrl } from "@t3tools/shared/githubMedia";
 import type { AssetResource, EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { createContext, useContext, useMemo } from "react";
@@ -47,7 +48,7 @@ function PullRequestGitHubVideo({
     assetUrl._tag === "Success" ? assetUrl.url : assetUrl._tag === "Failure" ? fetchUrl : null;
   return (
     <MediaVideoPlayer
-      src={src}
+      src={src === null ? null : src + markdownImageSourceFragment(url)}
       originalUrl={url}
       label="Pull request video"
       className="w-full"
