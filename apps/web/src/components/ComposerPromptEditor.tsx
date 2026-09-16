@@ -17,6 +17,7 @@ import {
 } from "@t3tools/shared/composerContextClipboard";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import {
+  $addUpdateTag,
   $applyNodeReplacement,
   $createRangeSelectionFromDom,
   $createRangeSelection,
@@ -80,6 +81,7 @@ import {
   splitPromptIntoComposerSegments,
 } from "~/composer-editor-mentions";
 import { collectInlineContextIds } from "~/lib/composerContextReferences";
+import { getComposerMarkdownNewline } from "~/composerMarkdown";
 import { cn, isMacPlatform } from "~/lib/utils";
 import { basenameOfPath } from "~/pierre-icons";
 import {
@@ -967,16 +969,40 @@ function ComposerCommandKeyPlugin(props: {
       key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
       event: KeyboardEvent | null,
     ): boolean => {
-      if (!props.onCommandKeyDown || !event) {
+      if (!event) {
         return false;
       }
 
-      if (key === "Enter" && (event.isComposing || event.keyCode === 229)) {
+      if (key === "Enter" && (event.isComposing || event.keyCode === 229 || editor.isComposing())) {
         event.stopPropagation();
         return true;
       }
 
-      const handled = props.onCommandKeyDown(key, event);
+      let handled = props.onCommandKeyDown?.(key, event) ?? false;
+      if (!handled && key === "Enter") {
+        const selection = $getSelection();
+        if ($isRangeSelection(selection) && selection.isCollapsed()) {
+          const value = $getRoot().getTextContent();
+          const edit = getComposerMarkdownNewline(
+            value,
+            $readExpandedSelectionOffsetFromEditorState(0),
+          );
+          if (edit) {
+            $setSelectionRangeAtComposerOffsets(
+              collapseExpandedComposerCursor(value, edit.start),
+              collapseExpandedComposerCursor(value, edit.end),
+            );
+            const editSelection = $getSelection();
+            if ($isRangeSelection(editSelection)) {
+              $addUpdateTag(HISTORY_PUSH_TAG);
+              editSelection.insertRawText(edit.text);
+              const nextValue = $getRoot().getTextContent();
+              $setSelectionAtComposerOffset(collapseExpandedComposerCursor(nextValue, edit.cursor));
+              handled = true;
+            }
+          }
+        }
+      }
       if (handled) {
         event.preventDefault();
         event.stopPropagation();

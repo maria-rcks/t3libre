@@ -19,6 +19,86 @@ import {
   replaceTextRange,
 } from "./composer-logic";
 import { formatTerminalContextReference } from "./lib/terminalContext";
+import { getComposerMarkdownNewline } from "./composerMarkdown";
+
+describe("getComposerMarkdownNewline", () => {
+  it.each([
+    ["1.", "1.\n2. "],
+    ["9. first", "9. first\n10. "],
+    ["  3) nested", "  3) nested\n  4) "],
+    ["- item", "- item\n- "],
+    ["\t+ item", "\t+ item\n\t+ "],
+    ["* [x] finished", "* [x] finished\n* [ ] "],
+    ["- [ ] pending", "- [ ] pending\n- [ ] "],
+    ["> quoted", "> quoted\n> "],
+    ["> > nested", "> > nested\n> > "],
+    ["1. first\n2. ", "1. first\n"],
+    ["  - ", "  "],
+    ["- [ ] ", ""],
+    ["> ", ""],
+    ["```ts\n  const x = 1", "```ts\n  const x = 1\n  "],
+  ])("continues or exits %j", (value, expected) => {
+    const edit = getComposerMarkdownNewline(value, value.length);
+    expect(edit).not.toBeNull();
+    if (!edit) return;
+    expect(value.slice(0, edit.start) + edit.text + value.slice(edit.end)).toBe(expected);
+    expect(edit.cursor).toBe(expected.length);
+  });
+
+  it.each(["```", "```typescript", "  ```js", "~~~~text"])(
+    "completes %j with the caret inside the fence",
+    (value) => {
+      const edit = getComposerMarkdownNewline(value, value.length);
+      const indent = value.startsWith("  ") ? "  " : "";
+      const marker = value.includes("~~~~") ? "~~~~" : "```";
+      expect(edit).toEqual({
+        start: value.length,
+        end: value.length,
+        text: `\n${indent}\n${indent}${marker}`,
+        cursor: value.length + 1 + indent.length,
+      });
+    },
+  );
+
+  it("retains an existing closing fence and following content", () => {
+    const value = "```ts\n```\nafter";
+    const edit = getComposerMarkdownNewline(value, 5);
+    expect(edit).toEqual({ start: 5, end: 5, text: "\n", cursor: 6 });
+  });
+
+  it("continues a list before an existing following line", () => {
+    expect(getComposerMarkdownNewline("1. first\nafter", 8)).toEqual({
+      start: 8,
+      end: 8,
+      text: "\n2. ",
+      cursor: 12,
+    });
+  });
+
+  it.each([
+    "ordinary text",
+    "```js\n1. code",
+    "~~~\n- code",
+    "```js\n```",
+    "````js\n```\n1. still code",
+    "```bad`language",
+  ])("leaves ordinary newline handling for %j", (value) => {
+    expect(getComposerMarkdownNewline(value, value.length)).toBeNull();
+  });
+
+  it("resumes list continuation after a closing fence", () => {
+    const value = "```\ncode\n```\n1. first";
+    expect(getComposerMarkdownNewline(value, value.length)?.text).toBe("\n2. ");
+  });
+
+  it("leaves mid-line edits and invalid cursors alone", () => {
+    expect(getComposerMarkdownNewline("1. first", 5)).toBeNull();
+    expect(getComposerMarkdownNewline("1. first", -1)).toBeNull();
+    expect(getComposerMarkdownNewline("1. first", 20)).toBeNull();
+    expect(getComposerMarkdownNewline("1. first", 2.5)).toBeNull();
+    expect(getComposerMarkdownNewline("\n1. first", 0)).toBeNull();
+  });
+});
 
 const terminalReference = formatTerminalContextReference({
   id: "ctx-1",
