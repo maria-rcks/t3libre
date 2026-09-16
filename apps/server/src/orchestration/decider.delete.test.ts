@@ -137,6 +137,44 @@ function normalizeDeleteEvent(event: PlannedEvent | ReadonlyArray<PlannedEvent>)
 }
 
 it.layer(NodeServices.layer)("decider deletion flows", (it) => {
+  it.effect("rejects client goal mutations on inactive threads but accepts provider sync", () =>
+    Effect.gen(function* () {
+      const seeded = yield* seedReadModel;
+      for (const field of ["archivedAt", "deletedAt"] as const) {
+        const readModel = {
+          ...seeded,
+          threads: seeded.threads.map((thread) => ({
+            ...thread,
+            [field]: "2026-01-02T00:00:00.000Z",
+          })),
+        };
+        for (const type of ["thread.goal.set", "thread.goal.clear"] as const) {
+          const error = yield* Effect.flip(
+            decideOrchestrationCommand({
+              command: {
+                type,
+                commandId: asCommandId(`goal-${field}-${type}`),
+                threadId: asThreadId("thread-delete-1"),
+                ...(type === "thread.goal.set" ? { objective: "finish work" } : {}),
+              },
+              readModel,
+            }),
+          );
+          expect(error.message).toContain(field === "archivedAt" ? "archived" : "deleted");
+        }
+        const synced = yield* decideOrchestrationCommand({
+          command: {
+            type: "thread.goal.sync",
+            commandId: asCommandId(`goal-sync-${field}`),
+            threadId: asThreadId("thread-delete-1"),
+            goal: null,
+          },
+          readModel,
+        });
+        expect(synced).toMatchObject({ type: "thread.meta-updated", payload: { goal: null } });
+      }
+    }),
+  );
   it.effect("rejects deleting a non-empty project without force", () =>
     Effect.gen(function* () {
       const readModel = yield* seedReadModel;

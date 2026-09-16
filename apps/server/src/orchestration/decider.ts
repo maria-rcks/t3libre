@@ -1297,7 +1297,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     case "thread.goal.set":
     case "thread.goal.clear":
     case "thread.goal.sync": {
-      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const thread =
+        command.type === "thread.goal.sync"
+          ? yield* requireThread({ readModel, command, threadId: command.threadId })
+          : yield* requireThreadNotArchived({ readModel, command, threadId: command.threadId });
+      if (command.type !== "thread.goal.sync" && thread.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} was deleted`,
+        });
+      }
       const occurredAt = yield* nowIso;
       const base = yield* withEventBase({
         aggregateKind: "thread",

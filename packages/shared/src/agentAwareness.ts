@@ -100,7 +100,9 @@ function resolveAwarenessGoal(thread: ProjectThreadAwarenessInput["thread"]) {
   // A retained terminal goal must not hide a later, ordinary conversation turn.
   if (
     goal.status !== "active" &&
-    Date.parse(thread.latestTurn?.requestedAt ?? "") > Date.parse(goal.updatedAt)
+    ((thread.session?.activeTurnId != null &&
+      thread.session.activeTurnId !== thread.latestTurn?.turnId) ||
+      Date.parse(thread.latestTurn?.requestedAt ?? "") > Date.parse(goal.updatedAt))
   ) {
     return null;
   }

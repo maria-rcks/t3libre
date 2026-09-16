@@ -1922,7 +1922,9 @@ const make = Effect.gen(function* () {
           if (
             event.type === "thread.goal-set-requested" &&
             thread.interactionMode === "plan" &&
-            (event.payload.objective !== undefined || event.payload.status === "active")
+            (event.payload.objective !== undefined ||
+              event.payload.status === "active" ||
+              event.payload.tokenBudget !== undefined)
           ) {
             return yield* appendProviderFailureActivity({
               threadId: thread.id,

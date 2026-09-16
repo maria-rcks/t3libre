@@ -125,6 +125,28 @@ describe("projectThreadAwareness", () => {
     ).toMatchObject({ updatedAt: NOW });
   });
 
+  it.each([completedTurn, null])("shows a new session turn before its checkpoint", (latestTurn) => {
+    expect(
+      projectThreadAwareness({
+        environmentId: "env-1" as EnvironmentId,
+        project,
+        thread: thread({
+          goal: { ...goal, status: "complete" },
+          latestTurn,
+          session: {
+            threadId: "thread-1" as ThreadId,
+            status: "running",
+            providerName: "Codex",
+            runtimeMode: "full-access",
+            activeTurnId: "turn-2" as TurnId,
+            lastError: null,
+            updatedAt: NOW,
+          },
+        }),
+      }),
+    ).toMatchObject({ phase: "running", headline: "Agent is working" });
+  });
+
   it("returns null for idle threads without an active awareness state", () => {
     expect(
       projectThreadAwareness({

@@ -375,6 +375,18 @@ export const make = Effect.gen(function* () {
     ThreadId,
     { state: GoalAwarenessTracking | undefined; sequence: number }
   >();
+  const cacheGoalTracking = (
+    threadId: ThreadId,
+    value: { state: GoalAwarenessTracking | undefined; sequence: number },
+  ) => {
+    goalThreads.delete(threadId);
+    goalThreads.set(threadId, value);
+    // Evicted state is recoverable from durable history on the next publish.
+    if (goalThreads.size > 1024) {
+      const oldest = goalThreads.keys().next().value;
+      if (oldest !== undefined) goalThreads.delete(oldest);
+    }
+  };
   const goalTrackingLock = yield* Semaphore.make(1);
   const loadGoalTracking = Effect.fn("loadGoalTracking")(function* (threadId: ThreadId) {
     const cached = goalThreads.get(threadId);
@@ -385,7 +397,7 @@ export const make = Effect.gen(function* () {
       undefined,
     );
     const restored = { state, sequence: history.snapshotSequence };
-    goalThreads.set(threadId, restored);
+    cacheGoalTracking(threadId, restored);
     return restored;
   });
   let schedulePublishConfirm: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
@@ -699,7 +711,7 @@ export const make = Effect.gen(function* () {
                         next = updateGoalAwarenessTracking(next, { manualTurn: true });
                       }
                     }
-                    goalThreads.set(threadId, { state: next, sequence: event.sequence });
+                    cacheGoalTracking(threadId, { state: next, sequence: event.sequence });
                   }),
                 )
               : Effect.void

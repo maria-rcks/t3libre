@@ -462,6 +462,67 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect.each(["user-set", "user-clear", "user-status", "toolbar-set"] as const)(
+    "settles successful %s local goal commands",
+    (scenario) => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        if (scenario === "toolbar-set") {
+          assert.ok(adapter.goals);
+          yield* adapter.goals.set(THREAD_ID, { objective: "finish work" });
+        } else {
+          yield* adapter.sendTurn({
+            threadId: THREAD_ID,
+            input:
+              scenario === "user-clear"
+                ? "/goal clear"
+                : scenario === "user-status"
+                  ? "/goal"
+                  : "/goal finish work",
+          });
+        }
+        const request = yield* Effect.promise(() =>
+          readFirstPromptMessage(harness.getLastCreateQueryInput()),
+        );
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          local_command: "goal",
+          user_message_uuid: request?.uuid,
+          result:
+            scenario === "user-clear"
+              ? "Goal cleared: finish work"
+              : scenario === "user-status"
+                ? "No goal set"
+                : "Goal set: finish work",
+          session_id: "sdk-session",
+          uuid: "goal-result",
+        } as unknown as SDKMessage);
+        const events = yield* Fiber.join(eventsFiber);
+        const completed = events.filter((event) => event.type === "turn.completed");
+        assert.equal(completed.length, 1);
+        assert.equal(completed[0]?.payload.state, "completed");
+        assert.equal((yield* adapter.listSessions())[0]?.activeTurnId, undefined);
+        assert.equal((yield* adapter.listSessions())[0]?.status, "ready");
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
   it.effect("keeps goal status and clear responses out of concurrent model turn lifecycles", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

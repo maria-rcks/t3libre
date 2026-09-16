@@ -4101,7 +4101,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         !message.result.startsWith("Goal cleared: ")
       )
         delete context.goalClearRequestId;
-      // Native clear aliases and rejections both return is_error:false.
+      // Native goal commands and rejections both return is_error:false.
       // Settle only this request, never a concurrently running model turn.
       if (
         context.goalStartTurnId &&
@@ -4112,11 +4112,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         delete context.goalStartTurnId;
         const resultText =
           "result" in message && typeof message.result === "string" ? message.result : undefined;
-        const cleared = resultText === "No goal set" || resultText?.startsWith("Goal cleared: ");
+        const succeeded =
+          !message.is_error &&
+          (resultText === "No goal set" ||
+            resultText === "No goal set. Usage: `/goal <condition>`" ||
+            resultText?.startsWith("Goal cleared: ") ||
+            resultText?.startsWith("Goal set: ") ||
+            resultText?.startsWith("Goal active: "));
         yield* completeTurn(
           context,
-          cleared ? "completed" : "failed",
-          cleared ? undefined : (resultText ?? "Claude could not start the requested goal."),
+          succeeded ? "completed" : "failed",
+          succeeded ? undefined : (resultText ?? "Claude could not start the requested goal."),
         );
       }
       if (
@@ -5312,7 +5318,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
 
     if (steeringTurnState === null) context.turnStartMessageIds.push(turnId);
-    if (isGoalStart && steeringTurnState === null) context.goalStartTurnId = turnId;
+    if (
+      steeringTurnState === null &&
+      (isGoalStart ||
+        ((input.attachments?.length ?? 0) === 0 &&
+          /^\/goal(?:\s|$)/.test(input.input?.trim() ?? "")))
+    )
+      context.goalStartTurnId = turnId;
     const goalArgument =
       (input.attachments?.length ?? 0) === 0
         ? /^\/goal\s+([\s\S]+)$/.exec(input.input?.trim() ?? "")?.[1]?.trim()

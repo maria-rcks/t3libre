@@ -864,6 +864,45 @@ describe("ProviderCommandReactor", () => {
       }).pipe(Effect.scoped),
   );
 
+  effectIt.effect.each([1000, null])(
+    "rejects a budget-only goal edit (%s) in Plan mode",
+    (tokenBudget) =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() => createHarness());
+        const events = yield* harness.engine.subscribeDomainEvents;
+        yield* harness.engine.dispatch({
+          type: "thread.interaction-mode.set",
+          commandId: CommandId.make("goal-budget-plan"),
+          threadId: ThreadId.make("thread-1"),
+          interactionMode: "plan",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        });
+        yield* harness.engine.dispatch({
+          type: "thread.goal.set",
+          commandId: CommandId.make("goal-budget-edit"),
+          threadId: ThreadId.make("thread-1"),
+          tokenBudget,
+        });
+        yield* events.pipe(
+          Stream.filter(
+            (event) =>
+              event.type === "thread.activity-appended" &&
+              event.payload.activity.summary === "Goal update failed",
+          ),
+          Stream.take(1),
+          Stream.runDrain,
+        );
+        yield* Effect.promise(() => harness.drain());
+        expect(harness.startSession).not.toHaveBeenCalled();
+        expect(harness.createWorktree).not.toHaveBeenCalled();
+        const state = yield* Effect.promise(() => harness.readModel());
+        expect(
+          state.threads[0]?.activities.find((activity) => activity.summary === "Goal update failed")
+            ?.payload,
+        ).toMatchObject({ detail: "Switch out of Plan mode before starting or editing a goal." });
+      }).pipe(Effect.scoped),
+  );
+
   effectIt.effect.each(["new", "ready", "stopped"] as const)(
     "handles sign-out for a %s thread before worktree repair, text helpers, or startup",
     (sessionStatus) =>
