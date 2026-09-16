@@ -3319,6 +3319,55 @@ it.effect("close and reopen notify subscribed readers after invalidating their c
   ),
 );
 
+it.effect("explicit invalidation refreshes origin readers after a routed host mutation", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let state: "open" | "closed" = "open";
+      const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+      const service = yield* makeService({
+        projects: [
+          project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
+        ],
+        providers: [
+          fakeProvider("github", {
+            getChangeRequestSummary: () =>
+              Effect.succeed({ ...changeRequest(1, "2026-09-16T00:00:00.000Z"), state }),
+          }),
+        ],
+      });
+      yield* service.refreshAfterTurn(reference.projectId);
+      let revision = Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes));
+      // The sync reactor invalidates before reading; it must not notify itself again.
+      yield* service.invalidate({ reference });
+      assert.strictEqual(
+        Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes)),
+        revision,
+      );
+      assert.strictEqual((yield* service.summary(reference)).state, "open");
+
+      for (const nextState of ["closed", "open"] as const) {
+        const refreshed = yield* service.subscribeRefreshes.pipe(
+          Stream.drop(1),
+          Stream.take(1),
+          Stream.mapEffect((nextRevision) =>
+            service
+              .summary(reference)
+              .pipe(Effect.map((summary) => ({ revision: nextRevision, state: summary.state }))),
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        state = nextState;
+        yield* service.invalidate({ reference }, { notifyReaders: true });
+        const result = Option.getOrThrow(yield* Fiber.join(refreshed));
+        assert.strictEqual(result.state, nextState);
+        assert.isAbove(result.revision, revision);
+        revision = result.revision;
+      }
+    }),
+  ),
+);
+
 it.effect("does not cache a failed listing", () =>
   Effect.gen(function* () {
     let hostCalls = 0;

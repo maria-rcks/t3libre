@@ -187,21 +187,8 @@ export const make = Effect.gen(function* () {
         link.snapshot === null ||
         !snapshotFieldsEqual(link.snapshot, fields) ||
         !stacksEqual(link.stack, nextStack);
-      if (changed) {
-        const uuid = yield* crypto.randomUUIDv4;
-        yield* engine.dispatch({
-          type: "thread.pull-request-link.sync",
-          commandId: CommandId.make(`server:pr-sync:${thread.id}:${uuid}`),
-          threadId: thread.id,
-          host: normalizeThreadPullRequestKey(link).host,
-          repository: link.repository,
-          number: link.number,
-          snapshot: { ...fields, syncedAt: nowIso },
-          stack: nextStack,
-        });
-      }
-      if (fetchedStack === null || fetchedStack.stack === null) return;
-      for (const layer of fetchedStack.stack.layers) {
+      // Persist discovered siblings before a terminal snapshot can trigger settlement.
+      for (const layer of fetchedStack?.stack?.layers ?? []) {
         const layerKey = {
           host: normalizeThreadPullRequestKey(link).host,
           repository: link.repository,
@@ -236,6 +223,19 @@ export const make = Effect.gen(function* () {
               }),
             ),
           );
+      }
+      if (changed) {
+        const uuid = yield* crypto.randomUUIDv4;
+        yield* engine.dispatch({
+          type: "thread.pull-request-link.sync",
+          commandId: CommandId.make(`server:pr-sync:${thread.id}:${uuid}`),
+          threadId: thread.id,
+          host: normalizeThreadPullRequestKey(link).host,
+          repository: link.repository,
+          number: link.number,
+          snapshot: { ...fields, syncedAt: nowIso },
+          stack: nextStack,
+        });
       }
     });
 

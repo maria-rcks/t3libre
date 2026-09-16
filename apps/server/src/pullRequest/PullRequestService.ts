@@ -232,7 +232,10 @@ export class PullRequestService extends Context.Service<
     readonly setLabels: (
       input: PullRequestLabelChangeInput,
     ) => Effect.Effect<void, PullRequestError>;
-    readonly invalidate: (input: PullRequestInvalidateInput) => Effect.Effect<void>;
+    readonly invalidate: (
+      input: PullRequestInvalidateInput,
+      options?: { readonly notifyReaders?: boolean },
+    ) => Effect.Effect<void>;
   }
 >()("t3/pullRequest/PullRequestService") {}
 
@@ -2839,10 +2842,12 @@ export const make = Effect.gen(function* () {
     return { stats: [...held, ...result.stats] };
   });
 
-  const invalidate: PullRequestService["Service"]["invalidate"] = (input) => {
+  const invalidate: PullRequestService["Service"]["invalidate"] = Effect.fn(
+    "PullRequestService.invalidate",
+  )(function* (input, options) {
     const reference = input.reference;
     if (reference !== undefined) {
-      return canonicalRef(reference).pipe(
+      yield* canonicalRef(reference).pipe(
         Effect.flatMap((ref) =>
           readCache
             .invalidate(refScope(ref))
@@ -2850,12 +2855,15 @@ export const make = Effect.gen(function* () {
         ),
         Effect.ignore,
       );
-    }
-    return Effect.sync(() => {
+    } else {
       listingsEpoch = ++epochCounter;
       viewersByHost.clear();
-    }).pipe(Effect.andThen(Cache.invalidateAll(viewerFlights)));
-  };
+      yield* Cache.invalidateAll(viewerFlights);
+    }
+    if (options?.notifyReaders) {
+      yield* SubscriptionRef.set(pullRequestRefreshes, ++epochCounter);
+    }
+  });
 
   const refreshAfterTurn: PullRequestService["Service"]["refreshAfterTurn"] = (projectId) =>
     Effect.suspend(() => {

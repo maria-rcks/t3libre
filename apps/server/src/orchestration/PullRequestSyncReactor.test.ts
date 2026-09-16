@@ -34,6 +34,7 @@ import {
 } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 import * as PullRequestSyncReactor from "./PullRequestSyncReactor.ts";
+import { resolveAutoSettlementAt } from "./ThreadSettlementPolicy.ts";
 
 const NOW = "2026-08-28T12:00:00.000Z";
 const PROJECT_ID = ProjectId.make("sync-project");
@@ -155,6 +156,7 @@ function makeSummary(
 }
 
 interface HarnessOptions {
+  readonly onDispatch?: (command: SyncCommand | LinkCommand) => Effect.Effect<void>;
   readonly invalidate?: PullRequestService["Service"]["invalidate"];
   readonly snapshot: OrchestrationShellSnapshot;
   readonly summary?: (
@@ -192,11 +194,13 @@ const makeHarness = Effect.fn("makePullRequestSyncHarness")(function* (options: 
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) => {
     if (command.type === "thread.pull-request-link.sync") {
       return Ref.update(syncCommands, (recorded) => [...recorded, command]).pipe(
+        Effect.andThen(options.onDispatch?.(command) ?? Effect.void),
         Effect.as({ sequence: 1 }),
       );
     }
     if (command.type === "thread.pull-request.link") {
       return Ref.update(linkCommands, (recorded) => [...recorded, command]).pipe(
+        Effect.andThen(options.onDispatch?.(command) ?? Effect.void),
         Effect.as({ sequence: 1 }),
       );
     }
@@ -700,20 +704,38 @@ describe("PullRequestSyncReactor", () => {
           base: "main",
           layers: [
             { number: 41, headBranch: "layer-1", state: "merged" },
-            { number: 42, headBranch: "layer-2", state: "open" },
+            { number: 42, headBranch: "layer-2", state: "merged" },
             { number: 43, headBranch: "layer-3", state: "open" },
           ],
         };
+        let thread = makeThread("one", {
+          pullRequests: [
+            makeLink(42, { state: "open" }),
+            makeLink(41, { state: "merged" }, { source: "stack-dismissed" }),
+          ],
+        });
         const fixture = yield* makeHarness({
-          snapshot: makeSnapshot([
-            makeThread("one", {
-              pullRequests: [
-                makeLink(42),
-                makeLink(41, { state: "merged" }, { source: "stack-dismissed" }),
-              ],
-            }),
-          ]),
+          snapshot: makeSnapshot([thread]),
+          summary: (input) =>
+            Effect.succeed(makeSummary(input, { state: "merged", mergedAt: NOW })),
           stack: () => Effect.succeed(stack),
+          onDispatch: (command) =>
+            Effect.sync(() => {
+              thread =
+                command.type === "thread.pull-request.link"
+                  ? { ...thread, pullRequests: [...thread.pullRequests, makeLink(command.number)] }
+                  : applySync(makeSnapshot([thread]), [command]).threads[0]!;
+              // Every projected event may wake settlement, including the terminal root update.
+              assert.isNull(
+                resolveAutoSettlementAt({
+                  thread,
+                  pullRequest: null,
+                  now: NOW,
+                  autoSettleAfterDays: null,
+                  autoSettleOnMerge: true,
+                }),
+              );
+            }),
         });
 
         yield* Effect.gen(function* () {
