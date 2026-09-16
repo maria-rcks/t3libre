@@ -1,5 +1,5 @@
 import { DEFAULT_SERVER_SETTINGS, type StorageCleanupSettings } from "@t3tools/contracts";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Switch } from "../ui/switch";
 import {
@@ -24,7 +24,11 @@ function RetentionControl({
   onChange: (value: number | null) => void;
 }) {
   const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
+  const [savedValue, setSavedValue] = useState(value);
+  if (savedValue !== value) {
+    setSavedValue(value);
+    setDraft(value);
+  }
 
   return (
     <div className="flex items-center gap-3">
