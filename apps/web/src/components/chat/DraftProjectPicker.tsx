@@ -24,6 +24,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
+import { Button } from "../ui/button";
 import {
   Menu,
   MenuItem,
@@ -274,14 +275,15 @@ export function DraftProjectPicker({
       </MenuPopup>
     </Menu>
   ) : (
-    <button
+    <Button
       type="button"
+      variant="chip"
       onClick={openAddProject}
       className="inline-flex h-8 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
     >
       <PlusIcon className="size-3.5" />
       Add project
-    </button>
+    </Button>
   );
 
   const chip = (
@@ -293,8 +295,9 @@ export function DraftProjectPicker({
         <Tooltip>
           <TooltipTrigger
             render={
-              <button
+              <Button
                 type="button"
+                variant="chip"
                 aria-label="Remove project"
                 onClick={() => {
                   const titleBounds = titleRef.current?.getBoundingClientRect();
