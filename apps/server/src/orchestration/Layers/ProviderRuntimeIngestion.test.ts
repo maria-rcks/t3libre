@@ -1611,62 +1611,71 @@ describe("ProviderRuntimeIngestion", () => {
     expect(new Set(reasoning.map((entry) => entry.id)).size).toBe(3);
   });
 
-  it("closes the reasoning block when the assistant starts answering", async () => {
-    const harness = await createHarness();
-    const now = "2026-01-01T00:00:00.000Z";
+  it.each([true, false])(
+    "closes reasoning when the assistant answers (deltas: %s)",
+    async (withDeltas) => {
+      const harness = await createHarness();
+      const now = "2026-01-01T00:00:00.000Z";
 
-    harness.emit({
-      type: "content.delta",
-      eventId: asEventId("evt-think-before-answer"),
-      provider: ProviderDriverKind.make("claude"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-answer"),
-      payload: { streamKind: "reasoning_text", delta: "thinking it through" },
-    });
-    harness.emit({
-      type: "content.delta",
-      eventId: asEventId("evt-answer-after-think"),
-      provider: ProviderDriverKind.make("claude"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-answer"),
-      itemId: asItemId("item-a1"),
-      payload: { streamKind: "assistant_text", delta: "the answer" },
-    });
-    harness.emit({
-      type: "item.completed",
-      eventId: asEventId("evt-answer-completed"),
-      provider: ProviderDriverKind.make("claude"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-answer"),
-      itemId: asItemId("item-a1"),
-      payload: { itemType: "assistant_message", status: "completed" },
-    });
+      harness.emit({
+        type: "content.delta",
+        eventId: asEventId("evt-think-before-answer"),
+        provider: ProviderDriverKind.make("claude"),
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-answer"),
+        payload: { streamKind: "reasoning_text", delta: "thinking it through" },
+      });
+      if (withDeltas) {
+        harness.emit({
+          type: "content.delta",
+          eventId: asEventId("evt-answer-after-think"),
+          provider: ProviderDriverKind.make("claude"),
+          createdAt: now,
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-answer"),
+          itemId: asItemId("item-a1"),
+          payload: { streamKind: "assistant_text", delta: "the answer" },
+        });
+      }
+      harness.emit({
+        type: "item.completed",
+        eventId: asEventId("evt-answer-completed"),
+        provider: ProviderDriverKind.make("claude"),
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-answer"),
+        itemId: asItemId("item-a1"),
+        payload: {
+          itemType: "assistant_message",
+          status: "completed",
+          ...(!withDeltas ? { detail: "the answer" } : {}),
+        },
+      });
 
-    const thread = await waitForThread(
-      harness.readModel,
-      (entry) =>
-        entry.messages.some(
-          (message: ProviderRuntimeTestMessage) =>
-            message.role === "reasoning" && !message.streaming,
-        ) &&
-        entry.messages.some(
-          (message: ProviderRuntimeTestMessage) =>
-            message.role === "assistant" && !message.streaming,
-        ),
-    );
-    const reasoning = thread.messages.find(
-      (entry: ProviderRuntimeTestMessage) => entry.role === "reasoning",
-    );
-    expect(reasoning?.text).toBe("thinking it through");
-    expect(reasoning?.streaming).toBe(false);
-    const assistant = thread.messages.find(
-      (entry: ProviderRuntimeTestMessage) => entry.role === "assistant",
-    );
-    expect(assistant?.text).toBe("the answer");
-  });
+      const thread = await waitForThread(
+        harness.readModel,
+        (entry) =>
+          entry.messages.some(
+            (message: ProviderRuntimeTestMessage) =>
+              message.role === "reasoning" && !message.streaming,
+          ) &&
+          entry.messages.some(
+            (message: ProviderRuntimeTestMessage) =>
+              message.role === "assistant" && !message.streaming,
+          ),
+      );
+      const reasoning = thread.messages.find(
+        (entry: ProviderRuntimeTestMessage) => entry.role === "reasoning",
+      );
+      expect(reasoning?.text).toBe("thinking it through");
+      expect(reasoning?.streaming).toBe(false);
+      const assistant = thread.messages.find(
+        (entry: ProviderRuntimeTestMessage) => entry.role === "assistant",
+      );
+      expect(assistant?.text).toBe("the answer");
+    },
+  );
 
   it("starts a new reasoning block after tool work", async () => {
     const harness = await createHarness();
