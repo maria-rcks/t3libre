@@ -4617,6 +4617,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   // The shell carries server PR updates even while thread detail is still loading.
   const activeThreadMetadata = activeThreadShell ?? activeThread;
+  const hasLinkedPullRequestDetail = activeThreadMetadata?.linkedPullRequest != null;
   const linkedThreadPullRequest =
     activeThreadMetadata?.linkedPullRequest ?? activeThreadMetadata?.branchPullRequest ?? null;
   const activeProjectRepository = activeProject?.repositoryIdentity?.displayName ?? null;
@@ -4712,7 +4713,7 @@ export default function ChatView(props: ChatViewProps) {
     if (eligibleLink && pullRequestsCapabilityKnown) {
       if (
         pullRequestsSurfaceAvailable &&
-        (visiblePullRequestCount > 1 || linkedThreadPullRequest === null || !supportsPullRequests)
+        (visiblePullRequestCount > 1 || !hasLinkedPullRequestDetail || !supportsPullRequests)
       ) {
         panels.openProactive(
           activeThreadRef,
@@ -4783,6 +4784,7 @@ export default function ChatView(props: ChatViewProps) {
     latestTurnSettled,
     linkedThreadPullRequest,
     proactivePullRequestsKey,
+    hasLinkedPullRequestDetail,
     onDiffPanelOpen,
     pullRequestsCapabilityKnown,
     pullRequestsSurfaceAvailable,
