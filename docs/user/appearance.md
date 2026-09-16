@@ -5,7 +5,7 @@ or dark mode. To use different themes for light and dark mode, select the corres
 within each theme. Appearance preferences are saved separately on each device or browser.
 
 On web and desktop, use **Change theme** in the command palette to choose System, Light, or Dark.
-Press **Cmd+Option+T** on macOS or **Ctrl+Alt+T** on Windows/Linux to cycle through those modes.
+Press **Cmd+Option+M** on macOS or **Ctrl+Alt+M** on Windows/Linux to cycle through those modes.
 Customize the shortcut under **Settings → Keybindings**.
 
 Mobile has its own themes and text, code, and terminal preferences. It does not follow environment
