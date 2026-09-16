@@ -89,9 +89,8 @@ export function GoalToolbar(props: {
           <ComposerBanner.Actions>
             <Button
               type="button"
-              variant="ghost"
+              variant="ghost-goal"
               size="icon-xs"
-              className="text-purple-700 dark:text-purple-300 [--control-icon-color:currentColor]"
               aria-label="Edit goal"
               disabled={disabled}
               onClick={() => {
@@ -105,9 +104,8 @@ export function GoalToolbar(props: {
             {props.capability?.pause && goal.status !== "complete" ? (
               <Button
                 type="button"
-                variant="ghost"
+                variant="ghost-goal"
                 size="icon-xs"
-                className="text-purple-700 dark:text-purple-300 [--control-icon-color:currentColor]"
                 disabled={disabled}
                 aria-label={goal.status === "active" ? "Pause goal" : "Resume goal"}
                 onClick={() =>
@@ -125,9 +123,8 @@ export function GoalToolbar(props: {
             ) : null}
             <Button
               type="button"
-              variant="ghost"
+              variant="ghost-goal"
               size="icon-xs"
-              className="text-purple-700 dark:text-purple-300 [--control-icon-color:currentColor]"
               aria-label="Clear goal"
               disabled={disabled}
               onClick={() => void run(props.onClear)}
