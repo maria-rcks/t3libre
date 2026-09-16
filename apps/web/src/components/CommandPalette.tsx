@@ -48,9 +48,12 @@ import {
   FolderPlusIcon,
   LinkIcon,
   MessageSquareIcon,
+  MonitorIcon,
+  MoonIcon,
   PaletteIcon,
   SettingsIcon,
   SquarePenIcon,
+  SunIcon,
   TextSearchIcon,
 } from "lucide-react";
 import {
@@ -192,6 +195,12 @@ import type { Project } from "../types";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
+
+const APPEARANCE_OPTIONS = [
+  { mode: "system", label: "System", icon: MonitorIcon },
+  { mode: "light", label: "Light", icon: SunIcon },
+  { mode: "dark", label: "Dark", icon: MoonIcon },
+] as const;
 
 function notifyThemeSaveFailure(): void {
   toastManager.add(
@@ -472,7 +481,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const { theme, themeHalves, resolvedTheme } = useTheme();
+  const { theme, themeHalves, resolvedTheme, appearanceMode, setAppearanceMode } = useTheme();
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
   const routeTarget = useParams({
     strict: false,
@@ -516,6 +525,23 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           modelPickerOpen: composerHandleRef.current?.isModelPickerOpen() ?? false,
         },
       });
+      if (command === "appearance.cycle") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat) return;
+        const nextMode =
+          appearanceMode === "system" ? "light" : appearanceMode === "light" ? "dark" : "system";
+        if (!setAppearanceMode(nextMode)) {
+          notifyThemeSaveFailure();
+        } else {
+          toastManager.add({
+            id: "appearance-cycle",
+            title: `Appearance: ${APPEARANCE_OPTIONS.find((option) => option.mode === nextMode)?.label}`,
+            timeout: 1500,
+          });
+        }
+        return;
+      }
       if (command === "theme.select") {
         event.preventDefault();
         event.stopPropagation();
@@ -543,7 +569,17 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, previewOpen, resolvedTheme, terminalOpen, theme, themeHalves, toggleMode]);
+  }, [
+    appearanceMode,
+    keybindings,
+    previewOpen,
+    resolvedTheme,
+    setAppearanceMode,
+    terminalOpen,
+    theme,
+    themeHalves,
+    toggleMode,
+  ]);
 
   useEffect(
     () =>
@@ -729,7 +765,15 @@ function OpenCommandPaletteDialog(props: {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const { theme, themeHalves, resolvedTheme, appearanceMode, setTheme, setThemeHalf } = useTheme();
+  const {
+    theme,
+    themeHalves,
+    resolvedTheme,
+    appearanceMode,
+    setAppearanceMode,
+    setTheme,
+    setThemeHalf,
+  } = useTheme();
   const customThemes = useCustomThemes();
   const environmentThemes = useEnvironmentThemeDefinitions();
   const themeCards = useMemo(() => {
@@ -1894,6 +1938,37 @@ function OpenCommandPaletteDialog(props: {
   };
   actionItems.push(changeThemeItem);
 
+  const changeAppearanceItem: CommandPaletteSubmenuItem = {
+    kind: "submenu",
+    value: "action:change-appearance",
+    searchTerms: ["change appearance", "light", "dark", "system", "mode", "toggle"],
+    title: "Change appearance",
+    icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
+    addonIcon: <MonitorIcon className={ADDON_ICON_CLASS} />,
+    shortcutCommand: "appearance.cycle",
+    groups: [
+      {
+        value: "appearance",
+        label: "Change appearance",
+        items: APPEARANCE_OPTIONS.map(({ mode, label, icon: Icon }) => ({
+          kind: "action",
+          value: `appearance:${mode}`,
+          title: label,
+          searchTerms: [label, "appearance", "mode"],
+          icon: <Icon className={ITEM_ICON_CLASS} />,
+          titleTrailingContent:
+            appearanceMode === mode ? (
+              <span className="text-xs text-muted-foreground/70">Current</span>
+            ) : undefined,
+          run: async () => {
+            if (!setAppearanceMode(mode)) notifyThemeSaveFailure();
+          },
+        })),
+      },
+    ],
+  };
+  actionItems.push(changeAppearanceItem);
+
   useLayoutEffect(() => {
     if (openIntent?.kind !== "change-theme") return;
     clearOpenIntent();
@@ -2005,7 +2080,9 @@ function OpenCommandPaletteDialog(props: {
         )
       : currentView?.groups[0]?.value === "themes"
         ? changeThemeItem.groups
-        : (currentView?.groups ?? rootGroups);
+        : currentView?.groups[0]?.value === "appearance"
+          ? changeAppearanceItem.groups
+          : (currentView?.groups ?? rootGroups);
 
   const filteredGroups = filterCommandPaletteGroups({
     activeGroups,
