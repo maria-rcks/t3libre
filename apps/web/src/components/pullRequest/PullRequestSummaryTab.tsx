@@ -397,10 +397,27 @@ export function PullRequestSummaryTab({
   // rather than wherever the last one had been read back to.
   const [shown, setShown] = useState({ url: detail.url, count: COMMENT_PAGE });
   const shownComments = shown.url === detail.url ? shown.count : COMMENT_PAGE;
+  // A comment that already lives on a review thread is that thread: the thread carries the line
+  // and side the bare comment has lost, and a resolved one is finished work nobody should be
+  // invited to fix again — the same call the whole-review hand-off makes.
+  const threadByCommentId = new Map(
+    detail.reviewThreads.flatMap((thread) =>
+      thread.comments.map((comment) => [comment.id, thread] as const),
+    ),
+  );
+
+  const activeComments: PullRequestComment[] = [];
+  const finishedComments: PullRequestComment[] = [];
+  for (const comment of detail.comments) {
+    const finished =
+      threadByCommentId.get(comment.id)?.isResolved ||
+      pullRequestReviewOutcome(comment.reviewState) === "dismissed";
+    (finished ? finishedComments : activeComments).push(comment);
+  }
   // Windowed by recency regardless of display order: expanding always reaches further back in
   // time, whether the newest comment currently reads first or last.
-  const recentComments = detail.comments.slice(Math.max(0, detail.comments.length - shownComments));
-  const hiddenCommentCount = detail.comments.length - recentComments.length;
+  const recentComments = activeComments.slice(Math.max(0, activeComments.length - shownComments));
+  const hiddenCommentCount = activeComments.length - recentComments.length;
   const [commentOrder, setCommentOrder] = useState<"newest" | "oldest">("newest");
   const visibleComments = orderPullRequestComments(recentComments, commentOrder);
   const showOldestCommentsButton =
@@ -411,8 +428,8 @@ export function PullRequestSummaryTab({
         className="w-full"
         onClick={() => setShown({ url: detail.url, count: shownComments + COMMENT_PAGE })}
       >
-        Show {Math.min(hiddenCommentCount, COMMENT_PAGE)} older comments ({hiddenCommentCount}{" "}
-        hidden)
+        Show {Math.min(hiddenCommentCount, COMMENT_PAGE)} older comment
+        {hiddenCommentCount === 1 ? "" : "s"} ({hiddenCommentCount} hidden)
       </Button>
     ) : null;
   // Read from the whole conversation, not the window shown below it: a verdict older than the
@@ -451,15 +468,6 @@ export function PullRequestSummaryTab({
         stale: entry.stale,
       })),
   ];
-
-  // A comment that already lives on a review thread is that thread: the thread carries the line
-  // and side the bare comment has lost, and a resolved one is finished work nobody should be
-  // invited to fix again — the same call the whole-review hand-off makes.
-  const threadByCommentId = new Map(
-    detail.reviewThreads.flatMap((thread) =>
-      thread.comments.map((comment) => [comment.id, thread] as const),
-    ),
-  );
 
   const openLink = useOpenLink(threadRef);
   const openCheck = (url: string) => {
@@ -792,30 +800,6 @@ export function PullRequestSummaryTab({
                   const thread = threadByCommentId.get(comment.id);
                   const body = visibleBody(comment.body);
                   const outcome = pullRequestReviewOutcome(comment.reviewState);
-                  if (thread?.isResolved || outcome === "dismissed") {
-                    return (
-                      <CollapsedComment
-                        key={comment.id}
-                        comment={comment}
-                        editing={commentEditing}
-                        detail={detail}
-                        thread={thread}
-                        label={thread?.isResolved ? "Resolved" : "Approval dismissed"}
-                        body={body}
-                        reactionBar={
-                          <PullRequestReactionBar
-                            className="mt-2"
-                            reactions={comment.reactions ?? []}
-                            canReact={detail.capabilities.reactions === true}
-                            subjectId={comment.id}
-                            environmentId={environmentId}
-                            reference={reference}
-                            onRefresh={onRefresh}
-                          />
-                        }
-                      />
-                    );
-                  }
                   // An approval is a verdict, not a finding: there is nothing in it to fix.
                   const finding: PullRequestFinding | null =
                     (comment.kind !== "review" && comment.kind !== "review-comment") ||
@@ -845,7 +829,7 @@ export function PullRequestSummaryTab({
                   );
                   return (
                     <article
-                      key={comment.id}
+                      key={`${detail.url}:${comment.id}`}
                       // Offscreen comments skip style, layout and paint. Bot comments carry pages of
                       // highlighted code, and the conversation is below the description either way.
                       className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:160px] [content-visibility:auto]"
@@ -905,6 +889,49 @@ export function PullRequestSummaryTab({
                   >
                     Show only {COMMENT_PAGE} recent comments
                   </Button>
+                ) : null}
+                {finishedComments.length > 0 ? (
+                  <Collapsible key={detail.url} className="border-t border-border/60 pt-1">
+                    <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground">
+                      <ChevronRightIcon
+                        aria-hidden
+                        className="size-3.5 shrink-0 transition-transform group-data-panel-open:rotate-90"
+                      />
+                      <span>
+                        {finishedComments.length} resolved or dismissed comment
+                        {finishedComments.length === 1 ? "" : "s"}
+                      </span>
+                    </CollapsibleTrigger>
+                    <CollapsiblePanel keepMounted>
+                      <div className="space-y-2 pt-2">
+                        {orderPullRequestComments(finishedComments, commentOrder).map((comment) => {
+                          const thread = threadByCommentId.get(comment.id);
+                          return (
+                            <CollapsedComment
+                              key={comment.id}
+                              comment={comment}
+                              editing={commentEditing}
+                              detail={detail}
+                              thread={thread}
+                              label={thread?.isResolved ? "Resolved" : "Approval dismissed"}
+                              body={visibleBody(comment.body)}
+                              reactionBar={
+                                <PullRequestReactionBar
+                                  className="mt-2"
+                                  reactions={comment.reactions ?? []}
+                                  canReact={detail.capabilities.reactions === true}
+                                  subjectId={comment.id}
+                                  environmentId={environmentId}
+                                  reference={reference}
+                                  onRefresh={onRefresh}
+                                />
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+                    </CollapsiblePanel>
+                  </Collapsible>
                 ) : null}
               </div>
             )}
