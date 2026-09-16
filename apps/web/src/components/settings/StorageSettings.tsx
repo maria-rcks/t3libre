@@ -25,26 +25,24 @@ function RetentionControl({
   return (
     <div className="flex items-center gap-3">
       {value !== null ? (
-        <>
-          <NumberField
-            value={value}
-            min={1}
-            max={3650}
-            step={1}
-            size="sm"
-            className="w-28"
-            onValueChange={(next) => {
-              if (next !== null) onChange(next);
-            }}
-          >
-            <NumberFieldGroup>
-              <NumberFieldDecrement aria-label={`Decrease ${label}`} />
-              <NumberFieldInput aria-label={`${label} in days`} />
-              <NumberFieldIncrement aria-label={`Increase ${label}`} />
-            </NumberFieldGroup>
-          </NumberField>
-          <span className="text-xs text-muted-foreground">days</span>
-        </>
+        <NumberField
+          value={value}
+          min={1}
+          max={3650}
+          step={1}
+          size="sm"
+          className="w-40"
+          format={{ style: "unit", unit: "day", unitDisplay: "long" }}
+          onValueChange={(next) => {
+            if (next !== null) onChange(next);
+          }}
+        >
+          <NumberFieldGroup>
+            <NumberFieldDecrement aria-label={`Decrease ${label}`} />
+            <NumberFieldInput aria-label={`${label} in days`} />
+            <NumberFieldIncrement aria-label={`Increase ${label}`} />
+          </NumberFieldGroup>
+        </NumberField>
       ) : (
         <span className="text-xs text-muted-foreground">Off</span>
       )}
@@ -155,10 +153,6 @@ export function StorageSettingsPanel() {
             />
           }
         />
-        <p className="px-3 py-3 text-xs leading-relaxed text-muted-foreground sm:px-4">
-          Only T3-managed worktrees are eligible. Active threads, shared worktrees, and uncommitted
-          work are preserved. Opening a new turn recreates a removed worktree from its saved branch.
-        </p>
       </SettingsSection>
 
       <SettingsSection id="storage-artifacts" title="Artifacts and logs">
