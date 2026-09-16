@@ -74,6 +74,18 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
     if (!token && environment.CURSOR_API_KEY?.trim()) {
       return makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
     }
+    const credentialStore = environment.AGENT_CLI_CREDENTIAL_STORE;
+    if (
+      !token &&
+      (credentialStore === "memory" || (platform === "darwin" && credentialStore !== "file"))
+    ) {
+      // Cursor's default macOS login lives in the keychain; a leftover file may be another account.
+      return makeUnavailableUsageLimits({
+        checkedAt,
+        reason: "unsupported",
+        message: "Cursor usage requires a file-based login or CURSOR_AUTH_TOKEN.",
+      });
+    }
     if (!token) {
       const home =
         (platform === "win32" ? environment.USERPROFILE : environment.HOME) || NodeOS.homedir();

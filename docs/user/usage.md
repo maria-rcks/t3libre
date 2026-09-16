@@ -71,7 +71,10 @@ anything. The command is offered only for providers that appear under **Usage â†
 
 OpenCode Go reports its session, weekly, and monthly allowance when OpenCode runs locally in
 the environment; external OpenCode servers do not expose their account limits. Cursor reports
-its monthly allowance, including separate Auto and API usage, using the CLI's signed-in account.
+its monthly allowance, including separate Auto and API usage, using a file-based CLI login or
+`CURSOR_AUTH_TOKEN`. Cursor's default macOS keychain login does not currently report limits.
+On macOS, use `AGENT_CLI_CREDENTIAL_STORE=file` when signing in and in the provider's environment
+to use a file-based login.
 
 API-key accounts may not report subscription limits. This also applies to Claude connections
 using a proxy through `ANTHROPIC_AUTH_TOKEN`.

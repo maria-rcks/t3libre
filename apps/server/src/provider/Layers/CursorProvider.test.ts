@@ -1030,16 +1030,62 @@ describe("Cursor usage limits", () => {
             ),
           );
         });
-        const limits = yield* readCursorUsageLimits(
-          { apiEndpoint: "https://cursor.example/" },
-          { XDG_CONFIG_HOME: directory },
-        ).pipe(
-          Effect.provideService(HostProcessPlatform, "linux"),
-          Effect.provideService(HttpClient.HttpClient, client),
+        yield* fs.makeDirectory(path.join(directory, ".cursor"));
+        yield* fs.writeFileString(
+          path.join(directory, ".cursor", "auth.json"),
+          '{"accessToken":"instance-token"}',
         );
-        expect(limits.windows[0]?.usedPercent).toBe(42);
+        for (const platform of ["linux", "darwin"] as const) {
+          const limits = yield* readCursorUsageLimits(
+            { apiEndpoint: "https://cursor.example/" },
+            { XDG_CONFIG_HOME: directory, HOME: directory, AGENT_CLI_CREDENTIAL_STORE: "file" },
+          ).pipe(
+            Effect.provideService(HostProcessPlatform, platform),
+            Effect.provideService(HttpClient.HttpClient, client),
+          );
+          expect(limits.windows[0]?.usedPercent).toBe(42);
+        }
       }).pipe(Effect.scoped),
     );
+  });
+
+  it("never reads stale files for keychain or memory logins, but accepts an explicit auth token", async () => {
+    for (const platform of ["linux", "darwin"] as const) {
+      for (const token of [undefined, "explicit-token"]) {
+        const limits = await runNode(
+          readCursorUsageLimits(
+            { apiEndpoint: "" },
+            {
+              AGENT_CLI_CREDENTIAL_STORE: platform === "linux" ? "memory" : "default",
+              ...(token ? { CURSOR_AUTH_TOKEN: token } : {}),
+            },
+          ).pipe(
+            Effect.provideService(HostProcessPlatform, platform),
+            Effect.provideService(
+              FileSystem.FileSystem,
+              FileSystem.makeNoop({
+                readFileString: () => Effect.die("must not read an unrelated credential file"),
+              }),
+            ),
+            Effect.provideService(
+              HttpClient.HttpClient,
+              HttpClient.make((request) => {
+                expect(token).toBe("explicit-token");
+                expect(request.headers.authorization).toBe("Bearer explicit-token");
+                return Effect.succeed(
+                  HttpClientResponse.fromWeb(
+                    request,
+                    Response.json({ planUsage: { totalPercentUsed: 10 } }),
+                  ),
+                );
+              }),
+            ),
+          ),
+        );
+        if (token) expect(limits.windows[0]?.usedPercent).toBe(10);
+        else expect(limits.unavailable?.reason).toBe("unsupported");
+      }
+    }
   });
 
   it("reports failed requests without exposing credentials or response bodies", async () => {
