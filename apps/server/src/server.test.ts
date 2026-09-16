@@ -2,6 +2,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import {
@@ -6438,6 +6439,65 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.isAtMost(first.disk.availableBytes, first.disk.totalBytes);
       }
     }).pipe(Effect.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-storage-usage-" }))),
+  );
+
+  it.effect(
+    "releases storage scans stalled in a filesystem promise and serves the partial cache",
+    () =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const stalled = vi.spyOn(NodeFSP, "realpath").mockImplementationOnce(() => {
+          Effect.runSync(Deferred.succeed(started, undefined));
+          return new Promise<never>(() => {});
+        });
+        try {
+          const usage = yield* StorageUsage.make();
+          const pending = yield* usage.read({}).pipe(Effect.forkChild);
+          yield* Deferred.await(started);
+          yield* TestClock.adjust("15 seconds");
+          const sample = yield* Fiber.join(pending);
+          assert.isTrue(sample.partial);
+          assert.equal(sample.totalBytes, 0);
+          assert.strictEqual(yield* usage.read({}), sample);
+          for (const category of Object.values(sample.categories)) assert.isTrue(category.partial);
+        } finally {
+          stalled.mockRestore();
+        }
+      }).pipe(
+        Effect.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-storage-stalled-" })),
+      ),
+  );
+
+  it.effect.skipIf(!symlinksSupported)(
+    "rejects a configured storage root replaced after lstat",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const config = yield* ServerConfig.ServerConfig;
+        yield* fs.makeDirectory(config.worktreesDir, { recursive: true });
+        const outside = yield* fs.makeTempDirectoryScoped({ prefix: "t3-storage-race-" });
+        yield* fs.writeFileString(path.join(outside, "outside.txt"), "must not be counted");
+        const realpath = NodeFSP.realpath;
+        let rootReads = 0;
+        const replaced = vi.spyOn(NodeFSP, "realpath").mockImplementation(async (...args) => {
+          // The first lookup builds category exclusions; the second follows lstat.
+          if (args[0] === config.worktreesDir && ++rootReads === 2) {
+            await NodeFSP.rename(config.worktreesDir, config.worktreesDir + "-original");
+            await NodeFSP.symlink(outside, config.worktreesDir, "dir");
+          }
+          return realpath(...args);
+        });
+        try {
+          const usage = yield* StorageUsage.make();
+          const sample = yield* usage.read({});
+          assert.deepEqual(sample.categories.worktrees, { bytes: 0, fileCount: 0, partial: true });
+        } finally {
+          replaced.mockRestore();
+        }
+      }).pipe(
+        Effect.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-storage-root-race-" })),
+      ),
   );
 
   it.effect("reports an unavailable storage category without losing other categories", () =>

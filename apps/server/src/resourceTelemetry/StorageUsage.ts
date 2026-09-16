@@ -6,6 +6,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Semaphore from "effect/Semaphore";
 
 import * as ServerConfig from "../config.ts";
@@ -50,6 +51,13 @@ export const make = Effect.fn("makeStorageUsage")(function* () {
           }
           let directory = directories.pop()!;
           try {
+            // Resolve platform aliases in ancestors, never a replaced root itself.
+            if (initialRoots.has(directory)) {
+              directory = NodePath.join(
+                await NodeFSP.realpath(NodePath.dirname(directory)),
+                NodePath.basename(directory),
+              );
+            }
             const stat = await NodeFSP.lstat(directory);
             // A configured root or a directory renamed during the scan may be a link.
             if (!stat.isDirectory()) {
@@ -57,13 +65,24 @@ export const make = Effect.fn("makeStorageUsage")(function* () {
               continue;
             }
             const realPath = await NodeFSP.realpath(directory);
-            // Canonicalize platform aliases such as macOS /var before descending.
-            if (initialRoots.has(directory)) directory = realPath;
-            else if (realPath !== directory) {
+            if (realPath !== directory) {
               result.partial = true;
               continue;
             }
             const handle = await NodeFSP.opendir(directory, { bufferSize: 64 });
+            // A rename between validation and opening must not change the category.
+            try {
+              const opened = await NodeFSP.lstat(directory);
+              if (!opened.isDirectory() || opened.dev !== stat.dev || opened.ino !== stat.ino) {
+                result.partial = true;
+                await handle.close();
+                continue;
+              }
+            } catch (error) {
+              result.partial = true;
+              await handle.close();
+              throw error;
+            }
             let files: string[] = [];
             const countFiles = async () => {
               await Promise.all(
@@ -113,19 +132,21 @@ export const make = Effect.fn("makeStorageUsage")(function* () {
       );
       const worktrees = await scan([config.worktreesDir]);
       const categories = { worktrees, browserArtifacts, logs, attachments, other };
-      const disk = await NodeFSP.statfs(config.baseDir).then(
-        (stat) => {
-          const totalBytes = stat.blocks * stat.bsize;
-          const availableBytes = stat.bavail * stat.bsize;
-          return Number.isSafeInteger(totalBytes) &&
-            totalBytes >= 0 &&
-            Number.isSafeInteger(availableBytes) &&
-            availableBytes >= 0
-            ? { totalBytes, availableBytes: Math.min(totalBytes, availableBytes) }
-            : null;
-        },
-        () => null,
-      );
+      const disk = signal.aborted
+        ? null
+        : await NodeFSP.statfs(config.baseDir).then(
+            (stat) => {
+              const totalBytes = stat.blocks * stat.bsize;
+              const availableBytes = stat.bavail * stat.bsize;
+              return Number.isSafeInteger(totalBytes) &&
+                totalBytes >= 0 &&
+                Number.isSafeInteger(availableBytes) &&
+                availableBytes >= 0
+                ? { totalBytes, availableBytes: Math.min(totalBytes, availableBytes) }
+                : null;
+            },
+            () => null,
+          );
       return {
         totalBytes: Object.values(categories).reduce(
           (total, category) => total + category.bytes,
@@ -150,7 +171,31 @@ export const make = Effect.fn("makeStorageUsage")(function* () {
           (cached !== previous || (!input.refresh && now - cached.sampledAt < CACHE_MS))
         )
           return cached;
-        cached = yield* sample();
+        const sampled = yield* sample().pipe(Effect.timeoutOption(SCAN_MS));
+        if (Option.isSome(sampled)) {
+          cached = sampled.value;
+        } else {
+          // Node filesystem promises cannot all be cancelled. Interrupting the
+          // Effect releases this permit; its AbortSignal stops further traversal.
+          const partial = (category?: StorageUsageSnapshot["categories"]["other"]) => ({
+            bytes: category?.bytes ?? 0,
+            fileCount: category?.fileCount ?? 0,
+            partial: true,
+          });
+          cached = {
+            sampledAt: DateTime.toEpochMillis(yield* DateTime.now),
+            totalBytes: cached?.totalBytes ?? 0,
+            partial: true,
+            disk: cached?.disk ?? null,
+            categories: {
+              worktrees: partial(cached?.categories.worktrees),
+              browserArtifacts: partial(cached?.categories.browserArtifacts),
+              logs: partial(cached?.categories.logs),
+              attachments: partial(cached?.categories.attachments),
+              other: partial(cached?.categories.other),
+            },
+          };
+        }
         return cached;
       }),
     );
