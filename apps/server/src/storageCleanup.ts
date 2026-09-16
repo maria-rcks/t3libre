@@ -20,17 +20,17 @@ import * as Schedule from "effect/Schedule";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-import { ServerConfig } from "./config.ts";
-import { GitManager } from "./git/GitManager.ts";
-import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
-import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
-import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
-import { ProviderService } from "./provider/Services/ProviderService.ts";
+import * as ServerConfig from "./config.ts";
+import * as GitManager from "./git/GitManager.ts";
+import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
+import * as ThreadDeletionReactor from "./orchestration/Services/ThreadDeletionReactor.ts";
+import * as ProviderService from "./provider/Services/ProviderService.ts";
 import { threadHasQueuedTurnStart } from "./orchestration/ThreadSettlementPolicy.ts";
 import { forkParked } from "./serverActivation.ts";
-import { ServerSettingsService } from "./serverSettings.ts";
-import { TerminalManager } from "./terminal/Manager.ts";
-import { GitVcsDriver } from "./vcs/GitVcsDriver.ts";
+import * as ServerSettings from "./serverSettings.ts";
+import * as TerminalManager from "./terminal/Manager.ts";
+import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "./workspace/workspaceLease.ts";
 
 const DAY_MS = 86_400_000;
@@ -71,15 +71,15 @@ export class StorageCleanup extends Context.Service<
 >()("t3/storageCleanup") {}
 
 export const make = Effect.gen(function* () {
-  const config = yield* ServerConfig;
-  const settingsService = yield* ServerSettingsService;
-  const snapshots = yield* ProjectionSnapshotQuery;
-  const engine = yield* OrchestrationEngineService;
-  const threadDeletion = yield* ThreadDeletionReactor;
-  const providers = yield* ProviderService;
-  const git = yield* GitVcsDriver;
-  const gitManager = yield* GitManager;
-  const terminals = yield* TerminalManager;
+  const config = yield* ServerConfig.ServerConfig;
+  const settingsService = yield* ServerSettings.ServerSettingsService;
+  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const engine = yield* OrchestrationEngine.OrchestrationEngineService;
+  const threadDeletion = yield* ThreadDeletionReactor.ThreadDeletionReactor;
+  const providers = yield* ProviderService.ProviderService;
+  const git = yield* GitVcsDriver.GitVcsDriver;
+  const gitManager = yield* GitManager.GitManager;
+  const terminals = yield* TerminalManager.TerminalManager;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const liveTerminals = new Map<string, Map<string, TerminalSummary>>();

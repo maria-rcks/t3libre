@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 
-import { ServerConfig } from "../config.ts";
+import * as ServerConfig from "../config.ts";
 
 export class StorageUsage extends Context.Service<
   StorageUsage,
@@ -21,7 +21,7 @@ const SCAN_MS = 15_000;
 const STAT_CONCURRENCY = 16;
 
 export const make = Effect.fn("makeStorageUsage")(function* () {
-  const config = yield* ServerConfig;
+  const config = yield* ServerConfig.ServerConfig;
   const semaphore = Semaphore.makeUnsafe(1);
   let cached: StorageUsageSnapshot | undefined;
 
