@@ -1641,7 +1641,9 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
     kind: props.kind ?? "image",
     name: props.alt || (props.kind ?? "image"),
     src,
-    asset: { environmentId: props.environmentId, resource },
+    ...(fallbackSrc === undefined
+      ? { asset: { environmentId: props.environmentId, resource } }
+      : {}),
     ...(reference ? { reference } : {}),
     ...(relativePath && (resource._tag === "media-file" || resource._tag === "workspace-file")
       ? {

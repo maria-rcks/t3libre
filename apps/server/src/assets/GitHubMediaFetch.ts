@@ -173,18 +173,18 @@ export const githubMediaResponse = Effect.fn("GitHubMediaFetch.githubMediaRespon
       headers,
     });
   }
-  for (const name of FORWARDED_RESPONSE_HEADERS) {
-    const value = response.headers[name];
-    if (value !== undefined) headers[name] = value;
-  }
   // Only pictures and recordings leave this origin, and never on GitHub's word alone: the raw
   // host labels every committed binary `application/octet-stream`, so the name decides those.
-  const upstreamType = headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  const upstreamType = response.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
   const contentType = MEDIA_CONTENT_TYPE_PATTERN.test(upstreamType)
     ? upstreamType
     : (Mime.getType(githubMediaFileName(asset.url))?.toLowerCase() ?? "");
   if (!MEDIA_CONTENT_TYPE_PATTERN.test(contentType)) {
     return HttpServerResponse.empty({ status: 415, headers });
+  }
+  for (const name of FORWARDED_RESPONSE_HEADERS) {
+    const value = response.headers[name];
+    if (value !== undefined) headers[name] = value;
   }
   headers["content-type"] = contentType;
   if (contentType === SVG_CONTENT_TYPE) {
