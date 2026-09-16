@@ -1,4 +1,5 @@
 import { DEFAULT_SERVER_SETTINGS, type StorageCleanupSettings } from "@t3tools/contracts";
+import { useEffect, useState } from "react";
 
 import { Switch } from "../ui/switch";
 import {
@@ -22,18 +23,23 @@ function RetentionControl({
   value: number | null;
   onChange: (value: number | null) => void;
 }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+
   return (
     <div className="flex items-center gap-3">
       {value !== null ? (
         <NumberField
-          value={value}
+          value={draft}
           min={1}
           max={3650}
           step={1}
           size="sm"
           className="w-40"
-          onValueChange={(next) => {
-            if (next !== null) onChange(next);
+          onValueChange={setDraft}
+          onValueCommitted={(next) => {
+            if (next === null) setDraft(value);
+            else onChange(next);
           }}
         >
           <NumberFieldGroup>
