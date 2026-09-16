@@ -283,7 +283,7 @@ describe("sidebar list motion", () => {
     expect(a.animations[0]!.cancel).toHaveBeenCalledOnce();
     expect(fresh.animate).toHaveBeenLastCalledWith(
       [
-        { opacity: 0, transform: "translateY(0px)" },
+        { opacity: 0, transform: "translateY(83px)" },
         { opacity: 1, transform: "translateY(0px)" },
       ],
       {
@@ -308,7 +308,7 @@ describe("sidebar list motion", () => {
     expect(clone.animate).toHaveBeenCalledWith(
       [
         { opacity: 1, transform: "translateY(0px)" },
-        { opacity: 0, transform: "translateY(0px)" },
+        { opacity: 0, transform: "translateY(-83px)" },
       ],
       {
         duration: 150,
@@ -349,6 +349,26 @@ describe("sidebar list motion", () => {
     expect(z.animate).toHaveBeenLastCalledWith(
       [
         { opacity: 0, transform: "translateY(72px)" },
+        { opacity: 1, transform: "translateY(0px)" },
+      ],
+      { duration: 150, easing: "ease-out" },
+    );
+  });
+
+  it("rides new rows on a retained header's unfinished travel", () => {
+    const header = new TestRow("header", 32);
+    const above = new TestRow("above", 39);
+    const incoming = new TestRow("incoming", 36);
+    const { motion, layout } = fixture([header]);
+    motion.update(true);
+    layout([above, header]);
+    motion.update(true);
+    header.animations[0]!.progress = 0.25;
+    layout([above, header, incoming]);
+    motion.update(true);
+    expect(incoming.animate).toHaveBeenLastCalledWith(
+      [
+        { opacity: 0, transform: "translateY(-30px)" },
         { opacity: 1, transform: "translateY(0px)" },
       ],
       { duration: 150, easing: "ease-out" },

@@ -171,7 +171,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
           const node = order[cursor]!;
           const delta = movedDelta.get(node);
           if (delta !== undefined) return delta;
-          if (retained(node)) return 0;
+          if (retained(node)) return remainingOffset(node);
         }
         return undefined;
       };
