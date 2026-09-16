@@ -146,7 +146,7 @@ export function useAssistantCitationTarget({
   ]);
 
   useEffect(() => {
-    if (!request) return;
+    if (!request || suspended) return;
     const dismiss = (onlyPending: boolean) => {
       const navigation = navigationRef.current;
       if (!navigation || navigation.target.key !== request.key) return;
@@ -183,7 +183,7 @@ export function useAssistantCitationTarget({
       viewport?.removeEventListener("wheel", onWheel);
       viewport?.removeEventListener("touchmove", onNavigation);
     };
-  }, [onManualNavigation, request, viewport]);
+  }, [onManualNavigation, request, suspended, viewport]);
 
   const target = ready?.key === request?.key ? ready : null;
   const positioning = request !== null && finishedKey !== request.key;

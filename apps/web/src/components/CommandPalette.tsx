@@ -2472,7 +2472,14 @@ function OpenCommandPaletteDialog(props: {
       platform: navigator.platform,
       context: { modelPickerOpen: false },
     });
-    if (command === "thread.search" || threadJumpIndexFromCommand(command ?? "") !== null) {
+    if (command === "thread.search") {
+      event.preventDefault();
+      event.stopPropagation();
+      const searchItem = actionItems.find((item) => item.shortcutCommand === command);
+      if (searchItem) executeItem(searchItem);
+      return;
+    }
+    if (threadJumpIndexFromCommand(command ?? "") !== null) {
       event.preventDefault();
       event.stopPropagation();
       const matchingItem = displayedGroups
