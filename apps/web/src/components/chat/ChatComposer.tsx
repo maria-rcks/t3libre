@@ -1082,7 +1082,10 @@ import type {
   PendingApproval,
   PendingUserInput,
 } from "../../session-logic";
-import { resolveComposerDispatchMode, type ComposerDispatchMode } from "./composerDispatch";
+import {
+  resolveComposerDispatchMode,
+  type ComposerDispatchMode,
+} from "@t3tools/client-runtime/state/composer-dispatch";
 import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import {
   formatProviderSkillDisplayName,
@@ -3955,7 +3958,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             sendEvent,
             dispatchMode ??
               resolveComposerDispatchMode({
-                phase,
+                running: phase === "running",
                 alternateModifier: false,
                 activeTurnDefault: settings.followUpBehavior,
               }),
@@ -3989,7 +3992,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       submitComposer(
         event,
         resolveComposerDispatchMode({
-          phase,
+          running: phase === "running",
           alternateModifier: event.metaKey || event.ctrlKey,
           activeTurnDefault: settings.followUpBehavior,
         }),
@@ -4001,7 +4004,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     submitComposer(
       undefined,
       resolveComposerDispatchMode({
-        phase,
+        running: phase === "running",
         alternateModifier: false,
         activeTurnDefault: settings.followUpBehavior,
       }),
@@ -4180,7 +4183,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       submitComposer(
         undefined,
         resolveComposerDispatchMode({
-          phase,
+          running: phase === "running",
           alternateModifier: event.metaKey || event.ctrlKey,
           activeTurnDefault: settings.followUpBehavior,
         }),

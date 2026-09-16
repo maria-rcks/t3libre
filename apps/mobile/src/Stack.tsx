@@ -42,6 +42,7 @@ import { GitBranchesSheet } from "./features/threads/git/GitBranchesSheet";
 import { GitCommitSheet } from "./features/threads/git/GitCommitSheet";
 import { GitConfirmSheet } from "./features/threads/git/GitConfirmSheet";
 import { GitOverviewSheet } from "./features/threads/git/GitOverviewSheet";
+import { ThreadAgentsSheet } from "./features/threads/ThreadAgentsSheet";
 import { ThreadQueueSheet } from "./features/threads/ThreadQueueControl";
 import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
 import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteScreen";
@@ -68,12 +69,7 @@ import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsCl
 import { SettingsDiagnosticsRouteScreen } from "./features/diagnostics/SettingsDiagnosticsRouteScreen";
 import { SettingsAuthRouteScreen } from "./features/settings/SettingsAuthRouteScreen";
 import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
-import {
-  SettingsEnvironmentAgentBehaviorRouteScreen,
-  SettingsEnvironmentMaintenanceRouteScreen,
-  SettingsEnvironmentNewThreadsRouteScreen,
-  SettingsEnvironmentSourceControlRouteScreen,
-} from "./features/settings/SettingsServerControlsRouteScreen";
+import { SettingsFollowUpRouteScreen } from "./features/settings/SettingsFollowUpRouteScreen";
 import { SettingsKeyboardRouteScreen } from "./features/settings/SettingsKeyboardRouteScreen";
 import { SettingsLegalRouteScreen } from "./features/settings/SettingsLegalRouteScreen";
 import {
@@ -271,6 +267,13 @@ const SettingsContentStack = createNativeStackNavigator({
         title: "Keyboard",
       },
     }),
+    SettingsFollowUp: createNativeStackScreen({
+      screen: SettingsFollowUpRouteScreen,
+      linking: "follow-ups",
+      options: {
+        title: "Follow-ups",
+      },
+    }),
     SettingsClientStorage: createNativeStackScreen({
       screen: SettingsClientStorageRouteScreen,
       linking: "client-storage",
@@ -457,6 +460,7 @@ const WORKSPACE_OVERLAY_ROUTES = new Set([
   "NewTaskSheet",
   "SettingsLegal",
   "SettingsSheet",
+  "ThreadAgents",
   "ThreadQueue",
   "ThreadReviewComment",
   "ThreadDevicePreview",
@@ -671,6 +675,15 @@ const RootStackConfig = createNativeStackNavigator({
         ...FORM_SHEET_PRESENTATION_OPTIONS,
         headerShown: false,
         sheetAllowedDetents: [0.65, 0.95],
+        sheetGrabberVisible: true,
+      },
+    }),
+    ThreadAgents: createNativeStackScreen({
+      screen: ThreadAgentsSheet,
+      options: {
+        ...FORM_SHEET_PRESENTATION_OPTIONS,
+        headerShown: false,
+        sheetAllowedDetents: [0.5, 0.9],
         sheetGrabberVisible: true,
       },
     }),
