@@ -1,4 +1,6 @@
 import type { ClientSettings } from "@t3tools/contracts/settings";
+import type { OrchestrationThreadShell, ThreadGoal, TurnId } from "@t3tools/contracts";
+import type { SidebarThreadStatus } from "./components/Sidebar.logic";
 
 import completionUrl from "./assets/notification-completion.mp3";
 import inputUrl from "./assets/notification-input.mp3";

@@ -1623,6 +1623,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             </span>
             {draftIndicator}
             {title}
+            {goalActive ? (
+              <TargetIcon
+                role="img"
+                aria-label="Goaling"
+                className="size-3.5 shrink-0 text-purple-600 dark:text-purple-400"
+              />
+            ) : null}
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1669,6 +1676,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       />
                       <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
                     </Tooltip>
+                  ) : goalActive && thread.goal?.timeUsedSeconds != null ? (
+                    <span
+                      className="text-xs text-purple-600 dark:text-purple-400"
+                      aria-label="Provider-reported goal run time"
+                    >
+                      {formatGoalDuration(thread.goal.timeUsedSeconds)}
+                    </span>
                   ) : (
                     <span className="text-xs">
                       {variantAction === "unsettle"

@@ -30,6 +30,11 @@ rounds appear when the provider reports them. Codex reports goal token usage and
 supports a token budget; Claude reports rounds and resets its counters when its
 native session resumes. Availability depends on the installed provider version.
 
+Enable **Thread notifications** in Settings to receive goal completion and
+attention alerts on web and desktop while T3 Code is open. Blocked goals and
+token or usage limits need attention; intermediate rounds, pause, and clear stay
+silent. Goals use your existing notification and sound preference.
+
 ## Attach files
 
 Attach up to eight files per message. Images can be up to 10 MB; other files can

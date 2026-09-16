@@ -3,6 +3,7 @@ import type {
   OrchestrationEvent,
   OrchestrationProjectShell,
   OrchestrationThreadShell,
+  ThreadGoal,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -74,6 +75,8 @@ export function shouldPublishAgentAwarenessEvent(event: OrchestrationEvent): boo
   switch (event.type) {
     case "thread.message-sent":
     case "thread.turn-start-requested":
+    case "thread.goal-set-requested":
+    case "thread.goal-clear-requested":
       // These events express intent to start work, but the shell still contains
       // the previous turn's terminal state until the provider acknowledges the
       // new turn. Publishing that snapshot can queue a fresh "Done" alert just
@@ -231,11 +234,31 @@ function describeThreadShellForAwareness(
   };
 }
 
+type GoalAwarenessTracking = { readonly goal: ThreadGoal | null; readonly ignore: boolean };
+
+export function updateGoalAwarenessTracking(
+  previous: GoalAwarenessTracking | undefined,
+  update: { readonly goal: ThreadGoal | null } | { readonly manualTurn: true },
+): GoalAwarenessTracking | undefined {
+  if ("manualTurn" in update) {
+    return previous ? { ...previous, ignore: previous.goal?.status !== "active" } : undefined;
+  }
+  const { goal } = update;
+  if (!goal && !previous) return undefined;
+  const unchanged =
+    goal?.createdAt === previous?.goal?.createdAt &&
+    goal?.objective === previous?.goal?.objective &&
+    goal?.status === previous?.goal?.status;
+  return { goal, ignore: unchanged || goal === null ? (previous?.ignore ?? false) : false };
+}
+
 export function resolveAgentAwarenessRelayPublishSnapshot(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly thread: Option.Option<OrchestrationThreadShell>;
   readonly project: Option.Option<OrchestrationProjectShell>;
+  readonly suppressClearedGoalCompletion?: boolean;
+  readonly ignoreRetainedGoal?: boolean;
 }): {
   readonly projectId: string | null;
   readonly state: RelayAgentActivityState | null;
@@ -255,14 +278,19 @@ export function resolveAgentAwarenessRelayPublishSnapshot(input: {
       reason: "project-not-found",
     };
   }
+  const state = projectThreadAwareness({
+    environmentId: input.environmentId,
+    project: input.project.value,
+    thread: input.ignoreRetainedGoal ? { ...input.thread.value, goal: null } : input.thread.value,
+  });
   return {
     projectId: input.thread.value.projectId,
     state: sanitizeRelayAgentActivityState(
-      projectThreadAwareness({
-        environmentId: input.environmentId,
-        project: input.project.value,
-        thread: input.thread.value,
-      }),
+      input.suppressClearedGoalCompletion &&
+        !input.thread.value.goal &&
+        state?.phase === "completed"
+        ? null
+        : state,
     ),
     reason: "snapshot",
   };
