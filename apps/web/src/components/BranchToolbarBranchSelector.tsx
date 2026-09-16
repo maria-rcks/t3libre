@@ -689,9 +689,10 @@ export function BranchToolbarBranchSelector({
   const prNumber = currentLinkedPr?.number ?? displayedPr?.number;
   const prUrl = currentLinkedPr?.url ?? displayedPr?.url;
   const openPrLink = useOpenPrLink(threadRef);
-  const panelPrLabel = branchPr
-    ? `#${branchPr.number}${branchPr.title.trim() ? `: ${branchPr.title}` : ""}`
-    : "";
+  const panelPrLabel =
+    prNumber === undefined
+      ? ""
+      : `#${prNumber}${displayedPr?.title.trim() ? `: ${displayedPr.title}` : ""}`;
 
   function selectPickerItem(itemValue: string) {
     highlightedBranchValueRef.current = null;
@@ -860,15 +861,17 @@ export function BranchToolbarBranchSelector({
             )}
           </ComboboxTrigger>
         </span>
-        {displayMode === "panel" && branchPr && displayedPrStatus ? (
+        {displayMode === "panel" && prNumber !== undefined && prUrl !== undefined ? (
           <ThreadDetailsPrRow
             environmentId={environmentId}
-            pr={branchPr}
+            pr={displayedPr}
+            number={prNumber}
+            reference={currentLinkedPr}
             status={displayedPrStatus}
             project={activeProject}
             label={panelPrLabel}
             openAriaLabel={prUrl ?? "Open pull request"}
-            onOpen={(event) => openPrLink(event, displayedPrStatus.url)}
+            onOpen={(event) => openPrLink(event, prUrl)}
             onActed={() => branchStatusQuery.refresh()}
           />
         ) : null}
