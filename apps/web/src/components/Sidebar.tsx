@@ -1368,7 +1368,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onFileDropThreads
         ? makeWorkspaceFileDropHandlers({
             setDragActive: setIsFileDragOver,
-            addFiles: (files) => onFileDropThreads(threadRef, files),
+            addFiles: (files) => {
+              onFileDropThreads(threadRef, files);
+            },
+            addFolders: () => {},
           })
         : null,
     [onFileDropThreads, threadRef],
@@ -2134,6 +2137,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
         addFiles: (files) => {
           props.onFileDropThreads(threadRef, files);
         },
+        addFolders: () => {},
       }),
     [props.onFileDropThreads, threadRef],
   );
