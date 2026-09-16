@@ -39,7 +39,7 @@ function RetentionControl({
           max={3650}
           step={1}
           size="sm"
-          className="w-40"
+          className="w-auto"
           onValueChange={setDraft}
           onValueCommitted={(next) => {
             if (next === null) setDraft(value);
@@ -54,7 +54,8 @@ function RetentionControl({
             <NumberFieldDecrement aria-label={`Decrease ${label}`} />
             <NumberFieldInput
               aria-label={`${label} in days`}
-              className="text-right in-data-[size=sm]:px-1"
+              size={new Intl.NumberFormat().format(draft ?? value).length}
+              className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right in-data-[size=sm]:px-1"
             />
             <span aria-hidden="true" className="self-center pr-2 text-xs">
               days
