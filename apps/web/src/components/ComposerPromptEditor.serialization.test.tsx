@@ -1,5 +1,14 @@
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { $copyNode, $getRoot, $isElementNode, PASTE_COMMAND, type LexicalEditor } from "lexical";
+import {
+  $copyNode,
+  $getRoot,
+  $getSelection,
+  $isElementNode,
+  $isRangeSelection,
+  KEY_ENTER_COMMAND,
+  PASTE_COMMAND,
+  type LexicalEditor,
+} from "lexical";
 import { act, createRef } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -84,6 +93,47 @@ afterEach(async () => {
 });
 
 describe("composer mention serialization", () => {
+  it.each([
+    "1. [README.md](README.md) item",
+    "1. [README.md](README.md)",
+    "1. @missing-file ",
+    "1. $unknown ",
+  ])("continues after typed token-like text without moving inside it: %s", async (prompt) => {
+    await renderPrompt("");
+    await act(() => {
+      lexicalEditor.update(
+        () => {
+          $getRoot().getFirstChildOrThrow().selectEnd();
+          const selection = $getSelection();
+          if (!$isRangeSelection(selection)) throw new Error("Expected a caret");
+          selection.insertText(prompt);
+        },
+        { discrete: true },
+      );
+    });
+    await act(() => {
+      lexicalEditor.dispatchCommand(KEY_ENTER_COMMAND, {
+        shiftKey: true,
+        preventDefault() {},
+        stopPropagation() {},
+      } as KeyboardEvent);
+    });
+    await act(() => {
+      lexicalEditor.update(
+        () => {
+          const selection = $getSelection();
+          if (!$isRangeSelection(selection)) throw new Error("Expected a caret");
+          selection.insertText("next item");
+        },
+        { discrete: true },
+      );
+    });
+    expect(editorRef.current?.readSnapshot()).toMatchObject({
+      value: `${prompt}\n2. next item`,
+      expandedCursor: `${prompt}\n2. next item`.length,
+    });
+  });
+
   it.each([
     "@README.md control",
     "@terminal-1:3 Explain this output\n\n<terminal_context>\n- Terminal 1 line 3:\n  3 | output\n</terminal_context>",

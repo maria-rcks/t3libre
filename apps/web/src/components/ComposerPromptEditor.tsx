@@ -983,21 +983,21 @@ function ComposerCommandKeyPlugin(props: {
         const selection = $getSelection();
         if ($isRangeSelection(selection) && selection.isCollapsed()) {
           const value = $getRoot().getTextContent();
-          const edit = getComposerMarkdownNewline(
-            value,
-            $readExpandedSelectionOffsetFromEditorState(0),
-          );
+          const expandedCursor = $readExpandedSelectionOffsetFromEditorState(0);
+          const cursor = $readSelectionOffsetFromEditorState(0);
+          const edit = getComposerMarkdownNewline(value, expandedCursor);
           if (edit) {
+            // These edits only insert text or remove an empty marker. Map relative to the
+            // actual caret: typed token spellings may still be plain text, not chip nodes.
             $setSelectionRangeAtComposerOffsets(
-              collapseExpandedComposerCursor(value, edit.start),
-              collapseExpandedComposerCursor(value, edit.end),
+              cursor + edit.start - expandedCursor,
+              cursor + edit.end - expandedCursor,
             );
             const editSelection = $getSelection();
             if ($isRangeSelection(editSelection)) {
               $addUpdateTag(HISTORY_PUSH_TAG);
               editSelection.insertRawText(edit.text);
-              const nextValue = $getRoot().getTextContent();
-              $setSelectionAtComposerOffset(collapseExpandedComposerCursor(nextValue, edit.cursor));
+              $setSelectionAtComposerOffset(cursor + edit.cursor - expandedCursor);
               handled = true;
             }
           }
