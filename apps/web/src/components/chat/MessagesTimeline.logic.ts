@@ -323,8 +323,7 @@ function isActivityEntry(entry: TimelineEntry): entry is ActivityEntry {
         entry.entry.agentSpawn === undefined &&
         entry.entry.questionAnswer === undefined &&
         entry.entry.sourceActivityKind !== "context-compaction" &&
-        entry.entry.tone !== "error" &&
-        !workEntryDisplayIndicatesToolFailure(entry.entry);
+        entry.entry.tone !== "error";
 }
 
 export type MessagesTimelineRow =
@@ -1158,7 +1157,8 @@ export function deriveMessagesTimelineRows(input: {
         const active =
           input.isWorking &&
           activityTurnId === unsettledTurnId &&
-          cursor === input.timelineEntries.length;
+          cursor === input.timelineEntries.length &&
+          !latestToolFailed;
         const groupId =
           timelineEntry.kind === "work"
             ? workGroupId(timelineEntry.id, timelineEntry.entry)
