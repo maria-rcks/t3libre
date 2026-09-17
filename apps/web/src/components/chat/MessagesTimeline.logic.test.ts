@@ -1197,7 +1197,11 @@ describe("deriveMessagesTimelineRows", () => {
       supportsConversationRollback: false,
       worktreeSetup: snapshot,
     });
-    expect(withUserMessage.map((row) => row.kind)).toEqual(["message", "working", "worktree-setup"]);
+    expect(withUserMessage.map((row) => row.kind)).toEqual([
+      "message",
+      "working",
+      "worktree-setup",
+    ]);
 
     // A failed setup never handed off, so the card stays under the send. The
     // rest of the timeline is untouched: a running send still gets its

@@ -201,9 +201,7 @@ function OutputTail({ lines, failed }: { lines: ReadonlyArray<string>; failed: b
     <pre
       className={cn(
         "mb-1 ml-8 overflow-hidden rounded-md px-2.5 py-1.5 font-mono text-[11px] leading-relaxed select-text",
-        failed
-          ? "bg-error-surface text-destructive-foreground"
-          : "bg-code text-muted-foreground",
+        failed ? "bg-error-surface text-destructive-foreground" : "bg-code text-muted-foreground",
       )}
     >
       {rows.map(({ slot, line }) => (
