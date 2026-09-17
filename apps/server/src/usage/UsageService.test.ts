@@ -133,14 +133,15 @@ describe("UsageService", () => {
           [
             { type: "session_meta", payload: { id: "codex-account-session" } },
             { type: "turn_context", payload: { model: "gpt-5.6-sol" } },
-            {
+            // A-B-A at one timestamp must preserve both equal A events.
+            ...[11, 12, 11].map((outputTokens) => ({
               type: "event_msg",
               timestamp: "2026-08-01T10:00:00Z",
               payload: {
                 type: "token_count",
-                info: { last_token_usage: { input_tokens: 10, output_tokens: 11 } },
+                info: { last_token_usage: { input_tokens: 10, output_tokens: outputTokens } },
               },
-            },
+            })),
           ]
             .map((line) => encodeUnknownJsonString(line))
             .join("\n") + "\n",
@@ -200,7 +201,7 @@ describe("UsageService", () => {
         ),
       );
       const summary = yield* service.readSummary(WINDOW);
-      assert.strictEqual(totalOutputTokens(summary), 36);
+      assert.strictEqual(totalOutputTokens(summary), 59);
       yield* Effect.promise(() =>
         NodeFSP.rename(
           NodePath.join(codexHome, "sessions", "rollout.jsonl"),
@@ -412,6 +413,10 @@ describe("UsageService", () => {
   it.live("preserves saved tokens, costs and sessions after transcript cleanup and restart", () =>
     Effect.gen(function* () {
       const { transcript, settings, home } = yield* setup;
+      const alias = NodePath.join(home, "claude-alias");
+      yield* Effect.promise(() =>
+        NodeFSP.symlink(NodePath.join(home, "claude"), alias, "junction"),
+      );
       const content = claudeLine(1, 5);
       yield* Effect.promise(() => NodeFSP.writeFile(transcript, content));
       yield* Effect.gen(function* () {
@@ -439,16 +444,23 @@ describe("UsageService", () => {
         yield* Effect.promise(() =>
           NodeFSP.rm(NodePath.join(home, "claude", "projects"), { recursive: true }),
         );
-        const missingRoot = yield* restarted.readSummary(WINDOW);
+        const afterRootCleanup = yield* UsageService.make;
+        const missingRoot = yield* afterRootCleanup.readSummary(WINDOW);
         assert.deepStrictEqual(missingRoot.buckets, first.buckets);
         assert.strictEqual(missingRoot.sources[0]?.distinctSessions, 1);
         assert.strictEqual(missingRoot.sources[0]?.status, "ok");
+        assert.deepStrictEqual(missingRoot.sources[0]?.fingerprint, first.sources[0]?.fingerprint);
         const merged = mergeUsage(
           [
             {
               environmentId: EnvironmentId.make("cleanup-test"),
               label: "test",
               summary: missingRoot,
+            },
+            {
+              environmentId: EnvironmentId.make("other-environment"),
+              label: "before cleanup",
+              summary: first,
             },
           ],
           missingRoot.contractVersion,
@@ -468,7 +480,7 @@ describe("UsageService", () => {
           serviceLayers({
             prefix: "usage-service-cleanup-test",
             home,
-            settings,
+            settings: { providers: { ...settings.providers, claudeAgent: { homePath: alias } } },
             ratesDocument: {
               "claude-fable-5": { input_cost_per_token: 1e-5, output_cost_per_token: 5e-5 },
             },

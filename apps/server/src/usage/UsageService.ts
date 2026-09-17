@@ -102,6 +102,10 @@ const ScanCacheJson = Schema.fromJsonString(Schema.Unknown as unknown as Schema.
 const decodeScanCacheFile = Schema.decodeUnknownEffect(ScanCacheJson);
 const encodeScanCacheFile = Schema.encodeEffect(ScanCacheJson);
 const encodeUsageRecordKey = Schema.encodeSync(ScanCacheJson);
+const CachedSource = Schema.Struct({ dir: Schema.String, volumeId: Schema.String });
+const decodeCachedSources = Schema.decodeUnknownOption(
+  Schema.Struct({ sources: Schema.Record(Schema.String, CachedSource) }),
+);
 
 export class UsageService extends Context.Service<
   UsageService,
@@ -148,6 +152,7 @@ export const make = Effect.gen(function* () {
   const hostEnvironment = yield* HostProcessEnvironment;
 
   const fileCache: ScanCache = new Map();
+  const sourceCache = new Map<string, typeof CachedSource.Type>();
   let cacheDirty = false;
 
   const ratesCachePath = path.join(config.stateDir, "usage-model-rates.json");
@@ -243,7 +248,12 @@ export const make = Effect.gen(function* () {
   const resolveTranscriptDirs = Effect.fn("UsageService.resolveTranscriptDirs")(function* (
     settings: ServerSettingsValue,
   ) {
-    const dirs: Array<{ provider: UsageProviderKind; dir: string; fileName?: string }> = [];
+    const dirs: Array<{
+      provider: UsageProviderKind;
+      dir: string;
+      volumeId: string;
+      fileName?: string;
+    }> = [];
     const seen = new Set<string>();
     for (const driver of ["claudeAgent", "codex", "grok"] as const) {
       // Disabled accounts still have history. Explicit default slots replace
@@ -281,14 +291,28 @@ export const make = Effect.gen(function* () {
           );
         }
         const directory = path.resolve(home, provider === "claude" ? "projects" : "sessions");
-        // Account aliases and Codex auth overlays can share the same history.
+        const sourceKey = provider + "\0" + directory;
+        const previous = sourceCache.get(sourceKey);
+        // Keep canonical paths and source fingerprints stable after root cleanup,
+        // including aliases and clients merging pre-cleanup environment summaries.
         const dir = yield* fileSystem
           .realPath(directory)
-          .pipe(Effect.orElseSucceed(() => directory));
+          .pipe(Effect.orElseSucceed(() => previous?.dir ?? directory));
+        const currentVolumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
+        const volumeId = currentVolumeId || (previous?.dir === dir ? previous.volumeId : "");
+        if (previous?.dir !== dir || previous.volumeId !== volumeId) {
+          sourceCache.set(sourceKey, { dir, volumeId });
+          cacheDirty = true;
+        }
         const key = `${provider}\0${dir}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        dirs.push({ provider, dir, ...(provider === "grok" ? { fileName: "updates.jsonl" } : {}) });
+        dirs.push({
+          provider,
+          dir,
+          volumeId,
+          ...(provider === "grok" ? { fileName: "updates.jsonl" } : {}),
+        });
       }
     }
     return dirs;
@@ -309,6 +333,11 @@ export const make = Effect.gen(function* () {
       );
       if (document === null) return;
       for (const [path, entry] of decodeScanCache(document)) fileCache.set(path, entry);
+      const sources = decodeCachedSources(document);
+      if (Option.isSome(sources)) {
+        for (const [key, source] of Object.entries(sources.value.sources))
+          sourceCache.set(key, source);
+      }
     }),
   );
 
@@ -316,7 +345,10 @@ export const make = Effect.gen(function* () {
     if (!cacheDirty) return;
     // Cleared only after the write lands, so a failed persist is retried on
     // the next scan instead of leaving disk permanently stale.
-    yield* encodeScanCacheFile(encodeScanCache(fileCache)).pipe(
+    yield* encodeScanCacheFile({
+      ...encodeScanCache(fileCache),
+      sources: Object.fromEntries(sourceCache),
+    }).pipe(
       Effect.flatMap((serialized) => fileSystem.writeFileString(scanCachePath, serialized)),
       Effect.map(() => {
         cacheDirty = false;
@@ -412,8 +444,7 @@ export const make = Effect.gen(function* () {
       Effect.provideService(Path.Path, path),
     );
     const scanned: ScannedDir[] = [];
-    for (const { provider, dir, fileName } of dirs) {
-      const volumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
+    for (const { provider, dir, volumeId, fileName } of dirs) {
       const exists = yield* fileSystem
         .exists(dir)
         .pipe(Effect.catchCause(() => Effect.succeed(false)));
@@ -534,24 +565,25 @@ export const make = Effect.gen(function* () {
           continue;
         }
         scannedFiles += 1;
+        const codexEventOccurrences = new Map<string, number>();
         for (const record of file.records) {
-          // Only sessions that contributed in-window count: the mtime slack
-          // admits boundary files whose records fall outside the range.
-          // A moved Codex rollout can coexist with its saved copy. Codex records
-          // have no provider event id, so identify the same session event here.
-          const usageRecord =
-            record.provider === "codex" && record.sessionId.length > 0
-              ? {
-                  ...record,
-                  dedupeKey: encodeUsageRecordKey([
-                    record.provider,
-                    record.sessionId,
-                    record.timestampMs,
-                    record.model,
-                    record.totals,
-                  ]),
-                }
-              : record;
+          let usageRecord = record;
+          if (record.provider === "codex" && record.sessionId.length > 0) {
+            // Match moved rollout copies without collapsing repeated equal events
+            // within one rollout (timestamps can have only second precision).
+            const key = encodeUsageRecordKey([
+              record.provider,
+              record.sessionId,
+              record.timestampMs,
+              record.model,
+              record.totals,
+            ]);
+            const occurrence = (codexEventOccurrences.get(key) ?? 0) + 1;
+            codexEventOccurrences.set(key, occurrence);
+            usageRecord = { ...record, dedupeKey: key + ":" + occurrence };
+          }
+          // Only sessions contributing in-window count; the mtime slack can
+          // admit boundary files whose records fall outside the range.
           if (aggregator.add(usageRecord) && record.sessionId.length > 0) {
             sessionIds.add(record.sessionId);
           }
