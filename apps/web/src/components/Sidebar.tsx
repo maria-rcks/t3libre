@@ -4048,12 +4048,25 @@ export default function Sidebar() {
           actionProps: {
             children: "Undo",
             onClick: () => {
-              // Only the threads this action grouped leave; anything filed in
-              // meanwhile stays, and the server retires the group once empty.
+              // Only the threads this action grouped, and only those still in
+              // this group, leave; anything filed elsewhere meanwhile stays,
+              // and the server retires the group once it is empty.
               for (const thread of selected) {
+                const current = readThreadShell(scopeThreadRef(thread.environmentId, thread.id));
+                if (current === null || current.groupId !== groupId) continue;
                 void setThreadGroup({
                   environmentId: thread.environmentId,
                   input: { threadId: thread.id, groupId: null },
+                }).then((undone) => {
+                  if (undone._tag !== "Failure" || isAtomCommandInterrupted(undone)) return;
+                  const error = squashAtomCommandFailure(undone);
+                  toastManager.add(
+                    stackedThreadToast({
+                      type: "error",
+                      title: "Failed to undo grouping",
+                      description: error instanceof Error ? error.message : "An error occurred.",
+                    }),
+                  );
                 });
               }
             },

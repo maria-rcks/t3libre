@@ -235,6 +235,45 @@ it.layer(NodeServices.layer)("decider thread group flows", (it) => {
       }),
   );
 
+  it.effect("grouping and moving reject a soft-deleted thread", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedGroupedReadModel;
+      const deletedAt = "2026-01-01T00:00:01.000Z";
+      const withDeleted = {
+        ...readModel,
+        threads: readModel.threads.map((thread) =>
+          thread.id === "thread-delete-2" ? { ...thread, deletedAt } : thread,
+        ),
+      };
+      const createError = yield* Effect.flip(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread-group.create",
+            commandId: asCommandId("cmd-group-create-deleted"),
+            groupId: ThreadGroupId.make("group-3"),
+            projectId: asProjectId("project-delete"),
+            threadIds: [asThreadId("thread-delete-2")],
+            createdAt: deletedAt,
+          },
+          readModel: withDeleted,
+        }),
+      );
+      expect(createError.message).toContain("is deleted");
+      const setError = yield* Effect.flip(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.group.set",
+            commandId: asCommandId("cmd-group-set-deleted"),
+            threadId: asThreadId("thread-delete-2"),
+            groupId: ThreadGroupId.make("group-1"),
+          },
+          readModel: withDeleted,
+        }),
+      );
+      expect(setError.message).toContain("is deleted");
+    }),
+  );
+
   it.effect("creating a group rejects members from another project", () =>
     Effect.gen(function* () {
       const readModel = yield* seedReadModel;
