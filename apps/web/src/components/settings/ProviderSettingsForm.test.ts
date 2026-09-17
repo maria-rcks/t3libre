@@ -20,6 +20,13 @@ describe("ProviderSettingsForm helpers", () => {
     ]);
   });
 
+  it("derives the Muse binary override", () => {
+    const muse = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("muse")];
+    expect(muse).toBeDefined();
+    const fields = deriveProviderSettingsFields(muse!);
+    expect(fields.map((field) => field.key)).toEqual(["binaryPath"]);
+  });
+
   it("sources labels and descriptions from schema annotations", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();

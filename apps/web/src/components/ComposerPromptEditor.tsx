@@ -300,7 +300,7 @@ function ComposerSkillDecorator(props: {
             props.skillDescription ??
             "No description is available for this skill."}
         </p>
-        {skill?.path ? (
+        {skill?.path && !/^(?!file:)[a-z][a-z\d+.-]*:\/\//i.test(skill.path) ? (
           <Button variant="outline" size="sm" onClick={() => actions.openMention(skill.path)}>
             View instructions
           </Button>

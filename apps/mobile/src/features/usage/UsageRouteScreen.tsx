@@ -346,11 +346,17 @@ function ChartCard(props: {
           {metric === "cost" ? "Raw token cost" : "Processed tokens"}
         </Text>
         <Text className="text-4xl font-t3-bold tabular-nums text-foreground">
-          {metric === "cost" ? `${formatUsd(merged.costUsd)}*` : formatTokens(merged.totalTokens)}
+          {metric === "cost"
+            ? merged.costQuality.unpricedShare === 1
+              ? "Unpriced"
+              : `${formatUsd(merged.costUsd)}*`
+            : formatTokens(merged.totalTokens)}
         </Text>
         <Text className="text-sm text-foreground-muted">
           {metric === "cost"
-            ? "* if billed at full API rate"
+            ? merged.costQuality.unpricedShare === 1
+              ? "API pricing unavailable"
+              : "* if billed at full API rate"
             : `Across ${formatCount(merged.sessions)} sessions`}
         </Text>
       </View>
@@ -415,6 +421,9 @@ function ProviderSection(props: {
     <SettingsSection title="Providers" card>
       {ordered.map((provider, index) => {
         const share = metric === "cost" ? provider.costShare : provider.tokenShare;
+        const models = merged.models.filter((entry) => entry.provider === provider.provider);
+        const costUnknown = models.length > 0 && models.every(isModelCostUnknown);
+        const costLabel = costUnknown ? "Unpriced" : formatUsd(provider.costUsd);
         return (
           <View
             key={provider.provider}
@@ -429,9 +438,7 @@ function ProviderSection(props: {
                 <Text className="text-lg text-foreground">{PROVIDER_LABEL[provider.provider]}</Text>
               </View>
               <Text className="text-lg tabular-nums text-foreground">
-                {metric === "cost"
-                  ? formatUsd(provider.costUsd)
-                  : formatTokens(provider.totalTokens)}
+                {metric === "cost" ? costLabel : formatTokens(provider.totalTokens)}
               </Text>
             </View>
             <View className="h-1 flex-row overflow-hidden rounded-full bg-subtle">
@@ -443,8 +450,8 @@ function ProviderSection(props: {
             </View>
             <Text className="text-sm text-foreground-muted">
               {metric === "cost"
-                ? `${formatPercent(share)} of cost · ${formatTokens(provider.totalTokens)} tokens`
-                : `${formatPercent(share)} of tokens · ${formatUsd(provider.costUsd)}`}
+                ? `${costUnknown ? "Unpriced" : `${formatPercent(share)} of cost`} · ${formatTokens(provider.totalTokens)} tokens`
+                : `${formatPercent(share)} of tokens · ${costLabel}`}
             </Text>
           </View>
         );

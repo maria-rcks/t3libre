@@ -70,7 +70,47 @@ export function totalTokens(totals: UsageTokenTotals): number {
 export function mightCarryUsage(line: string, provider: UsageProviderKind): boolean {
   if (provider === "claude") return line.includes('"usage"');
   if (provider === "grok") return line.includes('"turn_completed"');
+  if (provider === "muse") return line.includes('"model_completed"');
   return line.includes('"token_count"');
+}
+
+/** Muse's session log mirrors each model completion once, including cached input. */
+export function parseMuseLine(line: string): UsageRecord | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const object = (value: unknown): Record<string, unknown> =>
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  const record = object(parsed);
+  if (record.payload_type !== "runtime.session") return null;
+  const payload = object(record.payload);
+  const event = object(payload.event);
+  if (event.kind !== "model_completed") return null;
+  const usage = object(event.usage);
+  if (typeof record.recorded_at !== "number" || !Number.isFinite(record.recorded_at)) return null;
+  const sessionId = object(record.stream).id;
+  const sourceId = payload.source_run_record_id;
+  if (typeof sessionId !== "string" || typeof sourceId !== "string") return null;
+  const cached = int(usage.cache_read_tokens ?? usage.cached_tokens);
+  const created = int(usage.cache_write_tokens);
+  return {
+    provider: "muse",
+    timestampMs: Math.trunc(record.recorded_at / 1_000),
+    model: typeof event.model === "string" && event.model.length > 0 ? event.model : "unknown",
+    sessionId,
+    totals: {
+      uncachedInputTokens: Math.max(0, int(usage.input_tokens) - cached - created),
+      cachedInputTokens: cached,
+      cacheCreationTokens: created,
+      outputTokens: int(usage.output_tokens),
+      reasoningTokens: int(usage.reasoning_tokens),
+    },
+    reportedCostUsd: null,
+    dedupeKey: sourceId,
+  };
 }
 
 /**

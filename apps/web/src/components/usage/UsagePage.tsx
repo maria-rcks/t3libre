@@ -391,7 +391,9 @@ export function UsagePage() {
                     <div className="flex flex-col gap-1">
                       <span className="text-4xl font-semibold text-foreground tabular-nums">
                         {metric === "cost"
-                          ? formatUsd(merged.costUsd)
+                          ? merged.costQuality.unpricedShare === 1
+                            ? "Unpriced"
+                            : formatUsd(merged.costUsd)
                           : formatTokens(merged.totalTokens)}
                       </span>
                       <span className="text-xs text-muted-foreground">
@@ -407,6 +409,9 @@ export function UsagePage() {
 
                     {activeProviders.map((provider) => {
                       const totals = merged.providers.find((entry) => entry.provider === provider);
+                      const models = merged.models.filter((entry) => entry.provider === provider);
+                      const costUnknown = models.length > 0 && models.every(isModelCostUnknown);
+                      const costLabel = costUnknown ? "Unpriced" : formatUsd(totals?.costUsd ?? 0);
                       const share =
                         metric === "cost" ? (totals?.costShare ?? 0) : (totals?.tokenShare ?? 0);
                       const providerSessions = totals?.sessions ?? 0;
@@ -436,14 +441,14 @@ export function UsagePage() {
                             </span>
                             <span className="shrink-0 text-sm font-medium text-foreground tabular-nums">
                               {metric === "cost"
-                                ? formatUsd(totals?.costUsd ?? 0)
+                                ? costLabel
                                 : formatTokens(totals?.totalTokens ?? 0)}
                             </span>
                           </div>
                           <span className="text-xs text-muted-foreground">
                             {metric === "cost"
-                              ? `${formatPercent(share)} of cost · ${formatTokens(totals?.totalTokens ?? 0)} tokens`
-                              : `${formatPercent(share)} of tokens · ${formatUsd(totals?.costUsd ?? 0)}`}
+                              ? `${costUnknown ? "Unpriced" : `${formatPercent(share)} of cost`} · ${formatTokens(totals?.totalTokens ?? 0)} tokens`
+                              : `${formatPercent(share)} of tokens · ${costLabel}`}
                           </span>
                         </div>
                       );

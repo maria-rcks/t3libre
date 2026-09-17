@@ -67,6 +67,8 @@ export type ServerProviderUsageLimits = typeof ServerProviderUsageLimits.Type;
  * `id` onto the instance's published snapshot; omitted windows are unchanged.
  */
 export const ProviderUsageLimitsUpdate = Schema.Struct({
+  /** Provider observation time when the reported snapshot predates delivery. */
+  checkedAt: Schema.optional(IsoDateTime),
   windows: Schema.Array(ServerProviderUsageWindow),
 });
 export type ProviderUsageLimitsUpdate = typeof ProviderUsageLimitsUpdate.Type;

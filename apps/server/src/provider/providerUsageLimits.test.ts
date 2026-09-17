@@ -1,8 +1,16 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "@effect/vitest";
 
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import {
+  MuseSubscriptionUsage,
+  museSubscriptionUsageToLimits,
+  readMuseUsageLimits,
+} from "./Layers/museUsageLimits.ts";
 import { applyUsageLimitsUpdate, resolveUsageLimitsAfterProbe } from "./providerUsageLimits.ts";
 
 const checkedAt = "2026-09-03T12:00:00.000Z";
+const decodeMuseSubscriptionUsage = Schema.decodeUnknownSync(MuseSubscriptionUsage);
 const session = {
   id: "five_hour",
   kind: "session",
@@ -86,4 +94,51 @@ describe("resolveUsageLimitsAfterProbe", () => {
     expect(resolveUsageLimitsAfterProbe({ published, probed: unsupported })).toBe(unsupported);
     expect(resolveUsageLimitsAfterProbe({ published: undefined, probed: failed })).toBe(failed);
   });
+});
+
+describe("Muse subscription usage", () => {
+  it("preserves native observation and reset times while bounding over-quota bars", () => {
+    const usage = decodeMuseSubscriptionUsage({
+      observedAtMs: Date.parse(checkedAt),
+      tier: "native-tier",
+      window: {
+        usedPercent: 123,
+        resetsAtMs: Date.parse("2026-09-03T14:00:00.000Z"),
+        windowDurationMins: 300,
+      },
+      weekly: { usedPercent: 25, resetsAtMs: Date.parse("2026-09-10T12:00:00.000Z") },
+    });
+    expect(museSubscriptionUsageToLimits(usage)).toEqual({
+      checkedAt,
+      windows: [
+        {
+          id: "window",
+          kind: "session",
+          label: "Session",
+          usedPercent: 100,
+          resetsAt: "2026-09-03T14:00:00.000Z",
+          windowDurationMins: 300,
+        },
+        {
+          id: "weekly",
+          kind: "weekly",
+          label: "Weekly",
+          usedPercent: 25,
+          resetsAt: "2026-09-10T12:00:00.000Z",
+        },
+      ],
+    });
+  });
+
+  it.effect("leaves an unobserved subscription unknown and permits a later live update", () =>
+    Effect.gen(function* () {
+      const limits = yield* readMuseUsageLimits({ request: async () => ({}) });
+      expect(limits.windows).toEqual([]);
+      expect(limits.unavailable?.reason).toBe("probeFailed");
+      expect(
+        applyUsageLimitsUpdate({ previous: limits, update: { windows: [session] }, checkedAt })
+          ?.windows,
+      ).toEqual([session]);
+    }),
+  );
 });

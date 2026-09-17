@@ -1,6 +1,15 @@
-import type { UsageProviderKind } from "@t3tools/contracts";
+import { ProviderDriverKind, type UsageProviderKind } from "@t3tools/contracts";
+import { createElement } from "react";
 
 import { ClaudeAI, GrokIcon, type Icon, OpenAI } from "../Icons";
+import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+
+const MuseMark: Icon = ({ className }) =>
+  createElement(ProviderInstanceIcon, {
+    driverKind: ProviderDriverKind.make("muse"),
+    displayName: "Muse Code",
+    ...(className === undefined ? {} : { className }),
+  });
 
 type UsageProviderPresentation = {
   readonly label: string;
@@ -29,6 +38,11 @@ export const PROVIDER_PRESENTATION = {
     // Contrast-aware neutral between the Codex series and muted chart chrome.
     color: "color-mix(in oklab, var(--contrast-foreground) 72%, var(--background))",
     mark: GrokIcon,
+  },
+  muse: {
+    label: "Muse Code",
+    color: "#6088d9",
+    mark: MuseMark,
   },
 } satisfies Record<UsageProviderKind, UsageProviderPresentation>;
 

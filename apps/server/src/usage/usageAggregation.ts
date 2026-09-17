@@ -12,7 +12,13 @@
  *
  * @module usageAggregation
  */
-import type { UsageBucket, UsageDay, UsageResolution, UsageTokenTotals } from "@t3tools/contracts";
+import type {
+  UsageBucket,
+  UsageDay,
+  UsageProviderKind,
+  UsageResolution,
+  UsageTokenTotals,
+} from "@t3tools/contracts";
 
 import { addTotals, EMPTY_TOTALS, type UsageRecord } from "./usageTranscripts.ts";
 import { cacheSavingsUsd, priceUsage, type RateTable } from "./usagePricing.ts";
@@ -61,6 +67,7 @@ export interface AggregateOptions {
   readonly sinceDay: string;
   readonly untilDay: string;
   readonly rates: RateTable;
+  readonly providerRates?: Partial<Record<UsageProviderKind, RateTable>>;
   readonly priceOverrides?: RateTable;
   readonly resolution?: UsageResolution;
   readonly sinceTimeMs?: number;
@@ -161,8 +168,9 @@ export class UsageAggregator {
       this.#buckets.set(key, bucket);
     }
 
+    const rates = this.#options.providerRates?.[record.provider] ?? this.#options.rates;
     const priced = priceUsage(
-      this.#options.rates,
+      rates,
       record.model,
       record.totals,
       record.reportedCostUsd,
@@ -172,7 +180,7 @@ export class UsageAggregator {
     bucket.totals = addTotals(bucket.totals, record.totals);
     bucket.costUsd += priced.costUsd;
     bucket.cacheSavingsUsd += cacheSavingsUsd(
-      this.#options.rates,
+      rates,
       record.model,
       record.totals,
       this.#options.priceOverrides,

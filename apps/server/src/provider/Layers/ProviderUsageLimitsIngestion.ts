@@ -33,7 +33,8 @@ export const ProviderUsageLimitsIngestionLive = Layer.effectDiscard(
           if (!instance) {
             return;
           }
-          const checkedAt = DateTime.formatIso(yield* DateTime.now);
+          const checkedAt =
+            event.payload.limits.checkedAt ?? DateTime.formatIso(yield* DateTime.now);
           yield* instance.snapshot.applyUsageLimits({ ...event.payload.limits, checkedAt });
           // One bad event must not end the subscriber for every later one.
         }).pipe(Effect.ignoreCause({ log: true })),

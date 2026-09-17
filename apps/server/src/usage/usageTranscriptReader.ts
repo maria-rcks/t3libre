@@ -26,6 +26,7 @@ import {
   parseClaudeLine,
   parseCodexLine,
   parseGrokLine,
+  parseMuseLine,
   type CodexScanState,
   type UsageRecord,
 } from "./usageTranscripts.ts";
@@ -235,7 +236,7 @@ export async function readTranscriptRecords(
         for (const grokRecord of parseGrokLine(line)) out.push(grokRecord);
         return;
       }
-      const record = parseClaudeLine(line);
+      const record = provider === "muse" ? parseMuseLine(line) : parseClaudeLine(line);
       if (record !== null) out.push(record);
     };
 

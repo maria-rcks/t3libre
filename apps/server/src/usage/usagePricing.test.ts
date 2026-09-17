@@ -4,6 +4,7 @@ import {
   cacheSavingsUsd,
   createOverrideRateTable,
   lookupRate,
+  parseMuseRateTable,
   parseRateTable,
   priceUsage,
 } from "./usagePricing.ts";
@@ -22,6 +23,65 @@ describe("usage pricing", () => {
     outputTokens: 1_000_000,
     reasoningTokens: 500_000,
   };
+
+  it("prices Muse's native per-million catalog amounts, including cached input", () => {
+    const table = parseMuseRateTable([
+      {
+        source: "provider_catalog",
+        rows: [
+          {
+            model_id: "example-muse",
+            cost: { currency: "USD", input: "2", output: "8", cached: "0.5" },
+          },
+        ],
+      },
+    ]);
+    expect(priceUsage(table, "example-muse", totals, null)).toEqual({
+      costUsd: 12.5,
+      costSource: "modelPriced",
+    });
+    expect(cacheSavingsUsd(table, "example-muse", totals)).toBe(1.5);
+  });
+
+  it("keeps absent, incomplete, and non-USD Muse prices unpriced", () => {
+    for (const cost of [
+      null,
+      { currency: null, input: "2", output: "8", cached: "0.5" },
+      { currency: "EUR", input: "2", output: "8", cached: "0.5" },
+      { currency: "USD", input: "2", output: "8" },
+    ]) {
+      const table = parseMuseRateTable([
+        {
+          source: "provider_catalog",
+          rows: [{ model_id: "example-muse", cost }],
+        },
+      ]);
+      expect(priceUsage(table, "example-muse", totals, null)).toEqual({
+        costUsd: 0,
+        costSource: "unpriced",
+      });
+    }
+  });
+
+  it("does not choose between conflicting Muse account catalog prices", () => {
+    for (const inputs of [
+      ["2", "3"],
+      ["3", "2"],
+    ]) {
+      const table = parseMuseRateTable(
+        inputs.map((input) => ({
+          source: "provider_catalog",
+          rows: [
+            {
+              model_id: "example-muse",
+              cost: { currency: "USD", input, output: "8", cached: "0.5" },
+            },
+          ],
+        })),
+      );
+      expect(priceUsage(table, "example-muse", totals, null).costSource).toBe("unpriced");
+    }
+  });
 
   it("uses custom token rates ahead of public and provider-reported costs", () => {
     const table = parseRateTable({ "example-model": rate(1) });

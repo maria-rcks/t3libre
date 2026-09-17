@@ -53,6 +53,7 @@ import {
 } from "../../native/StackHeader";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { serverEnvironment } from "../../state/server";
+import { useEnvironmentServerConfig } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useNewTaskFlow } from "./new-task-flow-provider";
 import { MaterialScreenContent } from "../../components/MaterialScreenContent";
@@ -510,7 +511,7 @@ function ThreadSettingsSessionProvider(
   const value = useMemo<ThreadSettingsSessionValue>(
     () => ({
       environmentId: props.environmentId,
-      providerInstanceId: props.providerInstanceId,
+      providerInstanceId: props.selectedModel?.instanceId ?? props.providerInstanceId,
       providerGroups: props.providerGroups,
       runtimeMode: props.runtimeMode,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
@@ -541,6 +542,7 @@ function ThreadSettingsSessionProvider(
       isDisplayed,
       props.environmentId,
       props.providerInstanceId,
+      props.selectedModel?.instanceId,
       pendingModel,
       pressModel,
       providerFilter,
@@ -937,6 +939,12 @@ function ThreadSettingsChoiceContent(props: {
 }) {
   const insets = useSafeAreaInsets();
   const session = useThreadSettingsSession();
+  const serverConfig = useEnvironmentServerConfig(session.environmentId);
+  const runtimeModeDescriptions = serverConfig?.providers.find(
+    (provider) =>
+      provider.instanceId ===
+      (session.pendingModel?.selection.instanceId ?? session.providerInstanceId),
+  )?.runtimeModeDescriptions;
   const descriptorId = props.submenu.kind === "descriptor" ? props.submenu.id : null;
 
   const activeDescriptor =
@@ -952,7 +960,7 @@ function ThreadSettingsChoiceContent(props: {
           rows: RUNTIME_MODE_CHOICES.map((choice) => ({
             id: choice.mode,
             label: choice.label,
-            description: choice.description,
+            description: runtimeModeDescriptions?.[choice.mode] ?? choice.description,
             selected: choice.mode === session.runtimeMode,
             onPress: () => {
               void Haptics.selectionAsync();

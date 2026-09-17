@@ -274,7 +274,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                             {option.label}
                           </span>
                           <span className="text-xs leading-4 text-muted-foreground">
-                            {option.description}
+                            {activeEntry?.snapshot?.runtimeModeDescriptions?.[mode] ??
+                              option.description}
                           </span>
                         </div>
                       </SelectItem>

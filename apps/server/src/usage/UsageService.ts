@@ -13,10 +13,12 @@
  * @module UsageService
  */
 import * as NodeOS from "node:os";
+import { spawnMspConnection } from "@muse-code/sdk";
 
 import {
   ClaudeSettings,
   CodexSettings,
+  MuseSettings,
   type ProviderInstanceConfig,
   USAGE_CONTRACT_VERSION,
   type ServerSettings as ServerSettingsValue,
@@ -48,7 +50,12 @@ import * as ServerSettings from "../serverSettings.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
-import { createOverrideRateTable, parseRateTable, type RateTable } from "./usagePricing.ts";
+import {
+  createOverrideRateTable,
+  parseMuseRateTable,
+  parseRateTable,
+  type RateTable,
+} from "./usagePricing.ts";
 import {
   listTranscriptFiles,
   readDirectoryVolumeId,
@@ -84,6 +91,7 @@ const CACHE_RETENTION_DAYS = 90;
 
 const decodeCodexSettings = Schema.decodeOption(CodexSettings);
 const decodeClaudeSettings = Schema.decodeOption(ClaudeSettings);
+const decodeMuseSettings = Schema.decodeUnknownOption(MuseSettings);
 
 /** On-disk shape of the rate snapshot. */
 const RatesCacheFile = Schema.Struct({
@@ -244,12 +252,15 @@ export const make = Effect.gen(function* () {
   ) {
     const dirs: Array<{ provider: UsageProviderKind; dir: string; fileName?: string }> = [];
     const seen = new Set<string>();
-    for (const driver of ["claudeAgent", "codex", "grok"] as const) {
+    for (const driver of ["claudeAgent", "codex", "grok", "muse"] as const) {
       // Disabled accounts still have history. Explicit default slots replace
       // the legacy settings, just as they do in the provider registry.
       const instances: Array<Pick<ProviderInstanceConfig, "config" | "environment">> =
         Object.values(settings.providerInstances).filter((instance) => instance.driver === driver);
-      if (!Object.hasOwn(settings.providerInstances, driver)) {
+      if (
+        !Object.hasOwn(settings.providerInstances, driver) &&
+        (driver !== "muse" || settings.providers.muse.enabled)
+      ) {
         instances.push({ config: settings.providers[driver] });
       }
       for (const instance of instances) {
@@ -274,6 +285,30 @@ export const make = Effect.gen(function* () {
           home = configured
             ? expandHomePath(configured)
             : environment.CLAUDE_CONFIG_DIR?.trim() || path.join(NodeOS.homedir(), ".claude");
+        } else if (driver === "muse") {
+          const decoded = decodeMuseSettings(instance.config ?? {});
+          if (Option.isNone(decoded)) continue;
+          const museHome = yield* Effect.gen(function* () {
+            const connection = yield* Effect.acquireRelease(
+              Effect.try(() =>
+                spawnMspConnection({
+                  command: decoded.value.binaryPath || "muse",
+                  args: ["serve"],
+                  env: environment,
+                  shutdownTimeoutMs: 1_000,
+                }),
+              ),
+              (host) => Effect.tryPromise(() => host.close()).pipe(Effect.ignore),
+            );
+            const host = yield* Effect.tryPromise(() =>
+              connection.initialize({
+                clientInfo: { name: "t3_code", version: "0.0.0" },
+              }),
+            );
+            return host.initializeResult.museHome;
+          }).pipe(Effect.timeout("5 seconds"), Effect.scoped, Effect.option);
+          if (Option.isNone(museHome)) continue;
+          home = museHome.value;
         } else {
           home = expandHomePath(
             environment.GROK_HOME?.trim() || path.join(NodeOS.homedir(), ".grok"),
@@ -287,7 +322,15 @@ export const make = Effect.gen(function* () {
         const key = `${provider}\0${dir}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        dirs.push({ provider, dir, ...(provider === "grok" ? { fileName: "updates.jsonl" } : {}) });
+        dirs.push({
+          provider,
+          dir,
+          ...(provider === "grok"
+            ? { fileName: "updates.jsonl" }
+            : provider === "muse"
+              ? { fileName: "session.jsonl" }
+              : {}),
+        });
       }
     }
     return dirs;
@@ -489,6 +532,26 @@ export const make = Effect.gen(function* () {
       { concurrency: 2 },
     );
 
+    const museCatalogs: unknown[] = [];
+    for (const directory of scannedDirs) {
+      if (directory.provider !== "muse") continue;
+      const catalogDir = path.join(path.dirname(directory.dir), "model-catalog");
+      const names = yield* fileSystem
+        .readDirectory(catalogDir)
+        .pipe(Effect.orElseSucceed(() => []));
+      for (const name of names) {
+        if (!name.endsWith(".json")) continue;
+        const document = yield* fileSystem
+          .readFileString(path.join(catalogDir, name))
+          .pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
+            Effect.option,
+          );
+        if (Option.isSome(document)) museCatalogs.push(document.value);
+      }
+    }
+    const museRates = parseMuseRateTable(museCatalogs);
+    const combinedRates = new Map([...rates, ...museRates]);
     const aggregator = new UsageAggregator({
       timeZone: input.timeZone,
       sinceDay: input.sinceDay,
@@ -496,6 +559,7 @@ export const make = Effect.gen(function* () {
       resolution: input.resolution ?? "day",
       ...hourlyWindow,
       rates,
+      providerRates: { muse: museRates },
       priceOverrides: createOverrideRateTable(settings.usagePriceOverrides),
     });
 
@@ -572,7 +636,19 @@ export const make = Effect.gen(function* () {
       untilDay: input.untilDay,
       buckets: aggregated.buckets,
       sources,
-      pricing: pricing(),
+      pricing: {
+        ...pricing(),
+        knownModels: combinedRates.size,
+        ...(museRates.size > 0
+          ? {
+              source:
+                rates.size > 0
+                  ? `${LITELLM_RATES_URL} + Muse provider catalog`
+                  : "Muse provider catalog",
+              status: ratesStatus === "unavailable" ? ("cached" as const) : ratesStatus,
+            }
+          : {}),
+      },
       scanDurationMs: Math.max(0, finishedAtMs - startedAtMs),
     } satisfies UsageSummary;
   });

@@ -106,19 +106,27 @@ and enable the provider you want. Installation, login, and configuration belong
 to that environment's machine, even when you connect from a phone or another
 computer.
 
-| Provider    | Install and authenticate                                                                     |
-| ----------- | -------------------------------------------------------------------------------------------- |
-| Codex       | Install [Codex CLI](https://developers.openai.com/codex/cli), then run `codex login`.        |
-| Claude      | Install [Claude Code](https://claude.com/product/claude-code), then run `claude auth login`. |
-| Cursor      | Install [Cursor CLI](https://cursor.com/cli), then run `agent login`.                        |
-| Grok Build  | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                           |
-| OpenCode    | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                     |
-| Antigravity | Install and sign in with Google from T3 Code's provider settings.                            |
+| Provider    | Install and authenticate                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Codex       | Install [Codex CLI](https://developers.openai.com/codex/cli), then run `codex login`.                                          |
+| Claude      | Install [Claude Code](https://claude.com/product/claude-code), then run `claude auth login`.                                   |
+| Cursor      | Install [Cursor CLI](https://cursor.com/cli), then run `agent login`.                                                          |
+| Grok Build  | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                                                             |
+| OpenCode    | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                                                       |
+| Antigravity | Install and sign in with Google from T3 Code's provider settings.                                                              |
+| Muse Code   | Install and sign in to [Muse Code](https://dev.meta.ai/) on the environment machine. Requires a build supporting `muse serve`. |
 
 Provider CLIs must be on the server's `PATH`. If T3 Code cannot find one, set its
 **Binary path** in provider settings, especially when using a version manager.
 Cursor's executable is `cursor-agent`, although its login command is
 `agent login`. Antigravity can use its managed runtime without a `PATH` entry.
+
+Muse Code is a developer preview integration. It uses the models available to
+your Muse installation. Generated thread titles and source control text currently
+require another provider. Muse's supervised mode asks before shell commands;
+workspace file writes remain allowed. Usage shows native token history and
+subscription limits when Muse reports them. Models without published prices
+remain unpriced unless you add a price override.
 
 When a provider CLI is behind its latest release, its provider card shows the
 available version. **Update now** appears only when T3 Code can tell which

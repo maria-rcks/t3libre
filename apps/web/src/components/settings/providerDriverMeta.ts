@@ -4,9 +4,11 @@ import {
   CodexSettings,
   CursorSettings,
   GrokSettings,
+  MuseSettings,
   OpenCodeSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
+import { BotIcon } from "lucide-react";
 import type * as Schema from "effect/Schema";
 import {
   AntigravityIcon,
@@ -81,6 +83,13 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
     label: "Antigravity",
     icon: AntigravityIcon,
     settingsSchema: AntigravitySettings,
+  },
+  {
+    value: ProviderDriverKind.make("muse"),
+    label: "Muse Code",
+    icon: BotIcon,
+    badgeLabel: "Developer Preview",
+    settingsSchema: MuseSettings,
   },
 ];
 

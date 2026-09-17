@@ -123,6 +123,47 @@ function sameRate(a: ModelRate, b: ModelRate): boolean {
   );
 }
 
+/** Muse caches provider catalog prices as decimal USD amounts per million tokens. */
+export function parseMuseRateTable(documents: readonly unknown[]): RateTable {
+  const candidates = new Map<string, ModelRate | null>();
+  const object = (value: unknown): Record<string, unknown> =>
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  const amount = (value: unknown): number | null => {
+    if (typeof value !== "string" || !/^\d+(?:\.\d+)?$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed / 1_000_000 : null;
+  };
+  for (const document of documents) {
+    const catalog = object(document);
+    if (catalog.source !== "provider_catalog" || !Array.isArray(catalog.rows)) continue;
+    for (const raw of catalog.rows) {
+      const model = object(raw);
+      if (typeof model.model_id !== "string") continue;
+      const cost = object(model.cost);
+      if (cost.currency !== "USD") continue;
+      const input = amount(cost.input);
+      const output = amount(cost.output);
+      const cached = amount(cost.cached);
+      if (input === null || output === null || cached === null) continue;
+      const key = normalizeRateKey(model.model_id);
+      const rate: ModelRate = {
+        inputCostPerToken: input,
+        outputCostPerToken: output,
+        cacheReadCostPerToken: cached,
+        cacheCreationCostPerToken: input,
+      };
+      const previous = candidates.get(key);
+      candidates.set(
+        key,
+        previous === undefined || (previous !== null && sameRate(previous, rate)) ? rate : null,
+      );
+    }
+  }
+  return new Map(
+    [...candidates].filter((entry): entry is [string, ModelRate] => entry[1] !== null),
+  );
+}
+
 function normalizeRateKey(model: string): string {
   return model.trim().toLowerCase();
 }
