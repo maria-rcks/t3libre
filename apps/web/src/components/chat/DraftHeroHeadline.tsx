@@ -60,7 +60,7 @@ export function DraftHeroHeadline({
   const applyStickyState = useComposerDraftStore((store) => store.applyStickyState);
   const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
-  const { chatWorkspaceRootFor, ensureChatProject } = useChatProject();
+  const { canStartChatIn, chatWorkspaceRootFor, ensureChatProject } = useChatProject();
 
   const environmentLabelById = useMemo(
     () =>
@@ -151,8 +151,14 @@ export function DraftHeroHeadline({
       ? findChatProject({ projects, environmentId: chatEnvironmentId, chatWorkspaceRoot })
       : null;
   const isChatDraft = activeProject !== null && chatProject?.id === activeProject.id;
-  const canJustChat = chatWorkspaceRoot !== null && !isChatDraft;
+  const canJustChat = canStartChatIn(chatEnvironmentId) && !isChatDraft;
 
+  // The picker can change the draft's target while "Just chat" is still
+  // creating its project; a stale continuation must not retarget it again.
+  const latestTargetRef = useRef({ draftId, activeProjectKey });
+  useEffect(() => {
+    latestTargetRef.current = { draftId, activeProjectKey };
+  }, [activeProjectKey, draftId]);
   // Project selection changes the target of the open draft in place. The
   // prompt stays in the same composer session, so the sidebar only gets a
   // draft row if the user later navigates away.
@@ -160,6 +166,7 @@ export function DraftHeroHeadline({
     if (!draftId) {
       return;
     }
+    latestTargetRef.current = { draftId, activeProjectKey: logicalProjectKey };
     const currentDraft = getComposerDraft(draftId);
     setLogicalProjectDraftThreadId(
       logicalProjectKey,
@@ -182,12 +189,6 @@ export function DraftHeroHeadline({
       }
     }
   };
-  // The picker can change the draft's target while "Just chat" is still
-  // creating its project; a stale continuation must not retarget it again.
-  const latestTargetRef = useRef({ draftId, activeProjectKey });
-  useEffect(() => {
-    latestTargetRef.current = { draftId, activeProjectKey };
-  }, [activeProjectKey, draftId]);
   const startChat = async () => {
     if (chatEnvironmentId === null || isChatDraft) {
       return;

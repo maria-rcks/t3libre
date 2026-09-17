@@ -131,13 +131,14 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
   const { connectedEnvironments } = useRemoteConnectionStatus();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   // "Just chat" needs a connected environment whose server offers a chat
-  // folder. The list is scoped to selectedEnvironmentId, so never fall back to
-  // another environment behind the user's back.
+  // folder. When the list is scoped to selectedEnvironmentId only that
+  // environment qualifies; an unscoped list takes the first one that does.
   const chatEnvironment =
     connectedEnvironments.find(
       (environment) =>
         (selectedEnvironmentId === null || environment.environmentId === selectedEnvironmentId) &&
-        canCreateProjectInEnvironment(environment.connectionState),
+        canCreateProjectInEnvironment(environment.connectionState) &&
+        serverConfigs.get(environment.environmentId)?.chatWorkspaceRoot !== undefined,
     ) ?? null;
   const chatStartInFlightRef = useRef(false);
   const chatWorkspaceRoot = chatEnvironment

@@ -1760,18 +1760,20 @@ const makeWsRpcLayer = (
           );
       };
 
-      // Only clients that answer /usage-limits themselves see it in the catalogs;
-      // an older client would send the injected command to the provider.
+      const path = yield* Path.Path;
       // A chats folder inside a checkout (a dev worktree's .t3, a dotfiles
       // home) would inherit that repo's git status and checkpoints, so the
       // folder is only offered when the data dir is outside any work tree.
-      const path = yield* Path.Path;
-      const resolveChatWorkspaceRoot = yield* Effect.cached(
-        gitWorkflow.status({ cwd: config.baseDir }).pipe(
-          Effect.map((status) => (status.isRepo ? undefined : path.join(config.baseDir, "chats"))),
-          Effect.catch(() => Effect.succeed(undefined)),
+      // Detection failures fail closed and hide the folder, never the config.
+      const resolveChatWorkspaceRoot = gitWorkflow.isRepository(config.baseDir).pipe(
+        Effect.map((isRepository) =>
+          isRepository ? undefined : path.join(config.baseDir, "chats"),
         ),
+        Effect.catchCause(() => Effect.succeed(undefined)),
       );
+
+      // Only clients that answer /usage-limits themselves see it in the catalogs;
+      // an older client would send the injected command to the provider.
       const loadServerConfig = (options: { readonly usageLimitsCommand: boolean }) =>
         Effect.gen(function* () {
           const keybindingsConfig = yield* keybindings.loadConfigState;

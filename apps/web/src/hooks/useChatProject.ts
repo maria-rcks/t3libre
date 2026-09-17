@@ -38,18 +38,41 @@ export function useChatProject() {
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
 
   const chatWorkspaceRootFor = useCallback(
-    (environmentId: EnvironmentId | null): string | null => {
-      const environment = environments.find((entry) => entry.environmentId === environmentId);
-      if (!environment || environment.connection.phase !== "connected") return null;
-      return environment.serverConfig?.chatWorkspaceRoot ?? null;
-    },
+    (environmentId: EnvironmentId | null): string | null =>
+      environments.find((entry) => entry.environmentId === environmentId)?.serverConfig
+        ?.chatWorkspaceRoot ?? null,
     [environments],
+  );
+
+  /** Whether "Just chat" can be started in this environment right now. */
+  const canStartChatIn = useCallback(
+    (environmentId: EnvironmentId | null): boolean =>
+      environments.some(
+        (entry) =>
+          entry.environmentId === environmentId &&
+          entry.connection.phase === "connected" &&
+          entry.serverConfig?.chatWorkspaceRoot !== undefined,
+      ),
+    [environments],
+  );
+
+  // The hosted web app has no primary environment, so "Just chat" targets the
+  // first connected environment that offers a chats folder.
+  const chatEnvironmentId = useCallback(
+    (preferred: EnvironmentId | null): EnvironmentId | null =>
+      canStartChatIn(preferred)
+        ? preferred
+        : (environments.find((entry) => canStartChatIn(entry.environmentId))?.environmentId ??
+          null),
+    [canStartChatIn, environments],
   );
 
   const ensureChatProject = useCallback(
     (environmentId: EnvironmentId): Promise<EnvironmentProject | null> => {
       const chatWorkspaceRoot = chatWorkspaceRootFor(environmentId);
-      if (chatWorkspaceRoot === null) return Promise.resolve(null);
+      if (chatWorkspaceRoot === null || !canStartChatIn(environmentId)) {
+        return Promise.resolve(null);
+      }
       const findExisting = () =>
         findChatProject({ projects: readProjects(), environmentId, chatWorkspaceRoot });
       const existing = findExisting();
@@ -82,8 +105,8 @@ export function useChatProject() {
         // the create event to reach the client store before targeting one.
         try {
           return await waitForProject({ environmentId, projectId });
-        } catch (error) {
-          reportChatStartFailure(error);
+        } catch {
+          reportChatStartFailure(new Error("The chat project has not reached this client yet."));
           return null;
         }
       })().finally(() => {
@@ -92,8 +115,8 @@ export function useChatProject() {
       inFlightByEnvironment.set(environmentId, create);
       return create;
     },
-    [chatWorkspaceRootFor, createProject],
+    [canStartChatIn, chatWorkspaceRootFor, createProject],
   );
 
-  return { chatWorkspaceRootFor, ensureChatProject };
+  return { canStartChatIn, chatEnvironmentId, chatWorkspaceRootFor, ensureChatProject };
 }

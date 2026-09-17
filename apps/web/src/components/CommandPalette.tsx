@@ -700,7 +700,7 @@ function OpenCommandPaletteDialog(props: {
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });
-  const { chatWorkspaceRootFor, ensureChatProject } = useChatProject();
+  const { canStartChatIn, ensureChatProject } = useChatProject();
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
   });
@@ -1509,7 +1509,7 @@ function OpenCommandPaletteDialog(props: {
           },
         },
       ];
-      if (chatWorkspaceRootFor(environmentId) !== null) {
+      if (canStartChatIn(environmentId)) {
         sourceItems.push({
           kind: "action",
           value: `action:add-project:${environmentId}:chat`,
@@ -1598,7 +1598,7 @@ function OpenCommandPaletteDialog(props: {
       return [{ value: `sources:${environmentId}`, label: "Sources", items: sourceItems }];
     },
     [
-      chatWorkspaceRootFor,
+      canStartChatIn,
       ensureChatProject,
       handleNewThread,
       openSourceControlSettings,

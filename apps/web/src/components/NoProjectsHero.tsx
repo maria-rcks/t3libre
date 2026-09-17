@@ -14,12 +14,13 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 export function NoProjectsHero() {
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const { chatWorkspaceRootFor, ensureChatProject } = useChatProject();
+  const { chatEnvironmentId, ensureChatProject } = useChatProject();
   const handleNewThread = useNewThreadHandler();
-  const canJustChat = chatWorkspaceRootFor(primaryEnvironmentId) !== null;
+  const chatTargetEnvironmentId = chatEnvironmentId(primaryEnvironmentId);
+  const canJustChat = chatTargetEnvironmentId !== null;
   const startChat = useCallback(async () => {
-    if (primaryEnvironmentId === null) return;
-    const project = await ensureChatProject(primaryEnvironmentId);
+    if (chatTargetEnvironmentId === null) return;
+    const project = await ensureChatProject(chatTargetEnvironmentId);
     if (!project) return;
     try {
       await handleNewThread(scopeProjectRef(project.environmentId, project.id));
@@ -32,7 +33,7 @@ export function NoProjectsHero() {
         }),
       );
     }
-  }, [ensureChatProject, handleNewThread, primaryEnvironmentId]);
+  }, [chatTargetEnvironmentId, ensureChatProject, handleNewThread]);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
