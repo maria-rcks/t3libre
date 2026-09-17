@@ -212,10 +212,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     : null;
   const selectedModelKeys = useMemo(
     () =>
-      props.selectedModels?.map((selection) =>
-        modelPickerModelKey(selection.instanceId, selection.model),
-      ),
-    [props.selectedModels],
+      props.selectedModels?.map((selection) => {
+        const entry = instanceEntries.find((entry) => entry.instanceId === selection.instanceId);
+        const model = resolveModelPickerSelectedModel({
+          driverKind: entry?.driverKind,
+          model: selection.model,
+          options: modelOptionsByInstance.get(selection.instanceId) ?? [],
+        });
+        return modelPickerModelKey(selection.instanceId, model?.slug ?? selection.model);
+      }),
+    [instanceEntries, modelOptionsByInstance, props.selectedModels],
   );
   const selectedModelKeySet = useMemo(
     () => new Set(selectedModelKeys ?? (activeModelKey ? [activeModelKey] : [])),

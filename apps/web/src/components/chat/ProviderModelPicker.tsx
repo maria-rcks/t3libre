@@ -172,7 +172,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     return {
       ...selection,
       entry,
-      label: model ? getTriggerDisplayModelName(model) : selection.model,
+      label: model
+        ? `${getTriggerDisplayModelName(model)}${model.isUnavailable ? " (Unavailable)" : ""}`
+        : selection.model,
     };
   });
   const multipleLabel = selectedEntries

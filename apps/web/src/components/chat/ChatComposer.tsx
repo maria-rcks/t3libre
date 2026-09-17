@@ -244,6 +244,7 @@ import {
 import { useEnvironmentQuery } from "~/state/query";
 import { useDebouncedValue } from "~/state/queries";
 import { ProviderModelPicker } from "./ProviderModelPicker";
+import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
@@ -4937,14 +4938,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 : {}),
               onToggleModel: (instanceId: ProviderInstanceId, model: string) => {
                 const current = multipleModelSelections ?? [selectedModelSelection];
-                const exists = current.some(
-                  (selection) => selection.instanceId === instanceId && selection.model === model,
-                );
+                const matchesModel = (selection: ModelSelection) => {
+                  if (selection.instanceId !== instanceId) return false;
+                  const entry = providerInstanceEntries.find(
+                    (entry) => entry.instanceId === selection.instanceId,
+                  );
+                  const resolvedModel = resolveModelPickerSelectedModel({
+                    driverKind: entry?.driverKind,
+                    model: selection.model,
+                    options: modelOptionsByInstance.get(selection.instanceId) ?? [],
+                  });
+                  return (resolvedModel?.slug ?? selection.model) === model;
+                };
+                const exists = current.some(matchesModel);
                 const next = exists
-                  ? current.filter(
-                      (selection) =>
-                        selection.instanceId !== instanceId || selection.model !== model,
-                    )
+                  ? current.filter((selection) => !matchesModel(selection))
                   : [...current, createModelSelection(instanceId, model)];
                 if (next.length > 1) {
                   setMultipleModelSelections(next);
