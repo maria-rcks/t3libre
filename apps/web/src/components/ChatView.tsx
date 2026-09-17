@@ -46,7 +46,10 @@ import {
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import { type EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
-import { wasBootstrapThreadDeleted } from "@t3tools/client-runtime/errors";
+import {
+  wasBootstrapThreadDeleted,
+  wasBootstrapThreadNotCreated,
+} from "@t3tools/client-runtime/errors";
 import { readPastedComposerContext } from "./composerInlineTokenPaste";
 import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
 import { type CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
@@ -7326,6 +7329,13 @@ export default function ChatView(props: ChatViewProps) {
     const multipleModelSelections = queuedMessage ? null : sendCtx.multipleModelSelections;
     if (
       multipleModelSelections !== null &&
+      serverConfig?.environment.capabilities.requiredWorktreeBootstrap !== true
+    ) {
+      setThreadError(activeThread.id, "Update this server before starting multiple models.");
+      return;
+    }
+    if (
+      multipleModelSelections !== null &&
       (!isLocalDraftThread ||
         !isGitRepo ||
         !activeThreadBranch ||
@@ -7957,6 +7967,7 @@ export default function ChatView(props: ChatViewProps) {
                     prepareWorktree: {
                       projectCwd: activeProject.workspaceRoot,
                       baseBranch: activeThreadBranch!,
+                      requireWorktree: true,
                       branch: buildTemporaryWorktreeBranchName(randomHex),
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
                     },
@@ -7967,7 +7978,7 @@ export default function ChatView(props: ChatViewProps) {
               });
               if (result._tag === "Failure") {
                 const error = squashAtomCommandFailure(result);
-                if (wasBootstrapThreadDeleted(error)) {
+                if (wasBootstrapThreadDeleted(error) || wasBootstrapThreadNotCreated(error)) {
                   uncertainMultipleSubmissionsRef.current.delete(retryKey);
                 }
                 throw error;
@@ -9901,6 +9912,10 @@ export default function ChatView(props: ChatViewProps) {
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                           <ChatComposer
                             multipleModelSelections={multipleModelSelections}
+                            supportsMultipleModels={
+                              serverConfig?.environment.capabilities.requiredWorktreeBootstrap ===
+                              true
+                            }
                             onMultipleModelSelectionsChange={setMultipleModelSelections}
                             composerRef={composerRef}
                             composerDraftTarget={composerDraftTarget}

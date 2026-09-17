@@ -1294,6 +1294,7 @@ export interface ChatComposerProps {
   routeThreadRef: ScopedThreadRef;
   draftId: DraftId | null;
   multipleModelSelections: ReadonlyArray<ModelSelection> | null;
+  supportsMultipleModels: boolean;
   onMultipleModelSelectionsChange: React.Dispatch<
     React.SetStateAction<ReadonlyArray<ModelSelection> | null>
   >;
@@ -1455,6 +1456,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     routeThreadRef,
     draftId,
     multipleModelSelections,
+    supportsMultipleModels,
     onMultipleModelSelectionsChange: setMultipleModelSelections,
     activeThreadId,
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
@@ -4924,7 +4926,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       <ProviderModelPicker
         isComposerOwned
         disabled={providerCatalogPending || isSendBusy}
-        {...(routeKind === "draft"
+        {...(routeKind === "draft" && supportsMultipleModels
           ? {
               ...(multipleModelSelections !== null
                 ? { selectedModels: multipleModelSelections }
