@@ -9244,7 +9244,7 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   const onProviderModelSelect = useCallback(
-    (instanceId: ProviderInstanceId, model: string) => {
+    (instanceId: ProviderInstanceId, model: string, options?: { focusComposer?: boolean }) => {
       if (!activeThread) return;
       // Look up the configured instance so model normalization and custom
       // model lookup stay scoped to that exact instance. Unknown instance ids
@@ -9256,7 +9256,7 @@ export default function ChatView(props: ChatViewProps) {
         resolvedDriverKind !== null &&
         resolvedDriverKind !== lockedProvider
       ) {
-        scheduleComposerFocus();
+        if (options?.focusComposer !== false) scheduleComposerFocus();
         return;
       }
       if (lockedProvider !== null && activeThread.session?.providerInstanceId) {
@@ -9268,7 +9268,7 @@ export default function ChatView(props: ChatViewProps) {
           entry?.continuation?.groupKey &&
           currentEntry.continuation.groupKey !== entry.continuation.groupKey
         ) {
-          scheduleComposerFocus();
+          if (options?.focusComposer !== false) scheduleComposerFocus();
           return;
         }
       }
@@ -9279,7 +9279,7 @@ export default function ChatView(props: ChatViewProps) {
         model,
       );
       if (!resolvedModel) {
-        scheduleComposerFocus();
+        if (options?.focusComposer !== false) scheduleComposerFocus();
         return;
       }
       const nextModelSelection: ModelSelection = {
@@ -9299,7 +9299,7 @@ export default function ChatView(props: ChatViewProps) {
           title: modelChangeBlockReason.title,
           description: modelChangeBlockReason.description,
         });
-        scheduleComposerFocus();
+        if (options?.focusComposer !== false) scheduleComposerFocus();
         return;
       }
       setComposerDraftModelSelection(
@@ -9308,7 +9308,7 @@ export default function ChatView(props: ChatViewProps) {
         { explicit: true },
       );
       setStickyComposerModelSelection(nextModelSelection);
-      scheduleComposerFocus();
+      if (options?.focusComposer !== false) scheduleComposerFocus();
     },
     [
       activeThread,

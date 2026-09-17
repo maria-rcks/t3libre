@@ -1426,7 +1426,11 @@ export interface ChatComposerProps {
     cursorAdjacentToMention: boolean,
   ) => void;
 
-  onProviderModelSelect: (instanceId: ProviderInstanceId, model: string) => void;
+  onProviderModelSelect: (
+    instanceId: ProviderInstanceId,
+    model: string,
+    options?: { focusComposer?: boolean },
+  ) => void;
   onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
@@ -4931,10 +4935,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               ...(multipleModelSelections !== null
                 ? { selectedModels: multipleModelSelections }
                 : {}),
-              onToggleMultiple: () =>
-                setMultipleModelSelections((current) =>
-                  current === null ? [selectedModelSelection] : null,
-                ),
+              onToggleModel: (instanceId: ProviderInstanceId, model: string) => {
+                const current = multipleModelSelections ?? [selectedModelSelection];
+                const exists = current.some(
+                  (selection) => selection.instanceId === instanceId && selection.model === model,
+                );
+                const next = exists
+                  ? current.filter(
+                      (selection) =>
+                        selection.instanceId !== instanceId || selection.model !== model,
+                    )
+                  : [...current, createModelSelection(instanceId, model)];
+                if (next.length > 1) {
+                  setMultipleModelSelections(next);
+                } else {
+                  setMultipleModelSelections(null);
+                  const remaining = next[0] ?? selectedModelSelection;
+                  onProviderModelSelect(remaining.instanceId, remaining.model, {
+                    focusComposer: false,
+                  });
+                }
+              },
             }
           : {})}
         activeInstanceId={
@@ -4977,21 +4998,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onOpenChange={setIsComposerModelPickerOpen}
         getModelDisabledReason={getModelDisabledReason}
         onInstanceModelChange={(instanceId, model) => {
-          if (routeKind !== "draft" || multipleModelSelections === null) {
-            onProviderModelSelect(instanceId, model);
-            return;
-          }
-          setMultipleModelSelections((current) => {
-            if (current === null) return current;
-            const exists = current.some(
-              (selection) => selection.instanceId === instanceId && selection.model === model,
-            );
-            return exists
-              ? current.filter(
-                  (selection) => selection.instanceId !== instanceId || selection.model !== model,
-                )
-              : [...current, createModelSelection(instanceId, model)];
-          });
+          setMultipleModelSelections(null);
+          onProviderModelSelect(instanceId, model);
         }}
         onOpenProviderSetup={onOpenProviderSetup}
       />

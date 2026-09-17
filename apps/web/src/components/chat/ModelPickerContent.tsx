@@ -152,7 +152,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   activeInstanceId: ProviderInstanceId;
   model: string;
   selectedModels?: ReadonlyArray<{ instanceId: ProviderInstanceId; model: string }>;
-  onToggleMultiple?: () => void;
+  onToggleModel?: (instanceId: ProviderInstanceId, model: string) => void;
   /**
    * When set, the picker is locked to the given driver kind — typically
    * because the user is editing a previously-sent message and can't change
@@ -188,6 +188,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     instanceEntries,
     getModelDisabledReason,
     onInstanceModelChange,
+    onToggleModel,
   } = props;
   const [searchQuery, setSearchQuery] = useState("");
   const [showTopScrollFade, setShowTopScrollFade] = useState(false);
@@ -216,7 +217,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       ),
     [props.selectedModels],
   );
-  const selectedModelKeySet = useMemo(() => new Set(selectedModelKeys ?? []), [selectedModelKeys]);
+  const selectedModelKeySet = useMemo(
+    () => new Set(selectedModelKeys ?? (activeModelKey ? [activeModelKey] : [])),
+    [selectedModelKeys, activeModelKey],
+  );
   const activeInstanceHasSelectableUnavailableModel =
     activeEntry !== undefined &&
     (modelOptionsByInstance.get(props.activeInstanceId) ?? []).some((option) =>
@@ -585,7 +589,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, []);
 
   const handleModelSelect = useCallback(
-    (modelSlug: string, instanceId: ProviderInstanceId) => {
+    (modelSlug: string, instanceId: ProviderInstanceId, additive = false) => {
       if (getModelDisabledReason?.(instanceId, modelSlug)) {
         return;
       }
@@ -602,10 +606,20 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       // normalization rules, so pass the driver kind here.
       const resolvedModel = resolveSelectableModel(entry.driverKind, modelSlug, options);
       if (resolvedModel) {
-        onInstanceModelChange(instanceId, resolvedModel);
+        if (additive && onToggleModel) {
+          onToggleModel(instanceId, resolvedModel);
+        } else {
+          onInstanceModelChange(instanceId, resolvedModel);
+        }
       }
     },
-    [entryByInstanceId, getModelDisabledReason, modelOptionsByInstance, onInstanceModelChange],
+    [
+      entryByInstanceId,
+      getModelDisabledReason,
+      modelOptionsByInstance,
+      onInstanceModelChange,
+      onToggleModel,
+    ],
   );
 
   const toggleFavorite = useCallback(
@@ -822,8 +836,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           autoHighlight
           open
           virtualized
-          multiple={selectedModelKeys !== undefined}
-          value={selectedModelKeys ?? activeModelKey}
+          multiple={onToggleModel !== undefined}
+          value={onToggleModel ? [...selectedModelKeySet] : activeModelKey}
           onItemHighlighted={(modelKey, eventDetails) => {
             highlightedModelKeyRef.current = typeof modelKey === "string" ? modelKey : null;
             if (eventDetails.reason === "keyboard" && eventDetails.index >= 0) {
@@ -833,10 +847,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               });
             }
           }}
-          onValueChange={(value) => {
+          onValueChange={(value, details) => {
             const modelKey = Array.isArray(value)
               ? (value.find((key) => !selectedModelKeySet.has(key)) ??
-                selectedModelKeys?.find((key) => !value.includes(key)))
+                [...selectedModelKeySet].find((key) => !value.includes(key)))
               : value;
             if (typeof modelKey !== "string") {
               return;
@@ -848,7 +862,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             }
             const model = parseModelPickerModelKey(modelKey);
             if (model) {
-              handleModelSelect(model.slug, model.instanceId);
+              handleModelSelect(
+                model.slug,
+                model.instanceId,
+                "shiftKey" in details.event && details.event.shiftKey === true,
+              );
             }
           }}
         >
@@ -916,7 +934,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       }
                       const model = parseModelPickerModelKey(highlightedModelKeyRef.current);
                       if (model) {
-                        handleModelSelect(model.slug, model.instanceId);
+                        handleModelSelect(model.slug, model.instanceId, e.shiftKey);
                       }
                       return;
                     }
@@ -1044,21 +1062,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 No models found
               </ComboboxEmpty>
             )}
-            {props.onToggleMultiple ? (
-              <div className="shrink-0 border-t border-border/70 p-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start"
-                  onClick={() => {
-                    props.onToggleMultiple?.();
-                    focusSearchInput();
-                  }}
-                >
-                  {selectedModelKeys !== undefined ? "Use one model" : "Select multiple models"}
-                </Button>
-                <p className="px-2 pb-1 text-xs leading-snug text-muted-foreground">
-                  Each model starts in the background with its own worktree.
+            {onToggleModel ? (
+              <div className="shrink-0 border-t border-border/70 px-3 py-2">
+                <p className="text-xs leading-snug text-muted-foreground">
+                  Shift-click to add or remove models. Each starts in its own worktree.
                 </p>
               </div>
             ) : null}
