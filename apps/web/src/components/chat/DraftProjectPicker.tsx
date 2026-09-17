@@ -7,7 +7,7 @@ import {
   type ScopedProjectRef,
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { FolderPlusIcon, MessageCircleIcon, PlusIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, FolderPlusIcon, MessageCircleIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
@@ -211,8 +211,8 @@ export function DraftProjectPicker({
               aria-label={!isChat && hasResolvedProject ? "Change project" : "Add project"}
               className={
                 isChat
-                  ? "inline-flex h-10 min-w-0 items-center rounded-xl sm:h-11 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                  : "inline-flex h-10 min-w-0 max-w-64 items-center gap-2 sm:h-11 rounded-r-xl px-2 py-1 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  ? "inline-flex h-10 min-w-0 items-center gap-2 rounded-lg pe-3 sm:h-11 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  : "inline-flex h-10 min-w-0 max-w-64 items-center gap-2 sm:h-11 rounded-r-lg ps-2 pe-3 py-1 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               }
             />
           }
@@ -223,10 +223,12 @@ export function DraftProjectPicker({
             </span>
           ) : null}
           <span
-            className={`truncate py-[0.25em] [text-box:trim-both_cap_alphabetic]${isChat ? " ps-1 pe-3" : ""}`}
+            className={`truncate py-[0.25em]${isChat ? " ps-1" : ""}`}
+            style={{ textBox: "trim-both ex alphabetic" }}
           >
             {activeProjectDisplayName ?? "Add project"}
           </span>
+          <ChevronDownIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
         </TooltipTrigger>
         {activeProjectDisplayName ? (
           <TooltipPopup side="top" className="max-w-80">
@@ -291,7 +293,7 @@ export function DraftProjectPicker({
   const chip = (
     <span
       ref={chipRef}
-      className="inline-flex max-w-full items-center rounded-xl bg-muted/70 align-baseline"
+      className="inline-flex max-w-full items-center rounded-lg border border-input bg-popover shadow-xs/5 align-baseline dark:bg-input/32"
     >
       {!isChat && chatEntry && activeProject ? (
         <Tooltip>
