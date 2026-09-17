@@ -302,10 +302,7 @@ export function WorktreeSetupCard({
               : "text-foreground",
         )}
       >
-        <GitBranchIcon
-          aria-hidden
-          className={cn("size-4 shrink-0", cleanFinish ? "text-diff-addition" : "text-icon-muted")}
-        />
+        <GitBranchIcon aria-hidden className="size-4 shrink-0 text-icon-muted" />
         <span className="min-w-0 truncate">{headerLabel(snapshot)}</span>
         {!open && snapshot.branch ? (
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-normal text-muted-foreground">
