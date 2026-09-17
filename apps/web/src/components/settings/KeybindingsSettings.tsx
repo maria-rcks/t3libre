@@ -65,7 +65,7 @@ import {
   whenNodeRemoveLabel,
 } from "./KeybindingsSettings.logic";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { keybindingSearchAnchorId, searchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useAtomCommand } from "../../state/use-atom-command";
 
@@ -823,7 +823,11 @@ interface KeybindingRowActions {
   onRemove: (row: KeybindingRow) => void;
 }
 
-type KeybindingRowProps = KeybindingRowActions & { row: KeybindingRow; isSaving: boolean };
+type KeybindingRowProps = KeybindingRowActions & {
+  row: KeybindingRow;
+  isSaving: boolean;
+  anchorId?: string | undefined;
+};
 
 /** Shortcut pill that turns into a capture input when clicked, plus Save once the draft changes. */
 function KeybindingKeyControl({
@@ -1034,11 +1038,12 @@ function KeybindingHoverRowMenu(props: {
 
 /** One binding as a settings row: pills flush right, actions fading in beside them on hover. */
 function KeybindingSettingsRow(props: KeybindingRowProps) {
-  const { row, isSaving, allRows, variables, onSave, onReset, onRemove } = props;
+  const { row, isSaving, anchorId, allRows, variables, onSave, onReset, onRemove } = props;
   const editor = useKeybindingRowEditor({ row, allRows, onSave });
 
   return (
     <SettingsRow
+      id={anchorId}
       className="group/row rounded-none"
       title={<KeybindingRowTitle row={row} />}
       description={<KeybindingRowWhen row={row} editor={editor} variables={variables} />}
@@ -1299,10 +1304,16 @@ function KeybindingsList(props: KeybindingsListProps) {
   return (
     <div>
       {isAddingBinding ? <NewKeybindingSettingsRow {...newProps} /> : null}
-      {rows.map((row) => (
+      {rows.map((row, index) => (
         <KeybindingSettingsRow
           key={row.id}
           row={row}
+          // Settings search jumps to a command, so only its first row anchors.
+          anchorId={
+            rows.findIndex((candidate) => candidate.command === row.command) === index
+              ? keybindingSearchAnchorId(row.command)
+              : undefined
+          }
           isSaving={savingCommand === row.command}
           {...rowActions}
         />

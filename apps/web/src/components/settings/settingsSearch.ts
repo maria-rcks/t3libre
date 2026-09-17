@@ -1,7 +1,10 @@
 import { isElectron } from "~/env";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
+import { STATIC_KEYBINDING_COMMANDS, type KeybindingCommand } from "@t3tools/contracts";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
+import { DEFAULT_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import { commandLabel } from "./KeybindingsSettings.logic";
 import {
   validateSettingsScopeSearch,
   type ResolvedSettingsScope,
@@ -83,6 +86,30 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/connections": "Connections",
   "/settings/archived": "Archive",
 };
+
+/** Anchor id of the first row bound to `command` on the Keybindings page. */
+export function keybindingSearchAnchorId(command: KeybindingCommand) {
+  return `keybinding-${command}` as const;
+}
+
+/**
+ * One result per built-in command, in the panel's label order. The catalog
+ * anchor is the command's first row; default keys are searchable so "mod+b"
+ * lands on Sidebar: Toggle.
+ */
+const KEYBINDING_SEARCH_ITEMS = STATIC_KEYBINDING_COMMANDS.toSorted((left, right) =>
+  commandLabel(left).localeCompare(commandLabel(right)),
+).map((command) => ({
+  id: keybindingSearchAnchorId(command),
+  title: commandLabel(command),
+  to: "/settings/keybindings" as const,
+  searchTerms: [
+    command,
+    ...DEFAULT_KEYBINDINGS.filter((binding) => binding.command === command).map(
+      (binding) => binding.key,
+    ),
+  ],
+}));
 
 /**
  * Searchable settings and stable destinations, in result order. Rows with a
@@ -423,6 +450,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/keybindings",
     searchTerms: ["keyboard shortcuts hotkeys commands bindings json"],
   },
+  ...KEYBINDING_SEARCH_ITEMS,
   {
     id: "snap-shot-enabled",
     title: "SnapShots",
