@@ -3213,6 +3213,7 @@ export default function ChatView(props: ChatViewProps) {
     recordedWorktreeSetup?.phase === "running";
   const isWorking =
     phase === "running" ||
+    phase === "connecting" ||
     isSendBusy ||
     isConnecting ||
     isRevertingCheckpoint ||

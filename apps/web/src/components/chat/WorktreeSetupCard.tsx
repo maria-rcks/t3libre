@@ -284,13 +284,13 @@ export function WorktreeSetupCard({
       open={open}
       onOpenChange={setExpanded}
       render={<section aria-label="Worktree setup" />}
-      className="overflow-hidden rounded-lg bg-secondary dark:bg-input/20"
+      className="overflow-hidden rounded-lg"
       data-worktree-setup-phase={snapshot.phase}
     >
       <CollapsibleTrigger
         disabled={running}
         className={cn(
-          "flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default",
+          "flex w-full min-w-0 items-center gap-2 bg-secondary px-3 py-2 text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default dark:bg-input/20",
           snapshot.phase === "failed" || snapshot.phase === "cancelled"
             ? "text-destructive-foreground"
             : snapshot.stages.some(
@@ -326,7 +326,7 @@ export function WorktreeSetupCard({
         ) : null}
       </CollapsibleTrigger>
       <CollapsiblePanel className="duration-[220ms]">
-        <div className="px-3 py-2">
+        <div className="border-x border-border px-3 py-2">
           {snapshot.stages.map((stage) => (
             <div key={stage.id}>
               <StageRow
@@ -344,7 +344,7 @@ export function WorktreeSetupCard({
           ) : null}
           {detailsOpen ? <SetupDetails snapshot={snapshot} /> : null}
         </div>
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 bg-secondary px-3 py-2.5 dark:bg-input/20">
           <Button
             type="button"
             size="xs"
