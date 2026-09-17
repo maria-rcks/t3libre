@@ -211,8 +211,8 @@ export function DraftProjectPicker({
               aria-label={!isChat && hasResolvedProject ? "Change project" : "Add project"}
               className={
                 isChat
-                  ? "inline-flex h-10 min-w-0 items-center rounded-lg pe-3 sm:h-11 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                  : "inline-flex h-10 min-w-0 max-w-64 items-center gap-2 sm:h-11 rounded-r-lg ps-2 pe-3 py-1 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  ? "inline-flex h-10 min-w-0 items-center rounded-lg pe-3 sm:h-11 text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  : "inline-flex h-10 min-w-0 max-w-64 items-center gap-2 sm:h-11 rounded-r-lg ps-2 pe-3 py-1 text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               }
             />
           }
@@ -295,7 +295,7 @@ export function DraftProjectPicker({
   const chip = (
     <span
       ref={chipRef}
-      className="inline-flex max-w-full items-center rounded-lg border border-input bg-popover shadow-xs/5 align-baseline dark:bg-input/32"
+      className="inline-flex max-w-full items-center rounded-lg border border-input bg-popover shadow-xs/5 align-baseline transition-colors hover:bg-accent dark:bg-input/32 dark:hover:bg-accent"
     >
       {!isChat && chatEntry && activeProject ? (
         <Tooltip>
@@ -317,7 +317,7 @@ export function DraftProjectPicker({
                   }
                   selectProject(chatEntry.group.projectKey);
                 }}
-                className="group/project-icon relative ms-1 flex size-9 shrink-0 items-center justify-center self-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                className="group/project-icon relative ms-1 flex size-9 shrink-0 items-center justify-center self-center rounded-lg text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               />
             }
           >
