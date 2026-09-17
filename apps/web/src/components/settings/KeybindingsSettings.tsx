@@ -9,6 +9,7 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
+import { useLocation } from "@tanstack/react-router";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -1301,19 +1302,25 @@ function KeybindingsList(props: KeybindingsListProps) {
     onSave: rowActions.onSave,
     onCancel: onCancelAdd,
   };
+  // Settings search jumps to a command, so only its first row anchors.
+  const anchorIds = useMemo(() => {
+    const ids = new Map<string, string>();
+    const seen = new Set<KeybindingCommand>();
+    for (const row of rows) {
+      if (seen.has(row.command)) continue;
+      seen.add(row.command);
+      ids.set(row.id, keybindingSearchAnchorId(row.command));
+    }
+    return ids;
+  }, [rows]);
   return (
     <div>
       {isAddingBinding ? <NewKeybindingSettingsRow {...newProps} /> : null}
-      {rows.map((row, index) => (
+      {rows.map((row) => (
         <KeybindingSettingsRow
           key={row.id}
           row={row}
-          // Settings search jumps to a command, so only its first row anchors.
-          anchorId={
-            rows.findIndex((candidate) => candidate.command === row.command) === index
-              ? keybindingSearchAnchorId(row.command)
-              : undefined
-          }
+          anchorId={anchorIds.get(row.id)}
           isSaving={savingCommand === row.command}
           {...rowActions}
         />
@@ -1368,6 +1375,16 @@ export function KeybindingsSettingsPanel() {
   const [savingCommand, setSavingCommand] = useState<KeybindingCommand | null>(null);
   const [isAddingBinding, setIsAddingBinding] = useState(false);
   const rows = useMemo(() => buildKeybindingRows(keybindings, query), [keybindings, query]);
+  // The search-target context is provided by this panel's own page container,
+  // so the jump target is read from the route hash here.
+  const searchTargetId = useLocation({ select: (location) => location.hash.replace(/^#/, "") });
+  const [handledSearchTargetId, setHandledSearchTargetId] = useState(searchTargetId);
+
+  // A settings-search jump must not be hidden by the page's own filter.
+  if (searchTargetId !== handledSearchTargetId) {
+    setHandledSearchTargetId(searchTargetId);
+    if (searchTargetId.startsWith("keybinding-")) setQuery("");
+  }
   const commandOptions = useMemo(() => buildKeybindingCommandOptions(keybindings), [keybindings]);
   const whenVariables = useMemo(() => buildWhenVariableOptions(), []);
 
