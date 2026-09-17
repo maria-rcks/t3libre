@@ -32,6 +32,7 @@ import { discoverMuseSkills } from "./MuseSkills.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("muse");
 const decodeSettings = Schema.decodeSync(MuseSettings);
+const isProviderDriverError = Schema.is(ProviderDriverError);
 const MAINTENANCE = makeManualOnlyProviderMaintenanceCapabilities({
   provider: DRIVER_KIND,
   packageName: null,
@@ -135,7 +136,7 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
       } satisfies ProviderInstance;
     }).pipe(
       Effect.mapError((cause) =>
-        Schema.is(ProviderDriverError)(cause)
+        isProviderDriverError(cause)
           ? cause
           : new ProviderDriverError({
               driver: DRIVER_KIND,
