@@ -809,6 +809,7 @@ export function BranchToolbarBranchSelector({
           <ThreadPullRequestBadgeControl
             variant="ghost"
             badge={prBadge}
+            pullRequests={serverThread?.pullRequests ?? []}
             number={prNumber}
             url={prUrl}
             status={displayedPrStatus}
