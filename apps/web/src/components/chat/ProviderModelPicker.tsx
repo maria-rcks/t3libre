@@ -34,6 +34,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
    */
   activeInstanceId: ProviderInstanceId;
   model: string;
+  selectedModels?: ReadonlyArray<{ instanceId: ProviderInstanceId; model: string }>;
+  onToggleMultiple?: () => void;
   lockedProvider: ProviderDriverKind | null;
   lockedContinuationGroupKey?: string | null;
   /** Instance entries rendered in the sidebar + used to resolve display name. */
@@ -152,15 +154,18 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
-    setIsMenuOpen(false);
+    if (props.selectedModels === undefined) setIsMenuOpen(false);
   };
 
   const shortcutLabel = props.keybindings
     ? shortcutLabelForCommand(props.keybindings, "modelPicker.toggle")
     : null;
+  const multipleLabel = props.selectedModels
+    ? `${props.selectedModels.length} ${props.selectedModels.length === 1 ? "model" : "models"}`
+    : undefined;
   const triggerTooltipContent = shortcutLabel
-    ? `${props.triggerLabel ?? triggerLabel} · ${shortcutLabel}`
-    : (props.triggerLabel ?? triggerLabel);
+    ? `${props.triggerLabel ?? multipleLabel ?? triggerLabel} · ${shortcutLabel}`
+    : (props.triggerLabel ?? multipleLabel ?? triggerLabel);
 
   return (
     <Popover
@@ -216,7 +221,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 />
               }
             >
-              {props.triggerLabel ?? triggerTitle}
+              {props.triggerLabel ?? multipleLabel ?? triggerTitle}
             </TooltipTrigger>
             <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
           </Tooltip>
@@ -239,6 +244,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         <ModelPickerContent
           activeInstanceId={activeInstanceId}
           model={props.model}
+          {...(props.selectedModels !== undefined ? { selectedModels: props.selectedModels } : {})}
+          {...(props.onToggleMultiple ? { onToggleMultiple: props.onToggleMultiple } : {})}
           lockedProvider={props.lockedProvider}
           lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
           instanceEntries={props.instanceEntries}
