@@ -313,7 +313,7 @@ export function make(
           activeTurnId: TurnId.make(event.params.turnId),
         };
       }
-      if (event.method === "turn/completed") {
+      if (event.method === "turn/completed" || event.method === "turn/unqueued") {
         if (ctx.settledTurns.has(event.params.turnId)) return;
         ctx.settledTurns.add(event.params.turnId);
       }
@@ -355,7 +355,10 @@ export function make(
         if (event.params.item.status !== "inProgress")
           ctx.deltaCursors.delete(event.params.item.itemId);
       }
-      if (event.method === "turn/completed" && ctx.session.activeTurnId === event.params.turnId) {
+      if (
+        (event.method === "turn/completed" || event.method === "turn/unqueued") &&
+        ctx.session.activeTurnId === event.params.turnId
+      ) {
         const { activeTurnId: _, ...rest } = ctx.session;
         ctx.session = { ...rest, status: "ready", updatedAt: nowIso() };
       }
