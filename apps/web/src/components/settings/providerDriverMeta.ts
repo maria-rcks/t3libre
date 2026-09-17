@@ -79,17 +79,17 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
     settingsSchema: OpenCodeSettings,
   },
   {
-    value: ProviderDriverKind.make("antigravity"),
-    label: "Antigravity",
-    icon: AntigravityIcon,
-    settingsSchema: AntigravitySettings,
-  },
-  {
     value: ProviderDriverKind.make("muse"),
     label: "Muse Code",
     icon: MetaIcon,
     badgeLabel: "Developer Preview",
     settingsSchema: MuseSettings,
+  },
+  {
+    value: ProviderDriverKind.make("antigravity"),
+    label: "Antigravity",
+    icon: AntigravityIcon,
+    settingsSchema: AntigravitySettings,
   },
 ];
 
