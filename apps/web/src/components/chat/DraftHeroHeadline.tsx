@@ -315,9 +315,9 @@ export function DraftHeroHeadline({
   const orJustChat =
     canJustChat && (hasResolvedProject || canChooseProject) ? (
       <Button
-        variant="link"
-        size="xs"
-        className="pointer-events-auto font-normal text-muted-foreground text-sm! hover:text-foreground"
+        variant="link-muted"
+        size="sm"
+        className="pointer-events-auto"
         onClick={() =>
           void startChat().then((started) => {
             if (started) {
@@ -346,7 +346,7 @@ export function DraftHeroHeadline({
         )}
       </h1>
       {/* Always reserved so the heading does not move when the line goes. */}
-      <div className="mt-2 flex h-7 items-center">{orJustChat}</div>
+      <div className="mt-2 flex h-8 items-center sm:h-7">{orJustChat}</div>
     </div>
   );
 }
