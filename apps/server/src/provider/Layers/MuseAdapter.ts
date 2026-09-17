@@ -104,6 +104,7 @@ interface SessionContext {
   lock: Semaphore.Semaphore;
   items: Map<string, MuseItem>;
   streamed: Map<string, string>;
+  deltaCursors: Map<string, Set<string>>;
   approvals: Map<string, Approval>;
   questions: Map<string, UserInput>;
   settledTurns: Set<string>;
@@ -264,6 +265,14 @@ export function make(
       if (!isMuseNotificationMethod(input.method)) return;
       const event = decodeMuseNotification(input);
       if (event.method !== "usage/changed" && event.params.sessionId !== ctx.sessionId) return;
+      if (event.method === "item/delta") {
+        const item = ctx.items.get(event.params.itemId);
+        if (item && item.status !== "inProgress") return;
+        const cursors = ctx.deltaCursors.get(event.params.itemId) ?? new Set<string>();
+        if (cursors.has(event.params.viewCursor)) return;
+        cursors.add(event.params.viewCursor);
+        ctx.deltaCursors.set(event.params.itemId, cursors);
+      }
       if (event.method === "session/contextUsage") ctx.contextUsedTokens = event.params.usedTokens;
       if (
         event.method === "item/started" ||
@@ -284,12 +293,14 @@ export function make(
         ctx.questions.set(event.params.userInputId, event.params);
       }
       if (event.method === "userInput/settled") ctx.questions.delete(event.params.userInputId);
-      if (event.method === "turn/started")
+      if (event.method === "turn/started") {
+        if (ctx.settledTurns.has(event.params.turnId)) return;
         ctx.session = {
           ...ctx.session,
           status: "running",
           activeTurnId: TurnId.make(event.params.turnId),
         };
+      }
       if (event.method === "turn/completed") {
         if (ctx.settledTurns.has(event.params.turnId)) return;
         ctx.settledTurns.add(event.params.turnId);
@@ -324,8 +335,11 @@ export function make(
         event.method === "item/started" ||
         event.method === "item/updated" ||
         event.method === "item/completed"
-      )
+      ) {
         ctx.items.set(event.params.item.itemId, event.params.item);
+        if (event.params.item.status !== "inProgress")
+          ctx.deltaCursors.delete(event.params.item.itemId);
+      }
       if (event.method === "turn/completed" && ctx.session.activeTurnId === event.params.turnId) {
         const { activeTurnId: _, ...rest } = ctx.session;
         ctx.session = { ...rest, status: "ready", updatedAt: nowIso() };
@@ -406,6 +420,7 @@ export function make(
               lock: yield* Semaphore.make(1),
               items: new Map(),
               streamed: new Map(),
+              deltaCursors: new Map(),
               approvals: new Map(),
               questions: new Map(),
               settledTurns: new Set(),
