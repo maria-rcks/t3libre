@@ -1766,16 +1766,20 @@ const makeWsRpcLayer = (
       // folder is only offered when the data dir is outside any work tree.
       // Detection failures fail closed and hide the folder, never the config.
       // Probed once per connection: a negative VCS detection is not cached.
-      // An interrupted probe stays uncached so the next config load retries.
-      const resolveChatWorkspaceRoot = yield* Effect.cached(
-        gitWorkflow.isRepository(config.baseDir).pipe(
-          Effect.map((isRepository) =>
-            isRepository ? undefined : path.join(config.baseDir, "chats"),
+      // A cached probe memoizes an interrupt exit too, so a config load that
+      // is cancelled mid-probe invalidates it and the next load probes again.
+      const [cachedChatWorkspaceRoot, invalidateChatWorkspaceRoot] =
+        yield* Effect.cachedInvalidateWithTTL(
+          gitWorkflow.isRepository(config.baseDir).pipe(
+            Effect.map((isRepository) =>
+              isRepository ? undefined : path.join(config.baseDir, "chats"),
+            ),
+            Effect.catchCause(() => Effect.succeed(undefined)),
           ),
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.succeed(undefined),
-          ),
-        ),
+          Duration.infinity,
+        );
+      const resolveChatWorkspaceRoot = cachedChatWorkspaceRoot.pipe(
+        Effect.onInterrupt(() => invalidateChatWorkspaceRoot),
       );
 
       // Only clients that answer /usage-limits themselves see it in the catalogs;

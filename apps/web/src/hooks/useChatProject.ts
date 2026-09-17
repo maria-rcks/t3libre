@@ -26,7 +26,9 @@ async function waitForChatProject(
   for (let attempt = 0; attempt < attempts; attempt++) {
     const project = find();
     if (project) return project;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    if (attempt + 1 < attempts) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
   }
   return null;
 }
@@ -106,13 +108,12 @@ export function useChatProject() {
           },
         });
         if (result._tag === "Failure") {
+          if (isAtomCommandInterrupted(result)) return null;
           // Another client may have created it first. Its project event can
           // land after this rejection, so give the store a moment to catch up.
           const raced = await waitForChatProject(findExisting);
           if (raced) return raced;
-          if (!isAtomCommandInterrupted(result)) {
-            reportChatStartFailure(squashAtomCommandFailure(result));
-          }
+          reportChatStartFailure(squashAtomCommandFailure(result));
           return null;
         }
         // Drafts key off the project's stored path and settings, so wait for
