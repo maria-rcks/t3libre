@@ -64,8 +64,8 @@ function sameProjectWorktreePolicies(left: ServerSettings, right: ServerSettings
     ]),
   ].every((projectId) =>
     Equal.equals(
-      left.projectSettingsOverrides[projectId]?.worktreeCleanup,
-      right.projectSettingsOverrides[projectId]?.worktreeCleanup,
+      left.projectSettingsOverrides[projectId as ProjectId]?.worktreeCleanup,
+      right.projectSettingsOverrides[projectId as ProjectId]?.worktreeCleanup,
     ),
   );
 }
