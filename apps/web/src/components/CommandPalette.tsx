@@ -47,6 +47,7 @@ import {
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
+  MessageCircleIcon,
   LinkIcon,
   MessageSquareIcon,
   MonitorIcon,
@@ -95,6 +96,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
+import { useChatProject } from "../hooks/useChatProject";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
@@ -698,6 +700,7 @@ function OpenCommandPaletteDialog(props: {
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });
+  const { chatWorkspaceRootFor, ensureChatProject } = useChatProject();
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
   });
@@ -1506,6 +1509,22 @@ function OpenCommandPaletteDialog(props: {
           },
         },
       ];
+      if (chatWorkspaceRootFor(environmentId) !== null) {
+        sourceItems.push({
+          kind: "action",
+          value: `action:add-project:${environmentId}:chat`,
+          searchTerms: ["chat", "no project", "without", "conversation"],
+          title: "Just chat",
+          description: "Start a thread without a repository",
+          icon: <MessageCircleIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            const projectRef = await ensureChatProject(environmentId);
+            if (projectRef) {
+              await handleNewThread(projectRef);
+            }
+          },
+        });
+      }
 
       const orderedSources: ReadonlyArray<AddProjectRemoteSource> = [
         "url",
@@ -1578,7 +1597,14 @@ function OpenCommandPaletteDialog(props: {
 
       return [{ value: `sources:${environmentId}`, label: "Sources", items: sourceItems }];
     },
-    [openSourceControlSettings, startAddProjectBrowse, startAddProjectClone],
+    [
+      chatWorkspaceRootFor,
+      ensureChatProject,
+      handleNewThread,
+      openSourceControlSettings,
+      startAddProjectBrowse,
+      startAddProjectClone,
+    ],
   );
 
   const startAddProjectSourceSelection = useCallback(
