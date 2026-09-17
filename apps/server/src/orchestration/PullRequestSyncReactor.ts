@@ -204,25 +204,16 @@ export const make = Effect.gen(function* () {
         }
         const url = siblingPullRequestUrl(link.url, layer.number);
         if (url === null) continue;
-        linkedThisSweep.add(dedupeKey);
         const uuid = yield* crypto.randomUUIDv4;
-        yield* engine
-          .dispatch({
-            type: "thread.pull-request.link",
-            commandId: CommandId.make(`server:pr-stack-link:${thread.id}:${uuid}`),
-            threadId: thread.id,
-            ...layerKey,
-            url,
-            source: "stack",
-          })
-          .pipe(
-            Effect.catchCause(
-              logSkipped("pull request stack layer link skipped", {
-                threadId: thread.id,
-                number: layer.number,
-              }),
-            ),
-          );
+        yield* engine.dispatch({
+          type: "thread.pull-request.link",
+          commandId: CommandId.make(`server:pr-stack-link:${thread.id}:${uuid}`),
+          threadId: thread.id,
+          ...layerKey,
+          url,
+          source: "stack",
+        });
+        linkedThisSweep.add(dedupeKey);
       }
       if (changed) {
         const uuid = yield* crypto.randomUUIDv4;
@@ -276,8 +267,11 @@ export const make = Effect.gen(function* () {
           )
         : null;
       if (needsStack) {
-        if (fetchedStack === null) retryStacks.add(key);
-        else retryStacks.delete(key);
+        if (fetchedStack === null) {
+          retryStacks.add(key);
+          return;
+        }
+        retryStacks.delete(key);
       }
       // The host answered, so the cadence clock ticks even if a dispatch below is rejected.
       lastSyncedAt.set(key, nowMs);

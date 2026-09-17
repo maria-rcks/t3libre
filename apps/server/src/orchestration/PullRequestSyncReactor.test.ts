@@ -351,6 +351,7 @@ describe("PullRequestSyncReactor", () => {
         yield* Effect.gen(function* () {
           const reactor = yield* startAndSweep(fixture);
           const commands = yield* Ref.get(fixture.syncCommands);
+          assert.deepStrictEqual(commands, []);
           yield* Ref.update(fixture.snapshots, (snapshot) => applySync(snapshot, commands));
           yield* sweepAgain(fixture, reactor);
           assert.strictEqual(attempts, 2);
@@ -358,6 +359,43 @@ describe("PullRequestSyncReactor", () => {
             kind: "native",
             ...nativeStack,
           });
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("retries a failed sibling link before publishing a terminal snapshot", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        let failSibling = true;
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([makeThread("one", { pullRequests: [makeLink(7)] })]),
+          summary: (input) =>
+            Effect.succeed(makeSummary(input, { state: "merged", mergedAt: NOW })),
+          stack: () =>
+            Effect.succeed({
+              id: "stack",
+              number: 7,
+              url: "https://github.com/owner/repository/stacks/7",
+              base: "main",
+              layers: [
+                { number: 7, headBranch: "feature", state: "merged" },
+                { number: 8, headBranch: "sibling", state: "open" },
+              ],
+            }),
+          onDispatch: (command) =>
+            command.type === "thread.pull-request.link" && failSibling
+              ? Effect.die("temporary link failure")
+              : Effect.void,
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* startAndSweep(fixture);
+          assert.deepStrictEqual(yield* Ref.get(fixture.syncCommands), []);
+          failSibling = false;
+          yield* sweepAgain(fixture, reactor);
+          assert.strictEqual((yield* Ref.get(fixture.syncCommands))[0]?.snapshot.state, "merged");
+          assert.strictEqual((yield* Ref.get(fixture.linkCommands)).at(-1)?.number, 8);
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),
