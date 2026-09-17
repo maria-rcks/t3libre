@@ -302,10 +302,10 @@ describe("orchestration projector", () => {
     expect(unarchived.threads[0]?.archivedAt).toBeNull();
   });
 
-  it("applies thread group lifecycle and membership events", async () => {
-    const now = "2026-01-01T00:00:00.000Z";
-    const created = await Effect.runPromise(
-      projectEvent(
+  effectIt.effect("applies thread group lifecycle and membership events", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const created = yield* projectEvent(
         createEmptyReadModel(now),
         makeEvent({
           sequence: 1,
@@ -326,10 +326,8 @@ describe("orchestration projector", () => {
             updatedAt: now,
           },
         }),
-      ),
-    );
-    const grouped = await Effect.runPromise(
-      projectEvent(
+      );
+      const withGroup = yield* projectEvent(
         created,
         makeEvent({
           sequence: 2,
@@ -348,38 +346,33 @@ describe("orchestration projector", () => {
             updatedAt: now,
           },
         }),
-      ).pipe(
-        Effect.flatMap((model) =>
-          projectEvent(
-            model,
-            makeEvent({
-              sequence: 3,
-              type: "thread.group-set",
-              aggregateKind: "thread",
-              aggregateId: "thread-1",
-              occurredAt: now,
-              commandId: "cmd-group-create",
-              payload: { threadId: "thread-1", groupId: "group-1", updatedAt: now },
-            }),
-          ),
-        ),
-      ),
-    );
-    expect(grouped.threadGroups).toEqual([
-      {
-        id: "group-1",
-        projectId: "project-1",
-        name: "New group",
-        icon: null,
-        nameGeneration: { requestId: "cmd-group-create", startedAt: now },
-        createdAt: now,
-        updatedAt: now,
-      },
-    ]);
-    expect(grouped.threads[0]?.groupId).toBe("group-1");
+      );
+      const grouped = yield* projectEvent(
+        withGroup,
+        makeEvent({
+          sequence: 3,
+          type: "thread.group-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-group-create",
+          payload: { threadId: "thread-1", groupId: "group-1", updatedAt: now },
+        }),
+      );
+      expect(grouped.threadGroups).toEqual([
+        {
+          id: "group-1",
+          projectId: "project-1",
+          name: "New group",
+          icon: null,
+          nameGeneration: { requestId: "cmd-group-create", startedAt: now },
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+      expect(grouped.threads[0]?.groupId).toBe("group-1");
 
-    const named = await Effect.runPromise(
-      projectEvent(
+      const named = yield* projectEvent(
         grouped,
         makeEvent({
           sequence: 4,
@@ -395,14 +388,12 @@ describe("orchestration projector", () => {
             updatedAt: "2026-01-01T00:00:01.000Z",
           },
         }),
-      ),
-    );
-    expect(named.threadGroups?.[0]?.name).toBe("Auth work");
-    expect(named.threadGroups?.[0]?.nameGeneration).toBeNull();
-    expect(named.threadGroups?.[0]?.updatedAt).toBe("2026-01-01T00:00:01.000Z");
+      );
+      expect(named.threadGroups?.[0]?.name).toBe("Auth work");
+      expect(named.threadGroups?.[0]?.nameGeneration).toBeNull();
+      expect(named.threadGroups?.[0]?.updatedAt).toBe("2026-01-01T00:00:01.000Z");
 
-    const deleted = await Effect.runPromise(
-      projectEvent(
+      const released = yield* projectEvent(
         named,
         makeEvent({
           sequence: 5,
@@ -413,26 +404,23 @@ describe("orchestration projector", () => {
           commandId: "cmd-group-delete",
           payload: { threadId: "thread-1", groupId: null, updatedAt: now },
         }),
-      ).pipe(
-        Effect.flatMap((model) =>
-          projectEvent(
-            model,
-            makeEvent({
-              sequence: 6,
-              type: "thread-group.deleted",
-              aggregateKind: "thread-group",
-              aggregateId: "group-1",
-              occurredAt: now,
-              commandId: "cmd-group-delete",
-              payload: { groupId: "group-1", deletedAt: now },
-            }),
-          ),
-        ),
-      ),
-    );
-    expect(deleted.threadGroups).toEqual([]);
-    expect(deleted.threads[0]?.groupId).toBeNull();
-  });
+      );
+      const deleted = yield* projectEvent(
+        released,
+        makeEvent({
+          sequence: 6,
+          type: "thread-group.deleted",
+          aggregateKind: "thread-group",
+          aggregateId: "group-1",
+          occurredAt: now,
+          commandId: "cmd-group-delete",
+          payload: { groupId: "group-1", deletedAt: now },
+        }),
+      );
+      expect(deleted.threadGroups).toEqual([]);
+      expect(deleted.threads[0]?.groupId).toBeNull();
+    }),
+  );
 
   it("keeps projector forward-compatible for unhandled event types", async () => {
     const now = "2026-01-01T00:00:00.000Z";

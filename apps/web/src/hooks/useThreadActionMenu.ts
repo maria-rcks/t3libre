@@ -152,6 +152,7 @@ export function useThreadActionMenu(input: {
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
         const supportsGroups = readEnvironmentSupportsThreadGroups(threadRef.environmentId);
+        const threadShells = supportsGroups ? readThreadShells() : [];
         const items = buildThreadActionMenuItems({
           branch: thread.branch ?? null,
           isPinned: thread.pinnedAt != null,
@@ -173,7 +174,7 @@ export function useThreadActionMenu(input: {
                       (group) =>
                         group.environmentId === thread.environmentId &&
                         group.projectId === thread.projectId &&
-                        readThreadShells().some(
+                        threadShells.some(
                           (candidate) =>
                             candidate.environmentId === group.environmentId &&
                             candidate.groupId === group.id &&

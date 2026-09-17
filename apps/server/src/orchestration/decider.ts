@@ -1106,6 +1106,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const threadIds = [...new Set(command.threadIds)];
       for (const threadId of threadIds) {
         const thread = yield* requireThreadNotArchived({ readModel, command, threadId });
+        if (thread.deletedAt !== null) {
+          return yield* Effect.fail(
+            new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Thread '${threadId}' is deleted and cannot join group '${command.groupId}'.`,
+            }),
+          );
+        }
         if (thread.projectId !== command.projectId) {
           return yield* Effect.fail(
             new OrchestrationCommandInvariantError({
@@ -1231,6 +1239,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      if (thread.deletedAt !== null) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Thread '${command.threadId}' is deleted and cannot change groups.`,
+          }),
+        );
+      }
       if (command.groupId !== null) {
         const group = yield* requireThreadGroup({ readModel, command, groupId: command.groupId });
         if (group.projectId !== thread.projectId) {

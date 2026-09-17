@@ -2912,10 +2912,18 @@ export default function Sidebar() {
     (group: EnvironmentThreadGroup) => {
       const key = `${group.environmentId}:${group.id}`;
       // Keys of groups that no longer exist are dropped on the way, so the
-      // record cannot grow with every group ever created.
+      // record cannot grow with every group ever created. Only environments
+      // with a live group list are pruned: a disconnected one keeps its folds.
       const known = new Set(threadGroupsRef.current.map((g) => `${g.environmentId}:${g.id}`));
+      const knownEnvironments = new Set<string>(
+        threadGroupsRef.current.map((g) => g.environmentId),
+      );
       setThreadGroupsExpanded((value) => ({
-        ...Object.fromEntries(Object.entries(value).filter(([k]) => known.has(k))),
+        ...Object.fromEntries(
+          Object.entries(value).filter(
+            ([k]) => known.has(k) || !knownEnvironments.has(k.slice(0, k.indexOf(":"))),
+          ),
+        ),
         [key]: !(value[key] ?? false),
       }));
     },
@@ -4040,13 +4048,20 @@ export default function Sidebar() {
           actionProps: {
             children: "Undo",
             onClick: () => {
-              void deleteThreadGroup({ environmentId: first.environmentId, input: { groupId } });
+              // Only the threads this action grouped leave; anything filed in
+              // meanwhile stays, and the server retires the group once empty.
+              for (const thread of selected) {
+                void setThreadGroup({
+                  environmentId: thread.environmentId,
+                  input: { threadId: thread.id, groupId: null },
+                });
+              }
             },
           },
         }),
       );
     },
-    [clearSelection, createThreadGroup, deleteThreadGroup, serverConfigs],
+    [clearSelection, createThreadGroup, serverConfigs, setThreadGroup],
   );
   const groupThreadsTogetherRef = useRef(groupThreadsTogether);
   groupThreadsTogetherRef.current = groupThreadsTogether;
