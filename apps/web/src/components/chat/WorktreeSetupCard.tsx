@@ -316,13 +316,13 @@ export function WorktreeSetupCard({
           <ChevronRightIcon
             aria-hidden
             className={cn(
-              "size-3.5 shrink-0 text-icon-muted transition-transform duration-200 motion-reduce:transition-none",
+              "size-3.5 shrink-0 text-icon-muted transition-transform duration-300 ease-out motion-reduce:transition-none",
               open && "rotate-90",
             )}
           />
         ) : null}
       </CollapsibleTrigger>
-      <CollapsiblePanel className="duration-[220ms]">
+      <CollapsiblePanel className="duration-300 ease-out">
         <div className="px-3 py-2">
           {snapshot.stages.map((stage) => (
             <div key={stage.id}>
