@@ -26,7 +26,8 @@ import type { CodexScanState, UsageRecord } from "./usageTranscripts.ts";
 // entries would keep serving double-counted records forever.
 // v3: entries carry the parse position and reducer state so a grown file
 // re-parses only its appended bytes instead of starting over.
-const USAGE_SCAN_CACHE_VERSION = 3 as const;
+// v4: Muse counters use persisted per-run provider routing to interpret cache overlap.
+const USAGE_SCAN_CACHE_VERSION = 4 as const;
 
 export interface CachedFile {
   readonly size: number;
@@ -76,6 +77,7 @@ interface SerializedFile {
   readonly gh: number;
   /** Codex reducer state at `o`; `null` for stateless providers. */
   readonly cs: CodexScanState | null;
+  readonly ms?: readonly (readonly [string, string])[];
 }
 
 interface SerializedCache {
@@ -126,6 +128,7 @@ export function encodeScanCache(cache: ScanCache): SerializedCache {
       gl: entry.position.guardLength,
       gh: entry.position.guardHash,
       cs: entry.position.codexState,
+      ...(entry.position.museState ? { ms: [...entry.position.museState] } : {}),
     };
   }
 
@@ -242,6 +245,17 @@ export function decodeScanCache(document: unknown): ScanCache {
     }
     const codexState = decodeCodexState(entry.cs);
     if (codexState === undefined) continue;
+    if (
+      entry.p === "muse" &&
+      (!Array.isArray(entry.ms) ||
+        !entry.ms.every(
+          (route) =>
+            Array.isArray(route) &&
+            route.length === 2 &&
+            route.every((value) => typeof value === "string"),
+        ))
+    )
+      continue;
 
     const provider: UsageProviderKind = entry.p;
     const records = decodeRecords(entry.r, provider);
@@ -259,6 +273,7 @@ export function decodeScanCache(document: unknown): ScanCache {
         guardLength: entry.gl,
         guardHash: entry.gh,
         codexState,
+        ...(entry.p === "muse" ? { museState: new Map(entry.ms) } : {}),
       },
     });
   }

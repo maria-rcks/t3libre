@@ -70,12 +70,18 @@ export function totalTokens(totals: UsageTokenTotals): number {
 export function mightCarryUsage(line: string, provider: UsageProviderKind): boolean {
   if (provider === "claude") return line.includes('"usage"');
   if (provider === "grok") return line.includes('"turn_completed"');
-  if (provider === "muse") return line.includes('"model_completed"');
+  if (provider === "muse")
+    return line.includes('"model_completed"') || line.includes('"run.model.configured"');
   return line.includes('"token_count"');
 }
 
-/** Muse's session log mirrors each model completion once, including cached input. */
-export function parseMuseLine(line: string): UsageRecord | null {
+export type MuseScanState = Map<string, string>;
+
+/** Muse retains raw provider counters; per-run routing determines cache overlap. */
+export function parseMuseLine(
+  line: string,
+  providers: MuseScanState = new Map(),
+): UsageRecord | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -85,8 +91,15 @@ export function parseMuseLine(line: string): UsageRecord | null {
   const object = (value: unknown): Record<string, unknown> =>
     typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
   const record = object(parsed);
-  if (record.payload_type !== "runtime.session") return null;
   const payload = object(record.payload);
+  if (record.payload_type === "run.model.configured") {
+    const configured = object(payload.record);
+    const runId = object(configured.run_stream).id;
+    if (typeof runId === "string" && typeof configured.provider_id === "string")
+      providers.set(runId, configured.provider_id);
+    return null;
+  }
+  if (record.payload_type !== "runtime.session") return null;
   const event = object(payload.event);
   if (event.kind !== "model_completed") return null;
   const usage = object(event.usage);
@@ -96,13 +109,19 @@ export function parseMuseLine(line: string): UsageRecord | null {
   if (typeof sessionId !== "string" || typeof sourceId !== "string") return null;
   const cached = int(usage.cache_read_tokens ?? usage.cached_tokens);
   const created = int(usage.cache_write_tokens);
+  const provider = typeof payload.run_id === "string" ? providers.get(payload.run_id) : undefined;
+  const input = int(usage.input_tokens);
+  const inclusive = provider === "meta" || provider === "openai";
+  // Unknown cache conventions cannot yield a trustworthy disjoint token count.
+  // Omit such completions rather than fabricate usage or cost from overlapping counters.
+  if (cached + created > 0 && !inclusive && provider !== "anthropic") return null;
   return {
     provider: "muse",
     timestampMs: Math.trunc(record.recorded_at / 1_000),
     model: typeof event.model === "string" && event.model.length > 0 ? event.model : "unknown",
     sessionId,
     totals: {
-      uncachedInputTokens: Math.max(0, int(usage.input_tokens) - cached - created),
+      uncachedInputTokens: inclusive ? Math.max(0, input - cached - created) : input,
       cachedInputTokens: cached,
       cacheCreationTokens: created,
       outputTokens: int(usage.output_tokens),

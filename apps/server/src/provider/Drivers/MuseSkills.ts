@@ -15,8 +15,12 @@ import { spawnAndCollect } from "../providerSnapshot.ts";
 
 class MuseSkillsProbeError extends Schema.TaggedError<MuseSkillsProbeError>()(
   "MuseSkillsProbeError",
-  { message: Schema.String },
-) {}
+  { exitCode: Schema.Number },
+) {
+  override get message(): string {
+    return `Muse skill discovery exited with code ${this.exitCode}.`;
+  }
+}
 
 const SkillFiles = Schema.Struct({
   skills: Schema.Array(
@@ -74,7 +78,7 @@ export const discoverMuseSkills = Effect.fn("discoverMuseSkills")(function* (
     );
     if (output.code !== 0)
       return yield* new MuseSkillsProbeError({
-        message: `Muse skill discovery exited with code ${output.code}.`,
+        exitCode: output.code,
       });
     const files = yield* decodeSkillFiles(output.stdout);
     const handshake = yield* Effect.acquireRelease(

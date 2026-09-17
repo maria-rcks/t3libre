@@ -1039,6 +1039,25 @@ declaredCompaction.layer("ProviderService declared compaction", (it) => {
       assert.equal(compacted.requestId, String(requestId));
       assert.equal(customNativeCompaction.compactThread.mock.calls.length, 1);
       assert.equal(customNativeCompaction.sendTurn.mock.calls.length, 0);
+      customNativeCompaction.compactThread.mockImplementationOnce(() =>
+        Effect.sync(() =>
+          customNativeCompaction.emit({
+            type: "item.completed",
+            eventId: asEventId("evt-native-compact-noop"),
+            provider: customCompactionDriver,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            threadId,
+            payload: {
+              itemType: "context_compaction",
+              status: "completed",
+              data: { outcome: "noop" },
+            },
+          }),
+        ),
+      );
+      yield* provider.compactThread(threadId);
+      // A no-op settles normally and does not quarantine the next request.
+      yield* provider.compactThread(threadId);
       yield* provider.stopSession({ threadId });
     }),
   );

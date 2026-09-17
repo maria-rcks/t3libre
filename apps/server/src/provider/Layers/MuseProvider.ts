@@ -123,20 +123,23 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
   }).pipe(Effect.timeout("10 seconds"), Effect.scoped);
   return yield* probe.pipe(
     Effect.catch((error) =>
-      Effect.succeed(
-        buildServerProvider({
-          presentation: PRESENTATION,
-          enabled: true,
-          checkedAt,
-          models: providerModelsFromSettings(DEFAULT_MODELS, settings.customModels, CAPABILITIES),
-          probe: {
-            installed: false,
-            version: null,
-            status: "error",
-            auth: { status: "unknown" },
-            message: `Could not connect to Muse Code. Install and sign in to a build supporting muse serve. ${String(error)}`,
-          },
-        }),
+      Effect.logWarning("Muse Code provider probe failed.", { errorTag: error._tag }).pipe(
+        Effect.as(
+          buildServerProvider({
+            presentation: PRESENTATION,
+            enabled: true,
+            checkedAt,
+            models: providerModelsFromSettings(DEFAULT_MODELS, settings.customModels, CAPABILITIES),
+            probe: {
+              installed: false,
+              version: null,
+              status: "error",
+              auth: { status: "unknown" },
+              message:
+                "Could not connect to Muse Code. Install and sign in to a build supporting muse serve.",
+            },
+          }),
+        ),
       ),
     ),
   );

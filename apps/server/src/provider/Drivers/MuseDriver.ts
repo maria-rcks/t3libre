@@ -6,10 +6,10 @@ import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
-import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
+import * as ServerConfig from "../../config.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeMuseAdapter } from "../Layers/MuseAdapter.ts";
+import * as MuseAdapter from "../Layers/MuseAdapter.ts";
 import {
   buildInitialMuseProviderSnapshot,
   checkMuseProviderStatus,
@@ -50,8 +50,8 @@ export type MuseDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
   | FileSystem.FileSystem
   | Path.Path
-  | ServerConfig
-  | ServerSettingsService;
+  | ServerConfig.ServerConfig
+  | ServerSettings.ServerSettingsService;
 
 export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
   driverKind: DRIVER_KIND,
@@ -60,8 +60,8 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
   defaultConfig: () => decodeSettings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
-      const { cwd } = yield* ServerConfig;
-      const serverSettings = yield* ServerSettingsService;
+      const { cwd } = yield* ServerConfig.ServerConfig;
+      const serverSettings = yield* ServerSettings.ServerSettingsService;
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const path = yield* Path.Path;
       const processEnv = mergeProviderInstanceEnvironment(environment);
@@ -81,7 +81,7 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
         ...stampInstance(snapshot),
         supportsTextGeneration: false,
       });
-      const adapter = yield* makeMuseAdapter(effectiveConfig, {
+      const adapter = yield* MuseAdapter.make(effectiveConfig, {
         environment: processEnv,
         instanceId,
       });
@@ -110,7 +110,7 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
                     new ProviderDriverError({
                       driver: DRIVER_KIND,
                       instanceId,
-                      detail: `Failed to discover Muse skills for '${workspaceCwd}'`,
+                      detail: "Failed to discover Muse skills for this workspace.",
                       cause,
                     }),
                 ),
@@ -134,14 +134,15 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
         },
       } satisfies ProviderInstance;
     }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ProviderDriverError({
-            driver: DRIVER_KIND,
-            instanceId,
-            detail: String(cause),
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        Schema.is(ProviderDriverError)(cause)
+          ? cause
+          : new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: "Failed to initialize the Muse Code provider.",
+              cause,
+            }),
       ),
     ),
 };

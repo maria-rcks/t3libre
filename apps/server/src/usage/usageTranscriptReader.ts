@@ -28,6 +28,7 @@ import {
   parseGrokLine,
   parseMuseLine,
   type CodexScanState,
+  type MuseScanState,
   type UsageRecord,
 } from "./usageTranscripts.ts";
 
@@ -57,6 +58,7 @@ export interface TranscriptParsePosition {
   readonly guardHash: number;
   /** Codex reducer state as of `resumeOffset`; `null` for stateless providers. */
   readonly codexState: CodexScanState | null;
+  readonly museState?: MuseScanState;
 }
 
 export interface TranscriptParseResult {
@@ -205,20 +207,28 @@ export async function readTranscriptRecords(
 
   try {
     let codexState = initialCodexScanState();
+    let museState: MuseScanState = new Map();
     let resumed = false;
     let start = 0;
     if (
       resumeFrom !== undefined &&
       resumeFrom.resumeOffset > 0 &&
       (provider !== "codex" || resumeFrom.codexState !== null) &&
+      (provider !== "muse" || resumeFrom.museState !== undefined) &&
       (await guardMatches(handle, resumeFrom))
     ) {
       if (resumeFrom.codexState !== null) codexState = { ...resumeFrom.codexState };
+      if (resumeFrom.museState !== undefined) museState = new Map(resumeFrom.museState);
       start = resumeFrom.resumeOffset;
       resumed = true;
     }
 
-    const parseLine = (line: string, state: CodexScanState, out: UsageRecord[]): void => {
+    const parseLine = (
+      line: string,
+      state: CodexScanState,
+      museProviders: MuseScanState,
+      out: UsageRecord[],
+    ): void => {
       if (provider === "codex") {
         if (
           !mightCarryUsage(line, provider) &&
@@ -236,7 +246,8 @@ export async function readTranscriptRecords(
         for (const grokRecord of parseGrokLine(line)) out.push(grokRecord);
         return;
       }
-      const record = provider === "muse" ? parseMuseLine(line) : parseClaudeLine(line);
+      const record =
+        provider === "muse" ? parseMuseLine(line, museProviders) : parseClaudeLine(line);
       if (record !== null) out.push(record);
     };
 
@@ -271,7 +282,12 @@ export async function readTranscriptRecords(
       for (;;) {
         const newlineIndex = buffer.indexOf(NEWLINE, lineStart);
         if (newlineIndex === -1) break;
-        parseLine(toLineString(buffer.subarray(lineStart, newlineIndex)), codexState, records);
+        parseLine(
+          toLineString(buffer.subarray(lineStart, newlineIndex)),
+          codexState,
+          museState,
+          records,
+        );
         lineStart = newlineIndex + 1;
       }
       resumeOffset += lineStart;
@@ -284,7 +300,8 @@ export async function readTranscriptRecords(
     const tailRecords: UsageRecord[] = [];
     if (pendingChunks.length > 0) {
       const pending = pendingChunks.length === 1 ? pendingChunks[0]! : Buffer.concat(pendingChunks);
-      if (pending.length > 0) parseLine(toLineString(pending), { ...codexState }, tailRecords);
+      if (pending.length > 0)
+        parseLine(toLineString(pending), { ...codexState }, new Map(museState), tailRecords);
     }
 
     const guardLength = Math.min(GUARD_LENGTH, resumeOffset);
@@ -303,6 +320,7 @@ export async function readTranscriptRecords(
         guardLength,
         guardHash,
         codexState: provider === "codex" ? codexState : null,
+        ...(provider === "muse" ? { museState } : {}),
       },
       resumed,
     };

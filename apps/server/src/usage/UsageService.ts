@@ -257,10 +257,7 @@ export const make = Effect.gen(function* () {
       // the legacy settings, just as they do in the provider registry.
       const instances: Array<Pick<ProviderInstanceConfig, "config" | "environment">> =
         Object.values(settings.providerInstances).filter((instance) => instance.driver === driver);
-      if (
-        !Object.hasOwn(settings.providerInstances, driver) &&
-        (driver !== "muse" || settings.providers.muse.enabled)
-      ) {
+      if (!Object.hasOwn(settings.providerInstances, driver)) {
         instances.push({ config: settings.providers[driver] });
       }
       for (const instance of instances) {

@@ -15,7 +15,7 @@ import {
   type ProviderSession,
   type ThreadId,
 } from "@t3tools/contracts";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/hostProcess";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import * as Effect from "effect/Effect";
 import * as Clock from "effect/Clock";
@@ -29,7 +29,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
-import { ServerConfig } from "../../config.ts";
+import * as ServerConfig from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { MuseSkillCatalog, museSkillInputParts, museSkillMentions } from "../Drivers/MuseSkills.ts";
 import {
@@ -51,7 +51,10 @@ import {
   museApprovalDecision,
   type MuseNotification,
 } from "../muse/MuseRuntimeEvents.ts";
-import type { MuseAdapterShape } from "../Services/MuseAdapter.ts";
+import type { ProviderAdapterError } from "../Errors.ts";
+import type * as ProviderAdapter from "../Services/ProviderAdapter.ts";
+
+type Adapter = ProviderAdapter.ProviderAdapterShape<ProviderAdapterError>;
 
 const PROVIDER = ProviderDriverKind.make("muse");
 const encodePath = Schema.encodeSync(Schema.fromJsonString(Schema.String));
@@ -105,10 +108,11 @@ interface SessionContext {
   questions: Map<string, UserInput>;
   settledTurns: Set<string>;
   selectedModel: string;
+  contextUsedTokens?: number;
   stopped: boolean;
 }
 
-export function makeMuseAdapter(
+export function make(
   settings: MuseSettings,
   options?: {
     environment?: NodeJS.ProcessEnv;
@@ -116,12 +120,12 @@ export function makeMuseAdapter(
   },
 ) {
   return Effect.gen(function* () {
-    const config = yield* ServerConfig;
+    const config = yield* ServerConfig.ServerConfig;
     const fs = yield* FileSystem.FileSystem;
     const clock = yield* Clock.Clock;
     const nowIso = () => DateTime.formatIso(DateTime.makeUnsafe(clock.currentTimeMillisUnsafe()));
     const instanceId = options?.instanceId ?? ProviderInstanceId.make("muse");
-    const environment = options?.environment ?? (yield* HostProcessEnvironment);
+    const environment = options?.environment ?? (yield* HostProcess.HostProcessEnvironment);
     const sessions = new Map<ThreadId, SessionContext>();
     const events = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const lifecycle = yield* Semaphore.make(1);
@@ -131,8 +135,11 @@ export function makeMuseAdapter(
       new ProviderAdapterRequestError({
         provider: PROVIDER,
         method,
-        detail: cause instanceof Error ? cause.message : String(cause),
-        cause,
+        detail:
+          typeof cause === "string"
+            ? cause
+            : "Muse Code rejected the request or its response was invalid.",
+        ...(typeof cause === "string" ? {} : { cause }),
       });
     const attempt = <A>(method: string, run: () => Promise<A>) =>
       Effect.tryPromise({ try: run, catch: (cause) => requestError(method, cause) }).pipe(
@@ -249,6 +256,7 @@ export function makeMuseAdapter(
       if (!isMuseNotificationMethod(input.method)) return;
       const event = decodeMuseNotification(input);
       if (event.method !== "usage/changed" && event.params.sessionId !== ctx.sessionId) return;
+      if (event.method === "session/contextUsage") ctx.contextUsedTokens = event.params.usedTokens;
       if (
         event.method === "item/started" ||
         event.method === "item/updated" ||
@@ -286,6 +294,9 @@ export function makeMuseAdapter(
         nextEventId,
         itemById: (id) => ctx.items.get(id),
         streamedText: (id, field) => ctx.streamed.get(`${id}:${field}`) ?? "",
+        ...(ctx.contextUsedTokens !== undefined
+          ? { contextUsedTokens: ctx.contextUsedTokens }
+          : {}),
         ...(ctx.session.activeTurnId ? { activeTurnId: ctx.session.activeTurnId } : {}),
       })) {
         if (mapped.type === "content.delta" && mapped.itemId) {
@@ -321,7 +332,7 @@ export function makeMuseAdapter(
         payload: { reason: "Session stopped", recoverable: true },
       });
     });
-    const startSession: MuseAdapterShape["startSession"] = (input) =>
+    const startSession: Adapter["startSession"] = (input) =>
       lifecycle.withPermit(
         Effect.gen(function* () {
           const existing = sessions.get(input.threadId);
@@ -554,148 +565,146 @@ export function makeMuseAdapter(
           );
         }),
       );
-    const sendTurn: MuseAdapterShape["sendTurn"] = Effect.fn("MuseAdapter.sendTurn")(
-      function* (input) {
-        const ctx = yield* requireSession(input.threadId);
-        return yield* ctx.lock.withPermit(
-          Effect.gen(function* () {
-            if (ctx.stopped)
-              return yield* requestError(
-                "turn/start",
-                "Muse Code session has closed. Resume the thread to reconnect.",
-              );
-            if (input.interactionMode === "plan")
-              return yield* new ProviderAdapterValidationError({
-                provider: PROVIDER,
-                operation: "sendTurn",
-                issue: "Muse Code does not expose a plan mode through MSP.",
-              });
-            const parts: Array<Record<string, unknown>> = [];
-            if (input.input?.trim()) {
-              const prompt = input.input;
-              if (museSkillMentions(prompt).length > 0) {
-                const catalog = yield* attempt("skill/list", () =>
-                  ctx.host.connection.request("skill/list", { sessionId: ctx.sessionId }),
-                ).pipe(
-                  Effect.flatMap(Schema.decodeUnknownEffect(MuseSkillCatalog)),
-                  Effect.mapError((cause) => requestError("skill/list", cause)),
-                );
-                parts.push(
-                  { type: "text", text: buildRuntimeInstructions({ harness: "Muse Code" }) },
-                  ...museSkillInputParts(
-                    prompt,
-                    new Set(catalog.skills.map((skill) => skill.selector)),
-                  ),
-                );
-              } else {
-                parts.push({
-                  type: "text",
-                  text: `${buildRuntimeInstructions({ harness: "Muse Code" })}\n\n${prompt}`,
-                });
-              }
-            }
-            for (const attachment of input.attachments ?? []) {
-              const filePath = resolveAttachmentPath({
-                attachmentsDir: config.attachmentsDir,
-                attachment,
-              });
-              if (!filePath)
-                return yield* new ProviderAdapterValidationError({
-                  provider: PROVIDER,
-                  operation: "sendTurn",
-                  issue: "Muse Code could not resolve the attachment.",
-                });
-              if (attachment.type === "image") {
-                const bytes = yield* fs
-                  .readFile(filePath)
-                  .pipe(Effect.mapError((cause) => requestError("attachment", cause)));
-                parts.push({
-                  type: "image",
-                  mediaType: attachment.mimeType,
-                  base64Data: Buffer.from(bytes).toString("base64"),
-                });
-              } else if (attachment.type === "file") {
-                parts.push({
-                  type: "text",
-                  text: `Attached file: ${encodePath(filePath)}`,
-                });
-              } else {
-                return yield* new ProviderAdapterValidationError({
-                  provider: PROVIDER,
-                  operation: "sendTurn",
-                  issue: `Unsupported attachment type: ${attachment.type}`,
-                });
-              }
-            }
-            if (!parts.length)
-              return yield* new ProviderAdapterValidationError({
-                provider: PROVIDER,
-                operation: "sendTurn",
-                issue: "Muse Code requires text or an image.",
-              });
-            const model = input.modelSelection?.model;
-            if (
-              model &&
-              (model !== ctx.selectedModel ||
-                (model !== MUSE_DEFAULT_MODEL &&
-                  (decodeMuseModelSelection(model)?.modelId ?? model) !== ctx.session.model))
-            ) {
-              const selection = yield* resolveModelSelection(ctx.host, model);
-              yield* attempt("session/setModel", () =>
-                ctx.host.connection.command("session/setModel", {
-                  sessionId: ctx.sessionId,
-                  model: selection,
-                }),
-              );
-              ctx.session = { ...ctx.session, model: selection.modelId };
-            }
-            if (input.modelSelection) {
-              ctx.selectedModel = input.modelSelection.model;
-              ctx.session = {
-                ...ctx.session,
-                resumeCursor: {
-                  schemaVersion: 1,
-                  sessionId: ctx.sessionId,
-                  selectedModel: ctx.selectedModel,
-                },
-              };
-            }
-            const effort = input.modelSelection
-              ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
-              : undefined;
-            const result = yield* attempt("turn/start", () =>
-              ctx.host.connection.command("turn/start", {
-                sessionId: ctx.sessionId,
-                input: parts,
-                ifBusy: "steer",
-                ...(effort ? { reasoningEffort: effort } : {}),
-              }),
-            ).pipe(
-              Effect.flatMap(Schema.decodeUnknownEffect(TurnResult)),
-              Effect.mapError((cause) => requestError("turn/start", cause)),
+    const sendTurn: Adapter["sendTurn"] = Effect.fn("MuseAdapter.sendTurn")(function* (input) {
+      const ctx = yield* requireSession(input.threadId);
+      return yield* ctx.lock.withPermit(
+        Effect.gen(function* () {
+          if (ctx.stopped)
+            return yield* requestError(
+              "turn/start",
+              "Muse Code session has closed. Resume the thread to reconnect.",
             );
-            if (ctx.stopped)
-              return yield* requestError(
-                "turn/start",
-                ctx.session.lastError ?? "Muse Code disconnected.",
+          if (input.interactionMode === "plan")
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "sendTurn",
+              issue: "Muse Code does not expose a plan mode through MSP.",
+            });
+          const parts: Array<Record<string, unknown>> = [];
+          if (input.input?.trim()) {
+            const prompt = input.input;
+            if (museSkillMentions(prompt).length > 0) {
+              const catalog = yield* attempt("skill/list", () =>
+                ctx.host.connection.request("skill/list", { sessionId: ctx.sessionId }),
+              ).pipe(
+                Effect.flatMap(Schema.decodeUnknownEffect(MuseSkillCatalog)),
+                Effect.mapError((cause) => requestError("skill/list", cause)),
               );
-            if (!ctx.settledTurns.has(result.turnId))
-              ctx.session = {
-                ...ctx.session,
-                status: "running",
-                activeTurnId: TurnId.make(result.turnId),
-                updatedAt: nowIso(),
-              };
-            return {
-              threadId: input.threadId,
-              turnId: TurnId.make(result.turnId),
-              resumeCursor: ctx.session.resumeCursor,
+              parts.push(
+                { type: "text", text: buildRuntimeInstructions({ harness: "Muse Code" }) },
+                ...museSkillInputParts(
+                  prompt,
+                  new Set(catalog.skills.map((skill) => skill.selector)),
+                ),
+              );
+            } else {
+              parts.push({
+                type: "text",
+                text: `${buildRuntimeInstructions({ harness: "Muse Code" })}\n\n${prompt}`,
+              });
+            }
+          }
+          for (const attachment of input.attachments ?? []) {
+            const filePath = resolveAttachmentPath({
+              attachmentsDir: config.attachmentsDir,
+              attachment,
+            });
+            if (!filePath)
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "sendTurn",
+                issue: "Muse Code could not resolve the attachment.",
+              });
+            if (attachment.type === "image") {
+              const bytes = yield* fs
+                .readFile(filePath)
+                .pipe(Effect.mapError((cause) => requestError("attachment", cause)));
+              parts.push({
+                type: "image",
+                mediaType: attachment.mimeType,
+                base64Data: Buffer.from(bytes).toString("base64"),
+              });
+            } else if (attachment.type === "file") {
+              parts.push({
+                type: "text",
+                text: `Attached file: ${encodePath(filePath)}`,
+              });
+            } else {
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "sendTurn",
+                issue: `Unsupported attachment type: ${attachment.type}`,
+              });
+            }
+          }
+          if (!parts.length)
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "sendTurn",
+              issue: "Muse Code requires text or an image.",
+            });
+          const model = input.modelSelection?.model;
+          if (
+            model &&
+            (model !== ctx.selectedModel ||
+              (model !== MUSE_DEFAULT_MODEL &&
+                (decodeMuseModelSelection(model)?.modelId ?? model) !== ctx.session.model))
+          ) {
+            const selection = yield* resolveModelSelection(ctx.host, model);
+            yield* attempt("session/setModel", () =>
+              ctx.host.connection.command("session/setModel", {
+                sessionId: ctx.sessionId,
+                model: selection,
+              }),
+            );
+            ctx.session = { ...ctx.session, model: selection.modelId };
+          }
+          if (input.modelSelection) {
+            ctx.selectedModel = input.modelSelection.model;
+            ctx.session = {
+              ...ctx.session,
+              resumeCursor: {
+                schemaVersion: 1,
+                sessionId: ctx.sessionId,
+                selectedModel: ctx.selectedModel,
+              },
             };
-          }),
-        );
-      },
-    );
-    const interruptTurn: MuseAdapterShape["interruptTurn"] = Effect.fn("MuseAdapter.interruptTurn")(
+          }
+          const effort = input.modelSelection
+            ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
+            : undefined;
+          const result = yield* attempt("turn/start", () =>
+            ctx.host.connection.command("turn/start", {
+              sessionId: ctx.sessionId,
+              input: parts,
+              ifBusy: "steer",
+              ...(effort ? { reasoningEffort: effort } : {}),
+            }),
+          ).pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(TurnResult)),
+            Effect.mapError((cause) => requestError("turn/start", cause)),
+          );
+          if (ctx.stopped)
+            return yield* requestError(
+              "turn/start",
+              ctx.session.lastError ?? "Muse Code disconnected.",
+            );
+          if (!ctx.settledTurns.has(result.turnId))
+            ctx.session = {
+              ...ctx.session,
+              status: "running",
+              activeTurnId: TurnId.make(result.turnId),
+              updatedAt: nowIso(),
+            };
+          return {
+            threadId: input.threadId,
+            turnId: TurnId.make(result.turnId),
+            resumeCursor: ctx.session.resumeCursor,
+          };
+        }),
+      );
+    });
+    const interruptTurn: Adapter["interruptTurn"] = Effect.fn("MuseAdapter.interruptTurn")(
       function* (threadId, turnId) {
         const ctx = yield* requireSession(threadId);
         const target = turnId ?? ctx.session.activeTurnId;
@@ -708,30 +717,31 @@ export function makeMuseAdapter(
         );
       },
     );
-    const respondToRequest: MuseAdapterShape["respondToRequest"] = Effect.fn(
-      "MuseAdapter.respondToRequest",
-    )(function* (threadId, requestId, decision) {
-      const ctx = yield* requireSession(threadId);
-      const pending = ctx.approvals.get(requestId);
-      if (!pending) return yield* requestError("approval/decide", "Approval is no longer pending.");
-      const choice = pending.availableChoices.find(
-        (choice) => museApprovalDecision(choice.decision, choice.scope) === decision,
-      );
-      if (!choice)
-        return yield* requestError(
-          "approval/decide",
-          `Muse Code does not offer the ${decision} decision for this request.`,
+    const respondToRequest: Adapter["respondToRequest"] = Effect.fn("MuseAdapter.respondToRequest")(
+      function* (threadId, requestId, decision) {
+        const ctx = yield* requireSession(threadId);
+        const pending = ctx.approvals.get(requestId);
+        if (!pending)
+          return yield* requestError("approval/decide", "Approval is no longer pending.");
+        const choice = pending.availableChoices.find(
+          (choice) => museApprovalDecision(choice.decision, choice.scope) === decision,
         );
-      yield* attempt("approval/decide", () =>
-        ctx.host.connection.command("approval/decide", {
-          sessionId: ctx.sessionId,
-          approvalId: requestId,
-          requirementId: pending.currentRequirementId,
-          choiceId: choice.choiceId,
-        }),
-      );
-    });
-    const respondToUserInput: MuseAdapterShape["respondToUserInput"] = Effect.fn(
+        if (!choice)
+          return yield* requestError(
+            "approval/decide",
+            `Muse Code does not offer the ${decision} decision for this request.`,
+          );
+        yield* attempt("approval/decide", () =>
+          ctx.host.connection.command("approval/decide", {
+            sessionId: ctx.sessionId,
+            approvalId: requestId,
+            requirementId: pending.currentRequirementId,
+            choiceId: choice.choiceId,
+          }),
+        );
+      },
+    );
+    const respondToUserInput: Adapter["respondToUserInput"] = Effect.fn(
       "MuseAdapter.respondToUserInput",
     )(function* (threadId, requestId, answers) {
       const ctx = yield* requireSession(threadId);
@@ -765,7 +775,7 @@ export function makeMuseAdapter(
         }),
       );
     });
-    const readThread: MuseAdapterShape["readThread"] = Effect.fn("MuseAdapter.readThread")(
+    const readThread: Adapter["readThread"] = Effect.fn("MuseAdapter.readThread")(
       function* (threadId) {
         const ctx = yield* requireSession(threadId);
         const turns = new Map<TurnId, MuseItem[]>();
@@ -779,7 +789,7 @@ export function makeMuseAdapter(
         return { threadId, turns: Array.from(turns, ([id, items]) => ({ id, items })) };
       },
     );
-    const stopSession: MuseAdapterShape["stopSession"] = (threadId) =>
+    const stopSession: Adapter["stopSession"] = (threadId) =>
       lifecycle.withPermit(
         Effect.gen(function* () {
           const ctx = sessions.get(threadId);
@@ -798,10 +808,18 @@ export function makeMuseAdapter(
             Effect.mapError((cause) => requestError("session/compact", cause)),
           );
           if (result.status === "noop")
-            return yield* requestError(
-              "session/compact",
-              result.reason ?? "Muse Code has no context to compact.",
-            );
+            yield* Queue.offer(events, {
+              ...base(ctx),
+              eventId: nextEventId(),
+              type: "item.completed",
+              payload: {
+                itemType: "context_compaction",
+                status: "completed",
+                title: "Compaction skipped",
+                detail: result.reason ?? "Muse Code has no context to compact.",
+                data: { outcome: "noop" },
+              },
+            });
         }),
       );
     });
@@ -830,6 +848,6 @@ export function makeMuseAdapter(
           return ctx !== undefined && !ctx.stopped;
         }),
       streamEvents: Stream.fromQueue(events),
-    } satisfies MuseAdapterShape;
+    } satisfies Adapter;
   });
 }

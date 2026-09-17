@@ -286,6 +286,7 @@ export interface MuseEventContext {
   readonly itemById: (id: string) => MuseItem | undefined;
   readonly streamedText: (itemId: string, field: string) => string;
   readonly activeTurnId?: TurnId;
+  readonly contextUsedTokens?: number;
 }
 
 /** Maps validated MSP facts; the adapter owns lifecycle and replay deduplication. */
@@ -337,6 +338,17 @@ export function mapMuseNotification(
         item.visibleOutput ||
         item.failureReason ||
         item.fallbackText;
+      let input: Record<string, unknown> | undefined;
+      if (item.args) {
+        try {
+          const parsed: unknown = JSON.parse(item.args);
+          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+            input = parsed as Record<string, unknown>;
+          }
+        } catch {
+          // Partial tool arguments are completed by later item updates.
+        }
+      }
       const result: ProviderRuntimeEvent[] = [
         {
           ...base,
@@ -347,9 +359,15 @@ export function mapMuseNotification(
           payload: {
             itemType: itemType(item),
             status,
-            ...(item.tool ? { title: item.tool } : {}),
+            ...(item.tool ? { title: item.tool === "read_file" ? "Read file" : item.tool } : {}),
             ...(detail ? { detail } : {}),
-            data: item,
+            data: {
+              ...item,
+              ...(input ? { input } : {}),
+              ...(item.commandText ? { command: item.commandText } : {}),
+              ...(typeof input?.file_path === "string" ? { path: input.file_path } : {}),
+              ...(item.visibleOutput ? { rawOutput: item.visibleOutput } : {}),
+            },
           },
         },
       ];
@@ -401,7 +419,12 @@ export function mapMuseNotification(
           },
         });
       }
-      if (item.kind === "compaction" && item.outcome !== "compacted" && type === "item.completed") {
+      if (
+        item.kind === "compaction" &&
+        item.outcome !== "compacted" &&
+        item.outcome !== "noop" &&
+        type === "item.completed"
+      ) {
         result.push({
           ...base,
           eventId: context.nextEventId(),
@@ -599,6 +622,7 @@ export function mapMuseNotification(
         },
       ];
     case "session/tokenUsage":
+      if (context.contextUsedTokens === undefined) return [];
       return [
         {
           ...base,
@@ -606,7 +630,7 @@ export function mapMuseNotification(
           turnId: TurnId.make(event.params.turnId),
           payload: {
             usage: {
-              usedTokens: event.params.promptTokens,
+              usedTokens: context.contextUsedTokens,
               totalProcessedTokens: event.params.cumulative.totalTokens,
               inputTokens: event.params.cumulative.promptTokens,
               outputTokens: event.params.cumulative.outputTokens,

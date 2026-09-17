@@ -12,6 +12,14 @@ import {
 
 describe("parseMuseLine", () => {
   it("counts cached input once and preserves the completion key across session copies", () => {
+    const state = new Map<string, string>();
+    parseMuseLine(
+      JSON.stringify({
+        payload_type: "run.model.configured",
+        payload: { record: { provider_id: "meta", run_stream: { id: "run-1" } } },
+      }),
+      state,
+    );
     const records = ["original", "fork"].map((sessionId) =>
       parseMuseLine(
         JSON.stringify({
@@ -19,6 +27,7 @@ describe("parseMuseLine", () => {
           recorded_at: 1_789_614_123_616_227,
           stream: { kind: "session", id: sessionId },
           payload: {
+            run_id: "run-1",
             source_run_record_id: "completion-1",
             event: {
               kind: "model_completed",
@@ -34,6 +43,7 @@ describe("parseMuseLine", () => {
             },
           },
         }),
+        state,
       ),
     );
     for (const record of records) {
@@ -54,6 +64,47 @@ describe("parseMuseLine", () => {
       expect(totalTokens(record!.totals)).toBe(30_290);
     }
     expect(records.map((record) => record?.sessionId)).toEqual(["original", "fork"]);
+  });
+
+  it("uses the run's provider convention rather than its model name", () => {
+    for (const [provider, expected] of [
+      ["meta", 125],
+      ["openai", 125],
+      ["anthropic", 215],
+      ["unknown", null],
+    ] as const) {
+      const state = new Map<string, string>();
+      parseMuseLine(
+        JSON.stringify({
+          payload_type: "run.model.configured",
+          payload: { record: { provider_id: provider, run_stream: { id: "run-1" } } },
+        }),
+        state,
+      );
+      const record = parseMuseLine(
+        JSON.stringify({
+          payload_type: "runtime.session",
+          recorded_at: 1_789_614_123_616_227,
+          stream: { id: "session-1" },
+          payload: {
+            run_id: "run-1",
+            source_run_record_id: "completion-1",
+            event: {
+              kind: "model_completed",
+              model: "same-model-name",
+              usage: {
+                input_tokens: 100,
+                cache_read_tokens: 80,
+                cache_write_tokens: 10,
+                output_tokens: 25,
+              },
+            },
+          },
+        }),
+        state,
+      );
+      expect(record ? totalTokens(record.totals) : null).toBe(expected);
+    }
   });
 
   it("ignores usage attribution records and malformed completions", () => {

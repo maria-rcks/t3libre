@@ -990,9 +990,17 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const compactionTerminal = (event: ProviderRuntimeEvent): string | null =>
     event.type === "turn.completed"
       ? event.payload.state
-      : event.type === "runtime.error" || event.type === "turn.aborted"
-        ? event.type
-        : null;
+      : event.type === "item.completed" &&
+          event.payload.itemType === "context_compaction" &&
+          event.payload.status === "completed" &&
+          typeof event.payload.data === "object" &&
+          event.payload.data !== null &&
+          "outcome" in event.payload.data &&
+          event.payload.data.outcome === "noop"
+        ? "completed"
+        : event.type === "runtime.error" || event.type === "turn.aborted"
+          ? event.type
+          : null;
   const processFallbackCompactionEvent = (
     pending: PendingCompaction,
     event: ProviderRuntimeEvent,

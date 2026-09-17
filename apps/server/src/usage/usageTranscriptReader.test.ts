@@ -8,6 +8,7 @@ import * as NodePath from "node:path";
 import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest";
 
 import { readTranscriptRecords } from "./usageTranscriptReader.ts";
+import { decodeScanCache, encodeScanCache } from "./usageScanCache.ts";
 
 let dir: string;
 
@@ -61,6 +62,65 @@ function codexUsageLine(outputTokens: number, secondsOffset: number): string {
 }
 
 describe("readTranscriptRecords resume", () => {
+  it("restores Muse per-run routing from disk cache before reading appended completions", async () => {
+    const file = NodePath.join(dir, "session.jsonl");
+    const configured = JSON.stringify({
+      payload_type: "run.model.configured",
+      payload: { record: { provider_id: "anthropic", run_stream: { id: "run-1" } } },
+    });
+    await NodeFSP.writeFile(file, `${configured}\n`);
+    const first = await readTranscriptRecords(file, "muse");
+    assert.isNotNull(first);
+    const cache = decodeScanCache(
+      encodeScanCache(
+        new Map([
+          [
+            file,
+            {
+              size: Buffer.byteLength(`${configured}\n`),
+              mtimeMs: 1,
+              provider: "muse",
+              records: first!.records,
+              tailRecords: first!.tailRecords,
+              position: first!.position,
+            },
+          ],
+        ]),
+      ),
+    );
+    assert.isDefined(cache.get(file));
+    await NodeFSP.appendFile(
+      file,
+      `${JSON.stringify({
+        payload_type: "runtime.session",
+        recorded_at: 1_789_614_123_616_227,
+        stream: { id: "session-1" },
+        payload: {
+          run_id: "run-1",
+          source_run_record_id: "completion-1",
+          event: {
+            kind: "model_completed",
+            model: "example-model",
+            usage: {
+              input_tokens: 20,
+              cache_read_tokens: 80,
+              cache_write_tokens: 10,
+              output_tokens: 5,
+            },
+          },
+        },
+      })}\n`,
+    );
+    const resumed = await readTranscriptRecords(file, "muse", cache.get(file)!.position);
+    assert.isTrue(resumed?.resumed);
+    assert.deepEqual(resumed?.records[0]?.totals, {
+      uncachedInputTokens: 20,
+      cachedInputTokens: 80,
+      cacheCreationTokens: 10,
+      outputTokens: 5,
+      reasoningTokens: 0,
+    });
+  });
   it("parses only appended lines when resuming a grown file", async () => {
     const path = NodePath.join(dir, "claude.jsonl");
     await NodeFSP.writeFile(path, claudeLine(1, 5) + claudeLine(2, 7));
