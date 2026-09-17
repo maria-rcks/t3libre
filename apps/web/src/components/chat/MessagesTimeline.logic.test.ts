@@ -1178,6 +1178,7 @@ describe("deriveMessagesTimelineRows", () => {
       worktreeSetup: snapshot,
     });
     expect(withoutMessages).toEqual([
+      { kind: "working", id: "working-indicator-row", createdAt: "2026-01-01T00:00:00Z" },
       {
         kind: "worktree-setup",
         id: WORKTREE_SETUP_ROW_ID,
@@ -1187,7 +1188,7 @@ describe("deriveMessagesTimelineRows", () => {
       },
     ]);
 
-    // The setup card owns its header before the agent starts.
+    // The working header stays above the setup card before the agent starts.
     const withUserMessage = deriveMessagesTimelineRows({
       timelineEntries: [userEntry],
       isWorking: true,
@@ -1196,7 +1197,7 @@ describe("deriveMessagesTimelineRows", () => {
       supportsConversationRollback: false,
       worktreeSetup: snapshot,
     });
-    expect(withUserMessage.map((row) => row.kind)).toEqual(["message", "worktree-setup"]);
+    expect(withUserMessage.map((row) => row.kind)).toEqual(["message", "working", "worktree-setup"]);
 
     // A failed setup never handed off, so the card stays under the send. The
     // rest of the timeline is untouched: a running send still gets its
@@ -1212,8 +1213,8 @@ describe("deriveMessagesTimelineRows", () => {
     });
     expect(withMessages.map((row) => row.kind)).toEqual([
       "message",
-      "worktree-setup",
       "working",
+      "worktree-setup",
       "message",
       "thinking",
       "queued-message",
@@ -1229,11 +1230,12 @@ describe("deriveMessagesTimelineRows", () => {
     });
     expect(runningWithQueue.map((row) => row.kind)).toEqual([
       "message",
+      "working",
       "worktree-setup",
       "queued-message",
     ]);
 
-    // Async setup stays under the send while the agent gets its own header.
+    // Async setup stays below the same header once the agent starts.
     const stage = (id: "agent" | "setup-script", status: "done" | "running") =>
       ({
         id,
@@ -1265,11 +1267,11 @@ describe("deriveMessagesTimelineRows", () => {
     });
     expect(asyncRows.map((row) => row.kind)).toEqual([
       "message",
-      "worktree-setup",
       "working",
+      "worktree-setup",
       "thinking",
     ]);
-    expect(asyncRows[1]).toMatchObject({
+    expect(asyncRows[2]).toMatchObject({
       kind: "worktree-setup",
       id: WORKTREE_SETUP_ROW_ID,
       embedded: true,
@@ -1285,8 +1287,8 @@ describe("deriveMessagesTimelineRows", () => {
       supportsConversationRollback: false,
       worktreeSetup: asyncSnapshot,
     });
-    expect(handoffRows.map((row) => row.kind)).toEqual(["message", "worktree-setup"]);
-    expect(handoffRows[1]).toMatchObject({ kind: "worktree-setup", embedded: false });
+    expect(handoffRows.map((row) => row.kind)).toEqual(["message", "working", "worktree-setup"]);
+    expect(handoffRows[2]).toMatchObject({ kind: "worktree-setup", embedded: false });
     const stableHandoff = computeStableMessagesTimelineRows(handoffRows, {
       byId: new Map(),
       result: [],
@@ -1326,11 +1328,11 @@ describe("deriveMessagesTimelineRows", () => {
     });
     expect(failedRows.map((row) => row.kind)).toEqual([
       "message",
-      "worktree-setup",
       "working",
+      "worktree-setup",
       "thinking",
     ]);
-    expect(failedRows[1]).toMatchObject({ kind: "worktree-setup", embedded: true });
+    expect(failedRows[2]).toMatchObject({ kind: "worktree-setup", embedded: true });
 
     const completedSetup: WorktreeSetupSnapshot = {
       ...asyncSnapshot,
@@ -1358,8 +1360,27 @@ describe("deriveMessagesTimelineRows", () => {
       snapshot: completedSetup,
       embedded: true,
     });
+    const foldedRows = deriveMessagesTimelineRows({
+      ...completedInput,
+      timelineEntries: [
+        userEntry,
+        {
+          ...assistantEntry,
+          id: "commentary-entry",
+          message: { ...assistantEntry.message, id: "commentary" as never, streaming: false },
+        },
+        completedInput.timelineEntries[1]!,
+      ],
+    });
+    expect(foldedRows.map((row) => row.kind)).toEqual([
+      "message",
+      "turn-fold",
+      "worktree-setup",
+      "message",
+    ]);
+    expect(foldedRows[1]).toMatchObject({ label: "Worked for 29s" });
 
-    const followUpRows = deriveMessagesTimelineRows({
+    const followUpInput = {
       ...completedInput,
       timelineEntries: [
         ...completedInput.timelineEntries,
@@ -1376,7 +1397,8 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
-    });
+    };
+    const followUpRows = deriveMessagesTimelineRows(followUpInput);
     expect(followUpRows.map((row) => row.kind)).toEqual([
       "message",
       "worktree-setup",
@@ -1384,6 +1406,21 @@ describe("deriveMessagesTimelineRows", () => {
       "message",
     ]);
     expect(followUpRows[1]).toEqual(completedRows[1]);
+    const runningFollowUpRows = deriveMessagesTimelineRows({
+      ...followUpInput,
+      latestTurn: { ...liveTurn, turnId: "turn-2" as never },
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:01:00Z",
+    });
+    expect(runningFollowUpRows.map((row) => row.kind)).toEqual([
+      "message",
+      "worktree-setup",
+      "message",
+      "message",
+      "working",
+      "thinking",
+    ]);
+    expect(runningFollowUpRows[1]).toEqual(completedRows[1]);
   });
 
   it("keeps context compaction visible outside folded work", () => {

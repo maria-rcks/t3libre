@@ -34,6 +34,11 @@ interface WorktreeSetupCardProps {
   onOpenTerminal: (() => void) | null;
 }
 
+function formatSetupDuration(durationMs: number): string {
+  const seconds = Math.max(0, Math.round(durationMs / 1_000));
+  return seconds < 60 ? `${seconds}s` : formatDuration(seconds * 1_000);
+}
+
 function stageElapsedMs(stage: WorktreeSetupStage, nowMs: number): number | null {
   if (!stage.startedAt) return null;
   const start = Date.parse(stage.startedAt);
@@ -106,7 +111,7 @@ function ShimmerOverlay({ children }: { children: ReactNode }) {
 function headerLabel(snapshot: WorktreeSetupSnapshot): string {
   switch (snapshot.phase) {
     case "running":
-      return "Setting up worktree…";
+      return "Worktree setup";
     case "done":
       return snapshot.stages.some((stage) => stage.status === "failed")
         ? "Worktree ready, setup script failed"
@@ -161,7 +166,7 @@ function StageRow({
       ) : null}
       {elapsed !== null && stage.status !== "skipped" && stage.status !== "pending" ? (
         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-          {formatDuration(elapsed)}
+          {formatSetupDuration(elapsed)}
         </span>
       ) : null}
       {running ? (
@@ -195,10 +200,10 @@ function OutputTail({ lines, failed }: { lines: ReadonlyArray<string>; failed: b
   return (
     <pre
       className={cn(
-        "mb-1 ml-8 overflow-hidden rounded-md border px-2.5 py-1.5 font-mono text-[11px] leading-relaxed select-text",
+        "mb-1 ml-8 overflow-hidden rounded-md px-2.5 py-1.5 font-mono text-[11px] leading-relaxed select-text",
         failed
-          ? "border-destructive/20 bg-error-surface text-destructive-foreground"
-          : "border-border bg-code text-muted-foreground",
+          ? "bg-error-surface text-destructive-foreground"
+          : "bg-code text-muted-foreground",
       )}
     >
       {rows.map(({ slot, line }) => (
@@ -281,13 +286,13 @@ export function WorktreeSetupCard({
       open={open}
       onOpenChange={setExpanded}
       render={<section aria-label="Worktree setup" />}
-      className="overflow-hidden rounded-lg border border-border bg-secondary dark:bg-input/20"
+      className="overflow-hidden rounded-lg bg-secondary dark:bg-input/20"
       data-worktree-setup-phase={snapshot.phase}
     >
       <CollapsibleTrigger
         disabled={running}
         className={cn(
-          "flex w-full min-w-0 items-center gap-2 px-3 py-3 text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default",
+          "flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default",
           snapshot.phase === "failed" || snapshot.phase === "cancelled"
             ? "text-destructive-foreground"
             : snapshot.stages.some(
@@ -297,7 +302,10 @@ export function WorktreeSetupCard({
               : "text-foreground",
         )}
       >
-        <GitBranchIcon aria-hidden className="size-4 shrink-0 text-icon-muted" />
+        <GitBranchIcon
+          aria-hidden
+          className={cn("size-4 shrink-0", cleanFinish ? "text-diff-addition" : "text-icon-muted")}
+        />
         <span className="min-w-0 truncate">{headerLabel(snapshot)}</span>
         {!open && snapshot.branch ? (
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-normal text-muted-foreground">
@@ -306,7 +314,7 @@ export function WorktreeSetupCard({
         ) : null}
         {totalElapsed !== null ? (
           <span className="ml-auto shrink-0 font-normal text-muted-foreground tabular-nums">
-            {formatDuration(totalElapsed)}
+            {formatSetupDuration(totalElapsed)}
           </span>
         ) : null}
         {!running ? (
@@ -320,7 +328,7 @@ export function WorktreeSetupCard({
         ) : null}
       </CollapsibleTrigger>
       <CollapsiblePanel className="duration-[220ms]">
-        <div className="border-t border-border bg-background px-3 py-2">
+        <div className="px-3 py-2">
           {snapshot.stages.map((stage) => (
             <div key={stage.id}>
               <StageRow
@@ -338,7 +346,7 @@ export function WorktreeSetupCard({
           ) : null}
           {detailsOpen ? <SetupDetails snapshot={snapshot} /> : null}
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
           <Button
             type="button"
             size="xs"

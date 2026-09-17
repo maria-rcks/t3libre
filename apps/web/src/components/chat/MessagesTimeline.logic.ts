@@ -1386,8 +1386,15 @@ export function deriveMessagesTimelineRows(input: {
     });
   }
 
-  // Keep one stable row under the first send, including while an async setup
-  // script outlives the agent handoff. The card owns its progress header.
+  if (
+    input.isWorking &&
+    !nextRows.some((row) => row.kind === "working") &&
+    activeTurnHeaderIndex === input.timelineEntries.length
+  ) {
+    appendWorkingRow();
+  }
+  // Keep setup under the first send and its working header through handoff.
+  // Follow-up working headers stay with their own user message.
   const setupHandedOff =
     input.worktreeSetup !== null &&
     input.worktreeSetup !== undefined &&
@@ -1405,22 +1412,19 @@ export function deriveMessagesTimelineRows(input: {
     const firstUserRowIndex = nextRows.findIndex(
       (row) => row.kind === "message" && row.message.role === "user",
     );
-    if (setupRunning) {
-      const workingRowIndex = nextRows.findIndex((row) => row.kind === "working");
-      if (workingRowIndex >= 0) nextRows.splice(workingRowIndex, 1);
+    let insertAt = firstUserRowIndex >= 0 ? firstUserRowIndex + 1 : nextRows.length;
+    if (nextRows[insertAt]?.kind === "working" || nextRows[insertAt]?.kind === "turn-fold") {
+      insertAt += 1;
     }
-    const insertAt = firstUserRowIndex >= 0 ? firstUserRowIndex + 1 : nextRows.length;
+    if (setupRunning && !nextRows.some((row) => row.kind === "working")) {
+      nextRows.splice(insertAt, 0, {
+        kind: "working",
+        id: "working-indicator-row",
+        createdAt: input.worktreeSetup.startedAt,
+      });
+      insertAt += 1;
+    }
     nextRows.splice(insertAt, 0, setupRow);
-  }
-  // Before the handoff, the setup card itself carries the progress header.
-  const hasWorkingRow = nextRows.some((row) => row.kind === "working");
-  if (
-    input.isWorking &&
-    !setupRunning &&
-    !hasWorkingRow &&
-    activeTurnHeaderIndex === input.timelineEntries.length
-  ) {
-    appendWorkingRow();
   }
   if (input.isWorking && !setupRunning && (!hasActivityRow || latestToolFailed)) {
     nextRows.push({
