@@ -1068,13 +1068,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 No models found
               </ComboboxEmpty>
             )}
-            {onToggleModel ? (
-              <div className="shrink-0 border-t border-border/70 px-3 py-2">
-                <p className="text-xs leading-snug text-muted-foreground">
-                  Shift-click to add or remove models. Each starts in its own worktree.
-                </p>
-              </div>
-            ) : null}
           </div>
         </Combobox>
       </div>

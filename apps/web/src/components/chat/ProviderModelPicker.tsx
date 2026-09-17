@@ -183,10 +183,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       : `${selectedEntries
           .slice(0, 2)
           .map((selection) => selection.label)
-          .join(" + ")}${selectedEntries.length > 2 ? ` +${selectedEntries.length - 2}` : ""}`
+          .join(", ")}${selectedEntries.length > 2 ? `, ${selectedEntries.length - 2} more` : ""}`
     : undefined;
   const allModelNames = selectedEntries
-    ? selectedEntries.map((selection) => selection.label).join(" + ") || "Choose models"
+    ? selectedEntries.map((selection) => selection.label).join(", ") || "Choose models"
     : undefined;
   const triggerTooltipContent = shortcutLabel
     ? `${props.triggerLabel ?? allModelNames ?? triggerLabel} · ${shortcutLabel}`
