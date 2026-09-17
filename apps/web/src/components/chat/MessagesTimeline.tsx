@@ -2807,7 +2807,7 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="relative min-w-0 flex-1 truncate text-secondary-label text-sm leading-relaxed">
             Thought
-            {preview ? <span className="ms-2 text-foreground">{preview}</span> : null}
+            {preview ? ` · ${preview}` : null}
           </span>
           <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
             <ChevronRightIcon
@@ -3113,7 +3113,7 @@ function LiveActivityRow({
   shimmer = false,
 }: {
   label: ReactNode;
-  /** Foreground text after the label. Left out of the shimmer copy so the sweep keeps its contrast. */
+  /** Muted text after the label. Left out of the shimmer copy so the sweep keeps its contrast. */
   detail?: string | undefined;
   iconName?: WorkEntryIconName;
   toolIcon?: ToolActivityIcon | undefined;
@@ -3195,7 +3195,7 @@ function LiveActivityContent({
       ) : null}
       <span className={cn("min-w-0 flex-1 truncate", active && "live-tool-shine")}>
         {label}
-        {detail ? <span className="ms-2 text-foreground">{detail}</span> : null}
+        {detail ? ` · ${detail}` : null}
       </span>
       {showTrailingFailureMark ? (
         <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
