@@ -4068,12 +4068,23 @@ export default function Sidebar() {
               // this group, go back to their previous group (or none); anything
               // filed elsewhere meanwhile stays, and the server retires the
               // group once it is empty.
+              // A previous group emptied by this action was retired with it,
+              // so restoring into it would be rejected; those threads ungroup.
+              const liveGroupKeys = new Set(
+                threadGroupsRef.current.map((group) => `${group.environmentId}:${group.id}`),
+              );
               for (const thread of selected) {
                 const current = readThreadShell(scopeThreadRef(thread.environmentId, thread.id));
                 if (current === null || current.groupId !== groupId) continue;
+                const previousGroupId = previousGroupIds.get(thread.id) ?? null;
+                const restoreGroupId =
+                  previousGroupId !== null &&
+                  liveGroupKeys.has(`${thread.environmentId}:${previousGroupId}`)
+                    ? previousGroupId
+                    : null;
                 void setThreadGroup({
                   environmentId: thread.environmentId,
-                  input: { threadId: thread.id, groupId: previousGroupIds.get(thread.id) ?? null },
+                  input: { threadId: thread.id, groupId: restoreGroupId },
                 }).then((undone) => {
                   if (undone._tag !== "Failure" || isAtomCommandInterrupted(undone)) return;
                   const error = squashAtomCommandFailure(undone);
