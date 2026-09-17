@@ -483,7 +483,9 @@ const make = Effect.gen(function* () {
       yield* fileSystem
         .makeDirectory(cwd, { recursive: true })
         .pipe(
-          Effect.mapError(() => new ProviderWorkspaceMissingError({ threadId: thread.id, cwd })),
+          Effect.mapError(
+            (cause) => new ProviderWorkspaceMissingError({ threadId: thread.id, cwd, cause }),
+          ),
         );
       return;
     }

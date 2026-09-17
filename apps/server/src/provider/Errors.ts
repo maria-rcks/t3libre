@@ -94,6 +94,7 @@ export class ProviderWorkspaceMissingError extends Schema.TaggedError<ProviderWo
   {
     threadId: Schema.String,
     cwd: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
