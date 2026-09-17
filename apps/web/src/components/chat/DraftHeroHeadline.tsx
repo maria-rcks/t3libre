@@ -3,7 +3,7 @@ import { useComposerDraftStore } from "~/composerDraftStore";
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { findChatProject } from "@t3tools/client-runtime/operations/projects";
-import { FolderPlusIcon, XIcon } from "lucide-react";
+import { FolderPlusIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
@@ -310,49 +310,41 @@ export function DraftHeroHeadline({
     </button>
   );
 
-  // One click out of the project and into chat, sitting right after the name
-  // it removes. Focus moves to the mode word once the x has gone.
-  const leaveProject = canJustChat ? (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant="ghost-muted"
-            size="icon-xs"
-            aria-label="Just chat"
-            className="pointer-events-auto ms-2 align-middle"
-            onClick={() =>
-              void startChat().then((started) => {
-                if (started) {
-                  document.querySelector<HTMLElement>("[data-draft-project-trigger]")?.focus();
-                }
-              })
-            }
-          />
-        }
-      >
-        <XIcon />
-      </TooltipTrigger>
-      <TooltipPopup side="top">Just chat</TooltipPopup>
-    </Tooltip>
+  // One click into chat, phrased as the alternative to the question above it.
+  // Focus moves to the mode word once this line has gone.
+  const orJustChat = canJustChat ? (
+    <Button
+      variant="link"
+      size="sm"
+      className="pointer-events-auto font-normal text-muted-foreground hover:text-foreground"
+      onClick={() =>
+        void startChat().then((started) => {
+          if (started) {
+            document.querySelector<HTMLElement>("[data-draft-project-trigger]")?.focus();
+          }
+        })
+      }
+    >
+      or just chat
+    </Button>
   ) : null;
 
   return (
-    <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-      {hasResolvedProject ? (
-        isChatDraft ? (
-          <>What should we {projectSelector} about?</>
+    <div className="mx-auto flex w-full max-w-5xl flex-col items-center">
+      <h1 className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
+        {hasResolvedProject ? (
+          isChatDraft ? (
+            <>What should we {projectSelector} about?</>
+          ) : (
+            <>What should we build in {projectSelector}?</>
+          )
+        ) : canChooseProject ? (
+          <>{projectSelector} to start</>
         ) : (
-          <>
-            What should we build in {projectSelector}
-            {leaveProject}?
-          </>
-        )
-      ) : canChooseProject ? (
-        <>{projectSelector} to start</>
-      ) : (
-        <>Add a project to start</>
-      )}
-    </h1>
+          <>Add a project to start</>
+        )}
+      </h1>
+      {orJustChat ? <div className="mt-2 flex h-7 items-center">{orJustChat}</div> : null}
+    </div>
   );
 }
