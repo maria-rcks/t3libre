@@ -17,6 +17,9 @@ import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ThreadStatusPill } from "../Sidebar.logic";
 
+// Longest gap between the clicks of a double-click on common platforms.
+const DOUBLE_CLICK_WINDOW_MS = 500;
+
 /**
  * A user-made folder in the sidebar: a tinted card carrying the group's color
  * with a header row that toggles its member thread rows. Members render as
@@ -70,14 +73,25 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
       ? [`${props.pullRequestCount} pull request${props.pullRequestCount === 1 ? "" : "s"}`]
       : []),
   ].join(", ");
+  // Folds made by the clicks of a rename double-click, so the double-click can
+  // undo them. Touch reports every tap as a first click, so this counts folds
+  // instead of trusting `event.detail`.
+  const foldClicksRef = useRef({ count: 0, at: 0 });
   const handleClick = useCallback(
     (event: ReactMouseEvent) => {
-      if ((event.target as HTMLElement).closest("input")) return;
-      // The second click of a rename double-click must not fold the group back.
+      // A click beside the text box commits the rename; it must not fold too.
+      if (isRenaming || (event.target as HTMLElement).closest("input")) return;
+      // The second click of a mouse double-click must not fold the group back.
       if (event.detail > 1) return;
+      const now = event.timeStamp;
+      const clicks = foldClicksRef.current;
+      foldClicksRef.current = {
+        count: now - clicks.at < DOUBLE_CLICK_WINDOW_MS ? clicks.count + 1 : 1,
+        at: now,
+      };
       onToggle(group);
     },
-    [group, onToggle],
+    [group, isRenaming, onToggle],
   );
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent) => {
@@ -101,9 +115,10 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
       if (isRenaming || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       if ((event.target as HTMLElement).closest("input")) return;
       event.preventDefault();
-      // The first click of this pair already folded the group; put it back so
-      // renaming never changes the fold.
-      onToggle(group);
+      // Put back whatever the clicks of this pair folded so renaming never
+      // changes the fold.
+      if (foldClicksRef.current.count % 2 === 1) onToggle(group);
+      foldClicksRef.current = { count: 0, at: 0 };
       onStartRename(group);
     },
     [group, isRenaming, onStartRename, onToggle],
@@ -138,7 +153,10 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
       data-testid={`sidebar-thread-group-${group.id}`}
       className={cn(
         "list-none rounded-lg py-0.5 ring-1 ring-inset transition-colors motion-reduce:transition-none",
-        props.expanded ? "my-1 pb-1" : "my-px",
+        props.expanded ? "my-1" : "my-px",
+        // Member rows (all of them, or only the open thread while collapsed)
+        // need room above the card's bottom edge.
+        props.children ? "pb-1" : null,
         tintClassName,
       )}
     >
@@ -166,7 +184,11 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
           )}
         >
           {group.icon ? (
-            <ProjectIconOverrideGlyph icon={group.icon} className="size-3.5" />
+            <ProjectIconOverrideGlyph
+              icon={group.icon}
+              // A monogram is its own tile, so it takes the tile's size.
+              className={group.icon.kind === "monogram" ? "size-5" : "size-3.5"}
+            />
           ) : (
             <FolderIcon aria-hidden className="size-3.5" />
           )}
