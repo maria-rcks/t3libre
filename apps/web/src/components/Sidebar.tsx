@@ -2899,6 +2899,10 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  const threadGroupsRef = useRef(threadGroups);
+  threadGroupsRef.current = threadGroups;
+  const threadGroupBlocksRef = useRef(threadGroupBlocks);
+  threadGroupBlocksRef.current = threadGroupBlocks;
   const [threadGroupsExpanded, setThreadGroupsExpanded] = useLocalStorage(
     THREAD_GROUPS_EXPANDED_KEY,
     EMPTY_THREAD_GROUPS_EXPANDED,
@@ -2907,7 +2911,13 @@ export default function Sidebar() {
   const toggleThreadGroup = useCallback(
     (group: EnvironmentThreadGroup) => {
       const key = `${group.environmentId}:${group.id}`;
-      setThreadGroupsExpanded((value) => ({ ...value, [key]: !(value[key] ?? false) }));
+      // Keys of groups that no longer exist are dropped on the way, so the
+      // record cannot grow with every group ever created.
+      const known = new Set(threadGroupsRef.current.map((g) => `${g.environmentId}:${g.id}`));
+      setThreadGroupsExpanded((value) => ({
+        ...Object.fromEntries(Object.entries(value).filter(([k]) => known.has(k))),
+        [key]: !(value[key] ?? false),
+      }));
     },
     [setThreadGroupsExpanded],
   );
@@ -3009,10 +3019,7 @@ export default function Sidebar() {
       ]),
     [snoozedThreads, threadGroupBlocks],
   );
-  const threadGroupsRef = useRef(threadGroups);
-  threadGroupsRef.current = threadGroups;
-  const threadGroupBlocksRef = useRef(threadGroupBlocks);
-  threadGroupBlocksRef.current = threadGroupBlocks;
+
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
   snoozedThreadKeysRef.current = snoozedThreadKeys;
 
@@ -4535,7 +4542,10 @@ export default function Sidebar() {
                 ? {
                     groups: {
                       currentGroupId: thread.groupId ?? null,
-                      options: threadGroupsRef.current
+                      // Visible folders only, so a thread cannot be filed
+                      // into a group the sidebar does not show.
+                      options: threadGroupBlocksRef.current
+                        .map((block) => block.group)
                         .filter(
                           (group) =>
                             group.environmentId === thread.environmentId &&
@@ -4785,9 +4795,12 @@ export default function Sidebar() {
       if (command === "thread.group") {
         // Selection first; with nothing selected the open thread starts a
         // group of one, which the "Move to group" menu can grow later.
+        // Resolve from the shell store, not the rendered rows: a selected
+        // member folded away by its group must still join the new group.
         const selectedKeys = [...useThreadSelectionStore.getState().selectedThreadKeys];
         const selected = selectedKeys.flatMap((threadKey) => {
-          const thread = threadByKey.get(threadKey);
+          const threadRef = parseScopedThreadKey(threadKey);
+          const thread = threadRef === null ? null : readThreadShell(threadRef);
           return thread ? [thread] : [];
         });
         const routeThread =
@@ -5474,6 +5487,16 @@ export default function Sidebar() {
               void updateThreadGroup({
                 environmentId: group.environmentId,
                 input: { groupId: group.id, icon },
+              }).then((result) => {
+                if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+                const error = squashAtomCommandFailure(result);
+                toastManager.add(
+                  stackedThreadToast({
+                    type: "error",
+                    title: "Failed to change group icon",
+                    description: error instanceof Error ? error.message : "An error occurred.",
+                  }),
+                );
               });
             }}
           />

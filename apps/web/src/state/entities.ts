@@ -229,8 +229,6 @@ export function readEnvironmentSupportsTitleRegeneration(environmentId: Environm
   );
 }
 
-/** Whether the environment's server understands thread.pin.reorder (and
-    orderKey on thread.pin). Same version-skew contract as settlement. */
 /** Whether the environment's server understands thread groups.
     Same version-skew contract as settlement. */
 export function readEnvironmentSupportsThreadGroups(environmentId: EnvironmentId): boolean {
@@ -240,6 +238,8 @@ export function readEnvironmentSupportsThreadGroups(environmentId: EnvironmentId
   );
 }
 
+/** Whether the environment's server understands thread.pin.reorder (and
+    orderKey on thread.pin). Same version-skew contract as settlement. */
 export function readEnvironmentSupportsPinReorder(environmentId: EnvironmentId): boolean {
   return (
     appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities

@@ -2146,7 +2146,26 @@ const makeWsRpcLayer = (
                 }),
                 synchronizedThenLive,
               );
-            }),
+            }).pipe(
+              // Pre-groups clients fail to decode the group stream kinds, so
+              // only subscribers that opted in receive them.
+              Effect.map((stream) =>
+                input.threadGroups === true
+                  ? stream
+                  : stream.pipe(
+                      Stream.filter(
+                        (item) =>
+                          item.kind !== "thread-group-upserted" &&
+                          item.kind !== "thread-group-removed",
+                      ),
+                      Stream.map((item): OrchestrationShellStreamItem => {
+                        if (item.kind !== "snapshot") return item;
+                        const { threadGroups: _threadGroups, ...snapshot } = item.snapshot;
+                        return { kind: "snapshot" as const, snapshot };
+                      }),
+                    ),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: (_input) =>

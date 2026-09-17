@@ -187,7 +187,7 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
           {props.count}
         </span>
       </div>
-      {props.expanded && props.children ? (
+      {props.children ? (
         <ul
           role="list"
           data-testid={`sidebar-thread-group-members-${group.id}`}

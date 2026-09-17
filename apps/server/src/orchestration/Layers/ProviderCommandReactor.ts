@@ -1262,11 +1262,24 @@ const make = Effect.gen(function* () {
       if (result._tag === "Superseded") {
         return;
       }
-      yield* dispatchThreadGroupNameCompletion({
+      const completion = {
         groupId: request.groupId,
         requestId: request.requestId,
         ...(result.name !== undefined ? { name: result.name } : {}),
-      });
+      };
+      // One retry, like title regeneration: a transient dispatch failure must
+      // not leave the group stuck in its pending "Naming…" state.
+      yield* dispatchThreadGroupNameCompletion(completion).pipe(
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterruptsOnly(cause)) {
+            return Effect.failCause(cause);
+          }
+          return Effect.logWarning("provider command reactor retrying group name completion", {
+            groupId: request.groupId,
+            cause: Cause.pretty(cause),
+          }).pipe(Effect.andThen(dispatchThreadGroupNameCompletion(completion)));
+        }),
+      );
     },
     (effect, request) =>
       effect.pipe(

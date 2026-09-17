@@ -1,4 +1,4 @@
-import { TextGenerationError } from "@t3tools/contracts";
+import { DEFAULT_THREAD_GROUP_NAME, TextGenerationError } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -135,7 +135,7 @@ export function sanitizeThreadGroupName(raw: string): string {
     .trim()
     .replace(/\s+/g, " ");
   if (!normalized || normalized.length === 0) {
-    return "New group";
+    return DEFAULT_THREAD_GROUP_NAME;
   }
   // Models often answer in lowercase; a folder label reads as a title.
   const capitalized = normalized.charAt(0).toUpperCase() + normalized.slice(1);

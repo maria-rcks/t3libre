@@ -54,14 +54,18 @@ export interface ThreadActionMenuState {
   };
 }
 
-export function threadGroupMenuIdForGroup(groupId: ThreadGroupId): `group:${string}` {
-  return `group:${groupId}`;
+// Group ids live under their own prefix so they can never collide with the
+// `group:new` / `group:none` action ids.
+const THREAD_GROUP_MENU_ID_PREFIX = "group:id:";
+
+function threadGroupMenuIdForGroup(groupId: ThreadGroupId): `group:${string}` {
+  return `${THREAD_GROUP_MENU_ID_PREFIX}${groupId}`;
 }
 
-/** Group id from a `group:<id>` menu id, or null for the new/none choices. */
+/** Group id from a `group:id:<id>` menu id, or null for the new/none choices. */
 export function threadGroupIdFromMenuId(id: string): ThreadGroupId | null {
-  if (!id.startsWith("group:") || id === "group:new" || id === "group:none") return null;
-  return id.slice("group:".length) as ThreadGroupId;
+  if (!id.startsWith(THREAD_GROUP_MENU_ID_PREFIX)) return null;
+  return id.slice(THREAD_GROUP_MENU_ID_PREFIX.length) as ThreadGroupId;
 }
 
 /**

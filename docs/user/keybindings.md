@@ -63,7 +63,7 @@ It is a JSON array of rules:
 
 ```json
 [
-  { "key": "mod+g", "command": "terminal.toggle" },
+  { "key": "mod+alt+t", "command": "terminal.toggle" },
   { "key": "mod+shift+g", "command": "terminal.new", "when": "terminalFocus" }
 ]
 ```

@@ -9,7 +9,7 @@ import {
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 
 import { resolveSnoozePresets, snoozeWakeDescription } from "../components/Sidebar.snooze";
 import {
@@ -27,6 +27,7 @@ import {
   readEnvironmentSupportsThreadGroups,
   readEnvironmentSupportsTitleRegeneration,
   readThreadShell,
+  readThreadShells,
   useProjects,
   useThreadGroups,
 } from "../state/entities";
@@ -99,6 +100,9 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const threadGroups = useThreadGroups();
+  // Read at menu-open time so the callback does not churn on every group change.
+  const threadGroupsRef = useRef(threadGroups);
+  threadGroupsRef.current = threadGroups;
   const createThreadGroup = useAtomCommand(threadEnvironment.createGroup, {
     reportFailure: false,
   });
@@ -162,11 +166,19 @@ export function useThreadActionMenu(input: {
             ? {
                 groups: {
                   currentGroupId: thread.groupId ?? null,
-                  options: threadGroups
+                  // Only folders the sidebar shows: a group whose members are
+                  // all archived is kept for unarchive but is not a target.
+                  options: threadGroupsRef.current
                     .filter(
                       (group) =>
                         group.environmentId === thread.environmentId &&
-                        group.projectId === thread.projectId,
+                        group.projectId === thread.projectId &&
+                        readThreadShells().some(
+                          (candidate) =>
+                            candidate.environmentId === group.environmentId &&
+                            candidate.groupId === group.id &&
+                            candidate.archivedAt === null,
+                        ),
                     )
                     .map((group) => ({ id: group.id, name: group.name })),
                 },
@@ -407,7 +419,6 @@ export function useThreadActionMenu(input: {
       unsettleThread,
       unsnoozeThread,
       updateThreadMetadata,
-      threadGroups,
       createThreadGroup,
       setThreadGroup,
     ],

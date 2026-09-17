@@ -1025,6 +1025,13 @@ export const OrchestrationSubscribeShellInput = Schema.Struct({
    * snapshot or catch-up replay and before it begins emitting live events.
    */
   requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Opt in to thread groups: the snapshot's `threadGroups` list and the
+   * `thread-group-upserted` / `thread-group-removed` stream items. Clients
+   * from before groups cannot decode those kinds, so the server keeps them
+   * off the stream unless asked.
+   */
+  threadGroups: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationSubscribeShellInput = typeof OrchestrationSubscribeShellInput.Type;
 
@@ -1299,8 +1306,8 @@ const ThreadGroupMetaUpdateCommand = Schema.Struct({
 }).check(
   Schema.makeFilter(
     (input) =>
-      !(input.name !== undefined && input.regenerateName === true) ||
-      "name and regenerateName cannot be specified together",
+      !((input.name !== undefined || input.icon !== undefined) && input.regenerateName === true) ||
+      "name or icon cannot be specified together with regenerateName",
   ),
 );
 

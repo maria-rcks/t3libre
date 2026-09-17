@@ -3,6 +3,7 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   ProjectId,
+  ThreadGroupId,
   ThreadId,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -135,6 +136,154 @@ function normalizeDeleteEvent(event: PlannedEvent | ReadonlyArray<PlannedEvent>)
     }
   });
 }
+
+const seedGroupedReadModel = Effect.gen(function* () {
+  const now = "2026-01-01T00:00:00.000Z";
+  const seeded = yield* seedReadModel;
+  const withGroup = yield* projectEvent(seeded, {
+    sequence: 4,
+    eventId: asEventId("evt-group-create"),
+    aggregateKind: "thread-group",
+    aggregateId: ThreadGroupId.make("group-1"),
+    type: "thread-group.created",
+    occurredAt: now,
+    commandId: asCommandId("cmd-group-create"),
+    causationEventId: null,
+    correlationId: asCommandId("cmd-group-create"),
+    metadata: {},
+    payload: {
+      groupId: ThreadGroupId.make("group-1"),
+      projectId: asProjectId("project-delete"),
+      name: "Group",
+      icon: null,
+      nameGeneration: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+  return yield* projectEvent(withGroup, {
+    sequence: 5,
+    eventId: asEventId("evt-group-set"),
+    aggregateKind: "thread",
+    aggregateId: asThreadId("thread-delete-1"),
+    type: "thread.group-set",
+    occurredAt: now,
+    commandId: asCommandId("cmd-group-create"),
+    causationEventId: null,
+    correlationId: asCommandId("cmd-group-create"),
+    metadata: {},
+    payload: {
+      threadId: asThreadId("thread-delete-1"),
+      groupId: ThreadGroupId.make("group-1"),
+      updatedAt: now,
+    },
+  });
+});
+
+it.layer(NodeServices.layer)("decider thread group flows", (it) => {
+  it.effect("deleting a group's last member retires the group", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedGroupedReadModel;
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.delete",
+          commandId: asCommandId("cmd-thread-delete-grouped"),
+          threadId: asThreadId("thread-delete-1"),
+        },
+        readModel,
+      });
+      const events = Array.isArray(result) ? result : [result];
+      expect(events.map((event) => event.type)).toEqual(["thread.deleted", "thread-group.deleted"]);
+      expect(events[1]?.aggregateId).toBe("group-1");
+    }),
+  );
+
+  it.effect(
+    "moving the last member out retires the group; re-setting the same group is a no-op",
+    () =>
+      Effect.gen(function* () {
+        const readModel = yield* seedGroupedReadModel;
+        const moved = yield* decideOrchestrationCommand({
+          command: {
+            type: "thread.group.set",
+            commandId: asCommandId("cmd-group-unset"),
+            threadId: asThreadId("thread-delete-1"),
+            groupId: null,
+          },
+          readModel,
+        });
+        const movedEvents = Array.isArray(moved) ? moved : [moved];
+        expect(movedEvents.map((event) => event.type)).toEqual([
+          "thread.group-set",
+          "thread-group.deleted",
+        ]);
+
+        const same = yield* decideOrchestrationCommand({
+          command: {
+            type: "thread.group.set",
+            commandId: asCommandId("cmd-group-same"),
+            threadId: asThreadId("thread-delete-1"),
+            groupId: ThreadGroupId.make("group-1"),
+          },
+          readModel,
+        });
+        const sameEvents = Array.isArray(same) ? same : [same];
+        expect(sameEvents.map((event) => event.type)).toEqual(["thread.group-set"]);
+        if (sameEvents[0]?.type === "thread.group-set") {
+          expect(sameEvents[0].payload.updatedAt).toBe(readModel.threads[0]?.updatedAt);
+        }
+      }),
+  );
+
+  it.effect("creating a group rejects members from another project", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedReadModel;
+      const error = yield* Effect.flip(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread-group.create",
+            commandId: asCommandId("cmd-group-create-cross"),
+            groupId: ThreadGroupId.make("group-2"),
+            projectId: asProjectId("project-delete"),
+            threadIds: [asThreadId("thread-delete-2")],
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+          readModel: {
+            ...readModel,
+            threads: readModel.threads.map((thread) =>
+              thread.id === "thread-delete-2"
+                ? { ...thread, projectId: asProjectId("project-other") }
+                : thread,
+            ),
+          },
+        }),
+      );
+      expect(error.message).toContain("belongs to another project");
+    }),
+  );
+
+  it.effect("a late name completion for a superseded request only clears nothing", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedGroupedReadModel;
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread-group.name.generate.complete",
+          commandId: asCommandId("cmd-group-name-complete"),
+          groupId: ThreadGroupId.make("group-1"),
+          requestId: asCommandId("cmd-stale-request"),
+          name: "Stale name",
+        },
+        readModel,
+      });
+      const events = Array.isArray(result) ? result : [result];
+      expect(events[0]?.type).toBe("thread-group.meta-updated");
+      if (events[0]?.type === "thread-group.meta-updated") {
+        expect(events[0].payload.name).toBeUndefined();
+        expect(events[0].payload.nameGeneration).toBeUndefined();
+      }
+    }),
+  );
+});
 
 it.layer(NodeServices.layer)("decider deletion flows", (it) => {
   it.effect("rejects deleting a non-empty project without force", () =>

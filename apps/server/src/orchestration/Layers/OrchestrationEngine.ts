@@ -302,10 +302,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 });
               }
 
+              // Keyed by the command's own aggregate: group commands also emit
+              // thread events, and a retry is matched against the command.
               yield* commandReceiptRepository.upsert({
                 commandId: envelope.command.commandId,
-                aggregateKind: lastSavedEvent.aggregateKind,
-                aggregateId: lastSavedEvent.aggregateId,
+                aggregateKind: aggregateRef.aggregateKind,
+                aggregateId: aggregateRef.aggregateId,
                 acceptedAt: lastSavedEvent.occurredAt,
                 resultSequence: lastSavedEvent.sequence,
                 status: "accepted",

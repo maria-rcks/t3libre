@@ -467,7 +467,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const occurredAt = yield* nowIso;
-      return {
+      const deleted: PlannedOrchestrationEvent = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -480,6 +480,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           deletedAt: occurredAt,
         },
       };
+      // Deleting the last member retires its group the same way moving it
+      // out would; archiving does not, so an unarchive lands back in place.
+      const emptied = yield* emptiedThreadGroupDeletions({
+        readModel,
+        movedThreadIds: new Set([command.threadId]),
+        occurredAt,
+        commandId: command.commandId,
+      });
+      return emptied.length === 0 ? deleted : [deleted, ...emptied];
     }
 
     case "thread.archive": {
