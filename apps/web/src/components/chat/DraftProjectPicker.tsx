@@ -7,7 +7,7 @@ import {
   type ScopedProjectRef,
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { ChevronDownIcon, FolderPlusIcon, MessageCircleIcon, PlusIcon, XIcon } from "lucide-react";
+import { FolderPlusIcon, MessageCircleIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
@@ -224,11 +224,13 @@ export function DraftProjectPicker({
           ) : null}
           <span
             className={`truncate${isChat ? " ps-1" : ""}`}
-            style={{ textBox: "trim-both ex alphabetic", paddingBlock: "0.5em" }}
+            style={{
+              textBox: isChat ? "trim-both cap alphabetic" : "trim-both ex alphabetic",
+              paddingBlock: "0.5em",
+            }}
           >
             {activeProjectDisplayName ?? "Add project"}
           </span>
-          <ChevronDownIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
         </TooltipTrigger>
         {activeProjectDisplayName ? (
           <TooltipPopup side="top" className="max-w-80">
