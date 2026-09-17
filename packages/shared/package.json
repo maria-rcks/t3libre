@@ -47,6 +47,10 @@
       "types": "./src/git.ts",
       "import": "./src/git.ts"
     },
+    "./githubMedia": {
+      "types": "./src/githubMedia.ts",
+      "import": "./src/githubMedia.ts"
+    },
     "./sourceControl": {
       "types": "./src/sourceControl.ts",
       "import": "./src/sourceControl.ts"
@@ -270,6 +274,10 @@
     "./chatList": {
       "types": "./src/chatList.ts",
       "import": "./src/chatList.ts"
+    },
+    "./nodeRuntime": {
+      "types": "./src/nodeRuntime.ts",
+      "import": "./src/nodeRuntime.ts"
     },
     "./hostProcess": {
       "types": "./src/hostProcess.ts",
