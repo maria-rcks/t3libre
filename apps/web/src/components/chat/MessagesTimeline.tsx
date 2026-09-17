@@ -2730,10 +2730,11 @@ function ReasoningTraceBlock({
           </span>
         </div>
       ) : null}
-      <div className="ms-7 flex max-h-96 flex-col gap-3 overflow-auto px-0.5 py-1 text-foreground select-text">
+      <div className="ms-7 flex max-h-96 flex-col gap-3 overflow-auto px-0.5 py-1 select-text">
         {messages.map((reasoningMessage) => (
           <ChatMarkdown
             key={reasoningMessage.id}
+            className="text-foreground"
             text={reasoningMessage.text}
             cwd={ctx.markdownCwd}
             threadRef={ctx.threadRef ?? undefined}
@@ -2798,8 +2799,9 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
         </span>
       </button>
       {expanded ? (
-        <div className="mt-1 ms-7 flex max-h-96 flex-col gap-3 overflow-auto px-0.5 py-1 text-foreground select-text">
+        <div className="mt-1 ms-7 flex max-h-96 flex-col gap-3 overflow-auto px-0.5 py-1 select-text">
           <ChatMarkdown
+            className="text-foreground"
             text={message.text}
             cwd={ctx.markdownCwd}
             threadRef={ctx.threadRef ?? undefined}
