@@ -363,23 +363,96 @@ function Section({
 
 function CommentGroup({
   label,
+  comments,
+  detail,
   children,
   onOpenChange,
 }: {
-  label: ReactNode;
+  label: string;
+  comments: readonly PullRequestComment[];
+  detail: PullRequestDetailView;
   children: ReactNode;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const authors = [
+    ...new Map(
+      comments.map((comment) => [reviewerKey(comment.author?.login ?? "ghost"), comment.author]),
+    ).values(),
+  ];
+  const fileCount = new Set(comments.flatMap((comment) => (comment.path ? [comment.path] : [])))
+    .size;
+  const latest = comments.reduce<string | null>(
+    (date, comment) => (date === null || comment.createdAt > date ? comment.createdAt : date),
+    null,
+  );
   return (
-    <Collapsible className="border-t border-border/60 pt-1" onOpenChange={onOpenChange}>
-      <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground">
-        <ChevronRightIcon
-          aria-hidden
-          className="size-3.5 shrink-0 transition-transform group-data-panel-open:rotate-90"
-        />
-        <span>{label}</span>
-      </CollapsibleTrigger>
-      <CollapsiblePanel keepMounted>{children}</CollapsiblePanel>
+    <Collapsible
+      className="overflow-hidden rounded-lg border border-border/70 bg-muted/20"
+      onOpenChange={onOpenChange}
+    >
+      <div className="flex items-center gap-3 pl-3">
+        <div className="flex shrink-0 -space-x-1.5">
+          {authors.slice(0, 3).map((actor) => (
+            <PullRequestActorLabel
+              key={actor?.login ?? "ghost"}
+              actor={actor}
+              profileUrl={
+                detail.provider === "github" && actor
+                  ? new URL(
+                      actor.login.endsWith("[bot]")
+                        ? `/apps/${encodeURIComponent(actor.login.slice(0, -5))}`
+                        : `/${encodeURIComponent(actor.login)}`,
+                      detail.url,
+                    ).toString()
+                  : null
+              }
+              labelClassName="sr-only"
+              className="relative rounded-full bg-background ring-2 ring-background hover:z-10 focus-visible:z-10 [&>img]:size-6 [&>span:first-child]:size-6"
+            />
+          ))}
+          {authors.length > 3 ? (
+            <span className="relative flex size-6 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground ring-2 ring-background">
+              +{authors.length - 3}
+            </span>
+          ) : null}
+        </div>
+        <CollapsibleTrigger
+          aria-label={label}
+          className="group flex min-w-0 flex-1 items-center gap-3 rounded-md py-3 pr-3 text-left hover:bg-muted/30"
+        >
+          <span className="min-w-0 flex-1 space-y-1">
+            <span className="block text-xs font-medium text-foreground/90">{label}</span>
+            <span className="flex flex-wrap gap-x-1.5 text-[11px] text-muted-foreground">
+              <span>
+                {authors.length} {authors.length === 1 ? "author" : "authors"}
+              </span>
+              {fileCount > 0 ? (
+                <span>
+                  · {fileCount} {fileCount === 1 ? "file" : "files"}
+                </span>
+              ) : null}
+              {latest ? (
+                <span>
+                  · Latest{" "}
+                  <Tooltip>
+                    <TooltipTrigger render={<time dateTime={latest} />}>
+                      {formatRelativeTimeLabel(latest)}
+                    </TooltipTrigger>
+                    <TooltipPopup>{new Date(latest).toLocaleString()}</TooltipPopup>
+                  </Tooltip>
+                </span>
+              ) : null}
+            </span>
+          </span>
+          <ChevronRightIcon
+            aria-hidden
+            className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-90"
+          />
+        </CollapsibleTrigger>
+      </div>
+      <CollapsiblePanel keepMounted>
+        <div className="border-t border-border/60 px-3 pb-3">{children}</div>
+      </CollapsiblePanel>
     </Collapsible>
   );
 }
@@ -913,11 +986,9 @@ export function PullRequestSummaryTab({
                 {botComments.length > 0 ? (
                   <CommentGroup
                     key={`bots:${detail.url}`}
-                    label={
-                      <>
-                        {botComments.length} bot comment{botComments.length === 1 ? "" : "s"}
-                      </>
-                    }
+                    label={`${botComments.length} bot comment${botComments.length === 1 ? "" : "s"}`}
+                    comments={botComments}
+                    detail={detail}
                     onOpenChange={(open) => {
                       if (open) setOpenedBotGroup(detail.url);
                     }}
@@ -960,12 +1031,9 @@ export function PullRequestSummaryTab({
                 {finishedComments.length > 0 ? (
                   <CommentGroup
                     key={detail.url}
-                    label={
-                      <>
-                        {finishedComments.length} resolved or dismissed comment
-                        {finishedComments.length === 1 ? "" : "s"}
-                      </>
-                    }
+                    label={`${finishedComments.length} resolved or dismissed comment${finishedComments.length === 1 ? "" : "s"}`}
+                    comments={finishedComments}
+                    detail={detail}
                   >
                     <div className="space-y-2 pt-2">
                       {orderPullRequestComments(finishedComments, commentOrder).map((comment) => {

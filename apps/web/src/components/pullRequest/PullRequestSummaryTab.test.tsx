@@ -176,9 +176,7 @@ it("opens bot reports in pages without hiding human comments", () => {
   ).toBe(false);
   const group = renderer.root
     .findAllByType("button")
-    .find((button) =>
-      button.findAllByType("span").some((span) => span.children.includes(" bot comment")),
-    )!;
+    .find((button) => button.props["aria-label"] === "12 bot comments")!;
   act(() => group.props.onClick({ nativeEvent: {}, preventDefault() {}, stopPropagation() {} }));
   expect(
     renderer.root.findAllByType("p").filter((p) => p.children.join("").startsWith("Bot report")),
