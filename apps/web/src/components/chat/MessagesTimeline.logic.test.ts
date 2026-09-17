@@ -2181,33 +2181,36 @@ describe("deriveMessagesTimelineRows", () => {
     expect(settled.map((row) => row.kind)).toEqual(["activity-group"]);
   });
 
-  it("settles the activity row while the latest tool has failed", () => {
-    const thought = reasoningEntry("reasoning-entry", "2026-01-01T00:00:01Z", "turn-1");
-    const failedTool = toolEntry("failed-tool", "2026-01-01T00:00:02Z", "turn-1");
-    const rows = deriveMessagesTimelineRows({
-      timelineEntries: [
-        thought,
-        {
-          ...failedTool,
-          entry: {
-            ...failedTool.entry,
-            command: "echo nope",
-            toolCallId: "failed-tool",
-            toolLifecycleStatus: "failed" as const,
-            sourceActivityKind: "tool.completed" as const,
+  it.each(["failed", "declined"] as const)(
+    "settles the activity row while the latest tool is %s",
+    (status) => {
+      const thought = reasoningEntry("reasoning-entry", "2026-01-01T00:00:01Z", "turn-1");
+      const tool = toolEntry("last-tool", "2026-01-01T00:00:02Z", "turn-1");
+      const rows = deriveMessagesTimelineRows({
+        timelineEntries: [
+          thought,
+          {
+            ...tool,
+            entry: {
+              ...tool.entry,
+              command: "echo nope",
+              toolCallId: "last-tool",
+              toolLifecycleStatus: status,
+              sourceActivityKind: "tool.completed" as const,
+            },
           },
-        },
-      ],
-      runningTurnId: TurnId.make("turn-1"),
-      isWorking: true,
-      activeTurnStartedAt: "2026-01-01T00:00:00Z",
-      turnDiffSummaries: [],
-      supportsConversationRollback: false,
-    });
-    expect(rows.map((row) => row.kind)).toEqual(["working", "activity-group", "thinking"]);
-    expect(rows[1]).toMatchObject({ id: "activity-group:reasoning-entry", active: false });
-    expect(rows[2]).toMatchObject({ id: "live-activity-row" });
-  });
+        ],
+        runningTurnId: TurnId.make("turn-1"),
+        isWorking: true,
+        activeTurnStartedAt: "2026-01-01T00:00:00Z",
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+      });
+      expect(rows.map((row) => row.kind)).toEqual(["working", "activity-group", "thinking"]);
+      expect(rows[1]).toMatchObject({ id: "activity-group:reasoning-entry", active: false });
+      expect(rows[2]).toMatchObject({ id: "live-activity-row" });
+    },
+  );
 
   it("folds mixed activity under worked-for and restores ordered details when expanded", () => {
     const entries = [

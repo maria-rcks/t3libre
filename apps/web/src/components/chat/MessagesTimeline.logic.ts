@@ -390,7 +390,6 @@ export type MessagesTimelineRow =
       createdAt: string;
       message: ChatMessage;
       durationStart: string;
-      reasoningMessages?: ReadonlyArray<ChatMessage>;
       showAssistantMeta: boolean;
       showAssistantCopyButton: boolean;
       assistantCopyStreaming: boolean;
@@ -1158,7 +1157,8 @@ export function deriveMessagesTimelineRows(input: {
           input.isWorking &&
           activityTurnId === unsettledTurnId &&
           cursor === input.timelineEntries.length &&
-          !latestToolFailed;
+          !latestToolFailed &&
+          (latestVisibleToolEntry === undefined || latestToolKeepsActivityLive);
         const groupId =
           timelineEntry.kind === "work"
             ? workGroupId(timelineEntry.id, timelineEntry.entry)

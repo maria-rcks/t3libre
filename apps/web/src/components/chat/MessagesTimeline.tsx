@@ -171,7 +171,6 @@ import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssis
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
-  LIVE_ACTIVITY_ROW_ID,
   deriveUnsettledTurnId,
   type MessagesTimelineRowsProjection,
   liveWorkEntryLabel,
@@ -2644,7 +2643,7 @@ function ActivityGroupTimelineRow({
             key={entry.id}
             messages={messages}
             live={row.active && index === row.entries.length - 1}
-            showHeader={work.length > 0}
+            showHeader={row.entries.some((entry) => entry.kind === "work")}
           />,
         );
       }
@@ -2731,7 +2730,7 @@ function ReasoningTraceBlock({
           </span>
         </div>
       ) : null}
-      <div className="ms-7 flex flex-col gap-3 px-0.5 py-1 text-foreground select-text">
+      <div className="ms-7 flex max-h-96 flex-col gap-3 overflow-auto px-0.5 py-1 text-foreground select-text">
         {messages.map((reasoningMessage) => (
           <ChatMarkdown
             key={reasoningMessage.id}
@@ -2758,35 +2757,18 @@ function ReasoningTraceBlock({
  */
 const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
   row,
-  disclosureAnchorKey = row.id,
 }: {
   row: Extract<TimelineRow, { kind: "message" }>;
-  disclosureAnchorKey?: string;
 }) {
   const ctx = use(TimelineRowCtx);
-  const { isWorking, unsettledTurnId } = use(TimelineRowActivityCtx);
   const { message } = row;
-  const messages = row.reasoningMessages ?? [message];
-  // A block left open by a crashed provider or a restarted server never gets
-  // its completion. Only the live turn may claim to still be thinking, so a
-  // settled turn cannot shimmer "Thinking" at the user forever.
-  const streaming =
-    row.id === LIVE_ACTIVITY_ROW_ID &&
-    messages.some((reasoningMessage) => reasoningMessage.streaming) &&
-    isWorking &&
-    message.turnId !== null &&
-    message.turnId === unsettledTurnId;
   const expanded = ctx.expandedReasoningMessageIds.has(message.id);
   const { onToggleReasoning } = ctx;
   const toggle = useCallback(() => {
-    onToggleReasoning(message.id, !expanded, disclosureAnchorKey);
-  }, [expanded, message.id, disclosureAnchorKey, onToggleReasoning]);
-  const label = `${streaming ? "Thinking" : "Thought"}${messages.length > 1 ? ` (×${messages.length})` : ""}`;
+    onToggleReasoning(message.id, !expanded, row.id);
+  }, [expanded, message.id, row.id, onToggleReasoning]);
 
-  if (
-    messages.every((reasoningMessage) => reasoningMessage.text.trim().length === 0) &&
-    !streaming
-  ) {
+  if (message.text.trim().length === 0) {
     return null;
   }
 
@@ -2802,12 +2784,8 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
           <BrainIcon aria-hidden className="block size-4 shrink-0 stroke-[1.8] opacity-70" />
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span
-            ref={streaming ? observeVisibleAnimation : undefined}
-            className="relative min-w-0 flex-1 truncate text-secondary-label text-sm leading-relaxed"
-          >
-            {label}
-            {streaming ? <ActivityShimmerOverlay>{label}</ActivityShimmerOverlay> : null}
+          <span className="relative min-w-0 flex-1 truncate text-secondary-label text-sm leading-relaxed">
+            Thought
           </span>
           <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
             <ChevronRightIcon
@@ -2821,20 +2799,16 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
       </button>
       {expanded ? (
         <div className="mt-1 ms-7 flex max-h-96 flex-col gap-3 overflow-auto px-0.5 py-1 text-foreground select-text">
-          {messages.map((reasoningMessage) => (
-            <ChatMarkdown
-              key={reasoningMessage.id}
-              text={reasoningMessage.text}
-              cwd={ctx.markdownCwd}
-              threadRef={ctx.threadRef ?? undefined}
-              isStreaming={streaming && reasoningMessage.streaming}
-              lineBreaks
-              skills={ctx.skills}
-              headingLevelOffset={MESSAGE_HEADING_LEVEL}
-              onUseArtifactTemplate={ctx.onUseArtifactTemplate}
-              onImageExpand={ctx.onImageExpand}
-            />
-          ))}
+          <ChatMarkdown
+            text={message.text}
+            cwd={ctx.markdownCwd}
+            threadRef={ctx.threadRef ?? undefined}
+            lineBreaks
+            skills={ctx.skills}
+            headingLevelOffset={MESSAGE_HEADING_LEVEL}
+            onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+            onImageExpand={ctx.onImageExpand}
+          />
         </div>
       ) : null}
     </div>
