@@ -3536,14 +3536,24 @@ export default function ChatView(props: ChatViewProps) {
   }, [routeThreadKey]);
   const liveWorktreeSetup =
     heldWorktreeSetup?.threadId === routeThreadRef.threadId ? heldWorktreeSetup : null;
-  const worktreeSetup = resolveVisibleWorktreeSetup({
+  const worktreeSetupSnapshot = resolveVisibleWorktreeSetup({
     live: liveWorktreeSetup,
     recorded: recordedWorktreeSetup,
+    retainSettled: true,
     turnStarted: activeThread?.latestTurn?.startedAt != null,
-    // Counts the optimistic send too, so the row retires the moment the
-    // follow-up is on screen rather than when the server echoes it back.
     followUpSent: timelineMessages.filter((message) => message.role === "user").length > 1,
   });
+  // Auto-naming can rename the branch after setup; the retained row follows
+  // the thread's current branch while keeping the original setup details.
+  const worktreeSetup = useMemo(
+    () =>
+      worktreeSetupSnapshot &&
+      activeThread?.id === worktreeSetupSnapshot.threadId &&
+      activeThread.branch
+        ? { ...worktreeSetupSnapshot, branch: activeThread.branch }
+        : worktreeSetupSnapshot,
+    [worktreeSetupSnapshot, activeThread?.id, activeThread?.branch],
+  );
   // Sends wait for the agent handoff, not for the setup script: an async
   // script keeps the snapshot running while the agent already works, and a
   // follow-up must not be held behind a slow install. Before the first

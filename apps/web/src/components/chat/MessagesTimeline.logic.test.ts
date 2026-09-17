@@ -1127,7 +1127,7 @@ describe("deriveMessagesTimelineRows", () => {
     ]);
   });
 
-  it("leads the worktree setup card with the working header", () => {
+  it("keeps the worktree setup under its first send through handoff and follow-ups", () => {
     const snapshot: WorktreeSetupSnapshot = {
       threadId: ThreadId.make("thread-setup"),
       phase: "running",
@@ -1178,7 +1178,6 @@ describe("deriveMessagesTimelineRows", () => {
       worktreeSetup: snapshot,
     });
     expect(withoutMessages).toEqual([
-      { kind: "working", id: "working-indicator-row", createdAt: "2026-01-01T00:00:00Z" },
       {
         kind: "worktree-setup",
         id: WORKTREE_SETUP_ROW_ID,
@@ -1188,8 +1187,7 @@ describe("deriveMessagesTimelineRows", () => {
       },
     ]);
 
-    // The main pass already places the working header after the send while a
-    // bootstrap counts as working; the card slots under that one header.
+    // The setup card owns its header before the agent starts.
     const withUserMessage = deriveMessagesTimelineRows({
       timelineEntries: [userEntry],
       isWorking: true,
@@ -1198,11 +1196,7 @@ describe("deriveMessagesTimelineRows", () => {
       supportsConversationRollback: false,
       worktreeSetup: snapshot,
     });
-    expect(withUserMessage.map((row) => row.kind)).toEqual([
-      "message",
-      "working",
-      "worktree-setup",
-    ]);
+    expect(withUserMessage.map((row) => row.kind)).toEqual(["message", "worktree-setup"]);
 
     // A failed setup never handed off, so the card stays under the send. The
     // rest of the timeline is untouched: a running send still gets its
@@ -1235,13 +1229,11 @@ describe("deriveMessagesTimelineRows", () => {
     });
     expect(runningWithQueue.map((row) => row.kind)).toEqual([
       "message",
-      "working",
       "worktree-setup",
       "queued-message",
     ]);
 
-    // Once the agent stage is done and the turn is live, a still-running
-    // script leaves the timeline; the working header surfaces it instead.
+    // Async setup stays under the send while the agent gets its own header.
     const stage = (id: "agent" | "setup-script", status: "done" | "running") =>
       ({
         id,
@@ -1271,7 +1263,17 @@ describe("deriveMessagesTimelineRows", () => {
       supportsConversationRollback: false,
       worktreeSetup: asyncSnapshot,
     });
-    expect(asyncRows.map((row) => row.kind)).toEqual(["message", "working", "thinking"]);
+    expect(asyncRows.map((row) => row.kind)).toEqual([
+      "message",
+      "worktree-setup",
+      "working",
+      "thinking",
+    ]);
+    expect(asyncRows[1]).toMatchObject({
+      kind: "worktree-setup",
+      id: WORKTREE_SETUP_ROW_ID,
+      embedded: true,
+    });
 
     // Dispatched but not yet visible as a turn: the full card stays put so
     // nothing collapses during the handoff.
@@ -1283,8 +1285,14 @@ describe("deriveMessagesTimelineRows", () => {
       supportsConversationRollback: false,
       worktreeSetup: asyncSnapshot,
     });
-    expect(handoffRows.map((row) => row.kind)).toEqual(["message", "working", "worktree-setup"]);
-    expect(handoffRows[2]).toMatchObject({ kind: "worktree-setup", embedded: false });
+    expect(handoffRows.map((row) => row.kind)).toEqual(["message", "worktree-setup"]);
+    expect(handoffRows[1]).toMatchObject({ kind: "worktree-setup", embedded: false });
+    const stableHandoff = computeStableMessagesTimelineRows(handoffRows, {
+      byId: new Map(),
+      result: [],
+    });
+    const stableLive = computeStableMessagesTimelineRows(asyncRows, stableHandoff);
+    expect(stableLive.byId.get(WORKTREE_SETUP_ROW_ID)).toMatchObject({ embedded: true });
 
     // A script that outlives the reply never trails the assistant's message.
     const outlivedRows = deriveMessagesTimelineRows({
@@ -1299,7 +1307,7 @@ describe("deriveMessagesTimelineRows", () => {
       supportsConversationRollback: false,
       worktreeSetup: asyncSnapshot,
     });
-    expect(outlivedRows.map((row) => row.kind)).toEqual(["message", "message"]);
+    expect(outlivedRows.map((row) => row.kind)).toEqual(["message", "worktree-setup", "message"]);
 
     // A failed script after the handoff keeps its row under the send.
     const failedRows = deriveMessagesTimelineRows({
@@ -1323,6 +1331,59 @@ describe("deriveMessagesTimelineRows", () => {
       "thinking",
     ]);
     expect(failedRows[1]).toMatchObject({ kind: "worktree-setup", embedded: true });
+
+    const completedSetup: WorktreeSetupSnapshot = {
+      ...asyncSnapshot,
+      phase: "done",
+      endedAt: "2026-01-01T00:00:20Z",
+      stages: [stage("setup-script", "done"), stage("agent", "done")],
+    };
+    const completedInput = {
+      timelineEntries: [
+        userEntry,
+        { ...assistantEntry, message: { ...assistantEntry.message, streaming: false } },
+      ],
+      latestTurn: { ...liveTurn, state: "completed" as const, completedAt: "2026-01-01T00:00:40Z" },
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+      worktreeSetup: completedSetup,
+    };
+    const completedRows = deriveMessagesTimelineRows(completedInput);
+    expect(completedRows.map((row) => row.kind)).toEqual(["message", "worktree-setup", "message"]);
+    expect(completedRows[1]).toMatchObject({
+      kind: "worktree-setup",
+      id: WORKTREE_SETUP_ROW_ID,
+      snapshot: completedSetup,
+      embedded: true,
+    });
+
+    const followUpRows = deriveMessagesTimelineRows({
+      ...completedInput,
+      timelineEntries: [
+        ...completedInput.timelineEntries,
+        {
+          ...userEntry,
+          id: "follow-up-entry",
+          createdAt: "2026-01-01T00:01:00Z",
+          message: {
+            ...userEntry.message,
+            id: "user-2" as never,
+            text: "Continue",
+            createdAt: "2026-01-01T00:01:00Z",
+            updatedAt: "2026-01-01T00:01:00Z",
+          },
+        },
+      ],
+    });
+    expect(followUpRows.map((row) => row.kind)).toEqual([
+      "message",
+      "worktree-setup",
+      "message",
+      "message",
+    ]);
+    expect(followUpRows[1]).toEqual(completedRows[1]);
   });
 
   it("keeps context compaction visible outside folded work", () => {

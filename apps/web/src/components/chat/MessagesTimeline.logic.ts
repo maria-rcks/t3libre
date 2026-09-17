@@ -427,11 +427,7 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string | null;
       snapshot: WorktreeSetupSnapshot;
-      /**
-       * The agent's turn is live and owns the "Working for" header, so the
-       * card drops its own header and settle-time actions. The stage list
-       * stays put so nothing jumps when the handoff happens.
-       */
+      /** The agent has started, so cancel and work-locally no longer apply. */
       embedded: boolean;
     }
   | {
@@ -1390,21 +1386,15 @@ export function deriveMessagesTimelineRows(input: {
     });
   }
 
-  // Until the agent's turn is live, the setup card sits under the send with
-  // the working header above it (the header reads "Setting up worktree…" and
-  // later swaps its text in place, so nothing moves at the handoff). "Live"
-  // means the turn is in the timeline, not just that the server dispatched
-  // it: the card must not vanish in the gap between. Once the turn is live
-  // the stage list leaves the timeline; a script that is still running is
-  // surfaced by the working header itself. A failed or cancelled setup stays
-  // under the send so its outcome and actions remain reachable.
+  // Keep one stable row under the first send, including while an async setup
+  // script outlives the agent handoff. The card owns its progress header.
   const setupHandedOff =
     input.worktreeSetup !== null &&
     input.worktreeSetup !== undefined &&
     worktreeSetupAgentStarted(input.worktreeSetup) &&
     input.latestTurn?.startedAt != null;
   const setupRunning = !setupHandedOff && input.worktreeSetup?.phase === "running";
-  if (input.worktreeSetup && (!setupHandedOff || input.worktreeSetup.phase !== "running")) {
+  if (input.worktreeSetup) {
     const setupRow = {
       kind: "worktree-setup",
       id: WORKTREE_SETUP_ROW_ID,
@@ -1415,34 +1405,21 @@ export function deriveMessagesTimelineRows(input: {
     const firstUserRowIndex = nextRows.findIndex(
       (row) => row.kind === "message" && row.message.role === "user",
     );
-    // While the setup runs, the working header leads the card in the same
-    // slot it keeps once the agent's own turn takes over. The main pass may
-    // already have placed that header (a bootstrap counts as working).
-    const workingRowIndex = setupRunning ? nextRows.findIndex((row) => row.kind === "working") : -1;
-    if (workingRowIndex >= 0) {
-      nextRows.splice(workingRowIndex + 1, 0, setupRow);
-    } else {
-      const insertAt = firstUserRowIndex >= 0 ? firstUserRowIndex + 1 : nextRows.length;
-      nextRows.splice(
-        insertAt,
-        0,
-        ...(setupRunning
-          ? [
-              {
-                kind: "working",
-                id: "working-indicator-row",
-                createdAt: input.worktreeSetup.startedAt,
-              } as const,
-              setupRow,
-            ]
-          : [setupRow]),
-      );
+    if (setupRunning) {
+      const workingRowIndex = nextRows.findIndex((row) => row.kind === "working");
+      if (workingRowIndex >= 0) nextRows.splice(workingRowIndex, 1);
     }
+    const insertAt = firstUserRowIndex >= 0 ? firstUserRowIndex + 1 : nextRows.length;
+    nextRows.splice(insertAt, 0, setupRow);
   }
-  // A running setup owns the working slot above its card and shows no
-  // activity row of its own; every other state gets the usual tail.
+  // Before the handoff, the setup card itself carries the progress header.
   const hasWorkingRow = nextRows.some((row) => row.kind === "working");
-  if (input.isWorking && !hasWorkingRow && activeTurnHeaderIndex === input.timelineEntries.length) {
+  if (
+    input.isWorking &&
+    !setupRunning &&
+    !hasWorkingRow &&
+    activeTurnHeaderIndex === input.timelineEntries.length
+  ) {
     appendWorkingRow();
   }
   if (input.isWorking && !setupRunning && (!hasActivityRow || latestToolFailed)) {
@@ -1592,7 +1569,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "thinking":
       return a.createdAt === (b as typeof a).createdAt;
     case "worktree-setup":
-      return a.snapshot === (b as typeof a).snapshot;
+      return a.snapshot === (b as typeof a).snapshot && a.embedded === (b as typeof a).embedded;
 
     case "assistant-meta": {
       const bm = b as typeof a;

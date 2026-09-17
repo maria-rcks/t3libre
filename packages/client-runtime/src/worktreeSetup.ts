@@ -30,7 +30,8 @@ export function findRecordedWorktreeSetup(
 /**
  * Which setup snapshot the timeline shows, if any. The live stream wins while
  * it has a newer sequence; the recorded activity covers everything else. A
- * running setup always shows. The setup belongs to the thread's first turn:
+ * running setup always shows. Clients with an expandable history row retain
+ * settled snapshots too. Otherwise the setup belongs to the first turn:
  * once the user has sent a follow-up it is history and nothing about it is
  * shown again, whatever its outcome. Within that first turn, a clean finish
  * leaves no trace once the turn is live (the setup is a means to the reply,
@@ -46,12 +47,15 @@ export function resolveVisibleWorktreeSetup(input: {
   turnStarted: boolean;
   /** The user sent a message after the one that created the worktree. */
   followUpSent: boolean;
+  /** Keep settled outcomes in clients that render expandable setup history. */
+  retainSettled?: boolean;
 }): WorktreeSetupSnapshot | null {
   const snapshot =
     input.live && (!input.recorded || input.live.sequence >= input.recorded.sequence)
       ? input.live
       : input.recorded;
   if (!snapshot) return null;
+  if (input.retainSettled) return snapshot;
   if (snapshot.phase === "running") return snapshot;
   if (input.followUpSent) return null;
   if (snapshot.phase !== "done") return snapshot;

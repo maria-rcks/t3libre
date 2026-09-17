@@ -10,6 +10,7 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   CircleIcon,
+  GitBranchIcon,
   LaptopIcon,
   MinusIcon,
   TerminalIcon,
@@ -18,6 +19,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "~/components/ui/collapsible";
 import { Spinner } from "~/components/ui/spinner";
 import { observeVisibleAnimation } from "~/lib/visibleAnimation";
 import { cn } from "~/lib/utils";
@@ -114,52 +116,6 @@ function headerLabel(snapshot: WorktreeSetupSnapshot): string {
     case "cancelled":
       return "Worktree setup cancelled";
   }
-}
-
-/**
- * Occupies the same slot, with the same metrics, as the "Working for" header
- * so the handoff to the agent's turn only swaps the text.
- */
-function SetupHeaderRow({
-  snapshot,
-  totalElapsed,
-}: {
-  snapshot: WorktreeSetupSnapshot;
-  totalElapsed: number | null;
-}) {
-  const running = snapshot.phase === "running";
-  const failed = snapshot.phase === "failed";
-  const finishedWithFailedStage =
-    snapshot.phase === "done" && snapshot.stages.some((stage) => stage.status === "failed");
-  const text = headerLabel(snapshot);
-  const tone = failed
-    ? "text-destructive-foreground"
-    : finishedWithFailedStage
-      ? "text-warning-foreground"
-      : "text-muted-foreground";
-  return (
-    <div className="border-b border-border/60 pb-2 pt-1">
-      <div
-        className={cn(
-          "flex h-6 min-w-0 items-baseline gap-2 px-1 text-sm leading-relaxed tabular-nums",
-          tone,
-        )}
-      >
-        <span
-          ref={running ? observeVisibleAnimation : undefined}
-          className="relative min-w-0 shrink overflow-hidden whitespace-nowrap"
-        >
-          <span className="block truncate">{text}</span>
-          {running ? <ShimmerOverlay>{text}</ShimmerOverlay> : null}
-        </span>
-        {totalElapsed !== null ? (
-          <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-            {formatDuration(totalElapsed)}
-          </span>
-        ) : null}
-      </div>
-    </div>
-  );
 }
 
 /** One stage, rendered like a live work entry row. */
@@ -285,91 +241,85 @@ function SetupDetails({ snapshot }: { snapshot: WorktreeSetupSnapshot }) {
   );
 }
 
-/**
- * One-line summary of a settled setup under a live turn. A clean finish is
- * removed from the timeline altogether, so this only renders the outcomes
- * worth keeping: a failed script, a failed setup, or a cancelled one.
- */
-function CollapsedSummaryRow({
-  snapshot,
-  totalElapsed,
-}: {
-  snapshot: WorktreeSetupSnapshot;
-  totalElapsed: number | null;
-}) {
-  const status: WorktreeSetupStage["status"] =
-    snapshot.phase === "failed" || snapshot.phase === "cancelled"
-      ? "failed"
-      : snapshot.stages.some((stage) => stage.id === "setup-script" && stage.status === "failed")
-        ? "failed"
-        : "done";
-  const label = headerLabel(snapshot);
-  return (
-    <div
-      className={cn(
-        "flex min-h-6 min-w-0 items-center gap-1.5 rounded-md px-0.5 py-0.5 text-sm leading-relaxed",
-        stageRowClassName(status),
-      )}
-      data-worktree-setup-stage="summary"
-      data-worktree-setup-status={status}
-    >
-      <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
-        <StageIcon status={status} />
-      </span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {totalElapsed !== null ? (
-        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-          {formatDuration(totalElapsed)}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
+/** Keeps setup actions and output reachable after the agent takes over. */
 export function WorktreeSetupCard({
   snapshot,
   onCancel,
   onWorkLocally,
   onOpenTerminal,
-  embedded = false,
-}: WorktreeSetupCardProps & {
-  /**
-   * The agent's turn is live and owns the "Working for" header. The stage
-   * list stays exactly where it was so the handoff never moves anything; a
-   * failed script that outlives the handoff collapses to a single row.
-   */
-  embedded?: boolean;
-}) {
+}: WorktreeSetupCardProps) {
   const running = snapshot.phase === "running";
   const nowMs = useNowWhile(running);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [expanded, setExpanded] = useState<boolean | null>(null);
+  const cleanFinish =
+    snapshot.phase === "done" &&
+    !snapshot.stages.some((stage) => stage.status === "failed" || stage.status === "warning");
+  const open = running || (expanded ?? !cleanFinish);
   const totalElapsed = (() => {
     const start = Date.parse(snapshot.startedAt);
     const end = snapshot.endedAt ? Date.parse(snapshot.endedAt) : nowMs;
     return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : null;
   })();
   const setupStage = snapshot.stages.find((stage) => stage.id === "setup-script");
-  const showTerminal = onOpenTerminal && setupStage && setupStage.status !== "pending";
-  const collapsed = embedded && !running;
-  // While running, the timeline's working row above the card carries the
-  // "Setting up worktree…" label (and keeps that slot when the agent takes
-  // over). The card only brings its own header for a settled outcome that
-  // has no working row to sit under.
-  const showHeader = !embedded && !running;
-  // The tail box is part of the script row's footprint while the script runs
-  // (and after it failed, so the last lines explain the failure). It mounts
-  // as soon as the script is running, empty lines and all, so the card takes
-  // its final height once instead of growing with each output line.
+  const showTerminal =
+    onOpenTerminal &&
+    setupStage &&
+    setupStage.status !== "pending" &&
+    setupStage.status !== "skipped";
+  // Keep the output's footprint at completion so the panel closes in one
+  // height transition, and the final output remains available when reopened.
   const showTail =
-    setupStage !== undefined && (setupStage.status === "running" || setupStage.status === "failed");
+    setupStage !== undefined &&
+    (setupStage.status === "running" ||
+      setupStage.status === "failed" ||
+      setupStage.tail.length > 0);
 
   return (
-    <section aria-label="Worktree setup" data-worktree-setup-phase={snapshot.phase}>
-      {showHeader ? <SetupHeaderRow snapshot={snapshot} totalElapsed={totalElapsed} /> : null}
-      {collapsed ? (
-        <CollapsedSummaryRow snapshot={snapshot} totalElapsed={totalElapsed} />
-      ) : (
-        <div className={showHeader ? "pt-1.5" : undefined}>
+    <Collapsible
+      open={open}
+      onOpenChange={setExpanded}
+      render={<section aria-label="Worktree setup" />}
+      className="overflow-hidden rounded-lg border border-border bg-secondary dark:bg-input/20"
+      data-worktree-setup-phase={snapshot.phase}
+    >
+      <CollapsibleTrigger
+        disabled={running}
+        className={cn(
+          "flex w-full min-w-0 items-center gap-2 px-3 py-3 text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default",
+          snapshot.phase === "failed" || snapshot.phase === "cancelled"
+            ? "text-destructive-foreground"
+            : snapshot.stages.some(
+                  (stage) => stage.status === "failed" || stage.status === "warning",
+                )
+              ? "text-warning-foreground"
+              : "text-foreground",
+        )}
+      >
+        <GitBranchIcon aria-hidden className="size-4 shrink-0 text-icon-muted" />
+        <span className="min-w-0 truncate">{headerLabel(snapshot)}</span>
+        {!open && snapshot.branch ? (
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-normal text-muted-foreground">
+            {snapshot.branch}
+          </span>
+        ) : null}
+        {totalElapsed !== null ? (
+          <span className="ml-auto shrink-0 font-normal text-muted-foreground tabular-nums">
+            {formatDuration(totalElapsed)}
+          </span>
+        ) : null}
+        {!running ? (
+          <ChevronRightIcon
+            aria-hidden
+            className={cn(
+              "size-3.5 shrink-0 text-icon-muted transition-transform duration-200 motion-reduce:transition-none",
+              open && "rotate-90",
+            )}
+          />
+        ) : null}
+      </CollapsibleTrigger>
+      <CollapsiblePanel className="duration-[220ms]">
+        <div className="border-t border-border bg-background px-3 py-2">
           {snapshot.stages.map((stage) => (
             <div key={stage.id}>
               <StageRow
@@ -382,47 +332,48 @@ export function WorktreeSetupCard({
               ) : null}
             </div>
           ))}
+          {snapshot.phase === "failed" && snapshot.error ? (
+            <p className="mt-1 ml-8 text-xs text-muted-foreground">{snapshot.error}</p>
+          ) : null}
+          {detailsOpen ? <SetupDetails snapshot={snapshot} /> : null}
         </div>
-      )}
-
-      {snapshot.phase === "failed" && snapshot.error ? (
-        <p className="mt-1 ml-8 text-xs text-muted-foreground">{snapshot.error}</p>
-      ) : null}
-
-      {detailsOpen ? <SetupDetails snapshot={snapshot} /> : null}
-
-      {/* Indented so the first label lines up with the stage labels: the icon
-          column, minus the xs button's own horizontal padding. */}
-      <div className="mt-0.5 ml-[calc(--spacing(6)+2px-(--spacing(2)-1px))] flex flex-wrap items-center gap-0.5">
-        <Button
-          type="button"
-          size="xs"
-          variant="ghost-muted"
-          aria-expanded={detailsOpen}
-          onClick={() => setDetailsOpen((open) => !open)}
-        >
-          {detailsOpen ? <ChevronDownIcon aria-hidden /> : <ChevronRightIcon aria-hidden />}
-          Details
-        </Button>
-        {showTerminal ? (
-          <Button type="button" size="xs" variant="ghost-muted" onClick={onOpenTerminal}>
-            <TerminalIcon aria-hidden />
-            Open terminal
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2.5">
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            aria-expanded={detailsOpen}
+            onClick={() => setDetailsOpen((value) => !value)}
+          >
+            {detailsOpen ? <ChevronDownIcon aria-hidden /> : <ChevronRightIcon aria-hidden />}
+            Details
           </Button>
-        ) : null}
-        {onWorkLocally ? (
-          <Button type="button" size="xs" variant="ghost-muted" onClick={onWorkLocally}>
-            <LaptopIcon aria-hidden />
-            Work locally
-          </Button>
-        ) : null}
-        {onCancel && running ? (
-          <Button type="button" size="xs" variant="ghost-muted" onClick={onCancel}>
-            <XIcon aria-hidden />
-            Cancel
-          </Button>
-        ) : null}
-      </div>
-    </section>
+          {showTerminal ? (
+            <Button type="button" size="xs" variant="outline" onClick={onOpenTerminal}>
+              <TerminalIcon aria-hidden />
+              Open terminal
+            </Button>
+          ) : null}
+          {onWorkLocally && running ? (
+            <Button type="button" size="xs" variant="outline" onClick={onWorkLocally}>
+              <LaptopIcon aria-hidden />
+              Work locally
+            </Button>
+          ) : null}
+          {onCancel && running ? (
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              className="ml-auto"
+              onClick={onCancel}
+            >
+              <XIcon aria-hidden />
+              Cancel
+            </Button>
+          ) : null}
+        </div>
+      </CollapsiblePanel>
+    </Collapsible>
   );
 }

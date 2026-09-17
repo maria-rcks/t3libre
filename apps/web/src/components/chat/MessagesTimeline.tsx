@@ -191,7 +191,6 @@ import {
   toolGroupAction,
   workEntryDisplayLabel,
   workEntryIsVisibleInGroup,
-  worktreeSetupAgentStarted,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
@@ -199,8 +198,6 @@ import {
   type WorkGroupScrollAnchor,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorktreeSetupCard } from "./WorktreeSetupCard";
 import {
@@ -308,12 +305,6 @@ interface TimelineRowActivityState {
   isRevertingCheckpoint: boolean;
   latestTurnId: TurnId | null;
   unsettledTurnId: TurnId | null;
-  /**
-   * A worktree setup whose script is still running after the agent took
-   * over. The working header shows it as a chip with a popover; the stage
-   * list itself has already left the timeline.
-   */
-  backgroundWorktreeSetup: WorktreeSetupSnapshot | null;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -1197,13 +1188,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRemoveQueuedMessage,
     ],
   );
-  const backgroundWorktreeSetup =
-    worktreeSetup !== null &&
-    worktreeSetup.phase === "running" &&
-    worktreeSetupAgentStarted(worktreeSetup) &&
-    latestTurn?.startedAt != null
-      ? worktreeSetup
-      : null;
   const activityState = useMemo<TimelineRowActivityState>(
     () => ({
       isWorking,
@@ -1214,10 +1198,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       // The same value the row-derivation uses, so a block and the placeholder
       // beside it can never disagree about whether a turn is still live.
       unsettledTurnId: deriveUnsettledTurnId(latestTurn ?? null, runningTurnId),
-      backgroundWorktreeSetup,
     }),
     [
-      backgroundWorktreeSetup,
       isCompacting,
       isRevertingCheckpoint,
       isWorking,
@@ -1739,7 +1721,7 @@ function WorktreeSetupTimelineRow({
   return (
     <WorktreeSetupCard
       snapshot={row.snapshot}
-      embedded={row.embedded}
+      key={row.snapshot.threadId}
       onCancel={row.embedded ? null : ctx.onCancelWorktreeSetup}
       onWorkLocally={
         !row.embedded && row.snapshot.phase === "running" ? ctx.onWorktreeSetupWorkLocally : null
@@ -2502,8 +2484,7 @@ function ProposedPlanTimelineRow({
 }
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
-  const { isCompacting, isPreparingWorktree, backgroundWorktreeSetup } =
-    use(TimelineRowActivityCtx);
+  const { isCompacting, isPreparingWorktree } = use(TimelineRowActivityCtx);
   // One span for every label so the setup-to-working handoff swaps text in
   // place instead of remounting the row.
   const shimmer = isPreparingWorktree || isCompacting;
@@ -2528,52 +2509,8 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
           {label}
           {shimmer ? <ActivityShimmerOverlay>{label}</ActivityShimmerOverlay> : null}
         </span>
-        {backgroundWorktreeSetup ? (
-          <BackgroundWorktreeSetupChip snapshot={backgroundWorktreeSetup} />
-        ) : null}
       </div>
     </div>
-  );
-}
-
-/**
- * Trailing chip in the working header while a setup script still runs after
- * the agent started. Opens the stage list and live output in a popover; the
- * chip leaves with the script, so nothing lingers in the timeline.
- */
-function BackgroundWorktreeSetupChip({ snapshot }: { snapshot: WorktreeSetupSnapshot }) {
-  const ctx = use(TimelineRowCtx);
-  const terminalId = snapshot.setupScript?.terminalId ?? null;
-  const openTerminal = ctx.onOpenWorktreeSetupTerminal;
-  const onOpenTerminal = useMemo(
-    () => (openTerminal && terminalId ? () => openTerminal(terminalId) : null),
-    [openTerminal, terminalId],
-  );
-  const scriptName = snapshot.setupScript?.name ?? "Setup script";
-  return (
-    <Popover>
-      <PopoverTrigger
-        render={
-          <Button
-            variant="chip"
-            className="ml-auto inline-flex h-5 min-w-0 shrink-0 items-center gap-1 rounded-full border border-border/70 px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            aria-label={`${scriptName} is still running. Show setup progress.`}
-          />
-        }
-      >
-        <Spinner className="size-3 shrink-0" />
-        <span className="truncate">{scriptName}</span>
-      </PopoverTrigger>
-      <PopoverPopup side="bottom" align="end" className="w-[32rem] max-w-[calc(100vw-2rem)] p-3">
-        <WorktreeSetupCard
-          snapshot={snapshot}
-          embedded
-          onCancel={null}
-          onWorkLocally={null}
-          onOpenTerminal={onOpenTerminal}
-        />
-      </PopoverPopup>
-    </Popover>
   );
 }
 
