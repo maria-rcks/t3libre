@@ -47,8 +47,8 @@ import {
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
-  MessageCircleIcon,
   LinkIcon,
+  MessageCircleIcon,
   MessageSquareIcon,
   MonitorIcon,
   MoonIcon,
@@ -1518,9 +1518,9 @@ function OpenCommandPaletteDialog(props: {
           description: "Start a thread without a repository",
           icon: <MessageCircleIcon className={ITEM_ICON_CLASS} />,
           run: async () => {
-            const projectRef = await ensureChatProject(environmentId);
-            if (projectRef) {
-              await handleNewThread(projectRef);
+            const project = await ensureChatProject(environmentId);
+            if (project) {
+              await handleNewThread(scopeProjectRef(project.environmentId, project.id));
             }
           },
         });

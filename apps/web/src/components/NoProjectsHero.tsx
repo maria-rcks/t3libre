@@ -1,3 +1,4 @@
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { MessageCircleIcon, PlusIcon } from "lucide-react";
 import { useCallback } from "react";
 
@@ -8,6 +9,7 @@ import { usePrimaryEnvironmentId } from "../state/environments";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarInset } from "./ui/sidebar";
+import { stackedThreadToast, toastManager } from "./ui/toast";
 
 export function NoProjectsHero() {
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
@@ -17,8 +19,19 @@ export function NoProjectsHero() {
   const canJustChat = chatWorkspaceRootFor(primaryEnvironmentId) !== null;
   const startChat = useCallback(async () => {
     if (primaryEnvironmentId === null) return;
-    const projectRef = await ensureChatProject(primaryEnvironmentId);
-    if (projectRef) await handleNewThread(projectRef);
+    const project = await ensureChatProject(primaryEnvironmentId);
+    if (!project) return;
+    try {
+      await handleNewThread(scopeProjectRef(project.environmentId, project.id));
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not create thread",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
   }, [ensureChatProject, handleNewThread, primaryEnvironmentId]);
 
   return (

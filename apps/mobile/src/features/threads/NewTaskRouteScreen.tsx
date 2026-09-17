@@ -13,7 +13,7 @@ import {
   findChatProject,
 } from "@t3tools/client-runtime/operations/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { CommandId, ProjectId } from "@t3tools/contracts";
+import { CommandId, type EnvironmentId, ProjectId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useRef } from "react";
@@ -131,17 +131,15 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
   const { connectedEnvironments } = useRemoteConnectionStatus();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   // "Just chat" needs a connected environment whose server offers a chat
-  // folder. Prefer the environment the picker is already scoped to.
+  // folder. The list is scoped to selectedEnvironmentId, so never fall back to
+  // another environment behind the user's back.
   const chatEnvironment =
     connectedEnvironments.find(
       (environment) =>
-        environment.environmentId === selectedEnvironmentId &&
+        (selectedEnvironmentId === null || environment.environmentId === selectedEnvironmentId) &&
         canCreateProjectInEnvironment(environment.connectionState),
-    ) ??
-    connectedEnvironments.find((environment) =>
-      canCreateProjectInEnvironment(environment.connectionState),
-    ) ??
-    null;
+    ) ?? null;
+  const chatStartInFlightRef = useRef(false);
   const chatWorkspaceRoot = chatEnvironment
     ? (serverConfigs.get(chatEnvironment.environmentId)?.chatWorkspaceRoot ?? null)
     : null;
@@ -181,13 +179,23 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
   }
 
   async function startChat(): Promise<void> {
-    if (!chatEnvironment || chatWorkspaceRoot === null) return;
+    if (!chatEnvironment || chatWorkspaceRoot === null || chatStartInFlightRef.current) return;
     const environmentId = chatEnvironment.environmentId;
     const existing = findChatProject({ projects, environmentId, chatWorkspaceRoot });
     if (existing) {
       await selectProject(existing);
       return;
     }
+    chatStartInFlightRef.current = true;
+    try {
+      await createChatProject(environmentId);
+    } finally {
+      chatStartInFlightRef.current = false;
+    }
+  }
+
+  async function createChatProject(environmentId: EnvironmentId): Promise<void> {
+    if (chatWorkspaceRoot === null) return;
     const projectId = ProjectId.make(uuidv4());
     const result = await createProject({
       environmentId,

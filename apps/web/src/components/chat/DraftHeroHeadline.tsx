@@ -2,8 +2,9 @@ import type { DraftId } from "~/composerDraftStore";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { findChatProject } from "@t3tools/client-runtime/operations/projects";
 import { FolderPlusIcon, MessageCircleIcon } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useChatProject } from "~/hooks/useChatProject";
@@ -18,7 +19,7 @@ import {
   buildSidebarProjectSnapshots,
   projectGroupsSpanEnvironments,
 } from "~/sidebarProjectGrouping";
-import { useProjects, useThreadShells, waitForProject } from "~/state/entities";
+import { useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -143,11 +144,14 @@ export function DraftHeroHeadline({
             project.environmentId === activeProjectRef.environmentId &&
             project.id === activeProjectRef.projectId,
         ) ?? null);
-  const isChatDraft =
-    activeProject !== null &&
-    activeProject.workspaceRoot === chatWorkspaceRootFor(activeProject.environmentId);
   const chatEnvironmentId = activeProjectRef?.environmentId ?? primaryEnvironmentId;
-  const canJustChat = chatWorkspaceRootFor(chatEnvironmentId) !== null;
+  const chatWorkspaceRoot = chatWorkspaceRootFor(chatEnvironmentId);
+  const chatProject =
+    chatEnvironmentId !== null && chatWorkspaceRoot !== null
+      ? findChatProject({ projects, environmentId: chatEnvironmentId, chatWorkspaceRoot })
+      : null;
+  const isChatDraft = activeProject !== null && chatProject?.id === activeProject.id;
+  const canJustChat = chatWorkspaceRoot !== null && !isChatDraft;
 
   // Project selection changes the target of the open draft in place. The
   // prompt stays in the same composer session, so the sidebar only gets a
@@ -178,16 +182,24 @@ export function DraftHeroHeadline({
       }
     }
   };
+  // The picker can change the draft's target while "Just chat" is still
+  // creating its project; a stale continuation must not retarget it again.
+  const latestTargetRef = useRef({ draftId, activeProjectKey });
+  useEffect(() => {
+    latestTargetRef.current = { draftId, activeProjectKey };
+  }, [activeProjectKey, draftId]);
   const startChat = async () => {
     if (chatEnvironmentId === null || isChatDraft) {
       return;
     }
-    const projectRef = await ensureChatProject(chatEnvironmentId);
-    if (!projectRef) {
-      return;
-    }
-    const project = await waitForProject(projectRef).catch(() => null);
-    if (!project) {
+    const requested = { draftId, activeProjectKey };
+    const project = await ensureChatProject(chatEnvironmentId);
+    const latest = latestTargetRef.current;
+    if (
+      !project ||
+      latest.draftId !== requested.draftId ||
+      latest.activeProjectKey !== requested.activeProjectKey
+    ) {
       return;
     }
     selectProject(project, deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings));
