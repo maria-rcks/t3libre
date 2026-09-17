@@ -403,6 +403,46 @@ describe("PullRequestSyncReactor", () => {
     ),
   );
 
+  it.effect("concurrent stack reads persist a shared sibling once before syncing both roots", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const readsReady = yield* Deferred.make<void>();
+        let reads = 0;
+        let linked = false;
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([makeThread("one", { pullRequests: [makeLink(7), makeLink(8)] })]),
+          stack: () =>
+            Effect.gen(function* () {
+              if (++reads === 2) yield* Deferred.succeed(readsReady, undefined);
+              yield* Deferred.await(readsReady);
+              return {
+                id: "stack",
+                number: 7,
+                url: "https://github.com/owner/repository/stacks/7",
+                base: "main",
+                layers: [{ number: 9, headBranch: "sibling", state: "open" as const }],
+              };
+            }),
+          onDispatch: (command) =>
+            Effect.gen(function* () {
+              if (command.type === "thread.pull-request.link") {
+                yield* Effect.yieldNow;
+                assert.strictEqual(linked, false);
+                linked = true;
+              } else {
+                assert.strictEqual(linked, true);
+              }
+            }),
+        });
+        yield* Effect.gen(function* () {
+          yield* startAndSweep(fixture);
+          assert.strictEqual((yield* Ref.get(fixture.linkCommands)).length, 1);
+          assert.strictEqual((yield* Ref.get(fixture.syncCommands)).length, 2);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
   it.effect("explicit refresh reads a changed stack even when its PR summary is unchanged", () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -23,6 +23,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
 import type * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
@@ -175,6 +176,7 @@ export const make = Effect.gen(function* () {
     // Layers auto-linked this sweep, so two links of one thread that share a
     // stack do not both try to add the same sibling.
     const linkedThisSweep = new Set<string>();
+    const persistence = yield* Semaphore.make(1);
 
     const syncEntry = Effect.fn("PullRequestSyncReactor.syncEntry")(function* (
       entry: LinkEntry,
@@ -281,6 +283,7 @@ export const make = Effect.gen(function* () {
         entries,
         (entry) =>
           syncEntry(entry, fields, fetchedStack).pipe(
+            persistence.withPermits(1),
             Effect.catchCause((cause) => {
               if (!Cause.hasInterruptsOnly(cause)) retryStacks.add(key);
               return logSkipped("pull request sync skipped", { threadId: entry.thread.id, key })(
