@@ -18,6 +18,15 @@ export const MuseModelCatalog = Schema.Struct({
 });
 export const MUSE_ROUTED_MODEL_PREFIX = "muse-route:";
 
+/** Native Muse catalogs currently use model slugs as their display labels. */
+export function formatMuseModelLabel(label: string): string {
+  if (!/^muse(?:-[a-z0-9.]+)+$/.test(label)) return label;
+  return label
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 /** Preserve native routing when different profiles expose the same model id. */
 export function encodeMuseModelSelection(model: typeof ModelRouting.Type): string {
   const { modelId, providerId, profileId } = model;

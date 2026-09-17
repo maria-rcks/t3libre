@@ -10,7 +10,11 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { readMuseUsageLimits } from "./museUsageLimits.ts";
-import { encodeMuseModelSelection, MuseModelCatalog } from "../muse/MuseModels.ts";
+import {
+  encodeMuseModelSelection,
+  formatMuseModelLabel,
+  MuseModelCatalog,
+} from "../muse/MuseModels.ts";
 import { buildServerProvider, providerModelsFromSettings } from "../providerSnapshot.ts";
 
 const PRESENTATION = {
@@ -96,7 +100,7 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
             );
             return {
               slug: duplicate ? encodeMuseModelSelection(model) : model.modelId,
-              name: `${model.displayLabel || model.modelId}${duplicate ? ` (${model.providerId}${model.profileId === null ? "" : ` / ${model.profileId}`})` : ""}`,
+              name: `${formatMuseModelLabel(model.displayLabel || model.modelId)}${duplicate ? ` (${model.providerId}${model.profileId === null ? "" : ` / ${model.profileId}`})` : ""}`,
               isDefault: model.isDefault,
               isCustom: false,
               capabilities: CAPABILITIES,
