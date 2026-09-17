@@ -2606,13 +2606,16 @@ function ActivityGroupTimelineRow({
   const thinking = row.active && liveWork === undefined;
   const iconWork = row.active ? liveWork : work.at(-1);
   const failed = iconWork !== undefined && workEntryDisplayIndicatesToolFailure(iconWork);
+  const latestThought = row.entries.findLast((entry) => entry.kind === "message");
+  const thoughtPreview =
+    latestThought?.kind === "message" ? reasoningPreview(latestThought.message.text) : "";
   const label = row.active
     ? liveWork
       ? liveWorkEntryLabel(liveWork, ctx.workspaceRoot, true)
-      : "Thinking"
+      : thoughtLabel("Thinking", thoughtPreview)
     : work.length > 0
       ? summarizeToolGroup(work)
-      : `Thought${thoughtCount > 1 ? ` (×${thoughtCount})` : ""}`;
+      : thoughtLabel(`Thought${thoughtCount > 1 ? ` (×${thoughtCount})` : ""}`, thoughtPreview);
   const details: ReactNode[] = [];
   if (row.expanded) {
     for (let index = 0; index < row.entries.length; index += 1) {
@@ -2681,6 +2684,26 @@ function ThinkingTimelineRow() {
         <LiveActivityRow label="Thinking" iconName="brain" active shimmer />
       )}
     </div>
+  );
+}
+
+/** First line of a thinking trace, shown inline after its "Thought" label. */
+function reasoningPreview(text: string): string {
+  const line = text
+    .split("\n")
+    .map((part) => part.replace(/^[#>*\-\s]+/, "").trim())
+    .find((part) => part.length > 0);
+  return line ?? "";
+}
+
+/** "Thought" or "Thinking" followed by the trace's first line in the foreground color. */
+function thoughtLabel(label: string, preview: string): ReactNode {
+  if (preview.length === 0) return label;
+  return (
+    <>
+      {label}
+      <span className="ms-2 text-foreground">{preview}</span>
+    </>
   );
 }
 
@@ -2786,7 +2809,7 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="relative min-w-0 flex-1 truncate text-secondary-label text-sm leading-relaxed">
-            Thought
+            {thoughtLabel("Thought", reasoningPreview(message.text))}
           </span>
           <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
             <ChevronRightIcon
