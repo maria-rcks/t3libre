@@ -200,8 +200,10 @@ function OutputTail({ lines, failed }: { lines: ReadonlyArray<string>; failed: b
   return (
     <pre
       className={cn(
-        "mb-1 ml-8 overflow-hidden rounded-md px-2.5 py-1.5 font-mono text-[11px] leading-relaxed select-text",
-        failed ? "bg-error-surface text-destructive-foreground" : "bg-code text-muted-foreground",
+        "mb-1 ml-8 overflow-hidden rounded-md border px-2.5 py-1.5 font-mono text-[11px] leading-relaxed select-text",
+        failed
+          ? "border-destructive/20 bg-error-surface text-destructive-foreground"
+          : "border-border/40 bg-code text-muted-foreground",
       )}
     >
       {rows.map(({ slot, line }) => (
@@ -284,7 +286,7 @@ export function WorktreeSetupCard({
       open={open}
       onOpenChange={setExpanded}
       render={<section aria-label="Worktree setup" />}
-      className="overflow-hidden rounded-lg border border-secondary dark:border-input/20"
+      className="overflow-hidden rounded-lg border-2 border-secondary dark:border-input/20"
       data-worktree-setup-phase={snapshot.phase}
     >
       <CollapsibleTrigger
