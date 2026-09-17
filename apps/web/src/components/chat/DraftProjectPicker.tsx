@@ -223,7 +223,7 @@ export function DraftProjectPicker({
             </span>
           ) : null}
           <span
-            className={`truncate [text-box:trim-both_cap_alphabetic]${isChat ? " ps-1 pe-3" : ""}`}
+            className={`truncate py-[0.25em] [text-box:trim-both_cap_alphabetic]${isChat ? " ps-1 pe-3" : ""}`}
           >
             {activeProjectDisplayName ?? "Add project"}
           </span>
