@@ -154,6 +154,10 @@ export const make = Effect.gen(function* () {
   const fileCache: ScanCache = new Map();
   const sourceCache = new Map<string, typeof CachedSource.Type>();
   let cacheDirty = false;
+  const isWithinDirectory = (filePath: string, dir: string) => {
+    const relative = path.relative(dir, filePath);
+    return relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
+  };
 
   const ratesCachePath = path.join(config.stateDir, "usage-model-rates.json");
   const scanCachePath = path.join(config.stateDir, "usage-scan-cache.json");
@@ -247,6 +251,7 @@ export const make = Effect.gen(function* () {
   /** Resolves the transcript directory for each provider. */
   const resolveTranscriptDirs = Effect.fn("UsageService.resolveTranscriptDirs")(function* (
     settings: ServerSettingsValue,
+    retentionCutoffMs: number,
   ) {
     const dirs: Array<{
       provider: UsageProviderKind;
@@ -299,7 +304,20 @@ export const make = Effect.gen(function* () {
           .realPath(directory)
           .pipe(Effect.orElseSucceed(() => previous?.dir ?? directory));
         const currentVolumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
-        const volumeId = currentVolumeId || (previous?.dir === dir ? previous.volumeId : "");
+        const hasRetainedHistory = fileCache
+          .entries()
+          .some(
+            ([filePath, entry]) =>
+              entry.provider === provider &&
+              entry.mtimeMs >= retentionCutoffMs &&
+              entry.records.length + entry.tailRecords.length > 0 &&
+              isWithinDirectory(filePath, dir),
+          );
+        // A recreated directory still reports the retained history under its old identity.
+        const volumeId =
+          previous?.dir === dir && (hasRetainedHistory || !currentVolumeId)
+            ? previous.volumeId || currentVolumeId
+            : currentVolumeId;
         if (previous?.dir !== dir || previous.volumeId !== volumeId) {
           sourceCache.set(sourceKey, { dir, volumeId });
           cacheDirty = true;
@@ -437,10 +455,11 @@ export const make = Effect.gen(function* () {
   const collectDirs = Effect.fn("UsageService.collectDirs")(function* (
     windowStartMs: number,
     settings: ServerSettingsValue,
+    retentionCutoffMs: number,
   ) {
     // The home resolvers ask for `Path` themselves; satisfy them from the
     // instance we already hold so the scan stays context-free.
-    const dirs = yield* resolveTranscriptDirs(settings).pipe(
+    const dirs = yield* resolveTranscriptDirs(settings, retentionCutoffMs).pipe(
       Effect.provideService(Path.Path, path),
     );
     const scanned: ScannedDir[] = [];
@@ -514,11 +533,13 @@ export const make = Effect.gen(function* () {
     const windowStartMs =
       (hourlyWindow?.sinceTimeMs ?? DateTime.toEpochMillis(windowStart.value)) - MTIME_SLACK_MS;
 
+    const retentionCutoffMs = startedAtMs - CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
     // Pricing only matters once records are aggregated, so the rate table
     // loads while transcripts stream instead of gating them: a cold rates
     // fetch on a slow network no longer delays the scan by its own timeout.
     const [, scannedDirs] = yield* Effect.all(
-      [ensureRates(false), collectDirs(windowStartMs, settings)],
+      [ensureRates(false), collectDirs(windowStartMs, settings, retentionCutoffMs)],
       { concurrency: 2 },
     );
 
@@ -532,7 +553,6 @@ export const make = Effect.gen(function* () {
       priceOverrides: createOverrideRateTable(settings.usagePriceOverrides),
     });
 
-    const retentionCutoffMs = startedAtMs - CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
     const sources: UsageSource[] = [];
 
     for (const { provider, dir, volumeId, files } of scannedDirs) {
@@ -541,14 +561,11 @@ export const make = Effect.gen(function* () {
       // Cleanup may remove transcripts, but the usage we already saved still
       // contributes to this source. Keep the normal aggregation and dedupe path.
       for (const [filePath, entry] of fileCache) {
-        const relative = path.relative(dir, filePath);
         if (
           entry.provider !== provider ||
           entry.mtimeMs < retentionCutoffMs ||
           livePaths.has(filePath) ||
-          relative === ".." ||
-          relative.startsWith(".." + path.sep) ||
-          path.isAbsolute(relative)
+          !isWithinDirectory(filePath, dir)
         )
           continue;
         retainedFiles.push({ path: filePath, records: [...entry.records, ...entry.tailRecords] });

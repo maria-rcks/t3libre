@@ -441,6 +441,8 @@ describe("UsageService", () => {
         assert.deepStrictEqual(moved.buckets, first.buckets);
         assert.strictEqual(moved.sources[0]?.distinctSessions, 1);
 
+        const replacementProjects = NodePath.join(home, "replacement-projects");
+        yield* Effect.promise(() => NodeFSP.mkdir(replacementProjects));
         yield* Effect.promise(() =>
           NodeFSP.rm(NodePath.join(home, "claude", "projects"), { recursive: true }),
         );
@@ -450,12 +452,21 @@ describe("UsageService", () => {
         assert.strictEqual(missingRoot.sources[0]?.distinctSessions, 1);
         assert.strictEqual(missingRoot.sources[0]?.status, "ok");
         assert.deepStrictEqual(missingRoot.sources[0]?.fingerprint, first.sources[0]?.fingerprint);
+        yield* Effect.promise(async () => {
+          const projects = NodePath.join(home, "claude", "projects");
+          await NodeFSP.rename(replacementProjects, projects);
+          await NodeFSP.writeFile(NodePath.join(projects, "new.jsonl"), claudeLine(2, 7));
+        });
+        const recreated = yield* afterRootCleanup.readSummary(WINDOW);
+        assert.strictEqual(totalOutputTokens(recreated), 12);
+        assert.deepStrictEqual(recreated.sources[0]?.fingerprint, first.sources[0]?.fingerprint);
+
         const merged = mergeUsage(
           [
             {
               environmentId: EnvironmentId.make("cleanup-test"),
               label: "test",
-              summary: missingRoot,
+              summary: recreated,
             },
             {
               environmentId: EnvironmentId.make("other-environment"),
@@ -465,9 +476,9 @@ describe("UsageService", () => {
           ],
           missingRoot.contractVersion,
         );
-        assert.strictEqual(merged.outputTokens, 5);
+        assert.strictEqual(merged.outputTokens, 12);
         assert.strictEqual(merged.sessions, 1);
-        assert.strictEqual(merged.costUsd, first.buckets[0]?.costUsd);
+        assert.strictEqual(merged.costUsd, recreated.buckets[0]?.costUsd);
 
         const outsideWindow = yield* restarted.readSummary({
           ...WINDOW,
