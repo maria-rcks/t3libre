@@ -1,18 +1,39 @@
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as SqlSchema from "effect/unstable/sql/SqlSchema";
+import {
+  CommandId,
+  IsoDateTime,
+  ProjectIconOverride,
+  ProjectId,
+  ThreadGroupId,
+} from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
 import * as Struct from "effect/Struct";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
-import { ProjectIconOverride } from "@t3tools/contracts";
-import { toPersistenceSqlError } from "../Errors.ts";
-import {
-  GetProjectionThreadGroupInput,
-  ProjectionThreadGroup,
-  ProjectionThreadGroupRepository,
-  type ProjectionThreadGroupRepositoryShape,
-} from "../Services/ProjectionThreadGroups.ts";
+import { toPersistenceSqlError, type ProjectionRepositoryError } from "./Errors.ts";
+
+/** Projected thread group rows: user-made sidebar folders of threads. */
+export const ProjectionThreadGroup = Schema.Struct({
+  groupId: ThreadGroupId,
+  projectId: ProjectId,
+  name: Schema.String,
+  icon: Schema.NullOr(ProjectIconOverride),
+  nameGenerationRequestId: Schema.NullOr(CommandId),
+  nameGenerationStartedAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  deletedAt: Schema.NullOr(IsoDateTime),
+});
+export type ProjectionThreadGroup = typeof ProjectionThreadGroup.Type;
+
+export const GetProjectionThreadGroupInput = Schema.Struct({
+  groupId: ThreadGroupId,
+});
+export type GetProjectionThreadGroupInput = typeof GetProjectionThreadGroupInput.Type;
 
 export const ProjectionThreadGroupDbRow = ProjectionThreadGroup.mapFields(
   Struct.assign({
@@ -20,7 +41,19 @@ export const ProjectionThreadGroupDbRow = ProjectionThreadGroup.mapFields(
   }),
 );
 
-const makeProjectionThreadGroupRepository = Effect.gen(function* () {
+export class ProjectionThreadGroupRepository extends Context.Service<
+  ProjectionThreadGroupRepository,
+  {
+    /** Insert or replace a projected group row, keyed by `groupId`. */
+    readonly upsert: (row: ProjectionThreadGroup) => Effect.Effect<void, ProjectionRepositoryError>;
+    /** Read a projected group row by id, deleted rows included. */
+    readonly getById: (
+      input: GetProjectionThreadGroupInput,
+    ) => Effect.Effect<Option.Option<ProjectionThreadGroup>, ProjectionRepositoryError>;
+  }
+>()("t3/persistence/ProjectionThreadGroups/ProjectionThreadGroupRepository") {}
+
+const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   const upsertRow = SqlSchema.void({
@@ -82,18 +115,16 @@ const makeProjectionThreadGroupRepository = Effect.gen(function* () {
       `,
   });
 
-  const upsert: ProjectionThreadGroupRepositoryShape["upsert"] = (row) =>
+  const upsert: ProjectionThreadGroupRepository["Service"]["upsert"] = (row) =>
     upsertRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadGroupRepository.upsert:query")),
     );
-  const getById: ProjectionThreadGroupRepositoryShape["getById"] = (input) =>
+  const getById: ProjectionThreadGroupRepository["Service"]["getById"] = (input) =>
     getRow(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadGroupRepository.getById:query")),
     );
-  return { upsert, getById } satisfies ProjectionThreadGroupRepositoryShape;
+
+  return ProjectionThreadGroupRepository.of({ upsert, getById });
 });
 
-export const ProjectionThreadGroupRepositoryLive = Layer.effect(
-  ProjectionThreadGroupRepository,
-  makeProjectionThreadGroupRepository,
-);
+export const layer = Layer.effect(ProjectionThreadGroupRepository, make);

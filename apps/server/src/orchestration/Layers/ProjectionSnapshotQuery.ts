@@ -65,7 +65,7 @@ import { ProjectionThreadProposedPlan } from "../../persistence/Services/Project
 import { ProjectionThreadPullRequest } from "../../persistence/ProjectionThreadPullRequests.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
-import { ProjectionThreadGroup } from "../../persistence/Services/ProjectionThreadGroups.ts";
+import * as ProjectionThreadGroups from "../../persistence/ProjectionThreadGroups.ts";
 import {
   decodeThreadDetailPageCursor,
   encodeThreadDetailPageCursor,
@@ -129,11 +129,7 @@ const ProjectionThreadPullRequestDbRowSchema = ProjectionThreadPullRequest.mapFi
     stack: Schema.NullOr(Schema.fromJsonString(ThreadPullRequestStack)),
   }),
 );
-const ProjectionThreadGroupDbRowSchema = ProjectionThreadGroup.mapFields(
-  Struct.assign({
-    icon: Schema.NullOr(Schema.fromJsonString(ProjectIconOverride)),
-  }),
-);
+const ProjectionThreadGroupDbRowSchema = ProjectionThreadGroups.ProjectionThreadGroupDbRow;
 const ThreadGroupIdLookupInput = Schema.Struct({
   groupId: ThreadGroupId,
 });

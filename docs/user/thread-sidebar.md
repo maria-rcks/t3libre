@@ -75,8 +75,9 @@ their default order until the server is updated.
 
 ## Group threads
 
-On web and desktop, select several threads with `Cmd/Ctrl+Click` or `Shift+Click`
-and press `mod+g` to put them in a group. A group is a collapsible folder above
+On web and desktop, select one or more threads with `Cmd/Ctrl+Click` or `Shift+Click`
+and press `mod+g` to put them in a group. With nothing selected, `mod+g` groups the
+open thread. A group is a collapsible folder above
 the thread list. T3 Code names it from its threads with your text generation
 model; double-click the name to rename it, or choose **Rename group** from the
 group's menu. **Generate name** asks for a new suggestion.

@@ -118,9 +118,11 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
       className="list-none py-0.5"
     >
       <div
-        role="button"
-        tabIndex={0}
-        aria-expanded={props.expanded}
+        // While renaming, the row hands its semantics to the text box: a
+        // textbox inside a button is presentational to assistive tech.
+        role={isRenaming ? undefined : "button"}
+        tabIndex={isRenaming ? -1 : 0}
+        aria-expanded={isRenaming ? undefined : props.expanded}
         aria-label={`${group.name} group, ${props.count} thread${props.count === 1 ? "" : "s"}`}
         data-testid="sidebar-thread-group-row"
         className="group/sidebar-group flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left outline-none select-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring"

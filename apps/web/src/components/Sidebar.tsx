@@ -4028,6 +4028,10 @@ export default function Sidebar() {
         return;
       }
       const groupId = newThreadGroupId();
+      // Remembered so Undo can put re-filed threads back where they were.
+      const previousGroupIds = new Map(
+        selected.map((thread) => [thread.id, thread.groupId ?? null] as const),
+      );
       clearSelection();
       const result = await createThreadGroup({
         environmentId: first.environmentId,
@@ -4061,14 +4065,15 @@ export default function Sidebar() {
             children: "Undo",
             onClick: () => {
               // Only the threads this action grouped, and only those still in
-              // this group, leave; anything filed elsewhere meanwhile stays,
-              // and the server retires the group once it is empty.
+              // this group, go back to their previous group (or none); anything
+              // filed elsewhere meanwhile stays, and the server retires the
+              // group once it is empty.
               for (const thread of selected) {
                 const current = readThreadShell(scopeThreadRef(thread.environmentId, thread.id));
                 if (current === null || current.groupId !== groupId) continue;
                 void setThreadGroup({
                   environmentId: thread.environmentId,
-                  input: { threadId: thread.id, groupId: null },
+                  input: { threadId: thread.id, groupId: previousGroupIds.get(thread.id) ?? null },
                 }).then((undone) => {
                   if (undone._tag !== "Failure" || isAtomCommandInterrupted(undone)) return;
                   const error = squashAtomCommandFailure(undone);
