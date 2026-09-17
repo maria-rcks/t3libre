@@ -158,9 +158,11 @@ export function DraftHeroHeadline({
     chatProject !== null &&
     chatProject.environmentId === activeProject.environmentId &&
     chatProject.id === activeProject.id;
-  // The heading already says "chat", so the menu lists repositories only.
+  // On a chat draft the heading already says "chat", so its menu lists
+  // repositories only. Every other state keeps Chats as a way in.
   const menuEntries = projectPickerEntries.filter(
     ({ targetProject }) =>
+      !isChatDraft ||
       chatProject === null ||
       targetProject.environmentId !== chatProject.environmentId ||
       targetProject.id !== chatProject.id,
@@ -207,9 +209,9 @@ export function DraftHeroHeadline({
       }
     }
   };
-  const startChat = async () => {
+  const startChat = async (): Promise<boolean> => {
     if (chatTargetEnvironmentId === null || isChatDraft) {
-      return;
+      return false;
     }
     const requested = { draftId, activeProjectKey, chatTargetEnvironmentId };
     const project = await ensureChatProject(chatTargetEnvironmentId);
@@ -220,9 +222,10 @@ export function DraftHeroHeadline({
       latest.activeProjectKey !== requested.activeProjectKey ||
       latest.chatTargetEnvironmentId !== requested.chatTargetEnvironmentId
     ) {
-      return;
+      return false;
     }
     selectProject(project, deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings));
+    return true;
   };
 
   const projectSelector = shouldShowProjectMenu ? (
@@ -317,18 +320,20 @@ export function DraftHeroHeadline({
             variant="ghost-muted"
             size="icon-xs"
             aria-label="Just chat"
-            className="pointer-events-auto ms-1 rounded-full align-middle opacity-60 hover:opacity-100"
+            className="pointer-events-auto ms-2 align-middle"
             onClick={() =>
-              void startChat().then(() =>
-                document.querySelector<HTMLElement>("[data-draft-project-trigger]")?.focus(),
-              )
+              void startChat().then((started) => {
+                if (started) {
+                  document.querySelector<HTMLElement>("[data-draft-project-trigger]")?.focus();
+                }
+              })
             }
           />
         }
       >
         <XIcon />
       </TooltipTrigger>
-      <TooltipPopup side="top">Just chat, no project</TooltipPopup>
+      <TooltipPopup side="top">Just chat</TooltipPopup>
     </Tooltip>
   ) : null;
 
