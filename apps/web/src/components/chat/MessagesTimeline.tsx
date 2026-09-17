@@ -2668,7 +2668,7 @@ function ActivityGroupTimelineRow({
           shimmer={thinking}
         />
       </button>
-      {row.expanded ? <div className="mt-2 space-y-2">{details}</div> : null}
+      {row.expanded ? <div className="mt-2">{details}</div> : null}
     </div>
   );
 }
@@ -2726,7 +2726,7 @@ function ReasoningTraceBlock({
           type="button"
           aria-expanded={expanded}
           onClick={() => ctx.onToggleReasoning(first.id, !expanded, anchorKey)}
-          className="flex min-h-6 cursor-pointer select-none items-center gap-1.5 rounded-md px-0.5 py-0.5 text-start text-sm leading-relaxed transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+          className="flex min-h-6 cursor-pointer select-none items-center gap-1.5 rounded-md px-0.5 text-start text-sm leading-relaxed transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
         >
           <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
             <BrainIcon aria-hidden className="block size-4 shrink-0 stroke-[1.8] opacity-70" />
