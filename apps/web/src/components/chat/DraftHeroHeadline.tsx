@@ -3,7 +3,13 @@ import { useComposerDraftStore } from "~/composerDraftStore";
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { findChatProject } from "@t3tools/client-runtime/operations/projects";
-import { ChevronDownIcon, FolderPlusIcon, MessageCircleIcon, XIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  FolderIcon,
+  FolderPlusIcon,
+  MessageCircleIcon,
+  XIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
@@ -25,6 +31,7 @@ import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import { Button } from "../ui/button";
+import { Group } from "../ui/group";
 import {
   Menu,
   MenuItem,
@@ -154,7 +161,10 @@ export function DraftHeroHeadline({
   const isChatDraft = activeProject !== null && chatProject?.id === activeProject.id;
   // The chip and its x already stand for chat, so the menu lists repositories only.
   const menuEntries = projectPickerEntries.filter(
-    ({ targetProject }) => targetProject.id !== chatProject?.id,
+    ({ targetProject }) =>
+      chatProject === null ||
+      targetProject.environmentId !== chatProject.environmentId ||
+      targetProject.id !== chatProject.id,
   );
   const canJustChat = canStartChatIn(chatTargetEnvironmentId) && !isChatDraft;
 
@@ -256,7 +266,7 @@ export function DraftHeroHeadline({
           );
         })}
       </MenuRadioGroup>
-      <MenuSeparator />
+      {menuEntries.length > 0 ? <MenuSeparator /> : null}
       <MenuItem onClick={openAddProject}>
         <FolderPlusIcon />
         New project
@@ -264,40 +274,55 @@ export function DraftHeroHeadline({
     </MenuPopup>
   );
 
+  const focusProjectChip = () => {
+    document.querySelector<HTMLElement>("[data-draft-project-chip]")?.focus();
+  };
+
   // Chat drafts show a plain "Chat" chip; project drafts show the project
   // with an x that drops into chat in one click. Both open the same menu.
+  const projectChipLabel = isChatDraft
+    ? "Chat"
+    : activeProject === null
+      ? "Choose a project"
+      : (activeProjectDisplayName ?? "Choose a project");
   const projectChip = !canChooseProject ? (
     <Button variant="outline" size="sm" onClick={openAddProject}>
       <FolderPlusIcon />
       Add a project
     </Button>
-  ) : isChatDraft || activeProject === null ? (
-    <Menu>
-      <MenuTrigger
-        render={<Button variant="outline" size="sm" />}
-        aria-label={
-          isChatDraft ? "Chatting without a project. Choose a project" : "Choose a project"
-        }
-        className="max-w-64 font-normal"
-      >
-        <MessageCircleIcon />
-        <span className="truncate">{isChatDraft ? "Chat" : "Choose a project"}</span>
-        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
-      </MenuTrigger>
-      {projectMenu}
-    </Menu>
   ) : (
-    <span className="inline-flex max-w-full items-center">
+    <Group aria-label="Project">
       <Menu>
-        <MenuTrigger
-          render={<Button variant="outline" size="sm" />}
-          aria-label="Change project"
-          className={canJustChat ? "max-w-64 rounded-e-none font-normal" : "max-w-64 font-normal"}
-        >
-          <ProjectFavicon project={activeProject} className="size-4 shrink-0" />
-          <span className="truncate">{activeProjectDisplayName}</span>
-          <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
-        </MenuTrigger>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <MenuTrigger
+                render={<Button variant="outline" size="sm" />}
+                aria-label={
+                  isChatDraft ? "Chatting without a project. Choose a project" : "Change project"
+                }
+                className="max-w-64 font-normal"
+                data-draft-project-chip=""
+              />
+            }
+          >
+            {isChatDraft ? (
+              <MessageCircleIcon />
+            ) : activeProject === null ? (
+              <FolderIcon />
+            ) : (
+              <ProjectFavicon
+                project={activeProjectGroup ?? activeProject}
+                className="size-4 shrink-0"
+              />
+            )}
+            <span className="truncate">{projectChipLabel}</span>
+            <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+          </TooltipTrigger>
+          <TooltipPopup side="top" className="max-w-80">
+            {projectChipLabel}
+          </TooltipPopup>
+        </Tooltip>
         {projectMenu}
       </Menu>
       {canJustChat ? (
@@ -308,8 +333,7 @@ export function DraftHeroHeadline({
                 variant="outline"
                 size="icon-sm"
                 aria-label="Just chat"
-                className="-ms-px rounded-s-none"
-                onClick={() => void startChat()}
+                onClick={() => void startChat().then(focusProjectChip)}
               />
             }
           >
@@ -318,7 +342,7 @@ export function DraftHeroHeadline({
           <TooltipPopup side="top">Just chat, no project</TooltipPopup>
         </Tooltip>
       ) : null}
-    </span>
+    </Group>
   );
 
   return (
