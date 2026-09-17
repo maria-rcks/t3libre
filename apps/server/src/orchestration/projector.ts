@@ -53,6 +53,10 @@ import {
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
+  ThreadGroupSetPayload,
+  ThreadGroupCreatedPayload,
+  ThreadGroupMetaUpdatedPayload,
+  ThreadGroupDeletedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -317,6 +321,7 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
     snapshotSequence: 0,
     projects: [],
     threads: [],
+    threadGroups: [],
     updatedAt: nowIso,
   };
 }
@@ -634,6 +639,74 @@ export function projectEvent(
             }),
           };
         }),
+      );
+
+    case "thread.group-set":
+      return decodeForEvent(ThreadGroupSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            groupId: payload.groupId,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread-group.created":
+      return decodeForEvent(ThreadGroupCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const nextGroup = {
+            id: payload.groupId,
+            projectId: payload.projectId,
+            name: payload.name,
+            icon: payload.icon,
+            nameGeneration: payload.nameGeneration ?? null,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+          };
+          const threadGroups = nextBase.threadGroups ?? [];
+          return {
+            ...nextBase,
+            threadGroups: threadGroups.some((group) => group.id === payload.groupId)
+              ? threadGroups.map((group) => (group.id === payload.groupId ? nextGroup : group))
+              : [...threadGroups, nextGroup],
+          };
+        }),
+      );
+
+    case "thread-group.meta-updated":
+      return decodeForEvent(
+        ThreadGroupMetaUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threadGroups: (nextBase.threadGroups ?? []).map((group) =>
+            group.id === payload.groupId
+              ? {
+                  ...group,
+                  ...(payload.name !== undefined ? { name: payload.name } : {}),
+                  ...(payload.icon !== undefined ? { icon: payload.icon } : {}),
+                  ...(payload.nameGeneration !== undefined
+                    ? { nameGeneration: payload.nameGeneration }
+                    : {}),
+                  updatedAt: payload.updatedAt,
+                }
+              : group,
+          ),
+        })),
+      );
+
+    case "thread-group.deleted":
+      return decodeForEvent(ThreadGroupDeletedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threadGroups: (nextBase.threadGroups ?? []).filter(
+            (group) => group.id !== payload.groupId,
+          ),
+        })),
       );
 
     case "thread.pull-request-linked":

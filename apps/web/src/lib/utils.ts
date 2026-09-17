@@ -1,4 +1,4 @@
-import { MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { MessageId, ProjectId, ThreadGroupId, ThreadId } from "@t3tools/contracts";
 import { type CxOptions, cx } from "class-variance-authority";
 import * as Encoding from "effect/Encoding";
 import { twMerge } from "tailwind-merge";
@@ -45,6 +45,8 @@ export function randomUUID(): string {
 export const newProjectId = (): ProjectId => ProjectId.make(randomUUID());
 
 export const newThreadId = (): ThreadId => ThreadId.make(randomUUID());
+
+export const newThreadGroupId = (): ThreadGroupId => ThreadGroupId.make(randomUUID());
 
 export const newDraftId = (): DraftId => DraftId.make(randomUUID());
 

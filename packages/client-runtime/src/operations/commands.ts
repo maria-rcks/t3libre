@@ -44,6 +44,10 @@ export type UnpinThreadInput = CommandInput<"thread.unpin">;
 export type ReorderPinnedThreadInput = CommandInput<"thread.pin.reorder">;
 export type ReorderActiveThreadInput = CommandInput<"thread.active.reorder">;
 export type UpdateThreadMetadataInput = CommandInput<"thread.meta.update">;
+export type CreateThreadGroupInput = CommandInput<"thread-group.create">;
+export type UpdateThreadGroupInput = CommandInput<"thread-group.meta.update">;
+export type DeleteThreadGroupInput = CommandInput<"thread-group.delete">;
+export type SetThreadGroupInput = CommandInput<"thread.group.set">;
 export type LinkThreadPullRequestInput = CommandInput<"thread.pull-request.link">;
 export type UnlinkThreadPullRequestInput = CommandInput<"thread.pull-request.unlink">;
 export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
@@ -252,6 +256,48 @@ export const updateThreadMetadata: (input: UpdateThreadMetadataInput) => Command
   return yield* dispatch({
     ...input,
     type: "thread.meta.update",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const createThreadGroup: (input: CreateThreadGroupInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.createThreadGroup",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread-group.create",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const updateThreadGroup: (input: UpdateThreadGroupInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.updateThreadGroup",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "thread-group.meta.update",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const deleteThreadGroup: (input: DeleteThreadGroupInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.deleteThreadGroup",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "thread-group.delete",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const setThreadGroup: (input: SetThreadGroupInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.setThreadGroup",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "thread.group.set",
     commandId: yield* commandId(input),
   });
 });

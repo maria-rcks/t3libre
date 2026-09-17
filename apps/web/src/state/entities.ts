@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentProject,
   EnvironmentThread,
+  EnvironmentThreadGroup,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import {
@@ -19,7 +20,11 @@ import {
   allEnvironmentProjectSnapshotsReadyAtom,
   allEnvironmentShellsBootstrappedAtom,
 } from "./shell";
-import { environmentThreadDetails, environmentThreadShells } from "./threads";
+import {
+  environmentThreadDetails,
+  environmentThreadGroups,
+  environmentThreadShells,
+} from "./threads";
 
 const EMPTY_THREAD_REFS: ReadonlyArray<ScopedThreadRef> = Object.freeze([]);
 
@@ -76,6 +81,10 @@ export function useServerConfigs(): ReadonlyMap<EnvironmentId, ServerConfig> {
 
 export function useThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return useAtomValue(environmentThreadShells.threadShellsAtom);
+}
+
+export function useThreadGroups(): ReadonlyArray<EnvironmentThreadGroup> {
+  return useAtomValue(environmentThreadGroups.threadGroupsAtom);
 }
 
 export function useAllEnvironmentShellsBootstrapped(): boolean {
@@ -222,6 +231,15 @@ export function readEnvironmentSupportsTitleRegeneration(environmentId: Environm
 
 /** Whether the environment's server understands thread.pin.reorder (and
     orderKey on thread.pin). Same version-skew contract as settlement. */
+/** Whether the environment's server understands thread groups.
+    Same version-skew contract as settlement. */
+export function readEnvironmentSupportsThreadGroups(environmentId: EnvironmentId): boolean {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .threadGroups === true
+  );
+}
+
 export function readEnvironmentSupportsPinReorder(environmentId: EnvironmentId): boolean {
   return (
     appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities

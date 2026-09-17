@@ -3,6 +3,7 @@ import {
   EventId,
   ProjectId,
   ProviderDriverKind,
+  ThreadGroupId,
   ThreadId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
@@ -29,7 +30,9 @@ function makeEvent(input: {
     aggregateId:
       input.aggregateKind === "project"
         ? ProjectId.make(input.aggregateId)
-        : ThreadId.make(input.aggregateId),
+        : input.aggregateKind === "thread-group"
+          ? ThreadGroupId.make(input.aggregateId)
+          : ThreadId.make(input.aggregateId),
     occurredAt: input.occurredAt,
     commandId: input.commandId === null ? null : CommandId.make(input.commandId),
     causationEventId: null,
@@ -297,6 +300,138 @@ describe("orchestration projector", () => {
       ),
     );
     expect(unarchived.threads[0]?.archivedAt).toBeNull();
+  });
+
+  it("applies thread group lifecycle and membership events", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const created = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: { provider: ProviderDriverKind.make("codex"), model: "gpt-5-codex" },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+    const grouped = await Effect.runPromise(
+      projectEvent(
+        created,
+        makeEvent({
+          sequence: 2,
+          type: "thread-group.created",
+          aggregateKind: "thread-group",
+          aggregateId: "group-1",
+          occurredAt: now,
+          commandId: "cmd-group-create",
+          payload: {
+            groupId: "group-1",
+            projectId: "project-1",
+            name: "New group",
+            icon: null,
+            nameGeneration: { requestId: "cmd-group-create", startedAt: now },
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ).pipe(
+        Effect.flatMap((model) =>
+          projectEvent(
+            model,
+            makeEvent({
+              sequence: 3,
+              type: "thread.group-set",
+              aggregateKind: "thread",
+              aggregateId: "thread-1",
+              occurredAt: now,
+              commandId: "cmd-group-create",
+              payload: { threadId: "thread-1", groupId: "group-1", updatedAt: now },
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(grouped.threadGroups).toEqual([
+      {
+        id: "group-1",
+        projectId: "project-1",
+        name: "New group",
+        icon: null,
+        nameGeneration: { requestId: "cmd-group-create", startedAt: now },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    expect(grouped.threads[0]?.groupId).toBe("group-1");
+
+    const named = await Effect.runPromise(
+      projectEvent(
+        grouped,
+        makeEvent({
+          sequence: 4,
+          type: "thread-group.meta-updated",
+          aggregateKind: "thread-group",
+          aggregateId: "group-1",
+          occurredAt: now,
+          commandId: "cmd-group-name",
+          payload: {
+            groupId: "group-1",
+            name: "Auth work",
+            nameGeneration: null,
+            updatedAt: "2026-01-01T00:00:01.000Z",
+          },
+        }),
+      ),
+    );
+    expect(named.threadGroups?.[0]?.name).toBe("Auth work");
+    expect(named.threadGroups?.[0]?.nameGeneration).toBeNull();
+    expect(named.threadGroups?.[0]?.updatedAt).toBe("2026-01-01T00:00:01.000Z");
+
+    const deleted = await Effect.runPromise(
+      projectEvent(
+        named,
+        makeEvent({
+          sequence: 5,
+          type: "thread.group-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-group-delete",
+          payload: { threadId: "thread-1", groupId: null, updatedAt: now },
+        }),
+      ).pipe(
+        Effect.flatMap((model) =>
+          projectEvent(
+            model,
+            makeEvent({
+              sequence: 6,
+              type: "thread-group.deleted",
+              aggregateKind: "thread-group",
+              aggregateId: "group-1",
+              occurredAt: now,
+              commandId: "cmd-group-delete",
+              payload: { groupId: "group-1", deletedAt: now },
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(deleted.threadGroups).toEqual([]);
+    expect(deleted.threads[0]?.groupId).toBeNull();
   });
 
   it("keeps projector forward-compatible for unhandled event types", async () => {

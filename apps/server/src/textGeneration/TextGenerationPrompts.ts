@@ -327,3 +327,34 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
   return { prompt, outputSchema };
 }
+
+// ---------------------------------------------------------------------------
+// Thread group name
+// ---------------------------------------------------------------------------
+
+export interface ThreadGroupNamePromptInput {
+  threadTitles: ReadonlyArray<string>;
+}
+
+const THREAD_GROUP_NAME_PROMPT = `Name a sidebar folder that will hold the T3 Code threads listed below.
+Return JSON with the key name.
+
+Editorial rules:
+- 1-4 words, fewer than 30 characters.
+- Name the shared subject, feature area, or goal the threads have in common.
+- Prefer a compact noun phrase. No verbs like "fix" or "add" unless every thread is that action.
+- Do not copy one thread title. Do not number or list the threads.
+- Avoid project names already visible in the UI, quotes, labels, filler, and trailing punctuation.
+- If the threads share nothing recognizable, name the most common theme rather than refusing.`;
+
+export function buildThreadGroupNamePrompt(input: ThreadGroupNamePromptInput) {
+  const titles = input.threadTitles
+    .slice(0, 50)
+    .map((title) => `- ${title.replace(/\s+/g, " ").trim()}`)
+    .join("\n");
+  const prompt = `${THREAD_GROUP_NAME_PROMPT}\n\nThread titles:\n${limitSection(titles, 6_000)}`;
+  const outputSchema = Schema.Struct({
+    name: Schema.String,
+  });
+  return { prompt, outputSchema };
+}

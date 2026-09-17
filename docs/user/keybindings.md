@@ -30,6 +30,11 @@ on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and
 Hyprland. If a custom desktop shortcut takes the same keys, choose another binding
 in Settings.
 
+## Group threads
+
+Use `mod+g` to group the selected sidebar threads, or the open thread when
+nothing is selected. See [Group threads](./thread-sidebar.md#group-threads).
+
 ## Copy pull request references
 
 With a PR open in the right panel or on the Pull Requests page, use `mod+shift+c`

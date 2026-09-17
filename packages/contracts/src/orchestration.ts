@@ -18,6 +18,7 @@ import {
   PositiveInt,
   ProjectId,
   ProviderItemId,
+  ThreadGroupId,
   ThreadId,
   TrimmedNonEmptyString,
   TrimmedString,
@@ -682,6 +683,34 @@ export const ThreadTitleRegeneration = Schema.Struct({
 });
 export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 
+/** Pending AI naming for a thread group. Cleared when the request lands or a
+ * manual rename supersedes it; a late completion for another request is dropped. */
+export const ThreadGroupNameGeneration = Schema.Struct({
+  requestId: CommandId,
+  startedAt: IsoDateTime,
+});
+export type ThreadGroupNameGeneration = typeof ThreadGroupNameGeneration.Type;
+
+export const DEFAULT_THREAD_GROUP_NAME = "New group";
+
+/**
+ * A user-made folder of threads inside one project. Membership lives on the
+ * thread (`groupId`), so archiving or settling a member never has to touch the
+ * group; the group only carries its own identity and presentation.
+ */
+export const OrchestrationThreadGroup = Schema.Struct({
+  id: ThreadGroupId,
+  projectId: ProjectId,
+  name: TrimmedNonEmptyString,
+  // Same picker as project icons: a lucide glyph or monogram carries the
+  // color, an emoji has none. Null means the default folder glyph.
+  icon: Schema.NullOr(ProjectIconOverride),
+  nameGeneration: Schema.optional(Schema.NullOr(ThreadGroupNameGeneration)),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationThreadGroup = typeof OrchestrationThreadGroup.Type;
+
 /**
  * Legacy single-PR link. Still emitted as the thread's derived current pull
  * request (see `@t3tools/shared/threadPullRequests`) so clients from before
@@ -820,6 +849,9 @@ export const OrchestrationThread = Schema.Struct({
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
+  // The sidebar group this thread files under. Optional so payloads from
+  // pre-group servers still decode; null is ungrouped.
+  groupId: Schema.optional(Schema.NullOr(ThreadGroupId)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -835,6 +867,9 @@ export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
   threads: Schema.Array(OrchestrationThread),
+  // Optional so cached snapshots from older servers still decode and existing
+  // read-model fixtures stay valid; readers treat absent as empty.
+  threadGroups: Schema.optional(Schema.Array(OrchestrationThreadGroup)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
@@ -889,6 +924,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
+  groupId: Schema.optional(Schema.NullOr(ThreadGroupId)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -921,6 +957,9 @@ export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
   threads: Schema.Array(OrchestrationThreadShell),
+  // Optional so cached snapshots from older servers still decode and existing
+  // read-model fixtures stay valid; readers treat absent as empty.
+  threadGroups: Schema.optional(Schema.Array(OrchestrationThreadGroup)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
@@ -945,6 +984,16 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     kind: Schema.Literal("thread-removed"),
     sequence: NonNegativeInt,
     threadId: ThreadId,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("thread-group-upserted"),
+    sequence: NonNegativeInt,
+    threadGroup: OrchestrationThreadGroup,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("thread-group-removed"),
+    sequence: NonNegativeInt,
+    threadGroupId: ThreadGroupId,
   }),
 ]);
 export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent.Type;
@@ -1223,6 +1272,54 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   ),
 );
 
+// Groups are created with their first members in one command so a fresh
+// group never exists empty, and so the AI name can be requested from the
+// member titles at creation time.
+const ThreadGroupCreateCommand = Schema.Struct({
+  type: Schema.Literal("thread-group.create"),
+  commandId: CommandId,
+  groupId: ThreadGroupId,
+  projectId: ProjectId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  icon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  threadIds: Schema.Array(ThreadId).check(Schema.isMinLength(1)),
+  // Ask the server to name the group from its members' titles. The group
+  // starts with the placeholder name (or `name`) until generation lands.
+  generateName: Schema.optional(Schema.Literal(true)),
+  createdAt: IsoDateTime,
+});
+
+const ThreadGroupMetaUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread-group.meta.update"),
+  commandId: CommandId,
+  groupId: ThreadGroupId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  icon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  regenerateName: Schema.optional(Schema.Literal(true)),
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      !(input.name !== undefined && input.regenerateName === true) ||
+      "name and regenerateName cannot be specified together",
+  ),
+);
+
+// Deleting a group ungroups its members; the threads themselves are untouched.
+const ThreadGroupDeleteCommand = Schema.Struct({
+  type: Schema.Literal("thread-group.delete"),
+  commandId: CommandId,
+  groupId: ThreadGroupId,
+});
+
+// Null moves the thread out of its group. A group left empty by this move
+// is deleted in the same command so the sidebar never shows a hollow folder.
+const ThreadGroupSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.group.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  groupId: Schema.NullOr(ThreadGroupId),
+});
+
 const ThreadPullRequestLinkCommand = Schema.Struct({
   type: Schema.Literal("thread.pull-request.link"),
   commandId: CommandId,
@@ -1406,6 +1503,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadPinReorderCommand,
   ThreadActiveReorderCommand,
   ThreadMetaUpdateCommand,
+  ThreadGroupCreateCommand,
+  ThreadGroupMetaUpdateCommand,
+  ThreadGroupDeleteCommand,
+  ThreadGroupSetCommand,
   ThreadPullRequestLinkCommand,
   ThreadPullRequestUnlinkCommand,
   ThreadRuntimeModeSetCommand,
@@ -1439,6 +1540,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadPinReorderCommand,
   ThreadActiveReorderCommand,
   ThreadMetaUpdateCommand,
+  ThreadGroupCreateCommand,
+  ThreadGroupMetaUpdateCommand,
+  ThreadGroupDeleteCommand,
+  ThreadGroupSetCommand,
   ThreadPullRequestLinkCommand,
   ThreadPullRequestUnlinkCommand,
   ThreadRuntimeModeSetCommand,
@@ -1595,6 +1700,16 @@ const ThreadTitleRegenerationCompleteCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
 });
 
+const ThreadGroupNameGenerateCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread-group.name.generate.complete"),
+  commandId: CommandId,
+  groupId: ThreadGroupId,
+  requestId: CommandId,
+  // Absent when generation failed or produced nothing usable: the pending
+  // marker clears and the current name stays.
+  name: Schema.optional(TrimmedNonEmptyString),
+});
+
 const ThreadPullRequestSyncCommand = Schema.Struct({
   type: Schema.Literal("thread.pull-request.sync"),
   commandId: CommandId,
@@ -1639,6 +1754,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTitleRegenerationCompleteCommand,
   ThreadTitleGenerateCompleteCommand,
   ThreadTitleRefineCommand,
+  ThreadGroupNameGenerateCompleteCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
 ]);
@@ -1666,6 +1782,10 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.unpinned",
   "thread.pin-reordered",
   "thread.meta-updated",
+  "thread.group-set",
+  "thread-group.created",
+  "thread-group.meta-updated",
+  "thread-group.deleted",
   "thread.pull-request-linked",
   "thread.pull-request-unlinked",
   "thread.pull-request-synced",
@@ -1686,7 +1806,7 @@ export const OrchestrationEventType = Schema.Literals([
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
-export const OrchestrationAggregateKind = Schema.Literals(["project", "thread"]);
+export const OrchestrationAggregateKind = Schema.Literals(["project", "thread", "thread-group"]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
 
@@ -1825,6 +1945,38 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   updatedAt: IsoDateTime,
+});
+
+export const ThreadGroupSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  groupId: Schema.NullOr(ThreadGroupId),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadGroupCreatedPayload = Schema.Struct({
+  groupId: ThreadGroupId,
+  projectId: ProjectId,
+  name: TrimmedNonEmptyString,
+  icon: Schema.NullOr(ProjectIconOverride),
+  nameGeneration: Schema.optional(Schema.NullOr(ThreadGroupNameGeneration)),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadGroupMetaUpdatedPayload = Schema.Struct({
+  groupId: ThreadGroupId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  icon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  /** Intent marker consumed by the naming reactor. */
+  regenerateName: Schema.optional(Schema.Literal(true)),
+  /** Pending state shared with clients. Null clears a matching request. */
+  nameGeneration: Schema.optional(Schema.NullOr(ThreadGroupNameGeneration)),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadGroupDeletedPayload = Schema.Struct({
+  groupId: ThreadGroupId,
+  deletedAt: IsoDateTime,
 });
 
 export const ThreadPullRequestLinkedPayload = Schema.Struct({
@@ -1987,7 +2139,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId]),
+  aggregateId: Schema.Union([ProjectId, ThreadId, ThreadGroupId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -2070,6 +2222,26 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.meta-updated"),
     payload: ThreadMetaUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.group-set"),
+    payload: ThreadGroupSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread-group.created"),
+    payload: ThreadGroupCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread-group.meta-updated"),
+    payload: ThreadGroupMetaUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread-group.deleted"),
+    payload: ThreadGroupDeletedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

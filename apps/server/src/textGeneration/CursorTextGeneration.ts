@@ -16,11 +16,13 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildThreadGroupNamePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
+  sanitizeThreadGroupName,
 } from "./TextGenerationUtils.ts";
 import {
   applyCursorAcpModelSelection,
@@ -54,7 +56,8 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateThreadGroupName";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -261,10 +264,26 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateThreadGroupName: TextGeneration.TextGeneration["Service"]["generateThreadGroupName"] =
+    Effect.fn("CursorTextGeneration.generateThreadGroupName")(function* (input) {
+      const { prompt, outputSchema } = buildThreadGroupNamePrompt({
+        threadTitles: input.threadTitles,
+      });
+      const generated = yield* runCursorJson({
+        operation: "generateThreadGroupName",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { name: sanitizeThreadGroupName(generated.name) };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateThreadGroupName,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -46,12 +46,15 @@ export function ProjectIconPickerDialog({
   open,
   onOpenChange,
   onSelect,
+  title = "Choose project icon",
 }: {
   readonly current: ProjectIconOverride | null;
   readonly projectName: string;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onSelect: (icon: ProjectIconOverride) => void;
+  /** Thread groups reuse this picker; the heading names what is being decorated. */
+  readonly title?: string;
 }) {
   const automatic = deriveProjectIdentity(projectName);
   const [mode, setMode] = useState<ProjectIconOverride["kind"]>(current?.kind ?? "lucide");
@@ -102,7 +105,7 @@ export function ProjectIconPickerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="w-full sm:w-[32rem]">
         <DialogHeader>
-          <DialogTitle>Choose project icon</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
           <DialogDescription>Choose an icon, emoji, or monogram.</DialogDescription>
         </DialogHeader>
         <DialogPanel className="flex min-h-0 flex-col gap-4">

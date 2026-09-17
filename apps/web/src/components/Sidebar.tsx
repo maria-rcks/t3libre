@@ -22,7 +22,10 @@ import {
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
 import { resolveSettledThreadTimestamp } from "@t3tools/client-runtime/state/thread-sort";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import type {
+  EnvironmentThreadGroup,
+  EnvironmentThreadShell,
+} from "@t3tools/client-runtime/state/models";
 import {
   parseScopedThreadKey,
   scopeProjectRef,
@@ -34,6 +37,7 @@ import {
   type EnvironmentMachineKind,
   type ProjectIconOverride,
   type ScopedThreadRef,
+  type ThreadGroupId,
   type ThreadId,
 } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
@@ -61,7 +65,9 @@ import {
   XIcon,
 } from "lucide-react";
 import {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -128,6 +134,7 @@ import {
   readThreadShell,
   useAllEnvironmentProjectSnapshotsReady,
   useProjects,
+  useThreadGroups,
   useThreadShells,
 } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
@@ -146,12 +153,18 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
-import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
+import { buildThreadActionMenuItems, threadGroupIdFromMenuId } from "./threadActionMenu.logic";
+import { SidebarThreadGroupRow } from "./sidebar/SidebarThreadGroupRow";
+import { newThreadGroupId } from "~/lib/utils";
 import {
   animateSidebarLayoutChanges,
   applySidebarThreadDrop,
+  buildBulkGroupContextMenuItems,
   buildBulkTitleRegenerationContextMenuItem,
   buildBulkUnpinContextMenuItem,
+  buildThreadGroupContextMenuItems,
+  resolveProjectStatusIndicator,
+  resolveThreadStatusPill,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
   formatWorkingDurationLabel,
@@ -252,6 +265,30 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 // Fresh keys deliberately reset both shelves to collapsed for existing users.
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
+// Per-group fold state, keyed by scoped group key. Groups start collapsed:
+// a fresh group is a way to tuck work away, not to spread it out.
+const THREAD_GROUPS_EXPANDED_KEY = "t3code:sidebar:thread-groups-expanded";
+const ThreadGroupsExpandedSchema = Schema.Record(Schema.String, Schema.Boolean);
+const EMPTY_THREAD_GROUPS_EXPANDED: Record<string, boolean> = {};
+
+const ProjectIconPickerDialog = lazy(() =>
+  import("./settings/ProjectIconPickerDialog").then((module) => ({
+    default: module.ProjectIconPickerDialog,
+  })),
+);
+
+type SidebarThreadGroupRowEntry = {
+  readonly thread: EnvironmentThreadShell;
+  readonly section: SidebarSection;
+};
+type SidebarThreadGroupBlock = {
+  readonly key: string;
+  readonly group: EnvironmentThreadGroup;
+  /** Every visible member, pinned first, then active, snoozed, settled. */
+  readonly rows: readonly SidebarThreadGroupRowEntry[];
+  readonly status: ThreadStatusPillValue | null;
+};
+type ThreadStatusPillValue = NonNullable<ReturnType<typeof resolveThreadStatusPill>>;
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";
@@ -2132,6 +2169,7 @@ export default function Sidebar() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
+  const threadGroups = useThreadGroups();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -2156,6 +2194,16 @@ export default function Sidebar() {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const createThreadGroup = useAtomCommand(threadEnvironment.createGroup, {
+    reportFailure: false,
+  });
+  const updateThreadGroup = useAtomCommand(threadEnvironment.updateGroup, {
+    reportFailure: false,
+  });
+  const deleteThreadGroup = useAtomCommand(threadEnvironment.deleteGroup, {
+    reportFailure: false,
+  });
+  const setThreadGroup = useAtomCommand(threadEnvironment.setGroup, { reportFailure: false });
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
       toastManager.add({
@@ -2517,6 +2565,7 @@ export default function Sidebar() {
     activeThreads,
     snoozedThreads,
     settledThreads,
+    threadGroupBlocks,
     snoozeNow,
   } = useMemo(() => {
     // Snooze classification uses a REAL clock, not the quantized minute:
@@ -2537,8 +2586,42 @@ export default function Sidebar() {
     const settled: EnvironmentThreadShell[] = [];
     const draggable = new Set<string>();
     const activeReorderable = new Set<string>();
+    // Grouped threads leave the flat sections entirely: a group holds its
+    // own pinned/active/snoozed/settled members so parked work folds away
+    // with the group instead of stretching the shared shelves.
+    type GroupBucket = {
+      group: EnvironmentThreadGroup;
+      pinned: EnvironmentThreadShell[];
+      active: EnvironmentThreadShell[];
+      snoozed: EnvironmentThreadShell[];
+      settled: EnvironmentThreadShell[];
+    };
+    const groupByKey = new Map<string, GroupBucket>();
+    for (const group of threadGroups) {
+      if (
+        scopedProjectKeys !== null &&
+        !scopedProjectKeys.has(`${group.environmentId}:${group.projectId}`)
+      ) {
+        continue;
+      }
+      if (serverConfigs.get(group.environmentId)?.environment.capabilities.threadGroups !== true) {
+        continue;
+      }
+      groupByKey.set(`${group.environmentId}:${group.id}`, {
+        group,
+        pinned: [],
+        active: [],
+        snoozed: [],
+        settled: [],
+      });
+    }
     for (const thread of visible) {
       const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
+      const bucket =
+        thread.groupId == null
+          ? undefined
+          : groupByKey.get(`${thread.environmentId}:${thread.groupId}`);
+      const target = bucket ?? { pinned, active, snoozed, settled };
       // Threads on servers without the settlement capability (old server,
       // or descriptor not loaded yet) never classify as settled: the user
       // could neither un-settle nor pin them, so auto-settling them would
@@ -2546,13 +2629,20 @@ export default function Sidebar() {
       const supportsSettlement = capabilities?.threadSettlement === true;
       const supportsSnooze = capabilities?.threadSnooze === true;
       const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-      if (capabilities?.threadActiveReorder === true) activeReorderable.add(threadKey);
+      // Grouped rows are not part of the sortable list, so they never drag.
+      if (bucket === undefined && capabilities?.threadActiveReorder === true) {
+        activeReorderable.add(threadKey);
+      }
       // Older servers retain their existing drag actions. Active placement
       // additionally requires its own ordering capability at the drop target.
-      if (capabilities?.threadPinning === true && capabilities.threadPinReorder === true) {
+      if (
+        bucket === undefined &&
+        capabilities?.threadPinning === true &&
+        capabilities.threadPinReorder === true
+      ) {
         draggable.add(threadKey);
       }
-      if (optimisticDrop?.key === threadKey) {
+      if (bucket === undefined && optimisticDrop?.key === threadKey) {
         const projected = applySidebarThreadDrop(
           thread,
           optimisticDrop.section,
@@ -2571,15 +2661,62 @@ export default function Sidebar() {
         );
       } else if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
         // Snooze outranks settlement and pinning until the thread wakes.
-        snoozed.push(thread);
+        target.snoozed.push(thread);
       } else if (supportsSettlement && thread.settledOverride === "settled") {
-        settled.push(thread);
+        target.settled.push(thread);
       } else if (thread.pinnedAt != null) {
-        pinned.push(thread);
+        target.pinned.push(thread);
       } else {
-        active.push(thread);
+        target.active.push(thread);
       }
     }
+    const bySoonestWake = (left: EnvironmentThreadShell, right: EnvironmentThreadShell) =>
+      firstValidTimestampMs(left.snoozedUntil ?? null) -
+      firstValidTimestampMs(right.snoozedUntil ?? null);
+    // Empty groups (every member archived or deleted) stay out of the list;
+    // the server drops a group when its last member is moved out.
+    const groupBlocks: SidebarThreadGroupBlock[] = [...groupByKey.entries()]
+      .filter(
+        ([, bucket]) =>
+          bucket.pinned.length +
+            bucket.active.length +
+            bucket.snoozed.length +
+            bucket.settled.length >
+          0,
+      )
+      .sort(
+        ([, left], [, right]) =>
+          left.group.createdAt.localeCompare(right.group.createdAt) ||
+          left.group.id.localeCompare(right.group.id),
+      )
+      .map(([key, bucket]) => {
+        const rows: SidebarThreadGroupRowEntry[] = [
+          ...sortPinnedThreadsForSidebar(bucket.pinned).map((thread) => ({
+            thread,
+            section: "pinned" as const,
+          })),
+          ...sortThreadsForSidebar(bucket.active).map((thread) => ({
+            thread,
+            section: "active" as const,
+          })),
+          ...bucket.snoozed.toSorted(bySoonestWake).map((thread) => ({
+            thread,
+            section: "snoozed" as const,
+          })),
+          ...sortSettledThreadsForSidebar(bucket.settled).map((thread) => ({
+            thread,
+            section: "settled" as const,
+          })),
+        ];
+        return {
+          key,
+          group: bucket.group,
+          rows,
+          status: resolveProjectStatusIndicator(
+            rows.map((row) => resolveThreadStatusPill({ thread: row.thread })),
+          ),
+        };
+      });
     // One shared rule on every platform (see sortPinnedThreadsByOrderKey):
     // user-arranged keys first, keyless threads in creation order below.
     // Server capability only gates DRAGGING — it must not influence the
@@ -2607,23 +2744,38 @@ export default function Sidebar() {
               getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
             }),
       // Soonest wake first: "what comes back next" is the shelf's question.
-      snoozedThreads: snoozed.toSorted(
-        (left, right) =>
-          firstValidTimestampMs(left.snoozedUntil ?? null) -
-          firstValidTimestampMs(right.snoozedUntil ?? null),
-      ),
+      snoozedThreads: snoozed.toSorted(bySoonestWake),
       settledThreads: sortSettledThreadsForSidebar(settled),
+      threadGroupBlocks: groupBlocks,
       snoozeNow: preciseNow,
     };
-  }, [nowMinute, optimisticDrop, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+  }, [
+    nowMinute,
+    optimisticDrop,
+    scopedProjectKeys,
+    serverConfigs,
+    snoozeWakeTick,
+    threadGroups,
+    threads,
+  ]);
+  const groupedThreadCount = useMemo(
+    () => threadGroupBlocks.reduce((total, block) => total + block.rows.length, 0),
+    [threadGroupBlocks],
+  );
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
   const searchableThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
-    [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
+    () => [
+      ...threadGroupBlocks.flatMap((block) => block.rows.map((row) => row.thread)),
+      ...pinnedThreads,
+      ...activeThreads,
+      ...snoozedThreads,
+      ...settledThreads,
+    ],
+    [activeThreads, pinnedThreads, settledThreads, snoozedThreads, threadGroupBlocks],
   );
   const threadSearchResults = useMemo(
     () => searchSidebarThreads(searchableThreads, threadSearchQuery),
@@ -2648,10 +2800,17 @@ export default function Sidebar() {
   // moment a snooze expires instead of on the next minute tick. Sorted
   // soonest-first, so entry 0 is the boundary.
   useEffect(() => {
-    const nextWakeAtMs =
-      snoozedThreads.length > 0 && snoozedThreads[0]?.snoozedUntil != null
-        ? Date.parse(snoozedThreads[0].snoozedUntil)
-        : Number.NaN;
+    let nextWakeAtMs = Number.NaN;
+    const consider = (thread: EnvironmentThreadShell) => {
+      if (thread.snoozedUntil == null) return;
+      const wakeAtMs = Date.parse(thread.snoozedUntil);
+      if (Number.isNaN(wakeAtMs)) return;
+      nextWakeAtMs = Number.isNaN(nextWakeAtMs) ? wakeAtMs : Math.min(nextWakeAtMs, wakeAtMs);
+    };
+    if (snoozedThreads[0]) consider(snoozedThreads[0]);
+    for (const block of threadGroupBlocks) {
+      for (const row of block.rows) if (row.section === "snoozed") consider(row.thread);
+    }
     if (Number.isNaN(nextWakeAtMs)) return;
     // setTimeout delays are signed 32-bit: anything larger overflows and
     // fires immediately, turning a far-future wake (event-condition snoozes
@@ -2660,7 +2819,7 @@ export default function Sidebar() {
     const delayMs = Math.min(Math.max(0, nextWakeAtMs - Date.now()) + 50, 2_147_483_647);
     const id = window.setTimeout(() => bumpSnoozeWakeTick((tick) => tick + 1), delayMs);
     return () => window.clearTimeout(id);
-  }, [snoozedThreads]);
+  }, [snoozedThreads, threadGroupBlocks]);
 
   // The settled tail renders in pages: history shouldn't dominate the
   // sidebar, and the common lookups are recent. Expansion resets when the
@@ -2740,9 +2899,53 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  const [threadGroupsExpanded, setThreadGroupsExpanded] = useLocalStorage(
+    THREAD_GROUPS_EXPANDED_KEY,
+    EMPTY_THREAD_GROUPS_EXPANDED,
+    ThreadGroupsExpandedSchema,
+  );
+  const toggleThreadGroup = useCallback(
+    (group: EnvironmentThreadGroup) => {
+      const key = `${group.environmentId}:${group.id}`;
+      setThreadGroupsExpanded((value) => ({ ...value, [key]: !(value[key] ?? false) }));
+    },
+    [setThreadGroupsExpanded],
+  );
+  // A collapsed group still shows the open thread, like the shelves: the
+  // route's row must never vanish behind a fold.
+  const renderedThreadGroups = useMemo(
+    () =>
+      threadGroupBlocks.map((block) => {
+        const expanded = threadGroupsExpanded[block.key] === true;
+        const rows = expanded
+          ? block.rows
+          : routeThreadKey === null
+            ? []
+            : block.rows.filter(
+                (row) =>
+                  scopedThreadKey(scopeThreadRef(row.thread.environmentId, row.thread.id)) ===
+                  routeThreadKey,
+              );
+        return { ...block, expanded, renderedRows: rows };
+      }),
+    [routeThreadKey, threadGroupBlocks, threadGroupsExpanded],
+  );
+
   const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () => [
+      ...renderedThreadGroups.flatMap((block) => block.renderedRows.map((row) => row.thread)),
+      ...pinnedThreads,
+      ...activeThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ],
+    [
+      renderedThreadGroups,
+      pinnedThreads,
+      activeThreads,
+      visibleSnoozedThreads,
+      renderedSettledThreads,
+    ],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -2778,24 +2981,38 @@ export default function Sidebar() {
   handleNewThreadRef.current = newThreadContext.handleNewThread;
   const settledThreadKeys = useMemo(
     () =>
-      new Set(
-        settledThreads.map((thread) =>
+      new Set([
+        ...settledThreads.map((thread) =>
           scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
         ),
-      ),
-    [settledThreads],
+        ...threadGroupBlocks.flatMap((block) =>
+          block.rows
+            .filter((row) => row.section === "settled")
+            .map((row) => scopedThreadKey(scopeThreadRef(row.thread.environmentId, row.thread.id))),
+        ),
+      ]),
+    [settledThreads, threadGroupBlocks],
   );
   const settledThreadKeysRef = useRef(settledThreadKeys);
   settledThreadKeysRef.current = settledThreadKeys;
   const snoozedThreadKeys = useMemo(
     () =>
-      new Set(
-        snoozedThreads.map((thread) =>
+      new Set([
+        ...snoozedThreads.map((thread) =>
           scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
         ),
-      ),
-    [snoozedThreads],
+        ...threadGroupBlocks.flatMap((block) =>
+          block.rows
+            .filter((row) => row.section === "snoozed")
+            .map((row) => scopedThreadKey(scopeThreadRef(row.thread.environmentId, row.thread.id))),
+        ),
+      ]),
+    [snoozedThreads, threadGroupBlocks],
   );
+  const threadGroupsRef = useRef(threadGroups);
+  threadGroupsRef.current = threadGroups;
+  const threadGroupBlocksRef = useRef(threadGroupBlocks);
+  threadGroupBlocksRef.current = threadGroupBlocks;
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
   snoozedThreadKeysRef.current = snoozedThreadKeys;
 
@@ -3756,6 +3973,222 @@ export default function Sidebar() {
     [attemptUnsnooze, performSnooze, timestampFormat],
   );
 
+  // Group creation from a selection (or the open thread via ⌘G). Every member
+  // must share one environment and project: a group is a project-scoped
+  // folder, and the server rejects cross-project members.
+  const groupThreadsTogether = useCallback(
+    async (selected: readonly EnvironmentThreadShell[]) => {
+      const first = selected[0];
+      if (!first) return;
+      if (
+        !selected.every(
+          (thread) =>
+            thread.environmentId === first.environmentId && thread.projectId === first.projectId,
+        )
+      ) {
+        toastManager.add({
+          type: "warning",
+          title: "Select threads from one project to group them",
+        });
+        return;
+      }
+      if (serverConfigs.get(first.environmentId)?.environment.capabilities.threadGroups !== true) {
+        toastManager.add({
+          type: "warning",
+          title: "Thread groups need a newer server",
+          description: "Update the T3 Code server in this environment to group threads.",
+        });
+        return;
+      }
+      const groupId = newThreadGroupId();
+      clearSelection();
+      const result = await createThreadGroup({
+        environmentId: first.environmentId,
+        input: {
+          groupId,
+          projectId: first.projectId,
+          threadIds: selected.map((thread) => thread.id),
+          generateName: true,
+        },
+      });
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to group threads",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+        return;
+      }
+      toastManager.add(
+        stackedThreadToast({
+          type: "success",
+          title: `Grouped ${selected.length} thread${selected.length === 1 ? "" : "s"}`,
+          description: "Naming the group from its threads…",
+          timeout: 5_000,
+          actionProps: {
+            children: "Undo",
+            onClick: () => {
+              void deleteThreadGroup({ environmentId: first.environmentId, input: { groupId } });
+            },
+          },
+        }),
+      );
+    },
+    [clearSelection, createThreadGroup, deleteThreadGroup, serverConfigs],
+  );
+  const groupThreadsTogetherRef = useRef(groupThreadsTogether);
+  groupThreadsTogetherRef.current = groupThreadsTogether;
+  const moveThreadToGroup = useCallback(
+    async (thread: EnvironmentThreadShell, groupId: ThreadGroupId | null) => {
+      const result = await setThreadGroup({
+        environmentId: thread.environmentId,
+        input: { threadId: thread.id, groupId },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title:
+              groupId === null ? "Failed to remove thread from group" : "Failed to move thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      }
+    },
+    [setThreadGroup],
+  );
+
+  const [renamingGroupKey, setRenamingGroupKey] = useState<string | null>(null);
+  const [renamingGroupName, setRenamingGroupName] = useState("");
+  const startThreadGroupRename = useCallback((group: EnvironmentThreadGroup) => {
+    setRenamingGroupKey(`${group.environmentId}:${group.id}`);
+    setRenamingGroupName(group.name);
+  }, []);
+  const cancelThreadGroupRename = useCallback(() => setRenamingGroupKey(null), []);
+  const commitThreadGroupRename = useCallback(
+    (group: EnvironmentThreadGroup, name: string) => {
+      void (async () => {
+        const trimmed = name.trim();
+        setRenamingGroupKey(null);
+        if (trimmed.length === 0) {
+          toastManager.add({ type: "warning", title: "Group name cannot be empty" });
+          return;
+        }
+        if (trimmed === group.name) return;
+        const result = await updateThreadGroup({
+          environmentId: group.environmentId,
+          input: { groupId: group.id, name: trimmed },
+        });
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to rename group",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+      })();
+    },
+    [updateThreadGroup],
+  );
+  const [iconPickerGroup, setIconPickerGroup] = useState<EnvironmentThreadGroup | null>(null);
+  const handleThreadGroupContextMenu = useCallback(
+    (group: EnvironmentThreadGroup, position: { x: number; y: number }) => {
+      void (async () => {
+        const api = readLocalApi();
+        if (!api) return;
+        const block = threadGroupBlocksRef.current.find(
+          (candidate) => candidate.key === `${group.environmentId}:${group.id}`,
+        );
+        const supportsSettlement =
+          serverConfigs.get(group.environmentId)?.environment.capabilities.threadSettlement ===
+          true;
+        const settleable =
+          block?.rows.filter(
+            (row) => supportsSettlement && row.section !== "settled" && row.section !== "snoozed",
+          ) ?? [];
+        const clicked = await settlePromise(() =>
+          api.contextMenu.show(
+            buildThreadGroupContextMenuItems({
+              isNaming: group.nameGeneration != null,
+              supportsNaming: true,
+              settleableCount: settleable.length,
+            }),
+            position,
+          ),
+        );
+        if (clicked._tag === "Failure") return;
+        switch (clicked.value) {
+          case "rename":
+            startThreadGroupRename(group);
+            return;
+          case "regenerate-name": {
+            if (group.nameGeneration != null) return;
+            const result = await updateThreadGroup({
+              environmentId: group.environmentId,
+              input: { groupId: group.id, regenerateName: true },
+            });
+            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Failed to generate group name",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            }
+            return;
+          }
+          case "change-icon":
+            setIconPickerGroup(group);
+            return;
+          case "settle-all": {
+            const coSettlingKeys = new Set(
+              settleable.map((row) =>
+                scopedThreadKey(scopeThreadRef(row.thread.environmentId, row.thread.id)),
+              ),
+            );
+            for (const row of settleable) {
+              attemptSettle(scopeThreadRef(row.thread.environmentId, row.thread.id), {
+                coSettlingKeys,
+              });
+            }
+            return;
+          }
+          case "ungroup": {
+            const result = await deleteThreadGroup({
+              environmentId: group.environmentId,
+              input: { groupId: group.id },
+            });
+            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Failed to ungroup threads",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            }
+            return;
+          }
+          default:
+            return;
+        }
+      })();
+    },
+    [attemptSettle, deleteThreadGroup, serverConfigs, startThreadGroupRename, updateThreadGroup],
+  );
+
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const handleMultiSelectContextMenu = useCallback(
     async (position: { x: number; y: number }) => {
@@ -3807,9 +4240,31 @@ export default function Sidebar() {
         pinnedCount: pinnedSelectedThreads.length,
       });
       const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
+      const firstSelected = selectedThreads[0];
+      const canGroupTogether =
+        firstSelected !== undefined &&
+        serverConfigs.get(firstSelected.environmentId)?.environment.capabilities.threadGroups ===
+          true &&
+        selectedThreads.every(
+          (thread) =>
+            thread.environmentId === firstSelected.environmentId &&
+            thread.projectId === firstSelected.projectId,
+        );
+      const groupedSelectedThreads = selectedThreads.filter(
+        (thread) =>
+          thread.groupId != null &&
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadGroups === true,
+      );
+      const groupMenuItems = buildBulkGroupContextMenuItems({
+        count,
+        canGroupTogether,
+        groupedCount: groupedSelectedThreads.length,
+        shortcutLabel: shortcutLabelForCommand(keybindings, "thread.group"),
+      });
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
           [
+            ...groupMenuItems,
             ...(unpinMenuItem ? [unpinMenuItem] : []),
             { id: "settle", label: `Settle (${count})` },
             ...(canSnoozeSelection
@@ -3893,6 +4348,17 @@ export default function Sidebar() {
               }),
             );
           }
+        }
+        return;
+      }
+      if (clicked.value === "group") {
+        await groupThreadsTogether(selectedThreads);
+        return;
+      }
+      if (clicked.value === "ungroup") {
+        clearSelection();
+        for (const thread of groupedSelectedThreads) {
+          void moveThreadToGroup(thread, null);
         }
         return;
       }
@@ -4003,6 +4469,9 @@ export default function Sidebar() {
       attemptUnsnooze,
       updateThreadMetadata,
       timestampFormat,
+      groupThreadsTogether,
+      keybindings,
+      moveThreadToGroup,
     ],
   );
 
@@ -4040,6 +4509,8 @@ export default function Sidebar() {
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         const isPinned = thread.pinnedAt != null;
+        const supportsGroups =
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadGroups === true;
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
         const clicked = await settlePromise(() =>
@@ -4060,6 +4531,20 @@ export default function Sidebar() {
                 titleRegeneration: supportsTitleRegeneration,
               },
               snoozePresets,
+              ...(supportsGroups
+                ? {
+                    groups: {
+                      currentGroupId: thread.groupId ?? null,
+                      options: threadGroupsRef.current
+                        .filter(
+                          (group) =>
+                            group.environmentId === thread.environmentId &&
+                            group.projectId === thread.projectId,
+                        )
+                        .map((group) => ({ id: group.id, name: group.name })),
+                    },
+                  }
+                : {}),
             }),
             position,
           ),
@@ -4071,6 +4556,19 @@ export default function Sidebar() {
               ? await requestCustomSnooze()
               : snoozePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value);
           if (preset) attemptSnooze(threadRef, preset);
+          return;
+        }
+        if (clicked.value === "group:new") {
+          await groupThreadsTogether([thread]);
+          return;
+        }
+        if (clicked.value === "group:none") {
+          await moveThreadToGroup(thread, null);
+          return;
+        }
+        if (clicked.value?.startsWith("group:")) {
+          const groupId = threadGroupIdFromMenuId(clicked.value);
+          if (groupId !== null) await moveThreadToGroup(thread, groupId);
           return;
         }
         switch (clicked.value) {
@@ -4250,6 +4748,8 @@ export default function Sidebar() {
       startThreadRename,
       updateThreadMetadata,
       timestampFormat,
+      groupThreadsTogether,
+      moveThreadToGroup,
     ],
   );
 
@@ -4282,6 +4782,23 @@ export default function Sidebar() {
         navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
         return true;
       };
+      if (command === "thread.group") {
+        // Selection first; with nothing selected the open thread starts a
+        // group of one, which the "Move to group" menu can grow later.
+        const selectedKeys = [...useThreadSelectionStore.getState().selectedThreadKeys];
+        const selected = selectedKeys.flatMap((threadKey) => {
+          const thread = threadByKey.get(threadKey);
+          return thread ? [thread] : [];
+        });
+        const routeThread =
+          routeThreadKey === null ? null : (threadByKey.get(routeThreadKey) ?? null);
+        const targets = selected.length > 0 ? selected : routeThread ? [routeThread] : [];
+        if (targets.length === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void groupThreadsTogetherRef.current(targets);
+        return;
+      }
       const traversalDirection = threadTraversalDirectionFromCommand(command);
       if (traversalDirection !== null) {
         navigateToThreadKey(
@@ -4760,6 +5277,34 @@ export default function Sidebar() {
                           onNavigateToDraft={navigateToDraft}
                         />,
                       ];
+                      // Groups sit above the flat sections, folders first.
+                      // Their rows are plain thread rows (no sortable bag), so
+                      // the drag list below never has to reason about them.
+                      for (const block of renderedThreadGroups) {
+                        items.push(
+                          <SidebarThreadGroupRow
+                            key={`thread-group:${block.key}`}
+                            group={block.group}
+                            count={block.rows.length}
+                            expanded={block.expanded}
+                            status={block.expanded ? null : block.status}
+                            isRenaming={renamingGroupKey === block.key}
+                            renamingName={renamingGroupKey === block.key ? renamingGroupName : ""}
+                            onToggle={toggleThreadGroup}
+                            onContextMenu={handleThreadGroupContextMenu}
+                            onStartRename={startThreadGroupRename}
+                            onRenameNameChange={setRenamingGroupName}
+                            onCommitRename={commitThreadGroupRename}
+                            onCancelRename={cancelThreadGroupRename}
+                          >
+                            {block.renderedRows.length > 0
+                              ? block.renderedRows.map((row) =>
+                                  renderThreadRowInner(row.thread, row.section),
+                                )
+                              : null}
+                          </SidebarThreadGroupRow>,
+                        );
+                      }
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
@@ -4885,7 +5430,8 @@ export default function Sidebar() {
           ) : null}
           {!isSearchingThreads &&
           visibleDraftSessionCount === 0 &&
-          pinnedThreads.length +
+          groupedThreadCount +
+            pinnedThreads.length +
             activeThreads.length +
             snoozedThreads.length +
             settledThreads.length ===
@@ -4913,6 +5459,26 @@ export default function Sidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarChromeFooter />
+      {iconPickerGroup ? (
+        <Suspense fallback={null}>
+          <ProjectIconPickerDialog
+            current={iconPickerGroup.icon}
+            projectName={iconPickerGroup.name}
+            title="Choose group icon"
+            open
+            onOpenChange={(open) => {
+              if (!open) setIconPickerGroup(null);
+            }}
+            onSelect={(icon) => {
+              const group = iconPickerGroup;
+              void updateThreadGroup({
+                environmentId: group.environmentId,
+                input: { groupId: group.id, icon },
+              });
+            }}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 }

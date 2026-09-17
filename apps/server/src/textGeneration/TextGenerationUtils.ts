@@ -121,3 +121,25 @@ export function normalizeCliError(
     cause: error,
   });
 }
+
+const MAX_THREAD_GROUP_NAME_CHARS = 60;
+
+/** Normalise a raw group name to one short line. Empty input yields the default name. */
+export function sanitizeThreadGroupName(raw: string): string {
+  const normalized = raw
+    .trim()
+    .split(/\r?\n/g)[0]
+    ?.trim()
+    .replace(/^['"`]+|['"`]+$/g, "")
+    .replace(/[.!,;:]+$/g, "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!normalized || normalized.length === 0) {
+    return "New group";
+  }
+  // Models often answer in lowercase; a folder label reads as a title.
+  const capitalized = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  return capitalized.length <= MAX_THREAD_GROUP_NAME_CHARS
+    ? capitalized
+    : capitalized.slice(0, MAX_THREAD_GROUP_NAME_CHARS).trim();
+}

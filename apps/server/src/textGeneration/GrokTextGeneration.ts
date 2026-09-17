@@ -18,11 +18,13 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildThreadGroupNamePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
+  sanitizeThreadGroupName,
 } from "./TextGenerationUtils.ts";
 import {
   applyGrokAcpModelSelection,
@@ -54,7 +56,8 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateThreadGroupName";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -263,10 +266,26 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateThreadGroupName: TextGeneration.TextGeneration["Service"]["generateThreadGroupName"] =
+    Effect.fn("GrokTextGeneration.generateThreadGroupName")(function* (input) {
+      const { prompt, outputSchema } = buildThreadGroupNamePrompt({
+        threadTitles: input.threadTitles,
+      });
+      const generated = yield* runGrokJson({
+        operation: "generateThreadGroupName",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { name: sanitizeThreadGroupName(generated.name) };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateThreadGroupName,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

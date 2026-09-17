@@ -3,7 +3,9 @@ import type {
   OrchestrationProject,
   OrchestrationReadModel,
   OrchestrationThread,
+  OrchestrationThreadGroup,
   ProjectId,
+  ThreadGroupId,
   ThreadId,
 } from "@t3tools/contracts";
 import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
@@ -92,6 +94,23 @@ export function requireActiveProjectWorkspaceRootAbsent(input: {
     invariantError(
       input.command.type,
       `Active project '${existingProject.id}' already exists for workspace root '${normalizedWorkspaceRoot}'.`,
+    ),
+  );
+}
+
+export function requireThreadGroup(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly groupId: ThreadGroupId;
+}): Effect.Effect<OrchestrationThreadGroup, OrchestrationCommandInvariantError> {
+  const group = (input.readModel.threadGroups ?? []).find((entry) => entry.id === input.groupId);
+  if (group) {
+    return Effect.succeed(group);
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Thread group '${input.groupId}' does not exist for command '${input.command.type}'.`,
     ),
   );
 }

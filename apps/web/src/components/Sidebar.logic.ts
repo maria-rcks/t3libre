@@ -476,6 +476,72 @@ export function buildMultiSelectThreadContextMenuItems(input: {
   ];
 }
 
+export type ThreadGroupContextMenuId =
+  | "rename"
+  | "regenerate-name"
+  | "change-icon"
+  | "settle-all"
+  | "ungroup";
+
+/** Right-click menu for a sidebar group header. */
+export function buildThreadGroupContextMenuItems(input: {
+  isNaming: boolean;
+  supportsNaming: boolean;
+  settleableCount: number;
+}): readonly ContextMenuItem<ThreadGroupContextMenuId>[] {
+  return [
+    { id: "rename", label: "Rename group", icon: "pencil" },
+    ...(input.supportsNaming
+      ? [
+          {
+            id: "regenerate-name" as const,
+            label: input.isNaming ? "Naming…" : "Generate name",
+            icon: "refresh-cw",
+            disabled: input.isNaming,
+          },
+        ]
+      : []),
+    { id: "change-icon", label: "Change icon and color…", icon: "folder" },
+    ...(input.settleableCount > 0
+      ? [
+          {
+            id: "settle-all" as const,
+            label: `Settle threads (${input.settleableCount})`,
+            icon: "circle-check",
+            separatorBefore: true,
+          },
+        ]
+      : []),
+    { id: "ungroup", label: "Ungroup", icon: "folder-tree", separatorBefore: true },
+  ];
+}
+
+/**
+ * Bulk grouping offers "Group threads" only when every selected row can join
+ * one group: same environment, same project, and a server that has groups.
+ * "Remove from group" counts only rows that are actually grouped.
+ */
+export function buildBulkGroupContextMenuItems(input: {
+  count: number;
+  canGroupTogether: boolean;
+  groupedCount: number;
+  shortcutLabel: string | null;
+}): readonly ContextMenuItem<"group" | "ungroup">[] {
+  return [
+    ...(input.canGroupTogether
+      ? [
+          {
+            id: "group" as const,
+            label: `Group threads (${input.count})${input.shortcutLabel ? `  ${input.shortcutLabel}` : ""}`,
+          },
+        ]
+      : []),
+    ...(input.groupedCount > 0
+      ? [{ id: "ungroup" as const, label: `Remove from group (${input.groupedCount})` }]
+      : []),
+  ];
+}
+
 export function buildBulkTitleRegenerationContextMenuItem(input: {
   supportedCount: number;
   actionableCount: number;

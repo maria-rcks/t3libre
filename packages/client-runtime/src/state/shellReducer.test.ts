@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { ProjectId, ProviderInstanceId, ThreadGroupId, ThreadId } from "@t3tools/contracts";
 import type { OrchestrationShellSnapshot, OrchestrationShellStreamEvent } from "@t3tools/contracts";
 
 import { applyShellStreamEvent } from "./shellReducer.ts";
@@ -9,8 +9,19 @@ const baseSnapshot: OrchestrationShellSnapshot = {
   snapshotSequence: 0,
   projects: [],
   threads: [],
+  threadGroups: [],
   updatedAt: "2026-04-01T00:00:00.000Z",
 };
+
+const stubThreadGroup = {
+  id: ThreadGroupId.make("group-1"),
+  projectId: ProjectId.make("project-1"),
+  name: "Auth work",
+  icon: null,
+  nameGeneration: null,
+  createdAt: "2026-04-01T00:00:00.000Z",
+  updatedAt: "2026-04-01T00:00:00.000Z",
+} as const;
 
 const stubProject = {
   id: ProjectId.make("project-1"),
@@ -175,6 +186,44 @@ describe("applyShellStreamEvent", () => {
 
       expect(next.threads).toHaveLength(0);
       expect(next.snapshotSequence).toBe(6);
+    });
+  });
+
+  describe("thread-group-upserted and thread-group-removed", () => {
+    it("adds, replaces, and removes a thread group by id", () => {
+      const added = applyShellStreamEvent(baseSnapshot, {
+        kind: "thread-group-upserted",
+        sequence: 1,
+        threadGroup: stubThreadGroup,
+      });
+      expect(added.threadGroups).toEqual([stubThreadGroup]);
+      expect(added.snapshotSequence).toBe(1);
+
+      const renamed = applyShellStreamEvent(added, {
+        kind: "thread-group-upserted",
+        sequence: 2,
+        threadGroup: { ...stubThreadGroup, name: "Login flow" },
+      });
+      expect(renamed.threadGroups).toHaveLength(1);
+      expect(renamed.threadGroups?.[0]?.name).toBe("Login flow");
+
+      const removed = applyShellStreamEvent(renamed, {
+        kind: "thread-group-removed",
+        sequence: 3,
+        threadGroupId: stubThreadGroup.id,
+      });
+      expect(removed.threadGroups).toHaveLength(0);
+      expect(removed.snapshotSequence).toBe(3);
+    });
+
+    it("drops a stale group upsert", () => {
+      const snapshot: OrchestrationShellSnapshot = { ...baseSnapshot, snapshotSequence: 5 };
+      const next = applyShellStreamEvent(snapshot, {
+        kind: "thread-group-upserted",
+        sequence: 4,
+        threadGroup: stubThreadGroup,
+      });
+      expect(next).toBe(snapshot);
     });
   });
 

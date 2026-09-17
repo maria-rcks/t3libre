@@ -68,6 +68,7 @@ import {
   AssetWorkspaceContextResolutionError,
   RpcClientId,
   EnvironmentAuthorizationError,
+  ThreadGroupId,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -867,6 +868,17 @@ const makeWsRpcLayer = (
             );
           case "thread.unarchived":
             return threadUpsertOrRemove(ThreadId.make(event.aggregateId), event.sequence);
+          case "thread-group.created":
+          case "thread-group.meta-updated":
+            return threadGroupUpsertOrRemove(ThreadGroupId.make(event.aggregateId), event.sequence);
+          case "thread-group.deleted":
+            return Effect.succeed(
+              Option.some({
+                kind: "thread-group-removed" as const,
+                sequence: event.sequence,
+                threadGroupId: ThreadGroupId.make(event.aggregateId),
+              }),
+            );
           default:
             if (event.aggregateKind !== "thread") {
               return Effect.succeed(Option.none());
@@ -881,7 +893,7 @@ const makeWsRpcLayer = (
       // If both attempts fail, log and drop the stream item; treating an error as
       // a missing row would incorrectly remove a still-active aggregate.
       const retryShellProjectionRead = <A, E>(
-        aggregateKind: "project" | "thread",
+        aggregateKind: "project" | "thread" | "thread-group",
         aggregateId: string,
         read: Effect.Effect<A, E>,
       ): Effect.Effect<Option.Option<A>, never, never> =>
@@ -921,6 +933,35 @@ const makeWsRpcLayer = (
                     kind: "project-upserted" as const,
                     sequence,
                     project: nextProject,
+                  }),
+              }),
+            ),
+          ),
+        );
+
+      const threadGroupUpsertOrRemove = (
+        threadGroupId: ThreadGroupId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead(
+          "thread-group",
+          threadGroupId,
+          projectionSnapshotQuery.getThreadGroupShellById(threadGroupId),
+        ).pipe(
+          Effect.map(
+            Option.flatMap((threadGroup) =>
+              Option.match(threadGroup, {
+                onNone: () =>
+                  Option.some<OrchestrationShellStreamEvent>({
+                    kind: "thread-group-removed" as const,
+                    sequence,
+                    threadGroupId,
+                  }),
+                onSome: (nextThreadGroup) =>
+                  Option.some<OrchestrationShellStreamEvent>({
+                    kind: "thread-group-upserted" as const,
+                    sequence,
+                    threadGroup: nextThreadGroup,
                   }),
               }),
             ),

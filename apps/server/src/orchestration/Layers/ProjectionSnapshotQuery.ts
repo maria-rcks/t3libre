@@ -26,6 +26,8 @@ import {
   type OrchestrationSession,
   type OrchestrationThreadActivity,
   type OrchestrationThreadShell,
+  type OrchestrationThreadGroup,
+  ThreadGroupId,
   ModelSelection,
   ProjectId,
   ThreadLinkedPullRequest,
@@ -63,6 +65,7 @@ import { ProjectionThreadProposedPlan } from "../../persistence/Services/Project
 import { ProjectionThreadPullRequest } from "../../persistence/ProjectionThreadPullRequests.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
+import { ProjectionThreadGroup } from "../../persistence/Services/ProjectionThreadGroups.ts";
 import {
   decodeThreadDetailPageCursor,
   encodeThreadDetailPageCursor,
@@ -126,6 +129,14 @@ const ProjectionThreadPullRequestDbRowSchema = ProjectionThreadPullRequest.mapFi
     stack: Schema.NullOr(Schema.fromJsonString(ThreadPullRequestStack)),
   }),
 );
+const ProjectionThreadGroupDbRowSchema = ProjectionThreadGroup.mapFields(
+  Struct.assign({
+    icon: Schema.NullOr(Schema.fromJsonString(ProjectIconOverride)),
+  }),
+);
+const ThreadGroupIdLookupInput = Schema.Struct({
+  groupId: ThreadGroupId,
+});
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
@@ -406,6 +417,23 @@ function mapProjectShellRow(
   };
 }
 
+function mapThreadGroupRow(
+  row: Schema.Schema.Type<typeof ProjectionThreadGroupDbRowSchema>,
+): OrchestrationThreadGroup {
+  return {
+    id: row.groupId,
+    projectId: row.projectId,
+    name: row.name,
+    icon: row.icon,
+    nameGeneration:
+      row.nameGenerationRequestId !== null && row.nameGenerationStartedAt !== null
+        ? { requestId: row.nameGenerationRequestId, startedAt: row.nameGenerationStartedAt }
+        : null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 function mapProposedPlanRow(
   row: Schema.Schema.Type<typeof ProjectionThreadProposedPlanDbRowSchema>,
 ): OrchestrationProposedPlan {
@@ -563,6 +591,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           title_state_json AS "titleState",
+          group_id AS "groupId",
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
@@ -604,6 +633,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           title_state_json AS "titleState",
+          group_id AS "groupId",
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
@@ -647,6 +677,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           title_state_json AS "titleState",
+          group_id AS "groupId",
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
@@ -992,6 +1023,48 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const listActiveThreadGroupRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadGroupDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          group_id AS "groupId",
+          project_id AS "projectId",
+          name,
+          icon_json AS "icon",
+          name_generation_request_id AS "nameGenerationRequestId",
+          name_generation_started_at AS "nameGenerationStartedAt",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          deleted_at AS "deletedAt"
+        FROM projection_thread_groups
+        WHERE deleted_at IS NULL
+        ORDER BY created_at ASC, group_id ASC
+      `,
+  });
+
+  const getActiveThreadGroupRowById = SqlSchema.findOneOption({
+    Request: ThreadGroupIdLookupInput,
+    Result: ProjectionThreadGroupDbRowSchema,
+    execute: ({ groupId }) =>
+      sql`
+        SELECT
+          group_id AS "groupId",
+          project_id AS "projectId",
+          name,
+          icon_json AS "icon",
+          name_generation_request_id AS "nameGenerationRequestId",
+          name_generation_started_at AS "nameGenerationStartedAt",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          deleted_at AS "deletedAt"
+        FROM projection_thread_groups
+        WHERE group_id = ${groupId}
+          AND deleted_at IS NULL
+      `,
+  });
+
   const readProjectionCounts = SqlSchema.findOne({
     Request: Schema.Void,
     Result: ProjectionCountsRowSchema,
@@ -1212,6 +1285,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           title_state_json AS "titleState",
+          group_id AS "groupId",
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
@@ -2106,6 +2180,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listActiveThreadGroupRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getSnapshot:listThreadGroups:query",
+                "ProjectionSnapshotQuery.getSnapshot:listThreadGroups:decodeRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
@@ -2121,6 +2203,7 @@ pending_approval_requests AS (
             checkpointRows,
             latestTurnRows,
             stateRows,
+            threadGroupRows,
           ]) =>
             Effect.gen(function* () {
               const messagesByThread = new Map<string, Array<OrchestrationMessage>>();
@@ -2308,6 +2391,7 @@ pending_approval_requests AS (
                 activeOrderKey: row.activeOrderKey ?? null,
                 titleRegeneration: mapTitleRegeneration(row),
                 titleState: row.titleState,
+                groupId: row.groupId ?? null,
                 deletedAt: row.deletedAt,
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -2320,6 +2404,7 @@ pending_approval_requests AS (
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 threads,
+                threadGroups: threadGroupRows.map(mapThreadGroupRow),
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
 
@@ -2398,6 +2483,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listActiveThreadGroupRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listThreadGroups:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listThreadGroups:decodeRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
@@ -2410,6 +2503,7 @@ pending_approval_requests AS (
             sessionRows,
             latestTurnRows,
             stateRows,
+            threadGroupRows,
           ]) =>
             Effect.gen(function* () {
               const linkedThreadIds = new Set(pullRequestRows.map((row) => row.threadId));
@@ -2553,6 +2647,7 @@ pending_approval_requests AS (
                   activeOrderKey: row.activeOrderKey ?? null,
                   titleRegeneration: mapTitleRegeneration(row),
                   titleState: row.titleState,
+                  groupId: row.groupId ?? null,
                   deletedAt: row.deletedAt,
                   messages: [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -2566,6 +2661,7 @@ pending_approval_requests AS (
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 threads,
+                threadGroups: threadGroupRows.map(mapThreadGroupRow),
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               } satisfies OrchestrationReadModel;
             }),
@@ -2630,11 +2726,27 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listActiveThreadGroupRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listThreadGroups:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listThreadGroups:decodeRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, threadRows, sessionRows, pullRequestRows, latestTurnRows, stateRows]) =>
+          ([
+            projectRows,
+            threadRows,
+            sessionRows,
+            pullRequestRows,
+            latestTurnRows,
+            stateRows,
+            threadGroupRows,
+          ]) =>
             Effect.gen(function* () {
               let updatedAt: string | null = null;
               for (const row of projectRows) {
@@ -2656,6 +2768,9 @@ pending_approval_requests AS (
                 }
               }
               for (const row of stateRows) {
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+              }
+              for (const row of threadGroupRows) {
                 updatedAt = maxIso(updatedAt, row.updatedAt);
               }
 
@@ -2709,6 +2824,7 @@ pending_approval_requests AS (
                         activeOrderKey: row.activeOrderKey ?? null,
                         titleRegeneration: mapTitleRegeneration(row),
                         titleState: row.titleState,
+                        groupId: row.groupId ?? null,
                         session: sessionByThread.get(row.threadId) ?? null,
                         latestUserMessageAt: row.latestUserMessageAt,
                         hasPendingApprovals: row.pendingApprovalCount > 0,
@@ -2721,6 +2837,7 @@ pending_approval_requests AS (
                       } satisfies OrchestrationThreadShell)
                     : Result.failVoid,
                 ),
+                threadGroups: threadGroupRows.map(mapThreadGroupRow),
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
 
@@ -2872,6 +2989,7 @@ pending_approval_requests AS (
                   activeOrderKey: row.activeOrderKey ?? null,
                   titleRegeneration: mapTitleRegeneration(row),
                   titleState: row.titleState,
+                  groupId: row.groupId ?? null,
                   session: sessionByThread.get(row.threadId) ?? null,
                   latestUserMessageAt: row.latestUserMessageAt,
                   hasPendingApprovals: row.pendingApprovalCount > 0,
@@ -2882,6 +3000,7 @@ pending_approval_requests AS (
                   ),
                   planProgress: threadPlanProgress.getThreadPlanProgress(row.threadId),
                 })),
+                threadGroups: [],
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
 
@@ -3155,6 +3274,19 @@ pending_approval_requests AS (
       });
     });
 
+  const getThreadGroupShellById: ProjectionSnapshotQueryShape["getThreadGroupShellById"] = (
+    groupId,
+  ) =>
+    getActiveThreadGroupRowById({ groupId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getThreadGroupShellById:query",
+          "ProjectionSnapshotQuery.getThreadGroupShellById:decodeRow",
+        ),
+      ),
+      Effect.map(Option.map(mapThreadGroupRow)),
+    );
+
   const getThreadShellById: ProjectionSnapshotQueryShape["getThreadShellById"] = (threadId) =>
     Effect.gen(function* () {
       const [threadRow, latestTurnRow, sessionRow, pullRequestRows] = yield* Effect.all([
@@ -3228,6 +3360,7 @@ pending_approval_requests AS (
         activeOrderKey: threadRow.value.activeOrderKey ?? null,
         titleRegeneration: mapTitleRegeneration(threadRow.value),
         titleState: threadRow.value.titleState,
+        groupId: threadRow.value.groupId ?? null,
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
         latestUserMessageAt: threadRow.value.latestUserMessageAt,
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
@@ -3529,6 +3662,7 @@ pending_approval_requests AS (
         activeOrderKey: threadRow.value.activeOrderKey ?? null,
         titleRegeneration: mapTitleRegeneration(threadRow.value),
         titleState: threadRow.value.titleState,
+        groupId: threadRow.value.groupId ?? null,
         deletedAt: null,
         messages: messageRows.map((row) => {
           const message = {
@@ -3746,6 +3880,7 @@ pending_approval_requests AS (
     getThreadCheckpointContext,
     getFullThreadDiffContext,
     getThreadShellById,
+    getThreadGroupShellById,
     getThreadRuntimeContext,
     getTurnStartMessage,
     getThreadDetailById,

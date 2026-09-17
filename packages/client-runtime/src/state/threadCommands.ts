@@ -63,6 +63,14 @@ import {
   unsettleThread,
   unsnoozeThread,
   updateThreadMetadata,
+  createThreadGroup,
+  updateThreadGroup,
+  deleteThreadGroup,
+  setThreadGroup,
+  type CreateThreadGroupInput,
+  type UpdateThreadGroupInput,
+  type DeleteThreadGroupInput,
+  type SetThreadGroupInput,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 
@@ -91,6 +99,10 @@ export type {
   UnsettleThreadInput,
   UnsnoozeThreadInput,
   UpdateThreadMetadataInput,
+  CreateThreadGroupInput,
+  UpdateThreadGroupInput,
+  DeleteThreadGroupInput,
+  SetThreadGroupInput,
 } from "../operations/commands.ts";
 
 export function createThreadEnvironmentAtoms<R, E>(
@@ -102,6 +114,11 @@ export function createThreadEnvironmentAtoms<R, E>(
     mode: "serial" as const,
     key: ({ environmentId, input }: { environmentId: string; input: { threadId: string } }) =>
       JSON.stringify([environmentId, input.threadId]),
+  };
+  const groupConcurrency = {
+    mode: "serial" as const,
+    key: ({ environmentId, input }: { environmentId: string; input: { groupId: string } }) =>
+      JSON.stringify([environmentId, "thread-group", input.groupId]),
   };
   const commands = {
     create: createEnvironmentCommand(runtime, {
@@ -179,6 +196,32 @@ export function createThreadEnvironmentAtoms<R, E>(
     updateMetadata: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:update-metadata",
       execute: (input: UpdateThreadMetadataInput) => updateThreadMetadata(input),
+      scheduler,
+      concurrency,
+    }),
+    // Group commands serialize per group rather than per thread: a create
+    // touches several threads at once and must not interleave with a rename.
+    createGroup: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread-group:create",
+      execute: (input: CreateThreadGroupInput) => createThreadGroup(input),
+      scheduler,
+      concurrency: groupConcurrency,
+    }),
+    updateGroup: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread-group:update",
+      execute: (input: UpdateThreadGroupInput) => updateThreadGroup(input),
+      scheduler,
+      concurrency: groupConcurrency,
+    }),
+    deleteGroup: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread-group:delete",
+      execute: (input: DeleteThreadGroupInput) => deleteThreadGroup(input),
+      scheduler,
+      concurrency: groupConcurrency,
+    }),
+    setGroup: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:set-group",
+      execute: (input: SetThreadGroupInput) => setThreadGroup(input),
       scheduler,
       concurrency,
     }),
@@ -328,6 +371,10 @@ export function createThreadEnvironmentAtoms<R, E>(
     reorderActive: optimistic.wrap(commands.reorderActive, (thread, input) => ({
       ...thread,
       activeOrderKey: input.orderKey,
+    })),
+    setGroup: optimistic.wrap(commands.setGroup, (thread, input) => ({
+      ...thread,
+      groupId: input.groupId,
     })),
   };
 }

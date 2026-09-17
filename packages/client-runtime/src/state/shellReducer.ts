@@ -40,6 +40,19 @@ export function applyShellStreamEvent(
         threads: Arr.filter(snapshot.threads, (t) => t.id !== event.threadId),
         snapshotSequence: event.sequence,
       };
+    case "thread-group-upserted": {
+      const current = snapshot.threadGroups ?? [];
+      const threadGroups = current.some((g) => g.id === event.threadGroup.id)
+        ? Arr.map(current, (g) => (g.id === event.threadGroup.id ? event.threadGroup : g))
+        : Arr.append(current, event.threadGroup);
+      return { ...snapshot, threadGroups, snapshotSequence: event.sequence };
+    }
+    case "thread-group-removed":
+      return {
+        ...snapshot,
+        threadGroups: Arr.filter(snapshot.threadGroups ?? [], (g) => g.id !== event.threadGroupId),
+        snapshotSequence: event.sequence,
+      };
     default:
       return snapshot;
   }

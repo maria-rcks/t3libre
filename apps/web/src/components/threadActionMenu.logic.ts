@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem, ThreadGroupId } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
 /**
@@ -16,6 +16,10 @@ export type ThreadActionMenuId =
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
+  | "move-to-group"
+  | "group:new"
+  | "group:none"
+  | `group:${string}`
   | "rename"
   | "regenerate-title"
   | "mark-unread"
@@ -42,6 +46,22 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  /** Sidebar groups in this thread's project. Absent on servers without
+      thread groups (or surfaces that do not offer them), which hides the item. */
+  readonly groups?: {
+    readonly currentGroupId: ThreadGroupId | null;
+    readonly options: ReadonlyArray<{ readonly id: ThreadGroupId; readonly name: string }>;
+  };
+}
+
+export function threadGroupMenuIdForGroup(groupId: ThreadGroupId): `group:${string}` {
+  return `group:${groupId}`;
+}
+
+/** Group id from a `group:<id>` menu id, or null for the new/none choices. */
+export function threadGroupIdFromMenuId(id: string): ThreadGroupId | null {
+  if (!id.startsWith("group:") || id === "group:new" || id === "group:none") return null;
+  return id.slice("group:".length) as ThreadGroupId;
 }
 
 /**
@@ -96,6 +116,33 @@ export function buildThreadActionMenuItems(
                   { id: "snooze:custom" as const, label: "Custom…", separatorBefore: true },
                 ],
               },
+        ]
+      : []),
+    ...(state.groups
+      ? [
+          {
+            id: "move-to-group" as const,
+            label: "Move to group",
+            icon: "folder",
+            children: [
+              { id: "group:new" as const, label: "New group…" },
+              ...state.groups.options
+                .filter((group) => group.id !== state.groups?.currentGroupId)
+                .map((group) => ({
+                  id: threadGroupMenuIdForGroup(group.id),
+                  label: group.name,
+                })),
+              ...(state.groups.currentGroupId !== null
+                ? [
+                    {
+                      id: "group:none" as const,
+                      label: "Remove from group",
+                      separatorBefore: true,
+                    },
+                  ]
+                : []),
+            ],
+          },
         ]
       : []),
     { id: "rename", label: "Rename thread", icon: "pencil", separatorBefore: true },

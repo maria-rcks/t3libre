@@ -25,6 +25,7 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildThreadGroupNamePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -32,6 +33,7 @@ import {
   sanitizePrTitle,
   sanitizeThreadTitle,
   toJsonSchemaObject,
+  sanitizeThreadGroupName,
 } from "./TextGenerationUtils.ts";
 import {
   getModelSelectionStringOptionValue,
@@ -102,7 +104,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateThreadGroupName",
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -132,7 +135,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateThreadGroupName";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -185,9 +189,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     );
 
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
-      // Titles need only the supplied prompt, not configuration from the checkout.
+      // Titles and group names need only the supplied prompt, not configuration from the checkout.
       const workingDirectory =
-        operation === "generateThreadTitle"
+        operation === "generateThreadTitle" || operation === "generateThreadGroupName"
           ? yield* fileSystem
               .makeTempDirectoryScoped({ prefix: "t3code-claude-title-" })
               .pipe(
@@ -410,10 +414,26 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       };
     });
 
+  const generateThreadGroupName: TextGeneration.TextGeneration["Service"]["generateThreadGroupName"] =
+    Effect.fn("ClaudeTextGeneration.generateThreadGroupName")(function* (input) {
+      const { prompt, outputSchema } = buildThreadGroupNamePrompt({
+        threadTitles: input.threadTitles,
+      });
+      const generated = yield* runClaudeJson({
+        operation: "generateThreadGroupName",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { name: sanitizeThreadGroupName(generated.name) };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateThreadGroupName,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -73,6 +73,21 @@ If dragging is unavailable for one environment, update the T3 Code server runnin
 environment. Pinned and active reordering require server support. Threads from older servers keep
 their default order until the server is updated.
 
+## Group threads
+
+On web and desktop, select several threads with `Cmd/Ctrl+Click` or `Shift+Click`
+and press `mod+g` to put them in a group. A group is a collapsible folder above
+the thread list. T3 Code names it from its threads with your text generation
+model; double-click the name to rename it, or choose **Rename group** from the
+group's menu. **Generate name** asks for a new suggestion.
+
+Right-click a group to change its icon and color, settle all of its active
+threads, or **Ungroup**, which returns its threads to the list. A thread's menu
+offers **Move to group** to file it under an existing group, start a new one, or
+remove it from its group. Snoozed and settled threads stay inside their group,
+so they fold away with it instead of filling the shared shelves. Groups belong
+to one project; threads from different projects cannot share a group.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list

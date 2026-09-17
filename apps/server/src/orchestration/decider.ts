@@ -1,8 +1,10 @@
 import {
+  DEFAULT_THREAD_GROUP_NAME,
   EventId,
   MAX_SCRIPT_ID_LENGTH,
   SCRIPT_RUN_COMMAND_PATTERN,
   MessageId,
+  ProjectIconOverride,
   ThreadLinkedPullRequest,
   UserInputRequestedPayload,
   isImportedAgentSessionMessageId,
@@ -10,6 +12,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type OrchestrationThread,
+  type ThreadGroupId,
   type ThreadPullRequestKey,
   type ThreadPullRequestLink,
   type OrchestrationThreadActivity,
@@ -40,6 +43,7 @@ import {
   requireProject,
   requireProjectAbsent,
   requireThread,
+  requireThreadGroup,
   requireThreadArchived,
   requireThreadAbsent,
   requireThreadNotArchived,
@@ -54,6 +58,7 @@ const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const decodeUserInputRequestedPayload = Schema.decodeUnknownOption(UserInputRequestedPayload);
 const threadPullRequestLinksEqual = Schema.toEquivalence(Schema.NullOr(ThreadLinkedPullRequest));
+const threadGroupIconsEqual = Schema.toEquivalence(Schema.NullOr(ProjectIconOverride));
 
 /**
  * Blocked-on-you work derived from the thread's retained activities: an
@@ -169,6 +174,51 @@ function withEventBase(
 }
 
 type PlannedOrchestrationEvent = Omit<OrchestrationEvent, "sequence">;
+
+/**
+ * Groups that lose their last member in this command are deleted with it, so
+ * the sidebar never renders a hollow folder. Archived members still count:
+ * an archived thread keeps its group and returns to it on unarchive.
+ */
+const emptiedThreadGroupDeletions = Effect.fn("emptiedThreadGroupDeletions")(function* (input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly movedThreadIds: ReadonlySet<string>;
+  readonly occurredAt: string;
+  readonly commandId: OrchestrationCommand["commandId"];
+}): Effect.fn.Return<
+  ReadonlyArray<PlannedOrchestrationEvent>,
+  PlatformError.PlatformError,
+  Crypto.Crypto
+> {
+  const previousGroupIds = new Set<ThreadGroupId>();
+  for (const thread of input.readModel.threads) {
+    if (input.movedThreadIds.has(thread.id) && thread.groupId != null) {
+      previousGroupIds.add(thread.groupId);
+    }
+  }
+  const events: PlannedOrchestrationEvent[] = [];
+  for (const groupId of previousGroupIds) {
+    const remaining = input.readModel.threads.some(
+      (thread) =>
+        thread.groupId === groupId &&
+        thread.deletedAt === null &&
+        !input.movedThreadIds.has(thread.id),
+    );
+    if (remaining) continue;
+    if (!(input.readModel.threadGroups ?? []).some((group) => group.id === groupId)) continue;
+    events.push({
+      ...(yield* withEventBase({
+        aggregateKind: "thread-group",
+        aggregateId: groupId,
+        occurredAt: input.occurredAt,
+        commandId: input.commandId,
+      })),
+      type: "thread-group.deleted",
+      payload: { groupId, deletedAt: input.occurredAt },
+    });
+  }
+  return events;
+});
 
 type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
@@ -1030,6 +1080,204 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ? { linkedPullRequest: command.linkedPullRequest }
             : {}),
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread-group.create": {
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      if ((readModel.threadGroups ?? []).some((group) => group.id === command.groupId)) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Thread group '${command.groupId}' already exists.`,
+          }),
+        );
+      }
+      const threadIds = [...new Set(command.threadIds)];
+      for (const threadId of threadIds) {
+        const thread = yield* requireThreadNotArchived({ readModel, command, threadId });
+        if (thread.projectId !== command.projectId) {
+          return yield* Effect.fail(
+            new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Thread '${threadId}' belongs to another project and cannot join group '${command.groupId}'.`,
+            }),
+          );
+        }
+      }
+      const occurredAt = command.createdAt;
+      const created: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread-group",
+          aggregateId: command.groupId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread-group.created",
+        payload: {
+          groupId: command.groupId,
+          projectId: command.projectId,
+          name: command.name ?? DEFAULT_THREAD_GROUP_NAME,
+          icon: command.icon ?? null,
+          nameGeneration:
+            command.generateName === true
+              ? { requestId: command.commandId, startedAt: occurredAt }
+              : null,
+          createdAt: occurredAt,
+          updatedAt: occurredAt,
+        },
+      };
+      const memberships: PlannedOrchestrationEvent[] = [];
+      for (const threadId of threadIds) {
+        memberships.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.group-set",
+          payload: { threadId, groupId: command.groupId, updatedAt: occurredAt },
+        });
+      }
+      const emptied = yield* emptiedThreadGroupDeletions({
+        readModel,
+        movedThreadIds: new Set(threadIds),
+        occurredAt,
+        commandId: command.commandId,
+      });
+      return [created, ...memberships, ...emptied];
+    }
+
+    case "thread-group.meta.update": {
+      const group = yield* requireThreadGroup({ readModel, command, groupId: command.groupId });
+      const occurredAt = yield* nowIso;
+      const base = yield* withEventBase({
+        aggregateKind: "thread-group",
+        aggregateId: command.groupId,
+        occurredAt,
+        commandId: command.commandId,
+      });
+      if (command.regenerateName === true) {
+        return {
+          ...base,
+          type: "thread-group.meta-updated",
+          payload: {
+            groupId: command.groupId,
+            regenerateName: true as const,
+            nameGeneration: { requestId: command.commandId, startedAt: occurredAt },
+            updatedAt: occurredAt,
+          },
+        };
+      }
+      const unchanged =
+        (command.name === undefined || command.name === group.name) &&
+        (command.icon === undefined || threadGroupIconsEqual(command.icon, group.icon));
+      return {
+        ...base,
+        type: "thread-group.meta-updated",
+        payload: {
+          groupId: command.groupId,
+          ...(command.name !== undefined ? { name: command.name, nameGeneration: null } : {}),
+          ...(command.icon !== undefined ? { icon: command.icon } : {}),
+          updatedAt: unchanged ? group.updatedAt : occurredAt,
+        },
+      };
+    }
+
+    case "thread-group.delete": {
+      yield* requireThreadGroup({ readModel, command, groupId: command.groupId });
+      const occurredAt = yield* nowIso;
+      const releases: PlannedOrchestrationEvent[] = [];
+      for (const thread of readModel.threads) {
+        if (thread.groupId !== command.groupId || thread.deletedAt !== null) continue;
+        releases.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: thread.id,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.group-set",
+          payload: { threadId: thread.id, groupId: null, updatedAt: occurredAt },
+        });
+      }
+      const deleted: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread-group",
+          aggregateId: command.groupId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread-group.deleted",
+        payload: { groupId: command.groupId, deletedAt: occurredAt },
+      };
+      return [...releases, deleted];
+    }
+
+    case "thread.group.set": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (command.groupId !== null) {
+        const group = yield* requireThreadGroup({ readModel, command, groupId: command.groupId });
+        if (group.projectId !== thread.projectId) {
+          return yield* Effect.fail(
+            new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Thread '${command.threadId}' belongs to another project than group '${command.groupId}'.`,
+            }),
+          );
+        }
+      }
+      const occurredAt = yield* nowIso;
+      // Idempotent by re-emission (see thread.settle): setting the group the
+      // thread already has lands on the same state without churning updatedAt.
+      const unchanged = (thread.groupId ?? null) === command.groupId;
+      const membership: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.group-set",
+        payload: {
+          threadId: command.threadId,
+          groupId: command.groupId,
+          updatedAt: unchanged ? thread.updatedAt : occurredAt,
+        },
+      };
+      if (unchanged) return membership;
+      const emptied = yield* emptiedThreadGroupDeletions({
+        readModel,
+        movedThreadIds: new Set([command.threadId]),
+        occurredAt,
+        commandId: command.commandId,
+      });
+      return [membership, ...emptied];
+    }
+
+    case "thread-group.name.generate.complete": {
+      const group = yield* requireThreadGroup({ readModel, command, groupId: command.groupId });
+      const requestIsCurrent = group.nameGeneration?.requestId === command.requestId;
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread-group",
+          aggregateId: command.groupId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread-group.meta-updated",
+        payload: {
+          groupId: command.groupId,
+          ...(requestIsCurrent && command.name !== undefined ? { name: command.name } : {}),
+          ...(requestIsCurrent ? { nameGeneration: null } : {}),
+          updatedAt: requestIsCurrent ? occurredAt : group.updatedAt,
         },
       };
     }

@@ -14,6 +14,7 @@ import { useCallback, useMemo } from "react";
 import { resolveSnoozePresets, snoozeWakeDescription } from "../components/Sidebar.snooze";
 import {
   buildThreadActionMenuItems,
+  threadGroupIdFromMenuId,
   type ThreadActionMenuId,
 } from "../components/threadActionMenu.logic";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
@@ -23,10 +24,13 @@ import {
   readEnvironmentSupportsPinning,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
+  readEnvironmentSupportsThreadGroups,
   readEnvironmentSupportsTitleRegeneration,
   readThreadShell,
   useProjects,
+  useThreadGroups,
 } from "../state/entities";
+import { newThreadGroupId } from "~/lib/utils";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { readLocalApi } from "../localApi";
 import {
@@ -94,6 +98,11 @@ export function useThreadActionMenu(input: {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const threadGroups = useThreadGroups();
+  const createThreadGroup = useAtomCommand(threadEnvironment.createGroup, {
+    reportFailure: false,
+  });
+  const setThreadGroup = useAtomCommand(threadEnvironment.setGroup, { reportFailure: false });
   const handleNewThread = useNewThreadHandler();
   const markThreadUnread = useUiStateStore((s) => s.markThreadUnread);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
@@ -138,6 +147,7 @@ export function useThreadActionMenu(input: {
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
+        const supportsGroups = readEnvironmentSupportsThreadGroups(threadRef.environmentId);
         const items = buildThreadActionMenuItems({
           branch: thread.branch ?? null,
           isPinned: thread.pinnedAt != null,
@@ -148,6 +158,20 @@ export function useThreadActionMenu(input: {
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
           supports,
           snoozePresets,
+          ...(supportsGroups
+            ? {
+                groups: {
+                  currentGroupId: thread.groupId ?? null,
+                  options: threadGroups
+                    .filter(
+                      (group) =>
+                        group.environmentId === thread.environmentId &&
+                        group.projectId === thread.projectId,
+                    )
+                    .map((group) => ({ id: group.id, name: group.name })),
+                },
+              }
+            : {}),
         });
         const clicked = await settlePromise(() => api.contextMenu.show(items, position));
         if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -193,6 +217,32 @@ export function useThreadActionMenu(input: {
             failureToast(title, squashAtomCommandFailure(result));
           }
         };
+        if (action === "group:new") {
+          await reportFailure("Failed to group thread", () =>
+            createThreadGroup({
+              environmentId: threadRef.environmentId,
+              input: {
+                groupId: newThreadGroupId(),
+                projectId: thread.projectId,
+                threadIds: [thread.id],
+                generateName: true,
+              },
+            }),
+          );
+          return;
+        }
+        if (action === "group:none" || action.startsWith("group:")) {
+          const groupId = action === "group:none" ? null : threadGroupIdFromMenuId(action);
+          await reportFailure(
+            groupId === null ? "Failed to remove thread from group" : "Failed to move thread",
+            () =>
+              setThreadGroup({
+                environmentId: threadRef.environmentId,
+                input: { threadId: thread.id, groupId },
+              }),
+          );
+          return;
+        }
         switch (action) {
           case "project-settings": {
             const project = projects.find(
@@ -357,6 +407,9 @@ export function useThreadActionMenu(input: {
       unsettleThread,
       unsnoozeThread,
       updateThreadMetadata,
+      threadGroups,
+      createThreadGroup,
+      setThreadGroup,
     ],
   );
 

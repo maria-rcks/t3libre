@@ -1,12 +1,14 @@
 import {
   type ChatAttachment,
   CommandId,
+  DEFAULT_THREAD_GROUP_NAME,
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
+  ThreadGroupId,
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
@@ -1192,6 +1194,103 @@ const make = Effect.gen(function* () {
     processThreadTitleRegenerationSafely,
   );
 
+  // Group naming mirrors title regeneration: the decider stamps a pending
+  // request on the group, the reactor generates from the members' titles, and
+  // the completion command is dropped if a rename or a newer request landed
+  // in between.
+  const generateThreadGroupName = Effect.fn("generateThreadGroupName")(function* (
+    groupId: ThreadGroupId,
+    requestId: CommandId,
+  ) {
+    const group = Option.getOrUndefined(
+      yield* projectionSnapshotQuery.getThreadGroupShellById(groupId),
+    );
+    if (!group || group.nameGeneration?.requestId !== requestId) {
+      return { _tag: "Superseded" } as const;
+    }
+    const shell = yield* projectionSnapshotQuery.getShellSnapshot();
+    const threadTitles = shell.threads
+      .filter((thread) => thread.groupId === groupId && thread.archivedAt === null)
+      .map((thread) => thread.title);
+    if (threadTitles.length === 0) {
+      return { _tag: "Completed", name: undefined } as const;
+    }
+    const project = yield* resolveProject(group.projectId);
+    const cwd = project?.workspaceRoot ?? process.cwd();
+    const { textGenerationModelSelection: modelSelection } = resolveProjectSettings(
+      yield* serverSettingsService.getSettings,
+      group.projectId,
+    ).settings;
+    const generated = yield* textGeneration.generateThreadGroupName({
+      cwd,
+      threadTitles,
+      modelSelection,
+    });
+    if (generated.name === DEFAULT_THREAD_GROUP_NAME || generated.name === group.name) {
+      return { _tag: "Completed", name: undefined } as const;
+    }
+    return { _tag: "Completed", name: generated.name } as const;
+  });
+  const dispatchThreadGroupNameCompletion = Effect.fn("dispatchThreadGroupNameCompletion")(
+    function* (input: {
+      readonly groupId: ThreadGroupId;
+      readonly requestId: CommandId;
+      readonly name?: string;
+    }) {
+      yield* orchestrationEngine.dispatch({
+        type: "thread-group.name.generate.complete",
+        commandId: yield* serverCommandId("thread-group-name-complete"),
+        groupId: input.groupId,
+        requestId: input.requestId,
+        ...(input.name !== undefined ? { name: input.name } : {}),
+      });
+    },
+  );
+  const processThreadGroupNamingSafely = Effect.fn("processThreadGroupNamingSafely")(
+    function* (request: { readonly groupId: ThreadGroupId; readonly requestId: CommandId }) {
+      const result = yield* generateThreadGroupName(request.groupId, request.requestId).pipe(
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterruptsOnly(cause)) {
+            return Effect.failCause(cause);
+          }
+          return Effect.logWarning("provider command reactor failed to name thread group", {
+            groupId: request.groupId,
+            cause: Cause.pretty(cause),
+          }).pipe(Effect.as({ _tag: "Completed", name: undefined } as const));
+        }),
+      );
+      if (result._tag === "Superseded") {
+        return;
+      }
+      yield* dispatchThreadGroupNameCompletion({
+        groupId: request.groupId,
+        requestId: request.requestId,
+        ...(result.name !== undefined ? { name: result.name } : {}),
+      });
+    },
+    (effect, request) =>
+      effect.pipe(
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterruptsOnly(cause)) {
+            return Effect.failCause(cause);
+          }
+          return Effect.logWarning("provider command reactor failed to complete group naming", {
+            groupId: request.groupId,
+            cause: Cause.pretty(cause),
+          });
+        }),
+      ),
+  );
+  const threadGroupNamingWorker = yield* makeDrainableWorker(processThreadGroupNamingSafely);
+  const findPendingThreadGroupNames = Effect.fn("findPendingThreadGroupNames")(function* () {
+    const readModel = yield* projectionSnapshotQuery.getCommandReadModel();
+    return (readModel.threadGroups ?? []).flatMap((group) =>
+      group.nameGeneration == null
+        ? []
+        : [{ groupId: group.id, requestId: group.nameGeneration.requestId }],
+    );
+  });
+
   const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
     receivedEvent: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
   ) {
@@ -1880,9 +1979,51 @@ const make = Effect.gen(function* () {
       }
     });
 
+    const pendingGroupNames = yield* findPendingThreadGroupNames().pipe(
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.interrupt;
+        }
+        return Effect.logWarning("provider command reactor failed to find pending group names", {
+          failureKind: Cause.hasDies(cause) ? "defect" : "failure",
+          reasonCount: cause.reasons.length,
+        }).pipe(Effect.as([]));
+      }),
+    );
+    const processThreadGroupEvent = Effect.fn("processThreadGroupEvent")(function* (
+      event: OrchestrationEvent,
+    ) {
+      if (event.type === "thread-group.created" && event.payload.nameGeneration != null) {
+        yield* threadGroupNamingWorker.enqueue({
+          groupId: event.payload.groupId,
+          requestId: event.payload.nameGeneration.requestId,
+        });
+      } else if (
+        event.type === "thread-group.meta-updated" &&
+        event.payload.regenerateName === true &&
+        event.payload.nameGeneration != null
+      ) {
+        yield* threadGroupNamingWorker.enqueue({
+          groupId: event.payload.groupId,
+          requestId: event.payload.nameGeneration.requestId,
+        });
+      }
+    });
+
     // Subscribe before returning, even while event handling waits for server activation.
     const domainEvents = yield* orchestrationEngine.subscribeDomainEvents;
-    yield* forkParked(Stream.runForEach(domainEvents, processEvent));
+    yield* forkParked(
+      Stream.runForEach(domainEvents, (event) =>
+        processEvent(event).pipe(Effect.andThen(processThreadGroupEvent(event))),
+      ),
+    );
+    // Interrupted group naming re-runs: the request stays pending on the group
+    // until a completion lands, so a restart just picks the work back up.
+    yield* forkParked(
+      Effect.forEach(pendingGroupNames, (request) => threadGroupNamingWorker.enqueue(request), {
+        discard: true,
+      }),
+    );
 
     // Earlier events do not replay. Clear interrupted requests by their captured
     // IDs, then schedule persisted refinements after subscribing to their events.
@@ -1920,6 +2061,7 @@ const make = Effect.gen(function* () {
     drain: Effect.gen(function* () {
       yield* worker.drain;
       yield* threadTitleRegenerationWorker.drain;
+      yield* threadGroupNamingWorker.drain;
     }),
   } satisfies ProviderCommandReactorShape;
 });

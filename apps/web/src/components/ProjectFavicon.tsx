@@ -1,4 +1,5 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import type { ProjectIconOverride } from "@t3tools/contracts";
 import {
   getProjectFaviconResourceKey,
   isProjectFaviconFallbackUrl,
@@ -43,42 +44,10 @@ export function ProjectFavicon(input: {
       faviconPath: project.faviconPath,
     }),
   );
-  if (project.projectIcon?.kind === "monogram") {
-    return (
-      <ProjectMonogram
-        text={project.projectIcon.text}
-        color={project.projectIcon.color}
-        className={input.className}
-      />
-    );
-  }
-  if (project.projectIcon?.kind === "emoji") {
-    return (
-      <ProjectFaviconFallback
-        className={input.className}
-        icon={FolderCodeIcon}
-        emoji={project.projectIcon.emoji}
-      />
-    );
-  }
-  if (project.projectIcon?.kind === "lucide") {
-    const colorClassName = projectIconColorClassName(project.projectIcon.color);
-    const iconClassName = cn(
-      "inline-flex size-3.5 shrink-0 items-center justify-center",
-      colorClassName,
-      input.className,
-    );
-    return (
-      <span aria-hidden="true" className={iconClassName}>
-        <Suspense fallback={<DynamicProjectIconFallback />}>
-          <DynamicIcon
-            name={project.projectIcon.name as IconName}
-            className={cn("size-full", colorClassName)}
-            fallback={DynamicProjectIconFallback}
-          />
-        </Suspense>
-      </span>
-    );
+  if (project.projectIcon) {
+    // Called as a plain function (no hooks inside) so the rendered tree is
+    // exactly the glyph markup, with no extra component layer in between.
+    return ProjectIconOverrideGlyph({ icon: project.projectIcon, className: input.className });
   }
   const FallbackIcon = input.fallbackIcon ?? FolderCodeIcon;
 
@@ -106,6 +75,44 @@ export function ProjectFavicon(input: {
       fallbackIcon={FallbackIcon}
       fallbackProjectName={project.title}
     />
+  );
+}
+
+/** Renders a saved icon override on its own: projects and thread groups share
+ * the picker, so they share the glyph too. */
+export function ProjectIconOverrideGlyph({
+  icon,
+  className,
+}: {
+  readonly icon: ProjectIconOverride;
+  readonly className?: string | undefined;
+}) {
+  if (icon.kind === "monogram") {
+    return <ProjectMonogram text={icon.text} color={icon.color} className={className} />;
+  }
+  if (icon.kind === "emoji") {
+    return (
+      <ProjectFaviconFallback className={className} icon={FolderCodeIcon} emoji={icon.emoji} />
+    );
+  }
+  const colorClassName = projectIconColorClassName(icon.color);
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "inline-flex size-3.5 shrink-0 items-center justify-center",
+        colorClassName,
+        className,
+      )}
+    >
+      <Suspense fallback={<DynamicProjectIconFallback />}>
+        <DynamicIcon
+          name={icon.name as IconName}
+          className={cn("size-full", colorClassName)}
+          fallback={DynamicProjectIconFallback}
+        />
+      </Suspense>
+    </span>
   );
 }
 

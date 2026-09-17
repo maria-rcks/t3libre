@@ -966,4 +966,5 @@ export * from "./threadFeedback.ts";
 export * from "./threadDetail.ts";
 export * from "./threadReducer.ts";
 export * from "./threadShell.ts";
+export * from "./threadGroupEntities.ts";
 export * from "./threadState.ts";

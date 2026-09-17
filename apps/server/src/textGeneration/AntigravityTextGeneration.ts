@@ -26,11 +26,13 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildThreadGroupNamePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
+  sanitizeThreadGroupName,
 } from "./TextGenerationUtils.ts";
 
 const ANTIGRAVITY_TIMEOUT_MS = 180_000;
@@ -405,10 +407,21 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       };
     });
 
+  const generateThreadGroupName: TextGeneration.TextGeneration["Service"]["generateThreadGroupName"] =
+    Effect.fn("AntigravityTextGeneration.generateThreadGroupName")(function* (input) {
+      const generated = yield* runAntigravityJson({
+        operation: "generateThreadGroupName",
+        ...buildThreadGroupNamePrompt({ threadTitles: input.threadTitles }),
+        modelSelection: input.modelSelection,
+      });
+      return { name: sanitizeThreadGroupName(generated.name) };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateThreadGroupName,
   } satisfies TextGeneration.TextGeneration["Service"];
 });
