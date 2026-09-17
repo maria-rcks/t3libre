@@ -2700,7 +2700,7 @@ function reasoningPreview(text: string): string | undefined {
     .split("\n")
     .map((part) => part.replace(/^[#>*\-\s]+/, "").trim())
     .find((part) => part.length > 0);
-  return line && line.length > 0 ? line : undefined;
+  return line;
 }
 
 /**
@@ -2788,10 +2788,10 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
     onToggleReasoning(message.id, !expanded, row.id);
   }, [expanded, message.id, row.id, onToggleReasoning]);
 
-  const preview = reasoningPreview(message.text);
-  if (preview === undefined) {
+  if (message.text.trim().length === 0) {
     return null;
   }
+  const preview = reasoningPreview(message.text);
 
   return (
     <div className={cn("flex flex-col", expanded && "mb-1")}>
