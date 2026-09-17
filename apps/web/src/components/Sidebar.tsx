@@ -163,8 +163,6 @@ import {
   buildBulkTitleRegenerationContextMenuItem,
   buildBulkUnpinContextMenuItem,
   buildThreadGroupContextMenuItems,
-  resolveProjectStatusIndicator,
-  resolveThreadStatusPill,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
   formatWorkingDurationLabel,
@@ -2921,9 +2919,7 @@ export default function Sidebar() {
     [setThreadGroupsExpanded],
   );
   // A collapsed group still shows the open thread, like the shelves: the
-  // route's row must never vanish behind a fold. The collapsed status dot
-  // rolls up the members with their visit times, so unseen completions show.
-  const threadLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
+  // route's row must never vanish behind a fold.
   const renderedThreadGroups = useMemo(
     () =>
       threadGroupBlocks.map((block) => {
@@ -2937,22 +2933,6 @@ export default function Sidebar() {
                   scopedThreadKey(scopeThreadRef(row.thread.environmentId, row.thread.id)) ===
                   routeThreadKey,
               );
-        const status = expanded
-          ? null
-          : resolveProjectStatusIndicator(
-              block.rows.map((row) => {
-                const lastVisitedAt =
-                  threadLastVisitedAtById[
-                    scopedThreadKey(scopeThreadRef(row.thread.environmentId, row.thread.id))
-                  ];
-                return resolveThreadStatusPill({
-                  thread: {
-                    ...row.thread,
-                    ...(lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
-                  },
-                });
-              }),
-            );
         // Mirrors the member rows: dismissed stack links stay hidden, and a
         // legacy or branch link counts once its badge can render.
         const pullRequestCount = block.rows.filter(
@@ -2961,9 +2941,9 @@ export default function Sidebar() {
             row.thread.linkedPullRequest != null ||
             row.thread.branchPullRequest != null,
         ).length;
-        return { ...block, expanded, renderedRows: rows, status, pullRequestCount };
+        return { ...block, expanded, renderedRows: rows, pullRequestCount };
       }),
-    [routeThreadKey, threadGroupBlocks, threadGroupsExpanded, threadLastVisitedAtById],
+    [routeThreadKey, threadGroupBlocks, threadGroupsExpanded],
   );
 
   const orderedThreads = useMemo(
@@ -5374,7 +5354,6 @@ export default function Sidebar() {
                             count={block.rows.length}
                             pullRequestCount={block.pullRequestCount}
                             expanded={block.expanded}
-                            status={block.status}
                             isRenaming={renamingGroupKey === block.key}
                             renamingName={renamingGroupKey === block.key ? renamingGroupName : ""}
                             onToggle={toggleThreadGroup}

@@ -14,8 +14,6 @@ import { projectIconColorClassName, projectIconTintClassName } from "../../proje
 import { cn } from "~/lib/utils";
 import { ProjectIconOverrideGlyph } from "../ProjectFavicon";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import type { ThreadStatusPill } from "../Sidebar.logic";
 
 // Longest gap between the clicks of a double-click on common platforms.
 const DOUBLE_CLICK_WINDOW_MS = 500;
@@ -32,9 +30,6 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
   /** Members that carry a pull request, shown on the header while collapsed. */
   pullRequestCount: number;
   expanded: boolean;
-  // Rolled-up status of the members while collapsed, so a working or
-  // blocked thread is not hidden by the fold.
-  status: ThreadStatusPill | null;
   isRenaming: boolean;
   renamingName: string;
   onToggle: (group: EnvironmentThreadGroup) => void;
@@ -61,14 +56,11 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
   const nameClassName = color ? projectIconColorClassName(color) : "text-sidebar-foreground";
   // The card's surface and hairline come from the group color; a group
   // without a color takes a neutral tint so it still reads as a container.
-  const tintClassName = color
-    ? projectIconTintClassName(color)
-    : "bg-sidebar-foreground/[0.05] ring-sidebar-foreground/10";
+  const tintClassName = color ? projectIconTintClassName(color) : "bg-sidebar-foreground/[0.05]";
   // The header's label replaces its children for assistive tech, so the
-  // collapsed-only status and pull request count are spelled out here.
+  // member and collapsed-only pull request counts are spelled out here.
   const headerLabel = [
     `${group.name} group, ${props.count} thread${props.count === 1 ? "" : "s"}`,
-    ...(!props.expanded && props.status ? [props.status.label] : []),
     ...(!props.expanded && props.pullRequestCount > 0
       ? [`${props.pullRequestCount} pull request${props.pullRequestCount === 1 ? "" : "s"}`]
       : []),
@@ -152,7 +144,7 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
       data-thread-selection-safe
       data-testid={`sidebar-thread-group-${group.id}`}
       className={cn(
-        "list-none rounded-lg py-0.5 ring-1 ring-inset transition-colors motion-reduce:transition-none",
+        "list-none rounded-lg py-0.5 transition-colors motion-reduce:transition-none",
         props.expanded ? "my-1" : "my-px",
         // Member rows (all of them, or only the open thread while collapsed)
         // need room above the card's bottom edge.
@@ -222,25 +214,6 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
             Generating group name
           </span>
         ) : null}
-        {!props.expanded && props.status ? (
-          // Dot only: the label would crowd the name out of a narrow sidebar.
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span
-                  role="img"
-                  aria-label={props.status.label}
-                  className={cn(
-                    "size-2 shrink-0 rounded-full",
-                    props.status.dotClass,
-                    props.status.pulse && "animate-status-pulse",
-                  )}
-                />
-              }
-            />
-            <TooltipPopup side="top">{props.status.label}</TooltipPopup>
-          </Tooltip>
-        ) : null}
         {!props.expanded && props.pullRequestCount > 0 ? (
           <span
             aria-hidden
@@ -250,15 +223,6 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
             {props.pullRequestCount}
           </span>
         ) : null}
-        <span
-          className={cn(
-            "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1.5 text-[11px] font-medium tabular-nums",
-            "bg-[color-mix(in_srgb,currentColor_14%,transparent)]",
-            nameClassName,
-          )}
-        >
-          {props.count}
-        </span>
       </div>
       {props.children ? (
         <ul
