@@ -110,6 +110,7 @@ interface SessionContext {
   settledTurns: Set<string>;
   selectedModel: string;
   contextUsedTokens?: number;
+  contextWindowTokens?: number;
   pendingTokenUsage: Map<string, Extract<MuseNotification, { method: "session/tokenUsage" }>>;
   stopped: boolean;
 }
@@ -280,7 +281,11 @@ export function make(
         cursors.add(event.params.viewCursor);
         ctx.deltaCursors.set(event.params.itemId, cursors);
       }
-      if (event.method === "session/contextUsage") ctx.contextUsedTokens = event.params.usedTokens;
+      if (event.method === "session/contextUsage") {
+        ctx.contextUsedTokens = event.params.usedTokens;
+        if (event.params.windowTokens === undefined) delete ctx.contextWindowTokens;
+        else ctx.contextWindowTokens = event.params.windowTokens;
+      }
       if (
         event.method === "item/started" ||
         event.method === "item/updated" ||
@@ -322,6 +327,9 @@ export function make(
         approvalSubjectById: (id) => ctx.approvals.get(id)?.subject,
         ...(ctx.contextUsedTokens !== undefined
           ? { contextUsedTokens: ctx.contextUsedTokens }
+          : {}),
+        ...(ctx.contextWindowTokens !== undefined
+          ? { contextWindowTokens: ctx.contextWindowTokens }
           : {}),
         ...(ctx.session.activeTurnId ? { activeTurnId: ctx.session.activeTurnId } : {}),
       })) {

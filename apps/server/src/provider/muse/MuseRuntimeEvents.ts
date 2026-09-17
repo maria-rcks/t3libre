@@ -288,6 +288,7 @@ export interface MuseEventContext {
   readonly streamedText: (itemId: string, field: string) => string;
   readonly activeTurnId?: TurnId;
   readonly contextUsedTokens?: number;
+  readonly contextWindowTokens?: number;
   readonly approvalSubjectById?: (id: string) => typeof approvalSubject.Type | undefined;
 }
 
@@ -637,6 +638,7 @@ export function mapMuseNotification(
           payload: {
             usage: {
               usedTokens: context.contextUsedTokens,
+              ...(context.contextWindowTokens ? { maxTokens: context.contextWindowTokens } : {}),
               totalProcessedTokens: event.params.cumulative.totalTokens,
               inputTokens: event.params.cumulative.promptTokens,
               outputTokens: event.params.cumulative.outputTokens,
