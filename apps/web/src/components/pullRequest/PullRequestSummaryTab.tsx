@@ -361,6 +361,29 @@ function Section({
   );
 }
 
+function CommentGroup({
+  label,
+  children,
+  onOpenChange,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  return (
+    <Collapsible className="border-t border-border/60 pt-1" onOpenChange={onOpenChange}>
+      <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground">
+        <ChevronRightIcon
+          aria-hidden
+          className="size-3.5 shrink-0 transition-transform group-data-panel-open:rotate-90"
+        />
+        <span>{label}</span>
+      </CollapsibleTrigger>
+      <CollapsiblePanel keepMounted>{children}</CollapsiblePanel>
+    </Collapsible>
+  );
+}
+
 /**
  * What a first render of the conversation carries. A pull request with two hundred comments is
  * two hundred markdown documents, and the ones worth arriving for are the recent ones.
@@ -888,102 +911,90 @@ export function PullRequestSummaryTab({
                   </Button>
                 ) : null}
                 {botComments.length > 0 ? (
-                  <Collapsible
+                  <CommentGroup
                     key={`bots:${detail.url}`}
-                    className="border-t border-border/60 pt-1"
+                    label={
+                      <>
+                        {botComments.length} bot comment{botComments.length === 1 ? "" : "s"}
+                      </>
+                    }
                     onOpenChange={(open) => {
                       if (open) setOpenedBotGroup(detail.url);
                     }}
                   >
-                    <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground">
-                      <ChevronRightIcon
-                        aria-hidden
-                        className="size-3.5 shrink-0 transition-transform group-data-panel-open:rotate-90"
-                      />
-                      <span>
-                        {botComments.length} bot comment{botComments.length === 1 ? "" : "s"}
-                      </span>
-                    </CollapsibleTrigger>
-                    <CollapsiblePanel keepMounted>
-                      <div className="space-y-3 pt-2">
-                        {openedBotGroup === detail.url
-                          ? orderPullRequestComments(recentBotComments, commentOrder).map(
-                              renderComment,
-                            )
-                          : null}
-                        {hiddenBotCommentCount > 0 ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="w-full"
-                            onClick={() =>
-                              setShownBots({
-                                url: detail.url,
-                                count: shownBotComments + COMMENT_PAGE,
-                              })
-                            }
-                          >
-                            Show {Math.min(hiddenBotCommentCount, COMMENT_PAGE)} older bot comment
-                            {hiddenBotCommentCount === 1 ? "" : "s"} ({hiddenBotCommentCount}{" "}
-                            hidden)
-                          </Button>
-                        ) : null}
-                        {shownBotComments > COMMENT_PAGE ? (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="w-full"
-                            onClick={() => setShownBots({ url: detail.url, count: COMMENT_PAGE })}
-                          >
-                            Show only {COMMENT_PAGE} recent bot comments
-                          </Button>
-                        ) : null}
-                      </div>
-                    </CollapsiblePanel>
-                  </Collapsible>
+                    <div className="space-y-3 pt-2">
+                      {openedBotGroup === detail.url
+                        ? orderPullRequestComments(recentBotComments, commentOrder).map(
+                            renderComment,
+                          )
+                        : null}
+                      {hiddenBotCommentCount > 0 ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full"
+                          onClick={() =>
+                            setShownBots({
+                              url: detail.url,
+                              count: shownBotComments + COMMENT_PAGE,
+                            })
+                          }
+                        >
+                          Show {Math.min(hiddenBotCommentCount, COMMENT_PAGE)} older bot comment
+                          {hiddenBotCommentCount === 1 ? "" : "s"} ({hiddenBotCommentCount} hidden)
+                        </Button>
+                      ) : null}
+                      {shownBotComments > COMMENT_PAGE ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="w-full"
+                          onClick={() => setShownBots({ url: detail.url, count: COMMENT_PAGE })}
+                        >
+                          Show only {COMMENT_PAGE} recent bot comments
+                        </Button>
+                      ) : null}
+                    </div>
+                  </CommentGroup>
                 ) : null}
                 {finishedComments.length > 0 ? (
-                  <Collapsible key={detail.url} className="border-t border-border/60 pt-1">
-                    <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground">
-                      <ChevronRightIcon
-                        aria-hidden
-                        className="size-3.5 shrink-0 transition-transform group-data-panel-open:rotate-90"
-                      />
-                      <span>
+                  <CommentGroup
+                    key={detail.url}
+                    label={
+                      <>
                         {finishedComments.length} resolved or dismissed comment
                         {finishedComments.length === 1 ? "" : "s"}
-                      </span>
-                    </CollapsibleTrigger>
-                    <CollapsiblePanel keepMounted>
-                      <div className="space-y-2 pt-2">
-                        {orderPullRequestComments(finishedComments, commentOrder).map((comment) => {
-                          const thread = threadByCommentId.get(comment.id);
-                          return (
-                            <CollapsedComment
-                              key={comment.id}
-                              comment={comment}
-                              editing={commentEditing}
-                              detail={detail}
-                              thread={thread}
-                              label={thread?.isResolved ? "Resolved" : "Review dismissed"}
-                              body={visibleBody(comment.body)}
-                              reactionBar={
-                                <PullRequestReactionBar
-                                  className="ml-auto justify-end"
-                                  reactions={comment.reactions ?? []}
-                                  canReact={detail.capabilities.reactions === true}
-                                  subjectId={comment.id}
-                                  environmentId={environmentId}
-                                  reference={reference}
-                                  onRefresh={onRefresh}
-                                />
-                              }
-                            />
-                          );
-                        })}
-                      </div>
-                    </CollapsiblePanel>
-                  </Collapsible>
+                      </>
+                    }
+                  >
+                    <div className="space-y-2 pt-2">
+                      {orderPullRequestComments(finishedComments, commentOrder).map((comment) => {
+                        const thread = threadByCommentId.get(comment.id);
+                        return (
+                          <CollapsedComment
+                            key={comment.id}
+                            comment={comment}
+                            editing={commentEditing}
+                            detail={detail}
+                            thread={thread}
+                            label={thread?.isResolved ? "Resolved" : "Review dismissed"}
+                            body={visibleBody(comment.body)}
+                            reactionBar={
+                              <PullRequestReactionBar
+                                className="ml-auto justify-end"
+                                reactions={comment.reactions ?? []}
+                                canReact={detail.capabilities.reactions === true}
+                                subjectId={comment.id}
+                                environmentId={environmentId}
+                                reference={reference}
+                                onRefresh={onRefresh}
+                              />
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+                  </CommentGroup>
                 ) : null}
               </div>
             )}
