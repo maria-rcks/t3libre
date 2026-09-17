@@ -211,7 +211,7 @@ export function DraftProjectPicker({
               aria-label={!isChat && hasResolvedProject ? "Change project" : "Add project"}
               className={
                 isChat
-                  ? "inline-flex h-10 min-w-0 items-center gap-2 rounded-lg pe-3 sm:h-11 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  ? "inline-flex h-10 min-w-0 items-center rounded-lg pe-3 sm:h-11 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   : "inline-flex h-10 min-w-0 max-w-64 items-center gap-2 sm:h-11 rounded-r-lg ps-2 pe-3 py-1 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               }
             />
@@ -223,7 +223,7 @@ export function DraftProjectPicker({
             </span>
           ) : null}
           <span
-            className={`truncate${isChat ? " ps-1" : ""}`}
+            className="truncate"
             style={{
               textBox: isChat ? "trim-both cap alphabetic" : "trim-both ex alphabetic",
               paddingBlock: "0.5em",
