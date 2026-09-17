@@ -1766,12 +1766,15 @@ const makeWsRpcLayer = (
       // folder is only offered when the data dir is outside any work tree.
       // Detection failures fail closed and hide the folder, never the config.
       // Probed once per connection: a negative VCS detection is not cached.
+      // An interrupted probe stays uncached so the next config load retries.
       const resolveChatWorkspaceRoot = yield* Effect.cached(
         gitWorkflow.isRepository(config.baseDir).pipe(
           Effect.map((isRepository) =>
             isRepository ? undefined : path.join(config.baseDir, "chats"),
           ),
-          Effect.catchCause(() => Effect.succeed(undefined)),
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.succeed(undefined),
+          ),
         ),
       );
 

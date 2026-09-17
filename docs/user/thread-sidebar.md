@@ -16,8 +16,8 @@ if that project exists there. Otherwise it selects an environment that has it.
 To talk to an agent without picking a repository, choose **Just chat** from the
 project picker, the empty-state screen, or the add-project menu. Chat threads
 share one **Chats** project rooted in a plain `chats` folder inside the T3 data
-directory, so branch, worktree, and diff controls stay hidden. Any files the
-agent writes land in that folder. The option is unavailable when the data
+directory. Branch, worktree, and diff controls stay hidden while that folder is
+not a Git repository. Any files the agent writes land in that folder. The option is unavailable when the data
 directory itself sits inside a Git checkout.
 
 ### Start in the background

@@ -157,10 +157,10 @@ export function DraftHeroHeadline({
 
   // The picker can change the draft's target while "Just chat" is still
   // creating its project; a stale continuation must not retarget it again.
-  const latestTargetRef = useRef({ draftId, activeProjectKey });
+  const latestTargetRef = useRef({ draftId, activeProjectKey, chatTargetEnvironmentId });
   useEffect(() => {
-    latestTargetRef.current = { draftId, activeProjectKey };
-  }, [activeProjectKey, draftId]);
+    latestTargetRef.current = { draftId, activeProjectKey, chatTargetEnvironmentId };
+  }, [activeProjectKey, chatTargetEnvironmentId, draftId]);
   // Project selection changes the target of the open draft in place. The
   // prompt stays in the same composer session, so the sidebar only gets a
   // draft row if the user later navigates away.
@@ -168,7 +168,11 @@ export function DraftHeroHeadline({
     if (!draftId) {
       return;
     }
-    latestTargetRef.current = { draftId, activeProjectKey: logicalProjectKey };
+    latestTargetRef.current = {
+      draftId,
+      activeProjectKey: logicalProjectKey,
+      chatTargetEnvironmentId: project.environmentId,
+    };
     const currentDraft = getComposerDraft(draftId);
     setLogicalProjectDraftThreadId(
       logicalProjectKey,
@@ -195,13 +199,14 @@ export function DraftHeroHeadline({
     if (chatTargetEnvironmentId === null || isChatDraft) {
       return;
     }
-    const requested = { draftId, activeProjectKey };
+    const requested = { draftId, activeProjectKey, chatTargetEnvironmentId };
     const project = await ensureChatProject(chatTargetEnvironmentId);
     const latest = latestTargetRef.current;
     if (
       !project ||
       latest.draftId !== requested.draftId ||
-      latest.activeProjectKey !== requested.activeProjectKey
+      latest.activeProjectKey !== requested.activeProjectKey ||
+      latest.chatTargetEnvironmentId !== requested.chatTargetEnvironmentId
     ) {
       return;
     }

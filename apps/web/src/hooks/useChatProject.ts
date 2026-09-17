@@ -18,6 +18,19 @@ import { useAtomCommand } from "~/state/use-atom-command";
 // project.create is in flight would be rejected as a duplicate workspace root.
 const inFlightByEnvironment = new Map<EnvironmentId, Promise<EnvironmentProject | null>>();
 
+async function waitForChatProject(
+  find: () => EnvironmentProject | null,
+  attempts = 12,
+  intervalMs = 250,
+): Promise<EnvironmentProject | null> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const project = find();
+    if (project) return project;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return null;
+}
+
 function reportChatStartFailure(error: unknown) {
   toastManager.add(
     stackedThreadToast({
@@ -93,8 +106,9 @@ export function useChatProject() {
           },
         });
         if (result._tag === "Failure") {
-          // Another client may have created it first; that project is fine to use.
-          const raced = findExisting();
+          // Another client may have created it first. Its project event can
+          // land after this rejection, so give the store a moment to catch up.
+          const raced = await waitForChatProject(findExisting);
           if (raced) return raced;
           if (!isAtomCommandInterrupted(result)) {
             reportChatStartFailure(squashAtomCommandFailure(result));
