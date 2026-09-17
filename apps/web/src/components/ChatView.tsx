@@ -1779,8 +1779,11 @@ export default function ChatView(props: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
+  const composerSendGenerationRef = useRef(0);
   const [multipleModelSelections, setMultipleModelSelections] =
     useState<ReadonlyArray<ModelSelection> | null>(null);
+  const multipleModelSelectionsRef = useRef(multipleModelSelections);
+  multipleModelSelectionsRef.current = multipleModelSelections;
   const [multipleModelScope, setMultipleModelScope] = useState(routeThreadKey);
   if (multipleModelScope !== routeThreadKey) {
     setMultipleModelScope(routeThreadKey);
@@ -7747,6 +7750,7 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     sendInFlightRef.current = true;
+    const sendGeneration = ++composerSendGenerationRef.current;
     // Every early return above leaves a queued message in the queue for a
     // later retry. From here on a failure hands it back to the composer.
     if (queuedMessage) {
@@ -7891,6 +7895,8 @@ export default function ChatView(props: ChatViewProps) {
     if (multipleModelSelections !== null) {
       const failedSelections: ModelSelection[] = [];
       let clearedDraft = false;
+      let releasedComposer = false;
+      let canRestoreDraft = () => false;
       let startedCount = 0;
       try {
         const attachments = await turnAttachmentsPromise;
@@ -7912,8 +7918,18 @@ export default function ChatView(props: ChatViewProps) {
         clearComposerDraftContent(composerDraftTarget);
         composerRef.current?.resetCursorState();
         clearedDraft = true;
+        const clearedDraftSnapshot = useComposerDraftStore
+          .getState()
+          .getComposerDraft(composerDraftTarget);
+        const submittedSelections = multipleModelSelectionsRef.current;
+        canRestoreDraft = () =>
+          currentRouteThreadKeyRef.current === routeThreadKey &&
+          composerSendGenerationRef.current === sendGeneration &&
+          useComposerDraftStore.getState().getComposerDraft(composerDraftTarget) ===
+            clearedDraftSnapshot &&
+          multipleModelSelectionsRef.current === submittedSelections;
         setThreadError(threadIdForSend, null);
-        await Promise.all(
+        const starts = Promise.all(
           multipleTargets.map(async (target) => {
             const retryKey = JSON.stringify([
               routeThreadKey,
@@ -7922,6 +7938,7 @@ export default function ChatView(props: ChatViewProps) {
             ]);
             const uncertainThreadId = uncertainMultipleSubmissionsRef.current.get(retryKey);
             const targetThreadId = uncertainThreadId ?? newThreadId();
+            let requestMayHaveStarted = false;
             try {
               if (uncertainThreadId) {
                 throw new Error(
@@ -7931,7 +7948,7 @@ export default function ChatView(props: ChatViewProps) {
               const supportsInlineMessageContext =
                 appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment
                   .capabilities.inlineMessageContext === true;
-              uncertainMultipleSubmissionsRef.current.set(retryKey, targetThreadId);
+              requestMayHaveStarted = true;
               const result = await startThreadTurn({
                 environmentId,
                 input: {
@@ -7979,20 +7996,23 @@ export default function ChatView(props: ChatViewProps) {
               if (result._tag === "Failure") {
                 const error = squashAtomCommandFailure(result);
                 if (wasBootstrapThreadDeleted(error) || wasBootstrapThreadNotCreated(error)) {
-                  uncertainMultipleSubmissionsRef.current.delete(retryKey);
+                  requestMayHaveStarted = false;
                 }
                 throw error;
               }
-              uncertainMultipleSubmissionsRef.current.delete(retryKey);
               startedCount += 1;
             } catch (error) {
+              if (requestMayHaveStarted && !uncertainMultipleSubmissionsRef.current.has(retryKey)) {
+                uncertainMultipleSubmissionsRef.current.set(retryKey, targetThreadId);
+              }
               failedSelections.push(target.selection);
+              const retainedThreadId = uncertainMultipleSubmissionsRef.current.get(retryKey);
               toastManager.add(
                 stackedThreadToast({
                   type: "error",
                   title: `Could not start ${target.selection.model}`,
                   description: error instanceof Error ? error.message : "Failed to send message.",
-                  ...(uncertainMultipleSubmissionsRef.current.has(retryKey)
+                  ...(retainedThreadId
                     ? {
                         actionProps: {
                           children: "Open thread",
@@ -8000,7 +8020,7 @@ export default function ChatView(props: ChatViewProps) {
                             void navigate({
                               to: "/$environmentId/$threadId",
                               params: buildThreadRouteParams(
-                                scopeThreadRef(environmentId, targetThreadId),
+                                scopeThreadRef(environmentId, retainedThreadId),
                               ),
                             });
                           },
@@ -8012,6 +8032,12 @@ export default function ChatView(props: ChatViewProps) {
             }
           }),
         );
+        // Each request now owns its background thread. The original draft is
+        // ready for another prompt while checkout and setup scripts finish.
+        sendInFlightRef.current = false;
+        resetLocalDispatch();
+        releasedComposer = true;
+        await starts;
         if (startedCount > 0) {
           toastManager.add(
             stackedThreadToast({
@@ -8030,16 +8056,9 @@ export default function ChatView(props: ChatViewProps) {
           error instanceof Error ? error.message : "Failed to send messages.",
         );
       } finally {
-        if (failedSelections.length > 0) {
-          if (currentRouteThreadKeyRef.current === routeThreadKey) {
-            composerRef.current?.setMultipleModelSelections(failedSelections);
-          }
-          if (
-            clearedDraft &&
-            !composerDraftHasUserContent(
-              useComposerDraftStore.getState().getComposerDraft(composerDraftTarget),
-            )
-          ) {
+        const restoreFailedDraft = () => {
+          composerRef.current?.setMultipleModelSelections(failedSelections);
+          if (clearedDraft) {
             setComposerDraftPrompt(composerDraftTarget, messageTextForSend);
             addComposerDraftImages(
               composerDraftTarget,
@@ -8052,21 +8071,54 @@ export default function ChatView(props: ChatViewProps) {
               composerPreviewAnnotationsSnapshot,
             );
             setComposerDraftReviewComments(composerDraftTarget, composerReviewCommentsSnapshot);
-            if (currentRouteThreadKeyRef.current === routeThreadKey) {
-              promptRef.current = messageTextForSend;
-              composerRef.current?.resetCursorState({
-                cursor: collapseExpandedComposerCursor(
-                  messageTextForSend,
-                  messageTextForSend.length,
-                ),
-                prompt: messageTextForSend,
-                detectTrigger: true,
-              });
-            }
+            promptRef.current = messageTextForSend;
+            composerRef.current?.resetCursorState({
+              cursor: collapseExpandedComposerCursor(messageTextForSend, messageTextForSend.length),
+              prompt: messageTextForSend,
+              detectTrigger: true,
+            });
+          }
+        };
+        if (failedSelections.length > 0) {
+          if (canRestoreDraft() && composerRef.current) {
+            restoreFailedDraft();
+          } else if (clearedDraft) {
+            const recoveryToastId = toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "A background prompt could not be sent",
+                description:
+                  "Your newer draft is unchanged. Restore the failed prompt when this composer is empty.",
+                timeout: 0,
+                actionProps: {
+                  children: "Restore prompt",
+                  onClick: () => {
+                    if (
+                      !composerRef.current ||
+                      currentRouteThreadKeyRef.current !== routeThreadKey ||
+                      sendInFlightRef.current ||
+                      composerDraftHasUserContent(
+                        useComposerDraftStore.getState().getComposerDraft(composerDraftTarget),
+                      )
+                    ) {
+                      toastManager.update(recoveryToastId, {
+                        description:
+                          "Return to the original draft and send or clear its current prompt before restoring.",
+                      });
+                      return;
+                    }
+                    restoreFailedDraft();
+                    toastManager.close(recoveryToastId);
+                  },
+                },
+              }),
+            );
           }
         }
-        sendInFlightRef.current = false;
-        resetLocalDispatch();
+        if (!releasedComposer) {
+          sendInFlightRef.current = false;
+          resetLocalDispatch();
+        }
       }
       return;
     }
