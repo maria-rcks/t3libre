@@ -1428,6 +1428,11 @@ describe("storage cleanup", () => {
     "deleted-owner-root",
     "deleted-owner-nested",
     "deleted-provider",
+    "project-off",
+    "project-custom",
+    "project-policy-disabled",
+    "deleted-project-custom",
+    "deleted-project-off",
     "policy-disabled",
     "policy-extended",
     "files-disabled",
@@ -1511,9 +1516,30 @@ describe("storage cleanup", () => {
           const settingsService = yield* ServerSettingsService.pipe(
             Effect.provide(
               ServerSettingsService.layerTest({
+                projectSettingsOverrides: {
+                  [PROJECT_ID]:
+                    protection === "project-off" || protection === "deleted-project-off"
+                      ? { worktreeCleanup: { mode: "off" as const } }
+                      : protection === "project-custom" || protection === "deleted-project-custom"
+                        ? {
+                            worktreeCleanup: {
+                              mode: "custom" as const,
+                              rules: {
+                                worktreeAfterDays: protection === "project-custom" ? 8 : null,
+                                worktreeOnDelete: deleteRule,
+                                worktreeOnMerge: false,
+                                worktreeUnchanged: false,
+                              },
+                            },
+                          }
+                        : {},
+                },
                 storageCleanup: {
-                  worktreeAfterDays: deleteRule || mergeRule || unchangedRule ? null : 8,
-                  worktreeOnDelete: deleteRule,
+                  worktreeAfterDays:
+                    deleteRule || mergeRule || unchangedRule || protection === "project-custom"
+                      ? null
+                      : 8,
+                  worktreeOnDelete: deleteRule && protection !== "deleted-project-custom",
                   worktreeOnMerge: mergeRule,
                   worktreeUnchanged: unchangedRule,
                   browserArtifactsAfterDays: 8,
@@ -1574,9 +1600,12 @@ describe("storage cleanup", () => {
                       Effect.andThen(
                         Effect.sync(() => {
                           snapshotReads++;
-                          const projects = protection.startsWith("deleted-owner")
-                            ? []
-                            : [makeProject(PROJECT_ID, config.baseDir)];
+                          const projects =
+                            protection.startsWith("deleted-owner") ||
+                            protection === "deleted-project-off" ||
+                            protection === "deleted-project-custom"
+                              ? []
+                              : [makeProject(PROJECT_ID, config.baseDir)];
                           const threads = tombstoned ? [] : [thread];
                           if (protection === "deleted-shared")
                             threads.push({ ...thread, id: ThreadId.make("surviving-thread") });
@@ -1725,12 +1754,26 @@ describe("storage cleanup", () => {
                       stderrTruncated: false,
                     }).pipe(
                       Effect.tap(() =>
-                        protection.startsWith("policy-") && headReads > 1
+                        (protection.startsWith("policy-") ||
+                          protection === "project-policy-disabled") &&
+                        headReads > 1
                           ? settingsService
                               .updateSettings({
-                                storageCleanup: {
-                                  worktreeAfterDays: protection === "policy-disabled" ? null : 60,
-                                },
+                                ...(protection === "project-policy-disabled"
+                                  ? {
+                                      projectSettingsOverrides: {
+                                        [PROJECT_ID]: { worktreeCleanup: { mode: "off" as const } },
+                                      },
+                                    }
+                                  : {}),
+                                ...(protection === "project-policy-disabled"
+                                  ? {}
+                                  : {
+                                      storageCleanup: {
+                                        worktreeAfterDays:
+                                          protection === "policy-disabled" ? null : 60,
+                                      },
+                                    }),
                               })
                               .pipe(Effect.orDie)
                           : Effect.void,
@@ -1800,6 +1843,8 @@ describe("storage cleanup", () => {
             yield* cleanup.drain;
           }
           const removed =
+            protection === "project-custom" ||
+            protection === "deleted-project-custom" ||
             protection === "none" ||
             protection === "deleted" ||
             protection === "deleted-event" ||

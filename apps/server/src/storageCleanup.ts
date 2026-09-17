@@ -1,9 +1,12 @@
 import type {
   OrchestrationThreadShell,
+  ProjectId,
   ServerSettings,
   ServerSettingsError,
   TerminalSummary,
+  WorktreeCleanupRules,
 } from "@t3tools/contracts";
+import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -34,6 +37,38 @@ import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "./workspace/workspaceLease.ts";
 
 const DAY_MS = 86_400_000;
+
+const worktreeCleanupEnabled = (rules: WorktreeCleanupRules) =>
+  rules.worktreeAfterDays !== null ||
+  rules.worktreeOnMerge ||
+  rules.worktreeOnDelete ||
+  rules.worktreeUnchanged;
+
+function anyWorktreePolicy(
+  settings: ServerSettings,
+  predicate: (rules: WorktreeCleanupRules) => boolean,
+): boolean {
+  return (
+    predicate(resolveWorktreeCleanup(settings, null)) ||
+    Object.keys(settings.projectSettingsOverrides).some((projectId) =>
+      predicate(resolveWorktreeCleanup(settings, projectId as ProjectId)),
+    )
+  );
+}
+
+function sameProjectWorktreePolicies(left: ServerSettings, right: ServerSettings): boolean {
+  return [
+    ...new Set([
+      ...Object.keys(left.projectSettingsOverrides),
+      ...Object.keys(right.projectSettingsOverrides),
+    ]),
+  ].every((projectId) =>
+    Equal.equals(
+      left.projectSettingsOverrides[projectId]?.worktreeCleanup,
+      right.projectSettingsOverrides[projectId]?.worktreeCleanup,
+    ),
+  );
+}
 
 /** Live sessions keep their cwd even when no turn is currently running. */
 function storageCleanupThreadIdle(thread: OrchestrationThreadShell, now: number): boolean {
@@ -136,19 +171,16 @@ export const make = Effect.gen(function* () {
   });
 
   const cleanWorktrees = Effect.fn("StorageCleanup.cleanWorktrees")(function* (
-    settings: ServerSettings["storageCleanup"],
+    serverSettings: ServerSettings,
     now: number,
   ) {
-    if (
-      settings.worktreeAfterDays === null &&
-      !settings.worktreeOnMerge &&
-      !settings.worktreeOnDelete &&
-      !settings.worktreeUnchanged
-    )
-      return;
+    if (!anyWorktreePolicy(serverSettings, worktreeCleanupEnabled)) return;
     if (!(yield* fs.exists(config.worktreesDir))) return;
-    const deletedThreads = settings.worktreeOnDelete
-      ? yield* snapshots.getDeletedWorktreeThreads()
+    const hasDeleteRule = anyWorktreePolicy(serverSettings, (rules) => rules.worktreeOnDelete);
+    const deletedThreads = hasDeleteRule
+      ? (yield* snapshots.getDeletedWorktreeThreads()).filter(
+          (thread) => resolveWorktreeCleanup(serverSettings, thread.projectId).worktreeOnDelete,
+        )
       : [];
     if (deletedThreads.length > 0) {
       // Read tombstones before taking this fence. A later deletion waits for the
@@ -168,6 +200,8 @@ export const make = Effect.gen(function* () {
       ...deletedThreads.filter((thread) => !groups.has(path.resolve(thread.worktreePath))),
     ];
     for (const thread of candidates) {
+      const settings = resolveWorktreeCleanup(serverSettings, thread.projectId);
+      if (!worktreeCleanupEnabled(settings)) continue;
       const worktreePath = path.resolve(thread.worktreePath!);
       const deleted = "deletedAt" in thread;
       const project = deleted
@@ -258,7 +292,8 @@ export const make = Effect.gen(function* () {
         if (deleted) {
           if (
             latest.length > 0 ||
-            !(yield* settingsService.getSettings).storageCleanup.worktreeOnDelete
+            !resolveWorktreeCleanup(yield* settingsService.getSettings, thread.projectId)
+              .worktreeOnDelete
           )
             return;
           // A failed session stop is logged by the deletion reactor. Its drain
@@ -306,7 +341,17 @@ export const make = Effect.gen(function* () {
             .some((entry) => entry !== "" && !/(^|\/)node_modules\/$/.test(entry))
         )
           return;
-        if (!Equal.equals((yield* settingsService.getSettings).storageCleanup, settings)) return;
+        const current = resolveWorktreeCleanup(
+          yield* settingsService.getSettings,
+          thread.projectId,
+        );
+        if (
+          Object.keys(settings).some(
+            (key) =>
+              current[key as keyof typeof settings] !== settings[key as keyof typeof settings],
+          )
+        )
+          return;
         yield* git.removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: false });
         yield* gitManager.invalidateStatus(project.workspaceRoot);
         // Preserve branch and path: ProviderCommandReactor recreates the checkout
@@ -354,9 +399,10 @@ export const make = Effect.gen(function* () {
   });
 
   const sweep = Effect.fn("StorageCleanup.sweep")(function* () {
-    const { storageCleanup: settings } = yield* settingsService.getSettings;
+    const serverSettings = yield* settingsService.getSettings;
+    const settings = serverSettings.storageCleanup;
     const now = yield* Clock.currentTimeMillis;
-    yield* cleanWorktrees(settings, now).pipe(
+    yield* cleanWorktrees(serverSettings, now).pipe(
       Effect.catch((error) => Effect.logWarning("worktree cleanup failed", { error })),
     );
     yield* cleanFiles(
@@ -399,7 +445,7 @@ export const make = Effect.gen(function* () {
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
     const changes = yield* settingsService.subscribeChanges;
     const events = yield* engine.subscribeDomainEvents;
-    let lastSettings = (yield* settingsService.getSettings.pipe(Effect.orDie)).storageCleanup;
+    let lastSettings = yield* settingsService.getSettings.pipe(Effect.orDie);
     yield* forkParked(
       worker
         .enqueue(undefined)
@@ -411,15 +457,20 @@ export const make = Effect.gen(function* () {
     );
     yield* forkParked(
       Stream.runForEach(changes, (settings) => {
-        const next = settings.storageCleanup;
-        if (Equal.equals(next, lastSettings)) return Effect.void;
-        lastSettings = next;
+        if (
+          Equal.equals(settings.storageCleanup, lastSettings.storageCleanup) &&
+          Equal.equals(settings.worktreeCleanup, lastSettings.worktreeCleanup) &&
+          sameProjectWorktreePolicies(settings, lastSettings)
+        )
+          return Effect.void;
+        lastSettings = settings;
         return worker.enqueue(undefined);
       }),
     );
     yield* forkParked(
       Stream.runForEach(events, (event) =>
-        event.type === "thread.deleted" && lastSettings.worktreeOnDelete
+        event.type === "thread.deleted" &&
+        anyWorktreePolicy(lastSettings, (rules) => rules.worktreeOnDelete)
           ? worker.enqueue(undefined)
           : Effect.void,
       ),

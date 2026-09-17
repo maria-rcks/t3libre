@@ -231,6 +231,74 @@ describe("scoped settings writes", () => {
     });
   });
 
+  it("keeps each project's other cleanup rules when changing one rule across machines", () => {
+    const machine = environment("Laptop", {
+      settings: {
+        storageCleanup: { ...DEFAULT_SERVER_SETTINGS.storageCleanup, worktreeAfterDays: 30 },
+      },
+    });
+    const customized = environment("Server", {
+      settings: {
+        projectSettingsOverrides: {
+          [projectId]: {
+            defaultAutoPull: true,
+            worktreeCleanup: {
+              mode: "custom",
+              rules: {
+                worktreeAfterDays: 8,
+                worktreeOnDelete: false,
+                worktreeOnMerge: true,
+                worktreeUnchanged: false,
+              },
+            },
+          },
+        },
+      },
+    });
+    const plan = planScopedSettingsPatch(project, [machine, customized], {
+      worktreeCleanup: { mode: "custom", rules: { worktreeOnDelete: true } },
+    });
+    expect(plan.serverWrites.map((write) => write.patch.projectSettingsOverrides)).toEqual([
+      {
+        [projectId]: {
+          defaultAutoPull: true,
+          worktreeCleanup: {
+            mode: "custom",
+            rules: {
+              worktreeAfterDays: 8,
+              worktreeOnDelete: true,
+              worktreeOnMerge: true,
+              worktreeUnchanged: false,
+            },
+          },
+        },
+      },
+      {
+        [laptopProjectId]: {
+          worktreeCleanup: {
+            mode: "custom",
+            rules: {
+              worktreeAfterDays: 30,
+              worktreeOnDelete: true,
+              worktreeOnMerge: false,
+              worktreeUnchanged: false,
+            },
+          },
+        },
+      },
+    ]);
+    expect(
+      planScopedSettingsClear(checkout, [customized], ["worktreeCleanup"]).serverWrites[0]?.patch,
+    ).toEqual({
+      projectSettingsOverrides: { [projectId]: { defaultAutoPull: true } },
+    });
+    expect(
+      planScopedSettingsPatch(project, [machine, customized], {
+        storageCleanup: { browserArtifactsAfterDays: 8 },
+      }).serverWrites,
+    ).toEqual([]);
+  });
+
   it("scopes agent device access to projects while keeping hub and hosts environment-wide", () => {
     const plan = planScopedSettingsPatch(project, [laptop, server], {
       enableAgentDeviceAccess: true,

@@ -131,9 +131,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "storage-worktrees",
     title: "Worktree cleanup",
     to: "/settings/storage",
-    scope: "environment-defaults",
+    scope: "project-defaults",
     searchTerms: [
-      "disk storage delete deleted archived threads old inactive merged unchanged worktrees retention days",
+      "disk storage delete deleted archived threads old inactive merged unchanged worktrees retention days project inherit off custom",
     ],
   },
   {
@@ -807,7 +807,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/providers": null,
   "/settings/integrations": null,
   "/settings/source-control": "environment-defaults",
-  "/settings/storage": "environment-defaults",
+  "/settings/storage": "project-defaults",
   "/settings/connections": "connections",
   "/settings/archived": "project-defaults",
 };
