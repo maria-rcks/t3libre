@@ -1,15 +1,6 @@
-import { ProviderDriverKind, type UsageProviderKind } from "@t3tools/contracts";
-import { createElement } from "react";
+import type { UsageProviderKind } from "@t3tools/contracts";
 
-import { ClaudeAI, GrokIcon, type Icon, OpenAI } from "../Icons";
-import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
-
-const MuseMark: Icon = ({ className }) =>
-  createElement(ProviderInstanceIcon, {
-    driverKind: ProviderDriverKind.make("muse"),
-    displayName: "Muse Code",
-    ...(className === undefined ? {} : { className }),
-  });
+import { ClaudeAI, GrokIcon, type Icon, MetaIcon, OpenAI } from "../Icons";
 
 type UsageProviderPresentation = {
   readonly label: string;
@@ -42,7 +33,7 @@ export const PROVIDER_PRESENTATION = {
   muse: {
     label: "Muse Code",
     color: "#6088d9",
-    mark: MuseMark,
+    mark: MetaIcon,
   },
 } satisfies Record<UsageProviderKind, UsageProviderPresentation>;
 

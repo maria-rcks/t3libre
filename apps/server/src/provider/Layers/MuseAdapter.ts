@@ -39,6 +39,11 @@ import {
 } from "../Errors.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import {
+  decodeMuseModelSelection,
+  MUSE_ROUTED_MODEL_PREFIX,
+  MuseModelCatalog,
+} from "../muse/MuseModels.ts";
+import {
   decodeMuseNotification,
   isMuseNotificationMethod,
   mapMuseNotification,
@@ -77,17 +82,6 @@ const TurnResult = Schema.Struct({ status: Schema.Literal("accepted"), turnId: S
 const CompactResult = Schema.Struct({
   status: Schema.Literals(["accepted", "noop"]),
   reason: Schema.optional(Schema.String),
-});
-const ModelCatalog = Schema.Struct({
-  models: Schema.Array(
-    Schema.Struct({
-      modelId: Schema.String,
-      isDefault: Schema.Boolean,
-      providerId: Schema.String,
-      profileId: Schema.NullOr(Schema.String),
-      displayLabel: Schema.String,
-    }),
-  ),
 });
 const decodeResumeCursor = Schema.decodeUnknownEffect(ResumeCursor);
 const decodeAnswer = Schema.decodeUnknownEffect(
@@ -154,11 +148,18 @@ export function makeMuseAdapter(
       const catalog = yield* attempt("model/list", () =>
         host.connection.request("model/list", {}),
       ).pipe(
-        Effect.flatMap(Schema.decodeUnknownEffect(ModelCatalog)),
+        Effect.flatMap(Schema.decodeUnknownEffect(MuseModelCatalog)),
         Effect.mapError((cause) => requestError("model/list", cause)),
       );
+      const routing = decodeMuseModelSelection(model);
       const matches = catalog.models.filter((entry) =>
-        model === MUSE_DEFAULT_MODEL ? entry.isDefault : entry.modelId === model,
+        routing
+          ? entry.modelId === routing.modelId &&
+            entry.providerId === routing.providerId &&
+            entry.profileId === routing.profileId
+          : model === MUSE_DEFAULT_MODEL
+            ? entry.isDefault
+            : entry.modelId === model,
       );
       const match = matches[0];
       if (
@@ -185,6 +186,11 @@ export function makeMuseAdapter(
         return yield* requestError(
           "session/setModel",
           "Muse Code did not report its default model. Select an explicit model or start a new thread to use its startup default.",
+        );
+      if (model.startsWith(MUSE_ROUTED_MODEL_PREFIX))
+        return yield* requestError(
+          "session/setModel",
+          "The selected Muse model profile is no longer available. Select a model from the current catalog.",
         );
       return { modelId: model };
     });
@@ -631,7 +637,8 @@ export function makeMuseAdapter(
             if (
               model &&
               (model !== ctx.selectedModel ||
-                (model !== MUSE_DEFAULT_MODEL && model !== ctx.session.model))
+                (model !== MUSE_DEFAULT_MODEL &&
+                  (decodeMuseModelSelection(model)?.modelId ?? model) !== ctx.session.model))
             ) {
               const selection = yield* resolveModelSelection(ctx.host, model);
               yield* attempt("session/setModel", () =>

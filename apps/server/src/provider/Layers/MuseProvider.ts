@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { readMuseUsageLimits } from "./museUsageLimits.ts";
+import { encodeMuseModelSelection, MuseModelCatalog } from "../muse/MuseModels.ts";
 import { buildServerProvider, providerModelsFromSettings } from "../providerSnapshot.ts";
 
 const PRESENTATION = {
@@ -34,16 +35,6 @@ const DEFAULT_MODELS: ReadonlyArray<ServerProviderModel> = [
     capabilities: CAPABILITIES,
   },
 ];
-const ModelCatalog = Schema.Struct({
-  source: Schema.String,
-  models: Schema.Array(
-    Schema.Struct({
-      modelId: Schema.String,
-      displayLabel: Schema.String,
-      isDefault: Schema.Boolean,
-    }),
-  ),
-});
 
 export const buildInitialMuseProviderSnapshot = Effect.fn("buildInitialMuseProviderSnapshot")(
   function* (settings: MuseSettings) {
@@ -91,19 +82,26 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
       }),
     );
     const catalog = yield* Effect.tryPromise(() => host.connection.request("model/list", {})).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(ModelCatalog)),
+      Effect.flatMap(Schema.decodeUnknownEffect(MuseModelCatalog)),
     );
     const usageLimits = yield* readMuseUsageLimits(host.connection);
     const models: ServerProviderModel[] =
       catalog.source === "fakeCatalog"
         ? []
-        : catalog.models.map((model) => ({
-            slug: model.modelId,
-            name: model.displayLabel || model.modelId,
-            isDefault: model.isDefault,
-            isCustom: false,
-            capabilities: CAPABILITIES,
-          }));
+        : catalog.models.map((model) => {
+            const duplicate = catalog.models.some(
+              (other) =>
+                other.modelId === model.modelId &&
+                (other.providerId !== model.providerId || other.profileId !== model.profileId),
+            );
+            return {
+              slug: duplicate ? encodeMuseModelSelection(model) : model.modelId,
+              name: `${model.displayLabel || model.modelId}${duplicate ? ` (${model.providerId}${model.profileId === null ? "" : ` / ${model.profileId}`})` : ""}`,
+              isDefault: model.isDefault,
+              isCustom: false,
+              capabilities: CAPABILITIES,
+            };
+          });
     return buildServerProvider({
       presentation: PRESENTATION,
       enabled: true,

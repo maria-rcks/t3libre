@@ -8,7 +8,6 @@ import {
   OpenCodeSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
-import { BotIcon } from "lucide-react";
 import type * as Schema from "effect/Schema";
 import {
   AntigravityIcon,
@@ -16,6 +15,7 @@ import {
   CursorIcon,
   GrokIcon,
   type Icon,
+  MetaIcon,
   OpenAI,
   OpenCodeIcon,
 } from "../Icons";
@@ -87,7 +87,7 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
   {
     value: ProviderDriverKind.make("muse"),
     label: "Muse Code",
-    icon: BotIcon,
+    icon: MetaIcon,
     badgeLabel: "Developer Preview",
     settingsSchema: MuseSettings,
   },

@@ -139,13 +139,15 @@ export function parseMuseRateTable(documents: readonly unknown[]): RateTable {
     for (const raw of catalog.rows) {
       const model = object(raw);
       if (typeof model.model_id !== "string") continue;
+      const key = normalizeRateKey(model.model_id);
       const cost = object(model.cost);
-      if (cost.currency !== "USD") continue;
       const input = amount(cost.input);
       const output = amount(cost.output);
       const cached = amount(cost.cached);
-      if (input === null || output === null || cached === null) continue;
-      const key = normalizeRateKey(model.model_id);
+      if (cost.currency !== "USD" || input === null || output === null || cached === null) {
+        candidates.set(key, null);
+        continue;
+      }
       const rate: ModelRate = {
         inputCostPerToken: input,
         outputCostPerToken: output,

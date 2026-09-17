@@ -60,6 +60,27 @@ describe("usage pricing", () => {
         costUsd: 0,
         costSource: "unpriced",
       });
+      const pricedCatalog = {
+        source: "provider_catalog",
+        rows: [
+          {
+            model_id: "example-muse",
+            cost: { currency: "USD", input: "2", output: "8", cached: "0.5" },
+          },
+        ],
+      };
+      const unpricedCatalog = {
+        source: "provider_catalog",
+        rows: [{ model_id: "example-muse", cost }],
+      };
+      for (const catalogs of [
+        [pricedCatalog, unpricedCatalog],
+        [unpricedCatalog, pricedCatalog],
+      ]) {
+        expect(
+          priceUsage(parseMuseRateTable(catalogs), "example-muse", totals, null).costSource,
+        ).toBe("unpriced");
+      }
     }
   });
 
