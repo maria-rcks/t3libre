@@ -399,8 +399,8 @@ function CommentGroup({
               profileUrl={
                 detail.provider === "github" && actor
                   ? new URL(
-                      actor.login.endsWith("[bot]")
-                        ? `/apps/${encodeURIComponent(actor.login.slice(0, -5))}`
+                      actor.isBot || actor.login.endsWith("[bot]")
+                        ? `/apps/${encodeURIComponent(actor.login.replace(/\[bot\]$/, ""))}`
                         : `/${encodeURIComponent(actor.login)}`,
                       detail.url,
                     ).toString()
