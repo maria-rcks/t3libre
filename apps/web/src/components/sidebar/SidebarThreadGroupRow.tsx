@@ -54,7 +54,7 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
   const isNaming = group.nameGeneration != null;
   const color = group.icon && group.icon.kind !== "emoji" ? group.icon.color : null;
   const nameClassName = color ? projectIconColorClassName(color) : "text-sidebar-foreground";
-  // The card's surface and hairline come from the group color; a group
+  // The card's surface comes from the group color; a group
   // without a color takes a neutral tint so it still reads as a container.
   const tintClassName = color ? projectIconTintClassName(color) : "bg-sidebar-foreground/[0.05]";
   // The header's label replaces its children for assistive tech, so the
