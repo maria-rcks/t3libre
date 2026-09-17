@@ -312,22 +312,23 @@ export function DraftHeroHeadline({
 
   // One click into chat, phrased as the alternative to the question above it.
   // Focus moves to the mode word once this line has gone.
-  const orJustChat = canJustChat ? (
-    <Button
-      variant="link"
-      size="sm"
-      className="pointer-events-auto font-normal text-muted-foreground hover:text-foreground"
-      onClick={() =>
-        void startChat().then((started) => {
-          if (started) {
-            document.querySelector<HTMLElement>("[data-draft-project-trigger]")?.focus();
-          }
-        })
-      }
-    >
-      or just chat
-    </Button>
-  ) : null;
+  const orJustChat =
+    canJustChat && (hasResolvedProject || canChooseProject) ? (
+      <Button
+        variant="link"
+        size="xs"
+        className="pointer-events-auto font-normal text-muted-foreground text-sm! hover:text-foreground"
+        onClick={() =>
+          void startChat().then((started) => {
+            if (started) {
+              document.querySelector<HTMLElement>("[data-draft-project-trigger]")?.focus();
+            }
+          })
+        }
+      >
+        or just chat
+      </Button>
+    ) : null;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col items-center">
@@ -344,7 +345,8 @@ export function DraftHeroHeadline({
           <>Add a project to start</>
         )}
       </h1>
-      {orJustChat ? <div className="mt-2 flex h-7 items-center">{orJustChat}</div> : null}
+      {/* Always reserved so the heading does not move when the line goes. */}
+      <div className="mt-2 flex h-7 items-center">{orJustChat}</div>
     </div>
   );
 }
