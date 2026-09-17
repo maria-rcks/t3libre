@@ -101,6 +101,7 @@ const encodeRatesCache = Schema.encodeEffect(
 const ScanCacheJson = Schema.fromJsonString(Schema.Unknown as unknown as Schema.Codec<unknown>);
 const decodeScanCacheFile = Schema.decodeUnknownEffect(ScanCacheJson);
 const encodeScanCacheFile = Schema.encodeEffect(ScanCacheJson);
+const encodeUsageRecordKey = Schema.encodeSync(ScanCacheJson);
 
 export class UsageService extends Context.Service<
   UsageService,
@@ -366,7 +367,8 @@ export const make = Effect.gen(function* () {
       );
       // A read failure is not an empty transcript: caching it under this
       // (size, mtime) would silently drop the file's usage until it changes.
-      if (parsed === null) return [];
+      if (parsed === null)
+        return cached?.provider === provider ? [...cached.records, ...cached.tailRecords] : [];
 
       // Stored already de-duplicated within the file, which is 99% of all
       // duplicates. The aggregator still runs the cross-file dedupe pass. One
@@ -499,33 +501,34 @@ export const make = Effect.gen(function* () {
       priceOverrides: createOverrideRateTable(settings.usagePriceOverrides),
     });
 
+    const retentionCutoffMs = startedAtMs - CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
     const sources: UsageSource[] = [];
-    const livePaths = new Set<string>();
-    const walkedRoots: string[] = [];
 
     for (const { provider, dir, volumeId, files } of scannedDirs) {
-      if (files === null) {
-        sources.push({
-          fingerprint: { hostId, provider, resolvedHomePath: dir, volumeId },
-          status: "missing",
-          scannedFiles: 0,
-          skippedFiles: 0,
-          malformedRecords: 0,
-          distinctSessions: 0,
-          message: "No transcript directory on this environment.",
-        });
-        continue;
+      const retainedFiles = [...(files ?? [])];
+      const livePaths = new Set(retainedFiles.map((file) => file.path));
+      // Cleanup may remove transcripts, but the usage we already saved still
+      // contributes to this source. Keep the normal aggregation and dedupe path.
+      for (const [filePath, entry] of fileCache) {
+        const relative = path.relative(dir, filePath);
+        if (
+          entry.provider !== provider ||
+          entry.mtimeMs < retentionCutoffMs ||
+          livePaths.has(filePath) ||
+          relative === ".." ||
+          relative.startsWith(".." + path.sep) ||
+          path.isAbsolute(relative)
+        )
+          continue;
+        retainedFiles.push({ path: filePath, records: [...entry.records, ...entry.tailRecords] });
       }
-
-      walkedRoots.push(dir);
       let scannedFiles = 0;
       let skippedFiles = 0;
       // Distinct per directory. Buckets carry per-cell session counts, but a
       // session spans days and models, so clients total this figure instead.
       const sessionIds = new Set<string>();
 
-      for (const file of files) {
-        livePaths.add(file.path);
+      for (const file of retainedFiles) {
         if (file.records.length === 0) {
           skippedFiles += 1;
           continue;
@@ -534,7 +537,22 @@ export const make = Effect.gen(function* () {
         for (const record of file.records) {
           // Only sessions that contributed in-window count: the mtime slack
           // admits boundary files whose records fall outside the range.
-          if (aggregator.add(record) && record.sessionId.length > 0) {
+          // A moved Codex rollout can coexist with its saved copy. Codex records
+          // have no provider event id, so identify the same session event here.
+          const usageRecord =
+            record.provider === "codex" && record.sessionId.length > 0
+              ? {
+                  ...record,
+                  dedupeKey: encodeUsageRecordKey([
+                    record.provider,
+                    record.sessionId,
+                    record.timestampMs,
+                    record.model,
+                    record.totals,
+                  ]),
+                }
+              : record;
+          if (aggregator.add(usageRecord) && record.sessionId.length > 0) {
             sessionIds.add(record.sessionId);
           }
         }
@@ -542,21 +560,17 @@ export const make = Effect.gen(function* () {
 
       sources.push({
         fingerprint: { hostId, provider, resolvedHomePath: dir, volumeId },
-        status: "ok",
+        // Clients exclude missing sources, so saved records remain an available source.
+        status: files === null && scannedFiles === 0 ? "missing" : "ok",
         scannedFiles,
         skippedFiles,
         malformedRecords: 0,
         distinctSessions: sessionIds.size,
-        message: null,
+        message: files === null ? "No transcript directory on this environment." : null,
       });
     }
 
-    const pruned = pruneScanCache(fileCache, {
-      livePaths,
-      walkedRoots,
-      windowStartMs,
-      retentionCutoffMs: startedAtMs - CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000,
-    });
+    const pruned = pruneScanCache(fileCache, retentionCutoffMs);
     if (pruned > 0) cacheDirty = true;
     yield* persistScanCache();
 
