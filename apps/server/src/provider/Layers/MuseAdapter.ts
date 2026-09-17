@@ -110,6 +110,7 @@ interface SessionContext {
   settledTurns: Set<string>;
   selectedModel: string;
   contextUsedTokens?: number;
+  pendingTokenUsage: Map<string, Extract<MuseNotification, { method: "session/tokenUsage" }>>;
   stopped: boolean;
 }
 
@@ -265,6 +266,12 @@ export function make(
       if (!isMuseNotificationMethod(input.method)) return;
       const event = decodeMuseNotification(input);
       if (event.method !== "usage/changed" && event.params.sessionId !== ctx.sessionId) return;
+      if (event.method === "session/tokenUsage" && ctx.contextUsedTokens === undefined) {
+        // Canonical usage is a per-turn snapshot; keep only each turn's latest notification.
+        ctx.pendingTokenUsage.delete(event.params.turnId);
+        ctx.pendingTokenUsage.set(event.params.turnId, event);
+        return;
+      }
       if (event.method === "item/delta") {
         const item = ctx.items.get(event.params.itemId);
         if (item && item.status !== "inProgress") return;
@@ -343,6 +350,11 @@ export function make(
       if (event.method === "turn/completed" && ctx.session.activeTurnId === event.params.turnId) {
         const { activeTurnId: _, ...rest } = ctx.session;
         ctx.session = { ...rest, status: "ready", updatedAt: nowIso() };
+      }
+      if (event.method === "session/contextUsage" && ctx.pendingTokenUsage.size > 0) {
+        const pending = [...ctx.pendingTokenUsage.values()];
+        ctx.pendingTokenUsage.clear();
+        for (const usage of pending) receive(ctx, usage);
       }
     };
     const stopContext = Effect.fn("MuseAdapter.stopContext")(function* (ctx: SessionContext) {
@@ -424,6 +436,7 @@ export function make(
               approvals: new Map(),
               questions: new Map(),
               settledTurns: new Set(),
+              pendingTokenUsage: new Map(),
               selectedModel,
               stopped: false,
             };
