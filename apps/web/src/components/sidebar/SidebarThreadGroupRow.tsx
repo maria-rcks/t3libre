@@ -1,5 +1,5 @@
 import type { EnvironmentThreadGroup } from "@t3tools/client-runtime/state/shell";
-import { ChevronRightIcon, FolderIcon } from "lucide-react";
+import { FolderIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -10,20 +10,24 @@ import {
   type ReactNode,
 } from "react";
 
-import { projectIconColorClassName } from "../../projectIconColors";
+import { projectIconColorClassName, projectIconTintClassName } from "../../projectIconColors";
 import { cn } from "~/lib/utils";
 import { ProjectIconOverrideGlyph } from "../ProjectFavicon";
+import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ThreadStatusPill } from "../Sidebar.logic";
 
 /**
- * A user-made folder in the sidebar: a header row that toggles its member
- * thread rows. Members render as ordinary thread rows nested under the
- * header, so every row affordance (status, settle, snooze, selection) works
- * unchanged inside a group.
+ * A user-made folder in the sidebar: a tinted card carrying the group's color
+ * with a header row that toggles its member thread rows. Members render as
+ * ordinary thread rows nested inside the card, so every row affordance
+ * (status, settle, snooze, selection) works unchanged inside a group.
  */
 export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: {
   group: EnvironmentThreadGroup;
   count: number;
+  /** Members that carry a pull request, shown on the header while collapsed. */
+  pullRequestCount: number;
   expanded: boolean;
   // Rolled-up status of the members while collapsed, so a working or
   // blocked thread is not hidden by the fold.
@@ -50,13 +54,18 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
     renamingName,
   } = props;
   const isNaming = group.nameGeneration != null;
-  const colorClassName =
-    group.icon && group.icon.kind !== "emoji"
-      ? projectIconColorClassName(group.icon.color)
-      : "text-sidebar-foreground/90";
+  const color = group.icon && group.icon.kind !== "emoji" ? group.icon.color : null;
+  const nameClassName = color ? projectIconColorClassName(color) : "text-sidebar-foreground";
+  // The card's surface and hairline come from the group color; a group
+  // without a color takes a neutral tint so it still reads as a container.
+  const tintClassName = color
+    ? projectIconTintClassName(color)
+    : "bg-sidebar-foreground/[0.05] ring-sidebar-foreground/10";
   const handleClick = useCallback(
     (event: ReactMouseEvent) => {
       if ((event.target as HTMLElement).closest("input")) return;
+      // The second click of a rename double-click must not fold the group back.
+      if (event.detail > 1) return;
       onToggle(group);
     },
     [group, onToggle],
@@ -115,7 +124,11 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
     <li
       data-thread-selection-safe
       data-testid={`sidebar-thread-group-${group.id}`}
-      className="list-none py-0.5"
+      className={cn(
+        "list-none rounded-lg py-0.5 ring-1 ring-inset transition-colors motion-reduce:transition-none",
+        props.expanded ? "my-1 pb-1" : "my-px",
+        tintClassName,
+      )}
     >
       <div
         // While renaming, the row hands its semantics to the text box: a
@@ -129,24 +142,23 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
             : `${group.name} group, ${props.count} thread${props.count === 1 ? "" : "s"}`
         }
         data-testid="sidebar-thread-group-row"
-        className="group/sidebar-group flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left outline-none select-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring"
+        className="group/sidebar-group mx-0.5 flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-none select-none hover:bg-sidebar-row-hover/70 focus-visible:ring-2 focus-visible:ring-ring"
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
       >
-        <ChevronRightIcon
-          aria-hidden
+        <span
           className={cn(
-            "size-3.5 shrink-0 text-sidebar-muted-foreground/70 transition-transform motion-reduce:transition-none",
-            props.expanded && "rotate-90",
+            "flex size-5 shrink-0 items-center justify-center rounded-[25%]",
+            nameClassName,
           )}
-        />
-        <span className="flex size-4 shrink-0 items-center justify-center">
+          style={{ backgroundColor: "color-mix(in srgb, currentColor 14%, transparent)" }}
+        >
           {group.icon ? (
-            <ProjectIconOverrideGlyph icon={group.icon} className="size-4" />
+            <ProjectIconOverrideGlyph icon={group.icon} className="size-3.5" />
           ) : (
-            <FolderIcon aria-hidden className="size-4 text-sidebar-muted-foreground/70" />
+            <FolderIcon aria-hidden className="size-3.5" />
           )}
         </span>
         {isRenaming ? (
@@ -165,8 +177,8 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
         ) : (
           <span
             className={cn(
-              "min-w-0 flex-1 truncate text-sm font-medium transition-opacity motion-reduce:transition-none",
-              colorClassName,
+              "min-w-0 flex-1 truncate text-sm font-semibold transition-opacity motion-reduce:transition-none",
+              nameClassName,
               isNaming && "opacity-[0.55]",
             )}
           >
@@ -179,17 +191,40 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
           </span>
         ) : null}
         {!props.expanded && props.status ? (
-          <span
-            role="img"
-            aria-label={props.status.label}
-            className={cn(
-              "size-1.5 shrink-0 rounded-full",
-              props.status.dotClass,
-              props.status.pulse && "animate-status-pulse",
-            )}
-          />
+          // Dot only: the label would crowd the name out of a narrow sidebar.
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  role="img"
+                  aria-label={props.status.label}
+                  className={cn(
+                    "size-2 shrink-0 rounded-full",
+                    props.status.dotClass,
+                    props.status.pulse && "animate-status-pulse",
+                  )}
+                />
+              }
+            />
+            <TooltipPopup side="top">{props.status.label}</TooltipPopup>
+          </Tooltip>
         ) : null}
-        <span className="ml-auto shrink-0 rounded-sm bg-sidebar-border/60 px-1.5 text-[11px] tabular-nums text-sidebar-muted-foreground">
+        {!props.expanded && props.pullRequestCount > 0 ? (
+          <span
+            className="inline-flex shrink-0 items-center gap-0.5 text-[11px] tabular-nums text-sidebar-muted-foreground"
+            aria-label={`${props.pullRequestCount} pull request${props.pullRequestCount === 1 ? "" : "s"}`}
+          >
+            <PullRequestGlyph.pullRequest aria-hidden className="size-3" />
+            {props.pullRequestCount}
+          </span>
+        ) : null}
+        <span
+          className={cn(
+            "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1.5 text-[11px] font-medium tabular-nums",
+            nameClassName,
+          )}
+          style={{ backgroundColor: "color-mix(in srgb, currentColor 14%, transparent)" }}
+        >
           {props.count}
         </span>
       </div>
@@ -197,7 +232,7 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
         <ul
           role="list"
           data-testid={`sidebar-thread-group-members-${group.id}`}
-          className="ml-2.5 flex flex-col gap-px border-l border-sidebar-border/60 pl-1.5"
+          className="mx-1 flex flex-col gap-px"
         >
           {props.children}
         </ul>

@@ -2953,7 +2953,13 @@ export default function Sidebar() {
                 });
               }),
             );
-        return { ...block, expanded, renderedRows: rows, status };
+        const pullRequestCount = block.rows.filter(
+          (row) =>
+            row.thread.pullRequests.length > 0 ||
+            row.thread.linkedPullRequest != null ||
+            row.thread.branchPullRequest != null,
+        ).length;
+        return { ...block, expanded, renderedRows: rows, status, pullRequestCount };
       }),
     [routeThreadKey, threadGroupBlocks, threadGroupsExpanded, threadLastVisitedAtById],
   );
@@ -5364,6 +5370,7 @@ export default function Sidebar() {
                             key={`thread-group:${block.key}`}
                             group={block.group}
                             count={block.rows.length}
+                            pullRequestCount={block.pullRequestCount}
                             expanded={block.expanded}
                             status={block.status}
                             isRenaming={renamingGroupKey === block.key}
