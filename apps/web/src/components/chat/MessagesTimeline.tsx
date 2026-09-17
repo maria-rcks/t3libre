@@ -2606,16 +2606,20 @@ function ActivityGroupTimelineRow({
   const thinking = row.active && liveWork === undefined;
   const iconWork = row.active ? liveWork : work.at(-1);
   const failed = iconWork !== undefined && workEntryDisplayIndicatesToolFailure(iconWork);
-  const latestThought = row.entries.findLast((entry) => entry.kind === "message");
-  const thoughtPreview =
-    latestThought?.kind === "message" ? reasoningPreview(latestThought.message.text) : "";
   const label = row.active
     ? liveWork
       ? liveWorkEntryLabel(liveWork, ctx.workspaceRoot, true)
-      : thoughtLabel("Thinking", thoughtPreview)
+      : "Thinking"
     : work.length > 0
       ? summarizeToolGroup(work)
-      : thoughtLabel(`Thought${thoughtCount > 1 ? ` (×${thoughtCount})` : ""}`, thoughtPreview);
+      : `Thought${thoughtCount > 1 ? ` (×${thoughtCount})` : ""}`;
+  // Only a thought-labelled row previews its trace; tool summaries keep the line.
+  const previewsThought = row.active ? liveWork === undefined : work.length === 0;
+  const latestThought = previewsThought
+    ? row.entries.findLast((entry) => entry.kind === "message")
+    : undefined;
+  const detail =
+    latestThought?.kind === "message" ? reasoningPreview(latestThought.message.text) : undefined;
   const details: ReactNode[] = [];
   if (row.expanded) {
     for (let index = 0; index < row.entries.length; index += 1) {
@@ -2663,6 +2667,7 @@ function ActivityGroupTimelineRow({
       >
         <LiveActivityRow
           label={label}
+          detail={detail}
           iconName={iconWork ? workEntryIconName(iconWork) : "brain"}
           toolIcon={iconWork?.toolIcon ?? iconWork?.toolSource?.icon}
           failed={failed}
@@ -2687,24 +2692,15 @@ function ThinkingTimelineRow() {
   );
 }
 
-/** First line of a thinking trace, shown inline after its "Thought" label. */
-function reasoningPreview(text: string): string {
+/** First line of a thinking trace, shown inline after its "Thought" label. The
+ *  row truncates, so only a bounded prefix is scanned while a trace streams. */
+function reasoningPreview(text: string): string | undefined {
   const line = text
+    .slice(0, 400)
     .split("\n")
     .map((part) => part.replace(/^[#>*\-\s]+/, "").trim())
     .find((part) => part.length > 0);
-  return line ?? "";
-}
-
-/** "Thought" or "Thinking" followed by the trace's first line in the foreground color. */
-function thoughtLabel(label: string, preview: string): ReactNode {
-  if (preview.length === 0) return label;
-  return (
-    <>
-      {label}
-      <span className="ms-2 text-foreground">{preview}</span>
-    </>
-  );
+  return line && line.length > 0 ? line : undefined;
 }
 
 /**
@@ -2792,7 +2788,8 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
     onToggleReasoning(message.id, !expanded, row.id);
   }, [expanded, message.id, row.id, onToggleReasoning]);
 
-  if (message.text.trim().length === 0) {
+  const preview = reasoningPreview(message.text);
+  if (preview === undefined) {
     return null;
   }
 
@@ -2809,7 +2806,8 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="relative min-w-0 flex-1 truncate text-secondary-label text-sm leading-relaxed">
-            {thoughtLabel("Thought", reasoningPreview(message.text))}
+            Thought
+            {preview ? <span className="ms-2 text-foreground">{preview}</span> : null}
           </span>
           <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
             <ChevronRightIcon
@@ -3107,6 +3105,7 @@ function toolIconAcceptsTint(
 
 function LiveActivityRow({
   label,
+  detail,
   iconName,
   toolIcon,
   failed = false,
@@ -3114,6 +3113,8 @@ function LiveActivityRow({
   shimmer = false,
 }: {
   label: ReactNode;
+  /** Foreground text after the label. Left out of the shimmer copy so the sweep keeps its contrast. */
+  detail?: string | undefined;
   iconName?: WorkEntryIconName;
   toolIcon?: ToolActivityIcon | undefined;
   failed?: boolean;
@@ -3129,6 +3130,7 @@ function LiveActivityRow({
     >
       <LiveActivityContent
         label={label}
+        detail={detail}
         iconName={iconName}
         toolIcon={toolIcon}
         failed={failed}
@@ -3146,6 +3148,7 @@ function LiveActivityRow({
 
 function LiveActivityContent({
   label,
+  detail,
   iconName,
   toolIcon,
   failed = false,
@@ -3154,6 +3157,7 @@ function LiveActivityContent({
   highlighted = false,
 }: {
   label: ReactNode;
+  detail?: string | undefined;
   iconName: WorkEntryIconName | undefined;
   toolIcon?: ToolActivityIcon | undefined;
   failed?: boolean;
@@ -3189,7 +3193,10 @@ function LiveActivityContent({
           />
         </span>
       ) : null}
-      <span className={cn("min-w-0 flex-1 truncate", active && "live-tool-shine")}>{label}</span>
+      <span className={cn("min-w-0 flex-1 truncate", active && "live-tool-shine")}>
+        {label}
+        {detail ? <span className="ms-2 text-foreground">{detail}</span> : null}
+      </span>
       {showTrailingFailureMark ? (
         <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
       ) : null}
