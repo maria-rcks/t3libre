@@ -9691,7 +9691,7 @@ export default function ChatView(props: ChatViewProps) {
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full z-0">
                       <div
-                        className="pb-8 group-has-data-[composer-shoulder-tab]/composer-stack:pb-4"
+                        className="pb-3"
                         style={
                           forceExpandedMobileComposer
                             ? {
@@ -9700,11 +9700,16 @@ export default function ChatView(props: ChatViewProps) {
                             : undefined
                         }
                       >
-                        <DraftProjectPicker
-                          draftId={draftId}
-                          activeProjectRef={activeProjectRef}
-                          activeProjectTitle={activeProject?.title ?? null}
-                        />
+                        <h1 className="mb-6 text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
+                          What would you like to work on?
+                        </h1>
+                        <div className="flex h-9 items-center">
+                          <DraftProjectPicker
+                            draftId={draftId}
+                            activeProjectRef={activeProjectRef}
+                            activeProjectTitle={activeProject?.title ?? null}
+                          />
+                        </div>
                       </div>
                     </div>
                   ) : null}

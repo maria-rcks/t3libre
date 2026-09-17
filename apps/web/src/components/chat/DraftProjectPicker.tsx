@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon, MessageCircleIcon, PlusIcon, XIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useMemo } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useClientSettings } from "~/hooks/useSettings";
@@ -48,25 +48,6 @@ export function DraftProjectPicker({
   activeProjectRef,
   activeProjectTitle,
 }: DraftProjectPickerProps) {
-  const titleRef = useRef<HTMLHeadingElement>(null);
-  const chipRef = useRef<HTMLSpanElement>(null);
-  const [chatAnchor, setChatAnchor] = useState<{
-    draftId: DraftId | null;
-    width: number;
-    offset: number;
-  } | null>(null);
-  const chatOffset = chatAnchor?.draftId === draftId ? chatAnchor.offset : null;
-  useEffect(() => {
-    const title = titleRef.current;
-    if (!title || !chatAnchor) return;
-    const observer = new ResizeObserver(() => {
-      if (title.getBoundingClientRect().width !== chatAnchor.width) {
-        setChatAnchor(null);
-      }
-    });
-    observer.observe(title);
-    return () => observer.disconnect();
-  }, [chatAnchor]);
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments } = useEnvironments();
@@ -211,19 +192,19 @@ export function DraftProjectPicker({
               aria-label={!isChat && hasResolvedProject ? "Change project" : "Add project"}
               className={
                 isChat
-                  ? "inline-flex h-10 min-w-0 items-center rounded-lg pe-3 sm:h-11 text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                  : "inline-flex h-10 min-w-0 max-w-64 items-center gap-2 sm:h-11 rounded-r-lg ps-2 pe-3 py-1 text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  ? "inline-flex h-full min-w-0 flex-1 items-center rounded-lg pe-3 text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  : "inline-flex h-full min-w-0 flex-1 items-center rounded-r-lg ps-2 pe-3 text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               }
             />
           }
         >
           {isChat ? (
-            <span className="pointer-events-none ms-1 flex size-9 shrink-0 items-center justify-center self-center">
-              <MessageCircleIcon className="size-5" />
+            <span className="pointer-events-none ms-1 flex size-7 shrink-0 items-center justify-center self-center">
+              <MessageCircleIcon className="size-4" />
             </span>
           ) : null}
           <span
-            className="truncate"
+            className={isChat ? "truncate ps-0.5" : "truncate"}
             style={{
               textBox: isChat ? "trim-both cap alphabetic" : "trim-both ex alphabetic",
               paddingBlock: "0.5em",
@@ -238,7 +219,7 @@ export function DraftProjectPicker({
           </TooltipPopup>
         ) : null}
       </Tooltip>
-      <MenuPopup align="center" className="max-h-80 min-w-40! w-max max-w-64 overflow-y-auto">
+      <MenuPopup align="start" className="max-h-80 min-w-40! w-max max-w-64 overflow-y-auto">
         <MenuRadioGroup
           value={activeProjectKey}
           onValueChange={(value) => selectProject(value as string)}
@@ -285,18 +266,15 @@ export function DraftProjectPicker({
       type="button"
       variant="chip"
       onClick={openAddProject}
-      className="inline-flex h-8 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex h-full min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
     >
       <PlusIcon className="size-3.5" />
       Add project
     </Button>
   );
 
-  const chip = (
-    <span
-      ref={chipRef}
-      className="inline-flex max-w-full items-center rounded-lg border border-input bg-popover shadow-xs/5 align-baseline transition-colors hover:bg-accent dark:bg-input/32 dark:hover:bg-accent"
-    >
+  return (
+    <span className="inline-flex h-9 w-44 max-w-full items-center rounded-lg border border-input bg-popover shadow-xs/5 text-sm font-normal transition-colors hover:bg-accent dark:bg-input/32 dark:hover:bg-accent">
       {!isChat && chatEntry && activeProject ? (
         <Tooltip>
           <TooltipTrigger
@@ -306,64 +284,25 @@ export function DraftProjectPicker({
                 variant="chip"
                 aria-label="Remove project"
                 onClick={() => {
-                  const titleBounds = titleRef.current?.getBoundingClientRect();
-                  const chipBounds = chipRef.current?.getBoundingClientRect();
-                  if (titleBounds && chipBounds) {
-                    setChatAnchor({
-                      draftId,
-                      width: titleBounds.width,
-                      offset: chipBounds.left - titleBounds.left - titleBounds.width / 2,
-                    });
-                  }
                   selectProject(chatEntry.group.projectKey);
                 }}
-                className="group/project-icon relative ms-1 flex size-9 shrink-0 items-center justify-center self-center rounded-lg text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                className="group/project-icon relative ms-1 flex size-7 shrink-0 items-center justify-center self-center rounded-lg text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               />
             }
           >
             <span className="flex items-center justify-center group-hover/project-icon:opacity-0 group-focus-visible/project-icon:opacity-0">
-              <ProjectFavicon project={activeProject} className="size-6" />
+              <ProjectFavicon project={activeProject} className="size-4" />
             </span>
-            <XIcon className="absolute size-5 opacity-0 group-hover/project-icon:opacity-100 group-focus-visible/project-icon:opacity-100" />
+            <XIcon className="absolute size-4 opacity-0 group-hover/project-icon:opacity-100 group-focus-visible/project-icon:opacity-100" />
           </TooltipTrigger>
           <TooltipPopup>Enter chat mode</TooltipPopup>
         </Tooltip>
       ) : !isChat || !shouldShowProjectMenu ? (
-        <span className="ms-1 flex size-9 shrink-0 items-center justify-center self-center">
-          <MessageCircleIcon className="size-5" />
+        <span className="ms-1 flex size-7 shrink-0 items-center justify-center self-center">
+          <MessageCircleIcon className="size-4" />
         </span>
       ) : null}
       {projectSelector}
     </span>
-  );
-
-  return (
-    <h1
-      ref={titleRef}
-      className={
-        isChat && chatOffset !== null
-          ? "mx-auto grid w-full grid-cols-1 items-end gap-y-2 font-normal text-2xl text-foreground tracking-tight sm:grid-cols-[var(--chat-context-start)_minmax(0,1fr)] sm:text-3xl sm:[align-items:last_baseline]"
-          : "mx-auto w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
-      }
-      style={
-        isChat && chatOffset !== null
-          ? ({ "--chat-context-start": `calc(50% + ${chatOffset}px)` } as CSSProperties)
-          : undefined
-      }
-    >
-      {isChat && chatOffset !== null ? (
-        <>
-          <span className="text-center sm:pe-2 sm:text-end">What would you like to</span>
-          <span className="ms-[var(--chat-context-start)] flex min-w-0 items-baseline gap-x-2 text-start sm:ms-0">
-            {chip}
-            <span className="shrink-0">about?</span>
-          </span>
-        </>
-      ) : isChat ? (
-        <>What would you like to {chip} about?</>
-      ) : (
-        <>What should we build in {chip}?</>
-      )}
-    </h1>
   );
 }
