@@ -6,7 +6,7 @@ need a separate branch and working directory.
 ## Start a thread
 
 To ask a question without a project, open a new thread and remove the selected
-project using its icon in the title. Choose a project from the **Chat** selector
+project using its icon in the selector above the composer. Choose a project from the **Chat** selector
 to switch back, or use the machine selector to choose where a new chat runs. These conversations appear under **Chats**, with a separate folder for each
 conversation on the selected environment.
 
