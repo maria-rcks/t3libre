@@ -286,9 +286,7 @@ type SidebarThreadGroupBlock = {
   readonly group: EnvironmentThreadGroup;
   /** Every visible member, pinned first, then active, snoozed, settled. */
   readonly rows: readonly SidebarThreadGroupRowEntry[];
-  readonly status: ThreadStatusPillValue | null;
 };
-type ThreadStatusPillValue = NonNullable<ReturnType<typeof resolveThreadStatusPill>>;
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";
@@ -2708,14 +2706,7 @@ export default function Sidebar() {
             section: "settled" as const,
           })),
         ];
-        return {
-          key,
-          group: bucket.group,
-          rows,
-          status: resolveProjectStatusIndicator(
-            rows.map((row) => resolveThreadStatusPill({ thread: row.thread })),
-          ),
-        };
+        return { key, group: bucket.group, rows };
       });
     // One shared rule on every platform (see sortPinnedThreadsByOrderKey):
     // user-arranged keys first, keyless threads in creation order below.
@@ -2930,7 +2921,9 @@ export default function Sidebar() {
     [setThreadGroupsExpanded],
   );
   // A collapsed group still shows the open thread, like the shelves: the
-  // route's row must never vanish behind a fold.
+  // route's row must never vanish behind a fold. The collapsed status dot
+  // rolls up the members with their visit times, so unseen completions show.
+  const threadLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
   const renderedThreadGroups = useMemo(
     () =>
       threadGroupBlocks.map((block) => {
@@ -2944,9 +2937,25 @@ export default function Sidebar() {
                   scopedThreadKey(scopeThreadRef(row.thread.environmentId, row.thread.id)) ===
                   routeThreadKey,
               );
-        return { ...block, expanded, renderedRows: rows };
+        const status = expanded
+          ? null
+          : resolveProjectStatusIndicator(
+              block.rows.map((row) => {
+                const lastVisitedAt =
+                  threadLastVisitedAtById[
+                    scopedThreadKey(scopeThreadRef(row.thread.environmentId, row.thread.id))
+                  ];
+                return resolveThreadStatusPill({
+                  thread: {
+                    ...row.thread,
+                    ...(lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
+                  },
+                });
+              }),
+            );
+        return { ...block, expanded, renderedRows: rows, status };
       }),
-    [routeThreadKey, threadGroupBlocks, threadGroupsExpanded],
+    [routeThreadKey, threadGroupBlocks, threadGroupsExpanded, threadLastVisitedAtById],
   );
 
   const orderedThreads = useMemo(
@@ -5356,7 +5365,7 @@ export default function Sidebar() {
                             group={block.group}
                             count={block.rows.length}
                             expanded={block.expanded}
-                            status={block.expanded ? null : block.status}
+                            status={block.status}
                             isRenaming={renamingGroupKey === block.key}
                             renamingName={renamingGroupKey === block.key ? renamingGroupName : ""}
                             onToggle={toggleThreadGroup}
