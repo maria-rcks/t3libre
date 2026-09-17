@@ -3610,14 +3610,26 @@ export default function Sidebar() {
   // rendered order or a row's section changes. Keying the motion pass on that
   // keeps ordinary updates from forcing a layout read and animating rows
   // whose position drifted for other reasons.
+  // Group blocks are siblings of the flat rows in the same measured list, so
+  // a fold, a membership change, or a group appearing shifts every row below
+  // it and must refresh the motion baseline too.
   const sidebarListOrderKey = useMemo(
     () =>
-      sidebarListItems
-        .map((item) => (item.kind === "thread" ? `${item.key}:${item.section}` : item.marker))
-        .join("\0"),
-    [sidebarListItems],
+      [
+        ...renderedThreadGroups.map(
+          (block) =>
+            `${block.key}:${block.expanded ? "open" : "closed"}:${block.renderedRows
+              .map((row) => `${row.thread.id}:${row.section}`)
+              .join(",")}`,
+        ),
+        ...sidebarListItems.map((item) =>
+          item.kind === "thread" ? `${item.key}:${item.section}` : item.marker,
+        ),
+      ].join("\0"),
+    [renderedThreadGroups, sidebarListItems],
   );
-  const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
+  const sidebarListHasRows =
+    sidebarListItems.length + renderedThreadGroups.length + visibleDraftSessionCount > 0;
   useLayoutEffect(() => {
     // Drag release clears the baseline, so its commit cannot replay the
     // sortable preview; rows glide from their released positions instead.

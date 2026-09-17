@@ -82,26 +82,6 @@ const makeProjectionThreadGroupRepository = Effect.gen(function* () {
       `,
   });
 
-  const listRows = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: ProjectionThreadGroupDbRow,
-    execute: () =>
-      sql`
-        SELECT
-          group_id AS "groupId",
-          project_id AS "projectId",
-          name,
-          icon_json AS "icon",
-          name_generation_request_id AS "nameGenerationRequestId",
-          name_generation_started_at AS "nameGenerationStartedAt",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
-        FROM projection_thread_groups
-        ORDER BY created_at ASC, group_id ASC
-      `,
-  });
-
   const upsert: ProjectionThreadGroupRepositoryShape["upsert"] = (row) =>
     upsertRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadGroupRepository.upsert:query")),
@@ -110,12 +90,7 @@ const makeProjectionThreadGroupRepository = Effect.gen(function* () {
     getRow(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadGroupRepository.getById:query")),
     );
-  const listAll: ProjectionThreadGroupRepositoryShape["listAll"] = () =>
-    listRows().pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionThreadGroupRepository.listAll:query")),
-    );
-
-  return { upsert, getById, listAll } satisfies ProjectionThreadGroupRepositoryShape;
+  return { upsert, getById } satisfies ProjectionThreadGroupRepositoryShape;
 });
 
 export const ProjectionThreadGroupRepositoryLive = Layer.effect(

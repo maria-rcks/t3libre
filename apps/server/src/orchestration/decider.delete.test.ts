@@ -301,7 +301,7 @@ it.layer(NodeServices.layer)("decider thread group flows", (it) => {
     }),
   );
 
-  it.effect("a late name completion for a superseded request only clears nothing", () =>
+  it.effect("a name completion for a superseded request changes nothing", () =>
     Effect.gen(function* () {
       const readModel = yield* seedGroupedReadModel;
       const result = yield* decideOrchestrationCommand({

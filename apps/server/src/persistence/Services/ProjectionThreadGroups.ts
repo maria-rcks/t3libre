@@ -43,11 +43,6 @@ export interface ProjectionThreadGroupRepositoryShape {
   readonly getById: (
     input: GetProjectionThreadGroupInput,
   ) => Effect.Effect<Option.Option<ProjectionThreadGroup>, ProjectionRepositoryError>;
-  /** List every projected group row in creation order. */
-  readonly listAll: () => Effect.Effect<
-    ReadonlyArray<ProjectionThreadGroup>,
-    ProjectionRepositoryError
-  >;
 }
 
 export class ProjectionThreadGroupRepository extends Context.Service<
