@@ -36,6 +36,14 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "./workspace/workspaceLease.ts";
 
+export class StorageCleanup extends Context.Service<
+  StorageCleanup,
+  {
+    readonly start: () => Effect.Effect<void, never, Scope.Scope>;
+    readonly drain: Effect.Effect<void>;
+  }
+>()("t3/storageCleanup") {}
+
 const DAY_MS = 86_400_000;
 
 const worktreeCleanupEnabled = (rules: WorktreeCleanupRules) =>
@@ -96,14 +104,6 @@ function storageCleanupActivityAt(thread: OrchestrationThreadShell): number {
     ].flatMap((value) => (value == null ? [] : [Date.parse(value)])),
   );
 }
-
-export class StorageCleanup extends Context.Service<
-  StorageCleanup,
-  {
-    readonly start: () => Effect.Effect<void, never, Scope.Scope>;
-    readonly drain: Effect.Effect<void>;
-  }
->()("t3/storageCleanup") {}
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
@@ -422,7 +422,7 @@ export const make = Effect.gen(function* () {
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
-          : Effect.logWarning("storage cleanup failed", { cause: Cause.pretty(cause) }),
+          : Effect.logWarning("storage cleanup failed", { cause }),
       ),
     ),
   );
