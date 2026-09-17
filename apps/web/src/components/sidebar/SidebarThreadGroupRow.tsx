@@ -61,6 +61,15 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
   const tintClassName = color
     ? projectIconTintClassName(color)
     : "bg-sidebar-foreground/[0.05] ring-sidebar-foreground/10";
+  // The header's label replaces its children for assistive tech, so the
+  // collapsed-only status and pull request count are spelled out here.
+  const headerLabel = [
+    `${group.name} group, ${props.count} thread${props.count === 1 ? "" : "s"}`,
+    ...(!props.expanded && props.status ? [props.status.label] : []),
+    ...(!props.expanded && props.pullRequestCount > 0
+      ? [`${props.pullRequestCount} pull request${props.pullRequestCount === 1 ? "" : "s"}`]
+      : []),
+  ].join(", ");
   const handleClick = useCallback(
     (event: ReactMouseEvent) => {
       if ((event.target as HTMLElement).closest("input")) return;
@@ -92,9 +101,12 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
       if (isRenaming || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       if ((event.target as HTMLElement).closest("input")) return;
       event.preventDefault();
+      // The first click of this pair already folded the group; put it back so
+      // renaming never changes the fold.
+      onToggle(group);
       onStartRename(group);
     },
-    [group, isRenaming, onStartRename],
+    [group, isRenaming, onStartRename, onToggle],
   );
   const renameCommittedRef = useRef(false);
   useEffect(() => {
@@ -136,11 +148,7 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
         role={isRenaming ? undefined : "button"}
         tabIndex={isRenaming ? -1 : 0}
         aria-expanded={isRenaming ? undefined : props.expanded}
-        aria-label={
-          isRenaming
-            ? undefined
-            : `${group.name} group, ${props.count} thread${props.count === 1 ? "" : "s"}`
-        }
+        aria-label={isRenaming ? undefined : headerLabel}
         data-testid="sidebar-thread-group-row"
         className="group/sidebar-group mx-0.5 flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-none select-none hover:bg-sidebar-row-hover/70 focus-visible:ring-2 focus-visible:ring-ring"
         onClick={handleClick}
@@ -151,9 +159,11 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
         <span
           className={cn(
             "flex size-5 shrink-0 items-center justify-center rounded-[25%]",
+            // A monogram paints its own tile.
+            group.icon?.kind !== "monogram" &&
+              "bg-[color-mix(in_srgb,currentColor_14%,transparent)]",
             nameClassName,
           )}
-          style={{ backgroundColor: "color-mix(in srgb, currentColor 14%, transparent)" }}
         >
           {group.icon ? (
             <ProjectIconOverrideGlyph icon={group.icon} className="size-3.5" />
@@ -211,8 +221,8 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
         ) : null}
         {!props.expanded && props.pullRequestCount > 0 ? (
           <span
+            aria-hidden
             className="inline-flex shrink-0 items-center gap-0.5 text-[11px] tabular-nums text-sidebar-muted-foreground"
-            aria-label={`${props.pullRequestCount} pull request${props.pullRequestCount === 1 ? "" : "s"}`}
           >
             <PullRequestGlyph.pullRequest aria-hidden className="size-3" />
             {props.pullRequestCount}
@@ -221,9 +231,9 @@ export const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(props: 
         <span
           className={cn(
             "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1.5 text-[11px] font-medium tabular-nums",
+            "bg-[color-mix(in_srgb,currentColor_14%,transparent)]",
             nameClassName,
           )}
-          style={{ backgroundColor: "color-mix(in srgb, currentColor 14%, transparent)" }}
         >
           {props.count}
         </span>

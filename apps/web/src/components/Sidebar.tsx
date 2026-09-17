@@ -2953,9 +2953,11 @@ export default function Sidebar() {
                 });
               }),
             );
+        // Mirrors the member rows: dismissed stack links stay hidden, and a
+        // legacy or branch link counts once its badge can render.
         const pullRequestCount = block.rows.filter(
           (row) =>
-            row.thread.pullRequests.length > 0 ||
+            resolveThreadCurrentPullRequestLink(row.thread.pullRequests) !== null ||
             row.thread.linkedPullRequest != null ||
             row.thread.branchPullRequest != null,
         ).length;
