@@ -2643,7 +2643,7 @@ function ActivityGroupTimelineRow({
             key={entry.id}
             messages={messages}
             live={row.active && index === row.entries.length - 1}
-            showHeader={row.entries.some((entry) => entry.kind === "work")}
+            showHeader={work.length > 0}
           />,
         );
       }
@@ -2687,7 +2687,7 @@ function ThinkingTimelineRow() {
 /**
  * Thinking inside an expanded activity group: the trace is already one click
  * deep, so the text renders under its "Thought" header without another toggle.
- * A thought-only group already reads "Thought" on its row, so it skips the header.
+ * A group whose row already reads "Thought" (no visible tool) skips the header.
  */
 function ReasoningTraceBlock({
   messages,
