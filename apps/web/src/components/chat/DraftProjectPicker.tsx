@@ -211,8 +211,8 @@ export function DraftProjectPicker({
               aria-label={!isChat && hasResolvedProject ? "Change project" : "Add project"}
               className={
                 isChat
-                  ? "inline-flex min-w-0 items-baseline rounded-xl text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                  : "inline-flex min-w-0 max-w-64 items-baseline gap-2 rounded-r-xl px-2 py-1 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  ? "inline-flex h-10 min-w-0 items-center rounded-xl sm:h-11 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  : "inline-flex h-10 min-w-0 max-w-64 items-center gap-2 sm:h-11 rounded-r-xl px-2 py-1 text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               }
             />
           }
@@ -222,7 +222,9 @@ export function DraftProjectPicker({
               <MessageCircleIcon className="size-5" />
             </span>
           ) : null}
-          <span className={isChat ? "truncate ps-1 pe-3 py-1" : "truncate"}>
+          <span
+            className={`truncate [text-box:trim-both_cap_alphabetic]${isChat ? " ps-1 pe-3" : ""}`}
+          >
             {activeProjectDisplayName ?? "Add project"}
           </span>
         </TooltipTrigger>
@@ -289,7 +291,7 @@ export function DraftProjectPicker({
   const chip = (
     <span
       ref={chipRef}
-      className="inline-flex max-w-full items-baseline rounded-xl bg-muted/70 align-baseline"
+      className="inline-flex max-w-full items-center rounded-xl bg-muted/70 align-baseline"
     >
       {!isChat && chatEntry && activeProject ? (
         <Tooltip>
@@ -315,7 +317,7 @@ export function DraftProjectPicker({
               />
             }
           >
-            <span className="group-hover/project-icon:opacity-0 group-focus-visible/project-icon:opacity-0">
+            <span className="flex items-center justify-center group-hover/project-icon:opacity-0 group-focus-visible/project-icon:opacity-0">
               <ProjectFavicon project={activeProject} className="size-6" />
             </span>
             <XIcon className="absolute size-5 opacity-0 group-hover/project-icon:opacity-100 group-focus-visible/project-icon:opacity-100" />
