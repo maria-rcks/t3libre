@@ -1598,6 +1598,21 @@ describe("cached pull request detail", () => {
     ).toBeNull();
   });
 
+  it.each(["github", "gitlab"] as const)(
+    "retains portless %s snapshot identities for custom web ports",
+    (provider) => {
+      const storage = makeStorage();
+      const host = `${provider}.example.com`;
+      const hosted = { ...reference, host };
+      const cached = detail({
+        provider,
+        url: `https://${host}:8443/acme/web/${provider === "github" ? "pull" : "-/merge_requests"}/7`,
+      });
+      writePullRequestDetailSnapshot(storage, "env-1", hosted, cached);
+      expect(readPullRequestDetailSnapshot(storage, "env-1", hosted)?.title).toBe(cached.title);
+    },
+  );
+
   it("keeps a cached tab painted while the live read replaces the counts", () => {
     const cached = detail();
     const live = detail({ additions: 40, deletions: 9, title: "Cache the title" });
@@ -1621,11 +1636,11 @@ describe("cached pull request detail", () => {
   it("isolates stored and displayed details between hosts with the same repository and number", () => {
     const storage = makeStorage();
     const publicRef = { ...reference, host: "github.com" };
-    const enterpriseRef = { ...reference, host: "github.example.com" };
+    const enterpriseRef = { ...reference, host: "ghe.example.com" };
     const publicDetail = detail();
     const enterpriseDetail = detail({
       title: "Enterprise change",
-      url: "https://github.example.com/acme/web/pull/7",
+      url: "https://ghe.example.com/acme/web/pull/7",
     });
     writePullRequestDetailSnapshot(storage, "env-1", publicRef, publicDetail);
     expect(readPullRequestDetailSnapshot(storage, "env-1", enterpriseRef)).toBeNull();
@@ -1659,6 +1674,9 @@ describe("cached pull request detail", () => {
     storage.setItem("t3.pullRequests.detail:env-1:project-1:acme/web#7", "{not json");
     expect(readPullRequestDetailSnapshot(storage, "env-1", reference)).toBeNull();
     expect(readPullRequestDetailSnapshot(undefined, "env-1", reference)).toBeNull();
+    const hosted = { ...reference, host: "github.com" };
+    writePullRequestDetailSnapshot(storage, "env-1", hosted, detail({ url: "invalid url" }));
+    expect(readPullRequestDetailSnapshot(storage, "env-1", hosted)).toBeNull();
   });
 });
 

@@ -1,5 +1,4 @@
 import * as Schema from "effect/Schema";
-import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 
 import {
   PullRequestDetail,
@@ -1174,16 +1173,23 @@ export function resolveDisplayedPullRequestDetail(input: {
   readonly reference: PullRequestDetailSnapshotRef;
 }): PullRequestDetail | null {
   if (input.live !== null) return input.live;
-  const cachedLink = input.cached === null ? null : parseChangeRequestUrl(input.cached.url);
   if (
-    input.cached !== null &&
-    input.cached.projectId === input.reference.projectId &&
-    input.cached.repository.toLowerCase() === input.reference.repository.toLowerCase() &&
-    input.cached.number === input.reference.number &&
-    (input.reference.host === undefined ||
-      (cachedLink?.authority ?? cachedLink?.host) === input.reference.host.toLowerCase())
+    input.cached === null ||
+    input.cached.projectId !== input.reference.projectId ||
+    input.cached.repository.toLowerCase() !== input.reference.repository.toLowerCase() ||
+    input.cached.number !== input.reference.number
   ) {
-    return input.cached;
+    return null;
   }
-  return null;
+  if (input.reference.host === undefined) return input.cached;
+  try {
+    const url = new URL(input.cached.url);
+    const host = input.cached.provider === "forgejo" ? url.host : url.hostname;
+    return (url.protocol === "https:" || url.protocol === "http:") &&
+      host.toLowerCase() === input.reference.host.toLowerCase()
+      ? input.cached
+      : null;
+  } catch {
+    return null;
+  }
 }
