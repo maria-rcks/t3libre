@@ -370,7 +370,9 @@ describe("PullRequestSyncReactor", () => {
         yield* TestClock.setTime(Date.parse(NOW));
         let failSibling = true;
         const fixture = yield* makeHarness({
-          snapshot: makeSnapshot([makeThread("one", { pullRequests: [makeLink(7)] })]),
+          snapshot: makeSnapshot([
+            makeThread("one", { pullRequests: [makeLink(7, { state: "closed" })] }),
+          ]),
           summary: (input) =>
             Effect.succeed(makeSummary(input, { state: "merged", mergedAt: NOW })),
           stack: () =>

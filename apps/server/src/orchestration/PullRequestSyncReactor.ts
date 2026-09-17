@@ -281,9 +281,12 @@ export const make = Effect.gen(function* () {
         entries,
         (entry) =>
           syncEntry(entry, fields, fetchedStack).pipe(
-            Effect.catchCause(
-              logSkipped("pull request sync skipped", { threadId: entry.thread.id, key }),
-            ),
+            Effect.catchCause((cause) => {
+              if (!Cause.hasInterruptsOnly(cause)) retryStacks.add(key);
+              return logSkipped("pull request sync skipped", { threadId: entry.thread.id, key })(
+                cause,
+              );
+            }),
           ),
         { discard: true },
       );
