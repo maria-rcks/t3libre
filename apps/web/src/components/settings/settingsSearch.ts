@@ -94,7 +94,7 @@ export function keybindingSearchTargetId(command: KeybindingCommand) {
   return `keybinding-${command}` as const;
 }
 
-export function buildKeybindingSearchItems(keybindings: ResolvedKeybindingsConfig) {
+function buildKeybindingSearchItems(keybindings: ResolvedKeybindingsConfig) {
   const commands = new Map<KeybindingCommand, string[]>();
   for (const binding of keybindings) {
     const keys = commands.get(binding.command) ?? [];
