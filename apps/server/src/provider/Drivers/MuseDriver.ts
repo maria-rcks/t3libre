@@ -95,6 +95,7 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
         initialSnapshot: (settings) =>
           buildInitialMuseProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
         checkProvider: checkMuseProviderStatus(effectiveConfig, processEnv, cwd).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.map(stampIdentity),
         ),
       });

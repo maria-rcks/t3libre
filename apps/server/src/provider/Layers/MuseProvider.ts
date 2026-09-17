@@ -5,17 +5,24 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { ChildProcess } from "effect/unstable/process";
 
 import { readMuseUsageLimits } from "./museUsageLimits.ts";
 import {
   encodeMuseModelSelection,
   formatMuseModelLabel,
   MuseModelCatalog,
+  museReasoningCapabilities,
 } from "../muse/MuseModels.ts";
-import { buildServerProvider, providerModelsFromSettings } from "../providerSnapshot.ts";
+import {
+  buildServerProvider,
+  providerModelsFromSettings,
+  spawnAndCollect,
+} from "../providerSnapshot.ts";
 
 const PRESENTATION = {
   displayName: "Muse Code",
@@ -39,6 +46,24 @@ const DEFAULT_MODELS: ReadonlyArray<ServerProviderModel> = [
     capabilities: CAPABILITIES,
   },
 ];
+
+const discoverMuseReasoning = Effect.fn("discoverMuseReasoning")(
+  function* (settings: MuseSettings, environment: NodeJS.ProcessEnv, cwd: string) {
+    const command = settings.binaryPath || "muse";
+    const spawnCommand = yield* resolveSpawnCommand(command, ["--help"], { env: environment });
+    const output = yield* spawnAndCollect(
+      command,
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+        cwd,
+        env: environment,
+        shell: spawnCommand.shell,
+      }),
+    );
+    return output.code === 0 ? museReasoningCapabilities(output.stdout) : CAPABILITIES;
+  },
+  Effect.timeout("3 seconds"),
+  Effect.catch(() => Effect.succeed(CAPABILITIES)),
+);
 
 export const buildInitialMuseProviderSnapshot = Effect.fn("buildInitialMuseProviderSnapshot")(
   function* (settings: MuseSettings) {
@@ -89,6 +114,7 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
       Effect.flatMap(Schema.decodeUnknownEffect(MuseModelCatalog)),
     );
     const usageLimits = yield* readMuseUsageLimits(host.connection);
+    const reasoningCapabilities = yield* discoverMuseReasoning(settings, environment, cwd);
     const models: ServerProviderModel[] =
       catalog.source === "fakeCatalog"
         ? []
@@ -103,7 +129,7 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
               name: `${formatMuseModelLabel(model.displayLabel || model.modelId)}${duplicate ? ` (${model.providerId}${model.profileId === null ? "" : ` / ${model.profileId}`})` : ""}`,
               isDefault: model.isDefault,
               isCustom: false,
-              capabilities: CAPABILITIES,
+              capabilities: model.providerId === "meta" ? reasoningCapabilities : CAPABILITIES,
             };
           });
     return buildServerProvider({
@@ -111,9 +137,11 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
       enabled: true,
       checkedAt,
       models: providerModelsFromSettings(
-        models.length > 0 ? models : DEFAULT_MODELS,
+        models.length > 0
+          ? models
+          : DEFAULT_MODELS.map((model) => ({ ...model, capabilities: reasoningCapabilities })),
         settings.customModels,
-        CAPABILITIES,
+        reasoningCapabilities,
       ),
       probe: {
         installed: true,

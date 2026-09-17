@@ -1,3 +1,4 @@
+import { createModelCapabilities } from "@t3tools/shared/model";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -17,6 +18,34 @@ export const MuseModelCatalog = Schema.Struct({
   ),
 });
 export const MUSE_ROUTED_MODEL_PREFIX = "muse-route:";
+
+/** Muse's model catalog omits reasoning options; the installed CLI advertises them. */
+export function museReasoningCapabilities(help: string) {
+  const section = help.split(/--reasoning-effort\s+<[^>]+>/)[1]?.split(/\n\s*--/)[0];
+  const advertised = section?.match(/Meta reasoning effort:\s*([a-z]+(?:\s*\|\s*[a-z]+)+)/i)?.[1];
+  const values = [...new Set(advertised?.split("|").map((value) => value.trim()) ?? [])];
+  const defaultValue = section?.match(/\(default:\s*([a-z]+)\)/i)?.[1];
+  return createModelCapabilities({
+    optionDescriptors:
+      values.length === 0
+        ? []
+        : [
+            {
+              id: "reasoningEffort",
+              label: "Reasoning",
+              type: "select",
+              options: values.map((value) => ({
+                id: value,
+                label: value.charAt(0).toUpperCase() + value.slice(1),
+                ...(value === defaultValue ? { isDefault: true } : {}),
+              })),
+              ...(defaultValue && values.includes(defaultValue)
+                ? { currentValue: defaultValue }
+                : {}),
+            },
+          ],
+  });
+}
 
 /** Native Muse catalogs currently use model slugs as their display labels. */
 export function formatMuseModelLabel(label: string): string {
