@@ -284,7 +284,7 @@ export function WorktreeSetupCard({
       open={open}
       onOpenChange={setExpanded}
       render={<section aria-label="Worktree setup" />}
-      className="overflow-hidden rounded-lg"
+      className="overflow-hidden rounded-lg border border-secondary dark:border-input/20"
       data-worktree-setup-phase={snapshot.phase}
     >
       <CollapsibleTrigger
@@ -326,7 +326,7 @@ export function WorktreeSetupCard({
         ) : null}
       </CollapsibleTrigger>
       <CollapsiblePanel className="duration-[220ms]">
-        <div className="border-x border-border px-3 py-2">
+        <div className="px-3 py-2">
           {snapshot.stages.map((stage) => (
             <div key={stage.id}>
               <StageRow
