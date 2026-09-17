@@ -8022,13 +8022,38 @@ export default function ChatView(props: ChatViewProps) {
               }
               failedSelections.push(target.selection);
               const retainedThreadId = uncertainMultipleSubmissionsRef.current.get(retryKey);
-              toastManager.add(
+              const failureToastId = toastManager.add(
                 stackedThreadToast({
                   type: "error",
                   title: `Could not start ${target.selection.model}`,
                   description: error instanceof Error ? error.message : "Failed to send message.",
                   ...(retainedThreadId
                     ? {
+                        timeout: 0,
+                        data: {
+                          secondaryActionProps: {
+                            children: "Allow retry",
+                            onClick: () => {
+                              void readLocalApi()
+                                ?.dialogs.confirm(
+                                  "The previous request may already be running. Check its thread first. Allow another send that could create a duplicate thread?",
+                                )
+                                .then(
+                                  (confirmed) => {
+                                    if (
+                                      confirmed &&
+                                      uncertainMultipleSubmissionsRef.current.get(retryKey) ===
+                                        retainedThreadId
+                                    ) {
+                                      uncertainMultipleSubmissionsRef.current.delete(retryKey);
+                                      toastManager.close(failureToastId);
+                                    }
+                                  },
+                                  () => undefined,
+                                );
+                            },
+                          },
+                        },
                         actionProps: {
                           children: "Open thread",
                           onClick: () => {
