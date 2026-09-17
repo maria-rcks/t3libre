@@ -1765,11 +1765,14 @@ const makeWsRpcLayer = (
       // home) would inherit that repo's git status and checkpoints, so the
       // folder is only offered when the data dir is outside any work tree.
       // Detection failures fail closed and hide the folder, never the config.
-      const resolveChatWorkspaceRoot = gitWorkflow.isRepository(config.baseDir).pipe(
-        Effect.map((isRepository) =>
-          isRepository ? undefined : path.join(config.baseDir, "chats"),
+      // Probed once per connection: a negative VCS detection is not cached.
+      const resolveChatWorkspaceRoot = yield* Effect.cached(
+        gitWorkflow.isRepository(config.baseDir).pipe(
+          Effect.map((isRepository) =>
+            isRepository ? undefined : path.join(config.baseDir, "chats"),
+          ),
+          Effect.catchCause(() => Effect.succeed(undefined)),
         ),
-        Effect.catchCause(() => Effect.succeed(undefined)),
       );
 
       // Only clients that answer /usage-limits themselves see it in the catalogs;

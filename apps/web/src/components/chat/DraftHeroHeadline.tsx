@@ -60,7 +60,8 @@ export function DraftHeroHeadline({
   const applyStickyState = useComposerDraftStore((store) => store.applyStickyState);
   const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
-  const { canStartChatIn, chatWorkspaceRootFor, ensureChatProject } = useChatProject();
+  const { canStartChatIn, chatEnvironmentId, chatWorkspaceRootFor, ensureChatProject } =
+    useChatProject();
 
   const environmentLabelById = useMemo(
     () =>
@@ -144,14 +145,15 @@ export function DraftHeroHeadline({
             project.environmentId === activeProjectRef.environmentId &&
             project.id === activeProjectRef.projectId,
         ) ?? null);
-  const chatEnvironmentId = activeProjectRef?.environmentId ?? primaryEnvironmentId;
-  const chatWorkspaceRoot = chatWorkspaceRootFor(chatEnvironmentId);
+  const chatTargetEnvironmentId =
+    activeProjectRef?.environmentId ?? chatEnvironmentId(primaryEnvironmentId);
+  const chatWorkspaceRoot = chatWorkspaceRootFor(chatTargetEnvironmentId);
   const chatProject =
-    chatEnvironmentId !== null && chatWorkspaceRoot !== null
-      ? findChatProject({ projects, environmentId: chatEnvironmentId, chatWorkspaceRoot })
+    chatTargetEnvironmentId !== null && chatWorkspaceRoot !== null
+      ? findChatProject({ projects, environmentId: chatTargetEnvironmentId, chatWorkspaceRoot })
       : null;
   const isChatDraft = activeProject !== null && chatProject?.id === activeProject.id;
-  const canJustChat = canStartChatIn(chatEnvironmentId) && !isChatDraft;
+  const canJustChat = canStartChatIn(chatTargetEnvironmentId) && !isChatDraft;
 
   // The picker can change the draft's target while "Just chat" is still
   // creating its project; a stale continuation must not retarget it again.
@@ -190,11 +192,11 @@ export function DraftHeroHeadline({
     }
   };
   const startChat = async () => {
-    if (chatEnvironmentId === null || isChatDraft) {
+    if (chatTargetEnvironmentId === null || isChatDraft) {
       return;
     }
     const requested = { draftId, activeProjectKey };
-    const project = await ensureChatProject(chatEnvironmentId);
+    const project = await ensureChatProject(chatTargetEnvironmentId);
     const latest = latestTargetRef.current;
     if (
       !project ||
