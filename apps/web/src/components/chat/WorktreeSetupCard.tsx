@@ -272,6 +272,7 @@ export function WorktreeSetupCard({
   const showTail =
     setupStage !== undefined &&
     (setupStage.status === "running" ||
+      setupStage.status === "done" ||
       setupStage.status === "failed" ||
       setupStage.tail.length > 0);
 
