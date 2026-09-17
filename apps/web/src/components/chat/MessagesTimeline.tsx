@@ -2590,7 +2590,6 @@ function ActivityGroupTimelineRow({
     ),
     (entry) => entry,
   );
-  const thoughtCount = row.entries.filter((entry) => entry.kind === "message").length;
   const lastThoughtIndex = row.entries.findLastIndex((entry) => entry.kind === "message");
   const trailingWork = omitSupersededLifecycleMarkers(
     row.entries
@@ -2612,7 +2611,7 @@ function ActivityGroupTimelineRow({
       : "Thinking"
     : work.length > 0
       ? summarizeToolGroup(work)
-      : `Thought${thoughtCount > 1 ? ` (×${thoughtCount})` : ""}`;
+      : "Thought";
   // Only a thought-labelled row previews its trace; tool summaries keep the line.
   const previewsThought = row.active ? liveWork === undefined : work.length === 0;
   const latestThought = previewsThought

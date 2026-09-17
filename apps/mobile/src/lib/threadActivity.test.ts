@@ -2357,7 +2357,7 @@ describe("buildThreadFeed", () => {
     };
     // Reasoning alone stays visible, including a streaming flag left behind on settlement.
     expect(deriveThreadFeedPresentation(feed, settledTurn, new Set())).toMatchObject([
-      { type: "work-toggle", summary: "Thought (×4)", hiddenCount: 4 },
+      { type: "work-toggle", summary: "Thought", hiddenCount: 4 },
     ]);
     const completedMessages = messages.map((message) => ({ ...message, streaming: false }));
     const waiting = deriveThreadFeedPresentation(

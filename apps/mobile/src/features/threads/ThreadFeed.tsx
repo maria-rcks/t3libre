@@ -1490,7 +1490,7 @@ function renderFeedEntry(
           rowSizing={props.workRowSizing}
           iconSubtleColor={iconSubtleColor}
           expanded={props.expandedReasoningMessageIds.has(entry.id)}
-          label={`Thought${messages.length > 1 ? ` (×${messages.length})` : ""}`}
+          label="Thought"
           streaming={false}
           onToggle={() => props.onToggleReasoning(entry.id)}
         >

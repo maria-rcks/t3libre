@@ -1978,9 +1978,7 @@ function appendMixedActivityRun(
     groupId,
     hiddenCount: activities.length + thoughtCount,
     expanded,
-    summary: thinking
-      ? "Thinking"
-      : (toolSummary?.summary ?? `Thought${thoughtCount > 1 ? ` (×${thoughtCount})` : ""}`),
+    summary: thinking ? "Thinking" : (toolSummary?.summary ?? "Thought"),
     summaryKind: toolSummary?.summaryKind ?? "other",
     ...(thinking || !toolSummary
       ? { summaryToolIcon: "brain" as const }
