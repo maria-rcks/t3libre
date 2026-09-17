@@ -3,13 +3,7 @@ import { useComposerDraftStore } from "~/composerDraftStore";
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { findChatProject } from "@t3tools/client-runtime/operations/projects";
-import {
-  ChevronDownIcon,
-  FolderIcon,
-  FolderPlusIcon,
-  MessageCircleIcon,
-  XIcon,
-} from "lucide-react";
+import { FolderPlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
@@ -31,7 +25,6 @@ import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import { Button } from "../ui/button";
-import { Group } from "../ui/group";
 import {
   Menu,
   MenuItem,
@@ -142,7 +135,9 @@ export function DraftHeroHeadline({
         ) ?? null);
   const activeProjectKey = activeProjectGroup?.projectKey ?? "";
   const activeProjectDisplayName = activeProjectGroup?.displayName ?? activeProjectTitle;
+  const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
+  const shouldShowProjectMenu = canChooseProject;
   const activeProject =
     activeProjectRef === null
       ? null
@@ -158,8 +153,12 @@ export function DraftHeroHeadline({
     chatTargetEnvironmentId !== null && chatWorkspaceRoot !== null
       ? findChatProject({ projects, environmentId: chatTargetEnvironmentId, chatWorkspaceRoot })
       : null;
-  const isChatDraft = activeProject !== null && chatProject?.id === activeProject.id;
-  // The chip and its x already stand for chat, so the menu lists repositories only.
+  const isChatDraft =
+    activeProject !== null &&
+    chatProject !== null &&
+    chatProject.environmentId === activeProject.environmentId &&
+    chatProject.id === activeProject.id;
+  // The heading already says "chat", so the menu lists repositories only.
   const menuEntries = projectPickerEntries.filter(
     ({ targetProject }) =>
       chatProject === null ||
@@ -226,131 +225,129 @@ export function DraftHeroHeadline({
     selectProject(project, deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings));
   };
 
-  const projectMenu = (
-    <MenuPopup align="start" className="max-h-80 min-w-40! w-max max-w-64 overflow-y-auto">
-      <MenuRadioGroup
-        value={activeProjectKey}
-        onValueChange={(value) => {
-          const entry = projectEntryByKey.get(value as string);
-          if (!entry || value === activeProjectKey) {
-            return;
+  const projectSelector = shouldShowProjectMenu ? (
+    <Menu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <MenuTrigger
+              aria-label={
+                isChatDraft
+                  ? "Chatting. Choose a project"
+                  : hasResolvedProject
+                    ? "Change project"
+                    : "Choose a project"
+              }
+              data-draft-project-trigger=""
+              className="pointer-events-auto inline-block max-w-64 truncate border-foreground/60 border-b border-dotted align-baseline text-foreground transition-colors hover:border-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            />
           }
-          selectProject(entry.targetProject, entry.group.projectKey);
-        }}
-      >
-        {menuEntries.map(({ group }) => {
-          return (
-            <MenuRadioItem
-              key={group.projectKey}
-              value={group.projectKey}
-              closeOnClick
-              className="[&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
-            >
-              <ProjectFavicon project={group} className="size-4 shrink-0" />
-              <Tooltip>
-                <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
-                  {group.displayName}
-                </TooltipTrigger>
-                <TooltipPopup side="top" className="max-w-80">
-                  {group.displayName}
-                </TooltipPopup>
-              </Tooltip>
-              {showProjectEnvironments ? (
-                <ProjectEnvironmentBadge
-                  group={group}
-                  primaryEnvironmentId={primaryEnvironmentId}
-                  machineByEnvironmentId={environmentMachineById}
-                />
-              ) : null}
-            </MenuRadioItem>
-          );
-        })}
-      </MenuRadioGroup>
-      {menuEntries.length > 0 ? <MenuSeparator /> : null}
-      <MenuItem onClick={openAddProject}>
-        <FolderPlusIcon />
-        New project
-      </MenuItem>
-    </MenuPopup>
-  );
-
-  const focusProjectChip = () => {
-    document.querySelector<HTMLElement>("[data-draft-project-chip]")?.focus();
-  };
-
-  // Chat drafts show a plain "Chat" chip; project drafts show the project
-  // with an x that drops into chat in one click. Both open the same menu.
-  const projectChipLabel = isChatDraft
-    ? "Chat"
-    : activeProject === null
-      ? "Choose a project"
-      : (activeProjectDisplayName ?? "Choose a project");
-  const projectChip = !canChooseProject ? (
-    <Button variant="outline" size="sm" onClick={openAddProject}>
-      <FolderPlusIcon />
-      Add a project
-    </Button>
-  ) : (
-    <Group aria-label="Project">
-      <Menu>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <MenuTrigger
-                render={<Button variant="outline" size="sm" />}
-                aria-label={
-                  isChatDraft ? "Chatting without a project. Choose a project" : "Change project"
-                }
-                className="max-w-64 font-normal"
-                data-draft-project-chip=""
-              />
-            }
-          >
-            {isChatDraft ? (
-              <MessageCircleIcon />
-            ) : activeProject === null ? (
-              <FolderIcon />
-            ) : (
-              <ProjectFavicon
-                project={activeProjectGroup ?? activeProject}
-                className="size-4 shrink-0"
-              />
-            )}
-            <span className="truncate">{projectChipLabel}</span>
-            <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
-          </TooltipTrigger>
+        >
+          {isChatDraft ? "chat" : (activeProjectDisplayName ?? "Choose a project")}
+        </TooltipTrigger>
+        {activeProjectDisplayName && !isChatDraft ? (
           <TooltipPopup side="top" className="max-w-80">
-            {projectChipLabel}
+            {activeProjectDisplayName}
           </TooltipPopup>
-        </Tooltip>
-        {projectMenu}
-      </Menu>
-      {canJustChat ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="outline"
-                size="icon-sm"
-                aria-label="Just chat"
-                onClick={() => void startChat().then(focusProjectChip)}
-              />
+        ) : null}
+      </Tooltip>
+      <MenuPopup align="center" className="max-h-80 min-w-40! w-max max-w-64 overflow-y-auto">
+        <MenuRadioGroup
+          value={activeProjectKey}
+          onValueChange={(value) => {
+            const entry = projectEntryByKey.get(value as string);
+            if (!entry || value === activeProjectKey) {
+              return;
             }
-          >
-            <XIcon />
-          </TooltipTrigger>
-          <TooltipPopup side="top">Just chat, no project</TooltipPopup>
-        </Tooltip>
-      ) : null}
-    </Group>
+            selectProject(entry.targetProject, entry.group.projectKey);
+          }}
+        >
+          {menuEntries.map(({ group }) => {
+            return (
+              <MenuRadioItem
+                key={group.projectKey}
+                value={group.projectKey}
+                closeOnClick
+                className="[&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
+              >
+                <ProjectFavicon project={group} className="size-4 shrink-0" />
+                <Tooltip>
+                  <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
+                    {group.displayName}
+                  </TooltipTrigger>
+                  <TooltipPopup side="top" className="max-w-80">
+                    {group.displayName}
+                  </TooltipPopup>
+                </Tooltip>
+                {showProjectEnvironments ? (
+                  <ProjectEnvironmentBadge
+                    group={group}
+                    primaryEnvironmentId={primaryEnvironmentId}
+                    machineByEnvironmentId={environmentMachineById}
+                  />
+                ) : null}
+              </MenuRadioItem>
+            );
+          })}
+        </MenuRadioGroup>
+        {menuEntries.length > 0 ? <MenuSeparator /> : null}
+        <MenuItem onClick={openAddProject}>
+          <FolderPlusIcon />
+          New project
+        </MenuItem>
+      </MenuPopup>
+    </Menu>
+  ) : (
+    <button
+      type="button"
+      onClick={openAddProject}
+      className="pointer-events-auto inline cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {activeProjectTitle ?? "Add a project"}
+    </button>
   );
+
+  // One click out of the project and into chat, sitting right after the name
+  // it removes. Focus moves to the mode word once the x has gone.
+  const leaveProject = canJustChat ? (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost-muted"
+            size="icon-xs"
+            aria-label="Just chat"
+            className="pointer-events-auto ms-1 rounded-full align-middle opacity-60 hover:opacity-100"
+            onClick={() =>
+              void startChat().then(() =>
+                document.querySelector<HTMLElement>("[data-draft-project-trigger]")?.focus(),
+              )
+            }
+          />
+        }
+      >
+        <XIcon />
+      </TooltipTrigger>
+      <TooltipPopup side="top">Just chat, no project</TooltipPopup>
+    </Tooltip>
+  ) : null;
 
   return (
-    <div className="mx-auto w-full max-w-5xl">
-      <h1 className="text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-        What should we work on?
-      </h1>
-      <div className="mx-auto mt-6 flex h-8 w-full max-w-3xl items-center">{projectChip}</div>
-    </div>
+    <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
+      {hasResolvedProject ? (
+        isChatDraft ? (
+          <>What should we {projectSelector} about?</>
+        ) : (
+          <>
+            What should we build in {projectSelector}
+            {leaveProject}?
+          </>
+        )
+      ) : canChooseProject ? (
+        <>{projectSelector} to start</>
+      ) : (
+        <>Add a project to start</>
+      )}
+    </h1>
   );
 }

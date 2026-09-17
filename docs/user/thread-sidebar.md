@@ -13,11 +13,11 @@ an existing worktree, use **New thread in this worktree** from the branch toolba
 When you change a new thread's project, T3 Code stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
 
-To talk to an agent without picking a repository, click the **x** on the
-project chip above a new thread's composer, choose **Just chat** on the
-empty-state screen or in the add-project menu, or pick it from the project list
-on mobile. The chip then reads **Chat**; open it to move the thread to a
-project. Chat threads share one **Chats** project rooted in a plain `chats`
+To talk to an agent without picking a repository, click the **x** after the
+project name in a new thread's heading, choose **Just chat** on the empty-state
+screen or in the add-project menu, or pick it from the project list on mobile.
+The heading then reads "What should we chat about?"; click **chat** to move the
+thread to a project. Chat threads share one **Chats** project rooted in a plain `chats`
 folder inside the T3 data directory. Branch, worktree, and diff controls stay
 hidden while that folder is not a Git repository. Any files the agent writes
 land in that folder. The option is unavailable when the data directory itself
