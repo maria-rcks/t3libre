@@ -242,9 +242,15 @@ export function make(
         type: "session.exited",
         payload: { reason: message, recoverable: true },
       });
-      if (sessions.get(ctx.session.threadId) === ctx) sessions.delete(ctx.session.threadId);
       // MSP invokes this at its native callback boundary, outside an Effect fiber.
-      void Effect.runPromise(Scope.close(ctx.scope, Exit.void)).catch(() => undefined);
+      void Effect.runPromise(
+        lifecycle.withPermit(
+          Effect.gen(function* () {
+            yield* Scope.close(ctx.scope, Exit.void);
+            if (sessions.get(ctx.session.threadId) === ctx) sessions.delete(ctx.session.threadId);
+          }),
+        ),
+      ).catch(() => undefined);
     };
     const receive = (ctx: SessionContext, input: { method: string; params?: unknown }) => {
       if (ctx.stopped) return;
@@ -272,7 +278,6 @@ export function make(
         if (prior?.viewCursor === event.params.viewCursor) return;
         ctx.approvals.set(event.params.approvalId, event.params);
       }
-      if (event.method === "approval/resolved") ctx.approvals.delete(event.params.approvalId);
       if (event.method === "userInput/requested") {
         if (ctx.questions.get(event.params.userInputId)?.viewCursor === event.params.viewCursor)
           return;
@@ -296,6 +301,7 @@ export function make(
         nextEventId,
         itemById: (id) => ctx.items.get(id),
         streamedText: (id, field) => ctx.streamed.get(`${id}:${field}`) ?? "",
+        approvalSubjectById: (id) => ctx.approvals.get(id)?.subject,
         ...(ctx.contextUsedTokens !== undefined
           ? { contextUsedTokens: ctx.contextUsedTokens }
           : {}),
@@ -313,6 +319,7 @@ export function make(
         }
         emit(mapped);
       }
+      if (event.method === "approval/resolved") ctx.approvals.delete(event.params.approvalId);
       if (
         event.method === "item/started" ||
         event.method === "item/updated" ||
@@ -413,8 +420,8 @@ export function make(
             host.connection.onNotification((notification) => {
               try {
                 receive(ctx, notification);
-              } catch (cause) {
-                failSession(ctx, `Invalid Muse Code event: ${String(cause)}`);
+              } catch {
+                failSession(ctx, "Muse Code sent an invalid notification.");
               }
             });
             host.connection.onProtocolError(() =>
@@ -431,7 +438,7 @@ export function make(
               try {
                 receive(ctx, { method, params: request.params });
               } catch (cause) {
-                failSession(ctx, `Invalid Muse Code request: ${String(cause)}`);
+                failSession(ctx, "Muse Code sent an invalid server request.");
                 throw cause;
               }
               return {};
@@ -759,9 +766,21 @@ export function make(
           const allOptions = selected.every((value) =>
             question.options.some((option) => option.label === value),
           );
+          if (allOptions) {
+            const count = new Set(selected).size;
+            const min =
+              question.selection.mode === "single" ? 1 : (question.selection.minSelections ?? 0);
+            const max = question.selection.mode === "single" ? 1 : question.selection.maxSelections;
+            if (count !== selected.length || count < min || (max !== undefined && count > max))
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "respondToUserInput",
+                issue: `Select ${min}${max === undefined ? " or more" : ` to ${max}`} distinct options for this question.`,
+              });
+          }
           return {
             questionId: question.id,
-            ...(allOptions && selected.length
+            ...(allOptions && (selected.length || question.selection.mode === "multiple")
               ? question.selection.mode === "multiple"
                 ? { selectedLabels: selected }
                 : { selectedLabel: selected[0] }

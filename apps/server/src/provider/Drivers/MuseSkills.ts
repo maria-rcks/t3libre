@@ -154,14 +154,20 @@ export function museSkillInputParts(
   prompt: string,
   selectors: ReadonlySet<string>,
 ): Array<Record<string, unknown>> {
-  const mentions = museSkillMentions(prompt).filter((token) => selectors.has(token.value));
-  if (!mentions.length) return [{ type: "text", text: prompt }];
+  const mentions = museSkillMentions(prompt);
+  if (!mentions.some((token) => selectors.has(token.value)))
+    return [{ type: "text", text: prompt }];
   const parts: Array<Record<string, unknown>> = [];
   let cursor = 0;
   for (const [index, mention] of mentions.entries()) {
     const leading = prompt.slice(cursor, mention.start);
     if (leading.trim()) parts.push({ type: "text", text: leading });
     const end = mentions[index + 1]?.start ?? prompt.length;
+    if (!selectors.has(mention.value)) {
+      parts.push({ type: "text", text: prompt.slice(mention.start, end) });
+      cursor = end;
+      continue;
+    }
     const argumentsText = prompt.slice(mention.end, end).trim();
     parts.push({
       type: "skill",

@@ -132,6 +132,7 @@ export const MuseNotification = Schema.Union([
       itemId: Schema.String,
       turnId: Schema.String,
       decision: Schema.String,
+      amendment: Schema.optional(Schema.Struct({ durability: Schema.String })),
     }),
   }),
   Schema.Struct({
@@ -287,6 +288,7 @@ export interface MuseEventContext {
   readonly streamedText: (itemId: string, field: string) => string;
   readonly activeTurnId?: TurnId;
   readonly contextUsedTokens?: number;
+  readonly approvalSubjectById?: (id: string) => typeof approvalSubject.Type | undefined;
 }
 
 /** Maps validated MSP facts; the adapter owns lifecycle and replay deduplication. */
@@ -549,7 +551,8 @@ export function mapMuseNotification(
         },
       ];
     }
-    case "approval/resolved":
+    case "approval/resolved": {
+      const subject = context.approvalSubjectById?.(event.params.approvalId);
       return [
         {
           ...base,
@@ -557,11 +560,14 @@ export function mapMuseNotification(
           requestId: RuntimeRequestId.make(event.params.approvalId),
           turnId: TurnId.make(event.params.turnId),
           payload: {
-            requestType: "unknown",
-            decision: museApprovalDecision(event.params.decision) ?? event.params.decision,
+            requestType: subject ? requestType(subject) : "unknown",
+            decision:
+              museApprovalDecision(event.params.decision, event.params.amendment?.durability) ??
+              event.params.decision,
           },
         },
       ];
+    }
     case "userInput/requested":
       return [
         {
