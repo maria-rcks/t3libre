@@ -1,6 +1,7 @@
 import { resolvePlanFollowUpSubmission } from "../../proposedPlan";
 import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
 import {
+  ProjectId,
   PullRequestAction,
   type PullRequestCheck,
   type PullRequestComment,
@@ -40,6 +41,7 @@ import {
   readableFailure,
   readPullRequestDetailSnapshot,
   resolveDisplayedPullRequestDetail,
+  resolvePullRequestReferenceHost,
   resolvePullRequestPrimaryControl,
   allowsSinglePullRequestMerge,
   shouldRefreshPullRequestActivity,
@@ -1440,7 +1442,7 @@ describe("which actions need the host read again after they run", () => {
 });
 
 describe("cached pull request detail", () => {
-  const reference = { projectId: "project-1", repository: "acme/web", number: 7 };
+  const reference = { projectId: ProjectId.make("project-1"), repository: "acme/web", number: 7 };
   const detail = (overrides: Partial<PullRequestDetail> = {}): PullRequestDetail =>
     ({
       provider: "github",
@@ -1509,6 +1511,91 @@ describe("cached pull request detail", () => {
     expect(snapshot?.author?.login).toBe("octocat");
     expect(snapshot?.additions).toBe(12);
     expect(snapshot?.deletions).toBe(3);
+  });
+
+  it("reuses a host-qualified snapshot when reopening a thread link without a host", () => {
+    const storage = makeStorage();
+    writePullRequestDetailSnapshot(
+      storage,
+      "env-1",
+      { ...reference, host: "github.com" },
+      detail(),
+    );
+    const resolved = resolvePullRequestReferenceHost(reference, {
+      canonicalKey: "github.com/acme/web",
+      locator: {
+        source: "git-remote",
+        remoteName: "origin",
+        remoteUrl: "https://github.com/acme/web.git",
+      },
+      provider: "github",
+    });
+    expect(readPullRequestDetailSnapshot(storage, "env-1", resolved)?.title).toBe(
+      "Cache the title",
+    );
+    const explicit = { ...reference, host: "github.example.com" };
+    expect(
+      resolvePullRequestReferenceHost(explicit, {
+        canonicalKey: "github.com/acme/web",
+        locator: {
+          source: "git-remote",
+          remoteName: "origin",
+          remoteUrl: "https://github.com/acme/web.git",
+        },
+      }),
+    ).toBe(explicit);
+  });
+
+  it("leaves server-resolved Azure SSH references unchanged", () => {
+    expect(
+      resolvePullRequestReferenceHost(reference, {
+        canonicalKey: "ssh.dev.azure.com/v3/org/project/web",
+        locator: {
+          source: "git-remote",
+          remoteName: "origin",
+          remoteUrl: "git@ssh.dev.azure.com:v3/org/project/web",
+        },
+        provider: "azure-devops",
+      }),
+    ).toBe(reference);
+    expect(resolvePullRequestReferenceHost(reference, undefined)).toBe(reference);
+  });
+
+  it("hydrates legacy hostless snapshots only for the matching host", () => {
+    const storage = makeStorage();
+    writePullRequestDetailSnapshot(storage, "env-1", reference, detail());
+    expect(
+      readPullRequestDetailSnapshot(storage, "env-1", { ...reference, host: "github.com" })?.title,
+    ).toBe("Cache the title");
+    expect(
+      readPullRequestDetailSnapshot(storage, "env-1", {
+        ...reference,
+        host: "github.example.com",
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps Forgejo ports isolated when recovering legacy snapshots", () => {
+    const storage = makeStorage();
+    const cached = detail({
+      provider: "forgejo",
+      url: "https://forge.example:8443/acme/web/pulls/7",
+    });
+    writePullRequestDetailSnapshot(storage, "env-1", reference, cached);
+    const resolved = { ...reference, host: "forge.example:8443" };
+    expect(readPullRequestDetailSnapshot(storage, "env-1", resolved)?.title).toBe(cached.title);
+    expect(
+      readPullRequestDetailSnapshot(storage, "env-1", {
+        ...reference,
+        host: "forge.example:9443",
+      }),
+    ).toBeNull();
+    expect(
+      readPullRequestDetailSnapshot(storage, "env-1", {
+        ...reference,
+        host: "forge.example",
+      }),
+    ).toBeNull();
   });
 
   it("keeps a cached tab painted while the live read replaces the counts", () => {
