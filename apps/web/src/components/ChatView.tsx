@@ -85,9 +85,11 @@ import {
 } from "@t3tools/shared/terminalLabels";
 import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/unstable/reactivity";
 import {
   lazy,
   memo,
+  type SetStateAction,
   Suspense,
   useCallback,
   useEffect,
@@ -704,6 +706,14 @@ function pasteTextToFocusComposer(event: ClipboardEvent): string | null {
   const text = event.clipboardData.getData("text/plain");
   return text.length > 0 ? text : null;
 }
+
+const draftFanoutStateAtom = Atom.family((_routeKey: string) =>
+  Atom.make({
+    selections: null as ReadonlyArray<ModelSelection> | null,
+    sendInFlight: { current: false },
+    uncertainSubmissions: { current: new Map<string, ThreadId>() },
+  }).pipe(Atom.keepAlive),
+);
 
 function formatOutgoingPrompt(params: {
   provider: ProviderDriverKind;
@@ -1778,18 +1788,23 @@ export default function ChatView(props: ChatViewProps) {
   const [timelineOverflows, setTimelineOverflows] = useState(false);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
-  const sendInFlightRef = useRef(false);
+  const fanoutStateAtom = draftFanoutStateAtom(routeThreadKey);
+  const fanoutState = useAtomValue(fanoutStateAtom);
+  const sendInFlightRef = fanoutState.sendInFlight;
   const composerSendGenerationRef = useRef(0);
-  const [multipleModelSelections, setMultipleModelSelections] =
-    useState<ReadonlyArray<ModelSelection> | null>(null);
+  const multipleModelSelections = fanoutState.selections;
+  const setMultipleModelSelections = useCallback(
+    (selections: SetStateAction<ReadonlyArray<ModelSelection> | null>) => {
+      appAtomRegistry.update(fanoutStateAtom, (current) => ({
+        ...current,
+        selections: typeof selections === "function" ? selections(current.selections) : selections,
+      }));
+    },
+    [fanoutStateAtom],
+  );
   const multipleModelSelectionsRef = useRef(multipleModelSelections);
   multipleModelSelectionsRef.current = multipleModelSelections;
-  const [multipleModelScope, setMultipleModelScope] = useState(routeThreadKey);
-  if (multipleModelScope !== routeThreadKey) {
-    setMultipleModelScope(routeThreadKey);
-    setMultipleModelSelections(null);
-  }
-  const uncertainMultipleSubmissionsRef = useRef(new Map<string, ThreadId>());
+  const uncertainMultipleSubmissionsRef = fanoutState.uncertainSubmissions;
   const environmentUnavailableSendToastSlotRef = useRef(0);
   const feedbackUploadsInFlightRef = useRef(new Set<string>());
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
@@ -8057,7 +8072,7 @@ export default function ChatView(props: ChatViewProps) {
         );
       } finally {
         const restoreFailedDraft = () => {
-          composerRef.current?.setMultipleModelSelections(failedSelections);
+          setMultipleModelSelections(failedSelections);
           if (clearedDraft) {
             setComposerDraftPrompt(composerDraftTarget, messageTextForSend);
             addComposerDraftImages(
@@ -8071,12 +8086,17 @@ export default function ChatView(props: ChatViewProps) {
               composerPreviewAnnotationsSnapshot,
             );
             setComposerDraftReviewComments(composerDraftTarget, composerReviewCommentsSnapshot);
-            promptRef.current = messageTextForSend;
-            composerRef.current?.resetCursorState({
-              cursor: collapseExpandedComposerCursor(messageTextForSend, messageTextForSend.length),
-              prompt: messageTextForSend,
-              detectTrigger: true,
-            });
+            if (composerRef.current && currentRouteThreadKeyRef.current === routeThreadKey) {
+              promptRef.current = messageTextForSend;
+              composerRef.current.resetCursorState({
+                cursor: collapseExpandedComposerCursor(
+                  messageTextForSend,
+                  messageTextForSend.length,
+                ),
+                prompt: messageTextForSend,
+                detectTrigger: true,
+              });
+            }
           }
         };
         if (failedSelections.length > 0) {
@@ -8094,8 +8114,8 @@ export default function ChatView(props: ChatViewProps) {
                   children: "Restore prompt",
                   onClick: () => {
                     if (
-                      !composerRef.current ||
-                      currentRouteThreadKeyRef.current !== routeThreadKey ||
+                      !draftId ||
+                      !useComposerDraftStore.getState().getDraftSession(draftId) ||
                       sendInFlightRef.current ||
                       composerDraftHasUserContent(
                         useComposerDraftStore.getState().getComposerDraft(composerDraftTarget),
@@ -8108,6 +8128,7 @@ export default function ChatView(props: ChatViewProps) {
                       return;
                     }
                     restoreFailedDraft();
+                    void navigate({ to: "/draft/$draftId", params: { draftId } });
                     toastManager.close(recoveryToastId);
                   },
                 },
