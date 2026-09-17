@@ -242,7 +242,9 @@ export function make(
         type: "session.exited",
         payload: { reason: message, recoverable: true },
       });
-      void ctx.handshake.close().catch(() => undefined);
+      if (sessions.get(ctx.session.threadId) === ctx) sessions.delete(ctx.session.threadId);
+      // MSP invokes this at its native callback boundary, outside an Effect fiber.
+      void Effect.runPromise(Scope.close(ctx.scope, Exit.void)).catch(() => undefined);
     };
     const receive = (ctx: SessionContext, input: { method: string; params?: unknown }) => {
       if (ctx.stopped) return;
