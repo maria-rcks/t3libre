@@ -244,7 +244,25 @@ export function planScopedSettingsPatch(
           ? connectedEnvironments.map((environment) => ({
               environmentId: environment.environmentId,
               label: environment.label,
-              patch: serverPatch,
+              patch:
+                environment.serverConfig?.settings.worktreeCleanup != null &&
+                serverPatch.storageCleanup &&
+                Object.keys(serverPatch.storageCleanup).some((key) => key.startsWith("worktree"))
+                  ? {
+                      ...serverPatch,
+                      worktreeCleanup: {
+                        mode: "custom",
+                        rules: {
+                          ...resolveWorktreeCleanup(environment.serverConfig.settings, null),
+                          ...Object.fromEntries(
+                            Object.entries(serverPatch.storageCleanup).filter(([key]) =>
+                              key.startsWith("worktree"),
+                            ),
+                          ),
+                        },
+                      },
+                    }
+                  : serverPatch,
             }))
           : [];
   const hasClientWrite = Object.keys(clientPatch).length > 0;

@@ -13,6 +13,7 @@ import {
 } from "../ui/number-field";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
+import type { ScopedSettingsTarget } from "./scopedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
   useClearScopedSettings,
@@ -82,17 +83,19 @@ function RetentionControl({
 }
 
 export function StorageSettingsPanel() {
-  const { scope, connectedEnvironments, targets } = useSettingsScope();
+  const { scope, connectedEnvironments, targets, target } = useSettingsScope();
   const scopedSettings = useScopedSettings();
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const settings = {
     ...scopedSettings.storageCleanup,
     ...resolveWorktreeCleanup(scopedSettings, null),
   };
-  const mode = scopedSettings.worktreeCleanup?.mode ?? "inherit";
-  const mixedModes = targets.some(
-    (target) => (target.settings.worktreeCleanup?.mode ?? "inherit") !== mode,
-  );
+  const projectMode = (entry: ScopedSettingsTarget | null) =>
+    entry?.sources.worktreeCleanup === "project"
+      ? (entry.settings.worktreeCleanup?.mode ?? "inherit")
+      : "inherit";
+  const mode = projectMode(target);
+  const mixedModes = targets.some((entry) => projectMode(entry) !== mode);
   const updateSettings = useUpdateScopedSettings();
   const clearSettings = useClearScopedSettings();
   const ruleStatus = (key: keyof StorageCleanupSettings) =>

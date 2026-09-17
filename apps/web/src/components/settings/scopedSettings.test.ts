@@ -5,6 +5,8 @@ import {
   type ServerSettings,
 } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
+import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import {
@@ -146,6 +148,48 @@ describe("scoped settings targets", () => {
 });
 
 describe("scoped settings writes", () => {
+  it("edits the effective machine policy without changing other machines' rules", () => {
+    const custom = environment("Laptop", {
+      settings: {
+        worktreeCleanup: {
+          mode: "custom",
+          rules: {
+            worktreeAfterDays: 12,
+            worktreeOnDelete: true,
+            worktreeOnMerge: true,
+            worktreeUnchanged: false,
+          },
+        },
+      },
+    });
+    const disabled = environment("Server", {
+      settings: { worktreeCleanup: { mode: "off" } },
+    });
+    const targets = [custom, disabled];
+    const plan = planScopedSettingsPatch(all, targets, {
+      storageCleanup: { worktreeOnDelete: false },
+    });
+    const policies = plan.serverWrites.map((write, index) =>
+      resolveWorktreeCleanup(
+        applyServerSettingsPatch(targets[index]!.serverConfig!.settings, write.patch),
+        null,
+      ),
+    );
+    expect(policies).toEqual([
+      {
+        worktreeAfterDays: 12,
+        worktreeOnDelete: false,
+        worktreeOnMerge: true,
+        worktreeUnchanged: false,
+      },
+      {
+        worktreeAfterDays: null,
+        worktreeOnDelete: false,
+        worktreeOnMerge: false,
+        worktreeUnchanged: false,
+      },
+    ]);
+  });
   it("isolates a formerly shared server preference to the named environment", async () => {
     const persistServer = vi.fn().mockResolvedValue({ _tag: "Success" });
     const persistClient = vi.fn();
