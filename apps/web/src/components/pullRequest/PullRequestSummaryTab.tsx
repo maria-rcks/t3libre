@@ -396,6 +396,9 @@ export function PullRequestSummaryTab({
   // Keyed by the pull request, so opening another one starts at the end of its conversation
   // rather than wherever the last one had been read back to.
   const [shown, setShown] = useState({ url: detail.url, count: COMMENT_PAGE });
+  const [openedBotGroup, setOpenedBotGroup] = useState<string | null>(null);
+  const [shownBots, setShownBots] = useState({ url: detail.url, count: COMMENT_PAGE });
+  const shownBotComments = shownBots.url === detail.url ? shownBots.count : COMMENT_PAGE;
   const shownComments = shown.url === detail.url ? shown.count : COMMENT_PAGE;
   // A comment that already lives on a review thread is that thread: the thread carries the line
   // and side the bare comment has lost, and a resolved one is finished work nobody should be
@@ -408,16 +411,20 @@ export function PullRequestSummaryTab({
 
   const activeComments: PullRequestComment[] = [];
   const finishedComments: PullRequestComment[] = [];
+  const botComments: PullRequestComment[] = [];
   for (const comment of detail.comments) {
     const finished =
       threadByCommentId.get(comment.id)?.isResolved ||
       pullRequestReviewOutcome(comment.reviewState) === "dismissed";
-    (finished ? finishedComments : activeComments).push(comment);
+    const bot = comment.author?.isBot === true || comment.author?.login.endsWith("[bot]");
+    (finished ? finishedComments : bot ? botComments : activeComments).push(comment);
   }
   // Windowed by recency regardless of display order: expanding always reaches further back in
   // time, whether the newest comment currently reads first or last.
   const recentComments = activeComments.slice(Math.max(0, activeComments.length - shownComments));
   const hiddenCommentCount = activeComments.length - recentComments.length;
+  const recentBotComments = botComments.slice(Math.max(0, botComments.length - shownBotComments));
+  const hiddenBotCommentCount = botComments.length - recentBotComments.length;
   const [commentOrder, setCommentOrder] = useState<"newest" | "oldest">("newest");
   const visibleComments = orderPullRequestComments(recentComments, commentOrder);
   const showOldestCommentsButton =
@@ -535,6 +542,78 @@ export function PullRequestSummaryTab({
       setCommentScope(null);
       onRefresh();
     },
+  };
+
+  const renderComment = (comment: PullRequestComment) => {
+    const thread = threadByCommentId.get(comment.id);
+    const body = visibleBody(comment.body);
+    const outcome = pullRequestReviewOutcome(comment.reviewState);
+    // An approval is a verdict, not a finding: there is nothing in it to fix.
+    const finding: PullRequestFinding | null =
+      (comment.kind !== "review" && comment.kind !== "review-comment") || outcome === "approved"
+        ? null
+        : thread === undefined
+          ? // Nor is a remark with nothing in it: offering to hand an empty review
+            // to a thread promises work it does not describe.
+            body === null
+            ? null
+            : { kind: "comment", comment }
+          : { kind: "thread", thread };
+    const reactionBar = (
+      <PullRequestReactionBar
+        reactions={comment.reactions ?? []}
+        canReact={detail.capabilities.reactions === true}
+        subjectId={comment.id}
+        environmentId={environmentId}
+        reference={reference}
+        onRefresh={onRefresh}
+        className="ml-auto justify-end"
+      />
+    );
+    return (
+      <article
+        key={`${detail.url}:${comment.id}`}
+        // Offscreen comments skip style, layout and paint. Bot comments carry pages of
+        // highlighted code, and the conversation is below the description either way.
+        className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:160px] [content-visibility:auto]"
+      >
+        <div className="flex flex-wrap items-start gap-2 rounded-t-lg bg-muted/25 px-3 py-2.5">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <CommentIdentity comment={comment} detail={detail} />
+            {outcome ? (
+              <PullRequestReviewOutcomeBadge outcome={outcome} />
+            ) : comment.reviewState ? (
+              <span>{reviewStateLabel(comment.reviewState)}</span>
+            ) : null}
+          </div>
+          {/* Review remarks only. A plain conversation comment is talk, not a finding,
+                      and offering to fix one would promise more than it says. */}
+          {onFixFinding && finding ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="-mt-1 shrink-0"
+              disabled={pendingFinding !== null && pendingFinding !== undefined}
+              onClick={() => onFixFinding(finding)}
+            >
+              <HammerIcon className="size-3" />
+              {pendingFinding === pullRequestFindingKey(finding) ? "Preparing..." : fixFindingLabel}
+            </Button>
+          ) : null}
+          {reactionBar}
+        </div>
+        <div className="px-3">
+          <CommentLocation comment={comment} thread={thread} />
+        </div>
+        {/* A verdict usually carries no words, and an empty markdown block reads as
+                          a card somebody forgot to fill in — the badge above already said it.
+                          Kept where this reader may rewrite the remark: the pencil lives in here,
+                          and hiding the block would take away the only way back to it. */}
+        {body === null && !commentEditing.canEdit(comment) ? null : (
+          <CommentBody className="px-3 py-3" comment={comment} editing={commentEditing} />
+        )}
+      </article>
+    );
   };
 
   return (
@@ -796,84 +875,7 @@ export function PullRequestSummaryTab({
             ) : (
               <div className="space-y-3">
                 {commentOrder === "oldest" ? showOldestCommentsButton : null}
-                {visibleComments.map((comment) => {
-                  const thread = threadByCommentId.get(comment.id);
-                  const body = visibleBody(comment.body);
-                  const outcome = pullRequestReviewOutcome(comment.reviewState);
-                  // An approval is a verdict, not a finding: there is nothing in it to fix.
-                  const finding: PullRequestFinding | null =
-                    (comment.kind !== "review" && comment.kind !== "review-comment") ||
-                    outcome === "approved"
-                      ? null
-                      : thread === undefined
-                        ? // Nor is a remark with nothing in it: offering to hand an empty review
-                          // to a thread promises work it does not describe.
-                          body === null
-                          ? null
-                          : { kind: "comment", comment }
-                        : { kind: "thread", thread };
-                  const reactionBar = (
-                    <PullRequestReactionBar
-                      reactions={comment.reactions ?? []}
-                      canReact={detail.capabilities.reactions === true}
-                      subjectId={comment.id}
-                      environmentId={environmentId}
-                      reference={reference}
-                      onRefresh={onRefresh}
-                      className="ml-auto justify-end"
-                    />
-                  );
-                  return (
-                    <article
-                      key={`${detail.url}:${comment.id}`}
-                      // Offscreen comments skip style, layout and paint. Bot comments carry pages of
-                      // highlighted code, and the conversation is below the description either way.
-                      className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:160px] [content-visibility:auto]"
-                    >
-                      <div className="flex flex-wrap items-start gap-2 rounded-t-lg bg-muted/25 px-3 py-2.5">
-                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <CommentIdentity comment={comment} detail={detail} />
-                          {outcome ? (
-                            <PullRequestReviewOutcomeBadge outcome={outcome} />
-                          ) : comment.reviewState ? (
-                            <span>{reviewStateLabel(comment.reviewState)}</span>
-                          ) : null}
-                        </div>
-                        {/* Review remarks only. A plain conversation comment is talk, not a finding,
-                      and offering to fix one would promise more than it says. */}
-                        {onFixFinding && finding ? (
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            className="-mt-1 shrink-0"
-                            disabled={pendingFinding !== null && pendingFinding !== undefined}
-                            onClick={() => onFixFinding(finding)}
-                          >
-                            <HammerIcon className="size-3" />
-                            {pendingFinding === pullRequestFindingKey(finding)
-                              ? "Preparing..."
-                              : fixFindingLabel}
-                          </Button>
-                        ) : null}
-                        {reactionBar}
-                      </div>
-                      <div className="px-3">
-                        <CommentLocation comment={comment} thread={thread} />
-                      </div>
-                      {/* A verdict usually carries no words, and an empty markdown block reads as
-                          a card somebody forgot to fill in — the badge above already said it.
-                          Kept where this reader may rewrite the remark: the pencil lives in here,
-                          and hiding the block would take away the only way back to it. */}
-                      {body === null && !commentEditing.canEdit(comment) ? null : (
-                        <CommentBody
-                          className="px-3 py-3"
-                          comment={comment}
-                          editing={commentEditing}
-                        />
-                      )}
-                    </article>
-                  );
-                })}
+                {visibleComments.map(renderComment)}
                 {commentOrder === "newest" ? showOldestCommentsButton : null}
                 {shownComments > COMMENT_PAGE ? (
                   <Button
@@ -884,6 +886,61 @@ export function PullRequestSummaryTab({
                   >
                     Show only {COMMENT_PAGE} recent comments
                   </Button>
+                ) : null}
+                {botComments.length > 0 ? (
+                  <Collapsible
+                    key={`bots:${detail.url}`}
+                    className="border-t border-border/60 pt-1"
+                    onOpenChange={(open) => {
+                      if (open) setOpenedBotGroup(detail.url);
+                    }}
+                  >
+                    <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground">
+                      <ChevronRightIcon
+                        aria-hidden
+                        className="size-3.5 shrink-0 transition-transform group-data-panel-open:rotate-90"
+                      />
+                      <span>
+                        {botComments.length} bot comment{botComments.length === 1 ? "" : "s"}
+                      </span>
+                    </CollapsibleTrigger>
+                    <CollapsiblePanel keepMounted>
+                      <div className="space-y-3 pt-2">
+                        {openedBotGroup === detail.url
+                          ? orderPullRequestComments(recentBotComments, commentOrder).map(
+                              renderComment,
+                            )
+                          : null}
+                        {hiddenBotCommentCount > 0 ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full"
+                            onClick={() =>
+                              setShownBots({
+                                url: detail.url,
+                                count: shownBotComments + COMMENT_PAGE,
+                              })
+                            }
+                          >
+                            Show {Math.min(hiddenBotCommentCount, COMMENT_PAGE)} older bot comment
+                            {hiddenBotCommentCount === 1 ? "" : "s"} ({hiddenBotCommentCount}{" "}
+                            hidden)
+                          </Button>
+                        ) : null}
+                        {shownBotComments > COMMENT_PAGE ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="w-full"
+                            onClick={() => setShownBots({ url: detail.url, count: COMMENT_PAGE })}
+                          >
+                            Show only {COMMENT_PAGE} recent bot comments
+                          </Button>
+                        ) : null}
+                      </div>
+                    </CollapsiblePanel>
+                  </Collapsible>
                 ) : null}
                 {finishedComments.length > 0 ? (
                   <Collapsible key={detail.url} className="border-t border-border/60 pt-1">
