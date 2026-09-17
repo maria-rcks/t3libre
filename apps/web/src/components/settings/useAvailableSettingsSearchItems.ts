@@ -6,6 +6,10 @@ import { isElectron } from "~/env";
 import { isLocalEnvironmentDisabled } from "~/localEnvironment";
 import { desktopWslStateAtom } from "~/state/desktopWslState";
 import { useEnvironments } from "~/state/environments";
+import { mergeWithDefaultKeybindings } from "@t3tools/shared/keybindings";
+import { useLocation } from "@tanstack/react-router";
+import { useResolvedSettingsScope } from "./SettingsScopeContext";
+import { validateSettingsScopeSearch } from "./settingsScope";
 import { useEnvironmentQuery } from "~/state/query";
 import { usePrimarySessionState } from "~/environments/primary";
 import { isWslSettingsRowVisible } from "./ConnectionsSettings.logic";
@@ -17,6 +21,10 @@ import {
 
 export function useAvailableSettingsSearchItems() {
   const { environments } = useEnvironments();
+  const currentSearch = useLocation({ select: (location) => location.search });
+  const scopeSearch = useMemo(() => validateSettingsScopeSearch(currentSearch), [currentSearch]);
+  const { environment } = useResolvedSettingsScope(scopeSearch);
+  const serverKeybindings = environment?.serverConfig?.keybindings;
   const primarySessionState = usePrimarySessionState();
   const localEnvironmentDisabled = isLocalEnvironmentDisabled();
   const desktopWsl = useEnvironmentQuery(
@@ -31,25 +39,30 @@ export function useAvailableSettingsSearchItems() {
 
   return useMemo(
     () =>
-      filterAvailableSettingsSearchItems({
-        localEnvironmentDisabled,
-        hasCloudPublicConfig: hasCloudPublicConfig(),
-        hasEnvironment: environments.some((environment) => environment.serverConfig !== null),
-        hasProviderSettingsEnvironment: environments.some((environment) =>
-          isProviderSettingsEnvironmentAvailable({
-            connectionPhase: environment.connection.phase,
-            hasServerConfig: environment.serverConfig !== null,
+      filterAvailableSettingsSearchItems(
+        {
+          localEnvironmentDisabled,
+          hasCloudPublicConfig: hasCloudPublicConfig(),
+          hasEnvironment: environments.some((environment) => environment.serverConfig !== null),
+          hasProviderSettingsEnvironment: environments.some((environment) =>
+            isProviderSettingsEnvironmentAvailable({
+              connectionPhase: environment.connection.phase,
+              hasServerConfig: environment.serverConfig !== null,
+            }),
+          ),
+          canManageLocalBackend,
+          isWslSettingsRowVisible: isWslSettingsRowVisible({
+            state: desktopWsl.data,
+            error: desktopWsl.error,
           }),
-        ),
-        canManageLocalBackend,
-        isWslSettingsRowVisible: isWslSettingsRowVisible({
-          state: desktopWsl.data,
-          error: desktopWsl.error,
-        }),
-        hasThreadAutoSettlement:
-          getThreadAutoSettlementSearchAvailability(environments).eligibleEnvironmentIds.length > 0,
-      }),
+          hasThreadAutoSettlement:
+            getThreadAutoSettlementSearchAvailability(environments).eligibleEnvironmentIds.length >
+            0,
+        },
+        mergeWithDefaultKeybindings(serverKeybindings ?? []),
+      ),
     [
+      serverKeybindings,
       canManageLocalBackend,
       desktopWsl.data,
       desktopWsl.error,

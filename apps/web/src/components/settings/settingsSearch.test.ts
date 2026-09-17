@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId } from "@t3tools/contracts";
+import {
+  compileResolvedKeybindingsConfig,
+  mergeWithDefaultKeybindings,
+} from "@t3tools/shared/keybindings";
 
 import {
   filterAvailableSettingsSearchItems,
@@ -45,6 +49,47 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
+  it.each(["settle", "thread.settle", "settle shortcut", "mod+shift+s"])(
+    "finds the settle keybinding by %s",
+    (query) => {
+      expect(searchSettings(query)).toContainEqual(
+        expect.objectContaining({
+          id: "keybinding-thread.settle",
+          title: "Thread: Settle",
+          to: "/settings/keybindings",
+        }),
+      );
+    },
+  );
+
+  it("searches current shortcuts and script commands without duplicate command results", () => {
+    const items = filterAvailableSettingsSearchItems(
+      {
+        hasCloudPublicConfig: false,
+        hasEnvironment: true,
+        hasProviderSettingsEnvironment: true,
+        canManageLocalBackend: false,
+        isWslSettingsRowVisible: false,
+        hasThreadAutoSettlement: true,
+      },
+      mergeWithDefaultKeybindings(
+        compileResolvedKeybindingsConfig([
+          { command: "thread.settle", key: "alt+s" },
+          { command: "thread.settle", key: "alt+t" },
+          { command: "script.dev.run", key: "alt+d" },
+        ]),
+      ),
+    );
+    expect(
+      searchSettings("settle", items).filter((item) => item.to === "/settings/keybindings"),
+    ).toHaveLength(1);
+    expect(searchSettings("alt+s", items).map((item) => item.id)).toContain(
+      "keybinding-thread.settle",
+    );
+    expect(searchSettings("mod+shift+s", items)).toEqual([]);
+    expect(searchSettings("run script dev", items)[0]?.id).toBe("keybinding-script.dev.run");
+  });
+
   it.each(["send shortcut", "multiline", "new line"])("finds Send shortcut for %s", (query) => {
     expect(searchSettings(query).map((item) => item.id)).toContain("send-shortcut");
   });

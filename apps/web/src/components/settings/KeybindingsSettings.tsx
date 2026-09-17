@@ -65,7 +65,8 @@ import {
   whenNodeRemoveLabel,
 } from "./KeybindingsSettings.logic";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { keybindingSearchTargetId, searchableSetting } from "./settingsSearch";
+import { useLocation } from "@tanstack/react-router";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useAtomCommand } from "../../state/use-atom-command";
 
@@ -823,7 +824,11 @@ interface KeybindingRowActions {
   onRemove: (row: KeybindingRow) => void;
 }
 
-type KeybindingRowProps = KeybindingRowActions & { row: KeybindingRow; isSaving: boolean };
+type KeybindingRowProps = KeybindingRowActions & {
+  row: KeybindingRow;
+  isSaving: boolean;
+  searchTargetId: string | undefined;
+};
 
 /** Shortcut pill that turns into a capture input when clicked, plus Save once the draft changes. */
 function KeybindingKeyControl({
@@ -1039,6 +1044,7 @@ function KeybindingSettingsRow(props: KeybindingRowProps) {
 
   return (
     <SettingsRow
+      id={props.searchTargetId}
       className="group/row rounded-none"
       title={<KeybindingRowTitle row={row} />}
       description={<KeybindingRowWhen row={row} editor={editor} variables={variables} />}
@@ -1299,10 +1305,15 @@ function KeybindingsList(props: KeybindingsListProps) {
   return (
     <div>
       {isAddingBinding ? <NewKeybindingSettingsRow {...newProps} /> : null}
-      {rows.map((row) => (
+      {rows.map((row, index) => (
         <KeybindingSettingsRow
           key={row.id}
           row={row}
+          searchTargetId={
+            rows[index - 1]?.command !== row.command
+              ? keybindingSearchTargetId(row.command)
+              : undefined
+          }
           isSaving={savingCommand === row.command}
           {...rowActions}
         />
@@ -1351,8 +1362,17 @@ export function KeybindingsSettingsPanel() {
     primaryEnvironment?.environmentId ?? null,
     availableEditors,
   );
+  const hash = useLocation({ select: (location) => location.hash });
   const [query, setQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [previousHash, setPreviousHash] = useState(hash);
+  if (hash !== previousHash) {
+    setPreviousHash(hash);
+    if (hash.replace(/^#/, "").startsWith("keybinding-")) {
+      setQuery("");
+      setIsSearchOpen(false);
+    }
+  }
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [savingCommand, setSavingCommand] = useState<KeybindingCommand | null>(null);
   const [isAddingBinding, setIsAddingBinding] = useState(false);

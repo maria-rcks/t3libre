@@ -1,6 +1,12 @@
 import { isElectron } from "~/env";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  KeybindingCommand,
+  ResolvedKeybindingsConfig,
+} from "@t3tools/contracts";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import { commandLabel, shortcutToKeybindingInput } from "./KeybindingsSettings.logic";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import {
   validateSettingsScopeSearch,
@@ -84,11 +90,25 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/archived": "Archive",
 };
 
-/**
- * Searchable settings and stable destinations, in result order. Rows with a
- * dedicated anchor render their id and title via `searchableSetting`; items
- * that may not be mounted point at their nearest stable section instead.
- */
+export function keybindingSearchTargetId(command: KeybindingCommand) {
+  return `keybinding-${command}` as const;
+}
+
+export function buildKeybindingSearchItems(keybindings: ResolvedKeybindingsConfig) {
+  const commands = new Map<KeybindingCommand, string[]>();
+  for (const binding of keybindings) {
+    const keys = commands.get(binding.command) ?? [];
+    keys.push(shortcutToKeybindingInput(binding.shortcut));
+    commands.set(binding.command, keys);
+  }
+  return [...commands].map(([command, keys]) => ({
+    id: keybindingSearchTargetId(command),
+    title: commandLabel(command),
+    to: "/settings/keybindings" as const,
+    searchTerms: [command, "keyboard shortcuts hotkeys", ...keys],
+  }));
+}
+
 export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "project-defaults",
@@ -423,6 +443,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/keybindings",
     searchTerms: ["keyboard shortcuts hotkeys commands bindings json"],
   },
+  ...buildKeybindingSearchItems(DEFAULT_RESOLVED_KEYBINDINGS),
   {
     id: "snap-shot-enabled",
     title: "SnapShots",
@@ -856,8 +877,14 @@ export function searchableSetting(id: SettingsSearchItemId): {
 
 export function filterAvailableSettingsSearchItems(
   availability: SettingsSearchAvailability,
+  keybindings?: ResolvedKeybindingsConfig,
 ): ReadonlyArray<SettingsSearchItem> {
-  const items: ReadonlyArray<SettingsSearchItem> = SETTINGS_SEARCH_ITEMS;
+  const items: ReadonlyArray<SettingsSearchItem> = keybindings
+    ? [
+        ...SETTINGS_SEARCH_ITEMS.filter((item) => !item.id.startsWith("keybinding-")),
+        ...buildKeybindingSearchItems(keybindings),
+      ]
+    : SETTINGS_SEARCH_ITEMS;
   return items.filter(
     (item) =>
       (!item.cloudOnly || availability.hasCloudPublicConfig) &&
