@@ -1,3 +1,4 @@
+import { SubagentStatusDot } from "./SubagentStatusDot";
 import { useAtomValue } from "@effect/atom-react";
 import { serverEnvironment } from "../../state/server";
 import { ProviderIcon } from "../../components/ProviderIcon";
@@ -587,17 +588,17 @@ function ThreadSubagentGroup(props: ThreadWorkLogProps) {
                     }
                     size={14}
                   />
-                  <View
-                    className={cn(
-                      "absolute bottom-0.5 right-0.5 h-1.5 w-1.5 rounded-full",
+                  <SubagentStatusDot
+                    placement="provider"
+                    tone={
                       item.status === "failed"
-                        ? "bg-adaptive-rose-600-400"
+                        ? "failed"
                         : item.status === "completed"
-                          ? "bg-adaptive-emerald-600-400"
+                          ? "completed"
                           : item.status === "cancelled" || item.status === "interrupted"
-                            ? "bg-foreground-muted"
-                            : "bg-adaptive-sky-600-400",
-                    )}
+                            ? "stopped"
+                            : "working"
+                    }
                   />
                 </WorkLogIconSlot>
                 <WorkLogLabel>{title}</WorkLogLabel>
@@ -1117,13 +1118,6 @@ export function ThreadWorkGroupToggle(props: {
   );
 }
 
-const AGENT_SPAWN_TONE_DOT_CLASS = {
-  working: "bg-adaptive-sky-600-400",
-  completed: "bg-adaptive-emerald-600-400",
-  failed: "bg-adaptive-rose-600-400",
-  stopped: "bg-foreground-muted",
-} as const satisfies Record<AgentSpawnSummary["tone"], string>;
-
 /**
  * A batch of spawned subagents. The status line updates in place as members
  * report progress; expanding lists each member. Text nodes carry keys tied to
@@ -1181,12 +1175,7 @@ export const ThreadAgentSpawnCard = memo(function ThreadAgentSpawnCard(props: {
               {summary.title}
             </Text>
             <View className="flex-row items-center gap-1.5">
-              <View
-                className={cn(
-                  "h-1.5 w-1.5 shrink-0 rounded-full",
-                  AGENT_SPAWN_TONE_DOT_CLASS[summary.tone],
-                )}
-              />
+              <SubagentStatusDot tone={summary.tone} />
               {working ? (
                 <ShimmeringWorkContent
                   key={props.rowSizing.textSizeKey}
@@ -1222,12 +1211,7 @@ export const ThreadAgentSpawnCard = memo(function ThreadAgentSpawnCard(props: {
             {summary.members.map((member) => (
               <View key={member.title} className="gap-px">
                 <View className="flex-row items-center gap-1.5">
-                  <View
-                    className={cn(
-                      "h-1.5 w-1.5 shrink-0 rounded-full",
-                      AGENT_SPAWN_TONE_DOT_CLASS[member.tone],
-                    )}
-                  />
+                  <SubagentStatusDot tone={member.tone} />
                   <Text className="min-w-0 flex-1 text-xs text-foreground" numberOfLines={1}>
                     {member.title}
                   </Text>
