@@ -153,6 +153,10 @@ function SettingsIndexSections() {
         ) : null}
       </SettingsSection>
 
+      <SettingsSection title="Automations">
+        <SettingsRow icon="clock" label="Scheduled tasks" target="SettingsScheduledTasks" />
+      </SettingsSection>
+
       <SettingsSection title="Projects & threads">
         {selectedProjectKey !== null ? (
           <SettingsRow
