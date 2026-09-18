@@ -522,8 +522,8 @@ importers:
         specifier: 3.0.4
         version: 3.0.4
       node-pty:
-        specifier: ^1.1.0
-        version: 1.1.0
+        specifier: ^1.2.0-beta.15
+        version: 1.2.0-beta.15
       stream-chain:
         specifier: ^4.2.5
         version: 4.2.5
@@ -9216,8 +9216,8 @@ packages:
   node-mock-http@1.0.4:
     resolution: {integrity: sha512-8DY+kFsDkNXy1sJglUfuODx1/opAGJGyrTuFqEoN90oRc2Vk0ZbD4K2qmKXBBEhZQzdKHIVfEJpDU8Ak2NJEvQ==}
 
-  node-pty@1.1.0:
-    resolution: {integrity: sha512-20JqtutY6JPXTUnL0ij1uad7Qe1baT46lyolh2sSENDd4sTzKZ4nmAFkeAARDKwmlLjPx6XKRlwRUxwjOy+lUg==}
+  node-pty@1.2.0-beta.15:
+    resolution: {integrity: sha512-vORSzHXi4Ofl7HemVWpuudLqCPdaQb4LfpRCUpE5HPxhp4JYscl8zZwxh11p26v2wvW24WMwnMfLjhRLixrfxA==}
 
   node-readfiles@0.2.0:
     resolution: {integrity: sha512-SU00ZarexNlE4Rjdm83vglt5Y9yiQ+XI1XpflWlb7q7UTN1JUItm69xMeiQCTxtTfnzt+83T8Cx+vI2ED++VDA==}
@@ -20466,7 +20466,7 @@ snapshots:
 
   node-mock-http@1.0.4: {}
 
-  node-pty@1.1.0:
+  node-pty@1.2.0-beta.15:
     dependencies:
       node-addon-api: 7.1.1
 
