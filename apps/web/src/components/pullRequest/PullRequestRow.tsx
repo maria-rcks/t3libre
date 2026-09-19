@@ -11,7 +11,6 @@ import { pullRequestLabelColor, type EnvironmentPullRequestEntry } from "./pullR
 import { openOnHostLabel, showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
 import {
   PULL_REQUEST_ROW_CLASS,
-  PULL_REQUEST_ROW_INTRINSIC_HEIGHT,
   PULL_REQUEST_ROW_NUMBER_CLASS,
   PullRequestRowAuthor,
   PullRequestRowBranches,
@@ -64,6 +63,13 @@ function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry[
   );
 }
 
+/**
+ * The page row keeps a little more room around the shared lines than the panel, which sits in
+ * a narrow column. The intrinsic size is the row's own block size at this padding, for the
+ * `content-visibility` skip below.
+ */
+const PAGE_ROW_CLASS = "px-3 py-2 [contain-intrinsic-block-size:52px]";
+
 export type PullRequestRowTarget = Pick<
   EnvironmentPullRequestEntry,
   "environmentId" | "projectId" | "host" | "repository" | "number"
@@ -107,11 +113,11 @@ function PullRequestRowImpl({
       onClick={() => onSelect(entry)}
       className={cn(
         PULL_REQUEST_ROW_CLASS,
-        "cursor-pointer pl-2 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        PAGE_ROW_CLASS,
+        "cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         // Offscreen rows are skipped for style, layout and paint: a long list costs what the
         // viewport shows, not what the pages have loaded. The intrinsic size keeps the
         // scrollbar honest while a row is skipped.
-        PULL_REQUEST_ROW_INTRINSIC_HEIGHT,
         "[content-visibility:auto]",
         selected ? "bg-accent" : "hover:bg-accent/60",
       )}

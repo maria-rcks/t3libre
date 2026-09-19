@@ -1660,7 +1660,7 @@ function PullRequestsRouteView() {
           {displayGroups.map((group) => (
             <div key={group.key} className="space-y-0.5">
               {group.label ? (
-                <h2 className="px-2 pb-0.5 text-xs font-medium text-muted-foreground/70">
+                <h2 className="px-3 pb-0.5 text-xs font-medium text-muted-foreground/70">
                   {group.label}
                 </h2>
               ) : null}

@@ -24,9 +24,6 @@ import {
 export const PULL_REQUEST_ROW_CLASS =
   "group/pr-row flex w-full items-center gap-2 rounded-md py-1 pr-1 text-left";
 
-/** The wrapper's own block size, for `content-visibility` on the long page list. */
-export const PULL_REQUEST_ROW_INTRINSIC_HEIGHT = "[contain-intrinsic-block-size:44px]";
-
 export const PULL_REQUEST_ROW_NUMBER_CLASS =
   "shrink-0 font-mono text-xs tabular-nums text-muted-foreground";
 
