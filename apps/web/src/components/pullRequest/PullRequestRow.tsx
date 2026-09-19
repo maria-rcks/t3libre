@@ -65,10 +65,10 @@ function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry[
 
 /**
  * The page row keeps a little more room around the shared lines than the panel, which sits in
- * a narrow column. The intrinsic size is the row's own block size at this padding, for the
- * `content-visibility` skip below.
+ * a narrow column. The intrinsic size is the content box a skipped row reserves, which is the
+ * two lines without the padding: a 52px row less 16px of `py-2`.
  */
-const PAGE_ROW_CLASS = "px-3 py-2 [contain-intrinsic-block-size:52px]";
+const PAGE_ROW_CLASS = "px-3 py-2 [contain-intrinsic-block-size:36.5px]";
 
 export type PullRequestRowTarget = Pick<
   EnvironmentPullRequestEntry,

@@ -53,11 +53,11 @@ export function PullRequestListGhost({
           className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-3 py-2"
         >
           <GhostBar className="size-4 rounded-full" />
-          <div className="min-w-0 space-y-1">
-            <GhostBar className={cn("h-3.5", TITLE_WIDTHS[index % TITLE_WIDTHS.length])} />
-            <GhostBar className={META_WIDTHS[index % META_WIDTHS.length]} />
+          <div className="min-w-0 space-y-1.5">
+            <GhostBar className={cn("h-4", TITLE_WIDTHS[index % TITLE_WIDTHS.length])} />
+            <GhostBar className={cn("h-3.5", META_WIDTHS[index % META_WIDTHS.length])} />
           </div>
-          <div className="flex flex-col items-end gap-1">
+          <div className="flex flex-col items-end gap-1.5">
             <GhostBar className="w-12" />
             <GhostBar className="w-16" />
           </div>
