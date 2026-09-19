@@ -63,7 +63,8 @@ function flatten(node: ReactNode): ReadonlyArray<ReturnType<typeof Object>> {
     if (!isValidElement(child)) continue;
     found.push(child);
     for (const value of Object.values(child.props as Record<string, unknown>)) {
-      if (isValidElement(value) || Array.isArray(value)) found.push(...flatten(value));
+      if (isValidElement(value)) found.push(...flatten(value));
+      else if (Array.isArray(value)) found.push(...flatten(value.filter(isValidElement)));
     }
   }
   return found as ReadonlyArray<ReturnType<typeof Object>>;
