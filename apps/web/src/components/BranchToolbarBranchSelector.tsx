@@ -545,6 +545,7 @@ export function BranchToolbarBranchSelector({
     setIsBranchMenuOpen(open);
     if (!open) {
       setBranchQuery("");
+      highlightedBranchValueRef.current = null;
     }
   }, []);
 
@@ -594,6 +595,9 @@ export function BranchToolbarBranchSelector({
   }, [fetchNextBranchPage, hasNextPage, isBranchMenuOpen, isFetchingNextPage]);
 
   const branchListRef = useRef<LegendListRef | null>(null);
+  // Tracks the highlighted picker value so Enter can activate it even when the
+  // virtualized row is not mounted (Base UI Enter clicks the mounted element).
+  const highlightedBranchValueRef = useRef<string | null>(null);
   const updateBranchListScrollFades = useCallback(() => {
     const scrollElement = branchListRef.current?.getScrollableNode?.();
     if (!(scrollElement instanceof HTMLElement)) {
@@ -760,7 +764,8 @@ export function BranchToolbarBranchSelector({
       filteredItems={filteredBranchPickerItems}
       autoHighlight
       virtualized
-      onItemHighlighted={(_value, eventDetails) => {
+      onItemHighlighted={(value, eventDetails) => {
+        highlightedBranchValueRef.current = typeof value === "string" ? value : null;
         if (!isBranchMenuOpen || eventDetails.index < 0 || eventDetails.reason !== "keyboard") {
           return;
         }
@@ -828,6 +833,52 @@ export function BranchToolbarBranchSelector({
           placeholder="Search refs..."
           value={branchQuery}
           onChange={(event) => setBranchQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") {
+              return;
+            }
+            const highlightedValue = highlightedBranchValueRef.current;
+            if (highlightedValue === null) {
+              return;
+            }
+            if (
+              highlightedValue === checkoutPullRequestItemValue &&
+              prReference &&
+              onCheckoutPullRequestRequest
+            ) {
+              (
+                event as typeof event & { preventBaseUIHandler?: () => void }
+              ).preventBaseUIHandler?.();
+              event.preventDefault();
+              event.stopPropagation();
+              setIsBranchMenuOpen(false);
+              setBranchQuery("");
+              highlightedBranchValueRef.current = null;
+              onComposerFocusRequest?.();
+              onCheckoutPullRequestRequest(prReference);
+              return;
+            }
+            if (highlightedValue === createBranchItemValue) {
+              (
+                event as typeof event & { preventBaseUIHandler?: () => void }
+              ).preventBaseUIHandler?.();
+              event.preventDefault();
+              event.stopPropagation();
+              highlightedBranchValueRef.current = null;
+              createRef(trimmedBranchQuery);
+              return;
+            }
+            const highlightedRef = branchByName.get(highlightedValue);
+            if (highlightedRef) {
+              (
+                event as typeof event & { preventBaseUIHandler?: () => void }
+              ).preventBaseUIHandler?.();
+              event.preventDefault();
+              event.stopPropagation();
+              highlightedBranchValueRef.current = null;
+              selectBranch(highlightedRef);
+            }
+          }}
         />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ComboboxEmpty>No refs found.</ComboboxEmpty>
