@@ -28,6 +28,11 @@ export interface DesktopSettings {
   readonly localEnvironmentEnabled: boolean;
   readonly linuxPasswordStore: LinuxPasswordStorePreference;
   readonly mainWindowBounds: DesktopWindowBounds | null;
+  // Native display id of the monitor the main window was last on. Normal
+  // bounds alone cannot identify a monitor for a maximized window (they are
+  // its last un-maximized geometry), so this is recorded alongside them and
+  // used at startup to reopen on the same display.
+  readonly mainWindowDisplayId: number | null;
   readonly mainWindowMaximized: boolean;
   readonly serverExposureMode: DesktopServerExposureMode;
   readonly tailscaleServeEnabled: boolean;
@@ -77,6 +82,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   localEnvironmentEnabled: true,
   linuxPasswordStore: DEFAULT_LINUX_PASSWORD_STORE,
   mainWindowBounds: null,
+  mainWindowDisplayId: null,
   mainWindowMaximized: false,
   serverExposureMode: "local-only",
   tailscaleServeEnabled: false,
@@ -99,6 +105,7 @@ const DesktopSettingsDocument = Schema.Struct({
   localEnvironmentEnabled: Schema.optionalKey(Schema.Boolean),
   linuxPasswordStore: Schema.optionalKey(Schema.Unknown),
   mainWindowBounds: Schema.optionalKey(Schema.NullOr(DesktopWindowBoundsDocument)),
+  mainWindowDisplayId: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   mainWindowMaximized: Schema.optionalKey(Schema.Boolean),
   serverExposureMode: Schema.optionalKey(DesktopServerExposureModeSchema),
   tailscaleServeEnabled: Schema.optionalKey(Schema.Boolean),
@@ -161,6 +168,7 @@ export class DesktopAppSettings extends Context.Service<
     readonly setMainWindowBounds: (
       bounds: DesktopWindowBounds,
       isMaximized: boolean,
+      displayId?: number | null,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
     readonly setServerExposureMode: (
       mode: DesktopServerExposureMode,
@@ -210,6 +218,10 @@ export function normalizeMainWindowBounds(value: unknown): DesktopWindowBounds |
   return Option.getOrNull(decodeDesktopWindowBounds(value));
 }
 
+function normalizeMainWindowDisplayId(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
 function normalizeDesktopSettingsDocument(
   parsed: DesktopSettingsDocument,
   appVersion: string,
@@ -233,6 +245,9 @@ function normalizeDesktopSettingsDocument(
     localEnvironmentEnabled: parsed.localEnvironmentEnabled !== false,
     linuxPasswordStore: normalizeLinuxPasswordStorePreference(parsed.linuxPasswordStore),
     mainWindowBounds,
+    // A recorded display is only meaningful alongside valid bounds.
+    mainWindowDisplayId:
+      mainWindowBounds === null ? null : normalizeMainWindowDisplayId(parsed.mainWindowDisplayId),
     mainWindowMaximized: mainWindowBounds !== null && parsed.mainWindowMaximized === true,
     serverExposureMode:
       parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
@@ -263,6 +278,9 @@ function toDesktopSettingsDocument(
   }
   if (settings.mainWindowBounds !== null) {
     document.mainWindowBounds = settings.mainWindowBounds;
+  }
+  if (settings.mainWindowBounds !== null && settings.mainWindowDisplayId !== null) {
+    document.mainWindowDisplayId = settings.mainWindowDisplayId;
   }
   if (settings.mainWindowMaximized) {
     document.mainWindowMaximized = true;
@@ -311,14 +329,18 @@ function setMainWindowBounds(
   settings: DesktopSettings,
   bounds: DesktopWindowBounds,
   isMaximized: boolean,
+  displayId?: number | null,
 ): DesktopSettings {
+  const nextDisplayId = displayId ?? null;
   return settings.mainWindowBounds !== null &&
     desktopWindowBoundsEquivalence(settings.mainWindowBounds, bounds) &&
-    settings.mainWindowMaximized === isMaximized
+    settings.mainWindowMaximized === isMaximized &&
+    settings.mainWindowDisplayId === nextDisplayId
     ? settings
     : {
         ...settings,
         mainWindowBounds: bounds,
+        mainWindowDisplayId: nextDisplayId,
         mainWindowMaximized: isMaximized,
       };
 }
@@ -524,8 +546,8 @@ export const make = Effect.gen(function* () {
       );
       return yield* SynchronizedRef.setAndGet(settingsRef, settings);
     }).pipe(Effect.withSpan("desktop.settings.load")),
-    setMainWindowBounds: (bounds, isMaximized) =>
-      persist((settings) => setMainWindowBounds(settings, bounds, isMaximized)).pipe(
+    setMainWindowBounds: (bounds, isMaximized, displayId) =>
+      persist((settings) => setMainWindowBounds(settings, bounds, isMaximized, displayId)).pipe(
         Effect.withSpan("desktop.settings.setMainWindowBounds", {
           attributes: {
             x: bounds.x,
@@ -597,8 +619,8 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
       return DesktopAppSettings.of({
         get: SynchronizedRef.get(settingsRef),
         load: SynchronizedRef.get(settingsRef),
-        setMainWindowBounds: (bounds, isMaximized) =>
-          update((settings) => setMainWindowBounds(settings, bounds, isMaximized)),
+        setMainWindowBounds: (bounds, isMaximized, displayId) =>
+          update((settings) => setMainWindowBounds(settings, bounds, isMaximized, displayId)),
         setServerExposureMode: (mode) =>
           update((settings) => setServerExposureMode(settings, mode)),
         setTailscaleServe: (input) => update((settings) => setTailscaleServe(settings, input)),

@@ -159,6 +159,11 @@ function getInitialWindowBackgroundColor(shouldUseDarkColors: boolean): string {
 
 type DisplayBounds = Pick<Electron.Rectangle, "x" | "y" | "width" | "height">;
 
+// A connected display with its native id. The id is optional so existing
+// bounds-only callers keep working; startup passes the recorded id to reopen
+// on the display the window was last on.
+type ConnectedDisplay = DisplayBounds & { readonly id?: number | null | undefined };
+
 function windowFitsWithinDisplay(
   windowBounds: DesktopAppSettings.DesktopWindowBounds,
   displayBounds: DisplayBounds,
@@ -185,8 +190,24 @@ function windowBoundsEqual(
 
 export function resolveInitialMainWindowBounds(
   persistedBounds: DesktopAppSettings.DesktopWindowBounds | null,
-  displays: readonly DisplayBounds[],
+  displays: readonly ConnectedDisplay[],
+  persistedDisplayId?: number | null,
 ): DesktopAppSettings.DesktopWindowBounds | typeof DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE {
+  if (persistedBounds !== null && persistedDisplayId != null) {
+    const preferred = displays.find((display) => display.id === persistedDisplayId);
+    if (preferred !== undefined) {
+      if (windowFitsWithinDisplay(persistedBounds, preferred)) {
+        return persistedBounds;
+      }
+      // A maximized window's normal bounds usually point at another display.
+      // Keep their size and shift them onto the recorded display so the
+      // window is created there (and a restored maximize lands there too).
+      const shifted = shiftBoundsIntoDisplay(persistedBounds, preferred);
+      if (shifted !== null) {
+        return shifted;
+      }
+    }
+  }
   if (
     persistedBounds !== null &&
     displays.some((display) => windowFitsWithinDisplay(persistedBounds, display))
@@ -194,6 +215,27 @@ export function resolveInitialMainWindowBounds(
     return persistedBounds;
   }
   return DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE;
+}
+
+function shiftBoundsIntoDisplay(
+  windowBounds: DesktopAppSettings.DesktopWindowBounds,
+  display: DisplayBounds,
+): DesktopAppSettings.DesktopWindowBounds | null {
+  if (windowBounds.width > display.width || windowBounds.height > display.height) {
+    return null;
+  }
+  return {
+    x: Math.min(
+      Math.max(windowBounds.x, display.x),
+      display.x + display.width - windowBounds.width,
+    ),
+    y: Math.min(
+      Math.max(windowBounds.y, display.y),
+      display.y + display.height - windowBounds.height,
+    ),
+    width: windowBounds.width,
+    height: windowBounds.height,
+  };
 }
 
 // A self-contained "Connecting to WSL" splash, shown immediately in wsl-only
@@ -376,19 +418,26 @@ export const make = Effect.gen(function* () {
       try {
         return {
           _tag: "Success" as const,
-          bounds: Electron.screen.getAllDisplays().map((display) => display.bounds),
+          displays: Electron.screen.getAllDisplays().map((display): ConnectedDisplay => ({
+            id: typeof display.id === "number" ? display.id : null,
+            ...display.bounds,
+          })),
         };
       } catch (cause) {
         return { _tag: "Failure" as const, cause };
       }
     });
-    const displayBounds =
+    const connectedDisplays =
       displayBoundsResult._tag === "Success"
-        ? displayBoundsResult.bounds
+        ? displayBoundsResult.displays
         : yield* logWindowWarning("failed to read connected displays; using defaults", {
             cause: displayBoundsResult.cause,
-          }).pipe(Effect.as<readonly Electron.Rectangle[]>([]));
-    const initialBounds = resolveInitialMainWindowBounds(persistedBounds, displayBounds);
+          }).pipe(Effect.as<readonly ConnectedDisplay[]>([]));
+    const initialBounds = resolveInitialMainWindowBounds(
+      persistedBounds,
+      connectedDisplays,
+      persistedSettings.mainWindowDisplayId,
+    );
     const restoredPersistedBounds = persistedBounds !== null && initialBounds === persistedBounds;
     if (persistedBounds !== null && initialBounds === DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE) {
       yield* logWindowWarning("saved main window bounds could not be restored; using defaults");
@@ -442,6 +491,22 @@ export const make = Effect.gen(function* () {
     };
     const fallbackWindowBounds = boundsPersistenceEnabled ? null : readPersistableBounds();
     const fallbackWindowMaximized = persistedSettings.mainWindowMaximized;
+    const fallbackWindowDisplayId = persistedSettings.mainWindowDisplayId;
+    // The display the window currently occupies. For a maximized window
+    // getBounds() reports the maximized geometry on its actual monitor, which
+    // is exactly the display we need to remember; getNormalBounds() would
+    // point at the last un-maximized geometry instead.
+    const readCurrentDisplayId = (): number | null => {
+      if (window.isDestroyed()) {
+        return null;
+      }
+      try {
+        const id = Electron.screen.getDisplayMatching(window.getBounds()).id;
+        return typeof id === "number" && Number.isInteger(id) ? id : null;
+      } catch {
+        return null;
+      }
+    };
     const persistCurrentBounds = (): Fiber.Fiber<void, never> | undefined => {
       if (!boundsPersistenceEnabled) {
         return pendingBoundsPersistFiber;
@@ -450,8 +515,9 @@ export const make = Effect.gen(function* () {
       if (bounds === null) {
         return pendingBoundsPersistFiber;
       }
+      const displayId = readCurrentDisplayId();
       pendingBoundsPersistFiber = runFork(
-        desktopSettings.setMainWindowBounds(bounds, window.isMaximized()).pipe(
+        desktopSettings.setMainWindowBounds(bounds, window.isMaximized(), displayId).pipe(
           Effect.asVoid,
           Effect.catch((error) =>
             logWindowWarning("failed to persist main window bounds", {
@@ -469,7 +535,8 @@ export const make = Effect.gen(function* () {
           currentBounds === null ||
           (fallbackWindowBounds !== null &&
             windowBoundsEqual(currentBounds, fallbackWindowBounds) &&
-            window.isMaximized() === fallbackWindowMaximized)
+            window.isMaximized() === fallbackWindowMaximized &&
+            readCurrentDisplayId() === fallbackWindowDisplayId)
         ) {
           return;
         }
