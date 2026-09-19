@@ -680,6 +680,20 @@ export function BranchToolbarBranchSelector({
   const prUrl = currentLinkedPr?.url ?? displayedPr?.url;
   const openPrLink = useOpenPrLink(threadRef);
 
+  function selectPickerItem(itemValue: string) {
+    highlightedBranchValueRef.current = null;
+    if (itemValue === checkoutPullRequestItemValue && prReference && onCheckoutPullRequestRequest) {
+      handleOpenChange(false);
+      onComposerFocusRequest?.();
+      onCheckoutPullRequestRequest(prReference);
+    } else if (itemValue === createBranchItemValue) {
+      createRef(trimmedBranchQuery);
+    } else {
+      const refName = branchByName.get(itemValue);
+      if (refName) selectBranch(refName);
+    }
+  }
+
   function renderPickerItem(itemValue: string, index: number) {
     if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
       return (
@@ -689,15 +703,7 @@ export function BranchToolbarBranchSelector({
           index={index}
           value={itemValue}
           className="pe-2"
-          onClick={() => {
-            if (!prReference || !onCheckoutPullRequestRequest) {
-              return;
-            }
-            setIsBranchMenuOpen(false);
-            setBranchQuery("");
-            onComposerFocusRequest?.();
-            onCheckoutPullRequestRequest(prReference);
-          }}
+          onClick={() => selectPickerItem(itemValue)}
         >
           <div className="flex min-w-0 items-center gap-2 py-1">
             <SourceControlIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -719,7 +725,7 @@ export function BranchToolbarBranchSelector({
           index={index}
           value={itemValue}
           className="pe-1.5"
-          onClick={() => createRef(trimmedBranchQuery)}
+          onClick={() => selectPickerItem(itemValue)}
         >
           <span className="truncate">Create new ref &quot;{newRefName}&quot;</span>
         </ComboboxItem>
@@ -747,7 +753,7 @@ export function BranchToolbarBranchSelector({
         index={index}
         value={itemValue}
         className="pe-1.5"
-        onClick={() => selectBranch(refName)}
+        onClick={() => selectPickerItem(itemValue)}
         onContextMenu={(event) => handleBranchContextMenu(event, itemValue)}
       >
         <div className="flex w-full min-w-0 items-center justify-between gap-2">
@@ -834,53 +840,22 @@ export function BranchToolbarBranchSelector({
           value={branchQuery}
           onChange={(event) => setBranchQuery(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key !== "Enter") {
-              return;
-            }
-            if (event.nativeEvent.isComposing || event.keyCode === 229) {
+            if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) {
               return;
             }
             const highlightedValue = highlightedBranchValueRef.current;
-            if (highlightedValue === null) {
-              return;
-            }
             if (
-              highlightedValue === checkoutPullRequestItemValue &&
-              prReference &&
-              onCheckoutPullRequestRequest
+              highlightedValue === null ||
+              !filteredBranchPickerItems.includes(highlightedValue)
             ) {
-              (
-                event as typeof event & { preventBaseUIHandler?: () => void }
-              ).preventBaseUIHandler?.();
-              event.preventDefault();
-              event.stopPropagation();
-              setIsBranchMenuOpen(false);
-              setBranchQuery("");
-              highlightedBranchValueRef.current = null;
-              onComposerFocusRequest?.();
-              onCheckoutPullRequestRequest(prReference);
               return;
             }
-            if (highlightedValue === createBranchItemValue) {
-              (
-                event as typeof event & { preventBaseUIHandler?: () => void }
-              ).preventBaseUIHandler?.();
-              event.preventDefault();
-              event.stopPropagation();
-              highlightedBranchValueRef.current = null;
-              createRef(trimmedBranchQuery);
-              return;
-            }
-            const highlightedRef = branchByName.get(highlightedValue);
-            if (highlightedRef) {
-              (
-                event as typeof event & { preventBaseUIHandler?: () => void }
-              ).preventBaseUIHandler?.();
-              event.preventDefault();
-              event.stopPropagation();
-              highlightedBranchValueRef.current = null;
-              selectBranch(highlightedRef);
-            }
+            (
+              event as typeof event & { preventBaseUIHandler?: () => void }
+            ).preventBaseUIHandler?.();
+            event.preventDefault();
+            event.stopPropagation();
+            selectPickerItem(highlightedValue);
           }}
         />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
