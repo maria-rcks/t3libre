@@ -23,12 +23,12 @@ import { pullRequestListLines, type PullRequestListLine } from "./pullRequestLis
 import {
   PULL_REQUEST_ROW_CLASS,
   PULL_REQUEST_ROW_NUMBER_CLASS,
+  PullRequestRowAuthor,
   PullRequestRowBranches,
   PullRequestRowGlyph,
   PullRequestRowLines,
 } from "./PullRequestListRow";
 import {
-  PullRequestActorLabel,
   PullRequestDiffStat,
   PullRequestApprovalGlyph,
   pullRequestChecksStatePresentation,
@@ -158,7 +158,7 @@ function LinkRow({
                 </Tooltip>
               ) : null}
               {snapshot?.author ? (
-                <PullRequestActorLabel
+                <PullRequestRowAuthor
                   actor={snapshot.author}
                   className="shrink-0"
                   labelClassName="max-w-28"

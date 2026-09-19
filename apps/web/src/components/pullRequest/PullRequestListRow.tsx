@@ -1,10 +1,19 @@
-import type { PullRequestMergeability, PullRequestState } from "@t3tools/contracts";
+import type {
+  PullRequestActor,
+  PullRequestMergeability,
+  PullRequestState,
+} from "@t3tools/contracts";
 import type { ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
-import { PullRequestConflictGlyph, PullRequestStateGlyph } from "./pullRequestPresentation";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  PullRequestActorAvatar,
+  PullRequestConflictGlyph,
+  PullRequestStateGlyph,
+} from "./pullRequestPresentation";
 
 /**
  * The one row shape both pull request lists share: the full page and a thread's linked panel.
@@ -84,7 +93,7 @@ export function PullRequestRowLines({
       </span>
       <span
         className={cn(
-          "flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground",
+          "flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground",
           metaClassName,
         )}
       >
@@ -96,6 +105,32 @@ export function PullRequestRowLines({
         ) : null}
       </span>
     </span>
+  );
+}
+
+/** Avatar and login at the meta line's own size, with the actor's full name on hover. */
+export function PullRequestRowAuthor({
+  actor,
+  className,
+  labelClassName,
+}: {
+  actor: PullRequestActor | null;
+  className?: string;
+  labelClassName?: string;
+}) {
+  const login = actor?.login ?? "ghost";
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<span className={cn("inline-flex min-w-0 items-center gap-1", className)} />}
+      >
+        <PullRequestActorAvatar actor={actor} className="size-3.5" />
+        <span className={cn("truncate", labelClassName)}>{login}</span>
+      </TooltipTrigger>
+      <TooltipPopup side="top">
+        {actor?.name && actor.name !== login ? `${actor.name} (@${login})` : login}
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 

@@ -13,15 +13,12 @@ import {
   PULL_REQUEST_ROW_CLASS,
   PULL_REQUEST_ROW_INTRINSIC_HEIGHT,
   PULL_REQUEST_ROW_NUMBER_CLASS,
+  PullRequestRowAuthor,
   PullRequestRowBranches,
   PullRequestRowGlyph,
   PullRequestRowLines,
 } from "./PullRequestListRow";
-import {
-  PullRequestActorLabel,
-  PullRequestDiffStat,
-  PullRequestApprovalGlyph,
-} from "./pullRequestPresentation";
+import { PullRequestDiffStat, PullRequestApprovalGlyph } from "./pullRequestPresentation";
 
 /**
  * Each slot past the first only appears once the meta line is wide enough to hold it, so a
@@ -196,7 +193,7 @@ function PullRequestRowImpl({
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <span className="flex min-w-6 shrink-0 items-center gap-1 overflow-hidden rounded-full border border-border/60 px-1 text-[10px]" />
+                    <span className="flex min-w-6 items-center gap-1 overflow-hidden rounded-full border border-border/60 px-1 text-[10px]" />
                   }
                 >
                   <span className="sr-only">matched in the description</span>
@@ -216,14 +213,12 @@ function PullRequestRowImpl({
                 <TooltipPopup>{providerName}</TooltipPopup>
               </Tooltip>
             ) : null}
-            <PullRequestActorLabel
+            <PullRequestRowAuthor
               actor={entry.author}
-              className="shrink-0"
-              labelClassName="sr-only max-w-28 @xs/pr-row-meta:not-sr-only @xs/pr-row-meta:truncate"
+              className="min-w-3.5 max-w-40"
+              labelClassName="sr-only @xs/pr-row-meta:not-sr-only @xs/pr-row-meta:truncate"
             />
-            {showProjectTitle ? (
-              <span className="shrink-0 truncate">{entry.repository}</span>
-            ) : null}
+            {showProjectTitle ? <span className="truncate">{entry.repository}</span> : null}
             {environmentLabel ? (
               <span className="min-w-0 max-w-32 truncate">{environmentLabel}</span>
             ) : null}
