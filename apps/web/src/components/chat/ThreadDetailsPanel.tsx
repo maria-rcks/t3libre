@@ -48,6 +48,8 @@ export interface ThreadDetailsPanelProps {
   isGitRepo: boolean;
   envLocked: boolean;
   availableEnvironments: readonly EnvironmentOption[];
+  autoEnvironmentLabel?: string | undefined;
+  onAutoEnvironment?: (() => void) | undefined;
   onEnvironmentChange: (environmentId: EnvironmentId) => void;
   onEnvModeChange: (mode: EnvMode) => void;
   effectiveEnvModeOverride?: EnvMode;
@@ -148,6 +150,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             {props.availableEnvironments.length > 1 ? (
               <BranchToolbarEnvironmentSelector
                 displayMode="panel"
+                autoEnvironmentLabel={props.autoEnvironmentLabel}
+                onAutoEnvironment={props.onAutoEnvironment}
                 envLocked={props.envLocked}
                 environmentId={props.environmentId}
                 availableEnvironments={props.availableEnvironments}
