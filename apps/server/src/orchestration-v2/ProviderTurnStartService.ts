@@ -40,7 +40,7 @@ import {
   type ProviderAdapterV2SessionRuntime,
 } from "./ProviderAdapter.ts";
 import { IdAllocatorV2 } from "./IdAllocator.ts";
-import { ProjectionStoreV2 } from "./ProjectionStore.ts";
+import { ProjectionStoreV2, type ProjectionRuntimeRecoveryState } from "./ProjectionStore.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { makeProviderFailure } from "./ProviderFailure.ts";
 import {
@@ -111,8 +111,10 @@ export const layer: Layer.Layer<
       readonly runOrdinal: number;
       readonly inheritedBackgroundTurnItems: ReturnType<typeof selectInheritedBackgroundTurnItems>;
     }) => {
+      // Guards and background routing need live execution state, not a fresh
+      // allocation of every completed message and tool output in the thread.
       const isCurrentAttemptInStatus = (expectedStatus: OrchestrationV2Run["status"]) =>
-        projectionStore.getThreadProjection(input.threadId).pipe(
+        projectionStore.getRuntimeRecoveryProjection(input.threadId).pipe(
           Effect.map((current) => {
             const run = current.runs.find((candidate) => candidate.id === input.runId);
             return run?.activeAttemptId === input.attemptId && run.status === expectedStatus;
@@ -122,7 +124,7 @@ export const layer: Layer.Layer<
       return {
         isCurrentAttemptInStatus,
         loadInheritedBackgroundTurnItems: () =>
-          projectionStore.getThreadProjection(input.threadId).pipe(
+          projectionStore.getRuntimeRecoveryProjection(input.threadId).pipe(
             Effect.map((current) =>
               selectInheritedBackgroundTurnItems({
                 threadId: input.threadId,
@@ -136,7 +138,7 @@ export const layer: Layer.Layer<
           ),
         shouldStartProviderTurn: () => isCurrentAttemptInStatus("running"),
         shouldFinalizeRun: () =>
-          projectionStore.getThreadProjection(input.threadId).pipe(
+          projectionStore.getRuntimeRecoveryProjection(input.threadId).pipe(
             Effect.map((current) => {
               const run = current.runs.find((candidate) => candidate.id === input.runId);
               return (
@@ -451,7 +453,7 @@ export const layer: Layer.Layer<
         }
       }
       const selectInheritedBackgroundItems = (
-        current: typeof projection,
+        current: ProjectionRuntimeRecoveryState,
       ): ReturnType<typeof selectInheritedBackgroundTurnItems> =>
         selectInheritedBackgroundTurnItems({
           threadId: current.thread.id,
@@ -461,7 +463,7 @@ export const layer: Layer.Layer<
           turnItems: current.turnItems,
         });
       const inheritedBackgroundTurnItems = yield* projectionStore
-        .getThreadProjection(projection.thread.id)
+        .getRuntimeRecoveryProjection(projection.thread.id)
         .pipe(Effect.map(selectInheritedBackgroundItems));
       const providerSessionId = providerThread.providerSessionId;
       const runControls = makeRunControls({
