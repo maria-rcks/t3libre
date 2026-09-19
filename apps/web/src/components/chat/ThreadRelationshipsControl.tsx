@@ -240,8 +240,11 @@ export function ThreadRelationshipsPanel(props: {
     { id: "active", label: null, rows: active, expanded: true },
     { id: "previous", label: "Previous agents", rows: previous, expanded: false },
   ];
+  const runningCount =
+    projection?.subagents.filter((agent) => agent.status === "running").length ??
+    active.filter(({ edge }) => edge.status === "running").length;
 
-  if (relationshipRows.length === 0) {
+  if (relationshipRows.length === 0 && runningCount === 0) {
     return null;
   }
 
@@ -285,7 +288,7 @@ export function ThreadRelationshipsPanel(props: {
   return (
     <ThreadDetailsSection
       headingId="thread-details-lineage-heading"
-      title="Lineage"
+      title={runningCount > 0 ? `Lineage · ${runningCount} running` : "Lineage"}
       data-thread-relationships-panel
       actions={
         canDetach ? (
@@ -389,6 +392,7 @@ export function ThreadRelationshipsPanel(props: {
                     <div className={THREAD_DETAILS_PANEL_LINK_SPLIT_GROUP_CLASS}>
                       <Tooltip>
                         <TooltipTrigger
+                          delay={200}
                           render={
                             <Button
                               size="sm"
@@ -442,6 +446,7 @@ export function ThreadRelationshipsPanel(props: {
                   ) : (
                     <Tooltip>
                       <TooltipTrigger
+                        delay={200}
                         render={
                           <Button
                             size="sm"

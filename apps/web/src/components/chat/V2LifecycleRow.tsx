@@ -245,6 +245,7 @@ function SubagentTimelineLink(props: {
   return (
     <Tooltip>
       <TooltipTrigger
+        delay={200}
         render={
           threadId === null ? (
             <WorkLogRow

@@ -4,7 +4,7 @@ import type {
   ServerProvider,
 } from "@t3tools/contracts";
 import { fileBasename } from "@t3tools/client-runtime/markdown-links";
-import { formatModelSlugName } from "@t3tools/shared/model";
+import { formatModelSlugName, resolveSelectableModel } from "@t3tools/shared/model";
 import { getTriggerDisplayModelName } from "./providerIconUtils";
 import { Fragment } from "react";
 
@@ -14,19 +14,25 @@ export function SubagentTooltipContent(props: {
   model: string | null;
   provider?: ServerProvider | undefined;
   parentThread?: Pick<OrchestrationV2ThreadShell, "projectId" | "worktreePath"> | undefined;
-  childThread?: Pick<OrchestrationV2ThreadShell, "branch" | "worktreePath"> | undefined;
+  childThread?:
+    | Pick<OrchestrationV2ThreadShell, "branch" | "worktreePath" | "modelSelection">
+    | undefined;
   parentProject?: Pick<OrchestrationProjectShell, "workspaceRoot"> | undefined;
   childProject?: Pick<OrchestrationProjectShell, "id" | "title" | "workspaceRoot"> | undefined;
   status: string;
   result?: string | null | undefined;
   progress?: string | null | undefined;
 }) {
-  const providerModel = props.provider?.models.find((candidate) => candidate.slug === props.model);
+  const model = props.model?.trim() || props.childThread?.modelSelection.model.trim();
+  const modelSlug = props.provider
+    ? resolveSelectableModel(props.provider.driver, model, props.provider.models)
+    : model;
+  const providerModel = props.provider?.models.find((candidate) => candidate.slug === modelSlug);
   const modelLabel = providerModel
     ? getTriggerDisplayModelName(providerModel)
-    : props.model
-      ? formatModelSlugName(props.model)
-      : "Unknown";
+    : model
+      ? formatModelSlugName(model)
+      : "Not reported";
   const currentWorkspace = props.parentThread?.worktreePath ?? props.parentProject?.workspaceRoot;
   const childWorkspace = props.childThread?.worktreePath ?? props.childProject?.workspaceRoot;
   const metadata = [

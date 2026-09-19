@@ -94,6 +94,7 @@ it("shows the matching child agent details and refreshes them when the agent set
       .join(" ")
       .replace(/\s+/g, " ");
   expect(text()).toContain("Checker");
+  expect(text()).toContain("Lineage · 3 running");
   expect(text()).toContain("running");
   expect(text()).not.toContain("gpt-5.4");
   expect(text()).not.toContain("gpt-5.3");
@@ -115,6 +116,7 @@ it("shows the matching child agent details and refreshes them when the agent set
     ],
   };
   await act(async () => renderer.update(cloneElement(panel)));
+  expect(renderer.root.findByType("h3").children).toEqual(["Lineage"]);
   expect(text()).toContain("Previous agents (1)");
   expect(text()).not.toContain("Checker");
   await act(async () =>
@@ -140,6 +142,17 @@ it("shows the matching child agent details and refreshes them when the agent set
     ...projection,
     subagents: Array.from({ length: 8 }, (_, index) => ({
       ...agent,
+      id: `running-agent-${index}`,
+      childThreadId: `running-child-${index}`,
+    })),
+  };
+  await act(async () => renderer.update(cloneElement(panel)));
+  expect(text()).toContain("Lineage · 8 running");
+
+  state.projection = {
+    ...projection,
+    subagents: Array.from({ length: 8 }, (_, index) => ({
+      ...agent,
       id: `old-agent-${index}`,
       childThreadId: `old-child-${index}`,
       status: index === 7 ? "failed" : "completed",
@@ -158,6 +171,13 @@ it("shows the matching child agent details and refreshes them when the agent set
       .props.onClick(),
   );
   expect(text()).toContain("Old agent 7");
+
+  state.projection = {
+    ...projection,
+    subagents: [{ ...agent, childThreadId: null }],
+  };
+  await act(async () => renderer.update(cloneElement(panel)));
+  expect(text()).toContain("Lineage · 1 running");
 });
 
 it("shows readable models and only differing workspace details in agent tooltips", async () => {
@@ -176,6 +196,7 @@ it("shows readable models and only differing workspace details in agent tooltips
     worktreePath: null as string | null,
     branch: null as string | null,
     title: "Worker",
+    modelSelection: { instanceId: "codex", model: "gpt-5.4" },
     lineage: { parentThreadId: "parent", relationshipToParent: "subagent" },
   };
   state.projects = [
@@ -194,7 +215,9 @@ it("shows readable models and only differing workspace details in agent tooltips
       {
         instanceId: "codex",
         driver: "codex",
-        models: [{ slug: "gpt-5.4", name: "My GPT model", shortName: "My GPT" }],
+        models: [
+          { slug: "gpt-5.4", name: "My GPT model", shortName: "My GPT", aliases: ["model-alias"] },
+        ],
       },
     ],
   });
@@ -241,6 +264,23 @@ it("shows readable models and only differing workspace details in agent tooltips
   expect(text()).not.toContain("Project");
   expect(text()).not.toContain("Worktree");
   expect(text()).not.toContain("Workspace");
+
+  for (const [model, expected] of [
+    [null, "My GPT"],
+    ["", "My GPT"],
+    ["   ", "My GPT"],
+    ["model-alias", "My GPT"],
+    ["gpt-5.5", "GPT-5.5"],
+    ["custom/model-v1", "custom/model-v1"],
+  ] as const) {
+    state.projection = {
+      ...projection,
+      subagents: [{ ...projection.subagents[0], model }],
+    };
+    await act(async () => renderer.update(cloneElement(panel)));
+    expect(text()).toContain(expected);
+    expect(text()).not.toContain("Unknown");
+  }
 
   state.projection = {
     ...projection,
@@ -317,7 +357,7 @@ it("shows readable models and only differing workspace details in agent tooltips
     ["grok", "grok-4-fast", "Grok 4 Fast"],
     ["antigravity", "gemini-3.8-flash-high", "Gemini 3.8 Flash High"],
     ["opencode", "anthropic/claude-sonnet-4-6", "anthropic/Claude Sonnet 4.6"],
-    ["codex", null, "Unknown"],
+    ["codex", null, "Not reported"],
   ] as const) {
     state.projection = {
       ...projection,
