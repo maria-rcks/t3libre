@@ -45,19 +45,19 @@ export function PullRequestListGhost({
       className="motion-safe:animate-skeleton space-y-0.5"
     >
       {caption ? (
-        <p className="px-3 pb-1 text-xs font-medium text-muted-foreground/70">{caption}</p>
+        <p className="px-2 pb-1 text-xs font-medium text-muted-foreground/70">{caption}</p>
       ) : null}
       {Array.from({ length: rows }, (_, index) => (
         <div
           key={index}
-          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2"
+          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md py-1 pl-2 pr-1"
         >
           <GhostBar className="size-4 rounded-full" />
-          <div className="min-w-0 space-y-1.5">
+          <div className="min-w-0 space-y-1">
             <GhostBar className={cn("h-3.5", TITLE_WIDTHS[index % TITLE_WIDTHS.length])} />
             <GhostBar className={META_WIDTHS[index % META_WIDTHS.length]} />
           </div>
-          <div className="flex flex-col items-end gap-1.5">
+          <div className="flex flex-col items-end gap-1">
             <GhostBar className="w-12" />
             <GhostBar className="w-16" />
           </div>
