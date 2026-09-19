@@ -837,6 +837,9 @@ export function BranchToolbarBranchSelector({
             if (event.key !== "Enter") {
               return;
             }
+            if (event.nativeEvent.isComposing || event.keyCode === 229) {
+              return;
+            }
             const highlightedValue = highlightedBranchValueRef.current;
             if (highlightedValue === null) {
               return;

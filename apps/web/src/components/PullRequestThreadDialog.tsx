@@ -222,6 +222,9 @@ export function PullRequestThreadDialog({
                 if (event.key !== "Enter") {
                   return;
                 }
+                if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                  return;
+                }
                 event.preventDefault();
                 if (!isResolving && !preparePullRequestThreadAction.isPending) {
                   void handleConfirm("worktree");
