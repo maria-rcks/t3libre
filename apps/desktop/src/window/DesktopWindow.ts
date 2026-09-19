@@ -200,9 +200,9 @@ export function resolveInitialMainWindowBounds(
         return persistedBounds;
       }
       // A maximized window's normal bounds usually point at another display,
-      // and can even exceed the recorded one. Keep their size and clamp them
-      // onto the recorded display so the window is created there (and a
-      // restored maximize lands there too).
+      // and can even exceed the recorded one. Clamp them onto the recorded
+      // display so the window is created there (and a restored maximize
+      // lands there too).
       return clampBoundsIntoDisplay(persistedBounds, preferred);
     }
   }
@@ -219,15 +219,25 @@ function clampBoundsIntoDisplay(
   windowBounds: DesktopAppSettings.DesktopWindowBounds,
   display: DisplayBounds,
 ): DesktopAppSettings.DesktopWindowBounds {
-  // Guarded so oversized bounds still land on the display instead of
-  // producing an inverted range.
-  const maxX = Math.max(display.x, display.x + display.width - windowBounds.width);
-  const maxY = Math.max(display.y, display.y + display.height - windowBounds.height);
+  // Size is constrained to the recorded display: display matching and
+  // maximize both resolve to the display with the largest overlap, so an
+  // oversized window spilling mostly onto another monitor would reopen (and
+  // maximize) there instead. Floored at the window minima used at creation.
+  const width = Math.max(
+    DesktopAppSettings.MIN_MAIN_WINDOW_SIZE.width,
+    Math.min(windowBounds.width, display.width),
+  );
+  const height = Math.max(
+    DesktopAppSettings.MIN_MAIN_WINDOW_SIZE.height,
+    Math.min(windowBounds.height, display.height),
+  );
+  const maxX = Math.max(display.x, display.x + display.width - width);
+  const maxY = Math.max(display.y, display.y + display.height - height);
   return {
     x: Math.min(Math.max(windowBounds.x, display.x), maxX),
     y: Math.min(Math.max(windowBounds.y, display.y), maxY),
-    width: windowBounds.width,
-    height: windowBounds.height,
+    width,
+    height,
   };
 }
 

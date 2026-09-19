@@ -624,15 +624,29 @@ describe("DesktopWindow", () => {
       ),
       DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE,
     );
-    // Oversized normal bounds still land on the recorded display instead of
-    // the larger display they fit.
+    // Oversized normal bounds are constrained to the recorded display
+    // instead of spilling mostly onto the larger display they fit (which
+    // display matching and maximize would then resolve to).
     assert.deepEqual(
       DesktopWindow.resolveInitialMainWindowBounds(
         { x: 410, y: 86, width: 2000, height: 780 },
         displays,
         2,
       ),
-      { x: 1920, y: 86, width: 2000, height: 780 },
+      { x: 1920, y: 86, width: 1920, height: 780 },
+    );
+    // Left-hand secondary: a 3400-wide window clamped only in position would
+    // still overlap primary 1920px vs secondary 1280px and maximize there.
+    assert.deepEqual(
+      DesktopWindow.resolveInitialMainWindowBounds(
+        { x: 100, y: 100, width: 3400, height: 1000 },
+        [
+          { id: 1, x: 0, y: 0, width: 1920, height: 1080 },
+          { id: 2, x: -1280, y: 0, width: 1280, height: 1024 },
+        ],
+        2,
+      ),
+      { x: -1280, y: 24, width: 1280, height: 1000 },
     );
   });
 
