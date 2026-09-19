@@ -28,6 +28,7 @@ const [Start, Projection, Run, Sessions, Policy, Id, Sink, Handoff, Git, Project
     app("provider/Services/ProviderAuthService"),
   ]);
 let current;
+let fullReads = 0;
 const liveRuns = [];
 const refs = [];
 const checkpoints = [];
@@ -49,7 +50,12 @@ const dependencies = Layer.mergeAll(
   Layer.mock(Project.ProjectService)({}),
   Layer.mock(Auth.ProviderAuthService)({}),
   Layer.mock(Projection.ProjectionStoreV2)({
-    getThreadProjection: () => Effect.sync(() => current),
+    getThreadProjection: () =>
+      Effect.sync(() => {
+        fullReads++;
+        return current;
+      }),
+    getRuntimeRecoveryProjection: () => Effect.sync(() => current),
   }),
   Layer.mock(Sessions.ProviderSessionManagerV2)({ open: () => Effect.succeed(session) }),
   Layer.mock(Policy.RuntimePolicyV2)({
@@ -164,8 +170,9 @@ await Effect.runPromise(
       NodeAssert.equal(yield* controls.shouldFinalizeRun(), false);
       current = { ...current, runs: [{ ...liveRun, status: "completed" }] };
       NodeAssert.equal(yield* controls.shouldFinalizeRun(), false);
-      NodeAssert.equal(yield* controls.hasUnpairedRunInterruptRequest(), false);
       NodeAssert.deepEqual(yield* controls.loadInheritedBackgroundTurnItems(), []);
+      NodeAssert.equal(fullReads, i * 2 + 1);
+      NodeAssert.equal(yield* controls.hasUnpairedRunInterruptRequest(), false);
       current = null;
       if (i === Math.floor(count / 2) - 1 || i === count - 1) {
         yield* Effect.promise(async () => {
