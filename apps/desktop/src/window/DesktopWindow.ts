@@ -222,7 +222,9 @@ function clampBoundsIntoDisplay(
   // Size is constrained to the recorded display: display matching and
   // maximize both resolve to the display with the largest overlap, so an
   // oversized window spilling mostly onto another monitor would reopen (and
-  // maximize) there instead. Floored at the window minima used at creation.
+  // maximize) there instead. Floored at the window minima used at creation,
+  // which take precedence over fitting entirely within an undersized display
+  // (an 800x600 monitor still gets 840x620).
   const width = Math.max(
     DesktopAppSettings.MIN_MAIN_WINDOW_SIZE.width,
     Math.min(windowBounds.width, display.width),

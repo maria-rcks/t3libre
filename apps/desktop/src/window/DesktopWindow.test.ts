@@ -648,6 +648,15 @@ describe("DesktopWindow", () => {
       ),
       { x: -1280, y: 24, width: 1280, height: 1000 },
     );
+    // Window minima take precedence over fitting inside an undersized display.
+    assert.deepEqual(
+      DesktopWindow.resolveInitialMainWindowBounds(
+        { x: 0, y: 0, width: 1100, height: 780 },
+        [{ id: 3, x: 0, y: 0, width: 800, height: 600 }],
+        3,
+      ),
+      { x: 0, y: 0, width: 840, height: 620 },
+    );
   });
 
   it("recognizes only same-origin renderer navigations", () => {
