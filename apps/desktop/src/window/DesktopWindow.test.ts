@@ -624,6 +624,16 @@ describe("DesktopWindow", () => {
       ),
       DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE,
     );
+    // Oversized normal bounds still land on the recorded display instead of
+    // the larger display they fit.
+    assert.deepEqual(
+      DesktopWindow.resolveInitialMainWindowBounds(
+        { x: 410, y: 86, width: 2000, height: 780 },
+        displays,
+        2,
+      ),
+      { x: 1920, y: 86, width: 2000, height: 780 },
+    );
   });
 
   it("recognizes only same-origin renderer navigations", () => {

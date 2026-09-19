@@ -199,13 +199,11 @@ export function resolveInitialMainWindowBounds(
       if (windowFitsWithinDisplay(persistedBounds, preferred)) {
         return persistedBounds;
       }
-      // A maximized window's normal bounds usually point at another display.
-      // Keep their size and shift them onto the recorded display so the
-      // window is created there (and a restored maximize lands there too).
-      const shifted = shiftBoundsIntoDisplay(persistedBounds, preferred);
-      if (shifted !== null) {
-        return shifted;
-      }
+      // A maximized window's normal bounds usually point at another display,
+      // and can even exceed the recorded one. Keep their size and clamp them
+      // onto the recorded display so the window is created there (and a
+      // restored maximize lands there too).
+      return clampBoundsIntoDisplay(persistedBounds, preferred);
     }
   }
   if (
@@ -217,22 +215,17 @@ export function resolveInitialMainWindowBounds(
   return DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE;
 }
 
-function shiftBoundsIntoDisplay(
+function clampBoundsIntoDisplay(
   windowBounds: DesktopAppSettings.DesktopWindowBounds,
   display: DisplayBounds,
-): DesktopAppSettings.DesktopWindowBounds | null {
-  if (windowBounds.width > display.width || windowBounds.height > display.height) {
-    return null;
-  }
+): DesktopAppSettings.DesktopWindowBounds {
+  // Guarded so oversized bounds still land on the display instead of
+  // producing an inverted range.
+  const maxX = Math.max(display.x, display.x + display.width - windowBounds.width);
+  const maxY = Math.max(display.y, display.y + display.height - windowBounds.height);
   return {
-    x: Math.min(
-      Math.max(windowBounds.x, display.x),
-      display.x + display.width - windowBounds.width,
-    ),
-    y: Math.min(
-      Math.max(windowBounds.y, display.y),
-      display.y + display.height - windowBounds.height,
-    ),
+    x: Math.min(Math.max(windowBounds.x, display.x), maxX),
+    y: Math.min(Math.max(windowBounds.y, display.y), maxY),
     width: windowBounds.width,
     height: windowBounds.height,
   };
