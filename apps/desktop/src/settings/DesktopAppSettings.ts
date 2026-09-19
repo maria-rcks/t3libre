@@ -28,10 +28,7 @@ export interface DesktopSettings {
   readonly localEnvironmentEnabled: boolean;
   readonly linuxPasswordStore: LinuxPasswordStorePreference;
   readonly mainWindowBounds: DesktopWindowBounds | null;
-  // Native display id of the monitor the main window was last on. Normal
-  // bounds alone cannot identify a monitor for a maximized window (they are
-  // its last un-maximized geometry), so this is recorded alongside them and
-  // used at startup to reopen on the same display.
+  // Normal bounds can point at a different monitor while maximized.
   readonly mainWindowDisplayId: number | null;
   readonly mainWindowMaximized: boolean;
   readonly serverExposureMode: DesktopServerExposureMode;
