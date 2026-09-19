@@ -1,4 +1,5 @@
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import {
   CommandId,
   type ThreadId,
@@ -161,7 +162,29 @@ export function resolveAutoSettlementAt(input: {
   readonly autoSettleAfterDays: number | null;
   readonly autoSettleOnMerge: boolean;
 }): DateTime.Utc | null {
-  const { thread, pullRequest } = input;
+  const { thread } = input;
+  let pullRequest = input.pullRequest;
+  const links = visibleThreadPullRequests(thread.pullRequests ?? []);
+  if (links.some((link) => link.snapshot === null || link.snapshot.state === "open")) return null;
+  if (links.length > 0) {
+    const terminalAt = (link: (typeof links)[number]) => {
+      const snapshot = link.snapshot;
+      const value = snapshot?.state === "merged" ? snapshot.mergedAt : snapshot?.closedAt;
+      const timestamp = Date.parse(value ?? "");
+      return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
+    };
+    const latest = links.reduce((current, candidate) =>
+      terminalAt(candidate) > terminalAt(current) ? candidate : current,
+    );
+    pullRequest =
+      latest.snapshot === null
+        ? null
+        : {
+            state: latest.snapshot.state,
+            mergedAt: latest.snapshot.mergedAt ?? null,
+            closedAt: latest.snapshot.closedAt ?? null,
+          };
+  }
   if (!isAutoSettlementCandidate(thread, input.nowMs)) return null;
   const activityAtMs = latestMillis([
     toMillis(thread.latestUserMessageAt),
@@ -301,7 +324,9 @@ export const make = Effect.gen(function* () {
       candidates,
       (thread) => settleThread(thread, null),
       { concurrency: 8 },
-    )).filter((thread) => thread !== null);
+    ))
+      .filter((thread) => thread !== null)
+      .filter((thread) => visibleThreadPullRequests(thread.pullRequests ?? []).length === 0);
     // Use the same cwd as the sidebar so both paths share GitManager's PR cache.
     const lookupCwdByThreadId = new Map<string, string>();
     yield* Effect.forEach(
