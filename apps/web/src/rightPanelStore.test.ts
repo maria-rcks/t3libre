@@ -676,7 +676,9 @@ describe("rightPanelStore", () => {
   it("toggle to a different kind switches active", () => {
     useRightPanelStore.getState().toggle(refA, "preview");
     useRightPanelStore.getState().toggle(refA, "pull-requests");
-    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("pull-requests");
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe(
+      "pull-requests",
+    );
   });
 
   it("removeThread clears persisted state", () => {
