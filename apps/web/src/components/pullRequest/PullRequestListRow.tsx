@@ -18,7 +18,8 @@ import {
 /**
  * The one row shape both pull request lists share: the full page and a thread's linked panel.
  * A glyph, then two lines — number and title with the verdict, checks and diff counts on the
- * right; author, branches and the rest under them with the time on the right. The caller owns
+ * right; author and whatever else the caller shows under them with the time on the right. The
+ * page puts repository and labels there, the panel puts the branches there. The caller owns
  * the wrapper (a link on the panel, a button on the page) and hands in the slots.
  */
 export const PULL_REQUEST_ROW_CLASS =
@@ -74,7 +75,7 @@ export function PullRequestRowLines({
   title: ReactNode;
   /** Right end of the first line: review verdict, checks, diff counts. */
   status?: ReactNode;
-  /** Left of the second line: author, branches, labels. */
+  /** Left of the second line: author, then repository and labels or the branches. */
   meta?: ReactNode;
   metaClassName?: string;
   updatedAt?: string | null | undefined;
