@@ -97,11 +97,21 @@ export function resolveAutoSettlementAt(input: {
           };
   }
   if (!isAutoSettlementCandidate(thread, input.now)) return null;
+  // A timer wake is derived (no server event fires when snoozedUntil
+  // passes), so without this the reactor would settle a just-woke thread on
+  // its next minute sweep for pre-snooze inactivity. Anchoring on the wake
+  // restarts the inactivity window instead. Future snoozes never anchor:
+  // early hand-raise wakes (fresh error/completion) keep their own signal.
+  const snoozeWakeAt =
+    thread.snoozedUntil != null && Date.parse(thread.snoozedUntil) <= Date.parse(input.now)
+      ? thread.snoozedUntil
+      : null;
   const activityAt = latestTimestamp([
     thread.latestUserMessageAt,
     thread.latestTurn?.requestedAt,
     thread.latestTurn?.startedAt,
     thread.latestTurn?.completedAt,
+    snoozeWakeAt,
   ]);
   if (pullRequest !== null) {
     if (pullRequestSettles(thread, pullRequest, input.autoSettleOnMerge)) {

@@ -196,6 +196,19 @@ describe("resolveAutoSettlementAt", () => {
     ).toBe(false);
   });
 
+  it("grants a woken snoozed thread a fresh inactivity window", () => {
+    const justWoke = makeThread({
+      snoozedUntil: "2026-08-27T12:00:00.000Z",
+      snoozedAt: "2026-08-20T00:00:00.000Z",
+    });
+    expect(decide(justWoke)).toBe(false);
+    const wokeLongAgo = makeThread({
+      snoozedUntil: "2026-08-20T00:00:00.000Z",
+      snoozedAt: "2026-08-19T00:00:00.000Z",
+    });
+    expect(decide(wokeLongAgo)).toBe(true);
+  });
+
   it("allows a fresh completion to wake snooze before settlement", () => {
     expect(
       decide(
