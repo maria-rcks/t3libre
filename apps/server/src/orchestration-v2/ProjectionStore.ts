@@ -2472,12 +2472,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 FROM retained
                 ORDER BY ordinal ASC, turn_item_id ASC
               `;
-        const cohortPayloads = boundedTurnItemRows.map((row) =>
-          parseEncodedPayload(row.payload_json),
-        );
+        // Reuse the decoded items for cohort IDs and the resulting projection.
+        // Parsing these rows separately duplicates every retained tool output.
+        const turnItems = yield* decodeRows(decodeTurnItemPayload, threadId)(boundedTurnItemRows);
         const cohortJson = (field: string) =>
           JSON.stringify(
-            cohortPayloads.flatMap((payload) => {
+            turnItems.flatMap((payload) => {
               const value = nullableStringField(payload, field);
               return value === null ? [] : [value];
             }),
@@ -2543,7 +2543,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           runtimeRequestRows,
           messageRows,
           planRows,
-          turnItemRows,
           checkpointScopeRows,
           checkpointRows,
           contextHandoffRows,
@@ -2719,7 +2718,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   )
                 ORDER BY plan_id ASC
               `,
-          Effect.succeed(boundedTurnItemRows),
           window === undefined
             ? sql<PayloadRow>`
             SELECT payload_json
@@ -2795,7 +2793,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           runtimeRequests,
           messages,
           plans,
-          turnItems,
           checkpointScopes,
           checkpoints,
           contextHandoffs,
@@ -2811,7 +2808,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           decodeRows(decodeRuntimeRequestPayload, threadId)(runtimeRequestRows),
           decodeRows(decodeMessagePayload, threadId)(messageRows),
           decodeRows(decodePlanPayload, threadId)(planRows),
-          decodeRows(decodeTurnItemPayload, threadId)(turnItemRows),
           decodeRows(decodeCheckpointScopePayload, threadId)(checkpointScopeRows),
           decodeRows(decodeCheckpointPayload, threadId)(checkpointRows),
           decodeRows(decodeContextHandoffPayload, threadId)(contextHandoffRows),
