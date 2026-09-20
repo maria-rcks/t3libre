@@ -6,6 +6,7 @@ import type {
   PullRequestChecksState,
   PullRequestLabel,
   PullRequestMergeability,
+  PullRequestReviewDecision,
   PullRequestState,
 } from "@t3tools/contracts";
 import {
@@ -14,6 +15,8 @@ import {
   CircleDotIcon,
   CircleXIcon,
   UserCheckIcon,
+  UserRoundIcon,
+  UserRoundXIcon,
 } from "lucide-react";
 import { Children, type CSSProperties, isValidElement, type ReactNode, useState } from "react";
 
@@ -67,6 +70,52 @@ export function PullRequestLabelChip({
       <span className="truncate">{label.name}</span>
       {children}
     </Badge>
+  );
+}
+
+/**
+ * The review verdict as one glyph beside the checks glyph, so a row answers both "does it
+ * build" and "did someone say yes" in the same spot. Awaiting review is drawn, not omitted:
+ * green checks on an unreviewed pull request must not look the same as green checks on an
+ * approved one.
+ */
+function reviewDecisionPresentation(decision: PullRequestReviewDecision) {
+  switch (decision) {
+    case "approved":
+      return {
+        Icon: UserCheckIcon,
+        label: "Approved",
+        toneClassName: CHECK_STATUS_PRESENTATION.success.toneClassName,
+      };
+    case "changes-requested":
+      return {
+        Icon: UserRoundXIcon,
+        label: "Changes requested",
+        toneClassName: "text-amber-600/90 dark:text-amber-400/80",
+      };
+    case "review-required":
+      return {
+        Icon: UserRoundIcon,
+        label: "Awaiting review",
+        toneClassName: "text-muted-foreground/60",
+      };
+  }
+}
+
+export function PullRequestReviewDecisionGlyph({
+  decision,
+}: {
+  decision: PullRequestReviewDecision;
+}) {
+  const presentation = reviewDecisionPresentation(decision);
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+        <presentation.Icon aria-hidden className={cn("size-3.5", presentation.toneClassName)} />
+        <span className="sr-only">{presentation.label}</span>
+      </TooltipTrigger>
+      <TooltipPopup>{presentation.label}</TooltipPopup>
+    </Tooltip>
   );
 }
 

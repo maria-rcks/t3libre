@@ -30,7 +30,7 @@ import {
 } from "./PullRequestListRow";
 import {
   PullRequestDiffStat,
-  PullRequestApprovalGlyph,
+  PullRequestReviewDecisionGlyph,
   pullRequestChecksStatePresentation,
 } from "./pullRequestPresentation";
 import { PullRequestGlyph } from "./pullRequestIcons";
@@ -114,29 +114,27 @@ function LinkRow({
             </Tooltip>
           }
           title={snapshot?.title ?? link.repository}
-          // Match the full PR list: review verdict, checks, then diff counts. Each is absent
-          // rather than neutral when the host said nothing, so a row without them reads as
-          // unknown, not as fine.
+          signals={
+            snapshot?.state === "open" ? (
+              <>
+                {snapshot.checksState ? <ChecksGlyph state={snapshot.checksState} /> : null}
+                {snapshot.reviewDecision ? (
+                  <PullRequestReviewDecisionGlyph decision={snapshot.reviewDecision} />
+                ) : snapshot.isDraft ? null : (
+                  <PullRequestReviewDecisionGlyph decision="review-required" />
+                )}
+              </>
+            ) : null
+          }
+          // Match the full PR list: diff counts up top, checks under the lifecycle glyph, the
+          // verdict by the author. Each is absent rather than neutral when the host said
+          // nothing, so a row without them reads as unknown, not as fine.
           status={
-            <>
-              {snapshot?.state === "open" &&
-              (snapshot.reviewDecision === "approved" ||
-                snapshot.reviewDecision === "changes-requested") ? (
-                snapshot.reviewDecision === "approved" ? (
-                  <PullRequestApprovalGlyph />
-                ) : (
-                  <span className="text-amber-600/90 dark:text-amber-400/80">
-                    Changes requested
-                  </span>
-                )
-              ) : null}
-              {snapshot?.checksState ? <ChecksGlyph state={snapshot.checksState} /> : null}
-              <PullRequestDiffStat
-                additions={snapshot?.additions ?? 0}
-                deletions={snapshot?.deletions ?? 0}
-                className="font-mono"
-              />
-            </>
+            <PullRequestDiffStat
+              additions={snapshot?.additions ?? 0}
+              deletions={snapshot?.deletions ?? 0}
+              className="font-mono"
+            />
           }
           meta={
             <>

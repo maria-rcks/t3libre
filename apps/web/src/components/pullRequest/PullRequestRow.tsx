@@ -17,9 +17,9 @@ import {
   PullRequestRowLines,
 } from "./PullRequestListRow";
 import {
-  PullRequestApprovalGlyph,
   PullRequestDiffStat,
   PullRequestLabelChip,
+  PullRequestReviewDecisionGlyph,
 } from "./pullRequestPresentation";
 
 /**
@@ -140,6 +140,29 @@ function PullRequestRowImpl({
           </span>
         }
         title={entry.title}
+        signals={
+          <>
+            {entry.checksState === undefined ? null : (
+              <PullRequestChecksPopover
+                checksState={entry.checksState}
+                environmentId={entry.environmentId}
+                reference={{
+                  projectId: entry.projectId,
+                  repository: entry.repository,
+                  number: entry.number,
+                }}
+              />
+            )}
+            {/* An open pull request with no verdict is awaiting one, and says so: green checks
+                on an unreviewed pull request must not look like green checks on an approved
+                one. Drafts and closed ones are not waiting on anybody. */}
+            {entry.reviewDecision !== undefined ? (
+              <PullRequestReviewDecisionGlyph decision={entry.reviewDecision} />
+            ) : entry.state === "open" && !entry.isDraft ? (
+              <PullRequestReviewDecisionGlyph decision="review-required" />
+            ) : null}
+          </>
+        }
         status={
           <>
             {entry.stack ? (
@@ -157,26 +180,6 @@ function PullRequestRowImpl({
                 }
               />
             ) : null}
-            {/* Only a verdict somebody has actually given: "review required" is the absence of
-                one, and saying so on every unreviewed row would say nothing. */}
-            {entry.reviewDecision === "approved" ? (
-              <PullRequestApprovalGlyph />
-            ) : entry.reviewDecision === "changes-requested" ? (
-              <span className="min-w-0 truncate text-amber-600/90 dark:text-amber-400/80">
-                Changes requested
-              </span>
-            ) : null}
-            {entry.checksState === undefined ? null : (
-              <PullRequestChecksPopover
-                checksState={entry.checksState}
-                environmentId={entry.environmentId}
-                reference={{
-                  projectId: entry.projectId,
-                  repository: entry.repository,
-                  number: entry.number,
-                }}
-              />
-            )}
             <PullRequestDiffStat
               additions={entry.additions}
               deletions={entry.deletions}

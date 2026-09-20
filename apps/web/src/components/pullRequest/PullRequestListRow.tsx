@@ -17,8 +17,10 @@ import {
 
 /**
  * The one row shape both pull request lists share: the full page and a thread's linked panel.
- * A glyph, then two lines — number and title with the verdict, checks and diff counts on the
- * right; author and whatever else the caller shows under them with the time on the right. The
+ * A status column, then two lines — number and title with the diff counts on the right;
+ * author and whatever else the caller shows under them with the time on the right. The column
+ * stacks the lifecycle glyph over the checks glyph, so what a pull request is and how it is
+ * doing read top to bottom at the left edge, and the right edge is only numbers and time. The
  * page puts repository and labels there, the panel puts the branches there. The caller owns
  * the wrapper (a link on the panel, a button on the page) and hands in the slots.
  */
@@ -38,28 +40,34 @@ export function PullRequestRowGlyph({
   isDraft,
   mergeability,
   baseBranch,
+  below,
   className,
 }: {
   state: PullRequestState;
   isDraft: boolean;
   mergeability?: PullRequestMergeability | undefined;
   baseBranch?: string | undefined;
+  /** Under the lifecycle glyph, level with the second line: the checks glyph. */
+  below?: ReactNode;
   className?: string;
 }) {
   return (
-    <span className={cn("relative inline-flex shrink-0", className)}>
-      <PullRequestStateGlyph state={state} isDraft={isDraft} />
-      {/* The wrapper takes the offset, not the icon, so the tooltip trigger inside keeps the
-          badge's size and anchors the popup to it. */}
-      <span className="absolute -right-1 -bottom-1 inline-flex">
-        <PullRequestConflictGlyph
-          state={state}
-          isDraft={isDraft}
-          {...(mergeability === undefined ? {} : { mergeability })}
-          {...(baseBranch === undefined ? {} : { baseBranch })}
-          className="size-3 fill-background [stroke-width:2.5]"
-        />
+    <span className={cn("flex w-4 shrink-0 flex-col items-center gap-0.5", className)}>
+      <span className="relative inline-flex">
+        <PullRequestStateGlyph state={state} isDraft={isDraft} />
+        {/* The wrapper takes the offset, not the icon, so the tooltip trigger inside keeps the
+            badge's size and anchors the popup to it. */}
+        <span className="absolute -right-1 -bottom-1 inline-flex">
+          <PullRequestConflictGlyph
+            state={state}
+            isDraft={isDraft}
+            {...(mergeability === undefined ? {} : { mergeability })}
+            {...(baseBranch === undefined ? {} : { baseBranch })}
+            className="size-3 fill-background [stroke-width:2.5]"
+          />
+        </span>
       </span>
+      {below ? <span className="inline-flex text-[11px]">{below}</span> : null}
     </span>
   );
 }
@@ -68,6 +76,7 @@ export function PullRequestRowLines({
   number,
   title,
   status,
+  signals,
   meta,
   metaClassName,
   updatedAt,
@@ -75,8 +84,10 @@ export function PullRequestRowLines({
   /** The `#n` reference, already wrapped in whatever tooltip or menu the caller wants on it. */
   number: ReactNode;
   title: ReactNode;
-  /** Right end of the first line: review verdict, checks, diff counts. */
+  /** Right end of the first line: stack, diff counts. */
   status?: ReactNode;
+  /** Right after the title text: checks and review verdict glyphs. */
+  signals?: ReactNode;
   /** Left of the second line: author, then repository and labels or the branches. */
   meta?: ReactNode;
   metaClassName?: string;
@@ -86,7 +97,10 @@ export function PullRequestRowLines({
     <span className="min-w-0 flex-1">
       <span className="flex min-w-0 items-center gap-1.5">
         {number}
-        <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
+        <span className="min-w-0 truncate text-sm">{title}</span>
+        {signals ? (
+          <span className="flex shrink-0 items-center gap-1 text-[11px]">{signals}</span>
+        ) : null}
         {status ? (
           <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px]">{status}</span>
         ) : null}
