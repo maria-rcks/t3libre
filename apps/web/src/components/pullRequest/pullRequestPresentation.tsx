@@ -59,7 +59,7 @@ export function PullRequestLabelChip({
         "min-w-0 max-w-40 shrink justify-start gap-1 px-1.5",
         size === "sm" && "h-4 text-[.625rem]",
         color &&
-          "bg-[color-mix(in_srgb,var(--label)_12%,transparent)] text-[color-mix(in_srgb,var(--label)_30%,var(--foreground))] dark:bg-[color-mix(in_srgb,var(--label)_18%,transparent)] dark:text-[color-mix(in_srgb,var(--label)_50%,var(--foreground))]",
+          "bg-[color-mix(in_srgb,var(--label)_12%,transparent)] text-[color-mix(in_srgb,var(--label)_30%,var(--color-foreground))] dark:bg-[color-mix(in_srgb,var(--label)_18%,transparent)] dark:text-[color-mix(in_srgb,var(--label)_50%,var(--color-foreground))]",
         className,
       )}
       {...(color ? { style: { "--label": color } as CSSProperties } : {})}
