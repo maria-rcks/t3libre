@@ -29,7 +29,7 @@ export function MiddleTruncate({
   return (
     <span
       {...(showTitle ? { title: value } : {})}
-      className={cn("inline-flex min-w-0 max-w-full whitespace-nowrap", className)}
+      className={cn("inline-flex min-w-0 max-w-full overflow-hidden whitespace-nowrap", className)}
       {...props}
     >
       {split ? (
@@ -56,14 +56,18 @@ export function splitForMiddleTruncate(
   value: string,
   tail?: number,
 ): { head: string; tail: string } | null {
+  // Code points, not UTF-16 units: a cut inside a surrogate pair would render two broken
+  // glyphs where an emoji or a CJK extension character used to be.
+  const chars = Array.from(value);
   let keep = tail ?? DEFAULT_TAIL;
   if (tail === undefined) {
-    const slash = value.lastIndexOf("/");
-    if (slash > 0 && slash < value.length - 1) {
-      const segment = value.length - slash - 1;
+    const slash = chars.lastIndexOf("/");
+    if (slash > 0 && slash < chars.length - 1) {
+      const segment = chars.length - slash - 1;
       keep = segment <= MAX_SEGMENT_TAIL ? segment : DEFAULT_TAIL;
     }
   }
-  if (keep <= 0 || value.length <= keep + 4) return null;
-  return { head: value.slice(0, value.length - keep), tail: value.slice(value.length - keep) };
+  if (keep <= 0 || chars.length <= keep + 4) return null;
+  const cut = chars.length - keep;
+  return { head: chars.slice(0, cut).join(""), tail: chars.slice(cut).join("") };
 }
