@@ -44,7 +44,7 @@ function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry[
         return (
           <PullRequestLabelChip key={label.name} label={label} className={slot.pill}>
             {remaining > 0 ? (
-              <span className={cn("shrink-0 opacity-70", slot.overflow)}>+{remaining}</span>
+              <span className={cn("shrink-0", slot.overflow)}>+{remaining}</span>
             ) : null}
           </PullRequestLabelChip>
         );

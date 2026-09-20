@@ -32,9 +32,11 @@ import {
 
 /**
  * A host label as a flat tinted tag in the label's own color: a wash of it behind, the name
- * in a shade of it that reads on that wash in either theme (mixed toward the foreground, so
- * darker on light and lighter on dark). A label with no usable color falls back to the muted
- * tag. Children ride after the name, for an overflow count.
+ * in a mix of it and the theme foreground. The mix leans to the foreground because hosts hand
+ * out any color at all: at 40% of the label on light and 50% on dark, white, black and
+ * GitHub's pale yellows all clear 4:1 on their wash, and saturated colors sit well above.
+ * A label with no usable color falls back to the muted tag. Children ride after the name,
+ * for an overflow count. The height is pinned so a labeled row is as tall as one without.
  */
 export function PullRequestLabelChip({
   label,
@@ -53,9 +55,10 @@ export function PullRequestLabelChip({
       size={size}
       variant="secondary"
       className={cn(
-        "min-w-0 max-w-40 justify-start gap-1 px-1.5",
+        "min-w-0 max-w-40 shrink justify-start gap-1 px-1.5",
+        size === "sm" && "h-4 text-[.625rem]",
         color &&
-          "bg-[color-mix(in_srgb,var(--label)_12%,transparent)] text-[color-mix(in_srgb,var(--label)_68%,var(--foreground))] dark:bg-[color-mix(in_srgb,var(--label)_18%,transparent)]",
+          "bg-[color-mix(in_srgb,var(--label)_12%,transparent)] text-[color-mix(in_srgb,var(--label)_40%,var(--foreground))] dark:bg-[color-mix(in_srgb,var(--label)_18%,transparent)] dark:text-[color-mix(in_srgb,var(--label)_50%,var(--foreground))]",
         className,
       )}
       {...(color ? { style: { "--label": color } as CSSProperties } : {})}
