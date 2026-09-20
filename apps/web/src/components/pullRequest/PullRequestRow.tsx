@@ -117,6 +117,8 @@ function PullRequestRowImpl({
         isDraft={entry.isDraft}
         mergeability={entry.mergeability}
         baseBranch={entry.baseBranch}
+        // On the title line rather than between the lines, as main aligns it.
+        className="mt-0.75 self-start"
       />
       <PullRequestRowLines
         number={
