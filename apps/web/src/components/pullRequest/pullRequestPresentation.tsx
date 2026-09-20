@@ -119,21 +119,6 @@ export function PullRequestReviewDecisionGlyph({
   );
 }
 
-export function PullRequestApprovalGlyph() {
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
-        <UserCheckIcon
-          aria-hidden
-          className={cn("size-3.5", CHECK_STATUS_PRESENTATION.success.toneClassName)}
-        />
-        <span className="sr-only">Approved</span>
-      </TooltipTrigger>
-      <TooltipPopup>Approved</TooltipPopup>
-    </Tooltip>
-  );
-}
-
 /**
  * How a pull request's state reads anywhere it appears: the thread badge, the right-panel tab,
  * the list, and the detail header all resolve through here so one pull request cannot look like

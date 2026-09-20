@@ -120,9 +120,11 @@ function LinkRow({
                 {snapshot.checksState ? <ChecksGlyph state={snapshot.checksState} /> : null}
                 {snapshot.reviewDecision ? (
                   <PullRequestReviewDecisionGlyph decision={snapshot.reviewDecision} />
-                ) : snapshot.isDraft ? null : (
+                ) : link.host === "github.com" && !snapshot.isDraft ? (
+                  // Only GitHub reports a review decision, so only there does silence mean
+                  // "nobody has said yes yet" rather than "this host does not say".
                   <PullRequestReviewDecisionGlyph decision="review-required" />
-                )}
+                ) : null}
               </>
             ) : null
           }
