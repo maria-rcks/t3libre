@@ -255,6 +255,32 @@ export interface ProjectionStoreV2Shape {
     ReadonlyArray<ProjectionSettlementCandidate>,
     ProjectionStoreV2Error
   >;
+  readonly getTurnStartContext: (
+    threadId: ThreadId,
+    runId: RunId,
+  ) => Effect.Effect<
+    Pick<
+      OrchestrationV2ThreadProjection,
+      | "thread"
+      | "runs"
+      | "attempts"
+      | "nodes"
+      | "subagents"
+      | "providerSessions"
+      | "providerThreads"
+      | "providerTurns"
+      | "messages"
+      | "checkpointScopes"
+      | "contextHandoffs"
+      | "contextTransfers"
+      | "turnItems"
+    > & { readonly hasConversation: boolean },
+    ProjectionStoreV2Error
+  >;
+  readonly getTurnStartHistory: (
+    threadId: ThreadId,
+    runIds?: ReadonlyArray<RunId>,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationV2TurnItem>, ProjectionStoreV2Error>;
   readonly getThreadProjection: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2ThreadProjection, ProjectionStoreV2Error>;
@@ -3277,6 +3303,119 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
     );
 
+    // SQLite trim defaults to ASCII spaces; compact recognition uses JavaScript trim.
+    const javascriptTrimWhitespace =
+      " \t\n\r\v\f\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+
+    // Startup needs execution metadata, not the transcript or inherited fork history.
+    const getTurnStartContext: ProjectionStoreV2Shape["getTurnStartContext"] = (threadId, runId) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const thread = yield* getThread(threadId);
+            const runs = yield* sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_runs
+              WHERE thread_id = ${threadId} ORDER BY ordinal ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeRunPayload, threadId)));
+            const attempts = yield* sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_run_attempts
+              WHERE thread_id = ${threadId} ORDER BY run_id ASC, attempt_ordinal ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeRunAttemptPayload, threadId)));
+            const nodes = yield* sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_nodes
+              WHERE thread_id = ${threadId} AND node_id IN (SELECT json_extract(payload_json, '$.rootNodeId') FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId} AND run_id = ${runId}) ORDER BY node_id ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeNodePayload, threadId)));
+            const subagents = yield* sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_subagents
+              WHERE thread_id = ${threadId} AND status NOT IN ('interrupted','failed','cancelled') ORDER BY subagent_id ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeSubagentPayload, threadId)));
+            const providerThreads = yield* sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_provider_threads
+              WHERE thread_id = ${threadId} ORDER BY COALESCE(first_run_ordinal, 0), provider_thread_id ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeProviderThreadPayload, threadId)));
+            const providerTurns = yield* sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_provider_turns
+              WHERE thread_id = ${threadId} ORDER BY provider_thread_id ASC, ordinal ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeProviderTurnPayload, threadId)));
+            const checkpointScopes = yield* sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_checkpoint_scopes
+              WHERE thread_id = ${threadId} AND node_id IN (SELECT json_extract(payload_json, '$.rootNodeId') FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId} AND run_id = ${runId}) ORDER BY ordinal_within_parent ASC, scope_id ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeCheckpointScopePayload, threadId)));
+            const contextHandoffs = yield* sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_context_handoffs
+              WHERE thread_id = ${threadId} ORDER BY rowid ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeContextHandoffPayload, threadId)));
+            const contextTransfers = yield* sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_context_transfers
+              WHERE source_thread_id = ${threadId} OR target_thread_id = ${threadId} ORDER BY rowid ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeContextTransferPayload, threadId)));
+            const turnItems = yield* sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_turn_items
+              WHERE thread_id = ${threadId} AND run_id = ${runId} ORDER BY ordinal ASC, turn_item_id ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeTurnItemPayload, threadId)));
+            const providerSessions = yield* sql<PayloadRow>`
+              SELECT sessions.payload_json FROM orchestration_v2_projection_provider_sessions AS sessions
+              INNER JOIN orchestration_v2_projection_provider_session_bindings AS bindings
+                ON bindings.provider_session_id = sessions.provider_session_id
+              WHERE bindings.thread_id = ${threadId}
+              ORDER BY sessions.updated_at ASC, sessions.provider_session_id ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeProviderSessionPayload, threadId)));
+            // Compact retries need their original markers; emptiness is an existence check.
+            const messages = yield* sql<PayloadRow>`
+              SELECT payload_json FROM orchestration_v2_projection_messages
+              WHERE thread_id = ${threadId} AND (
+                message_id IN (SELECT json_extract(payload_json, '$.userMessageId') FROM orchestration_v2_projection_runs
+                  WHERE thread_id = ${threadId} AND run_id = ${runId})
+                OR (role = 'user' AND lower(trim(json_extract(payload_json, '$.text'), ${javascriptTrimWhitespace})) = '/compact')
+              ) ORDER BY created_at ASC, message_id ASC
+            `.pipe(Effect.flatMap(decodeRows(decodeMessagePayload, threadId)));
+            const conversation = yield* sql<{ present: number }>`
+              SELECT EXISTS(
+                SELECT 1 FROM orchestration_v2_projection_messages
+                WHERE thread_id = ${threadId} AND role = 'user'
+                    AND (lower(trim(json_extract(payload_json, '$.text'), ${javascriptTrimWhitespace})) <> '/compact'
+                      OR json_array_length(payload_json, '$.attachments') > 0)
+              ) AS present
+            `;
+            return {
+              hasConversation: conversation[0]?.present === 1,
+              thread,
+              runs,
+              attempts,
+              nodes,
+              subagents,
+              providerSessions,
+              providerThreads,
+              providerTurns,
+              messages,
+              checkpointScopes,
+              contextHandoffs,
+              contextTransfers,
+              turnItems,
+            };
+          }),
+        )
+        .pipe(
+          Effect.mapError((cause) =>
+            isProjectionStoreThreadNotFoundError(cause)
+              ? cause
+              : new ProjectionStoreReadError({ threadId, cause }),
+          ),
+        );
+
+    const getTurnStartHistory: ProjectionStoreV2Shape["getTurnStartHistory"] = (threadId, runIds) =>
+      Effect.gen(function* () {
+        const rows = yield* sql<PayloadRow>`
+          SELECT payload_json FROM orchestration_v2_projection_turn_items
+          WHERE thread_id = ${threadId}
+            AND type IN ('user_message','assistant_message','command_execution','error',
+              'run_interrupt_result','file_change','proposed_plan')
+            AND (${runIds === undefined ? 1 : 0} OR run_id IN (SELECT value FROM json_each(${JSON.stringify(runIds ?? [])})))
+          ORDER BY ordinal ASC, turn_item_id ASC
+        `;
+        return yield* decodeRows(decodeTurnItemPayload, threadId)(rows);
+      }).pipe(Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })));
+
     const getThreadProjection: ProjectionStoreV2Shape["getThreadProjection"] = (threadId) =>
       readProjection(threadId, new Set());
 
@@ -4624,6 +4763,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getThread,
       getSettlementCandidates,
       getThreadProjection,
+      getTurnStartContext,
+      getTurnStartHistory,
       getRuntimeRecoveryProjection,
       getRunningTurnContext,
       getThreadProviderContext,
@@ -4987,6 +5128,39 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           }
           return projection;
         }),
+      getTurnStartContext: (threadId, runId) =>
+        service.getThreadProjection(threadId).pipe(
+          Effect.map((projection) => ({
+            ...projection,
+            hasConversation: projection.messages.some(
+              (message) =>
+                message.role === "user" &&
+                (message.text.trim().toLowerCase() !== "/compact" ||
+                  message.attachments.length > 0),
+            ),
+            turnItems: projection.turnItems.filter((item) => item.runId === runId),
+          })),
+        ),
+      getTurnStartHistory: (threadId, runIds) =>
+        service
+          .getThreadProjection(threadId)
+          .pipe(
+            Effect.map((projection) =>
+              projection.turnItems.filter(
+                (item) =>
+                  [
+                    "user_message",
+                    "assistant_message",
+                    "command_execution",
+                    "error",
+                    "run_interrupt_result",
+                    "file_change",
+                    "proposed_plan",
+                  ].includes(item.type) &&
+                  (runIds === undefined || (item.runId !== null && runIds.includes(item.runId))),
+              ),
+            ),
+          ),
       getRuntimeRecoveryProjection: (threadId) => service.getThreadProjection(threadId),
       getThreadSnapshot: (threadId) =>
         service.getThreadProjection(threadId).pipe(
