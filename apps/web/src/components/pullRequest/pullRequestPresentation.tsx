@@ -33,7 +33,7 @@ import {
 /**
  * A host label as a flat tinted tag in the label's own color: a wash of it behind, the name
  * in a mix of it and the theme foreground. The mix leans to the foreground because hosts hand
- * out any color at all: at 30% of the label on light and 50% on dark, white, black and
+ * out any color at all: at 30% of the label on light and 45% on dark, white, black and
  * GitHub's pale yellows all clear 4.5:1 on their wash, selected row included, and
  * saturated colors sit well above.
  * A label with no usable color falls back to the muted tag. Children ride after the name,
@@ -59,7 +59,7 @@ export function PullRequestLabelChip({
         "min-w-0 max-w-40 shrink justify-start gap-1 px-1.5",
         size === "sm" && "h-4 text-[.625rem]",
         color &&
-          "bg-[color-mix(in_srgb,var(--label)_12%,transparent)] text-[color-mix(in_srgb,var(--label)_30%,var(--color-foreground))] dark:bg-[color-mix(in_srgb,var(--label)_18%,transparent)] dark:text-[color-mix(in_srgb,var(--label)_50%,var(--color-foreground))]",
+          "bg-[color-mix(in_srgb,var(--label)_12%,transparent)] text-[color-mix(in_srgb,var(--label)_30%,var(--color-foreground))] dark:bg-[color-mix(in_srgb,var(--label)_18%,transparent)] dark:text-[color-mix(in_srgb,var(--label)_45%,var(--color-foreground))]",
         className,
       )}
       {...(color ? { style: { "--label": color } as CSSProperties } : {})}
