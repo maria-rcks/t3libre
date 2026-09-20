@@ -5235,6 +5235,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     options?: {
       readonly source?: ChatFileAttachment["source"];
       readonly selection?: { start: number; end: number };
+      readonly skipImageInlineChip?: boolean;
     },
   ): Promise<boolean> => {
     if (!activeThreadId || files.length === 0 || isRevertingCheckpointRef.current) return false;
@@ -5258,14 +5259,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // the awaits below: compression is async and the prompt may change while it
     // runs. An explicit selection replace and states where the editor refuses
     // input (connecting, approval, pending questions, project selection) still
-    // get chips so the image is never invisible.
+    // get chips so the image is never invisible, unless paste-as-text explicitly
+    // requests no inline image chip.
     const imageAttachmentsGetChips =
-      options?.selection !== undefined ||
-      isConnecting ||
-      isComposerApprovalState ||
-      pendingUserInputs.length > 0 ||
-      projectSelectionRequired ||
-      stripInlineContextReferences(promptRef.current).trim().length > 0;
+      !options?.skipImageInlineChip &&
+      (options?.selection !== undefined ||
+        isConnecting ||
+        isComposerApprovalState ||
+        pendingUserInputs.length > 0 ||
+        projectSelectionRequired ||
+        stripInlineContextReferences(promptRef.current).trim().length > 0);
 
     // Validation happens synchronously so concurrent pastes see each other:
     // accepted files reserve their attachment slots (via the pending counter)
@@ -5590,7 +5593,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ) {
       event.preventDefault();
       event.stopPropagation();
-      void addComposerAttachments(files);
+      void addComposerAttachments(files, { skipImageInlineChip: bypassAutoAttachment });
       return;
     }
 
