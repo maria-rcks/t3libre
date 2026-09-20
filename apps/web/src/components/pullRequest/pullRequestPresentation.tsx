@@ -4,6 +4,7 @@ import type {
   PullRequestCheck,
   PullRequestCheckStatus,
   PullRequestChecksState,
+  PullRequestLabel,
   PullRequestMergeability,
   PullRequestState,
 } from "@t3tools/contracts";
@@ -14,19 +15,56 @@ import {
   CircleXIcon,
   UserCheckIcon,
 } from "lucide-react";
-import { Children, isValidElement, type ReactNode, useState } from "react";
+import { Children, type CSSProperties, isValidElement, type ReactNode, useState } from "react";
 
 import { cn } from "~/lib/utils";
 
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { PullRequestReviewOutcome } from "./pullRequestDetail.logic";
+import { pullRequestLabelColor } from "./pullRequestList.logic";
 import {
   PULL_REQUEST_STATE_PRESENTATION,
   PullRequestGlyph,
   type PullRequestStatePresentation,
   type PullRequestGlyphIcon,
 } from "./pullRequestIcons";
+
+/**
+ * A host label as a flat tinted tag in the label's own color: a wash of it behind, the name
+ * in a shade of it that reads on that wash in either theme (mixed toward the foreground, so
+ * darker on light and lighter on dark). A label with no usable color falls back to the muted
+ * tag. Children ride after the name, for an overflow count.
+ */
+export function PullRequestLabelChip({
+  label,
+  size = "sm",
+  className,
+  children,
+}: {
+  label: Pick<PullRequestLabel, "name" | "color">;
+  size?: "sm" | "default";
+  className?: string;
+  children?: ReactNode;
+}) {
+  const color = pullRequestLabelColor(label.color);
+  return (
+    <Badge
+      size={size}
+      variant="secondary"
+      className={cn(
+        "min-w-0 max-w-40 justify-start gap-1 px-1.5",
+        color &&
+          "bg-[color-mix(in_srgb,var(--label)_12%,transparent)] text-[color-mix(in_srgb,var(--label)_68%,var(--foreground))] dark:bg-[color-mix(in_srgb,var(--label)_18%,transparent)]",
+        className,
+      )}
+      {...(color ? { style: { "--label": color } as CSSProperties } : {})}
+    >
+      <span className="truncate">{label.name}</span>
+      {children}
+    </Badge>
+  );
+}
 
 export function PullRequestApprovalGlyph() {
   return (

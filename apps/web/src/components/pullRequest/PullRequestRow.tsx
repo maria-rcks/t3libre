@@ -7,7 +7,7 @@ import { getSourceControlPresentationForKind } from "~/sourceControlPresentation
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PullRequestChecksPopover } from "./PullRequestChecksPopover";
-import { pullRequestLabelColor, type EnvironmentPullRequestEntry } from "./pullRequestList.logic";
+import type { EnvironmentPullRequestEntry } from "./pullRequestList.logic";
 import { openOnHostLabel, showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
 import {
   PULL_REQUEST_ROW_CLASS,
@@ -16,7 +16,11 @@ import {
   PullRequestRowGlyph,
   PullRequestRowLines,
 } from "./PullRequestListRow";
-import { PullRequestDiffStat, PullRequestApprovalGlyph } from "./pullRequestPresentation";
+import {
+  PullRequestApprovalGlyph,
+  PullRequestDiffStat,
+  PullRequestLabelChip,
+} from "./pullRequestPresentation";
 
 /**
  * Each slot past the first only appears once the meta line is wide enough to hold it, so a
@@ -36,26 +40,13 @@ function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry[
       {LABEL_SLOTS.map((slot, index) => {
         const label = labels[index];
         if (!label) return null;
-        const dot = pullRequestLabelColor(label.color);
         const remaining = labels.length - index - 1;
         return (
-          <span
-            key={label.name}
-            className={cn(
-              "inline-flex max-w-40 min-w-0 items-center gap-1 rounded-full border border-border/70 bg-muted/40 py-0 pl-1 pr-1.5 text-[10px] leading-3.5 text-muted-foreground",
-              slot.pill,
-            )}
-          >
-            <span
-              aria-hidden
-              className="size-2 shrink-0 rounded-full bg-muted-foreground"
-              {...(dot ? { style: { backgroundColor: dot } } : {})}
-            />
-            <span className="truncate">{label.name}</span>
+          <PullRequestLabelChip key={label.name} label={label} className={slot.pill}>
             {remaining > 0 ? (
-              <span className={cn("shrink-0", slot.overflow)}>+{remaining}</span>
+              <span className={cn("shrink-0 opacity-70", slot.overflow)}>+{remaining}</span>
             ) : null}
-          </span>
+          </PullRequestLabelChip>
         );
       })}
     </span>

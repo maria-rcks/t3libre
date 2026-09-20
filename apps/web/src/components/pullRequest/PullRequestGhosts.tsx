@@ -13,11 +13,11 @@ import { ArrowLeftIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
-import { pullRequestLabelColor } from "./pullRequestList.logic";
 import {
   PullRequestActorLabel,
-  PullRequestDiffStat,
   pullRequestChecksStatePresentation,
+  PullRequestDiffStat,
+  PullRequestLabelChip,
   resolvePullRequestState,
 } from "./pullRequestPresentation";
 
@@ -218,26 +218,15 @@ export function PullRequestDetailGhost({ seed }: { seed?: PullRequestListEntry |
             </div>
             <div className="flex items-center gap-1">
               {seed ? (
-                seed.labels.slice(0, 3).map((label) => {
-                  const color = pullRequestLabelColor(label.color);
-                  return (
-                    <span
-                      key={label.name}
-                      className="inline-flex h-5 max-w-32 items-center gap-1 truncate rounded-full border border-border/70 bg-muted/40 px-2 text-[10px] text-muted-foreground"
-                    >
-                      <span
-                        aria-hidden
-                        className="size-2 shrink-0 rounded-full bg-muted-foreground"
-                        {...(color ? { style: { backgroundColor: color } } : {})}
-                      />
-                      <span className="truncate">{label.name}</span>
-                    </span>
-                  );
-                })
+                seed.labels
+                  .slice(0, 3)
+                  .map((label) => (
+                    <PullRequestLabelChip key={label.name} label={label} className="max-w-32" />
+                  ))
               ) : (
                 <>
-                  <GhostBar className="h-5 w-24 rounded-full" />
-                  <GhostBar className="h-5 w-20 rounded-full" />
+                  <GhostBar className="h-4 w-20" />
+                  <GhostBar className="h-4 w-16" />
                 </>
               )}
             </div>
