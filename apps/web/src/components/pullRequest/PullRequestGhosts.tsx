@@ -50,7 +50,7 @@ export function PullRequestListGhost({
       {Array.from({ length: rows }, (_, index) => (
         <div
           key={index}
-          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-3 py-2"
+          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-3 py-2.5"
         >
           <GhostBar className="size-4 rounded-full" />
           <div className="min-w-0 space-y-1.5">
