@@ -523,9 +523,11 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                   : persistedActiveSurfaceId !== null);
               // An open panel needs an active surface: if migration dropped
               // the persisted one (e.g. plan was active), fall back to the
-              // first survivor instead of rendering an open empty panel.
+              // first survivor instead of rendering an open empty panel. Removed
+              // agents selections also keep a survivor ready while the panel is closed.
               const activeSurfaceId =
-                persistedActiveSurfaceId ?? (isOpen ? (surfaces[0]?.id ?? null) : null);
+                persistedActiveSurfaceId ??
+                (isOpen || rawActiveSurfaceId === "agents" ? (surfaces[0]?.id ?? null) : null);
               return [
                 threadKey,
                 {

@@ -385,17 +385,21 @@ describe("rightPanelStore", () => {
     });
   });
 
-  it.each(["plan", "agents"])("drops persisted %s surfaces and falls back cleanly", (kind) => {
+  it.each([
+    { kind: "plan", isOpen: true },
+    { kind: "agents", isOpen: true },
+    { kind: "agents", isOpen: false },
+  ])("drops $kind with isOpen=$isOpen and falls back", ({ kind, isOpen }) => {
     expect(
       migratePersistedRightPanelState({
         byThreadKey: {
           "env-1:thread-A": {
-            isOpen: true,
+            isOpen,
             activeSurfaceId: kind,
             surfaces: [{ id: kind, kind }],
           },
           "env-1:thread-B": {
-            isOpen: true,
+            isOpen,
             activeSurfaceId: kind,
             surfaces: [
               { id: kind, kind },
@@ -412,7 +416,7 @@ describe("rightPanelStore", () => {
           surfaces: [],
         },
         "env-1:thread-B": {
-          isOpen: true,
+          isOpen,
           activeSurfaceId: "diff",
           surfaces: [{ id: "diff", kind: "diff" }],
         },
