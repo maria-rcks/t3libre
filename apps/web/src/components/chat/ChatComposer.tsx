@@ -5081,7 +5081,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 "flex w-max min-w-max shrink-0 items-center gap-1",
                 hidden && "pointer-events-none invisible absolute",
                 index >= restingBlockDefs.length - iconOnlyBlockCount &&
-                  "[&_[data-composer-control-label]]:pointer-events-none [&_[data-composer-control-label]]:invisible [&_[data-composer-control-label]]:absolute [&_[data-composer-control-label]]:w-max [&_[data-composer-control-label]]:max-w-none [&_[data-composer-control-compact-icon]]:visible [&_[data-composer-control-compact-icon]]:relative",
+                  "[&_[data-composer-control-label]]:pointer-events-none [&_[data-composer-control-label]]:invisible [&_[data-composer-control-label]]:absolute [&_[data-composer-control-label]]:w-max [&_[data-composer-control-label]]:max-w-none [&_[data-composer-control-compact-icon]]:[visibility:inherit] [&_[data-composer-control-compact-icon]]:relative",
               )}
             >
               {def.content}

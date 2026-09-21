@@ -590,6 +590,7 @@ export const TraitsPicker = memo(function TraitsPicker({
     primarySelectDescriptorId: primarySelectDescriptor?.id ?? null,
     ultrathinkPromptControlled,
   });
+  const accessibleLabel = showFastModeIcon ? `${triggerLabel}, Fast mode on` : triggerLabel;
   const fastModeIcon = showFastModeIcon ? (
     <>
       <ComposerControlIcon
@@ -623,7 +624,7 @@ export const TraitsPicker = memo(function TraitsPicker({
             <MenuTrigger
               render={
                 <ComposerControl
-                  aria-label={triggerLabel}
+                  aria-label={accessibleLabel}
                   data-composer-shortcut={isComposerOwned ? "composer.effort" : undefined}
                   variant={triggerVariant ?? "ghost"}
                   size={size}
@@ -675,7 +676,7 @@ export const TraitsPicker = memo(function TraitsPicker({
             </>
           )}
         </TooltipTrigger>
-        <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
+        <TooltipPopup side="top">{accessibleLabel}</TooltipPopup>
       </Tooltip>
       <MenuPopup align="start" {...(isComposerOwned ? composerFloatingLayerProps : {})}>
         <TraitsMenuContent
