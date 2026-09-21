@@ -6,6 +6,7 @@ import type {
   ProjectId,
   PullRequestAction,
   PullRequestInvolvement,
+  PullRequestMergeMethod,
   PullRequestListCursors,
   PullRequestListFilters,
   PullRequestListInput,
@@ -153,6 +154,13 @@ import {
   type EnvironmentQueryTarget,
 } from "../state/pullRequests";
 import { useAtomCommand } from "../state/use-atom-command";
+import { useShortcutModifierState } from "../shortcutModifierState";
+import {
+  PullRequestSpeedMergeDialog,
+  type PullRequestSpeedAction,
+} from "../components/pullRequest/PullRequestSpeedActions";
+import { readableFailure } from "../components/pullRequest/pullRequestDetail.logic";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { cn } from "~/lib/utils";
 import { Separator } from "~/components/ui/separator";
 import { primaryServerKeybindingsAtom } from "~/state/server";
@@ -926,12 +934,80 @@ function PullRequestsRouteView() {
   const [overrides, setOverrides] = useState<ReadonlyMap<string, PullRequestListOverride>>(
     () => new Map(),
   );
-  const overrideEntry = (entry: EnvironmentPullRequestEntry, action: PullRequestAction) => {
-    const override = pullRequestOverrideAfterAction(entry, action, new Date().toISOString());
-    if (override === null) return false;
-    setOverrides((current) => new Map(current).set(pullRequestEntryKey(entry), override));
-    return true;
-  };
+  const overrideEntry = useCallback(
+    (entry: EnvironmentPullRequestEntry, action: PullRequestAction) => {
+      const override = pullRequestOverrideAfterAction(entry, action, new Date().toISOString());
+      if (override === null) return false;
+      setOverrides((current) => new Map(current).set(pullRequestEntryKey(entry), override));
+      return true;
+    },
+    [],
+  );
+  // Speed mode: Shift held over the list puts close, reopen and merge on the rows themselves.
+  // A key held while typing in a field is a capital letter, not a mode.
+  const modifiers = useShortcutModifierState();
+  const speed =
+    modifiers.shiftKey &&
+    !(
+      document.activeElement instanceof HTMLInputElement ||
+      document.activeElement instanceof HTMLTextAreaElement
+    );
+  const runRowAction = useAtomCommand(pullRequestEnvironment.runAction, { reportFailure: false });
+  const [speedMergeTarget, setSpeedMergeTarget] = useState<EnvironmentPullRequestEntry | null>(
+    null,
+  );
+  const speedAct = useCallback(
+    async (
+      entry: EnvironmentPullRequestEntry,
+      action: PullRequestSpeedAction,
+      mergeMethod?: PullRequestMergeMethod,
+    ) => {
+      if (action === "merge" && mergeMethod === undefined) {
+        setSpeedMergeTarget(entry);
+        return;
+      }
+      const key = pullRequestEntryKey(entry);
+      overrideEntry(entry, action);
+      const result = await runRowAction({
+        environmentId: entry.environmentId,
+        input: {
+          projectId: entry.projectId,
+          repository: entry.repository,
+          number: entry.number,
+          host: entry.host,
+          action,
+          ...(mergeMethod ? { mergeMethod } : {}),
+        },
+      });
+      if (result._tag === "Failure") {
+        // The row said what was asked; the host said no, so the row takes it back.
+        setOverrides((current) => {
+          const next = new Map(current);
+          next.delete(key);
+          return next;
+        });
+        toastManager.add({
+          type: "error",
+          title: `Could not ${action} #${entry.number}`,
+          description: readableFailure(
+            squashAtomCommandFailure(result),
+            "Check your access on the host.",
+          ),
+        });
+        return;
+      }
+      toastManager.add({
+        type: "success",
+        title: `#${entry.number} ${action === "merge" ? "merged" : action === "close" ? "closed" : "reopened"}`,
+      });
+    },
+    [overrideEntry, runRowAction],
+  );
+  const onSpeedAction = useCallback(
+    (entry: EnvironmentPullRequestEntry, action: PullRequestSpeedAction) =>
+      void speedAct(entry, action),
+    [speedAct],
+  );
   // A reload recreates the registry the queries live in, so with nothing held the page would
   // cold-start into skeletons even though almost every row is unchanged. The last answer for
   // this set of environments is kept across reloads and hydrated here as the carried rows: they
@@ -1764,6 +1840,8 @@ function PullRequestsRouteView() {
                       selected.number === entry.number
                     }
                     onSelect={selectEntry}
+                    speed={speed}
+                    onSpeedAction={onSpeedAction}
                   />
                 );
               })}
@@ -1772,6 +1850,14 @@ function PullRequestsRouteView() {
         </div>
       )}
 
+      <PullRequestSpeedMergeDialog
+        target={speedMergeTarget}
+        onClose={() => setSpeedMergeTarget(null)}
+        onConfirm={(entry, method) => {
+          setSpeedMergeTarget(null);
+          void speedAct(entry, "merge", method);
+        }}
+      />
       {listQuery.error && entries.length > 0 ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
           <span>{listQuery.error} Showing the last pull requests loaded.</span>
