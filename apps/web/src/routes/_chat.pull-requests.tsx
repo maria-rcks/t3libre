@@ -1241,12 +1241,7 @@ function PullRequestsRouteView() {
   );
 
   const entries = useMemo(() => {
-    const known = applyPullRequestOverrides(
-      ordered?.key === filterKey ? ordered.entries : (listData?.entries ?? []),
-      overrides,
-      pullRequestEntryKey,
-      search.state,
-    );
+    const known = ordered?.key === filterKey ? ordered.entries : (listData?.entries ?? []);
     const involvementEntries = filterPullRequestsByInvolvement(known, viewers, search.involvement);
     // The hosts search more than the row shows — a body, a review, a commit message — so once
     // their answer is in, narrowing it again here would throw away matches the reader asked for.
@@ -1281,10 +1276,8 @@ function PullRequestsRouteView() {
     localFilters,
     listData,
     ordered,
-    overrides,
     querySettled,
     search.involvement,
-    search.state,
     searchingHosts,
     showingCarried,
     typedParsed.text,
@@ -1493,9 +1486,17 @@ function PullRequestsRouteView() {
     setStatsByRow((previous) => mergePullRequestDiffStats(previous, stats));
   }, [statsQuery.stats]);
   const displayGroups = useMemo(() => {
+    // The reader's pending answers go on here, after grouping: the authored and reviewing
+    // groups are read separately from the feed, and a row closed a moment ago has to leave
+    // whichever group it was in.
     const enriched = groups.map((group) => ({
       ...group,
-      entries: group.entries.map((entry) => withDiffStat(entry, statsByRow)),
+      entries: applyPullRequestOverrides(
+        group.entries.map((entry) => withDiffStat(entry, statsByRow)),
+        overrides,
+        pullRequestEntryKey,
+        search.state,
+      ),
     }));
     // Searching keeps its relevance order and priority groups unless the reader explicitly asks
     // for another sort. The readiness queue is the default browse order, not a way to bury a
@@ -1508,15 +1509,15 @@ function PullRequestsRouteView() {
         entry.additions + entry.deletions > 0 || statsByRow.has(pullRequestDiffStatKey(entry)),
       search.involvement,
     );
-  }, [groups, search.involvement, sort, statsByRow, typedParsed.text]);
+  }, [groups, overrides, search.involvement, search.state, sort, statsByRow, typedParsed.text]);
   const heldPullRequestsBySurface = useMemo(
     () =>
       new Map(
-        (ordered?.key === filterKey ? ordered.entries : (listData?.entries ?? [])).map(
-          (entry) => [pullRequestListEntryId(entry), entry] as const,
+        groups.flatMap((group) =>
+          group.entries.map((entry) => [pullRequestListEntryId(entry), entry] as const),
         ),
       ),
-    [filterKey, listData, ordered],
+    [groups],
   );
   const listedPullRequestsBySurface = useMemo(
     () =>
