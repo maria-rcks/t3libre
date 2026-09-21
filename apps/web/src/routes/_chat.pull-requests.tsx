@@ -926,12 +926,30 @@ function PullRequestsRouteView() {
   const [overrides, setOverrides] = useState<ReadonlyMap<string, PullRequestListOverride>>(
     () => new Map(),
   );
-  const overrideEntry = (entry: EnvironmentPullRequestEntry, action: PullRequestAction) => {
-    const override = pullRequestOverrideAfterAction(entry, action, new Date().toISOString());
-    if (override === null) return false;
+  const overrideToken = useRef(0);
+  /** Writes the action's outcome onto the row; the token names this write for a later rollback. */
+  const overrideEntry = (
+    entry: EnvironmentPullRequestEntry,
+    action: PullRequestAction,
+  ): number | null => {
+    const token = ++overrideToken.current;
+    const override = pullRequestOverrideAfterAction(entry, action, new Date(), token);
+    if (override === null) return null;
     setOverrides((current) => new Map(current).set(pullRequestEntryKey(entry), override));
-    return true;
+    return token;
   };
+  /** A rollback for one write only: a later action's note over the same row is left alone. */
+  const revertOverride = (key: string, token: number | null) => {
+    if (token === null) return;
+    setOverrides((current) => {
+      if (current.get(key)?.token !== token) return current;
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
+  };
+  /** The detail panel's own writes, by row, so its failure takes back its own note. */
+  const detailOverrideTokens = useRef(new Map<string, number | null>());
   // A reload recreates the registry the queries live in, so with nothing held the page would
   // cold-start into skeletons even though almost every row is unchanged. The last answer for
   // this set of environments is kept across reloads and hydrated here as the carried rows: they
@@ -1107,10 +1125,9 @@ function PullRequestsRouteView() {
     // The host's word outranks the reader's, once it has actually said it: an override is
     // cleared by an answer that agrees with it, not by any answer that happens to land.
     setOverrides((current) =>
-      settlePullRequestOverrides(current, answered.entries, pullRequestEntryKey, search.state),
+      settlePullRequestOverrides(current, answered.entries, pullRequestEntryKey, Date.now()),
     );
   }, [
-    search.state,
     answered,
     filterKey,
     sentCursors,
@@ -2157,16 +2174,20 @@ function PullRequestsRouteView() {
                 const stateOnly =
                   action !== undefined &&
                   acted !== undefined &&
-                  pullRequestOverrideAfterAction(acted, action, "") !== null;
+                  pullRequestOverrideAfterAction(acted, action, new Date(), 0) !== null;
                 if (stateOnly) {
-                  if (phase === "sent") overrideEntry(acted, action);
+                  const key = pullRequestEntryKey(acted);
+                  // A merge is written on once the host has done it, since a host that only
+                  // queues one leaves the pull request open; the rest go on as they are sent.
+                  if (phase === "sent" && action !== "merge") {
+                    detailOverrideTokens.current.set(key, overrideEntry(acted, action));
+                  }
                   if (phase === "failed") {
-                    const key = pullRequestEntryKey(acted);
-                    setOverrides((current) => {
-                      const next = new Map(current);
-                      next.delete(key);
-                      return next;
-                    });
+                    revertOverride(key, detailOverrideTokens.current.get(key) ?? null);
+                  }
+                  if (phase === "done" && action === "merge") {
+                    overrideEntry(acted, action);
+                    refreshListAndStats(undefined, panelEnvironmentId);
                   }
                   return;
                 }

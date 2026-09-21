@@ -1619,21 +1619,25 @@ describe("pull request list overrides", () => {
   const key = (row: { number: number }) => `#${row.number}`;
 
   it("maps the actions that change a row's state and nothing else", () => {
-    const at = "2026-07-02T00:00:00Z";
-    expect(pullRequestOverrideAfterAction(entry(1, "open"), "close", at)).toEqual({
+    const now = new Date("2026-07-02T00:00:00Z");
+    expect(pullRequestOverrideAfterAction(entry(1, "open"), "close", now, 7)).toEqual({
       state: "closed",
-      updatedAt: at,
+      updatedAt: "2026-07-02T00:00:00.000Z",
+      token: 7,
+      at: now.getTime(),
     });
-    expect(pullRequestOverrideAfterAction(entry(1, "closed"), "reopen", at)?.state).toBe("open");
-    expect(pullRequestOverrideAfterAction(entry(1, "open"), "merge", at)?.state).toBe("merged");
-    expect(pullRequestOverrideAfterAction(entry(1, "open"), "draft", at)?.isDraft).toBe(true);
-    expect(pullRequestOverrideAfterAction(entry(1, "open"), "update-branch", at)).toBeNull();
+    expect(pullRequestOverrideAfterAction(entry(1, "closed"), "reopen", now, 1)?.state).toBe(
+      "open",
+    );
+    expect(pullRequestOverrideAfterAction(entry(1, "open"), "merge", now, 1)?.state).toBe("merged");
+    expect(pullRequestOverrideAfterAction(entry(1, "open"), "draft", now, 1)?.isDraft).toBe(true);
+    expect(pullRequestOverrideAfterAction(entry(1, "open"), "update-branch", now, 1)).toBeNull();
   });
 
   it("writes the override over the row and drops it from a list whose state it left", () => {
     const rows = [entry(1, "open"), entry(2, "open")];
     const overrides = new Map([
-      ["#1", { state: "closed" as const, updatedAt: "2026-07-03T00:00:00Z" }],
+      ["#1", { state: "closed" as const, updatedAt: "2026-07-03T00:00:00Z", token: 1, at: 0 }],
     ]);
     expect(
       applyPullRequestOverrides(rows, overrides, key, "open").map((row) => row.number),
@@ -1664,16 +1668,23 @@ describe("pull request list override settlement", () => {
   const key = (row: { number: number }) => `#${row.number}`;
 
   it("keeps an override until an answer agrees with it", () => {
-    const closed = { state: "closed" as const, updatedAt: "2026-07-03T00:00:00Z" };
+    const at = 1_000_000;
+    const closed = { state: "closed" as const, updatedAt: "2026-07-03T00:00:00Z", token: 1, at };
     const overrides = new Map([["#1", closed]]);
     // A read from before the action still says open: the override stands.
-    expect(settlePullRequestOverrides(overrides, [entry(1, "open")], key, "open")).toBe(overrides);
-    // The row is gone from an open list: that is the host agreeing.
-    expect(settlePullRequestOverrides(overrides, [entry(2, "open")], key, "open").size).toBe(0);
-    // Absent from an "all" list says nothing, so the override stays.
-    expect(settlePullRequestOverrides(overrides, [entry(2, "open")], key, "all").size).toBe(1);
+    expect(settlePullRequestOverrides(overrides, [entry(1, "open")], key, at + 5_000)).toBe(
+      overrides,
+    );
+    // Absent from the answer says nothing: the row may live in another group or page.
+    expect(settlePullRequestOverrides(overrides, [entry(2, "open")], key, at + 5_000).size).toBe(1);
     // Present as closed: confirmed.
-    expect(settlePullRequestOverrides(overrides, [entry(1, "closed")], key, "all").size).toBe(0);
+    expect(settlePullRequestOverrides(overrides, [entry(1, "closed")], key, at + 5_000).size).toBe(
+      0,
+    );
+    // Present as open a good while later: the host's news, which outranks the note.
+    expect(settlePullRequestOverrides(overrides, [entry(1, "open")], key, at + 90_000).size).toBe(
+      0,
+    );
   });
 
   it("does not hand back the old order when only the order changed", () => {
