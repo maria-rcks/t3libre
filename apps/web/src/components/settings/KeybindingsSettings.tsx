@@ -128,10 +128,12 @@ function KeybindingsSearchInput({
         value={query}
         onChange={(event) => onChange(event.currentTarget.value)}
         onKeyDown={(event) => {
-          if (event.key === "Escape" && query.length > 0) {
-            event.preventDefault();
-            onChange("");
-          }
+          // The settings route treats an unhandled Escape as "go back";
+          // inside the search box it clears, then leaves the field.
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          if (query.length > 0) onChange("");
+          else event.currentTarget.blur();
         }}
         placeholder="Search keybindings"
         aria-label="Search keybindings"
