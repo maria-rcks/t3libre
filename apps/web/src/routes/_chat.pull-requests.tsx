@@ -1029,7 +1029,15 @@ function PullRequestsRouteView() {
       }
       toastManager.add({
         type: "success",
-        title: `#${entry.number} ${action === "merge" ? "merged" : action === "close" ? "closed" : "reopened"}`,
+        title: `#${entry.number} ${
+          action === "merge"
+            ? "merged"
+            : action === "close"
+              ? "closed"
+              : action === "reopen"
+                ? "reopened"
+                : "marked ready for review"
+        }`,
       });
       if (action === "merge") {
         overrideEntry(entry, action);
@@ -1056,50 +1064,6 @@ function PullRequestsRouteView() {
       await sendSpeedAction(entry, action, token, mergeMethod);
     },
     [claimSpeedPending, overrideEntry, sendSpeedAction],
-  );
-  const postSpeedComment = useAtomCommand(pullRequestEnvironment.comment, {
-    reportFailure: false,
-  });
-  /** A close with words: the comment goes first, and a refused comment closes nothing. */
-  const speedCloseWithComment = useCallback(
-    async (entry: EnvironmentPullRequestEntry, body: string) => {
-      const key = pullRequestEntryKey(entry);
-      if (!claimSpeedPending(key)) return false;
-      const token = overrideEntry(entry, "close");
-      const commented = await postSpeedComment({
-        environmentId: entry.environmentId,
-        input: {
-          projectId: entry.projectId,
-          repository: entry.repository,
-          number: entry.number,
-          host: entry.host,
-          body,
-        },
-      });
-      if (commented._tag === "Failure") {
-        releaseSpeedPending(key);
-        revertOverride(key, token);
-        toastManager.add({
-          type: "error",
-          title: `Could not comment on #${entry.number}`,
-          description: readableFailure(
-            squashAtomCommandFailure(commented),
-            "Check your access on the host.",
-          ),
-        });
-        return false;
-      }
-      await sendSpeedAction(entry, "close", token);
-      return true;
-    },
-    [
-      claimSpeedPending,
-      overrideEntry,
-      postSpeedComment,
-      releaseSpeedPending,
-      revertOverride,
-      sendSpeedAction,
-    ],
   );
   const onSpeedAction = useCallback(
     (entry: EnvironmentPullRequestEntry, action: PullRequestSpeedAction) =>
@@ -1969,7 +1933,6 @@ function PullRequestsRouteView() {
                     speed={speed}
                     speedPending={speedPending.has(entryKey)}
                     onSpeedAction={onSpeedAction}
-                    onSpeedCloseWithComment={speedCloseWithComment}
                   />
                 );
               })}
