@@ -2232,6 +2232,22 @@ export function GeneralSettingsPanel() {
           }
         />
 
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("auto-resume-limited-threads")}
+          description="Resume usage-limit stops at the reported reset time. Each thread can cancel its scheduled continuation."
+          settingKeys={["autoResumeLimitedThreads"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["autoResumeLimitedThreads"]}
+              checked={settings.autoResumeLimitedThreads}
+              onCheckedChange={(checked) =>
+                updateSettings({ autoResumeLimitedThreads: Boolean(checked) })
+              }
+              aria-label="Auto-resume limited threads"
+            />
+          }
+        />
         {supportsAutoSettlement ? (
           <>
             <SettingsRow
