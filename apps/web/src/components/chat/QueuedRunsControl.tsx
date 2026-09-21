@@ -1,5 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
+import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type {
   ChatAttachment as ContractChatAttachment,
   EnvironmentId,
@@ -282,6 +283,9 @@ export function QueuedRunsControl({
         <ComposerBanner.Scroll className={cn("max-h-32", !expanded && "hidden")}>
           <ComposerBanner.Children render={<ol />} id={queueListId}>
             {items.map((item) => {
+              const previewText = replaceComposerContextReferences(item.text, (reference) =>
+                reference.kind === "image" && item.thumbnails.length > 0 ? "" : reference.label,
+              ).trim();
               const rowRunId = item.runId;
               const rowServerIndex = item.serverIndex;
               const isEditing = rowRunId !== null && rowRunId === props.editingRunId;
@@ -403,10 +407,10 @@ export function QueuedRunsControl({
                     ) : null}
                     <Tooltip>
                       <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
-                        {item.text}
+                        {previewText}
                       </TooltipTrigger>
                       <TooltipPopup side="top" className="max-w-96 break-words">
-                        {item.text}
+                        {previewText}
                       </TooltipPopup>
                     </Tooltip>
                   </ComposerBanner.Content>
