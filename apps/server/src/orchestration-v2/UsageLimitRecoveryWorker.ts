@@ -1,20 +1,15 @@
-import {
-  CommandId,
-  MessageId,
-  type OrchestrationV2ThreadShell,
-  type OrchestrationV2Command,
-} from "@t3tools/contracts";
+import { CommandId, MessageId, type OrchestrationV2Command } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Schedule from "effect/Schedule";
+import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
 /** The persisted run and reset form the identity of one recovery opportunity. */
 export function limitRecoveryCommand(
-  thread: OrchestrationV2ThreadShell,
+  thread: ProjectionStore.ProjectionLimitRecoveryCandidate,
   autoResume: boolean,
   nowMs: number,
   snooze = false,
@@ -82,9 +77,14 @@ const makeSweep = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   return Effect.fn("UsageLimitRecoveryWorker.sweep")(function* () {
     const preferences = yield* settings.getSettings;
-    const snapshot = yield* projections.getShellSnapshot();
-    const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
-    for (const thread of snapshot.threads) {
+    const now = yield* DateTime.now;
+    const candidates = yield* projections.getLimitRecoveryCandidates({
+      now,
+      autoResume: preferences.autoResumeLimitedThreads,
+      snooze: preferences.snoozeLimitedThreads,
+    });
+    const nowMs = DateTime.toEpochMillis(now);
+    for (const thread of candidates) {
       const command = limitRecoveryCommand(
         thread,
         preferences.autoResumeLimitedThreads,
@@ -104,17 +104,12 @@ const makeSweep = Effect.gen(function* () {
   });
 });
 
-// The schedule is derived from persisted failures and thread recovery choices,
-// so restarts need no timer restoration and disconnected clients need not run it.
+// The shared scheduler derives due work from persisted failures and recovery
+// choices, so restarts need no timer restoration or connected client.
 export const workerLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const sweep = yield* makeSweep;
-    yield* sweep().pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("orchestration-v2.limit-recovery.sweep-failed", { cause }),
-      ),
-      Effect.repeat(Schedule.spaced("30 seconds")),
-      Effect.forkScoped,
-    );
+    const scheduler = yield* Scheduler.Scheduler;
+    yield* scheduler.register("usage-limit-recovery", sweep());
   }),
 );
