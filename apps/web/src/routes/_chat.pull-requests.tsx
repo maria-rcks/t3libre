@@ -2182,9 +2182,12 @@ function PullRequestsRouteView() {
                   if (phase === "sent" && action !== "merge") {
                     detailOverrideTokens.current.set(key, overrideEntry(acted, action));
                   }
-                  if (phase === "failed") {
+                  // A merge wrote nothing on the way out, so its failure has nothing to take
+                  // back; an earlier action's note on the same row is left standing.
+                  if (phase === "failed" && action !== "merge") {
                     revertOverride(key, detailOverrideTokens.current.get(key) ?? null);
                   }
+                  if (phase !== "sent") detailOverrideTokens.current.delete(key);
                   if (phase === "done" && action === "merge") {
                     overrideEntry(acted, action);
                     refreshListAndStats(undefined, panelEnvironmentId);
