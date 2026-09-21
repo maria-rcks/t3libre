@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import { cn } from "~/lib/utils";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
+import { MiddleTruncate } from "../ui/middle-truncate";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   PullRequestActorAvatar,
@@ -151,8 +152,12 @@ export function PullRequestRowAuthor({
 /** `head → base`, in the mono the branches are typed in. */
 export function PullRequestRowBranches({ head, base }: { head: string; base: string }) {
   return (
-    <span className="truncate font-mono">
-      {head} → {base}
+    <span className="flex min-w-0 items-center gap-1 font-mono">
+      <MiddleTruncate value={head} />
+      <span aria-hidden className="shrink-0">
+        →
+      </span>
+      <MiddleTruncate value={base} />
     </span>
   );
 }
