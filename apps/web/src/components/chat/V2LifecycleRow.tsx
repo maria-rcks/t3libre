@@ -7,8 +7,9 @@ import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { environmentThreadDetails } from "../../state/threads";
-import { ThreadRelationshipIcon } from "./ThreadRelationshipIcon";
-import { WorkLogButton, WorkLogRow } from "./WorkLog";
+import { PullRequestActorAvatar } from "../pullRequest/pullRequestPresentation";
+import { cn } from "../../lib/utils";
+import { WorkLogRow } from "./WorkLog";
 import { resolveHandoffEndpoints, type HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
 import { Fragment } from "react";
 import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
@@ -24,6 +25,8 @@ import {
 } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
+  BotIcon,
+  ChevronRightIcon,
   ArrowRightLeftIcon,
   ArrowRightIcon,
   GitForkIcon,
@@ -225,6 +228,34 @@ export function V2LifecycleRow(props: {
   return null;
 }
 
+export function SubagentAvatar({
+  driver,
+  provider,
+}: {
+  driver?: ProviderDriverKind | undefined;
+  provider?: ServerProvider | undefined;
+}) {
+  return (
+    <PullRequestActorAvatar
+      actor={null}
+      className="size-7 border-2 border-background bg-muted text-[9px]"
+      fallback={
+        driver ? (
+          <ProviderInstanceIcon
+            driverKind={driver}
+            displayName={provider?.displayName ?? driver}
+            acpRegistryIconUrl={provider?.iconUrl}
+            className="z-auto"
+            iconClassName="size-4"
+          />
+        ) : (
+          <BotIcon className="size-4" />
+        )
+      }
+    />
+  );
+}
+
 function SubagentTimelineLink(props: {
   readonly parentRef: ScopedThreadRef;
   readonly subagentId: NodeId;
@@ -242,32 +273,62 @@ function SubagentTimelineLink(props: {
     (thread) => thread?.projection.subagents.find((agent) => agent.id === props.subagentId) ?? null,
   );
   const threadId = props.threadId;
-  const statusLabel = props.status.replaceAll("_", " ");
-  const icon = (
-    <ThreadRelationshipIcon driver={props.driver} provider={props.provider} status={props.status} />
+  const status = agent?.status ?? props.status;
+  const statusLabel = status.replaceAll("_", " ");
+  const result = (agent?.result ?? props.result)?.trim();
+  const progress = (agent?.progress ?? props.progress)?.trim();
+  const settled = ["completed", "failed", "cancelled", "interrupted"].includes(status);
+  const detail = settled ? result || progress : progress || result;
+  const content = (
+    <>
+      <SubagentAvatar driver={props.driver} provider={props.provider} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-medium">{props.title}</span>
+        {detail ? (
+          <span className="mt-0.5 block line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+            {detail}
+          </span>
+        ) : null}
+      </span>
+      <span
+        className={cn(
+          "shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] text-muted-foreground",
+          status === "failed" && "border-destructive/40 text-destructive",
+          status === "completed" && "border-success/30 text-success",
+        )}
+      >
+        {statusLabel}
+      </span>
+      {threadId !== null ? (
+        <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : null}
+    </>
   );
-  const label = <span className="block truncate">{props.title}</span>;
+  const className =
+    "flex w-full min-w-0 items-center gap-3 rounded-lg border border-border/60 p-3 text-left";
   return (
     <Tooltip>
       <TooltipTrigger
         delay={200}
         render={
           threadId === null ? (
-            <WorkLogRow
-              data-v2-item-type="subagent"
-              aria-description={statusLabel}
-              icon={icon}
-              label={label}
-            />
+            <div data-v2-item-type="subagent" aria-description={statusLabel} className={className}>
+              {content}
+            </div>
           ) : (
-            <WorkLogButton
+            <button
+              type="button"
               data-v2-item-type="subagent"
               aria-label={`Open ${props.title}`}
               aria-description={statusLabel}
               onClick={() => props.onOpenThread(threadId)}
-              icon={icon}
-              label={label}
-            />
+              className={cn(
+                className,
+                "cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+            >
+              {content}
+            </button>
           )
         }
       />

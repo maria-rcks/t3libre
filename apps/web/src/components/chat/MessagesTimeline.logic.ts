@@ -43,9 +43,11 @@ import {
 } from "@t3tools/contracts";
 import type { ThreadRunSummary } from "@t3tools/client-runtime/state/shell";
 import {
+  resolveT3McpToolDefinition,
   resolveT3McpToolPresentation,
   type T3McpToolPresentation,
 } from "@t3tools/shared/t3McpToolPresentation";
+import { compactDynamicToolOutput } from "@t3tools/shared/toolOutput";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 
 function timelineEntryRunId(entry: TimelineEntry): RunId | null {
@@ -990,6 +992,57 @@ function attachTrailingToolGroupsToAssistant(
   return result;
 }
 
+// Delegation already has a durable child card. Match its returned child identity
+// (or its task while running) before removing the duplicate tool row.
+function withoutSubagentDelegationRows(entries: ReadonlyArray<TimelineEntry>) {
+  const tasksByRun = new Map<RunId, Set<string>>();
+  const childrenByRun = new Map<RunId, Set<string>>();
+  for (const entry of entries) {
+    if (entry.kind !== "event" || entry.projectedItem.item.type !== "subagent") continue;
+    const item = entry.projectedItem.item;
+    if (item.origin !== "app_owned" || item.runId === null) continue;
+    const tasks = tasksByRun.get(item.runId) ?? new Set<string>();
+    tasks.add(item.prompt);
+    tasksByRun.set(item.runId, tasks);
+    const children = childrenByRun.get(item.runId) ?? new Set<string>();
+    children.add(item.subagentId);
+    childrenByRun.set(item.runId, children);
+  }
+  const parse = (value: unknown): unknown => {
+    if (typeof value !== "string") return value;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  };
+  return entries.filter((entry) => {
+    if (entry.kind !== "work" || workEntryDisplayIndicatesToolFailure(entry.entry)) return true;
+    const item = entry.entry.projectedItem?.item ?? entry.entry.structuredPayload;
+    if (
+      item?.type !== "dynamic_tool" ||
+      item.runId === null ||
+      (item.status !== "running" && item.status !== "completed") ||
+      resolveT3McpToolDefinition(item.toolName)?.summaryAction !== "delegate"
+    )
+      return true;
+    const output = compactDynamicToolOutput(item.output);
+    if (output?.isError) return true;
+    if (output?.taskId !== undefined) {
+      return !childrenByRun.get(item.runId)?.has(output.taskId);
+    }
+    const input = parse(item.input);
+    return !(
+      item.status === "running" &&
+      typeof input === "object" &&
+      input !== null &&
+      "task" in input &&
+      typeof input.task === "string" &&
+      tasksByRun.get(item.runId)?.has(input.task)
+    );
+  });
+}
+
 export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   latestRun?: TimelineLatestRun | null;
@@ -1006,6 +1059,7 @@ export function deriveMessagesTimelineRows(input: {
   /** Live bootstrap progress. Renders a stage card under the first user message. */
   worktreeSetup?: WorktreeSetupSnapshot | null;
 }): MessagesTimelineRow[] {
+  const timelineEntries = withoutSubagentDelegationRows(input.timelineEntries);
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
   for (const summary of input.turnDiffSummaries) {
     if (summary.assistantMessageId) {
@@ -1014,28 +1068,28 @@ export function deriveMessagesTimelineRows(input: {
   }
   const revertTurnCountByUserMessageId = input.supportsConversationRollback
     ? deriveRevertTurnCountByUserMessageId({
-        timelineEntries: input.timelineEntries,
+        timelineEntries: timelineEntries,
         checkpoints: input.turnDiffSummaries,
       })
     : new Map<MessageId, number>();
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
-    input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
+    timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
-  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(input.timelineEntries);
+  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineEntries);
   const unsettledRunId = deriveUnsettledRunId(input.latestRun ?? null, input.runningRunId ?? null);
-  const failedRunIds = failedTimelineRunIds(input.timelineEntries, input.latestRun ?? null);
+  const failedRunIds = failedTimelineRunIds(timelineEntries, input.latestRun ?? null);
   const supersededFoldsByAnchorEntryId = deriveSupersededAttemptFolds(
-    input.timelineEntries,
+    timelineEntries,
     failedRunIds,
   );
   const activeVisualResponseRunIds = deriveActiveVisualResponseRunIds({
-    timelineEntries: input.timelineEntries,
+    timelineEntries: timelineEntries,
     unsettledRunId,
     isWorking: input.isWorking,
   });
   const foldsByAnchorEntryId = deriveTurnFolds({
-    timelineEntries: input.timelineEntries,
+    timelineEntries: timelineEntries,
     terminalAssistantMessageIds,
     latestRun: input.latestRun ?? null,
     unfoldedRunIds: new Set([...activeVisualResponseRunIds, ...failedRunIds]),
@@ -1065,8 +1119,8 @@ export function deriveMessagesTimelineRows(input: {
   // A steer continues the current turn. Keep its elapsed-time header below
   // the initiating prompt (or automatic wake), rather than moving it down.
   const activeTurnHeaderIndex = input.isWorking
-    ? lastResponseBoundaryIndex(input.timelineEntries) + 1
-    : input.timelineEntries.length;
+    ? lastResponseBoundaryIndex(timelineEntries) + 1
+    : timelineEntries.length;
 
   // Contiguous trailing work entries of the active run collapse into one live
   // row that survives between actions: while a tool runs it shows that tool,
@@ -1075,8 +1129,8 @@ export function deriveMessagesTimelineRows(input: {
   const activeToolEntries: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
   if (input.isWorking && unsettledRunId !== null) {
     let tailAttemptId: string | null | undefined;
-    for (let index = input.timelineEntries.length - 1; index >= activeTurnHeaderIndex; index -= 1) {
-      const entry = input.timelineEntries[index]!;
+    for (let index = timelineEntries.length - 1; index >= activeTurnHeaderIndex; index -= 1) {
+      const entry = timelineEntries[index]!;
       if (
         entry.kind !== "work" ||
         entry.entry.tone === "error" ||
@@ -1164,8 +1218,8 @@ export function deriveMessagesTimelineRows(input: {
     );
   };
 
-  for (let index = 0; index < input.timelineEntries.length; index += 1) {
-    const timelineEntry = input.timelineEntries[index];
+  for (let index = 0; index < timelineEntries.length; index += 1) {
+    const timelineEntry = timelineEntries[index];
     if (!timelineEntry) {
       continue;
     }
@@ -1261,8 +1315,8 @@ export function deriveMessagesTimelineRows(input: {
       }
       const groupedEntries = [timelineEntry.entry];
       let cursor = index + 1;
-      while (cursor < input.timelineEntries.length) {
-        const nextEntry = input.timelineEntries[cursor];
+      while (cursor < timelineEntries.length) {
+        const nextEntry = timelineEntries[cursor];
         if (
           !nextEntry ||
           nextEntry.kind !== "work" ||
@@ -1403,7 +1457,9 @@ export function deriveMessagesTimelineRows(input: {
         timelineEntry.projectedItem.item.type === "subagent" &&
         previous?.kind === "event" &&
         previous.projectedItem.item.type === "subagent" &&
-        previous.projectedItem.item.runId === timelineEntry.projectedItem.item.runId
+        previous.projectedItem.item.runId === timelineEntry.projectedItem.item.runId &&
+        previous.projectedItem.item.providerTurnId ===
+          timelineEntry.projectedItem.item.providerTurnId
       ) {
         nextRows[nextRows.length - 1] = {
           ...previous,
@@ -1516,7 +1572,7 @@ export function deriveMessagesTimelineRows(input: {
   // A running setup owns the working slot above its card and shows no
   // activity row of its own; every other state gets the usual tail.
   const hasWorkingRow = nextRows.some((row) => row.kind === "working");
-  if (input.isWorking && !hasWorkingRow && activeTurnHeaderIndex === input.timelineEntries.length) {
+  if (input.isWorking && !hasWorkingRow && activeTurnHeaderIndex === timelineEntries.length) {
     appendWorkingRow();
   }
   if (
@@ -1533,7 +1589,7 @@ export function deriveMessagesTimelineRows(input: {
   }
 
   const result = attachTrailingToolGroupsToAssistant(
-    attachCreatedThreadSummaries(nextRows, input.timelineEntries),
+    attachCreatedThreadSummaries(nextRows, timelineEntries),
   );
   return result.map((row, index) =>
     timelineRowIsWorkLog(row) && timelineRowIsWorkLog(result[index + 1])
@@ -1549,8 +1605,7 @@ function timelineRowIsWorkLog(row: MessagesTimelineRow | undefined): boolean {
     (row.kind === "work" ||
       row.kind === "work-toggle" ||
       row.kind === "work-live" ||
-      row.kind === "thinking" ||
-      (row.kind === "event" && row.projectedItem.item.type === "subagent"))
+      row.kind === "thinking")
   );
 }
 

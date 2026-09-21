@@ -12,6 +12,7 @@ import {
   deriveTimelineEntriesFromVisibleTurnItems,
   deriveTimelineEntriesFromVisibleTurnItemsWithState,
   workEntryDisplayIndicatesToolFailure,
+  type TimelineEntry,
 } from "../../session-logic";
 import { makeStreamingTimelineFixture } from "../../test-fixtures";
 import type { TurnDiffSummary } from "../../types";
@@ -3679,7 +3680,7 @@ describe("linked timeline resources", () => {
   });
   const common = { isWorking: false, turnDiffSummaries: [], supportsConversationRollback: false };
 
-  it("previews a thought and joins adjacent worklogs without removing message boundaries", () => {
+  it("previews a thought and separates subagent cards from worklogs", () => {
     const rows = deriveMessagesTimelineRows({
       ...common,
       timelineEntries: [
@@ -3717,8 +3718,8 @@ describe("linked timeline resources", () => {
     });
     expect(rows.find((row) => row.kind === "work")).toMatchObject({
       displayLabel: "First paragraph. Second paragraph.",
-      continuesWorkLog: true,
     });
+    expect(rows.find((row) => row.kind === "work")?.continuesWorkLog).toBeUndefined();
     expect(rows.find((row) => row.id === "child")?.continuesWorkLog).toBeUndefined();
   });
 
@@ -3744,6 +3745,101 @@ describe("linked timeline resources", () => {
     ]);
     expect(rows[1]).toMatchObject({ subagents: [{ item: { id: "a" } }, { item: { id: "b" } }] });
   });
+
+  it.each([
+    { status: "completed", envelope: "direct" },
+    { status: "completed", envelope: "structured" },
+    { status: "completed", envelope: "text" },
+    { status: "running", envelope: "direct" },
+  ] as const)(
+    "groups subagents across their $status delegation calls with $envelope output",
+    ({ status, envelope }) => {
+      const child = (id: string) => {
+        const entry = event(id, "subagent");
+        return {
+          ...entry,
+          projectedItem: {
+            item: {
+              ...entry.projectedItem.item,
+              origin: "app_owned",
+              subagentId: id,
+              prompt: id,
+              childThreadId: null,
+            },
+          } as OrchestrationV2ProjectedTurnItem,
+        };
+      };
+      const delegation = (id: string, taskId: string, failed = false): TimelineEntry => ({
+        id,
+        kind: "work",
+        createdAt: "2026-09-08T10:00:02Z",
+        entry: {
+          id,
+          runId,
+          createdAt: "2026-09-08T10:00:02Z",
+          label: "Delegated a child task",
+          tone: failed ? "error" : "tool",
+          itemType: "dynamic_tool",
+          toolLifecycleStatus: failed
+            ? "failed"
+            : status === "running"
+              ? "inProgress"
+              : "completed",
+          projectedItem: {
+            item: {
+              id,
+              runId,
+              type: "dynamic_tool",
+              status: failed ? "failed" : status,
+              toolName: "t3-code.delegate_task",
+              input: { task: taskId },
+              ...(status === "completed"
+                ? {
+                    output:
+                      envelope === "structured"
+                        ? { content: JSON.stringify({ taskId }), structuredContent: { taskId } }
+                        : envelope === "text"
+                          ? { content: [{ type: "text", text: JSON.stringify({ taskId }) }] }
+                          : { taskId },
+                  }
+                : {}),
+            },
+          } as OrchestrationV2ProjectedTurnItem,
+        },
+      });
+      const rows = deriveMessagesTimelineRows({
+        ...common,
+        isWorking: status === "running",
+        runningRunId: status === "running" ? runId : null,
+        timelineEntries: [
+          child("a"),
+          delegation("delegate-a", "a"),
+          child("b"),
+          delegation("delegate-b", "b"),
+          delegation("unmatched", "other-child"),
+          child("c"),
+          delegation("failed", "c", true),
+          child("d"),
+        ],
+        expandedRunIds: new Set([runId]),
+      });
+      expect(rows.find((row) => row.id === "a")).toMatchObject({
+        subagents: [{ item: { id: "a" } }, { item: { id: "b" } }],
+      });
+      expect(rows.some((row) => row.id === "b")).toBe(false);
+      expect(rows.find((row) => row.id === "c")).toBeDefined();
+      expect(rows.find((row) => row.id === "d")).toBeDefined();
+      const visibleTools = rows.flatMap((row) =>
+        row.kind === "work" || row.kind === "work-live"
+          ? row.groupedEntries.map((entry) => entry.id)
+          : [],
+      );
+      expect(visibleTools).toContain("unmatched");
+      expect(visibleTools).toContain("failed");
+      expect(visibleTools).not.toContain("delegate-a");
+      expect(visibleTools).not.toContain("delegate-b");
+    },
+  );
 
   it("keeps created-chat summaries after the final answer and folds only their timeline rows", () => {
     const timelineEntries = [

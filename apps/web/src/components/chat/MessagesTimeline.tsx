@@ -253,10 +253,17 @@ import {
 } from "../../timestampFormat";
 import { V2ItemInspector } from "./V2ItemInspector";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
-import { isV2LifecycleItem, V2LifecycleRow, type HandoffTimelineRun } from "./V2LifecycleRow";
+import { Collapsible, CollapsibleTrigger, CollapsiblePanel } from "../ui/collapsible";
+import {
+  isV2LifecycleItem,
+  SubagentAvatar,
+  V2LifecycleRow,
+  type HandoffTimelineRun,
+} from "./V2LifecycleRow";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 
 import { SkillInlineText } from "./SkillInlineText";
+import { deriveAgentSpawnSummary } from "./agentSpawnSummary";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import {
   buildReviewCommentRenderablePatch,
@@ -2879,38 +2886,79 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
   );
 }
 
-function V2SubagentGroup({ row }: { row: Extract<TimelineRow, { kind: "event" }> }) {
+const V2SubagentGroup = memo(function V2SubagentGroup({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "event" }>;
+}) {
   const ctx = use(TimelineRowCtx);
   const groupId = `subagent-group:${row.id}`;
   const [expanded, setExpanded] = useState(() =>
     ctx.workGroupViewState.expandedEntries.has(groupId),
   );
-  const members = row.subagents ?? [row.projectedItem];
+  const members = (row.subagents ?? [row.projectedItem]).filter(
+    ({ item }) => item.type === "subagent",
+  );
   const summary = subagentGroupSummary(members.map(({ item }) => item));
-  const toggleExpanded = () => {
+  const status = deriveAgentSpawnSummary({
+    agents: members.map(({ item }) => ({ kind: "subagent", status: item.status })),
+    agentCount: members.length,
+  });
+  const toggleExpanded = (open: boolean) => {
     ctx.onToggleWorkEntry(row.id, expanded);
-    if (expanded) ctx.workGroupViewState.expandedEntries.delete(groupId);
-    else ctx.workGroupViewState.expandedEntries.add(groupId);
-    setExpanded(!expanded);
+    if (open) ctx.workGroupViewState.expandedEntries.add(groupId);
+    else ctx.workGroupViewState.expandedEntries.delete(groupId);
+    setExpanded(open);
   };
   return (
-    <WorkLogBlock
-      continues={row.continuesWorkLog}
-      layout={expanded ? "group-content" : "standalone"}
-    >
-      <div data-subagent-group>
-        <WorkGroupHeader
-          label={summary.label}
-          iconName="bot"
-          active={summary.active}
-          failed={summary.failed}
-          expanded={expanded}
-          createdAt={row.createdAt}
-          timestampFormat={ctx.timestampFormat}
-          onToggle={toggleExpanded}
+    <Collapsible open={expanded} onOpenChange={toggleExpanded} className="mb-3" data-subagent-group>
+      <CollapsibleTrigger
+        aria-label={`${members.length} ${members.length === 1 ? "subagent" : "subagents"}`}
+        className={cn(
+          "flex w-full min-w-0 items-center gap-3 py-2 text-left transition-opacity hover:opacity-100",
+          expanded ? "text-foreground opacity-100" : "text-muted-foreground opacity-55",
+        )}
+      >
+        <span className="flex shrink-0 -space-x-2" aria-hidden>
+          {members
+            .slice(0, 3)
+            .map(({ item }) =>
+              item.type === "subagent" ? (
+                <SubagentAvatar
+                  key={item.id}
+                  driver={item.driver}
+                  provider={ctx.providerStatuses.find(
+                    (provider) => provider.instanceId === item.providerInstanceId,
+                  )}
+                />
+              ) : null,
+            )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs font-semibold">
+            {members.length} {members.length === 1 ? "subagent" : "subagents"}
+          </span>
+          <span
+            className={cn(
+              "block truncate text-[10px] text-muted-foreground",
+              summary.failed && "text-destructive",
+              summary.active && "text-info",
+            )}
+          >
+            {status.status}
+          </span>
+        </span>
+        <ChevronDownIcon
+          aria-hidden
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+            expanded && "rotate-180",
+          )}
         />
+      </CollapsibleTrigger>
+      <CollapsiblePanel>
         {expanded ? (
-          <WorkLogList>
+          <div className="mt-1 space-y-1">
             {members.map((projected) => (
               <V2LifecycleRow
                 environmentId={ctx.activeThreadEnvironmentId}
@@ -2923,12 +2971,12 @@ function V2SubagentGroup({ row }: { row: Extract<TimelineRow, { kind: "event" }>
                 onOpenThread={ctx.onOpenThread}
               />
             ))}
-          </WorkLogList>
+          </div>
         ) : null}
-      </div>
-    </WorkLogBlock>
+      </CollapsiblePanel>
+    </Collapsible>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // Extracted row sections — own their state / store subscriptions so changes
