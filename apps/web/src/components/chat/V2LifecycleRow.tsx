@@ -9,7 +9,6 @@ import { scopeThreadRef, scopeProjectRef } from "@t3tools/client-runtime/environ
 import { environmentThreadDetails } from "../../state/threads";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import * as DateTime from "effect/DateTime";
-import { cn } from "../../lib/utils";
 import { WorkLogRow } from "./WorkLog";
 import { resolveHandoffEndpoints, type HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
 import { Fragment } from "react";
