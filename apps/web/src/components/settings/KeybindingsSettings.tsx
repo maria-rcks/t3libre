@@ -118,7 +118,7 @@ function KeybindingsSearchInput({
   inputRef: RefObject<HTMLInputElement | null>;
 }) {
   return (
-    <InputGroup className="w-full sm:w-64">
+    <InputGroup className="min-w-0 basis-full **:[input]:h-9 sm:basis-0 sm:flex-1 sm:**:[input]:h-8">
       <InputGroupAddon>
         <SearchIcon aria-hidden className="size-3.5" />
       </InputGroupAddon>
@@ -1265,14 +1265,7 @@ interface KeybindingsGroupsProps extends KeybindingRowActions {
 function KeybindingsGroups(props: KeybindingsGroupsProps) {
   const { groups, anchorIds, savingCommand, ...rowActions } = props;
   return groups.map((group) => (
-    <SettingsSection
-      key={group.id}
-      id={`keybindings-${group.id}`}
-      title={group.title}
-      headerAction={
-        <span className="text-[11px] text-muted-foreground tabular-nums">{group.rows.length}</span>
-      }
-    >
+    <SettingsSection key={group.id} id={`keybindings-${group.id}`} title={group.title}>
       {group.rows.map((row) => (
         <KeybindingSettingsRow
           key={row.id}
@@ -1493,44 +1486,36 @@ export function KeybindingsSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection
         {...searchableSetting("keybindings")}
-        headerAction={
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground tabular-nums">
-            {rows.length} {rows.length === 1 ? "binding" : "bindings"}
-            {!isElectron ? <BrowserKeybindingNotice /> : null}
-          </span>
-        }
+        headerAction={!isElectron ? <BrowserKeybindingNotice /> : null}
       >
-        <div className="flex min-w-0 flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-3 sm:px-4">
           <KeybindingsSearchInput query={query} onChange={setQuery} inputRef={searchInputRef} />
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            <Button
-              type="button"
-              size="xs"
-              variant="ghost-muted"
-              disabled={isAddingBinding}
-              onClick={() => setIsAddingBinding(true)}
-            >
-              <PlusIcon />
-              Add keybinding
-            </Button>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost-muted"
-                    disabled={!keybindingsConfigPath}
-                    onClick={openKeybindingsFile}
-                    aria-label="Open keybindings.json"
-                  >
-                    <FileJsonIcon />
-                  </Button>
-                }
-              />
-              <TooltipPopup side="top">Open keybindings.json</TooltipPopup>
-            </Tooltip>
-          </div>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isAddingBinding}
+            onClick={() => setIsAddingBinding(true)}
+          >
+            <PlusIcon aria-hidden className="size-4" />
+            Add keybinding
+          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  disabled={!keybindingsConfigPath}
+                  onClick={openKeybindingsFile}
+                  aria-label="Open keybindings.json"
+                >
+                  <FileJsonIcon aria-hidden className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipPopup side="top">Open keybindings.json</TooltipPopup>
+          </Tooltip>
         </div>
       </SettingsSection>
 
