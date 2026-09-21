@@ -137,7 +137,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
           render={
             <SelectTrigger
               variant="ghost"
-              size={displayMode === "panel" ? "default" : "xs"}
+              size="xs"
               className={cn(
                 "min-w-0 shrink font-normal text-xs!",
                 displayMode === "panel" && THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,

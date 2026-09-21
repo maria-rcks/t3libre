@@ -205,7 +205,7 @@ export default function ProjectScriptsControl({
               {shortcutLabel && (
                 <MenuShortcut
                   className={
-                    presentation === "menu"
+                    isPanel || presentation === "menu"
                       ? "ms-0 mr-7"
                       : "ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0"
                   }
@@ -217,7 +217,7 @@ export default function ProjectScriptsControl({
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                className={`absolute right-0 top-1/2 size-6 -translate-y-1/2 ${presentation === "menu" ? "" : "opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"}`}
+                className={`absolute right-0 top-1/2 size-6 -translate-y-1/2 ${isPanel || presentation === "menu" ? "" : "opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"}`}
                 aria-label={`Edit ${script.name}`}
                 onPointerDown={(event) => {
                   event.preventDefault();

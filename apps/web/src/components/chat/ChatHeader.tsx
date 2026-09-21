@@ -23,7 +23,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { createPortal } from "react-dom";
 import GitActionsControl from "../GitActionsControl";
 import { isTrailingDoubleClick } from "../Sidebar.logic";
 import { type DraftId } from "~/composerDraftStore";
@@ -148,18 +147,6 @@ export const ChatHeader = memo(function ChatHeader({
   onDeleteProjectScript,
 }: ChatHeaderProps) {
   const [actionsOpen, setActionsOpen] = useState(false);
-  const [actionsContainer] = useState(() => {
-    const container = document.createElement("div");
-    container.className = "contents";
-    return container;
-  });
-  // Keep controls mounted while the popup is closed so shortcuts and open dialogs survive.
-  const mountMenuActions = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (node) node.appendChild(actionsContainer);
-    },
-    [actionsContainer],
-  );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeProjectName = activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
@@ -475,15 +462,15 @@ export const ChatHeader = memo(function ChatHeader({
             <ListFilterIcon className="size-4" />
           </PopoverTrigger>
           <PopoverPopup
+            keepMounted
             data-chat-header-actions
             aria-label="Workspace menu"
             align="end"
             className="w-64 max-w-[calc(100vw-2rem)] [-webkit-app-region:no-drag]"
             viewportClassName="p-0 [--viewport-inline-padding:0px]"
           >
-            <div ref={mountMenuActions} className="contents" />
+            {headerActions}
           </PopoverPopup>
-          {createPortal(headerActions, actionsContainer)}
         </Popover>
       </div>
     </div>

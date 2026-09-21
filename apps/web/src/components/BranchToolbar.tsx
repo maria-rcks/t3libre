@@ -620,7 +620,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
           />
         ) : null}
-        {panelSection !== "branch" ? (
+        {panelSection !== "branch" && showGitControls ? (
           <BranchToolbarEnvModeSelector
             displayMode="panel"
             forceNewWorktree={forceNewWorktree}
