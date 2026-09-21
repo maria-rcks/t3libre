@@ -77,6 +77,7 @@ function PullRequestRowImpl({
   statsRef,
   onSelect,
   speed = false,
+  speedPending = false,
   onSpeedAction,
 }: {
   entry: EnvironmentPullRequestEntry;
@@ -97,6 +98,8 @@ function PullRequestRowImpl({
   onSelect: (entry: PullRequestRowTarget) => void;
   /** Shift is held: the row wears its own close, reopen and merge buttons. */
   speed?: boolean;
+  /** One of this row's speed actions is still with the host. */
+  speedPending?: boolean;
   onSpeedAction?: (entry: EnvironmentPullRequestEntry, action: PullRequestSpeedAction) => void;
 }) {
   const { Icon, providerName } = getSourceControlPresentationForKind(entry.provider);
@@ -238,7 +241,7 @@ function PullRequestRowImpl({
         />
       </button>
       {speed && onSpeedAction ? (
-        <PullRequestSpeedActions entry={entry} onAct={onSpeedAction} />
+        <PullRequestSpeedActions entry={entry} pending={speedPending} onAct={onSpeedAction} />
       ) : null}
     </div>
   );

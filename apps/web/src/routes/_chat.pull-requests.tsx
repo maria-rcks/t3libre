@@ -934,15 +934,28 @@ function PullRequestsRouteView() {
   const [overrides, setOverrides] = useState<ReadonlyMap<string, PullRequestListOverride>>(
     () => new Map(),
   );
+  const overrideToken = useRef(0);
+  /** Writes the action's outcome onto the row; the token names this write for a later rollback. */
   const overrideEntry = useCallback(
-    (entry: EnvironmentPullRequestEntry, action: PullRequestAction) => {
-      const override = pullRequestOverrideAfterAction(entry, action, new Date().toISOString());
-      if (override === null) return false;
+    (entry: EnvironmentPullRequestEntry, action: PullRequestAction): number | null => {
+      const token = ++overrideToken.current;
+      const override = pullRequestOverrideAfterAction(entry, action, new Date(), token);
+      if (override === null) return null;
       setOverrides((current) => new Map(current).set(pullRequestEntryKey(entry), override));
-      return true;
+      return token;
     },
     [],
   );
+  /** A rollback for one write only: a later action's note over the same row is left alone. */
+  const revertOverride = useCallback((key: string, token: number | null) => {
+    if (token === null) return;
+    setOverrides((current) => {
+      if (current.get(key)?.token !== token) return current;
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
+  }, []);
   // Speed mode: Shift held over the list puts close, reopen and merge on the rows themselves.
   // A key held while typing in a field is a capital letter, not a mode.
   const modifiers = useShortcutModifierState();
@@ -956,6 +969,12 @@ function PullRequestsRouteView() {
   const [speedMergeTarget, setSpeedMergeTarget] = useState<EnvironmentPullRequestEntry | null>(
     null,
   );
+  const speedPendingRef = useRef<ReadonlySet<string>>(new Set());
+  /** The detail panel's own writes, by row, so its failure takes back its own note. */
+  const detailOverrideTokens = useRef(new Map<string, number | null>());
+  // Rows with a speed action still travelling: no second one for the same row until the
+  // host answers the first, so two cannot land out of order.
+  const [speedPending, setSpeedPending] = useState<ReadonlySet<string>>(() => new Set());
   const speedAct = useCallback(
     async (
       entry: EnvironmentPullRequestEntry,
@@ -967,7 +986,10 @@ function PullRequestsRouteView() {
         return;
       }
       const key = pullRequestEntryKey(entry);
-      overrideEntry(entry, action);
+      if (speedPendingRef.current.has(key)) return;
+      speedPendingRef.current = new Set(speedPendingRef.current).add(key);
+      setSpeedPending(speedPendingRef.current);
+      const token = overrideEntry(entry, action);
       const result = await runRowAction({
         environmentId: entry.environmentId,
         input: {
@@ -979,13 +1001,14 @@ function PullRequestsRouteView() {
           ...(mergeMethod ? { mergeMethod } : {}),
         },
       });
+      speedPendingRef.current = new Set(
+        [...speedPendingRef.current].filter((pending) => pending !== key),
+      );
+      setSpeedPending(speedPendingRef.current);
       if (result._tag === "Failure") {
-        // The row said what was asked; the host said no, so the row takes it back.
-        setOverrides((current) => {
-          const next = new Map(current);
-          next.delete(key);
-          return next;
-        });
+        // The row said what was asked; the host said no, so the row takes it back, unless a
+        // later action has already written something newer over it.
+        revertOverride(key, token);
         toastManager.add({
           type: "error",
           title: `Could not ${action} #${entry.number}`,
@@ -1001,7 +1024,7 @@ function PullRequestsRouteView() {
         title: `#${entry.number} ${action === "merge" ? "merged" : action === "close" ? "closed" : "reopened"}`,
       });
     },
-    [overrideEntry, runRowAction],
+    [overrideEntry, revertOverride, runRowAction],
   );
   const onSpeedAction = useCallback(
     (entry: EnvironmentPullRequestEntry, action: PullRequestSpeedAction) =>
@@ -1183,10 +1206,9 @@ function PullRequestsRouteView() {
     // The host's word outranks the reader's, once it has actually said it: an override is
     // cleared by an answer that agrees with it, not by any answer that happens to land.
     setOverrides((current) =>
-      settlePullRequestOverrides(current, answered.entries, pullRequestEntryKey, search.state),
+      settlePullRequestOverrides(current, answered.entries, pullRequestEntryKey, Date.now()),
     );
   }, [
-    search.state,
     answered,
     filterKey,
     sentCursors,
@@ -1841,6 +1863,7 @@ function PullRequestsRouteView() {
                     }
                     onSelect={selectEntry}
                     speed={speed}
+                    speedPending={speedPending.has(entryKey)}
                     onSpeedAction={onSpeedAction}
                   />
                 );
@@ -2214,16 +2237,19 @@ function PullRequestsRouteView() {
                 const stateOnly =
                   action !== undefined &&
                   acted !== undefined &&
-                  pullRequestOverrideAfterAction(acted, action, "") !== null;
+                  pullRequestOverrideAfterAction(acted, action, new Date(), 0) !== null;
                 if (stateOnly) {
-                  if (phase === "sent") overrideEntry(acted, action);
+                  const key = pullRequestEntryKey(acted);
+                  if (phase === "sent") {
+                    detailOverrideTokens.current.set(key, overrideEntry(acted, action));
+                  }
                   if (phase === "failed") {
-                    const key = pullRequestEntryKey(acted);
-                    setOverrides((current) => {
-                      const next = new Map(current);
-                      next.delete(key);
-                      return next;
-                    });
+                    revertOverride(key, detailOverrideTokens.current.get(key) ?? null);
+                  }
+                  // A merge the host only queued leaves the pull request open, and the row
+                  // would say merged; a finished merge reads the list again to settle it.
+                  if (phase === "done" && action === "merge") {
+                    refreshListAndStats(undefined, panelEnvironmentId);
                   }
                   return;
                 }

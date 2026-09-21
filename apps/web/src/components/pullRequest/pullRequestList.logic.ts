@@ -1153,24 +1153,30 @@ export interface PullRequestListOverride {
   readonly state: PullRequestState;
   readonly isDraft?: boolean;
   readonly updatedAt: string;
+  /** Which action wrote it, so a failure takes back its own note and not a later one's. */
+  readonly token: number;
+  /** When it was written, in the reader's clock. */
+  readonly at: number;
 }
 
 export function pullRequestOverrideAfterAction(
   entry: Pick<PullRequestListEntry, "state" | "isDraft">,
   action: PullRequestAction,
-  at: string,
+  now: Date,
+  token: number,
 ): PullRequestListOverride | null {
+  const stamp = { updatedAt: now.toISOString(), token, at: now.getTime() };
   switch (action) {
     case "close":
-      return { state: "closed", updatedAt: at };
+      return { state: "closed", ...stamp };
     case "reopen":
-      return { state: "open", updatedAt: at };
+      return { state: "open", ...stamp };
     case "merge":
-      return { state: "merged", updatedAt: at };
+      return { state: "merged", ...stamp };
     case "draft":
-      return { state: entry.state, isDraft: true, updatedAt: at };
+      return { state: entry.state, isDraft: true, ...stamp };
     case "ready":
-      return { state: entry.state, isDraft: false, updatedAt: at };
+      return { state: entry.state, isDraft: false, ...stamp };
     default:
       return null;
   }
@@ -1225,29 +1231,38 @@ export function reusePullRequestEntries<Entry extends PullRequestListEntry>(
     : out;
 }
 
+/** How long a read that disagrees is taken for a stale one rather than for news. */
+export const PULL_REQUEST_OVERRIDE_TRUST_MS = 60_000;
+
 /**
- * The overrides a whole-page answer has confirmed, dropped; the rest kept. A read that started
- * before the action can land after it and still say the old thing, so an override is not
- * cleared because an answer arrived but because the answer agrees: the row is there in the
- * state the override said, or it is gone from a list whose state filter no longer holds it.
+ * The overrides an answer has confirmed, dropped; the rest kept. A read that started before
+ * the action can land after it and still say the old thing, so an override is not cleared
+ * because an answer arrived but because the answer agrees: the row is there in the state the
+ * override said. A row that is absent says nothing — the authored and reviewing groups are read
+ * apart from the feed, and a page is only a page — so absence never confirms. A row present in
+ * another state is taken for a stale read for a minute, and for the host's news after that,
+ * which is how a pull request reopened elsewhere comes back.
  */
 export function settlePullRequestOverrides<Entry extends PullRequestListEntry>(
   overrides: ReadonlyMap<string, PullRequestListOverride>,
   answered: ReadonlyArray<Entry>,
   keyOf: (entry: Entry) => string,
-  state: PullRequestListState,
+  now: number,
 ): ReadonlyMap<string, PullRequestListOverride> {
   if (overrides.size === 0) return overrides;
   const byKey = new Map(answered.map((entry) => [keyOf(entry), entry]));
   const kept = new Map<string, PullRequestListOverride>();
   for (const [key, override] of overrides) {
     const row = byKey.get(key);
-    const confirmed =
-      row === undefined
-        ? state !== "all" && override.state !== state
-        : row.state === override.state &&
-          (override.isDraft === undefined || row.isDraft === override.isDraft);
-    if (!confirmed) kept.set(key, override);
+    if (row === undefined) {
+      kept.set(key, override);
+      continue;
+    }
+    const agrees =
+      row.state === override.state &&
+      (override.isDraft === undefined || row.isDraft === override.isDraft);
+    const outranked = now - override.at > PULL_REQUEST_OVERRIDE_TRUST_MS;
+    if (!agrees && !outranked) kept.set(key, override);
   }
   return kept.size === overrides.size ? overrides : kept;
 }

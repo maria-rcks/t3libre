@@ -27,9 +27,12 @@ export type PullRequestSpeedAction = Extract<PullRequestAction, "close" | "reope
  */
 export function PullRequestSpeedActions({
   entry,
+  pending,
   onAct,
 }: {
   entry: EnvironmentPullRequestEntry;
+  /** An action of this row's is still with the host: no second one until it answers. */
+  pending: boolean;
   onAct: (entry: EnvironmentPullRequestEntry, action: PullRequestSpeedAction) => void;
 }) {
   if (entry.state === "merged") return null;
@@ -43,8 +46,10 @@ export function PullRequestSpeedActions({
       <span aria-hidden className="absolute inset-0 -z-10 bg-accent/60" />
       {entry.state === "open" ? (
         <>
-          {entry.isDraft ? null : (
-            <Button size="xs" variant="outline" onClick={act("merge")}>
+          {/* A stacked pull request merges through its stack, where the detail decides
+              whether one layer may go alone; the row offers no lone merge for it. */}
+          {entry.isDraft || entry.stack ? null : (
+            <Button size="xs" variant="outline" disabled={pending} onClick={act("merge")}>
               Merge
             </Button>
           )}
@@ -52,13 +57,14 @@ export function PullRequestSpeedActions({
             size="xs"
             variant="outline"
             className="text-destructive hover:text-destructive"
+            disabled={pending}
             onClick={act("close")}
           >
             Close
           </Button>
         </>
       ) : (
-        <Button size="xs" variant="outline" onClick={act("reopen")}>
+        <Button size="xs" variant="outline" disabled={pending} onClick={act("reopen")}>
           Reopen
         </Button>
       )}
