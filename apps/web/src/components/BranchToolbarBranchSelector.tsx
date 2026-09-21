@@ -9,7 +9,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon, GitBranchIcon, SearchIcon } from "lucide-react";
+import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -64,7 +64,7 @@ import { getVirtualizedScrollFadeClassName } from "./ui/scroll-area";
 import {
   Combobox,
   ComboboxEmpty,
-  ComboboxInput,
+  ComboboxSearchInput,
   ComboboxItem,
   ComboboxListVirtualized,
   ComboboxPopup,
@@ -79,6 +79,7 @@ export interface BranchToolbarBranchSelectorHandle {
 }
 
 interface BranchToolbarBranchSelectorProps {
+  forceNewWorktree?: boolean;
   ref?: Ref<BranchToolbarBranchSelectorHandle>;
   className?: string;
   environmentId: EnvironmentId;
@@ -99,6 +100,7 @@ function toBranchActionErrorMessage(error: unknown): string {
 }
 
 export function BranchToolbarBranchSelector({
+  forceNewWorktree = false,
   ref,
   className,
   environmentId,
@@ -152,7 +154,9 @@ export function BranchToolbarBranchSelector({
     activeThreadBranchOverride !== undefined
       ? activeThreadBranchOverride
       : (serverThread?.branch ?? draftThread?.branch ?? null);
-  const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
+  const activeWorktreePath = forceNewWorktree
+    ? null
+    : (serverThread?.worktreePath ?? draftThread?.worktreePath ?? null);
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const branchCwd = activeWorktreePath ?? activeProjectCwd;
   const hasServerThread = serverThread !== null;
@@ -541,6 +545,7 @@ export function BranchToolbarBranchSelector({
     setIsBranchMenuOpen(open);
     if (!open) {
       setBranchQuery("");
+      highlightedBranchValueRef.current = null;
     }
   }, []);
 
@@ -590,6 +595,9 @@ export function BranchToolbarBranchSelector({
   }, [fetchNextBranchPage, hasNextPage, isBranchMenuOpen, isFetchingNextPage]);
 
   const branchListRef = useRef<LegendListRef | null>(null);
+  // Tracks the highlighted picker value so Enter can activate it even when the
+  // virtualized row is not mounted (Base UI Enter clicks the mounted element).
+  const highlightedBranchValueRef = useRef<string | null>(null);
   const updateBranchListScrollFades = useCallback(() => {
     const scrollElement = branchListRef.current?.getScrollableNode?.();
     if (!(scrollElement instanceof HTMLElement)) {
@@ -672,6 +680,20 @@ export function BranchToolbarBranchSelector({
   const prUrl = currentLinkedPr?.url ?? displayedPr?.url;
   const openPrLink = useOpenPrLink(threadRef);
 
+  function selectPickerItem(itemValue: string) {
+    highlightedBranchValueRef.current = null;
+    if (itemValue === checkoutPullRequestItemValue && prReference && onCheckoutPullRequestRequest) {
+      handleOpenChange(false);
+      onComposerFocusRequest?.();
+      onCheckoutPullRequestRequest(prReference);
+    } else if (itemValue === createBranchItemValue) {
+      createRef(trimmedBranchQuery);
+    } else {
+      const refName = branchByName.get(itemValue);
+      if (refName) selectBranch(refName);
+    }
+  }
+
   function renderPickerItem(itemValue: string, index: number) {
     if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
       return (
@@ -681,15 +703,7 @@ export function BranchToolbarBranchSelector({
           index={index}
           value={itemValue}
           className="pe-2"
-          onClick={() => {
-            if (!prReference || !onCheckoutPullRequestRequest) {
-              return;
-            }
-            setIsBranchMenuOpen(false);
-            setBranchQuery("");
-            onComposerFocusRequest?.();
-            onCheckoutPullRequestRequest(prReference);
-          }}
+          onClick={() => selectPickerItem(itemValue)}
         >
           <div className="flex min-w-0 items-center gap-2 py-1">
             <SourceControlIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -711,7 +725,7 @@ export function BranchToolbarBranchSelector({
           index={index}
           value={itemValue}
           className="pe-1.5"
-          onClick={() => createRef(trimmedBranchQuery)}
+          onClick={() => selectPickerItem(itemValue)}
         >
           <span className="truncate">Create new ref &quot;{newRefName}&quot;</span>
         </ComboboxItem>
@@ -739,7 +753,7 @@ export function BranchToolbarBranchSelector({
         index={index}
         value={itemValue}
         className="pe-1.5"
-        onClick={() => selectBranch(refName)}
+        onClick={() => selectPickerItem(itemValue)}
         onContextMenu={(event) => handleBranchContextMenu(event, itemValue)}
       >
         <div className="flex w-full min-w-0 items-center justify-between gap-2">
@@ -756,7 +770,8 @@ export function BranchToolbarBranchSelector({
       filteredItems={filteredBranchPickerItems}
       autoHighlight
       virtualized
-      onItemHighlighted={(_value, eventDetails) => {
+      onItemHighlighted={(value, eventDetails) => {
+        highlightedBranchValueRef.current = typeof value === "string" ? value : null;
         if (!isBranchMenuOpen || eventDetails.index < 0 || eventDetails.reason !== "keyboard") {
           return;
         }
@@ -820,24 +835,29 @@ export function BranchToolbarBranchSelector({
         className="flex w-80 flex-col"
         {...composerFloatingLayerProps}
       >
-        <div className="shrink-0 px-3 pt-2.5">
-          <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
-            <SearchIcon
-              aria-hidden="true"
-              className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground/55"
-            />
-            <ComboboxInput
-              className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
-              inputClassName="rounded-none bg-transparent text-sm"
-              placeholder="Search refs..."
-              showTrigger={false}
-              size="sm"
-              unstyled
-              value={branchQuery}
-              onChange={(event) => setBranchQuery(event.target.value)}
-            />
-          </div>
-        </div>
+        <ComboboxSearchInput
+          placeholder="Search refs..."
+          value={branchQuery}
+          onChange={(event) => setBranchQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) {
+              return;
+            }
+            const highlightedValue = highlightedBranchValueRef.current;
+            if (
+              highlightedValue === null ||
+              !filteredBranchPickerItems.includes(highlightedValue)
+            ) {
+              return;
+            }
+            (
+              event as typeof event & { preventBaseUIHandler?: () => void }
+            ).preventBaseUIHandler?.();
+            event.preventDefault();
+            event.stopPropagation();
+            selectPickerItem(highlightedValue);
+          }}
+        />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ComboboxEmpty>No refs found.</ComboboxEmpty>
           <div className="relative min-h-0 w-full max-h-56 flex-1 overflow-hidden">
