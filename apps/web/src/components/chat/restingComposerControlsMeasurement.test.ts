@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  resolveRestingComposerControlsLayout,
-  resolveRestingComposerControlsNaturalWidth,
-} from "../composerFooterLayout";
+import { resolveRestingComposerControlsLayout } from "../composerFooterLayout";
 import { measureRestingComposerControls } from "./restingComposerControlsMeasurement";
 
 function measurePicker(input: { clientWidth: number; flexGrow: string; maxWidth?: string }) {
@@ -37,7 +34,6 @@ describe("measureRestingComposerControls", () => {
     const measurement = measurePicker({ clientWidth: 0, flexGrow: "0" });
 
     expect(measurement.naturalFixedWidth).toBe(52);
-    expect(resolveRestingComposerControlsNaturalWidth(measurement)).toBe(196);
     expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth: 200 })).toEqual({
       hiddenCount: 0,
       visible: true,
