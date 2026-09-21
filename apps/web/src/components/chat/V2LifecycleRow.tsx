@@ -414,19 +414,19 @@ function SubagentTimelineLink(props: {
               {content}
             </div>
           ) : (
-            <Button
-              variant="chip"
+            <button
+              type="button"
               data-v2-item-type="subagent"
               aria-label={`Open ${props.title}`}
               aria-description={statusLabel}
               onClick={() => props.onOpenThread(threadId)}
               className={cn(
                 className,
-                "cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+                "cursor-pointer transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
               )}
             >
               {content}
-            </Button>
+            </button>
           )
         }
       />
