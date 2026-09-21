@@ -27,7 +27,9 @@ import {
   type ThreadId,
   type ToolActivityIcon,
 } from "@t3tools/contracts";
-import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { useAtomValue } from "@effect/atom-react";
+import { environmentThreadDetails } from "../../state/threads";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
@@ -2899,9 +2901,22 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
   const members = (row.subagents ?? [row.projectedItem]).filter(
     ({ item }) => item.type === "subagent",
   );
-  const summary = subagentGroupSummary(members.map(({ item }) => item));
+  const liveAgents = useAtomValue(
+    environmentThreadDetails.threadAtom(
+      scopeThreadRef(ctx.activeThreadEnvironmentId, row.projectedItem.item.threadId),
+    ),
+    (thread) => thread?.projection.subagents,
+  );
+  const agents = members.map(({ item }) => ({
+    kind: "subagent" as const,
+    status:
+      (item.type === "subagent"
+        ? liveAgents?.find((agent) => agent.id === item.subagentId)?.status
+        : undefined) ?? item.status,
+  }));
+  const summary = subagentGroupSummary(agents);
   const status = deriveAgentSpawnSummary({
-    agents: members.map(({ item }) => ({ kind: "subagent", status: item.status })),
+    agents,
     agentCount: members.length,
   });
   const toggleExpanded = (open: boolean) => {

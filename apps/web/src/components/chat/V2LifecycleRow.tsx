@@ -316,8 +316,8 @@ function SubagentTimelineLink(props: {
               {content}
             </div>
           ) : (
-            <button
-              type="button"
+            <Button
+              variant="chip"
               data-v2-item-type="subagent"
               aria-label={`Open ${props.title}`}
               aria-description={statusLabel}
@@ -328,7 +328,7 @@ function SubagentTimelineLink(props: {
               )}
             >
               {content}
-            </button>
+            </Button>
           )
         }
       />

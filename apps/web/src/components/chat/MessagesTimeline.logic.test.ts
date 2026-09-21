@@ -3747,13 +3747,15 @@ describe("linked timeline resources", () => {
   });
 
   it.each([
-    { status: "completed", envelope: "direct" },
-    { status: "completed", envelope: "structured" },
-    { status: "completed", envelope: "text" },
-    { status: "running", envelope: "direct" },
+    { status: "completed", envelope: "direct", role: "general" },
+    { status: "completed", envelope: "structured", role: "general" },
+    { status: "completed", envelope: "text", role: "general" },
+    { status: "completed", envelope: "structured", role: "research" },
+    { status: "running", envelope: "direct", role: "general" },
+    { status: "running", envelope: "direct", role: "research" },
   ] as const)(
-    "groups subagents across their $status delegation calls with $envelope output",
-    ({ status, envelope }) => {
+    "matches $status $role delegation calls by child identity with $envelope output",
+    ({ status, envelope, role }) => {
       const child = (id: string) => {
         const entry = event(id, "subagent");
         return {
@@ -3763,7 +3765,8 @@ describe("linked timeline resources", () => {
               ...entry.projectedItem.item,
               origin: "app_owned",
               subagentId: id,
-              prompt: id,
+              prompt:
+                role === "general" ? id : `Act as the ${role} sub-agent for this task.\n\n${id}`,
               childThreadId: null,
             },
           } as OrchestrationV2ProjectedTurnItem,
@@ -3792,7 +3795,7 @@ describe("linked timeline resources", () => {
               type: "dynamic_tool",
               status: failed ? "failed" : status,
               toolName: "t3-code.delegate_task",
-              input: { task: taskId },
+              input: { task: taskId === "b" ? "a" : taskId, role },
               ...(status === "completed"
                 ? {
                     output:
@@ -3814,7 +3817,7 @@ describe("linked timeline resources", () => {
         timelineEntries: [
           child("a"),
           delegation("delegate-a", "a"),
-          child("b"),
+          ...(status === "completed" ? [child("b")] : []),
           delegation("delegate-b", "b"),
           delegation("unmatched", "other-child"),
           child("c"),
@@ -3823,10 +3826,15 @@ describe("linked timeline resources", () => {
         ],
         expandedRunIds: new Set([runId]),
       });
-      expect(rows.find((row) => row.id === "a")).toMatchObject({
-        subagents: [{ item: { id: "a" } }, { item: { id: "b" } }],
-      });
-      expect(rows.some((row) => row.id === "b")).toBe(false);
+      if (status === "completed") {
+        expect(rows.find((row) => row.id === "a")).toMatchObject({
+          subagents: [{ item: { id: "a" } }, { item: { id: "b" } }],
+        });
+        expect(rows.some((row) => row.id === "b")).toBe(false);
+      } else {
+        expect(rows.find((row) => row.id === "a")).toBeDefined();
+        expect(rows.find((row) => row.id === "b")).toBeUndefined();
+      }
       expect(rows.find((row) => row.id === "c")).toBeDefined();
       expect(rows.find((row) => row.id === "d")).toBeDefined();
       const visibleTools = rows.flatMap((row) =>
@@ -3836,8 +3844,8 @@ describe("linked timeline resources", () => {
       );
       expect(visibleTools).toContain("unmatched");
       expect(visibleTools).toContain("failed");
-      expect(visibleTools).not.toContain("delegate-a");
-      expect(visibleTools).not.toContain("delegate-b");
+      expect(visibleTools.includes("delegate-a")).toBe(status === "running");
+      expect(visibleTools.includes("delegate-b")).toBe(status === "running");
     },
   );
 

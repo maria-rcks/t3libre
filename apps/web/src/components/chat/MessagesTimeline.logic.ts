@@ -992,30 +992,18 @@ function attachTrailingToolGroupsToAssistant(
   return result;
 }
 
-// Delegation already has a durable child card. Match its returned child identity
-// (or its task while running) before removing the duplicate tool row.
+// Delegation already has a durable child card. Remove its tool row only after
+// the returned task ID identifies that child; pending calls can share a prompt.
 function withoutSubagentDelegationRows(entries: ReadonlyArray<TimelineEntry>) {
-  const tasksByRun = new Map<RunId, Set<string>>();
   const childrenByRun = new Map<RunId, Set<string>>();
   for (const entry of entries) {
     if (entry.kind !== "event" || entry.projectedItem.item.type !== "subagent") continue;
     const item = entry.projectedItem.item;
     if (item.origin !== "app_owned" || item.runId === null) continue;
-    const tasks = tasksByRun.get(item.runId) ?? new Set<string>();
-    tasks.add(item.prompt);
-    tasksByRun.set(item.runId, tasks);
     const children = childrenByRun.get(item.runId) ?? new Set<string>();
     children.add(item.subagentId);
     childrenByRun.set(item.runId, children);
   }
-  const parse = (value: unknown): unknown => {
-    if (typeof value !== "string") return value;
-    try {
-      return JSON.parse(value);
-    } catch {
-      return null;
-    }
-  };
   return entries.filter((entry) => {
     if (entry.kind !== "work" || workEntryDisplayIndicatesToolFailure(entry.entry)) return true;
     const item = entry.entry.projectedItem?.item ?? entry.entry.structuredPayload;
@@ -1031,15 +1019,7 @@ function withoutSubagentDelegationRows(entries: ReadonlyArray<TimelineEntry>) {
     if (output?.taskId !== undefined) {
       return !childrenByRun.get(item.runId)?.has(output.taskId);
     }
-    const input = parse(item.input);
-    return !(
-      item.status === "running" &&
-      typeof input === "object" &&
-      input !== null &&
-      "task" in input &&
-      typeof input.task === "string" &&
-      tasksByRun.get(item.runId)?.has(input.task)
-    );
+    return true;
   });
 }
 
