@@ -65,6 +65,14 @@ export function shouldUseRestingComposerLayout(input: {
 export const COMPOSER_RESTING_EXPANSION_MIN_PX = 94;
 
 /**
+ * The width of the resting row the prompt keeps before the inline controls
+ * start folding into overflow. The prompt itself stays shrinkable so a very
+ * narrow pane never pushes it under the overlaid actions; the controls hide
+ * entirely once even their minimum no longer fits beside this.
+ */
+export const COMPOSER_RESTING_PROMPT_MIN_PX = 160;
+
+/**
  * The space the timeline reserves at its end for the composer overlay.
  *
  * The overlay is measured live, but a resting composer is much shorter than

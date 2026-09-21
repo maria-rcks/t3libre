@@ -74,10 +74,12 @@ export function measureRestingComposerControls(
 }
 
 /**
- * The room a host leaves for the resting controls: its content box minus the
- * minimum width its reserved child keeps for the prompt. Reading the
- * reservation from `min-width` instead of the child's rendered width keeps
- * the answer independent of how much room the controls took last render.
+ * The room a host leaves for the resting controls: its content box minus
+ * what its reserved group keeps back. The group's attribute carries the
+ * prompt's minimum in pixels, and any image previews inside it keep their
+ * rendered width. Reading a constant for the prompt instead of its rendered
+ * width keeps the answer independent of how much room the controls took
+ * last render.
  */
 export function measureRestingComposerControlsHostWidth(host: HTMLElement): number {
   const style = getComputedStyle(host);
@@ -85,8 +87,15 @@ export function measureRestingComposerControlsHostWidth(host: HTMLElement): numb
     host.clientWidth -
     (Number.parseFloat(style.paddingLeft) || 0) -
     (Number.parseFloat(style.paddingRight) || 0);
-  const reserved = host.querySelector<HTMLElement>('[data-resting-controls-reserved="true"]');
+  const reserved = host.querySelector<HTMLElement>("[data-resting-controls-reserved]");
   if (!reserved) return contentWidth;
+  const promptWidth = Number.parseFloat(reserved.dataset.restingControlsReserved ?? "") || 0;
+  const previews = reserved.querySelector<HTMLElement>(
+    '[data-chat-composer-resting-images="true"]',
+  );
+  const previewsWidth = previews ? elementOuterWidth(previews) : 0;
+  const previewsGap =
+    previewsWidth > 0 ? Number.parseFloat(getComputedStyle(reserved).columnGap) || 0 : 0;
   const gap = Number.parseFloat(style.columnGap) || 0;
-  return contentWidth - (Number.parseFloat(getComputedStyle(reserved).minWidth) || 0) - gap;
+  return contentWidth - promptWidth - previewsWidth - previewsGap - gap;
 }
