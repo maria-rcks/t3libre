@@ -997,9 +997,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     () =>
       timelineContentOverflowsViewport(listRef.current?.getState?.(), {
         composerInset: contentInsetEndAdjustment,
-        anchorOffset: CHAT_TIMELINE_ANCHOR_OFFSET + headerInset,
+        anchorOffset: CHAT_TIMELINE_ANCHOR_OFFSET,
       }),
-    [contentInsetEndAdjustment, listRef, headerInset],
+    [contentInsetEndAdjustment, listRef],
   );
   // LegendList lays rows out from layout effects, so a read on the next frame
   // sees the settled positions. One frame is shared across bursts of size

@@ -5358,18 +5358,18 @@ export default function ChatView(props: ChatViewProps) {
         state,
         anchorIndex,
         composerOverlayHeight: composerTimelineInset,
-        anchorOffset: timelineAnchorOffset,
+        anchorOffset: CHAT_TIMELINE_ANCHOR_OFFSET,
       });
     },
-    [composerTimelineInset, timelineAnchorOffset],
+    [composerTimelineInset],
   );
   const timelineRealContentOverflowsViewport = useCallback(
     (list?: LegendListRef | null) =>
       timelineContentOverflowsViewport((list ?? legendListRef.current)?.getState(), {
         composerInset: composerTimelineInset,
-        anchorOffset: timelineAnchorOffset,
+        anchorOffset: CHAT_TIMELINE_ANCHOR_OFFSET,
       }),
-    [composerTimelineInset, timelineAnchorOffset],
+    [composerTimelineInset],
   );
   const pageScrollControllerRef = useRef<ReturnType<typeof createPageScrollController> | null>(
     null,
