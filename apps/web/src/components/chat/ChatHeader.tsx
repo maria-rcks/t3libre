@@ -306,7 +306,7 @@ export const ChatHeader = memo(function ChatHeader({
   );
   const headerActions = (
     <>
-      <section aria-label="Workspace" className="p-1">
+      <section aria-label="Workspace" className="flex flex-col gap-0.5 p-2">
         <h3 className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Workspace</h3>
         <BranchToolbar {...branchToolbarProps} layout="panel" panelSection="workspace" />
         {showOpenInPicker && (
@@ -334,7 +334,10 @@ export const ChatHeader = memo(function ChatHeader({
         )}
       </section>
       {gitCwd && (
-        <section aria-label="Version Control" className="border-t border-border/65 p-1">
+        <section
+          aria-label="Version Control"
+          className="flex flex-col gap-0.5 border-t border-border/65 p-2"
+        >
           <h3 className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Version Control</h3>
           {branchToolbarProps.showGitControls && (
             <BranchToolbar {...branchToolbarProps} layout="panel" panelSection="branch" />

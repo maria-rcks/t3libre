@@ -608,7 +608,7 @@ export const BranchToolbar = memo(function BranchToolbar({
 
   if (layout === "panel") {
     return (
-      <div className="flex w-full flex-col" data-thread-panel-run-context>
+      <div className="flex w-full flex-col gap-0.5" data-thread-panel-run-context>
         {panelSection !== "branch" && showEnvironmentIndicator && availableEnvironments ? (
           <BranchToolbarEnvironmentSelector
             displayMode="panel"
