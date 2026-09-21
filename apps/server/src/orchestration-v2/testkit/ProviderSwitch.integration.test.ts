@@ -20,7 +20,6 @@ import {
   ThreadId,
   TurnItemId,
   ProviderDriverKind,
-  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -521,7 +520,7 @@ describe("orchestration v2 provider switching", () => {
               {
                 length:
                   scenario.includes("eight") || capacityScenario
-                    ? PROVIDER_SEND_TURN_MAX_ATTACHMENTS
+                    ? 8
                     : scenario.includes("pair")
                       ? 2
                       : 1,

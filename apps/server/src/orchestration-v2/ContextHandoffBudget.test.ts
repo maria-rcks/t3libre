@@ -261,7 +261,8 @@ describe("handoff budget", () => {
     }
     assert.equal(handoffBudget({ ...base, tokenCap: 2_000 }), 2_000);
   });
-  it("budgets all supported image counts with unknown capacity, honoring smaller known windows", () => {
+  it("reserves context for image batches up to the attachment limit, honoring smaller known windows", () => {
+    let previousBudget = 16_000;
     for (let count = 1; count <= PROVIDER_SEND_TURN_MAX_ATTACHMENTS; count++) {
       const input = {
         tokenCap: 16_000,
@@ -273,13 +274,24 @@ describe("handoff budget", () => {
           id: `image-${index}`,
           name: "image.png",
           mimeType: "image/png",
-          sizeBytes: 10 * 1024 * 1024,
+          sizeBytes: 100_000,
         })),
       };
       const budget = handoffBudget(input);
-      assert.equal(budget, 16_000);
-      const selected = selectHistory({ messages, coverage: "Recover omitted history", budget });
-      assert.isAtMost(historyCost(selected.messages, selected.context), budget);
+      assert.isAtLeast(budget, 0);
+      assert.isAtMost(budget, previousBudget);
+      previousBudget = budget;
+      if (count <= 8) assert.equal(budget, 16_000);
+      if (count === 10) {
+        assert.isAbove(budget, 0);
+        assert.isBelow(budget, 16_000);
+      }
+      if (count === PROVIDER_SEND_TURN_MAX_ATTACHMENTS) assert.equal(budget, 0);
+      if (budget > 0) {
+        const selected = selectHistory({ messages, coverage: "Recover omitted history", budget });
+        assert.isAtMost(historyCost(selected.messages, selected.context), budget);
+      }
+      assert.equal(handoffBudget({ ...input, modelContextWindow: 2_000_000 }), 16_000);
       assert.equal(handoffBudget({ ...input, modelContextWindow: 20_000 }), 0);
       assert.equal(
         handoffBudget({
