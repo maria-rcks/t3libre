@@ -7,6 +7,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { vcsEnvironment } from "../state/vcs";
 import { BranchPicker, BranchPickerRefItem } from "./BranchPicker";
 import { resolveBranchTriggerLabel, sanitizeNewRefName } from "./BranchToolbar.logic";
+import { MiddleTruncate } from "./ui/middle-truncate";
 import { Button } from "./ui/button";
 import { ComboboxTrigger } from "./ui/combobox";
 
@@ -85,6 +86,10 @@ export function WorktreeBaseBranchPicker({
       onQueryChange={setQuery}
       open={open && !disabled}
       onOpenChange={handleOpenChange}
+      onSelectItem={(name) => {
+        onValueChange(name);
+        handleOpenChange(false);
+      }}
       hasNextPage={hasNextPage}
       isFetchingNextPage={branches.isFetchingNextPage}
       onLoadNext={branches.loadNext}
@@ -113,7 +118,7 @@ export function WorktreeBaseBranchPicker({
         className="w-full justify-between font-normal"
       >
         <GitBranchIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+        <MiddleTruncate value={label} className="flex-1 text-left" />
         <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
       </ComboboxTrigger>
     </BranchPicker>

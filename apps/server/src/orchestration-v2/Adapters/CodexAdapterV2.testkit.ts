@@ -1,3 +1,4 @@
+import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { type ProviderReplayTranscript } from "@t3tools/contracts";
 import * as CodexClient from "effect-codex-app-server/client";
@@ -99,11 +100,11 @@ export function makeReplayServerConfig(
       traceMaxBytes: 10 * 1024 * 1024,
       traceMaxFiles: 10,
       otlpTracesUrl: undefined,
-      otlpProtocol: "http/json",
-      otlpHeaders: undefined,
       otlpMetricsUrl: undefined,
       otlpLogsUrl: undefined,
-      otlpExportIntervalMs: 10_000,
+      otlpTracesExport: DEFAULT_SIGNAL_EXPORT,
+      otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
+      otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
       otlpServiceName: "t3-server",
       mode: "web",
       port: 0,

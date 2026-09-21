@@ -55,6 +55,7 @@ export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(
   if (command.type === "runtime-request.respond" && command.attachmentsByQuestionId) {
     const config = yield* ServerConfig.ServerConfig;
     const incomingByQuestionId = command.attachmentsByQuestionId;
+    yield* AttachmentClaims.validateAttachmentLimits(Object.values(incomingByQuestionId).flat());
     // Claims accumulate across questions, so all of preparation shares one
     // rollback boundary: any failure before dispatch removes every new copy.
     const claimedPaths: string[] = [];
@@ -180,6 +181,7 @@ export const launchThread = Effect.fn("ThreadMessageIntake.launchThread")(functi
   input: ThreadLaunch.ThreadLaunchInput,
 ) {
   const launches = yield* ThreadLaunch.ThreadLaunchService;
+  yield* AttachmentClaims.validateAttachmentLimits(input.initialMessage?.attachments ?? []);
   if (!input.initialMessage?.attachments.some(AttachmentClaims.attachmentIsPendingUpload)) {
     return yield* launches.launch(input);
   }

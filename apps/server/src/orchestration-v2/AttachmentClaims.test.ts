@@ -50,6 +50,48 @@ const stagePendingUpload = Effect.fn("test.stagePendingUpload")(function* (input
 });
 
 describe("AttachmentClaims", () => {
+  it.effect("accepts 100 existing files without claiming new copies", () =>
+    Effect.gen(function* () {
+      const attachments: ChatAttachment[] = Array.from({ length: 100 }, (_, index) => ({
+        type: "file",
+        id: ChatAttachmentId.make(`existing-file-${index}`),
+        name: `${index}.txt`,
+        mimeType: "text/plain",
+        sizeBytes: 1,
+      }));
+      const claimed = yield* claimPendingAttachments({ threadId: "thread-many", attachments });
+      expect(claimed.attachments).toEqual(attachments);
+      expect(claimed.claimedPaths).toEqual([]);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("rejects oversized image batches before copying a pending upload", () =>
+    Effect.gen(function* () {
+      const pending = yield* stagePendingUpload({
+        name: "pending.png",
+        bytes: new Uint8Array([1]),
+        mimeType: "image/png",
+      });
+      const images: ChatAttachment[] = Array.from({ length: 9 }, (_, index) => ({
+        type: "image",
+        id: ChatAttachmentId.make(`existing-image-${index}`),
+        name: `${index}.png`,
+        mimeType: "image/png",
+        sizeBytes: 10 * 1024 * 1024,
+      }));
+      const result = yield* Effect.exit(
+        claimPendingAttachments({
+          threadId: "thread-image-budget",
+          attachments: [pending, ...images],
+        }),
+      );
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") expect(String(result.cause)).toContain("80 MiB");
+      const config = yield* ServerConfig.ServerConfig;
+      expect(NodeFS.readdirSync(config.attachmentsDir)).toHaveLength(1);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("claims a pending upload into the thread store and rewrites the id", () =>
     Effect.gen(function* () {
       const pending = yield* stagePendingUpload({

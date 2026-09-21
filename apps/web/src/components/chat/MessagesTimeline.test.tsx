@@ -2392,6 +2392,77 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("text-destructive");
   });
 
+  it.each([
+    [
+      "**Viewing image first** with *care*, ~~old~~ `code` and [context](https://example.com)",
+      "Viewing image first with care, old code and context",
+      1,
+    ],
+    ["first paragraph\n\nsecond paragraph", "first paragraph second paragraph", 0],
+    ["- first\n- second", "first second", 0],
+    ["first  \nsecond", "first second", 0],
+    ["![image description](image.png)", "image description", 0],
+    ["![](image.png)", "Thought", 0],
+    ["---", "Thought", 0],
+  ] as const)(
+    "shows plain text for a V2 reasoning preview: %s",
+    async (markdown, expected, strongCount) => {
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      vi.stubGlobal("requestAnimationFrame", () => 0);
+      vi.stubGlobal("cancelAnimationFrame", () => {});
+      activityTestState.expanded = true;
+      let renderer: ReactTestRenderer | undefined;
+      try {
+        await act(() => {
+          renderer = create(
+            <MessagesTimeline
+              {...buildProps()}
+              timelineEntries={[
+                {
+                  id: "reasoning-preview",
+                  kind: "work",
+                  createdAt: MESSAGE_CREATED_AT,
+                  entry: {
+                    id: "reasoning-preview",
+                    createdAt: MESSAGE_CREATED_AT,
+                    label: markdown,
+                    detail: markdown,
+                    tone: "thinking",
+                    itemType: "reasoning",
+                    toolLifecycleStatus: "completed",
+                  },
+                },
+              ]}
+            />,
+          );
+        });
+        const previewText = () =>
+          renderer!.root
+            .findAllByType("span")
+            .flatMap((node) => node.findAll(() => true))
+            .flatMap((node) => node.children)
+            .filter((child) => typeof child === "string")
+            .join(" ");
+        expect(previewText()).toContain(expected);
+        expect(renderer!.root.findAllByType("strong")).toHaveLength(0);
+        const row = () =>
+          renderer!.root.findAll(
+            (node) =>
+              node.type === "div" &&
+              node.props.role === "button" &&
+              typeof node.props["aria-expanded"] === "boolean",
+          )[0]!;
+        await act(() => row().props.onClick());
+        expect(renderer!.root.findAllByType("strong")).toHaveLength(strongCount);
+        await act(() => row().props.onClick());
+        expect(previewText()).toContain(expected);
+        expect(renderer!.root.findAllByType("strong")).toHaveLength(0);
+      } finally {
+        await act(() => renderer?.unmount());
+      }
+    },
+  );
+
   it("expands and collapses a tool call through its header", async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("requestAnimationFrame", () => 0);

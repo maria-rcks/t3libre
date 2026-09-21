@@ -39,10 +39,8 @@ import {
 } from "@t3tools/client-runtime/work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
-import { formatSubagentTokenCount } from "@t3tools/client-runtime/state/subagentRuntime";
 import { subagentGroupSummary } from "@t3tools/client-runtime/state/subagent-display";
 
-const NOOP_OPEN_AGENTS = () => {};
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 
@@ -99,6 +97,9 @@ import {
 } from "../../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import type { Root, RootContent } from "mdast";
 import { T3Wordmark } from "../T3Wordmark";
 import { ThreadContextChip } from "../ThreadContextChip";
 import {
@@ -256,7 +257,6 @@ import { isV2LifecycleItem, V2LifecycleRow, type HandoffTimelineRun } from "./V2
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 
 import { SkillInlineText } from "./SkillInlineText";
-import { deriveAgentSpawnSummary } from "./agentSpawnSummary";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import {
   buildReviewCommentRenderablePatch,
@@ -1680,7 +1680,6 @@ function TimelineMinimapNavigationButton({
 // TimelineRowContent — the actual row component
 // ---------------------------------------------------------------------------
 
-type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
@@ -3260,7 +3259,12 @@ function BackgroundWorktreeSetupChip({ snapshot }: { snapshot: WorktreeSetupSnap
         <Spinner className="size-3 shrink-0" />
         <span className="truncate">{scriptName}</span>
       </PopoverTrigger>
-      <PopoverPopup side="bottom" align="end" className="w-[32rem] max-w-[calc(100vw-2rem)] p-3">
+      <PopoverPopup
+        side="bottom"
+        align="end"
+        className="surface-glass! w-[28rem] max-w-[calc(100vw-2rem)]"
+        viewportClassName="py-3 [--viewport-inline-padding:--spacing(3)]"
+      >
         <WorktreeSetupCard
           snapshot={snapshot}
           embedded
@@ -3420,6 +3424,15 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
                 {getQuestionAnswerPreview(row.entry.questionAnswer)}
               </span>
             </span>
+          ) : row.entry.itemType === "reasoning" ? (
+            <ReactMarkdown
+              remarkPlugins={[
+                remarkGfm,
+                [remarkThoughtPreview, row.active ? "Thinking" : "Thought"],
+              ]}
+            >
+              {row.entry.detail ?? label}
+            </ReactMarkdown>
           ) : (
             label
           )
@@ -3691,12 +3704,13 @@ function UserMessagePullRequestContextChip(props: {
   copyMarkdown: string;
   toneClassName: string;
 }) {
-  const { openPullRequest } = use(TimelineRowCtx);
+  const { activeThreadEnvironmentId, openPullRequest } = use(TimelineRowCtx);
   const metadata = props.record.pullRequest;
   if (metadata === undefined) return null;
   return (
     <PullRequestChip
       metadata={metadata}
+      environmentId={activeThreadEnvironmentId}
       label={reviewCommentContextLabel(props.record)}
       kindLabel={pullRequestContextKindLabel(props.record)}
       className={cn(CHAT_INLINE_CHIP_CLASS_NAME, props.toneClassName)}
@@ -4265,7 +4279,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
 
 const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
-  renderContextReference: (reference: ChatMarkdownContextReference) => ReactNode;
+  renderContextReference?: (reference: ChatMarkdownContextReference) => ReactNode;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   markdownCwd: string | undefined;
 }) {
@@ -4790,6 +4804,28 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
+function remarkThoughtPreview(fallback: string) {
+  return (tree: Root) => {
+    const plainText = (node: Root | RootContent): string => {
+      if (node.type === "html" || node.type === "definition") return "";
+      if ("alt" in node) return node.alt ?? "";
+      if ("value" in node) return node.value;
+      if ("children" in node) {
+        const separator = ["root", "blockquote", "list", "listItem", "table", "tableRow"].includes(
+          node.type,
+        )
+          ? " "
+          : "";
+        return node.children.map(plainText).join(separator);
+      }
+      return node.type === "break" ? " " : "";
+    };
+    tree.children = [
+      { type: "text", value: plainText(tree).replace(/\s+/g, " ").trim() || fallback },
+    ];
+  };
+}
+
 function ReasoningTraceContent({ entries }: { entries: ReadonlyArray<TimelineWorkEntry> }) {
   const ctx = use(TimelineRowCtx);
   const { isWorking, latestRunId } = use(TimelineRowActivityCtx);
@@ -5005,7 +5041,21 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                 headingClass,
               )}
             >
-              {previewText}
+              {isReasoning && !expanded ? (
+                <ReactMarkdown
+                  remarkPlugins={[
+                    remarkGfm,
+                    [
+                      remarkThoughtPreview,
+                      workEntry.toolLifecycleStatus === "inProgress" ? "Thinking" : "Thought",
+                    ],
+                  ]}
+                >
+                  {workEntry.detail ?? previewText}
+                </ReactMarkdown>
+              ) : (
+                previewText
+              )}
             </span>
             {answerPreview ? (
               <span

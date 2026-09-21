@@ -117,7 +117,7 @@ export function SettingsEnvironmentFilterHeader(props: {
             },
           }),
           ...(props.trailingItems ?? []),
-          ...(props.closeSettings
+          ...(closeSettings
             ? [
                 withNativeGlassHeaderItem({
                   accessibilityLabel: "Close settings",

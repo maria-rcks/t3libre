@@ -737,3 +737,29 @@ it.effect("a retried response re-claims the preserved pending uploads", () =>
     ).toHaveLength(2);
   }).pipe(Effect.provide(intakeTestLayer)),
 );
+
+it.effect("applies the image budget across all questions before dispatch", () =>
+  Effect.gen(function* () {
+    const attachments = Array.from({ length: 5 }, (_, index) => ({
+      type: "image" as const,
+      id: ChatAttachmentId.make(`existing-budget-${index}`),
+      name: `${index}.png`,
+      mimeType: "image/png",
+      sizeBytes: 10 * 1024 * 1024,
+    }));
+    const captured: OrchestrationV2Command[] = [];
+    const result = yield* Effect.exit(
+      dispatchCommand({
+        type: "runtime-request.respond",
+        commandId: CommandId.make("command-image-budget"),
+        threadId: ThreadId.make("thread-image-budget"),
+        requestId: RuntimeRequestId.make("question-image-budget"),
+        answers: {},
+        attachmentsByQuestionId: { q1: attachments, q2: attachments },
+      }).pipe(Effect.provide(failingDispatch(captured))),
+    );
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(String(result.cause)).toContain("80 MiB");
+    expect(captured).toEqual([]);
+  }).pipe(Effect.provide(intakeTestLayer)),
+);

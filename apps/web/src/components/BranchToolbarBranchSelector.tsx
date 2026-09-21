@@ -62,6 +62,7 @@ import {
 } from "./ThreadStatusIndicators";
 import { Button } from "./ui/button";
 import { ComboboxItem, ComboboxTrigger } from "./ui/combobox";
+import { MiddleTruncate } from "./ui/middle-truncate";
 import { BranchPicker, BranchPickerRefItem } from "./BranchPicker";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
@@ -530,7 +531,6 @@ export function BranchToolbarBranchSelector({
     setIsBranchMenuOpen(open);
     if (!open) {
       setBranchQuery("");
-      highlightedBranchValueRef.current = null;
     }
   }, []);
 
@@ -590,7 +590,6 @@ export function BranchToolbarBranchSelector({
       : `#${prNumber}${displayedPr?.title.trim() ? `: ${displayedPr.title}` : ""}`;
 
   function selectPickerItem(itemValue: string) {
-    highlightedBranchValueRef.current = null;
     if (itemValue === checkoutPullRequestItemValue && prReference && onCheckoutPullRequestRequest) {
       handleOpenChange(false);
       onComposerFocusRequest?.();
@@ -661,6 +660,7 @@ export function BranchToolbarBranchSelector({
       filteredItems={filteredBranchPickerItems}
       open={isBranchMenuOpen}
       onOpenChange={handleOpenChange}
+      onSelectItem={selectPickerItem}
       value={resolvedActiveBranch}
       query={branchQuery}
       resultsQuery={deferredTrimmedBranchQuery}
@@ -731,7 +731,9 @@ export function BranchToolbarBranchSelector({
                 displayMode === "panel" && THREAD_DETAILS_PANEL_ICON_CLASS,
               )}
             />
-            <ComposerContextLabel displayMode={displayMode}>{triggerLabel}</ComposerContextLabel>
+            <ComposerContextLabel displayMode={displayMode}>
+              <MiddleTruncate value={triggerLabel} className="w-full" />
+            </ComposerContextLabel>
             {displayMode === "panel" ? (
               <span data-slot="select-icon">
                 <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />

@@ -152,8 +152,8 @@ export function PullRequestChecksPopover({
 }) {
   const presentation = pullRequestChecksStatePresentation(checksState);
   // Counts beat the rollup's own wording where they are known, the way GitHub's own header reads.
-  const summary = checks === undefined ? null : summarizePullRequestChecks(checks);
   const runningCount = checks?.filter((check) => check.status === "pending").length ?? 0;
+  const summary = checks === undefined || stale ? null : summarizePullRequestChecks(checks);
   return (
     <Popover>
       {/* A listing row is itself a button, so the trigger renders as a span: a nested button is

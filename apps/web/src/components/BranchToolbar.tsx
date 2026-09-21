@@ -229,6 +229,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                   <MenuRadioItem
                     value="auto"
                     disabled={envLocked}
+                    closeOnClick
                     onClick={() => {
                       if (autoEnvironmentLabel) onAutoEnvironment?.();
                     }}
@@ -246,6 +247,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                     key={env.environmentId}
                     disabled={envLocked}
                     value={env.environmentId}
+                    closeOnClick
                   >
                     <span className="flex min-w-0 items-center gap-1.5">
                       <EnvironmentMachineIcon kind={env.machine} className="size-3" />

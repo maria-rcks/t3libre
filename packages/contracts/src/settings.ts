@@ -1613,6 +1613,8 @@ export const ClientSettingsPatch = Schema.Struct({
   browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),
   browserDefaultAppearance: Schema.optionalKey(PreviewAppearancePreference),
   browserRecordingFrameRate: Schema.optionalKey(BrowserRecordingFrameRate),
+  browserRecordingShowKeyPresses: Schema.optionalKey(Schema.Boolean),
+  browserRecordingShowMousePresses: Schema.optionalKey(Schema.Boolean),
   browserLinkTarget: Schema.optionalKey(BrowserLinkTarget),
   browserAutoShowFloatingPreview: Schema.optionalKey(Schema.Boolean),
   browserProfiles: Schema.optionalKey(Schema.Array(BrowserProfile)),

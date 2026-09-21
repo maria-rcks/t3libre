@@ -15,7 +15,7 @@ import {
   useRemoteOpenState,
 } from "../../remoteOpen";
 import { useEnvironment } from "../../state/environments";
-import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
+import { ChevronDownIcon, FolderClosedIcon, SquareArrowOutUpRightIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
 import {
@@ -426,25 +426,7 @@ export const OpenInPicker = memo(function OpenInPicker({
           {...(isPanel ? { anchor: panelAnchorRef } : {})}
           className={isPanel ? THREAD_DETAILS_PANEL_ROW_POPUP_CLASS : undefined}
         >
-          {remote.mode === "remote-unavailable" ? (
-            <MenuItem disabled>No SSH route to {environmentLabel}</MenuItem>
-          ) : (
-            <>
-              {options.length === 0 && <MenuItem disabled>No installed editors found</MenuItem>}
-              {options.map(({ label, Icon, value, kind }) => (
-                <MenuItem key={value} onClick={() => openInEditor(value)}>
-                  <Icon aria-hidden="true" className={getOpenInIconClass(kind)} />
-                  {label}
-                  {value === preferredEditor && openFavoriteEditorShortcutLabel && (
-                    <MenuShortcut>{openFavoriteEditorShortcutLabel}</MenuShortcut>
-                  )}
-                </MenuItem>
-              ))}
-              {remote.mode === "remote-links" && !remoteHintSeen && (
-                <MenuItem disabled>Opens over SSH. Needs your key on {environmentLabel}</MenuItem>
-              )}
-            </>
-          )}
+          {editorItems}
         </MenuPopup>
       </Menu>
     </ActionGroup>

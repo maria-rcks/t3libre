@@ -9351,7 +9351,10 @@ export default function ChatView(props: ChatViewProps) {
       activePendingProgress?.activeQuestion,
       activePendingUserInput,
       activePendingRequestKey,
+      composerDraftTarget,
       composerRef,
+      pendingUserInputAnswersByRequestId,
+      setComposerDraftPrompt,
     ],
   );
 
