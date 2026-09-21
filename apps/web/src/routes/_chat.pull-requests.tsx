@@ -24,11 +24,13 @@ import {
   LayersIcon,
   ListChecksIcon,
   PenLineIcon,
+  UsersIcon,
   Plug2Icon,
   Maximize2Icon,
   Minimize2Icon,
   SearchIcon,
   UserLockIcon,
+  type LucideIcon,
 } from "lucide-react";
 import {
   useCallback,
@@ -186,6 +188,32 @@ export interface PullRequestsSearch extends PullRequestListPreferences {
    * link without it still opens, resolved by project id alone where that is unambiguous.
    */
   readonly selectedEnvironmentId?: EnvironmentId;
+}
+
+/**
+ * A group reads like the sidebar's shelves: its glyph, its name, how many, then a rule out
+ * to the edge. The glyph is the one the involvement filter uses for the same idea.
+ */
+const GROUP_ICONS: Record<string, LucideIcon> = {
+  authored: PenLineIcon,
+  reviewRequested: EyeIcon,
+  others: UsersIcon,
+};
+
+function PullRequestGroupHeader({
+  group,
+}: {
+  group: { key: string; label: string; entries: ReadonlyArray<unknown> };
+}) {
+  const Icon = GROUP_ICONS[group.key] ?? LayersIcon;
+  return (
+    <h2 className="flex items-center gap-2 px-3 pb-1 text-xs font-medium text-muted-foreground/70">
+      <Icon aria-hidden className="size-3.5 shrink-0" />
+      <span className="shrink-0">{group.label}</span>
+      <span className="shrink-0 tabular-nums text-muted-foreground/50">{group.entries.length}</span>
+      <span aria-hidden className="h-px min-w-2 flex-1 bg-border/60" />
+    </h2>
+  );
 }
 
 // The state filters wear the same glyphs the rows do, so the two read as one vocabulary.
@@ -1659,11 +1687,7 @@ function PullRequestsRouteView() {
         <div className="space-y-3">
           {displayGroups.map((group) => (
             <div key={group.key} className="space-y-0.5">
-              {group.label ? (
-                <h2 className="px-3 pb-0.5 text-xs font-medium text-muted-foreground/70">
-                  {group.label}
-                </h2>
-              ) : null}
+              {group.label ? <PullRequestGroupHeader group={group} /> : null}
               {group.entries.map((entry) => {
                 const entryKey = pullRequestEntryKey(entry);
                 return (
