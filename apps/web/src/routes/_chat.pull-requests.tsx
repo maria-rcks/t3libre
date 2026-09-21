@@ -148,6 +148,7 @@ import {
 } from "../state/pullRequests";
 import { useAtomCommand } from "../state/use-atom-command";
 import { cn } from "~/lib/utils";
+import { Separator } from "~/components/ui/separator";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
@@ -207,12 +208,12 @@ function PullRequestGroupHeader({
 }) {
   const Icon = GROUP_ICONS[group.key] ?? LayersIcon;
   return (
-    <h2 className="flex items-center gap-2 px-3 pb-1 text-xs font-medium text-muted-foreground/70">
+    <div className="flex items-center gap-2 px-3 pb-1 text-xs font-medium text-muted-foreground/70">
       <Icon aria-hidden className="size-3.5 shrink-0" />
-      <span className="shrink-0">{group.label}</span>
+      <h2 className="shrink-0">{group.label}</h2>
       <span className="shrink-0 tabular-nums text-muted-foreground/50">{group.entries.length}</span>
-      <span aria-hidden className="h-px min-w-2 flex-1 bg-border/60" />
-    </h2>
+      <Separator className="min-w-2 flex-1 bg-border/60" />
+    </div>
   );
 }
 
