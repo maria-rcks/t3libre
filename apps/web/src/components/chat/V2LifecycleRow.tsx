@@ -280,6 +280,16 @@ function isoOrNull(value: DateTime.Utc | null | undefined): string | null {
   return value ? DateTime.formatIso(value) : null;
 }
 
+/**
+ * The agents panel timer counts to now when a settled agent has no completion
+ * time, which would show a card's age as work duration. Show nothing instead.
+ */
+export function SubagentElapsed({ agent }: { agent: Parameters<typeof AgentElapsed>[0]["agent"] }) {
+  const live = agent.status === "running" || agent.status === "waiting";
+  if (!live && agent.completedAt === null) return null;
+  return <AgentElapsed agent={agent} />;
+}
+
 /** Round provider tile with the agents panel's status dot; rings let a header stack overlap. */
 export function SubagentAvatar({
   driver,
@@ -392,7 +402,7 @@ function SubagentTimelineLink(props: {
         </span>
       </span>
       <span className="shrink-0 font-mono text-[10px] text-muted-foreground/80">
-        <AgentElapsed agent={timing} />
+        <SubagentElapsed agent={timing} />
       </span>
       {threadId !== null ? (
         <ChevronRightIcon

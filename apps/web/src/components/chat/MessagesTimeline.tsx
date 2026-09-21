@@ -262,13 +262,13 @@ import { Collapsible, CollapsibleTrigger, CollapsiblePanel } from "../ui/collaps
 import {
   isV2LifecycleItem,
   SubagentAvatar,
+  SubagentElapsed,
   V2LifecycleRow,
   type HandoffTimelineRun,
 } from "./V2LifecycleRow";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 
 import { SkillInlineText } from "./SkillInlineText";
-import { AgentElapsed } from "../AgentsPanel";
 import * as DateTime from "effect/DateTime";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import {
@@ -2952,6 +2952,7 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
   });
   const summary = subagentGroupSummary(agents);
   const label = `${members.length} ${members.length === 1 ? "subagent" : "subagents"}`;
+  const statusSummary = summarizeSubagentStatuses(agents.map(({ status }) => status));
   const toggleExpanded = (open: boolean) => {
     ctx.onToggleWorkEntry(row.id, expanded);
     if (open) ctx.workGroupViewState.expandedEntries.add(groupId);
@@ -2963,6 +2964,7 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
       <Collapsible open={expanded} onOpenChange={toggleExpanded} data-subagent-group>
         <CollapsibleTrigger
           aria-label={label}
+          aria-description={statusSummary}
           className={cn(
             "flex w-full min-w-0 items-center gap-3 py-2 text-left transition-opacity hover:opacity-100",
             expanded || summary.active
@@ -2995,11 +2997,11 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
                 summary.active ? "text-info" : summary.failed && "text-destructive",
               )}
             >
-              {summarizeSubagentStatuses(agents.map(({ status }) => status))}
+              {statusSummary}
             </span>
           </span>
           <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-            <AgentElapsed agent={subagentGroupTiming(agents)} />
+            <SubagentElapsed agent={subagentGroupTiming(agents)} />
           </span>
           <ChevronDownIcon
             aria-hidden
