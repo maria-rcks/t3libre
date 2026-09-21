@@ -190,6 +190,7 @@ import { replaceComposerContextReferences } from "@t3tools/shared/composerContex
 import {
   COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
   COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX,
+  COMPOSER_RESTING_PROMPT_MIN_PX,
   getRestingComposerImagePreviewCounts,
   resolveRestingComposerControlsLayout,
   shouldAnimateComposerRestingTransition,
@@ -5309,7 +5310,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       inert={restingControlsVisible ? undefined : true}
       className={cn(
         "relative flex w-max min-w-0 max-w-full items-center gap-1 text-muted-foreground/70 [&_button]:text-xs!",
-        !restingControlsVisible && "invisible",
+        // A cluster that no longer fits leaves the flow so the prompt keeps
+        // the whole row; it stays mounted so it can be measured back in.
+        !restingControlsVisible && "invisible absolute",
       )}
     >
       {composerControls}
@@ -7076,11 +7079,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     </DialogPopup>
                   </Dialog>
                 ) : null}
-                {/* The prompt keeps this much of the resting row; the controls
-                    beside it measure the remainder and fold into overflow. */}
+                {/* The prompt reserves this much of the row and the image previews
+                    their full width; the controls beside them measure the remainder
+                    and fold into overflow. */}
                 <div
-                  data-resting-controls-reserved={isComposerResting ? "true" : undefined}
-                  className={cn(isComposerResting && "flex min-w-40 flex-1 items-center gap-1")}
+                  data-resting-controls-reserved={
+                    isComposerResting ? String(COMPOSER_RESTING_PROMPT_MIN_PX) : undefined
+                  }
+                  className={cn(isComposerResting && "flex min-w-0 flex-1 items-center gap-1")}
                 >
                   <ComposerContextActionsContext value={composerContextActions}>
                     <ComposerPromptEditor
@@ -7188,8 +7194,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   pendingUserInputs.length > 0 && "pt-2",
                   isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
                   showMobilePendingAnswerActions && "hidden sm:flex",
+                  // The overlaid footer keeps its padding, which reaches over the
+                  // inline controls; only its actions may take the pointer.
                   isComposerResting &&
-                    "absolute right-px bottom-px z-10 h-12 w-auto gap-0 py-0 sm:gap-0 sm:py-0",
+                    "pointer-events-none absolute right-px bottom-px z-10 h-12 w-auto gap-0 py-0 sm:gap-0 sm:py-0",
                 )}
               >
                 <div
@@ -7211,7 +7219,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+                  className="pointer-events-auto flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
                   {showComposerAttachAction ? (
                     <>
