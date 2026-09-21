@@ -876,6 +876,72 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
   },
 ) {
   const { row, expanded } = props;
+  const failureItem = row.projectedItem.item;
+  if (failureItem.type === "error" && failureItem.status === "failed") {
+    const warning = failureItem.failure.class === "usage_limit";
+    const timestamp = new Date(row.createdAt);
+    const resetAt = failureItem.failure.resetAt;
+    const resetTime = resetAt
+      ? new Date(resetAt).toLocaleString(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : null;
+    const label = warning
+      ? `Usage limit reached.${resetTime ? ` Retry after ${resetTime}.` : ""}`
+      : row.summary;
+    return (
+      <WorkLogPressable
+        accessibilityLabel={warning ? label : `${row.summary}: ${failureItem.failure.message}`}
+        accessibilityHint="Long press to copy."
+        onLongPress={() => props.onCopyRow(row.id, row.getCopyText())}
+      >
+        <View className="flex-1 py-1">
+          <View className="flex-row items-center gap-1.5">
+            <WorkLogIconSlot>
+              <WorkLogIcon
+                icon="exclamationmark.circle"
+                color={props.iconSubtleColor}
+                colorClassName={warning ? "accent-warning-foreground" : "accent-danger-foreground"}
+              />
+            </WorkLogIconSlot>
+            <Text
+              className={
+                warning
+                  ? "min-w-0 flex-1 font-t3-medium text-sm text-warning-foreground"
+                  : "min-w-0 flex-1 font-t3-medium text-sm text-adaptive-rose-600-400"
+              }
+            >
+              {label}
+            </Text>
+            {props.copied ? (
+              <Text className="pr-1 font-t3-medium text-3xs text-adaptive-emerald-600-400">
+                Copied
+              </Text>
+            ) : null}
+            <Text
+              accessibilityLabel={timestamp.toLocaleString()}
+              className="shrink-0 text-xs text-foreground-subtle"
+            >
+              {timestamp.toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </Text>
+          </View>
+          {!warning ? (
+            <Text selectable className="ml-7 text-sm text-foreground">
+              {failureItem.failure.message}
+            </Text>
+          ) : null}
+        </View>
+      </WorkLogPressable>
+    );
+  }
   const canExpand = row.canExpand;
   const reasoning = row.projectedItem.item.type === "reasoning" ? row.projectedItem.item : null;
   const fullDetail = expanded && !reasoning ? row.getFullDetail() : null;
