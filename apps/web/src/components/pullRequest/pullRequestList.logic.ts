@@ -1218,5 +1218,36 @@ export function reusePullRequestEntries<Entry extends PullRequestListEntry>(
     }
     return entry;
   });
-  return reused === next.length && previous.length === next.length ? previous : out;
+  return reused === next.length &&
+    previous.length === next.length &&
+    previous.every((entry, index) => keyOf(entry) === keyOf(next[index]!))
+    ? previous
+    : out;
+}
+
+/**
+ * The overrides a whole-page answer has confirmed, dropped; the rest kept. A read that started
+ * before the action can land after it and still say the old thing, so an override is not
+ * cleared because an answer arrived but because the answer agrees: the row is there in the
+ * state the override said, or it is gone from a list whose state filter no longer holds it.
+ */
+export function settlePullRequestOverrides<Entry extends PullRequestListEntry>(
+  overrides: ReadonlyMap<string, PullRequestListOverride>,
+  answered: ReadonlyArray<Entry>,
+  keyOf: (entry: Entry) => string,
+  state: PullRequestListState,
+): ReadonlyMap<string, PullRequestListOverride> {
+  if (overrides.size === 0) return overrides;
+  const byKey = new Map(answered.map((entry) => [keyOf(entry), entry]));
+  const kept = new Map<string, PullRequestListOverride>();
+  for (const [key, override] of overrides) {
+    const row = byKey.get(key);
+    const confirmed =
+      row === undefined
+        ? state !== "all" && override.state !== state
+        : row.state === override.state &&
+          (override.isDraft === undefined || row.isDraft === override.isDraft);
+    if (!confirmed) kept.set(key, override);
+  }
+  return kept.size === overrides.size ? overrides : kept;
 }

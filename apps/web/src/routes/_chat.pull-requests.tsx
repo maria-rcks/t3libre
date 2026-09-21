@@ -82,6 +82,7 @@ import {
   type PullRequestListOverride,
   pullRequestOverrideAfterAction,
   reusePullRequestEntries,
+  settlePullRequestOverrides,
 } from "../components/pullRequest/pullRequestList.logic";
 import {
   pullRequestListPreferences,
@@ -1103,9 +1104,13 @@ function PullRequestsRouteView() {
         ),
       };
     });
-    // A whole answer read after the action is the host's word, which outranks the reader's.
-    setOverrides((current) => (current.size === 0 ? current : new Map()));
+    // The host's word outranks the reader's, once it has actually said it: an override is
+    // cleared by an answer that agrees with it, not by any answer that happens to land.
+    setOverrides((current) =>
+      settlePullRequestOverrides(current, answered.entries, pullRequestEntryKey, search.state),
+    );
   }, [
+    search.state,
     answered,
     filterKey,
     sentCursors,
@@ -1504,6 +1509,15 @@ function PullRequestsRouteView() {
       search.involvement,
     );
   }, [groups, search.involvement, sort, statsByRow, typedParsed.text]);
+  const heldPullRequestsBySurface = useMemo(
+    () =>
+      new Map(
+        (ordered?.key === filterKey ? ordered.entries : (listData?.entries ?? [])).map(
+          (entry) => [pullRequestListEntryId(entry), entry] as const,
+        ),
+      ),
+    [filterKey, listData, ordered],
+  );
   const listedPullRequestsBySurface = useMemo(
     () =>
       new Map(
@@ -2100,17 +2114,33 @@ function PullRequestsRouteView() {
               refreshToken={detailRefreshToken}
               // Host actions can change both readiness and diff size, so refresh the counts
               // alongside the list. The panel already refreshes itself after each action.
-              onActed={(action) => {
-                // An action that only moves a row's state is written onto the row at once; the
-                // host has invalidated its caches, so the next scheduled read confirms it. The
-                // rest change what the counts and checks say, and those need the reads now.
-                const acted = listedPullRequestsBySurface.get(
+              onActed={(action, phase = "done") => {
+                // An action that only moves a row's state is written onto the row as it is
+                // sent, and taken back if the host refuses; the host invalidates its caches,
+                // so the next scheduled read confirms it. The rest change what the counts and
+                // checks say, and those need the reads once they are done.
+                // From every row held, not the ones on screen: a pull request closed from an
+                // open list has left the screen, and reopening it has to find it anyway.
+                const acted = heldPullRequestsBySurface.get(
                   pullRequestListEntryId(renderedPullRequestSurface),
                 );
-                if (action !== undefined && acted !== undefined && overrideEntry(acted, action)) {
+                const stateOnly =
+                  action !== undefined &&
+                  acted !== undefined &&
+                  pullRequestOverrideAfterAction(acted, action, "") !== null;
+                if (stateOnly) {
+                  if (phase === "sent") overrideEntry(acted, action);
+                  if (phase === "failed") {
+                    const key = pullRequestEntryKey(acted);
+                    setOverrides((current) => {
+                      const next = new Map(current);
+                      next.delete(key);
+                      return next;
+                    });
+                  }
                   return;
                 }
-                refreshListAndStats(undefined, panelEnvironmentId);
+                if (phase === "done") refreshListAndStats(undefined, panelEnvironmentId);
               }}
             />
           </RightPanelTabs>

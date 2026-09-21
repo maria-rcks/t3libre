@@ -35,6 +35,7 @@ import {
   applyPullRequestOverrides,
   pullRequestOverrideAfterAction,
   reusePullRequestEntries,
+  settlePullRequestOverrides,
 } from "./pullRequestList.logic";
 import {
   pullRequestListPreferences,
@@ -1654,5 +1655,31 @@ describe("pull request list overrides", () => {
     expect(
       reusePullRequestEntries(previous, [{ ...entry(1, "open") }, { ...entry(2, "open") }], key),
     ).toBe(previous);
+  });
+});
+
+describe("pull request list override settlement", () => {
+  const entry = (number: number, state: "open" | "closed" | "merged") =>
+    ({ number, state, isDraft: false, labels: [] }) as unknown as PullRequestListEntry;
+  const key = (row: { number: number }) => `#${row.number}`;
+
+  it("keeps an override until an answer agrees with it", () => {
+    const closed = { state: "closed" as const, updatedAt: "2026-07-03T00:00:00Z" };
+    const overrides = new Map([["#1", closed]]);
+    // A read from before the action still says open: the override stands.
+    expect(settlePullRequestOverrides(overrides, [entry(1, "open")], key, "open")).toBe(overrides);
+    // The row is gone from an open list: that is the host agreeing.
+    expect(settlePullRequestOverrides(overrides, [entry(2, "open")], key, "open").size).toBe(0);
+    // Absent from an "all" list says nothing, so the override stays.
+    expect(settlePullRequestOverrides(overrides, [entry(2, "open")], key, "all").size).toBe(1);
+    // Present as closed: confirmed.
+    expect(settlePullRequestOverrides(overrides, [entry(1, "closed")], key, "all").size).toBe(0);
+  });
+
+  it("does not hand back the old order when only the order changed", () => {
+    const previous = [entry(1, "open"), entry(2, "open")];
+    const swapped = reusePullRequestEntries(previous, [entry(2, "open"), entry(1, "open")], key);
+    expect(swapped).not.toBe(previous);
+    expect(swapped.map((row) => row.number)).toEqual([2, 1]);
   });
 });
