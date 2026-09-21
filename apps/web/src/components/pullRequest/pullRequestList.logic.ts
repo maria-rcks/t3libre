@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import type {
   ProjectId,
+  PullRequestAction,
   PullRequestActor,
   PullRequestDiffStat,
   PullRequestInvolvement,
@@ -16,6 +17,7 @@ import type {
   PullRequestListCursors,
   PullRequestListFilters,
   PullRequestListState,
+  PullRequestState,
 } from "@t3tools/contracts";
 
 import { toSortableTimestamp } from "../../lib/threadSort";
@@ -1139,4 +1141,82 @@ export function withDiffStat<
   if (entry.additions !== 0 || entry.deletions !== 0) return entry;
   const stat = statsByRow.get(pullRequestDiffStatKey(entry));
   return stat === undefined ? entry : { ...entry, ...stat };
+}
+
+/**
+ * What a row should say the moment an action is sent, before any host has answered. The host
+ * is the record and a later read replaces this, but the reader pressed the button and should
+ * see the row answer at once: a closed pull request leaves an "open" list on the click, not
+ * after the reads that follow.
+ */
+export interface PullRequestListOverride {
+  readonly state: PullRequestState;
+  readonly isDraft?: boolean;
+  readonly updatedAt: string;
+}
+
+export function pullRequestOverrideAfterAction(
+  entry: Pick<PullRequestListEntry, "state" | "isDraft">,
+  action: PullRequestAction,
+  at: string,
+): PullRequestListOverride | null {
+  switch (action) {
+    case "close":
+      return { state: "closed", updatedAt: at };
+    case "reopen":
+      return { state: "open", updatedAt: at };
+    case "merge":
+      return { state: "merged", updatedAt: at };
+    case "draft":
+      return { state: entry.state, isDraft: true, updatedAt: at };
+    case "ready":
+      return { state: entry.state, isDraft: false, updatedAt: at };
+    default:
+      return null;
+  }
+}
+
+/** The rows with their pending answers written over them, and the ones the list's state filter no longer holds dropped. */
+export function applyPullRequestOverrides<Entry extends PullRequestListEntry>(
+  entries: ReadonlyArray<Entry>,
+  overrides: ReadonlyMap<string, PullRequestListOverride>,
+  keyOf: (entry: Entry) => string,
+  state: PullRequestListState,
+): ReadonlyArray<Entry> {
+  if (overrides.size === 0) return entries;
+  const out: Entry[] = [];
+  for (const entry of entries) {
+    const override = overrides.get(keyOf(entry));
+    if (override === undefined) {
+      out.push(entry);
+      continue;
+    }
+    if (state !== "all" && override.state !== state) continue;
+    out.push({ ...entry, ...override });
+  }
+  return out;
+}
+
+/**
+ * A fresh answer with the rows it did not change handed back as the objects already held, so a
+ * memoized row whose data is the same does not render again. Every refresh otherwise rebuilds
+ * every entry, and a hundred rows repaint for the one that moved.
+ */
+export function reusePullRequestEntries<Entry extends PullRequestListEntry>(
+  previous: ReadonlyArray<Entry>,
+  next: ReadonlyArray<Entry>,
+  keyOf: (entry: Entry) => string,
+): ReadonlyArray<Entry> {
+  if (previous.length === 0) return next;
+  const held = new Map(previous.map((entry) => [keyOf(entry), entry]));
+  let reused = 0;
+  const out = next.map((entry) => {
+    const before = held.get(keyOf(entry));
+    if (before !== undefined && JSON.stringify(before) === JSON.stringify(entry)) {
+      reused += 1;
+      return before;
+    }
+    return entry;
+  });
+  return reused === next.length && previous.length === next.length ? previous : out;
 }

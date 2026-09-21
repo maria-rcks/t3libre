@@ -32,6 +32,9 @@ import {
   resolveQueryEnvironmentIds,
   resolveSelectedEnvironmentId,
   type EnvironmentPullRequestEntry,
+  applyPullRequestOverrides,
+  pullRequestOverrideAfterAction,
+  reusePullRequestEntries,
 } from "./pullRequestList.logic";
 import {
   pullRequestListPreferences,
@@ -1598,5 +1601,58 @@ describe("the priority groups against a paginated feed", () => {
     expect(
       groups.find((group) => group.key === "others")?.entries.map((row) => row.number),
     ).toEqual([6123]);
+  });
+});
+
+describe("pull request list overrides", () => {
+  const entry = (number: number, state: "open" | "closed" | "merged") =>
+    ({
+      host: "github.com",
+      repository: "pingdotgg/t3code",
+      number,
+      state,
+      isDraft: false,
+      updatedAt: "2026-07-01T00:00:00Z",
+      labels: [],
+    }) as unknown as PullRequestListEntry;
+  const key = (row: { number: number }) => `#${row.number}`;
+
+  it("maps the actions that change a row's state and nothing else", () => {
+    const at = "2026-07-02T00:00:00Z";
+    expect(pullRequestOverrideAfterAction(entry(1, "open"), "close", at)).toEqual({
+      state: "closed",
+      updatedAt: at,
+    });
+    expect(pullRequestOverrideAfterAction(entry(1, "closed"), "reopen", at)?.state).toBe("open");
+    expect(pullRequestOverrideAfterAction(entry(1, "open"), "merge", at)?.state).toBe("merged");
+    expect(pullRequestOverrideAfterAction(entry(1, "open"), "draft", at)?.isDraft).toBe(true);
+    expect(pullRequestOverrideAfterAction(entry(1, "open"), "update-branch", at)).toBeNull();
+  });
+
+  it("writes the override over the row and drops it from a list whose state it left", () => {
+    const rows = [entry(1, "open"), entry(2, "open")];
+    const overrides = new Map([
+      ["#1", { state: "closed" as const, updatedAt: "2026-07-03T00:00:00Z" }],
+    ]);
+    expect(
+      applyPullRequestOverrides(rows, overrides, key, "open").map((row) => row.number),
+    ).toEqual([2]);
+    const all = applyPullRequestOverrides(rows, overrides, key, "all");
+    expect(all.map((row) => [row.number, row.state])).toEqual([
+      [1, "closed"],
+      [2, "open"],
+    ]);
+    expect(applyPullRequestOverrides(rows, new Map(), key, "open")).toBe(rows);
+  });
+
+  it("hands back the held object for a row a refresh did not change", () => {
+    const previous = [entry(1, "open"), entry(2, "open")];
+    const next = [{ ...entry(1, "open") }, { ...entry(2, "open"), state: "merged" as const }];
+    const reused = reusePullRequestEntries(previous, next, key);
+    expect(reused[0]).toBe(previous[0]);
+    expect(reused[1]).toBe(next[1]);
+    expect(
+      reusePullRequestEntries(previous, [{ ...entry(1, "open") }, { ...entry(2, "open") }], key),
+    ).toBe(previous);
   });
 });

@@ -4,6 +4,7 @@ import { pullRequestHostOf, resolveEnvironmentMachineKind } from "@t3tools/contr
 import type {
   EnvironmentId,
   ProjectId,
+  PullRequestAction,
   PullRequestInvolvement,
   PullRequestListCursors,
   PullRequestListFilters,
@@ -77,6 +78,10 @@ import {
   type PullRequestStatsPolicy,
   type PullRequestStatsScope,
   type PullRequestPartitionsSnapshot,
+  applyPullRequestOverrides,
+  type PullRequestListOverride,
+  pullRequestOverrideAfterAction,
+  reusePullRequestEntries,
 } from "../components/pullRequest/pullRequestList.logic";
 import {
   pullRequestListPreferences,
@@ -914,6 +919,18 @@ function PullRequestsRouteView() {
     key: string;
     entries: ReadonlyArray<EnvironmentPullRequestEntry>;
   } | null>(null);
+  // What the reader just did to a row, shown before any host confirms it. A closed pull request
+  // leaves an "open" list on the click; the reads that follow are slow, and until one lands the
+  // row says what was asked of it. Cleared when a whole-page answer arrives after the action.
+  const [overrides, setOverrides] = useState<ReadonlyMap<string, PullRequestListOverride>>(
+    () => new Map(),
+  );
+  const overrideEntry = (entry: EnvironmentPullRequestEntry, action: PullRequestAction) => {
+    const override = pullRequestOverrideAfterAction(entry, action, new Date().toISOString());
+    if (override === null) return false;
+    setOverrides((current) => new Map(current).set(pullRequestEntryKey(entry), override));
+    return true;
+  };
   // A reload recreates the registry the queries live in, so with nothing held the page would
   // cold-start into skeletons even though almost every row is unchanged. The last answer for
   // this set of environments is kept across reloads and hydrated here as the carried rows: they
@@ -1077,8 +1094,17 @@ function PullRequestsRouteView() {
       // since the last read at the bottom of the page — below rows a week older — where "the
       // latest" is exactly what a refresh was for. The host answers in the order the page
       // reads, so its order stands; a row that moved was updated, and moving is the news.
-      return { key: filterKey, entries: rankPullRequestMatches(answered.entries, sentParsed.text) };
+      return {
+        key: filterKey,
+        entries: reusePullRequestEntries(
+          previous.entries,
+          rankPullRequestMatches(answered.entries, sentParsed.text),
+          pullRequestEntryKey,
+        ),
+      };
     });
+    // A whole answer read after the action is the host's word, which outranks the reader's.
+    setOverrides((current) => (current.size === 0 ? current : new Map()));
   }, [
     answered,
     filterKey,
@@ -1210,7 +1236,12 @@ function PullRequestsRouteView() {
   );
 
   const entries = useMemo(() => {
-    const known = ordered?.key === filterKey ? ordered.entries : (listData?.entries ?? []);
+    const known = applyPullRequestOverrides(
+      ordered?.key === filterKey ? ordered.entries : (listData?.entries ?? []),
+      overrides,
+      pullRequestEntryKey,
+      search.state,
+    );
     const involvementEntries = filterPullRequestsByInvolvement(known, viewers, search.involvement);
     // The hosts search more than the row shows — a body, a review, a commit message — so once
     // their answer is in, narrowing it again here would throw away matches the reader asked for.
@@ -1245,8 +1276,10 @@ function PullRequestsRouteView() {
     localFilters,
     listData,
     ordered,
+    overrides,
     querySettled,
     search.involvement,
+    search.state,
     searchingHosts,
     showingCarried,
     typedParsed.text,
@@ -2067,8 +2100,16 @@ function PullRequestsRouteView() {
               refreshToken={detailRefreshToken}
               // Host actions can change both readiness and diff size, so refresh the counts
               // alongside the list. The panel already refreshes itself after each action.
-              onActed={() => {
-                // Mutations already invalidate the host's affected caches.
+              onActed={(action) => {
+                // An action that only moves a row's state is written onto the row at once; the
+                // host has invalidated its caches, so the next scheduled read confirms it. The
+                // rest change what the counts and checks say, and those need the reads now.
+                const acted = listedPullRequestsBySurface.get(
+                  pullRequestListEntryId(renderedPullRequestSurface),
+                );
+                if (action !== undefined && acted !== undefined && overrideEntry(acted, action)) {
+                  return;
+                }
                 refreshListAndStats(undefined, panelEnvironmentId);
               }}
             />
