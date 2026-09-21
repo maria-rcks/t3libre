@@ -35,7 +35,10 @@ export function PullRequestSpeedActions({
   pending: boolean;
   onAct: (entry: EnvironmentPullRequestEntry, action: PullRequestSpeedAction) => void;
 }) {
-  if (entry.state === "merged") return null;
+  // Only for GitHub rows: the row does not carry what a host allows, and GitHub is the one
+  // whose close, reopen and merge the page knows. The host still has the last word, and a
+  // refusal takes the row's note back.
+  if (entry.state === "merged" || entry.provider !== "github") return null;
   const act = (action: PullRequestSpeedAction) => (event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();

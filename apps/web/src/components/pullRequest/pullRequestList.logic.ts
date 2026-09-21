@@ -1232,7 +1232,7 @@ export function reusePullRequestEntries<Entry extends PullRequestListEntry>(
 }
 
 /** How long a read that disagrees is taken for a stale one rather than for news. */
-export const PULL_REQUEST_OVERRIDE_TRUST_MS = 60_000;
+const PULL_REQUEST_OVERRIDE_TRUST_MS = 60_000;
 
 /**
  * The overrides an answer has confirmed, dropped; the rest kept. A read that started before

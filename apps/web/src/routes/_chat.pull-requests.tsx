@@ -961,6 +961,7 @@ function PullRequestsRouteView() {
   const modifiers = useShortcutModifierState();
   const speed =
     modifiers.shiftKey &&
+    typeof document !== "undefined" &&
     !(
       document.activeElement instanceof HTMLInputElement ||
       document.activeElement instanceof HTMLTextAreaElement
@@ -989,7 +990,10 @@ function PullRequestsRouteView() {
       if (speedPendingRef.current.has(key)) return;
       speedPendingRef.current = new Set(speedPendingRef.current).add(key);
       setSpeedPending(speedPendingRef.current);
-      const token = overrideEntry(entry, action);
+      // A merge is written onto the row once the host has done it, not when it is asked: a
+      // host that only queues the merge leaves the pull request open, and the row must not
+      // say merged ahead of it.
+      const token = action === "merge" ? null : overrideEntry(entry, action);
       const result = await runRowAction({
         environmentId: entry.environmentId,
         input: {
@@ -1023,8 +1027,12 @@ function PullRequestsRouteView() {
         type: "success",
         title: `#${entry.number} ${action === "merge" ? "merged" : action === "close" ? "closed" : "reopened"}`,
       });
+      if (action === "merge") {
+        overrideEntry(entry, action);
+        refreshListAndStats(undefined, entry.environmentId);
+      }
     },
-    [overrideEntry, revertOverride, runRowAction],
+    [overrideEntry, refreshListAndStats, revertOverride, runRowAction],
   );
   const onSpeedAction = useCallback(
     (entry: EnvironmentPullRequestEntry, action: PullRequestSpeedAction) =>
@@ -1587,15 +1595,31 @@ function PullRequestsRouteView() {
     // The reader's pending answers go on here, after grouping: the authored and reviewing
     // groups are read separately from the feed, and a row closed a moment ago has to leave
     // whichever group it was in.
-    const enriched = groups.map((group) => ({
-      ...group,
-      entries: applyPullRequestOverrides(
+    const enriched = groups.map((group) => {
+      const answered = applyPullRequestOverrides(
         group.entries.map((entry) => withDiffStat(entry, statsByRow)),
         overrides,
         pullRequestEntryKey,
         search.state,
-      ),
-    }));
+      );
+      // A row whose draft flag just changed has to pass the local filters again: a draft
+      // filter that let it in may not let the new one in.
+      return {
+        ...group,
+        entries:
+          hasLocalFilters && overrides.size > 0
+            ? answered.filter(
+                (entry) =>
+                  !overrides.has(pullRequestEntryKey(entry)) ||
+                  matchesPullRequestFilters(
+                    entry,
+                    localFilters,
+                    pullRequestEntryViewer(entry, viewers),
+                  ),
+              )
+            : answered,
+      };
+    });
     // Searching keeps its relevance order and priority groups unless the reader explicitly asks
     // for another sort. The readiness queue is the default browse order, not a way to bury a
     // closer text match.
@@ -1607,7 +1631,20 @@ function PullRequestsRouteView() {
         entry.additions + entry.deletions > 0 || statsByRow.has(pullRequestDiffStatKey(entry)),
       search.involvement,
     );
-  }, [groups, overrides, search.involvement, search.state, sort, statsByRow, typedParsed.text]);
+  }, [
+    groups,
+    hasLocalFilters,
+    localFilters,
+    overrides,
+    search.involvement,
+    search.state,
+    sort,
+    statsByRow,
+    typedParsed.text,
+    viewers,
+  ]);
+  /** What is actually on screen once the reader's pending answers are on the rows. */
+  const shownCount = displayGroups.reduce((count, group) => count + group.entries.length, 0);
   const heldPullRequestsBySurface = useMemo(
     () =>
       new Map(
@@ -1791,7 +1828,7 @@ function PullRequestsRouteView() {
   // so that case waits with the skeletons rather than answering for the hosts. A search says so
   // in its own words and is left to.
   const carriedToNothing =
-    showingCarried && listQuery.isPending && entries.length === 0 && typedQuery.length === 0;
+    showingCarried && listQuery.isPending && shownCount === 0 && typedQuery.length === 0;
   const listBody = (
     <>
       {!capabilityKnown ? (
@@ -1803,7 +1840,7 @@ function PullRequestsRouteView() {
         />
       ) : firstLoad ? (
         <PullRequestListGhost rows={7} />
-      ) : listQuery.error && entries.length === 0 ? (
+      ) : listQuery.error && shownCount === 0 ? (
         <PullRequestsUnavailableState
           error={listQuery.error}
           refreshing={listQuery.isPending}
@@ -1811,7 +1848,7 @@ function PullRequestsRouteView() {
         />
       ) : carriedToNothing ? (
         <PullRequestListGhost rows={7} />
-      ) : entries.length === 0 ? (
+      ) : shownCount === 0 ? (
         <PullRequestListEmptyState
           hasProjects={!projectsKnown || projects.length > 0}
           refreshing={refreshing}
@@ -1881,7 +1918,7 @@ function PullRequestsRouteView() {
           void speedAct(entry, "merge", method);
         }}
       />
-      {listQuery.error && entries.length > 0 ? (
+      {listQuery.error && shownCount > 0 ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
           <span>{listQuery.error} Showing the last pull requests loaded.</span>
           <Button size="xs" variant="outline" onClick={() => listQuery.refresh()}>
@@ -2240,15 +2277,16 @@ function PullRequestsRouteView() {
                   pullRequestOverrideAfterAction(acted, action, new Date(), 0) !== null;
                 if (stateOnly) {
                   const key = pullRequestEntryKey(acted);
-                  if (phase === "sent") {
+                  // A merge is written on once the host has done it, since a host that only
+                  // queues one leaves the pull request open; the rest go on as they are sent.
+                  if (phase === "sent" && action !== "merge") {
                     detailOverrideTokens.current.set(key, overrideEntry(acted, action));
                   }
                   if (phase === "failed") {
                     revertOverride(key, detailOverrideTokens.current.get(key) ?? null);
                   }
-                  // A merge the host only queued leaves the pull request open, and the row
-                  // would say merged; a finished merge reads the list again to settle it.
                   if (phase === "done" && action === "merge") {
+                    overrideEntry(acted, action);
                     refreshListAndStats(undefined, panelEnvironmentId);
                   }
                   return;
