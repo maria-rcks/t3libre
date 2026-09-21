@@ -42,6 +42,7 @@ import { useSettingsScope } from "./SettingsScopeContext";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Kbd, KbdGroup } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -117,9 +118,11 @@ function KeybindingsSearchInput({
   inputRef: RefObject<HTMLInputElement | null>;
 }) {
   return (
-    <div className="relative w-full sm:w-64">
-      <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 z-10 size-3.5 -translate-y-1/2 text-muted-foreground" />
-      <Input
+    <InputGroup className="w-full sm:w-64">
+      <InputGroupAddon>
+        <SearchIcon aria-hidden className="size-3.5" />
+      </InputGroupAddon>
+      <InputGroupInput
         ref={inputRef}
         type="search"
         value={query}
@@ -132,10 +135,9 @@ function KeybindingsSearchInput({
         }}
         placeholder="Search keybindings"
         aria-label="Search keybindings"
-        className="[&_[data-slot=input]]:pl-8"
         size="sm"
       />
-    </div>
+    </InputGroup>
   );
 }
 
