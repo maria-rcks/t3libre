@@ -56,13 +56,7 @@ export function PullRequestSpeedActions({
               Merge
             </Button>
           )}
-          <Button
-            size="xs"
-            variant="outline"
-            className="text-destructive hover:text-destructive"
-            disabled={pending}
-            onClick={act("close")}
-          >
+          <Button size="xs" variant="destructive-outline" disabled={pending} onClick={act("close")}>
             Close
           </Button>
         </>
