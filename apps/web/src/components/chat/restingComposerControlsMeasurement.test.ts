@@ -38,14 +38,14 @@ describe("measureRestingComposerControlsHostWidth", () => {
       input.previewsWidth === undefined
         ? null
         : { getBoundingClientRect: () => ({ width: input.previewsWidth }) };
-    const reserved = {
-      dataset: { restingControlsReserved: String(input.promptWidth) },
-      querySelector: () => previews,
+    const reserved = { dataset: { restingControlsReserved: String(input.promptWidth) } };
+    const host = {
+      clientWidth: 600,
+      querySelector: (selector: string) =>
+        selector === "[data-resting-controls-reserved]" ? reserved : previews,
     };
-    const host = { clientWidth: 600, querySelector: () => reserved };
     vi.stubGlobal("getComputedStyle", (target: unknown) => {
       if (target === host) return { paddingLeft: "16px", paddingRight: "80px", columnGap: "4px" };
-      if (target === reserved) return { columnGap: "4px" };
       return { marginInlineStart: "0px", marginInlineEnd: "0px" };
     });
     return host as unknown as HTMLElement;
