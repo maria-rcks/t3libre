@@ -1,3 +1,9 @@
+import {
+  THREAD_DETAILS_PANEL_ICON_CLASS,
+  THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
+  THREAD_DETAILS_PANEL_ROW_POPUP_CLASS,
+  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+} from "./chat/threadDetailsPanelStyles";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -79,6 +85,7 @@ export interface BranchToolbarBranchSelectorHandle {
 }
 
 interface BranchToolbarBranchSelectorProps {
+  displayMode?: "toolbar" | "panel";
   forceNewWorktree?: boolean;
   ref?: Ref<BranchToolbarBranchSelectorHandle>;
   className?: string;
@@ -100,6 +107,7 @@ function toBranchActionErrorMessage(error: unknown): string {
 }
 
 export function BranchToolbarBranchSelector({
+  displayMode = "toolbar",
   forceNewWorktree = false,
   ref,
   className,
@@ -785,7 +793,11 @@ export function BranchToolbarBranchSelector({
       value={resolvedActiveBranch}
     >
       <div
-        className={cn("flex min-w-0 items-center gap-1", className)}
+        className={cn(
+          "flex min-w-0 items-center gap-1",
+          displayMode === "panel" && "w-full",
+          className,
+        )}
         data-composer-context-control
       >
         <ThreadPullRequestBadgeControl
@@ -803,20 +815,33 @@ export function BranchToolbarBranchSelector({
             pointer-events-none, so the trigger itself never sees right-clicks
             while refs are loading or a branch action is pending. */}
         <span
-          className="flex min-w-0"
+          className={cn("flex min-w-0", displayMode === "panel" && "flex-1")}
           onContextMenu={(event) => handleBranchContextMenu(event, resolvedActiveBranch)}
         >
           <ComboboxTrigger
-            render={<Button variant="ghost" size="xs" />}
+            render={<Button variant="ghost" size={displayMode === "panel" ? "sm" : "xs"} />}
             // No press-scale: the popup aligns live to this trigger, so a
             // momentary 0.97 shrink would drag the open popup ~3px sideways.
-            className="min-w-0 max-w-full font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80 active:scale-100"
+            className={cn(
+              "min-w-0 max-w-full font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80 active:scale-100",
+              displayMode === "panel" && THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
+            )}
             disabled={isInitialBranchesLoadPending || isBranchActionPending}
           >
-            <GitBranchIcon className="size-3 shrink-0 opacity-70" />
+            <GitBranchIcon
+              className={
+                displayMode === "panel"
+                  ? THREAD_DETAILS_PANEL_ICON_CLASS
+                  : "size-3 shrink-0 opacity-70"
+              }
+            />
             <span
               data-composer-label
-              className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+              className={
+                displayMode === "panel"
+                  ? "min-w-0 flex-1 truncate text-left"
+                  : "min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+              }
             >
               <span
                 data-composer-label-motion
@@ -825,15 +850,24 @@ export function BranchToolbarBranchSelector({
                 {triggerLabel}
               </span>
             </span>
-            <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+            {displayMode === "panel" ? (
+              <span data-slot="select-icon">
+                <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />
+              </span>
+            ) : (
+              <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+            )}
           </ComboboxTrigger>
         </span>
       </div>
       <ComboboxPopup
-        align="end"
-        side="top"
-        className="flex w-80 flex-col"
-        {...composerFloatingLayerProps}
+        align={displayMode === "panel" ? "start" : "end"}
+        side={displayMode === "panel" ? "bottom" : "top"}
+        className={cn(
+          "flex flex-col",
+          displayMode === "panel" ? THREAD_DETAILS_PANEL_ROW_POPUP_CLASS : "w-80",
+        )}
+        {...(displayMode === "toolbar" ? composerFloatingLayerProps : {})}
       >
         <ComboboxSearchInput
           placeholder="Search refs..."

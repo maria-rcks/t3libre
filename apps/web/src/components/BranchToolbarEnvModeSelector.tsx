@@ -1,3 +1,10 @@
+import { cn } from "../lib/utils";
+import {
+  THREAD_DETAILS_PANEL_ICON_CLASS,
+  THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
+  THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
+  THREAD_DETAILS_PANEL_ROW_POPUP_CLASS,
+} from "./chat/threadDetailsPanelStyles";
 import { FolderGit2Icon, FolderGitIcon, FolderIcon, HistoryIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
@@ -22,6 +29,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
 
 interface BranchToolbarEnvModeSelectorProps {
+  displayMode?: "toolbar" | "panel";
   forceNewWorktree?: boolean;
   envLocked: boolean;
   effectiveEnvMode: EnvMode;
@@ -32,6 +40,7 @@ interface BranchToolbarEnvModeSelectorProps {
 }
 
 export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSelector({
+  displayMode = "toolbar",
   forceNewWorktree = false,
   envLocked,
   effectiveEnvMode,
@@ -58,19 +67,38 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       <Tooltip>
         <TooltipTrigger
           render={<span />}
-          className="inline-flex h-7 min-w-0 items-center gap-1 border border-transparent px-[calc(--spacing(2)-1px)] font-normal text-muted-foreground/70 text-xs sm:h-6"
+          className={cn(
+            "inline-flex h-7 min-w-0 items-center gap-1 border border-transparent px-[calc(--spacing(2)-1px)] font-normal text-muted-foreground/70 text-xs sm:h-6",
+            displayMode === "panel" && THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
+          )}
           data-composer-context-control
         >
           {forceNewWorktree ? (
-            <FolderGit2Icon className="size-3 shrink-0" />
+            <FolderGit2Icon
+              className={
+                displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
+              }
+            />
           ) : activeWorktreePath ? (
-            <FolderGitIcon className="size-3 shrink-0" />
+            <FolderGitIcon
+              className={
+                displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
+              }
+            />
           ) : (
-            <FolderIcon className="size-3 shrink-0" />
+            <FolderIcon
+              className={
+                displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
+              }
+            />
           )}
           <span
             data-composer-label
-            className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+            className={
+              displayMode === "panel"
+                ? "min-w-0 flex-1 truncate text-left"
+                : "min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+            }
           >
             <span
               data-composer-label-motion
@@ -109,8 +137,11 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
           render={
             <SelectTrigger
               variant="ghost"
-              size="xs"
-              className="min-w-0 shrink font-normal text-xs!"
+              size={displayMode === "panel" ? "default" : "xs"}
+              className={cn(
+                "min-w-0 shrink font-normal text-xs!",
+                displayMode === "panel" && THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
+              )}
               aria-label="Workspace"
               data-composer-shortcut="composer.workspace"
               data-composer-context-control
@@ -118,15 +149,31 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
           }
         >
           {effectiveEnvMode === "worktree" ? (
-            <FolderGit2Icon className="size-3" />
+            <FolderGit2Icon
+              className={
+                displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
+              }
+            />
           ) : activeWorktreePath ? (
-            <FolderGitIcon className="size-3" />
+            <FolderGitIcon
+              className={
+                displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
+              }
+            />
           ) : (
-            <FolderIcon className="size-3" />
+            <FolderIcon
+              className={
+                displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
+              }
+            />
           )}
           <span
             data-composer-label
-            className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+            className={
+              displayMode === "panel"
+                ? "min-w-0 flex-1 truncate text-left"
+                : "min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+            }
           >
             <span
               data-composer-label-motion
@@ -135,6 +182,11 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
               <SelectValue />
             </span>
           </span>
+          {displayMode === "panel" && effectiveEnvMode === "worktree" && !activeWorktreePath ? (
+            <span className="shrink-0 text-[10px] font-normal text-muted-foreground/70">
+              Create
+            </span>
+          ) : null}
         </TooltipTrigger>
         <TooltipPopup>
           {effectiveEnvMode === "worktree"
@@ -142,7 +194,12 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
             : resolveCurrentWorkspaceLabel(activeWorktreePath)}
         </TooltipPopup>
       </Tooltip>
-      <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
+      <SelectPopup
+        alignItemWithTrigger={false}
+        {...(displayMode === "toolbar"
+          ? composerFloatingLayerProps
+          : { popupClassName: THREAD_DETAILS_PANEL_ROW_POPUP_CLASS })}
+      >
         <SelectGroup>
           <SelectGroupLabel>Workspace</SelectGroupLabel>
           <SelectItem value="local">

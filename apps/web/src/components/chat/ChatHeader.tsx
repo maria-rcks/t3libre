@@ -11,7 +11,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { ChevronDownIcon, EllipsisIcon } from "lucide-react";
+import { ChevronDownIcon, ListFilterIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -19,6 +19,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
@@ -40,7 +41,7 @@ import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { readLocalApi } from "~/localApi";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { observeResponsiveBreakpointFade, usePanelAnimationSettings } from "../../panelAnimations";
+import { BranchToolbar } from "../BranchToolbar";
 import { ProjectFavicon } from "../ProjectFavicon";
 import {
   WorkspaceBreadcrumb,
@@ -49,9 +50,8 @@ import {
   WorkspaceBreadcrumbText,
 } from "../WorkspaceBreadcrumb";
 import { cn } from "~/lib/utils";
-import { useIsMobile } from "~/hooks/useMediaQuery";
 import { Button } from "../ui/button";
-import { Menu, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -67,6 +67,8 @@ interface ChatHeaderProps {
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
+  branchToolbarProps: ComponentProps<typeof BranchToolbar>;
+  onOpenChanges?: (() => void) | undefined;
   gitCwd: string | null;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
@@ -101,8 +103,6 @@ export function resolveRenameCommit(input: {
 // events (the second click dismisses it and dblclick still fires), so it
 // opens immediately.
 const TITLE_MENU_OPEN_DELAY_MS = 500;
-// Matches the @3xl/header-actions container breakpoint owned by this header.
-const HEADER_ACTIONS_EXPANDED_BREAKPOINT_REM = 48;
 
 export function shouldShowOpenInPicker(input: {
   readonly activeProjectName: string | undefined;
@@ -136,6 +136,8 @@ export const ChatHeader = memo(function ChatHeader({
   keybindings,
   availableEditors,
   rightPanelOpen,
+  branchToolbarProps,
+  onOpenChanges,
   gitCwd,
   onOpenPullRequest,
   onNewThreadInProject,
@@ -145,55 +147,19 @@ export const ChatHeader = memo(function ChatHeader({
   onUpdateProjectScript,
   onDeleteProjectScript,
 }: ChatHeaderProps) {
-  const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
-    usePanelAnimationSettings();
-  const headerActionsRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const actions = headerActionsRef.current;
-    const container = actions?.parentElement;
-    if (!actions || !container) return;
-    return observeResponsiveBreakpointFade({
-      target: actions,
-      container,
-      active: panelAnimationsActive,
-      durationMs: panelAnimationDurationMs,
-      breakpoint: { value: HEADER_ACTIONS_EXPANDED_BREAKPOINT_REM, unit: "rem" },
-    });
-  }, [panelAnimationDurationMs, panelAnimationsActive]);
-  const isMobile = useIsMobile();
-  // Side panels can leave a desktop header narrower than a phone.
-  const [isNarrowHeader, setIsNarrowHeader] = useState(false);
-  useEffect(() => {
-    const container = headerActionsRef.current?.parentElement;
-    if (!container) return;
-    const update = () => setIsNarrowHeader(container.clientWidth < 512);
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, []);
-  const actionsCollapsed = isMobile || isNarrowHeader;
   const [actionsOpen, setActionsOpen] = useState(false);
   const [actionsContainer] = useState(() => {
     const container = document.createElement("div");
     container.className = "contents";
     return container;
   });
-  // Reparent the DOM host, not the React controls: rotating a phone or resizing
-  // a window must not discard an unsaved script or Git dialog.
-  const mountInlineActions = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (node && !actionsCollapsed) node.appendChild(actionsContainer);
-    },
-    [actionsContainer, actionsCollapsed],
-  );
+  // Keep controls mounted while the popup is closed so shortcuts and open dialogs survive.
   const mountMenuActions = useCallback(
     (node: HTMLDivElement | null) => {
-      if (node && actionsCollapsed) node.appendChild(actionsContainer);
+      if (node) node.appendChild(actionsContainer);
     },
-    [actionsContainer, actionsCollapsed],
+    [actionsContainer],
   );
-  if (!actionsCollapsed && actionsOpen) setActionsOpen(false);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeProjectName = activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
@@ -353,11 +319,22 @@ export const ChatHeader = memo(function ChatHeader({
   );
   const headerActions = (
     <>
-      {activeProjectScripts && (
-        <>
+      <section aria-label="Workspace" className="p-1">
+        <h3 className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Workspace</h3>
+        <BranchToolbar {...branchToolbarProps} layout="panel" panelSection="workspace" />
+        {showOpenInPicker && (
+          <OpenInPicker
+            displayMode="panel"
+            environmentId={activeThreadEnvironmentId}
+            keybindings={keybindings}
+            availableEditors={availableEditors}
+            openInCwd={openInCwd}
+          />
+        )}
+        {activeProjectScripts && (
           <ProjectScriptsControl
+            displayMode="panel"
             onRequestMenuClose={() => setActionsOpen(false)}
-            presentation={actionsCollapsed ? "menu" : "toolbar"}
             scripts={activeProjectScripts}
             fileScripts={fileScripts}
             keybindings={keybindings}
@@ -367,31 +344,25 @@ export const ChatHeader = memo(function ChatHeader({
             onUpdateScript={onUpdateProjectScript}
             onDeleteScript={onDeleteProjectScript}
           />
-        </>
-      )}
-      {showOpenInPicker && (
-        <>
-          {actionsCollapsed && activeProjectScripts && <MenuSeparator />}
-          <OpenInPicker
-            presentation={actionsCollapsed ? "menu" : "toolbar"}
-            environmentId={activeThreadEnvironmentId}
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            openInCwd={openInCwd}
-          />
-        </>
-      )}
-      {activeProjectName && gitCwd && (
-        <>
-          {actionsCollapsed && (activeProjectScripts || showOpenInPicker) && <MenuSeparator />}
-          <GitActionsControl
-            presentation={actionsCollapsed ? "menu" : "toolbar"}
-            gitCwd={gitCwd}
-            activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
-            onOpenPullRequest={onOpenPullRequest}
-            {...(draftId ? { draftId } : {})}
-          />
-        </>
+        )}
+      </section>
+      {gitCwd && (
+        <section aria-label="Version Control" className="border-t border-border/65 p-1">
+          <h3 className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Version Control</h3>
+          {branchToolbarProps.showGitControls && (
+            <BranchToolbar {...branchToolbarProps} layout="panel" panelSection="branch" />
+          )}
+          {activeProjectName && (
+            <GitActionsControl
+              displayMode="panel"
+              gitCwd={gitCwd}
+              activeThreadRef={activeThreadRef}
+              onOpenPullRequest={onOpenPullRequest}
+              {...(onOpenChanges ? { onOpenChanges } : {})}
+              {...(draftId ? { draftId } : {})}
+            />
+          )}
+        </section>
       )}
     </>
   );
@@ -488,7 +459,6 @@ export const ChatHeader = memo(function ChatHeader({
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
       <div
-        ref={headerActionsRef}
         data-chat-header-actions
         className={cn(
           "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
@@ -498,31 +468,23 @@ export const ChatHeader = memo(function ChatHeader({
           "[[data-panel-animations=true]_&]:motion-safe:transition-[padding-right] [[data-panel-animations=true]_&]:motion-safe:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:motion-safe:ease-out",
         )}
       >
-        <Menu open={actionsCollapsed && actionsOpen} onOpenChange={setActionsOpen}>
-          <MenuTrigger
-            className={
-              actionsCollapsed &&
-              (activeProjectScripts || showOpenInPicker || (activeProjectName && gitCwd))
-                ? undefined
-                : "hidden"
-            }
-            render={<Button size="icon-sm" variant="ghost" aria-label="More header actions" />}
+        <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
+          <PopoverTrigger
+            render={<Button size="icon-sm" variant="ghost" aria-label="Workspace menu" />}
           >
-            <EllipsisIcon className="size-4" />
-          </MenuTrigger>
-          <div ref={mountInlineActions} className="contents" />
-          <MenuPopup
+            <ListFilterIcon className="size-4" />
+          </PopoverTrigger>
+          <PopoverPopup
             data-chat-header-actions
-            keepMounted
-            aria-label="Header actions"
+            aria-label="Workspace menu"
             align="end"
-            className="min-w-56 max-w-[calc(100vw-2rem)]"
-            finalFocus={actionsCollapsed ? undefined : false}
+            className="w-64 max-w-[calc(100vw-2rem)] [-webkit-app-region:no-drag]"
+            viewportClassName="p-0 [--viewport-inline-padding:0px]"
           >
             <div ref={mountMenuActions} className="contents" />
-            {createPortal(headerActions, actionsContainer)}
-          </MenuPopup>
-        </Menu>
+          </PopoverPopup>
+          {createPortal(headerActions, actionsContainer)}
+        </Popover>
       </div>
     </div>
   );

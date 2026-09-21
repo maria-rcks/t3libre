@@ -9819,6 +9819,39 @@ export default function ChatView(props: ChatViewProps) {
             keybindings={keybindings}
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
+            branchToolbarProps={{
+              forceNewWorktree: multipleModelSelections !== null,
+              environmentId: activeThread.environmentId,
+              threadId: activeThread.id,
+              showGitControls: isGitRepo,
+              ...(routeKind === "draft" && draftId ? { draftId } : {}),
+              onEnvModeChange,
+              startFromOrigin,
+              onStartFromOriginChange,
+              ...(canOverrideServerThreadEnvMode
+                ? {
+                    effectiveEnvModeOverride: envMode,
+                    activeThreadBranchOverride: activeThreadBranch,
+                    onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+                  }
+                : {}),
+              envLocked,
+              onComposerFocusRequest: scheduleComposerFocus,
+              ...(canCheckoutPullRequestIntoThread
+                ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+                : {}),
+              ...(hasMultipleEnvironments ? { onEnvironmentChange } : {}),
+              autoEnvironmentLabel,
+              onAutoEnvironment:
+                draftId &&
+                !envLocked &&
+                hasMultipleEnvironments &&
+                loadBalancingSettings.loadBalancingEnabled
+                  ? onAutoEnvironment
+                  : undefined,
+              availableEnvironments: logicalProjectEnvironments,
+            }}
+            onOpenChanges={isServerThread && isGitRepo ? addDiffSurface : undefined}
             gitCwd={gitCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
             {...(activeDraftLogicalProjectKey

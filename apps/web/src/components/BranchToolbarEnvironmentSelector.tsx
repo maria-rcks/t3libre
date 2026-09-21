@@ -1,3 +1,10 @@
+import { cn } from "../lib/utils";
+import {
+  THREAD_DETAILS_PANEL_ICON_CLASS,
+  THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
+  THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
+  THREAD_DETAILS_PANEL_ROW_POPUP_CLASS,
+} from "./chat/threadDetailsPanelStyles";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
@@ -17,6 +24,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 interface BranchToolbarEnvironmentSelectorProps {
+  displayMode?: "toolbar" | "panel";
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
   envLocked: boolean;
@@ -28,6 +36,7 @@ interface BranchToolbarEnvironmentSelectorProps {
 }
 
 export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
+  displayMode = "toolbar",
   autoEnvironmentLabel,
   onAutoEnvironment,
   envLocked,
@@ -63,16 +72,25 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
       <Tooltip>
         <TooltipTrigger
           render={<span />}
-          className="inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-[calc(--spacing(2)-1px)] font-normal text-muted-foreground/70 text-xs sm:h-6"
+          className={cn(
+            "inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-[calc(--spacing(2)-1px)] font-normal text-muted-foreground/70 text-xs sm:h-6",
+            displayMode === "panel" && THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
+          )}
           data-composer-context-control
         >
           <EnvironmentMachineIcon
             kind={activeEnvironment?.machine ?? "server"}
-            className="size-3 shrink-0"
+            className={
+              displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
+            }
           />
           <span
             data-composer-label
-            className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+            className={
+              displayMode === "panel"
+                ? "min-w-0 flex-1 truncate text-left"
+                : "min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+            }
           >
             <span
               data-composer-label-motion
@@ -101,8 +119,11 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           render={
             <SelectTrigger
               variant="ghost"
-              size="xs"
-              className="min-w-0 max-w-full font-normal text-xs!"
+              size={displayMode === "panel" ? "default" : "xs"}
+              className={cn(
+                "min-w-0 max-w-full font-normal text-xs!",
+                displayMode === "panel" && THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
+              )}
               aria-label="Run on"
               data-composer-shortcut="composer.host"
               data-composer-context-control
@@ -110,16 +131,27 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           }
         >
           {autoEnvironmentLabel ? (
-            <ScaleIcon className="size-3 shrink-0" aria-hidden="true" />
+            <ScaleIcon
+              className={
+                displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
+              }
+              aria-hidden="true"
+            />
           ) : (
             <EnvironmentMachineIcon
               kind={activeEnvironment?.machine ?? "server"}
-              className="size-3 shrink-0"
+              className={
+                displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
+              }
             />
           )}
           <span
             data-composer-label
-            className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+            className={
+              displayMode === "panel"
+                ? "min-w-0 flex-1 truncate text-left"
+                : "min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+            }
           >
             <span
               data-composer-label-motion
@@ -131,7 +163,12 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         </TooltipTrigger>
         <TooltipPopup>{autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}</TooltipPopup>
       </Tooltip>
-      <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
+      <SelectPopup
+        alignItemWithTrigger={false}
+        {...(displayMode === "toolbar"
+          ? composerFloatingLayerProps
+          : { popupClassName: THREAD_DETAILS_PANEL_ROW_POPUP_CLASS })}
+      >
         <SelectGroup>
           <SelectGroupLabel>Run on</SelectGroupLabel>
           {onAutoEnvironment && (
