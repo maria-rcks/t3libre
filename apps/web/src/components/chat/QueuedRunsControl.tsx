@@ -374,38 +374,26 @@ export function QueuedRunsControl({
                       </Button>
                     ) : null}
                   </ComposerBanner.Icon>
-                  <ComposerBanner.Content className="flex-col items-start text-foreground/80">
+                  <ComposerBanner.Content className="text-foreground/80">
                     {isEditing ? <span className="sr-only">Editing queued message: </span> : null}
-                    <span className="flex w-full min-w-0 items-center gap-1">
-                      {item.pending ? (
-                        <Clock3Icon
-                          aria-label="Saving queued message"
-                          className="size-3 shrink-0 text-muted-foreground/60"
-                        />
-                      ) : null}
-                      {previewText ? (
-                        <Tooltip>
-                          <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
-                            {previewText}
-                          </TooltipTrigger>
-                          <TooltipPopup side="top" className="max-w-96 break-words">
-                            {previewText}
-                          </TooltipPopup>
-                        </Tooltip>
-                      ) : null}
-                    </span>
+                    {item.pending ? (
+                      <Clock3Icon
+                        aria-label="Saving queued message"
+                        className="size-3 shrink-0 text-muted-foreground/60"
+                      />
+                    ) : null}
                     {item.thumbnails.length > 0 ? (
-                      <span className="flex w-full min-w-0 flex-wrap gap-1 py-1">
+                      <span className="flex shrink-0 items-center gap-0.5">
                         {item.thumbnails.map((thumbnail) => (
                           <span
                             key={thumbnail.key}
-                            className="size-7 shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted/60"
+                            className="size-4 overflow-hidden rounded border border-border/70 bg-background"
                           >
                             {thumbnail.url ? (
                               <img
                                 src={thumbnail.url}
                                 alt={thumbnail.name}
-                                className="block size-full object-contain"
+                                className="size-full object-cover"
                               />
                             ) : (
                               <span
@@ -417,6 +405,14 @@ export function QueuedRunsControl({
                         ))}
                       </span>
                     ) : null}
+                    <Tooltip>
+                      <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
+                        {previewText}
+                      </TooltipTrigger>
+                      <TooltipPopup side="top" className="max-w-96 break-words">
+                        {previewText}
+                      </TooltipPopup>
+                    </Tooltip>
                   </ComposerBanner.Content>
                   <ComposerBanner.Actions>
                     {isEditing ? (
