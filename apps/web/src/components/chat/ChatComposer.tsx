@@ -101,6 +101,7 @@ import {
   useComposerMenuProps,
   isInsideCollapsedComposerControls,
   isInsideRestingComposerControlScope,
+  shouldBypassComposerDrag,
 } from "./composerEventScope";
 import {
   type ComposerFileAttachment,
@@ -5309,9 +5310,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       aria-hidden={restingControlsVisible ? undefined : true}
       inert={restingControlsVisible ? undefined : true}
       className={cn(
-        "relative flex w-max min-w-0 max-w-full items-center gap-1 text-muted-foreground/70 [&_button]:text-xs!",
-        // A cluster that no longer fits leaves the flow so the prompt keeps
-        // the whole row; it stays mounted so it can be measured back in.
+        // The cluster carries the row's shrink weight, so a picker that the
+        // measurement allowed to contract does so before the prompt loses its
+        // reserved width. A cluster that no longer fits leaves the flow so the
+        // prompt keeps the whole row; it stays mounted so it can be measured
+        // back in.
+        "relative flex w-max min-w-0 max-w-full shrink-[999] items-center gap-1 text-muted-foreground/70 [&_button]:text-xs!",
         !restingControlsVisible && "invisible absolute",
       )}
     >
@@ -6343,19 +6347,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         scheduleComposerCollapseCheck();
       }}
       onDragEnterCapture={(event) => {
-        if (isInsideRestingComposerControlScope(event.target)) return;
+        if (shouldBypassComposerDrag(event.target)) return;
         composerMentionDragHandlers.onDragEnter(event);
       }}
       onDragOverCapture={(event) => {
-        if (isInsideRestingComposerControlScope(event.target)) return;
+        if (shouldBypassComposerDrag(event.target)) return;
         composerMentionDragHandlers.onDragOver(event);
       }}
       onDragLeaveCapture={(event) => {
-        if (isInsideRestingComposerControlScope(event.target)) return;
+        if (shouldBypassComposerDrag(event.target)) return;
         onComposerMentionDragLeaveCapture(event);
       }}
       onDropCapture={(event) => {
-        if (isInsideRestingComposerControlScope(event.target)) return;
+        if (shouldBypassComposerDrag(event.target)) return;
         composerMentionDragHandlers.onDrop(event);
       }}
       className="mx-auto w-full min-w-0 max-w-(--chat-content-max-width)"
@@ -7079,14 +7083,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     </DialogPopup>
                   </Dialog>
                 ) : null}
-                {/* The prompt reserves this much of the row and the image previews
-                    their full width; the controls beside them measure the remainder
-                    and fold into overflow. */}
+                {/* The prompt starts from its reserved width and grows into what
+                    the controls leave; the same number feeds their measurement, so
+                    they fold into overflow before the prompt gives anything up. */}
                 <div
                   data-resting-controls-reserved={
                     isComposerResting ? String(COMPOSER_RESTING_PROMPT_MIN_PX) : undefined
                   }
-                  className={cn(isComposerResting && "flex min-w-0 flex-1 items-center gap-1")}
+                  className={cn(isComposerResting && "min-w-0 shrink grow")}
+                  style={
+                    isComposerResting ? { flexBasis: COMPOSER_RESTING_PROMPT_MIN_PX } : undefined
+                  }
                 >
                   <ComposerContextActionsContext value={composerContextActions}>
                     <ComposerPromptEditor
@@ -7104,7 +7111,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       buildContextClipboardFragment={buildContextClipboardFragment}
                       importContextFragment={importContextFragment}
                       skills={selectedProviderSkills}
-                      containerClassName={cn(isComposerResting && "min-w-0 flex-1")}
+                      containerClassName={cn(isComposerResting && "min-w-0")}
                       className={cn(
                         showMobilePendingAnswerActions && "max-sm:pb-11",
                         isComposerResting &&
@@ -7146,8 +7153,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       }
                     />
                   </ComposerContextActionsContext>
-                  {isComposerResting ? collapsedComposerImagePreviews : null}
                 </div>
+                {isComposerResting ? collapsedComposerImagePreviews : null}
                 {isComposerResting ? restingComposerControls : null}
                 {showMobilePendingAnswerActions ? (
                   <div

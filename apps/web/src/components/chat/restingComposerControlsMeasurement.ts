@@ -75,11 +75,10 @@ export function measureRestingComposerControls(
 
 /**
  * The room a host leaves for the resting controls: its content box minus
- * what its reserved group keeps back. The group's attribute carries the
- * prompt's minimum in pixels, and any image previews inside it keep their
- * rendered width. Reading a constant for the prompt instead of its rendered
- * width keeps the answer independent of how much room the controls took
- * last render.
+ * the prompt's reservation (the pixel value its reserved element carries)
+ * and the rendered width of any image previews, each with the row gap.
+ * Reading a constant for the prompt instead of its rendered width keeps the
+ * answer independent of how much room the controls took last render.
  */
 export function measureRestingComposerControlsHostWidth(host: HTMLElement): number {
   const style = getComputedStyle(host);
@@ -89,13 +88,9 @@ export function measureRestingComposerControlsHostWidth(host: HTMLElement): numb
     (Number.parseFloat(style.paddingRight) || 0);
   const reserved = host.querySelector<HTMLElement>("[data-resting-controls-reserved]");
   if (!reserved) return contentWidth;
-  const promptWidth = Number.parseFloat(reserved.dataset.restingControlsReserved ?? "") || 0;
-  const previews = reserved.querySelector<HTMLElement>(
-    '[data-chat-composer-resting-images="true"]',
-  );
-  const previewsWidth = previews ? elementOuterWidth(previews) : 0;
-  const previewsGap =
-    previewsWidth > 0 ? Number.parseFloat(getComputedStyle(reserved).columnGap) || 0 : 0;
   const gap = Number.parseFloat(style.columnGap) || 0;
-  return contentWidth - promptWidth - previewsWidth - previewsGap - gap;
+  const promptWidth = Number.parseFloat(reserved.dataset.restingControlsReserved ?? "") || 0;
+  const previews = host.querySelector<HTMLElement>('[data-chat-composer-resting-images="true"]');
+  const previewsWidth = previews ? elementOuterWidth(previews) : 0;
+  return contentWidth - promptWidth - gap - (previewsWidth > 0 ? previewsWidth + gap : 0);
 }
