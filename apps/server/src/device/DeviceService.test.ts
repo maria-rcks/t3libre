@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   DEFAULT_SERVER_SETTINGS,
   DeviceId,
+  DeviceOperationError,
   LOCAL_DEVICE_HOST_ID,
   ThreadId,
   type DeviceServiceState,
@@ -66,7 +67,9 @@ const fixture = Effect.fn("fixture")(function* (
   onBoot: Effect.Effect<void> = Effect.void,
   bootError?: string,
   failListAfterShutdown = false,
-  runtimeFailure?: NodeRuntimeUnavailableError,
+  runtimeFailure?: NodeRuntimeUnavailableError | DeviceHost.DeviceHostError,
+  inspectError = false,
+  installTool?: Parameters<typeof makeWithHosts>[3],
 ) {
   const settings = yield* Ref.make(DEFAULT_SERVER_SETTINGS);
   const starts: string[] = [];
@@ -82,6 +85,17 @@ const fixture = Effect.fn("fixture")(function* (
     run: () => Effect.succeed({ code: 0, stdout: "Pixel_API_35\n", stderr: "" }),
   };
   const host: DeviceHost.DeviceHost["Service"] = {
+    ...(inspectError
+      ? {
+          inspect: Effect.fail(
+            new DeviceHost.DeviceHostError({
+              hostId: LOCAL_DEVICE_HOST_ID,
+              step: "probe",
+              cause: new Error("offline"),
+            }),
+          ),
+        }
+      : {}),
     id: LOCAL_DEVICE_HOST_ID,
     summary: Effect.succeed({
       id: LOCAL_DEVICE_HOST_ID,
@@ -96,7 +110,7 @@ const fixture = Effect.fn("fixture")(function* (
       Effect.gen(function* () {
         if (runtimeFailure) return yield* runtimeFailure;
         starts.push("start");
-        yield* onPhase("starting");
+        yield* onPhase("installing", "Updating device hub from 0.9.0 to 0.10.1…");
         return ready;
       }),
     ensureAgentReady: (onPhase) =>
@@ -117,7 +131,12 @@ const fixture = Effect.fn("fixture")(function* (
       starts.push("stop");
     }),
   };
-  const service = yield* makeWithHosts(new Map([[host.id, host]])).pipe(
+  const service = yield* makeWithHosts(
+    new Map([[host.id, host]]),
+    undefined,
+    undefined,
+    installTool,
+  ).pipe(
     Effect.provideService(DeviceHost.DeviceHost, host),
     Effect.provideService(
       ServerSettingsService,
@@ -570,4 +589,145 @@ it.effect.each([
       Effect.provide(ServerSettingsService.layerTest({ enableDeviceSupport: true })),
       Effect.scoped,
     ),
+);
+
+it.effect("retry keeps device and agent consent unchanged", () =>
+  Effect.gen(function* () {
+    const { service, starts, agentStarts } = yield* fixture();
+    yield* service.retryHost(LOCAL_DEVICE_HOST_ID);
+    expect(starts).toEqual([]);
+    expect(agentStarts).toEqual([]);
+    yield* service.configure({ enabled: true });
+    yield* service.retryHost(LOCAL_DEVICE_HOST_ID);
+    expect(agentStarts).toEqual([]);
+    yield* service.configure({ agentAccessEnabled: true });
+    const before = agentStarts.length;
+    yield* service.retryHost(LOCAL_DEVICE_HOST_ID);
+    expect(agentStarts.length).toBe(before + 1);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("publishes update detail for the correct host", () =>
+  Effect.gen(function* () {
+    const { service } = yield* fixture();
+    const changes = yield* service.subscribe;
+    yield* service.configure({ enabled: true });
+    const states = yield* PubSub.takeAll(changes);
+    expect(
+      states.some(
+        (state) => state.hostStatuses.local?.detail === "Updating device hub from 0.9.0 to 0.10.1…",
+      ),
+    ).toBe(true);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("host retry exposes actionable failure without internal IDs or diagnostics", () =>
+  Effect.gen(function* () {
+    const { service, settings } = yield* fixture(
+      Effect.void,
+      undefined,
+      false,
+      new DeviceHost.DeviceHostError({
+        hostId: LOCAL_DEVICE_HOST_ID,
+        step: "probe",
+        cause: "private diagnostics",
+      }),
+    );
+    yield* Ref.update(settings, (current) => ({ ...current, enableDeviceSupport: true }));
+    const state = yield* service.retryHost(LOCAL_DEVICE_HOST_ID);
+    expect(state.supportsHostRetry).toBe(true);
+    expect(state.hostStatuses[LOCAL_DEVICE_HOST_ID]).toEqual({
+      status: "failed",
+      detail: "Could not connect to this host over SSH.",
+    });
+  }).pipe(Effect.scoped),
+);
+
+it.effect("version discovery does not grant consent or start device tools", () =>
+  Effect.gen(function* () {
+    const { service, starts, agentStarts, requests } = yield* fixture();
+    const state = yield* service.inspect;
+    expect(state.supportsToolInspection).toBe(true);
+    expect(state.hostStatus).toBe("disabled");
+    expect(state.hosts).toHaveLength(1);
+    expect(starts).toEqual([]);
+    expect(agentStarts).toEqual([]);
+    expect(requests).toEqual([]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("failed read-only discovery preserves lifecycle status and installed inventory", () =>
+  Effect.gen(function* () {
+    const { service, starts } = yield* fixture(Effect.void, undefined, false, undefined, true);
+    const state = yield* service.inspect;
+    expect(state.supportsToolInspection).toBe(true);
+    expect(state.hostStatus).toBe("disabled");
+    expect(state.hosts[0]?.hubInstalled).toBe(true);
+    expect(state.hosts[0]?.toolInspectionError).toContain("Reconnect the host");
+    expect(starts).toEqual([]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "manual updates install only the selected tool without enabling access or starting helpers",
+  () =>
+    Effect.gen(function* () {
+      const installed: string[] = [];
+      const { service, starts, agentStarts, requests } = yield* fixture(
+        Effect.void,
+        undefined,
+        false,
+        undefined,
+        false,
+        (tool) =>
+          Effect.sync(() => {
+            installed.push(tool);
+          }),
+      );
+      const before = yield* service.state;
+      const state = yield* service.updateTool("agent");
+      expect(installed).toEqual(["agent"]);
+      expect(state.supportsToolUpdate).toBe(true);
+      expect(state.hostStatus).toBe(before.hostStatus);
+      expect(state.agentAccessEnabled).toBe(before.agentAccessEnabled);
+      expect(state.revision).toBeGreaterThan(before.revision);
+      expect(starts).toEqual([]);
+      expect(agentStarts).toEqual([]);
+      expect(requests).toEqual([]);
+      yield* service.updateTool("hub");
+      expect(installed).toEqual(["agent", "hub"]);
+    }).pipe(Effect.scoped),
+);
+
+it.effect("failed manual installation leaves lifecycle state unchanged and can be retried", () =>
+  Effect.gen(function* () {
+    let attempts = 0;
+    const { service, starts, agentStarts } = yield* fixture(
+      Effect.void,
+      undefined,
+      false,
+      undefined,
+      false,
+      () =>
+        Effect.suspend(() =>
+          ++attempts === 1
+            ? Effect.fail(
+                new DeviceOperationError({
+                  operation: "update device tool",
+                  reason: "command_failed",
+                  cause: new Error("offline"),
+                }),
+              )
+            : Effect.void,
+        ),
+    );
+    const before = yield* service.state;
+    const result = yield* service.updateTool("agent").pipe(Effect.result);
+    expect(result._tag).toBe("Failure");
+    expect(yield* service.state).toEqual(before);
+    yield* service.updateTool("agent");
+    expect(attempts).toBe(2);
+    expect(starts).toEqual([]);
+    expect(agentStarts).toEqual([]);
+  }).pipe(Effect.scoped),
 );
