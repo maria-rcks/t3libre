@@ -1,3 +1,7 @@
+import {
+  latestRootProviderFailure,
+  threadErrorSummary,
+} from "@t3tools/shared/orchestrationV2ThreadError";
 import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
 import type {
   OrchestrationV2AppThread,
@@ -775,6 +779,7 @@ type ShellThreadRow = {
   readonly activity_run_status: string | null;
   readonly activity_run_started_at: string | null;
   readonly last_error: string | null;
+  readonly terminal_failure_payload_json: string | null;
   readonly pending_request_payload_json: string | null;
   readonly latest_user_message_at: string | null;
   readonly has_actionable_proposed_plan: number;
@@ -1231,7 +1236,10 @@ export function threadShellFromProjection(
     activityRunStatus: activityRun?.status ?? null,
     activityRunStartedAt: activityRun?.startedAt ?? activityRun?.requestedAt ?? null,
     status: latestRun?.status ?? "idle",
-    lastError: providerSession?.lastError ?? null,
+    ...threadErrorSummary(
+      latestRootProviderFailure(latestRun, projection.turnItems),
+      providerSession?.lastError ?? null,
+    ),
     pendingRuntimeRequest:
       pendingRuntimeRequest === null
         ? null
@@ -1321,6 +1329,8 @@ type ShellThreadState = {
   readonly activityRunStatus: ShellActivityRunStatus | null;
   readonly activityRunStartedAt: DateTime.Utc | null;
   readonly lastError: string | null;
+  readonly lastErrorClass: OrchestrationV2ThreadShell["lastErrorClass"];
+  readonly usageLimitResetAt: OrchestrationV2ThreadShell["usageLimitResetAt"];
   readonly pendingRuntimeRequest: OrchestrationV2ThreadProjection["runtimeRequests"][number] | null;
   readonly latestUserMessageAt: DateTime.Utc | null;
   readonly hasActionableProposedPlan: boolean;
@@ -1456,6 +1466,8 @@ function shellFromState(input: {
     activityRunStartedAt: input.state.activityRunStartedAt,
     status: input.state.latestRunStatus,
     lastError: input.state.lastError,
+    lastErrorClass: input.state.lastErrorClass,
+    usageLimitResetAt: input.state.usageLimitResetAt,
     pendingRuntimeRequest:
       input.state.pendingRuntimeRequest === null
         ? null
@@ -3339,7 +3351,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             `.pipe(Effect.flatMap(decodeRows(decodeProviderTurnPayload, threadId)));
             const checkpointScopes = yield* sql<PayloadRow>`
               SELECT payload_json FROM orchestration_v2_projection_checkpoint_scopes
-              WHERE thread_id = ${threadId} AND node_id IN (SELECT json_extract(payload_json, '$.rootNodeId') FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId} AND run_id = ${runId}) ORDER BY ordinal_within_parent ASC, scope_id ASC
+              WHERE thread_id = ${threadId} AND scope_id IN ${sql.in(nodes.flatMap((node) => (node.checkpointScopeId === null ? [] : [node.checkpointScopeId])))} ORDER BY ordinal_within_parent ASC, scope_id ASC
             `.pipe(Effect.flatMap(decodeRows(decodeCheckpointScopePayload, threadId)));
             const contextHandoffs = yield* sql<PayloadRow>`
               SELECT payload_json FROM orchestration_v2_projection_context_handoffs
@@ -3410,7 +3422,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           WHERE thread_id = ${threadId}
             AND type IN ('user_message','assistant_message','command_execution','error',
               'run_interrupt_result','file_change','proposed_plan')
-            AND (${runIds === undefined ? 1 : 0} OR run_id IN (SELECT value FROM json_each(${JSON.stringify(runIds ?? [])})))
+            AND ${runIds === undefined ? sql`1` : sql`run_id IN ${sql.in(runIds)}`}
           ORDER BY ordinal ASC, turn_item_id ASC
         `;
         return yield* decodeRows(decodeTurnItemPayload, threadId)(rows);
@@ -4238,6 +4250,21 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 LIMIT 1
               ) AS last_error,
               (
+                SELECT item.payload_json
+                FROM orchestration_v2_projection_turn_items item
+                INNER JOIN orchestration_v2_projection_runs r ON r.run_id = item.run_id
+                WHERE r.run_id = (
+                  SELECT latest.run_id FROM orchestration_v2_projection_runs latest
+                  WHERE latest.thread_id = t.thread_id
+                  ORDER BY latest.ordinal DESC, latest.run_id DESC LIMIT 1
+                )
+                  AND r.status = 'failed'
+                  AND item.type = 'error' AND item.status = 'failed'
+                  AND item.node_id IS json_extract(r.payload_json, '$.rootNodeId')
+                ORDER BY item.updated_at DESC, item.ordinal DESC, item.turn_item_id DESC
+                LIMIT 1
+              ) AS terminal_failure_payload_json,
+              (
                 SELECT request.payload_json
                 FROM orchestration_v2_projection_runtime_requests request
                 WHERE request.thread_id = t.thread_id
@@ -4532,6 +4559,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           row.pending_request_payload_json === null
             ? null
             : yield* decodeRuntimeRequestPayload(row.pending_request_payload_json);
+        const terminalFailureItem =
+          row.terminal_failure_payload_json === null
+            ? null
+            : yield* decodeTurnItemPayload(row.terminal_failure_payload_json);
         const latestRunId = row.latest_run_id === null ? null : RunId.make(row.latest_run_id);
         const latestRunStatus = shellStatusFromStoredRunStatus(row.latest_run_status);
         const pendingBackgroundTasks = [
@@ -4578,7 +4609,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             row.activity_run_status === "waiting"
               ? row.activity_run_status
               : null,
-          lastError: row.last_error,
+          ...threadErrorSummary(
+            terminalFailureItem?.type === "error" ? terminalFailureItem.failure : null,
+            row.last_error,
+          ),
           pendingRuntimeRequest,
           latestUserMessageAt:
             row.latest_user_message_at === null

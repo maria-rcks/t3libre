@@ -134,6 +134,10 @@ for custom configuration.
 
 ## Inspect agent work
 
+**Limited** means the provider stopped on a usage or rate limit. The conversation
+keeps the provider's explanation. Retry after the limit resets, or switch to
+another provider instance.
+
 On web and desktop, use **Agents** to follow work delegated to subagents.
 
 Expand a tool call in the conversation to see its full command and output.

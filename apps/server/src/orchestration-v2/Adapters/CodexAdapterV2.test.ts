@@ -4862,6 +4862,244 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
+  for (const scenario of [
+    {
+      name: "usage",
+      code: "usageLimitExceeded",
+      notification: false,
+      expectedClass: "usage_limit",
+    },
+    { name: "rate", code: "rateLimitExceeded", notification: false, expectedClass: "usage_limit" },
+    {
+      name: "ordinary",
+      code: "contextWindowExceeded",
+      notification: false,
+      expectedClass: "provider_error",
+    },
+    {
+      name: "notification",
+      code: "usageLimitExceeded",
+      notification: true,
+      expectedClass: "usage_limit",
+    },
+    {
+      name: "replacement",
+      code: "usageLimitExceeded",
+      notification: true,
+      expectedClass: "provider_error",
+    },
+    {
+      name: "known-reset",
+      code: "usageLimitExceeded",
+      notification: false,
+      expectedClass: "usage_limit",
+    },
+    {
+      name: "late-reset",
+      code: "usageLimitExceeded",
+      notification: false,
+      expectedClass: "usage_limit",
+    },
+    {
+      name: "matching-details",
+      code: "usageLimitExceeded",
+      notification: true,
+      expectedClass: "usage_limit",
+    },
+    {
+      name: "deferred-reset",
+      code: "usageLimitExceeded",
+      notification: false,
+      expectedClass: "usage_limit",
+    },
+    { name: "retry", code: "usageLimitExceeded", notification: true, expectedClass: "usage_limit" },
+  ] as const) {
+    it.effect(`classifies Codex terminal failures from ${scenario.name} evidence`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const nativeThreadId = `native-limit-${scenario.name}`;
+          const nativeTurnId = `turn-limit-${scenario.name}`;
+          const message = "Provider stopped this request.";
+          const resetAt = "2033-05-19T07:20:00.000Z";
+          const snapshot = {
+            type: "emit_inbound" as const,
+            label: "account/rateLimits/updated",
+            frame: {
+              method: "account/rateLimits/updated",
+              params: {
+                rateLimits: {
+                  limitId: "codex",
+                  primary: { usedPercent: 100, resetsAt: 2000100000, windowDurationMins: 300 },
+                },
+              },
+            },
+          };
+          const transcript = makeCodexReplayTranscript({
+            scenario: `codex-limit-${scenario.name}`,
+            entries: [
+              ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "Continue." }),
+              ...(scenario.name === "known-reset" || scenario.name === "deferred-reset"
+                ? [snapshot]
+                : []),
+              ...(scenario.name === "deferred-reset"
+                ? [
+                    {
+                      type: "emit_inbound" as const,
+                      label: "item/completed/subAgentActivity-started",
+                      frame: {
+                        method: "item/completed",
+                        params: {
+                          threadId: nativeThreadId,
+                          turnId: nativeTurnId,
+                          item: {
+                            type: "subAgentActivity",
+                            id: "limit-child-spawn",
+                            kind: "started",
+                            agentThreadId: "native-limit-child",
+                            agentPath: "/root/limit_child",
+                          },
+                        },
+                      },
+                    },
+                    {
+                      type: "emit_inbound" as const,
+                      label: "turn/started/child",
+                      frame: {
+                        method: "turn/started",
+                        params: {
+                          threadId: "native-limit-child",
+                          turn: makeCodexReplayTurn({
+                            id: "limit-child-turn",
+                            status: "inProgress",
+                          }),
+                        },
+                      },
+                    },
+                  ]
+                : []),
+              ...(scenario.notification
+                ? [
+                    {
+                      type: "emit_inbound" as const,
+                      label: "error",
+                      frame: {
+                        method: "error",
+                        params: {
+                          threadId: nativeThreadId,
+                          turnId: nativeTurnId,
+                          willRetry: scenario.name === "retry",
+                          error: {
+                            message,
+                            codexErrorInfo: scenario.code,
+                            additionalDetails:
+                              scenario.name === "matching-details"
+                                ? "Detailed provider allowance explanation."
+                                : null,
+                          },
+                        },
+                      },
+                    },
+                  ]
+                : []),
+              {
+                type: "emit_inbound",
+                label: "turn/completed",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: {
+                      ...makeCodexReplayTurn({ id: nativeTurnId, status: "failed" }),
+                      error: {
+                        message: scenario.name === "replacement" ? "A different failure." : message,
+                        ...(scenario.notification && scenario.name !== "matching-details"
+                          ? {}
+                          : { codexErrorInfo: scenario.code }),
+                      },
+                    },
+                  },
+                },
+              },
+              ...(scenario.name === "late-reset" ? [snapshot] : []),
+              ...(scenario.name === "deferred-reset"
+                ? [
+                    {
+                      ...snapshot,
+                      frame: {
+                        method: "account/rateLimits/updated",
+                        params: {
+                          rateLimits: {
+                            limitId: "codex",
+                            primary: {
+                              usedPercent: 100,
+                              resetsAt: 2000200000,
+                              windowDurationMins: 300,
+                            },
+                          },
+                        },
+                      },
+                    },
+                    {
+                      type: "emit_inbound" as const,
+                      label: "turn/completed/child",
+                      frame: {
+                        method: "turn/completed",
+                        params: {
+                          threadId: "native-limit-child",
+                          turn: makeCodexReplayTurn({
+                            id: "limit-child-turn",
+                            status: "completed",
+                          }),
+                        },
+                      },
+                    },
+                  ]
+                : []),
+            ],
+          });
+          const resetReceipt = yield* Deferred.make<void>();
+          const harness = yield* makeCodexReplayHarness(transcript, (event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.type === "error" &&
+            event.turnItem.failure.resetAt === resetAt
+              ? Deferred.succeed(resetReceipt, undefined)
+              : Effect.void,
+          );
+          yield* harness.runtime.startTurn(
+            makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              text: "Continue.",
+              attemptId: RunAttemptId.make(`attempt-limit-${scenario.name}`),
+            }),
+          );
+          yield* harness.firstTerminal;
+          const terminal = harness.terminalEvents()[0];
+          assert.equal(terminal?.status, "failed");
+          if (terminal?.status !== "failed") return;
+          assert.equal(terminal.failure.class, scenario.expectedClass);
+          assert.equal(terminal.threadDisposition, "reusable");
+          if (scenario.name === "known-reset" || scenario.name === "deferred-reset")
+            assert.equal(terminal.failure.resetAt, resetAt);
+          if (scenario.name === "matching-details")
+            assert.equal(terminal.failure.message, "Detailed provider allowance explanation.");
+          if (scenario.name === "late-reset") {
+            yield* Deferred.await(resetReceipt);
+            const item = harness.events.find(
+              (event) =>
+                event.type === "turn_item.updated" &&
+                event.turnItem.type === "error" &&
+                event.turnItem.failure.resetAt === resetAt,
+            );
+            assert.isDefined(item);
+          }
+          if (scenario.name === "retry") assert.equal(terminal.retry?.attempt, 1);
+        }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
+      ),
+    );
+  }
+
   const FAILED_SCENARIO = "codex-failed-mid-command";
   const FAILED_NATIVE_THREAD = "native-codex-failed-thread";
   const FAILED_NATIVE_TURN = "native-codex-failed-turn";

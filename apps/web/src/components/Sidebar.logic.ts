@@ -877,7 +877,14 @@ export function resolveThreadRowClassName(input: {
 // false Done.
 // Unread completion is tracked separately: it describes whether a ready
 // thread needs attention, not what the thread is currently doing.
-export type SidebarThreadStatus = "approval" | "input" | "working" | "waiting" | "failed" | "ready";
+export type SidebarThreadStatus =
+  | "approval"
+  | "input"
+  | "working"
+  | "waiting"
+  | "failed"
+  | "limited"
+  | "ready";
 
 export function shouldRecedeSidebarThread(input: {
   status: SidebarThreadStatus;
@@ -916,7 +923,7 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
     return "waiting";
   }
   if (thread.runtime?.status === "failed") {
-    return "failed";
+    return thread.runtime.lastErrorClass === "usage_limit" ? "limited" : "failed";
   }
   return "ready";
 }
@@ -925,6 +932,7 @@ export type SidebarV2TopStatusKind =
   | "approval"
   | "done"
   | "failed"
+  | "limited"
   | "input"
   | "waiting"
   | "woke"
@@ -947,8 +955,8 @@ export function resolveSidebarV2TopStatus(input: {
   if (input.status === "input") {
     return "input";
   }
-  if (input.status === "failed") {
-    return "failed";
+  if (input.status === "failed" || input.status === "limited") {
+    return input.status;
   }
   if (input.isWoke) {
     return "woke";

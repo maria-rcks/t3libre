@@ -955,6 +955,7 @@ export const OrchestrationV2FileChangeDetail = Schema.Struct({
 export type OrchestrationV2FileChangeDetail = typeof OrchestrationV2FileChangeDetail.Type;
 
 export const OrchestrationV2ProviderFailureClass = Schema.Literals([
+  "usage_limit",
   "provider_error",
   "transport_error",
   "permission_error",
@@ -978,6 +979,8 @@ export const OrchestrationV2ProviderFailure = Schema.Struct({
   message: OrchestrationV2ProviderFailureMessage,
   code: Schema.NullOr(OrchestrationV2ProviderFailureCode),
   retryable: Schema.NullOr(Schema.Boolean),
+  /** Reported reset time; absent when the provider cannot name one. */
+  resetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
 export type OrchestrationV2ProviderFailure = typeof OrchestrationV2ProviderFailure.Type;
 
@@ -1486,6 +1489,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   ),
   status: OrchestrationV2ShellThreadStatus,
   lastError: Schema.optional(Schema.NullOr(Schema.String)),
+  lastErrorClass: Schema.optional(Schema.NullOr(OrchestrationV2ProviderFailureClass)),
+  usageLimitResetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pendingRuntimeRequest: Schema.NullOr(OrchestrationV2PendingRuntimeRequestSummary),
   latestVisibleMessage: Schema.NullOr(OrchestrationV2LatestVisibleMessageSummary),
   latestUserMessageAt: Schema.NullOr(Schema.DateTimeUtc),

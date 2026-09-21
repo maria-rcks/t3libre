@@ -1,3 +1,5 @@
+import * as EffectAcpErrors from "effect-acp/errors";
+import { xAiRateLimitedErrorCode } from "../../provider/acp/XAiAcpExtension.ts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import type * as EffectAcpSchema from "effect-acp/compat";
@@ -63,6 +65,34 @@ describe("acpSubagentStatusBlocksTurnSettlement", () => {
 });
 
 describe("GrokAdapterV2 capabilities", () => {
+  it("preserves Grok's rate-limit stop and distinguishes other prompt failures", () => {
+    const flavor = makeGrokAcpAdapterFlavor({
+      makeRuntime: () => Effect.never,
+    } as unknown as GrokAdapterV2Options);
+    const limit = flavor.promptFailure?.(
+      new EffectAcpErrors.AcpRequestError({
+        code: xAiRateLimitedErrorCode,
+        errorMessage: "Grok usage limit reached. Try again later.",
+      }),
+    );
+    assert.equal(limit?.class, "usage_limit");
+    assert.equal(limit?.code, String(xAiRateLimitedErrorCode));
+    assert.equal(limit?.message, "Grok usage limit reached. Try again later.");
+    assert.equal(
+      flavor.promptFailure?.(
+        new EffectAcpErrors.AcpRequestError({
+          code: -32603,
+          errorMessage: "Internal error",
+        }),
+      ).class,
+      "provider_error",
+    );
+    assert.equal(
+      flavor.promptFailure?.(new Error("Rate limit mentioned in an ordinary error")).class,
+      "provider_error",
+    );
+  });
+
   it("wires hard Stop teardown but soft non-Stop interrupts in the constructor flavor", () => {
     const flavor = makeGrokAcpAdapterFlavor({
       makeRuntime: () => Effect.never,

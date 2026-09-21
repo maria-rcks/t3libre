@@ -70,6 +70,7 @@ const STATUS_LABEL_BY_STATUS: Partial<
   input: { label: "Input", className: "text-adaptive-indigo-600-300" },
   working: { label: "Working", className: "text-adaptive-sky-600-400" },
   failed: { label: "Failed", className: "text-danger-foreground" },
+  limited: { label: "Limited", className: "text-warning-foreground" },
 };
 
 function threadTimeLabel(thread: EnvironmentThreadShell): string {
@@ -914,13 +915,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         </View>
       ) : null}
       <View className="mt-1 flex-row items-center gap-2">
-        {status === "failed" && thread.runtime?.lastError ? (
+        {(status === "failed" || status === "limited") && thread.runtime?.lastError ? (
           <Text
             className={cn(
               "flex-1 text-xs",
               selected
                 ? selectedThreadRowColors.mutedForegroundClassName
-                : "text-danger-foreground",
+                : status === "limited"
+                  ? "text-warning-foreground"
+                  : "text-danger-foreground",
             )}
             numberOfLines={1}
           >
