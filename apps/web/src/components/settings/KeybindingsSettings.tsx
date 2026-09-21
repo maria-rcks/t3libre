@@ -39,7 +39,6 @@ import { formatShortcutLabel } from "../../keybindings";
 import { cn } from "../../lib/utils";
 import { serverEnvironment } from "../../state/server";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { Alert, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -1290,12 +1289,19 @@ function KeybindingsGroups(props: KeybindingsGroupsProps) {
 /** Shown in the browser build only; the desktop app receives every shortcut. */
 function BrowserKeybindingNotice() {
   return (
-    <Alert variant="warning" role="status">
-      <TriangleAlertIcon aria-hidden />
-      <AlertDescription>
+    <Tooltip>
+      <TooltipTrigger
+        delay={200}
+        render={
+          <Button size="icon-micro" variant="ghost-muted" aria-label="Browser shortcut limits">
+            <TriangleAlertIcon className="size-3.5 text-warning" />
+          </Button>
+        }
+      />
+      <TooltipPopup side="top" className="max-w-72">
         The browser may claim some shortcuts first. The desktop app receives them all.
-      </AlertDescription>
-    </Alert>
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -1484,14 +1490,14 @@ export function KeybindingsSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection
         {...searchableSetting("keybindings")}
-        variant="plain"
         headerAction={
-          <span className="text-[11px] text-muted-foreground tabular-nums">
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground tabular-nums">
             {rows.length} {rows.length === 1 ? "binding" : "bindings"}
+            {!isElectron ? <BrowserKeybindingNotice /> : null}
           </span>
         }
       >
-        <div className="flex min-h-9 min-w-0 flex-col gap-2 px-3 sm:flex-row sm:items-center sm:px-4">
+        <div className="flex min-w-0 flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
           <KeybindingsSearchInput query={query} onChange={setQuery} inputRef={searchInputRef} />
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
             <Button
@@ -1523,7 +1529,6 @@ export function KeybindingsSettingsPanel() {
             </Tooltip>
           </div>
         </div>
-        {!isElectron ? <BrowserKeybindingNotice /> : null}
       </SettingsSection>
 
       {isAddingBinding ? (
