@@ -1,5 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
+import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type {
   ChatAttachment as ContractChatAttachment,
   EnvironmentId,
@@ -282,6 +283,9 @@ export function QueuedRunsControl({
         <ComposerBanner.Scroll className={cn("max-h-32", !expanded && "hidden")}>
           <ComposerBanner.Children render={<ol />} id={queueListId}>
             {items.map((item) => {
+              const previewText = replaceComposerContextReferences(item.text, (reference) =>
+                reference.kind === "image" && item.thumbnails.length > 0 ? "" : reference.label,
+              ).trim();
               const rowRunId = item.runId;
               const rowServerIndex = item.serverIndex;
               const isEditing = rowRunId !== null && rowRunId === props.editingRunId;
@@ -370,26 +374,38 @@ export function QueuedRunsControl({
                       </Button>
                     ) : null}
                   </ComposerBanner.Icon>
-                  <ComposerBanner.Content className="text-foreground/80">
+                  <ComposerBanner.Content className="flex-col items-start text-foreground/80">
                     {isEditing ? <span className="sr-only">Editing queued message: </span> : null}
-                    {item.pending ? (
-                      <Clock3Icon
-                        aria-label="Saving queued message"
-                        className="size-3 shrink-0 text-muted-foreground/60"
-                      />
-                    ) : null}
+                    <span className="flex w-full min-w-0 items-center gap-1">
+                      {item.pending ? (
+                        <Clock3Icon
+                          aria-label="Saving queued message"
+                          className="size-3 shrink-0 text-muted-foreground/60"
+                        />
+                      ) : null}
+                      {previewText ? (
+                        <Tooltip>
+                          <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
+                            {previewText}
+                          </TooltipTrigger>
+                          <TooltipPopup side="top" className="max-w-96 break-words">
+                            {previewText}
+                          </TooltipPopup>
+                        </Tooltip>
+                      ) : null}
+                    </span>
                     {item.thumbnails.length > 0 ? (
-                      <span className="flex shrink-0 items-center gap-0.5">
+                      <span className="flex w-full min-w-0 flex-wrap gap-1 py-1">
                         {item.thumbnails.map((thumbnail) => (
                           <span
                             key={thumbnail.key}
-                            className="size-4 overflow-hidden rounded border border-border/70 bg-background"
+                            className="size-7 shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted/60"
                           >
                             {thumbnail.url ? (
                               <img
                                 src={thumbnail.url}
                                 alt={thumbnail.name}
-                                className="size-full object-cover"
+                                className="block size-full object-contain"
                               />
                             ) : (
                               <span
@@ -401,14 +417,6 @@ export function QueuedRunsControl({
                         ))}
                       </span>
                     ) : null}
-                    <Tooltip>
-                      <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
-                        {item.text}
-                      </TooltipTrigger>
-                      <TooltipPopup side="top" className="max-w-96 break-words">
-                        {item.text}
-                      </TooltipPopup>
-                    </Tooltip>
                   </ComposerBanner.Content>
                   <ComposerBanner.Actions>
                     {isEditing ? (
