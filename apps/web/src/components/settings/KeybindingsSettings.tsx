@@ -1288,18 +1288,21 @@ function KeybindingsGroups(props: KeybindingsGroupsProps) {
 
 /** Shown in the browser build only; the desktop app receives every shortcut. */
 function BrowserKeybindingNotice() {
+  // The label carries the whole sentence so assistive tech reads it without
+  // opening the tooltip.
+  const message = "The browser may claim some shortcuts first. The desktop app receives them all.";
   return (
     <Tooltip>
       <TooltipTrigger
         delay={200}
         render={
-          <Button size="icon-micro" variant="ghost-muted" aria-label="Browser shortcut limits">
+          <Button size="icon-micro" variant="ghost-muted" aria-label={message}>
             <TriangleAlertIcon className="size-3.5 text-warning" />
           </Button>
         }
       />
       <TooltipPopup side="top" className="max-w-72">
-        The browser may claim some shortcuts first. The desktop app receives them all.
+        {message}
       </TooltipPopup>
     </Tooltip>
   );
