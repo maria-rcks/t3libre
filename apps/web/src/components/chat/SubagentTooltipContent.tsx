@@ -78,7 +78,7 @@ export function SubagentTooltipContent(props: {
   const preview =
     compactDetail.length > 280 ? `${compactDetail.slice(0, 280).trimEnd()}…` : compactDetail;
   const driver = props.provider?.driver ?? props.driver;
-  const working = ["running", "in_progress", "pending"].includes(props.status);
+  const working = ["running", "in_progress", "pending", "waiting"].includes(props.status);
   const failed = ["failed", "error"].includes(props.status);
   const StatusIcon = working
     ? CircleDashedIcon
