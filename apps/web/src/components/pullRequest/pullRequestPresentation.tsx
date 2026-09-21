@@ -421,11 +421,9 @@ export function PullRequestReviewOutcomeBadge({
 export function PullRequestActorAvatar({
   actor,
   className,
-  fallback,
 }: {
   actor: PullRequestActor | null;
   className?: string;
-  fallback?: ReactNode;
 }) {
   const login = actor?.login ?? "ghost";
   const avatarUrl = actor?.avatarUrl ?? null;
@@ -439,7 +437,7 @@ export function PullRequestActorAvatar({
         className,
       )}
     >
-      {fallback ?? login.slice(0, 1).toUpperCase()}
+      {login.slice(0, 1).toUpperCase()}
     </span>
   ) : (
     <img

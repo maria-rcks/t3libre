@@ -41,7 +41,10 @@ import {
 } from "@t3tools/client-runtime/work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
-import { subagentGroupSummary } from "@t3tools/client-runtime/state/subagent-display";
+import {
+  subagentGroupSummary,
+  summarizeSubagentStatuses,
+} from "@t3tools/client-runtime/state/subagent-display";
 
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
@@ -265,7 +268,8 @@ import {
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 
 import { SkillInlineText } from "./SkillInlineText";
-import { deriveAgentSpawnSummary } from "./agentSpawnSummary";
+import { AgentElapsed } from "../AgentsPanel";
+import * as DateTime from "effect/DateTime";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import {
   buildReviewCommentRenderablePatch,
@@ -2888,6 +2892,36 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
   );
 }
 
+/** One elapsed span for the whole group: first launch to last settle, ticking while any member works. */
+function subagentGroupTiming(
+  agents: ReadonlyArray<{
+    status: OrchestrationV2TurnItem["status"];
+    startedAt: DateTime.Utc | null;
+    completedAt: DateTime.Utc | null;
+  }>,
+) {
+  let startMs: number | null = null;
+  let endMs: number | null = null;
+  for (const agent of agents) {
+    if (agent.startedAt) {
+      const ms = DateTime.toEpochMillis(agent.startedAt);
+      startMs = startMs === null ? ms : Math.min(startMs, ms);
+    }
+    if (agent.completedAt) {
+      const ms = DateTime.toEpochMillis(agent.completedAt);
+      endMs = endMs === null ? ms : Math.max(endMs, ms);
+    }
+  }
+  const live = agents.some(
+    ({ status }) => status === "pending" || status === "running" || status === "waiting",
+  );
+  return {
+    status: live ? ("running" as const) : ("completed" as const),
+    startedAt: startMs === null ? null : new Date(startMs).toISOString(),
+    completedAt: live || endMs === null ? null : new Date(endMs).toISOString(),
+  };
+}
+
 const V2SubagentGroup = memo(function V2SubagentGroup({
   row,
 }: {
@@ -2898,8 +2932,8 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
   const [expanded, setExpanded] = useState(() =>
     ctx.workGroupViewState.expandedEntries.has(groupId),
   );
-  const members = (row.subagents ?? [row.projectedItem]).filter(
-    ({ item }) => item.type === "subagent",
+  const members = (row.subagents ?? [row.projectedItem]).flatMap(({ item }) =>
+    item.type === "subagent" ? [item] : [],
   );
   const liveAgents = useAtomValue(
     environmentThreadDetails.threadAtom(
@@ -2907,18 +2941,17 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
     ),
     (thread) => thread?.projection.subagents,
   );
-  const agents = members.map(({ item }) => ({
-    kind: "subagent" as const,
-    status:
-      (item.type === "subagent"
-        ? liveAgents?.find((agent) => agent.id === item.subagentId)?.status
-        : undefined) ?? item.status,
-  }));
-  const summary = subagentGroupSummary(agents);
-  const status = deriveAgentSpawnSummary({
-    agents,
-    agentCount: members.length,
+  const agents = members.map((item) => {
+    const live = liveAgents?.find((agent) => agent.id === item.subagentId);
+    return {
+      item,
+      status: live?.status ?? item.status,
+      startedAt: live?.startedAt ?? item.startedAt,
+      completedAt: live?.completedAt ?? item.completedAt,
+    };
   });
+  const summary = subagentGroupSummary(agents);
+  const label = `${members.length} ${members.length === 1 ? "subagent" : "subagents"}`;
   const toggleExpanded = (open: boolean) => {
     ctx.onToggleWorkEntry(row.id, expanded);
     if (open) ctx.workGroupViewState.expandedEntries.add(groupId);
@@ -2926,70 +2959,76 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
     setExpanded(open);
   };
   return (
-    <Collapsible open={expanded} onOpenChange={toggleExpanded} className="mb-3" data-subagent-group>
-      <CollapsibleTrigger
-        aria-label={`${members.length} ${members.length === 1 ? "subagent" : "subagents"}`}
-        className={cn(
-          "flex w-full min-w-0 items-center gap-3 py-2 text-left transition-opacity hover:opacity-100",
-          expanded ? "text-foreground opacity-100" : "text-muted-foreground opacity-55",
-        )}
-      >
-        <span className="flex shrink-0 -space-x-2" aria-hidden>
-          {members
-            .slice(0, 3)
-            .map(({ item }) =>
-              item.type === "subagent" ? (
-                <SubagentAvatar
-                  key={item.id}
-                  driver={item.driver}
-                  provider={ctx.providerStatuses.find(
-                    (provider) => provider.instanceId === item.providerInstanceId,
-                  )}
-                />
-              ) : null,
-            )}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-xs font-semibold">
-            {members.length} {members.length === 1 ? "subagent" : "subagents"}
-          </span>
-          <span
-            className={cn(
-              "block truncate text-[10px] text-muted-foreground",
-              summary.failed && "text-destructive",
-              summary.active && "text-info",
-            )}
-          >
-            {status.status}
-          </span>
-        </span>
-        <ChevronDownIcon
-          aria-hidden
+    <WorkLogBlock continues={row.continuesWorkLog}>
+      <Collapsible open={expanded} onOpenChange={toggleExpanded} data-subagent-group>
+        <CollapsibleTrigger
+          aria-label={label}
           className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            expanded && "rotate-180",
+            "flex w-full min-w-0 items-center gap-3 py-2 text-left transition-opacity hover:opacity-100",
+            expanded || summary.active
+              ? "text-foreground opacity-100"
+              : "text-muted-foreground opacity-55",
           )}
-        />
-      </CollapsibleTrigger>
-      <CollapsiblePanel>
-        {expanded ? (
-          <div className="mt-1 space-y-1">
-            {members.map((projected) => (
-              <V2LifecycleRow
-                environmentId={ctx.activeThreadEnvironmentId}
-                key={projected.item.id}
-                item={projected.item}
-                createdAt={row.createdAt}
-                timestampFormat={ctx.timestampFormat}
-                providerStatuses={ctx.providerStatuses}
-                runs={ctx.runs}
-                onOpenThread={ctx.onOpenThread}
+        >
+          <span className="flex shrink-0 items-center -space-x-1.5" aria-hidden>
+            {agents.slice(0, 3).map(({ item, status }) => (
+              <SubagentAvatar
+                key={item.id}
+                driver={item.driver}
+                provider={ctx.providerStatuses.find(
+                  (provider) => provider.instanceId === item.providerInstanceId,
+                )}
+                status={agents.length === 1 ? status : undefined}
               />
             ))}
-          </div>
-        ) : null}
-      </CollapsiblePanel>
-    </Collapsible>
+            {agents.length > 3 ? (
+              <span className="inline-flex size-6 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-2 ring-background">
+                +{agents.length - 3}
+              </span>
+            ) : null}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-semibold">{label}</span>
+            <span
+              className={cn(
+                "block truncate text-[10px] text-muted-foreground",
+                summary.active ? "text-info" : summary.failed && "text-destructive",
+              )}
+            >
+              {summarizeSubagentStatuses(agents.map(({ status }) => status))}
+            </span>
+          </span>
+          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+            <AgentElapsed agent={subagentGroupTiming(agents)} />
+          </span>
+          <ChevronDownIcon
+            aria-hidden
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform",
+              expanded && "rotate-180",
+            )}
+          />
+        </CollapsibleTrigger>
+        <CollapsiblePanel>
+          {expanded ? (
+            <div className="mt-1 mb-1 rounded-lg border border-border/60 bg-card/30 p-1">
+              {members.map((item) => (
+                <V2LifecycleRow
+                  environmentId={ctx.activeThreadEnvironmentId}
+                  key={item.id}
+                  item={item}
+                  createdAt={row.createdAt}
+                  timestampFormat={ctx.timestampFormat}
+                  providerStatuses={ctx.providerStatuses}
+                  runs={ctx.runs}
+                  onOpenThread={ctx.onOpenThread}
+                />
+              ))}
+            </div>
+          ) : null}
+        </CollapsiblePanel>
+      </Collapsible>
+    </WorkLogBlock>
   );
 });
 

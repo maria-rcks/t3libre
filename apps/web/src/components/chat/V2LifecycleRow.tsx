@@ -7,7 +7,8 @@ import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { environmentThreadDetails } from "../../state/threads";
-import { PullRequestActorAvatar } from "../pullRequest/pullRequestPresentation";
+import { MiddleTruncate } from "../ui/middle-truncate";
+import * as DateTime from "effect/DateTime";
 import { cn } from "../../lib/utils";
 import { WorkLogRow } from "./WorkLog";
 import { resolveHandoffEndpoints, type HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
@@ -220,6 +221,8 @@ export function V2LifecycleRow(props: {
         title={formatSubagentDisplayTitle(item.title ?? "Subagent")}
         result={item.result}
         progress={item.progress}
+        startedAt={item.startedAt}
+        completedAt={item.completedAt}
         threadId={item.childThreadId}
         onOpenThread={props.onOpenThread}
       />
@@ -228,31 +231,96 @@ export function V2LifecycleRow(props: {
   return null;
 }
 
+/**
+ * In-flight states all present as Working, the way the agents fleet view did:
+ * detail belongs in the activity line, and a waiting or queued subagent is
+ * still the fleet doing its job. Only settled states differentiate. Idle reads
+ * as settled rather than in progress, since a resting child looks done unless
+ * resumed.
+ */
+const STATUS_VISUALS: Record<
+  OrchestrationV2TurnItem["status"],
+  { dotClass: string; label: string }
+> = {
+  pending: { dotClass: "bg-info", label: "Working" },
+  running: { dotClass: "bg-info", label: "Working" },
+  waiting: { dotClass: "bg-info", label: "Working" },
+  idle: { dotClass: "bg-muted-foreground/50", label: "Idle · resumable" },
+  completed: { dotClass: "bg-success", label: "Completed" },
+  failed: { dotClass: "bg-destructive", label: "Failed" },
+  cancelled: { dotClass: "bg-muted-foreground/60", label: "Stopped" },
+  interrupted: { dotClass: "bg-muted-foreground/60", label: "Stopped" },
+};
+
+function subagentStatusVisual(status: OrchestrationV2TurnItem["status"]) {
+  return STATUS_VISUALS[status];
+}
+
+const SETTLED_SUBAGENT_STATUSES = new Set<OrchestrationV2TurnItem["status"]>([
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+]);
+
+/** The server's placeholder when a child ends without output; the status dot already says it. */
+const GENERIC_CHILD_END = /^Child task ended with status\b/i;
+
+/** One line of a markdown result: drop list bullets, code ticks, and link targets. */
+function plainDetail(text: string): string {
+  return text
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/`/g, "")
+    .replace(/(^|\s)[-*]\s+/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isoOrNull(value: DateTime.Utc | null | undefined): string | null {
+  return value ? DateTime.formatIso(value) : null;
+}
+
+/** Round provider tile with the agents panel's status dot; rings let a header stack overlap. */
 export function SubagentAvatar({
   driver,
   provider,
+  status,
+  className,
 }: {
   driver?: ProviderDriverKind | undefined;
   provider?: ServerProvider | undefined;
+  /** Omitted inside an overlapped stack, where a covered dot would only add noise. */
+  status?: OrchestrationV2TurnItem["status"] | undefined;
+  className?: string;
 }) {
   return (
-    <PullRequestActorAvatar
-      actor={null}
-      className="size-7 border-2 border-background bg-muted text-[9px]"
-      fallback={
-        driver ? (
-          <ProviderInstanceIcon
-            driverKind={driver}
-            displayName={provider?.displayName ?? driver}
-            acpRegistryIconUrl={provider?.iconUrl}
-            className="z-auto"
-            iconClassName="size-4"
-          />
-        ) : (
-          <BotIcon className="size-4" />
-        )
-      }
-    />
+    <span
+      aria-hidden
+      className={cn(
+        "relative inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-border/70 bg-muted ring-2 ring-background",
+        className,
+      )}
+    >
+      {driver ? (
+        <ProviderInstanceIcon
+          driverKind={driver}
+          displayName={provider?.displayName ?? driver}
+          acpRegistryIconUrl={provider?.iconUrl}
+          className="z-auto"
+          iconClassName="size-3.5"
+        />
+      ) : (
+        <BotIcon className="size-3.5 text-muted-foreground" />
+      )}
+      {status ? (
+        <span
+          className={cn(
+            "absolute -right-px -bottom-px size-2 rounded-full ring-2 ring-background",
+            subagentStatusVisual(status).dotClass,
+          )}
+        />
+      ) : null}
+    </span>
   );
 }
 
@@ -265,6 +333,8 @@ function SubagentTimelineLink(props: {
   readonly result: string | null;
   readonly progress: string | undefined;
   readonly status: OrchestrationV2TurnItem["status"];
+  readonly startedAt: DateTime.Utc | null;
+  readonly completedAt: DateTime.Utc | null;
   readonly threadId: ThreadId | null;
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
@@ -274,38 +344,66 @@ function SubagentTimelineLink(props: {
   );
   const threadId = props.threadId;
   const status = agent?.status ?? props.status;
-  const statusLabel = status.replaceAll("_", " ");
+  const statusLabel = subagentStatusVisual(status).label;
   const result = (agent?.result ?? props.result)?.trim();
   const progress = (agent?.progress ?? props.progress)?.trim();
-  const settled = ["completed", "failed", "cancelled", "interrupted"].includes(status);
-  const detail = settled ? result || progress : progress || result;
+  const settled = SETTLED_SUBAGENT_STATUSES.has(status);
+  const rawDetail = settled ? result || progress : progress || result;
+  const detail =
+    rawDetail && !GENERIC_CHILD_END.test(rawDetail) ? plainDetail(rawDetail) || null : null;
+  const failed = status === "failed";
+  const timing = {
+    status,
+    startedAt: isoOrNull(agent?.startedAt ?? props.startedAt),
+    completedAt: isoOrNull(agent?.completedAt ?? props.completedAt),
+  };
   const content = (
     <>
-      <SubagentAvatar driver={props.driver} provider={props.provider} />
+      <SubagentAvatar driver={props.driver} provider={props.provider} status={status} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-medium">{props.title}</span>
-        {detail ? (
-          <span className="mt-0.5 block line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
-            {detail}
+        <span className="flex items-baseline gap-2">
+          <span className="min-w-0 truncate text-xs font-medium text-foreground">
+            {props.title}
           </span>
-        ) : null}
+          {detail !== null && status !== "completed" ? (
+            <span
+              className={cn(
+                "shrink-0 text-[10px]",
+                failed ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {statusLabel}
+            </span>
+          ) : null}
+        </span>
+        <span
+          className={cn(
+            "block text-[11px] leading-relaxed",
+            failed ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {detail === null ? (
+            statusLabel
+          ) : detail.includes("/") && !detail.includes(" ") ? (
+            <MiddleTruncate value={detail} showTitle={false} className="flex" />
+          ) : (
+            <span className="block truncate">{detail}</span>
+          )}
+        </span>
       </span>
-      <span
-        className={cn(
-          "shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] text-muted-foreground",
-          status === "failed" && "border-destructive/40 text-destructive",
-          status === "completed" && "border-success/30 text-success",
-        )}
-      >
-        {statusLabel}
+      <span className="shrink-0 font-mono text-[10px] text-muted-foreground/80">
+        <AgentElapsed agent={timing} />
       </span>
       {threadId !== null ? (
-        <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+        <ChevronRightIcon
+          aria-hidden
+          className="size-3.5 shrink-0 text-muted-foreground/60 transition-colors group-hover/subagent:text-foreground"
+        />
       ) : null}
     </>
   );
   const className =
-    "flex w-full min-w-0 items-center gap-3 rounded-lg border border-border/60 p-3 text-left";
+    "group/subagent flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left";
   return (
     <Tooltip>
       <TooltipTrigger
@@ -324,7 +422,7 @@ function SubagentTimelineLink(props: {
               onClick={() => props.onOpenThread(threadId)}
               className={cn(
                 className,
-                "cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
               )}
             >
               {content}
@@ -337,7 +435,7 @@ function SubagentTimelineLink(props: {
           {...props}
           elapsed={agent ? <AgentElapsed agent={projectedSubagentsToRuntime([agent])[0]!} /> : null}
           model={agent?.model ?? null}
-          status={agent?.status ?? props.status}
+          status={status}
           result={agent?.result ?? props.result}
           progress={agent?.progress ?? props.progress}
         />
