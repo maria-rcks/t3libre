@@ -2892,7 +2892,11 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
   );
 }
 
-/** One elapsed span for the whole group: first launch to last settle, ticking while any member works. */
+/**
+ * One elapsed span for the whole group: first launch to last settle, ticking
+ * while any member works. A settled member without a completion time leaves
+ * the end unknown, so the span is withheld rather than cut short.
+ */
 function subagentGroupTiming(
   agents: ReadonlyArray<{
     status: OrchestrationV2TurnItem["status"];
@@ -2902,6 +2906,7 @@ function subagentGroupTiming(
 ) {
   let startMs: number | null = null;
   let endMs: number | null = null;
+  let endUnknown = false;
   for (const agent of agents) {
     if (agent.startedAt) {
       const ms = DateTime.toEpochMillis(agent.startedAt);
@@ -2910,6 +2915,8 @@ function subagentGroupTiming(
     if (agent.completedAt) {
       const ms = DateTime.toEpochMillis(agent.completedAt);
       endMs = endMs === null ? ms : Math.max(endMs, ms);
+    } else {
+      endUnknown = true;
     }
   }
   const live = agents.some(
@@ -2918,7 +2925,7 @@ function subagentGroupTiming(
   return {
     status: live ? ("running" as const) : ("completed" as const),
     startedAt: startMs === null ? null : new Date(startMs).toISOString(),
-    completedAt: live || endMs === null ? null : new Date(endMs).toISOString(),
+    completedAt: live || endUnknown || endMs === null ? null : new Date(endMs).toISOString(),
   };
 }
 

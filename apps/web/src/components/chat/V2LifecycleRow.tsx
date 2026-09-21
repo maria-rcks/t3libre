@@ -271,7 +271,7 @@ function plainDetail(text: string): string {
   return text
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/`/g, "")
-    .replace(/(^|\s)[-*]\s+/g, "$1")
+    .replace(/^[ \t]*[-*][ \t]+/gm, "")
     .replace(/\s+/g, " ")
     .trim();
 }
