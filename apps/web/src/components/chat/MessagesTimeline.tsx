@@ -2629,7 +2629,7 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
         tone:
           item.status === "completed"
             ? "success"
-            : item.status === "running"
+            : item.status === "running" || item.failure.class === "usage_limit"
               ? "warning"
               : "danger",
         icon: CircleAlertIcon,
@@ -4839,8 +4839,10 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   };
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
-  const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
+  const showFailedIndicator =
+    !showWarningIndicator && workEntryDisplayIndicatesToolFailure(workEntry);
   const showDestructiveRowStyle =
+    !showWarningIndicator &&
     showFailedIndicator &&
     (workEntrySignalsSevereFailure(workEntry) || !workLogEntryIsToolLike(workEntry));
   const entryIconName =

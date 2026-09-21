@@ -55,7 +55,7 @@ export function WorkLogLabel({
   tone = "default",
 }: {
   children: ReactNode;
-  tone?: "default" | "danger";
+  tone?: "default" | "danger" | "warning";
 }) {
   return (
     <Text
@@ -65,6 +65,7 @@ export function WorkLogLabel({
       className={cn(
         "min-w-0 flex-1 text-sm text-foreground-muted",
         tone === "danger" && "font-t3-medium text-adaptive-rose-600-400",
+        tone === "warning" && "font-t3-medium text-warning-foreground",
       )}
     >
       {children}

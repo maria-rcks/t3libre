@@ -115,7 +115,7 @@ function EnvironmentNotifications({
       if (status === "ready" && thread.latestRun?.status === "failed") status = "failed";
       const prior = previous.current.get(thread.id);
       const attention =
-        status === "input" || status === "approval" || status === "failed"
+        status === "input" || status === "approval" || status === "failed" || status === "limited"
           ? `${thread.latestRun?.runId ?? ""}:${status}`
           : null;
       const completedAt = Date.parse(thread.latestRun?.completedAt ?? "");
@@ -139,9 +139,11 @@ function EnvironmentNotifications({
           ? "Thread completed"
           : status === "approval"
             ? "Approval needed"
-            : status === "failed"
-              ? "Thread failed"
-              : "Input needed";
+            : status === "limited"
+              ? "Usage limit reached"
+              : status === "failed"
+                ? "Thread failed"
+                : "Input needed";
       if (hasNotificationSound(mode)) {
         void playNotificationSound(kind, () =>
           hasNotificationSound(getClientSettings().notificationMode),

@@ -362,7 +362,8 @@ function itemIsProminent(item: OrchestrationV2TurnItem): boolean {
 function itemStatus(item: OrchestrationV2TurnItem): ThreadFeedActivity["status"] {
   if (item.type === "notification") return item.outcome === "failed" ? "failure" : null;
   if (item.type === "error") {
-    if (item.status === "failed") return "failure";
+    if (item.status === "failed")
+      return item.failure.class === "usage_limit" ? "neutral" : "failure";
     return item.status === "completed" ? "success" : "neutral";
   }
   if (!itemIsToolLike(item)) return null;
@@ -431,7 +432,11 @@ function itemIcon(item: OrchestrationV2TurnItem): ThreadFeedActivity["icon"] {
     case "system_notice":
       return "warning";
     case "error":
-      return "alert";
+      return item.failure.class === "usage_limit"
+        ? item.status === "completed"
+          ? "check"
+          : "warning"
+        : "alert";
     case "checkpoint":
     case "proposed_plan":
     case "todo_list":
@@ -485,7 +490,7 @@ function itemSummary(
     case "run_interrupt_result":
       return "Run interrupted";
     case "error":
-      return "Provider error";
+      return item.failure.class === "usage_limit" ? "Usage limit reached" : "Provider error";
     case "handoff":
       return "Context handed off";
     case "fork":
@@ -670,7 +675,12 @@ function toFeedActivity(
     logo: toolPresentation?.logo ?? null,
     toolLike: itemIsToolLike(item),
     prominent: itemIsProminent(item),
-    status: workEntryDisplayIndicatesToolFailure(workEntry) ? "failure" : itemStatus(item),
+    status:
+      item.type === "error" && item.failure.class === "usage_limit"
+        ? itemStatus(item)
+        : workEntryDisplayIndicatesToolFailure(workEntry)
+          ? "failure"
+          : itemStatus(item),
     lifecycleStatus: itemLifecycleStatus(item),
     workEntry,
     projectedItem: row,

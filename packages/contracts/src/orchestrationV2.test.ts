@@ -585,6 +585,14 @@ describe("orchestration V2 contracts", () => {
     expect(errorItem.type).toBe("error");
     if (errorItem.type !== "error") throw new Error("expected error item");
     expect(errorItem.failure.message).toBe("Invalid reasoning effort.");
+    const usageLimited = decodeOrchestrationV2TurnItem({
+      ...errorItem,
+      startedAt: now,
+      completedAt: now,
+      updatedAt: now,
+      failure: { ...errorItem.failure, class: "usage_limit" },
+    });
+    expect(usageLimited.type === "error" && usageLimited.failure.class).toBe("usage_limit");
     expect(() =>
       decodeOrchestrationV2TurnItem({
         ...errorItem,

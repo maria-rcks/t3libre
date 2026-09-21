@@ -1,4 +1,10 @@
-import { MessageId, RunId, type OrchestrationV2RunStatus } from "@t3tools/contracts";
+import {
+  TurnItemId,
+  NodeId,
+  MessageId,
+  RunId,
+  type OrchestrationV2RunStatus,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -34,6 +40,53 @@ function run(id: string, ordinal: number, status: OrchestrationV2RunStatus) {
 }
 
 describe("thread execution presentation", () => {
+  it("derives the current root failure without inheriting errors from children or previous runs", () => {
+    const failed = { ...run("limited", 1, "failed"), rootNodeId: NodeId.make("root") };
+    const item = {
+      id: TurnItemId.make("limit-error"),
+      threadId: v2Projection.thread.id,
+      runId: failed.id,
+      nodeId: failed.rootNodeId,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 1,
+      type: "error" as const,
+      status: "failed" as const,
+      title: "Usage limit reached",
+      startedAt: now,
+      completedAt: now,
+      updatedAt: now,
+      failure: {
+        class: "usage_limit" as const,
+        message: "Plan limit reached",
+        code: "usageLimitExceeded",
+        retryable: null,
+      },
+    };
+    const projection = { ...v2Projection, runs: [failed], turnItems: [item] };
+    expect(deriveThreadRuntime(projection)).toMatchObject({
+      lastError: "Plan limit reached",
+      lastErrorClass: "usage_limit",
+    });
+    expect(
+      deriveThreadRuntime({
+        ...projection,
+        turnItems: [{ ...item, nodeId: NodeId.make("child") }],
+      }),
+    ).toMatchObject({ lastError: null, lastErrorClass: null });
+    expect(
+      deriveThreadRuntime({
+        ...projection,
+        runs: [{ ...failed, rootNodeId: NodeId.make("new-root") }],
+      }),
+    ).toMatchObject({ lastError: null, lastErrorClass: null });
+    expect(
+      deriveThreadRuntime({ ...projection, runs: [failed, run("new", 2, "running")] }),
+    ).toMatchObject({ status: "running", lastError: null, lastErrorClass: null });
+  });
+
   it("keeps live activity attached to an executing run when a newer run is queued", () => {
     const runningRun = run("run-running", 1, "running");
     const queuedRun = run("run-queued", 2, "queued");

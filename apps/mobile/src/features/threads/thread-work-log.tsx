@@ -888,7 +888,12 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
   const accessiblePreview = [previewText, answerPreview].filter(Boolean).join(": ");
   const displayText = workEntryRowLabel(row.workEntry, expanded);
   const isSystemNotice = row.projectedItem.item.type === "system_notice";
-  const iconIsDestructive = !isSystemNotice && (row.icon === "alert" || row.icon === "warning");
+  const isUsageLimit =
+    row.projectedItem.item.type === "error" &&
+    row.projectedItem.item.failure.class === "usage_limit" &&
+    row.projectedItem.item.status !== "completed";
+  const iconIsDestructive =
+    !isSystemNotice && !isUsageLimit && (row.icon === "alert" || row.icon === "warning");
   const failed = row.status === "failure";
   const toolIcon = row.workEntry.toolIcon ?? row.workEntry.toolSource?.icon;
   const icon = reasoning ? "brain" : (toolPresentation?.icon ?? workRowSymbolName(row.icon));
@@ -942,16 +947,20 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
                   icon={icon}
                   color={props.iconSubtleColor}
                   colorClassName={
-                    iconIsDestructive
-                      ? "accent-adaptive-rose-600-400"
-                      : failed
-                        ? "accent-danger-foreground/40"
-                        : undefined
+                    isUsageLimit
+                      ? "accent-warning-foreground"
+                      : iconIsDestructive
+                        ? "accent-adaptive-rose-600-400"
+                        : failed
+                          ? "accent-danger-foreground/40"
+                          : undefined
                   }
                 />
               )}
             </WorkLogIconSlot>
-            <WorkLogLabel tone={iconIsDestructive ? "danger" : "default"}>
+            <WorkLogLabel
+              tone={isUsageLimit ? "warning" : iconIsDestructive ? "danger" : "default"}
+            >
               {isSystemNotice ? row.summary : displayText}
               {answerPreview ? (
                 <Text

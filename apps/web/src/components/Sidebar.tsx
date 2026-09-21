@@ -507,9 +507,20 @@ function SidebarThreadTooltip({
             </div>
           ) : null}
           {thread.runtime?.lastError ? (
-            <div className="flex min-w-0 items-center gap-2 text-red-600 dark:text-red-400">
+            <div
+              className={cn(
+                "flex min-w-0 items-center gap-2",
+                thread.runtime.lastErrorClass === "usage_limit"
+                  ? "text-amber-700 dark:text-amber-300"
+                  : "text-red-600 dark:text-red-400",
+              )}
+            >
               <CircleAlertIcon className="size-3 shrink-0 stroke-current" />
-              <div className="min-w-0 truncate">Error occurred</div>
+              <div className="min-w-0 truncate">
+                {thread.runtime.lastErrorClass === "usage_limit"
+                  ? "Usage limit reached"
+                  : "Error occurred"}
+              </div>
             </div>
           ) : null}
         </div>
@@ -1234,25 +1245,31 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 icon: "input" as const,
                 className: "text-indigo-600 dark:text-indigo-300",
               }
-            : status === "failed"
+            : status === "limited"
               ? {
-                  label: "Failed",
+                  label: "Limited",
                   icon: "failed" as const,
-                  className: "text-red-700 dark:text-red-300",
+                  className: "text-amber-700 dark:text-amber-300",
                 }
-              : isWoke
+              : status === "failed"
                 ? {
-                    label: "Woke",
-                    icon: "woke" as const,
-                    className: "text-amber-700 dark:text-amber-300",
+                    label: "Failed",
+                    icon: "failed" as const,
+                    className: "text-red-700 dark:text-red-300",
                   }
-                : isUnread
+                : isWoke
                   ? {
-                      label: "Done",
-                      icon: "done" as const,
-                      className: "text-emerald-700 dark:text-emerald-300",
+                      label: "Woke",
+                      icon: "woke" as const,
+                      className: "text-amber-700 dark:text-amber-300",
                     }
-                  : null;
+                  : isUnread
+                    ? {
+                        label: "Done",
+                        icon: "done" as const,
+                        className: "text-emerald-700 dark:text-emerald-300",
+                      }
+                    : null;
   const isWokeStatus = topStatus?.icon === "woke";
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({

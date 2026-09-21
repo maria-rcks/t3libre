@@ -128,6 +128,35 @@ describe("resolveThreadListV2Enabled", () => {
 });
 
 describe("resolveThreadListV2Status", () => {
+  it("distinguishes usage limits from ordinary failures and clears the label after recovery", () => {
+    const thread = makeThread({
+      id: ThreadId.make("limited"),
+      title: "Limited",
+      runtime: {
+        status: "failed",
+        activeRunId: null,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providerName: "Codex",
+        lastError: "Plan limit reached",
+        lastErrorClass: "usage_limit",
+        updatedAt: NOW,
+      },
+    });
+    expect(resolveThreadListV2Status(thread)).toBe("limited");
+    expect(
+      resolveThreadListV2Status({
+        ...thread,
+        runtime: { ...thread.runtime!, lastErrorClass: null },
+      }),
+    ).toBe("failed");
+    expect(
+      resolveThreadListV2Status({
+        ...thread,
+        runtime: { ...thread.runtime!, status: "completed" },
+      }),
+    ).toBe("ready");
+  });
+
   it("prioritizes approval over a running runtime", () => {
     const thread = makeThread({
       id: ThreadId.make("t"),

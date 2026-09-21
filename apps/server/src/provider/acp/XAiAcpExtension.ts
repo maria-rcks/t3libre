@@ -15,7 +15,7 @@ import type * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 import type { AcpToolCallState } from "./AcpRuntimeModel.ts";
 
 const xAiStopReasonMissingMetaKey = "xAiStopReasonMissing";
-const xAiRateLimitedErrorCode = -32003;
+export const xAiRateLimitedErrorCode = -32003;
 const completedXAiPromptIdLimit = 128;
 
 const XAiPromptCompleteNotification = Schema.Struct({

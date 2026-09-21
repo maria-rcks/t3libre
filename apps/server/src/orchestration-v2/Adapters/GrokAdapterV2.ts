@@ -1,3 +1,5 @@
+import { makeProviderFailure } from "../ProviderFailure.ts";
+import { xAiRateLimitedErrorCode } from "../../provider/acp/XAiAcpExtension.ts";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import {
   defaultInstanceIdForDriver,
@@ -12,7 +14,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import type * as EffectAcpErrors from "effect-acp/errors";
+import * as EffectAcpErrors from "effect-acp/errors";
 
 import { ServerConfig } from "../../config.ts";
 import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
@@ -253,6 +255,17 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
           environment: options.environment,
           childProcessSpawner: options.childProcessSpawner,
         })),
+    promptFailure: (cause) =>
+      makeProviderFailure({
+        cause,
+        ...(Schema.is(EffectAcpErrors.AcpRequestError)(cause)
+          ? {
+              message: cause.errorMessage,
+              code: String(cause.code),
+              class: cause.code === xAiRateLimitedErrorCode ? "usage_limit" : "provider_error",
+            }
+          : { class: "provider_error" }),
+      }),
     registerExtensions: registerGrokAcpExtensions,
     extractSubagentUpdate: extractXAiAcpSubagentUpdate,
     extractSubagentEndNotice: extractXAiAcpSubagentEndNotice,

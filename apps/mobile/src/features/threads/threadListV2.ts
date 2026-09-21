@@ -59,7 +59,14 @@ export function resolveThreadListV2ProviderDrivers(
  * The orchestrator v2 presentation bridge parks runtime at idle when the
  * post-settlement background roster is nonempty.
  */
-export type ThreadListV2Status = "approval" | "input" | "working" | "waiting" | "failed" | "ready";
+export type ThreadListV2Status =
+  | "approval"
+  | "input"
+  | "working"
+  | "waiting"
+  | "failed"
+  | "limited"
+  | "ready";
 export type ThreadListV2SwipeAction = "archive" | "settle" | "unsettle" | "snooze" | "unsnooze";
 
 export function resolveThreadListV2SnoozeMenuSelection(input: {
@@ -197,7 +204,7 @@ export function resolveThreadListV2Status(
     return "waiting";
   }
   if (thread.runtime?.status === "failed") {
-    return "failed";
+    return thread.runtime.lastErrorClass === "usage_limit" ? "limited" : "failed";
   }
   return "ready";
 }
