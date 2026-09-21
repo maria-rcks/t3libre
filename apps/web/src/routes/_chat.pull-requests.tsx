@@ -976,24 +976,31 @@ function PullRequestsRouteView() {
   // Rows with a speed action still travelling: no second one for the same row until the
   // host answers the first, so two cannot land out of order.
   const [speedPending, setSpeedPending] = useState<ReadonlySet<string>>(() => new Set());
-  const speedAct = useCallback(
+  /** Claims the row for one speed action; false when an earlier one is still travelling. */
+  const claimSpeedPending = useCallback((key: string) => {
+    if (speedPendingRef.current.has(key)) return false;
+    speedPendingRef.current = new Set(speedPendingRef.current).add(key);
+    setSpeedPending(speedPendingRef.current);
+    return true;
+  }, []);
+  const releaseSpeedPending = useCallback((key: string) => {
+    speedPendingRef.current = new Set(
+      [...speedPendingRef.current].filter((pending) => pending !== key),
+    );
+    setSpeedPending(speedPendingRef.current);
+  }, []);
+  /**
+   * The host half of a speed action, for a row already claimed. `token` names the note the
+   * caller wrote on the row, so a refusal takes back that one and not a newer one.
+   */
+  const sendSpeedAction = useCallback(
     async (
       entry: EnvironmentPullRequestEntry,
       action: PullRequestSpeedAction,
+      token: number | null,
       mergeMethod?: PullRequestMergeMethod,
     ) => {
-      if (action === "merge" && mergeMethod === undefined) {
-        setSpeedMergeTarget(entry);
-        return;
-      }
       const key = pullRequestEntryKey(entry);
-      if (speedPendingRef.current.has(key)) return;
-      speedPendingRef.current = new Set(speedPendingRef.current).add(key);
-      setSpeedPending(speedPendingRef.current);
-      // A merge is written onto the row once the host has done it, not when it is asked: a
-      // host that only queues the merge leaves the pull request open, and the row must not
-      // say merged ahead of it.
-      const token = action === "merge" ? null : overrideEntry(entry, action);
       const result = await runRowAction({
         environmentId: entry.environmentId,
         input: {
@@ -1005,10 +1012,7 @@ function PullRequestsRouteView() {
           ...(mergeMethod ? { mergeMethod } : {}),
         },
       });
-      speedPendingRef.current = new Set(
-        [...speedPendingRef.current].filter((pending) => pending !== key),
-      );
-      setSpeedPending(speedPendingRef.current);
+      releaseSpeedPending(key);
       if (result._tag === "Failure") {
         // The row said what was asked; the host said no, so the row takes it back, unless a
         // later action has already written something newer over it.
@@ -1032,7 +1036,70 @@ function PullRequestsRouteView() {
         refreshListAndStats(undefined, entry.environmentId);
       }
     },
-    [overrideEntry, refreshListAndStats, revertOverride, runRowAction],
+    [overrideEntry, refreshListAndStats, releaseSpeedPending, revertOverride, runRowAction],
+  );
+  const speedAct = useCallback(
+    async (
+      entry: EnvironmentPullRequestEntry,
+      action: PullRequestSpeedAction,
+      mergeMethod?: PullRequestMergeMethod,
+    ) => {
+      if (action === "merge" && mergeMethod === undefined) {
+        setSpeedMergeTarget(entry);
+        return;
+      }
+      if (!claimSpeedPending(pullRequestEntryKey(entry))) return;
+      // A merge is written onto the row once the host has done it, not when it is asked: a
+      // host that only queues the merge leaves the pull request open, and the row must not
+      // say merged ahead of it.
+      const token = action === "merge" ? null : overrideEntry(entry, action);
+      await sendSpeedAction(entry, action, token, mergeMethod);
+    },
+    [claimSpeedPending, overrideEntry, sendSpeedAction],
+  );
+  const postSpeedComment = useAtomCommand(pullRequestEnvironment.comment, {
+    reportFailure: false,
+  });
+  /** A close with words: the comment goes first, and a refused comment closes nothing. */
+  const speedCloseWithComment = useCallback(
+    async (entry: EnvironmentPullRequestEntry, body: string) => {
+      const key = pullRequestEntryKey(entry);
+      if (!claimSpeedPending(key)) return false;
+      const token = overrideEntry(entry, "close");
+      const commented = await postSpeedComment({
+        environmentId: entry.environmentId,
+        input: {
+          projectId: entry.projectId,
+          repository: entry.repository,
+          number: entry.number,
+          host: entry.host,
+          body,
+        },
+      });
+      if (commented._tag === "Failure") {
+        releaseSpeedPending(key);
+        revertOverride(key, token);
+        toastManager.add({
+          type: "error",
+          title: `Could not comment on #${entry.number}`,
+          description: readableFailure(
+            squashAtomCommandFailure(commented),
+            "Check your access on the host.",
+          ),
+        });
+        return false;
+      }
+      await sendSpeedAction(entry, "close", token);
+      return true;
+    },
+    [
+      claimSpeedPending,
+      overrideEntry,
+      postSpeedComment,
+      releaseSpeedPending,
+      revertOverride,
+      sendSpeedAction,
+    ],
   );
   const onSpeedAction = useCallback(
     (entry: EnvironmentPullRequestEntry, action: PullRequestSpeedAction) =>
@@ -1902,6 +1969,7 @@ function PullRequestsRouteView() {
                     speed={speed}
                     speedPending={speedPending.has(entryKey)}
                     onSpeedAction={onSpeedAction}
+                    onSpeedCloseWithComment={speedCloseWithComment}
                   />
                 );
               })}

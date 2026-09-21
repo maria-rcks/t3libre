@@ -79,6 +79,7 @@ function PullRequestRowImpl({
   speed = false,
   speedPending = false,
   onSpeedAction,
+  onSpeedCloseWithComment,
 }: {
   entry: EnvironmentPullRequestEntry;
   selected: boolean;
@@ -101,6 +102,8 @@ function PullRequestRowImpl({
   /** One of this row's speed actions is still with the host. */
   speedPending?: boolean;
   onSpeedAction?: (entry: EnvironmentPullRequestEntry, action: PullRequestSpeedAction) => void;
+  /** A close that carries a comment; resolves to whether the comment landed. */
+  onSpeedCloseWithComment?: (entry: EnvironmentPullRequestEntry, body: string) => Promise<boolean>;
 }) {
   const { Icon, providerName } = getSourceControlPresentationForKind(entry.provider);
   // The row is a button, and the speed buttons cannot nest in one, so they ride a wrapper
@@ -240,8 +243,14 @@ function PullRequestRowImpl({
           updatedAt={entry.updatedAt}
         />
       </button>
-      {speed && onSpeedAction ? (
-        <PullRequestSpeedActions entry={entry} pending={speedPending} onAct={onSpeedAction} />
+      {onSpeedAction && onSpeedCloseWithComment ? (
+        <PullRequestSpeedActions
+          entry={entry}
+          shown={speed}
+          pending={speedPending}
+          onAct={onSpeedAction}
+          onCloseWithComment={onSpeedCloseWithComment}
+        />
       ) : null}
     </div>
   );
