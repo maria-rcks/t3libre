@@ -153,15 +153,13 @@ function PullRequestRowImpl({
                 }}
               />
             )}
-            {/* An open pull request with no verdict is awaiting one, and says so: green checks
-                on an unreviewed pull request must not look like green checks on an approved
-                one. Drafts and closed ones are not waiting on anybody. Only GitHub reports a
-                review decision at all, so on other hosts silence means unknown, not pending. */}
-            {entry.reviewDecision !== undefined ? (
+            {/* Only a verdict the host actually reports: an approval, a request for changes,
+                or a review the branch rules still require. No glyph on the common case of a
+                pull request nobody has reviewed, so a row only wears a person when the person
+                has said something. */}
+            {entry.reviewDecision === undefined ? null : (
               <PullRequestReviewDecisionGlyph decision={entry.reviewDecision} />
-            ) : entry.provider === "github" && entry.state === "open" && !entry.isDraft ? (
-              <PullRequestReviewDecisionGlyph decision="review-required" />
-            ) : null}
+            )}
           </>
         }
         status={

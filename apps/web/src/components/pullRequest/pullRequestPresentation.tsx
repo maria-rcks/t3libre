@@ -59,10 +59,10 @@ export function PullRequestLabelChip({
       size={size}
       variant="secondary"
       className={cn(
-        "min-w-0 max-w-40 shrink justify-start gap-1 px-1.5",
+        "min-w-0 max-w-40 shrink justify-start gap-1 rounded-full px-2",
         size === "sm" && "h-4 text-[.625rem]",
         color &&
-          "bg-[color-mix(in_srgb,var(--label)_12%,transparent)] text-[color-mix(in_srgb,var(--label)_30%,var(--color-foreground))] dark:bg-[color-mix(in_srgb,var(--label)_18%,transparent)] dark:text-[color-mix(in_srgb,var(--label)_45%,var(--color-foreground))]",
+          "bg-[color-mix(in_srgb,var(--label)_8%,transparent)] text-[color-mix(in_srgb,var(--label)_30%,var(--color-foreground))] dark:bg-[color-mix(in_srgb,var(--label)_12%,transparent)] dark:text-[color-mix(in_srgb,var(--label)_45%,var(--color-foreground))]",
         className,
       )}
       {...(color ? { style: { "--label": color } as CSSProperties } : {})}
@@ -75,9 +75,8 @@ export function PullRequestLabelChip({
 
 /**
  * The review verdict as one glyph beside the checks glyph, so a row answers both "does it
- * build" and "did someone say yes" in the same spot. Awaiting review is drawn, not omitted:
- * green checks on an unreviewed pull request must not look the same as green checks on an
- * approved one.
+ * build" and "did someone say yes" in the same spot. "Awaiting review" is only drawn when the
+ * host reports it, which on GitHub means the branch rules require a review nobody has given.
  */
 function reviewDecisionPresentation(decision: PullRequestReviewDecision) {
   switch (decision) {
