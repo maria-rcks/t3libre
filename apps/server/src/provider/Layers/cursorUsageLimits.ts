@@ -16,6 +16,7 @@ import {
 import { readMacCursorAccessToken } from "../cursorCredentialStore.ts";
 
 const CursorCredentials = Schema.Struct({ accessToken: Schema.optional(Schema.String) });
+const DEFAULT_CURSOR_API_ENDPOINT = "https://api2.cursor.sh";
 const decodeCredentials = Schema.decodeEffect(Schema.fromJsonString(CursorCredentials));
 const CursorUsageResponse = Schema.Struct({
   billingCycleEnd: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
@@ -75,7 +76,7 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
     const endpoint = (
       settings.apiEndpoint.trim() ||
       environment.CURSOR_API_ENDPOINT?.trim() ||
-      "https://api2.cursor.sh"
+      DEFAULT_CURSOR_API_ENDPOINT
     ).replace(/\/$/, "");
     let token = environment.CURSOR_AUTH_TOKEN?.trim();
     // An explicit API key can name a different account from the stored login.
@@ -98,11 +99,11 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
           message: "Enable Cursor account usage in T3 Code to read its Keychain login.",
         });
       }
-      if (!endpoint.toLowerCase().startsWith("https://")) {
+      if (endpoint !== DEFAULT_CURSOR_API_ENDPOINT) {
         return makeUnavailableUsageLimits({
           checkedAt,
           reason: "unsupported",
-          message: "Cursor account usage requires an HTTPS endpoint when using Keychain.",
+          message: "Cursor account usage requires the default Cursor endpoint when using Keychain.",
         });
       }
       token = (yield* Effect.tryPromise(keychainToken))?.trim();

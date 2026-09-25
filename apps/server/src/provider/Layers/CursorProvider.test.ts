@@ -1154,24 +1154,26 @@ describe("Cursor usage limits", () => {
     expect(limits.unavailable?.reason).toBe("probeFailed");
   });
 
-  it("does not read Keychain or send its token to an HTTP endpoint", async () => {
+  it("does not read Keychain or send its token to a custom endpoint", async () => {
     for (const [apiEndpoint, environment] of [
       ["http://localhost:3000", {}],
       ["", { CURSOR_API_ENDPOINT: "http://localhost:3000" }],
+      ["https://cursor-proxy.example", {}],
+      ["", { CURSOR_API_ENDPOINT: "https://cursor-proxy.example" }],
     ] as const) {
       const limits = await runNode(
         readCursorUsageLimits({ apiEndpoint }, environment, true, async () => {
-          throw new Error("must not read Keychain for an HTTP endpoint");
+          throw new Error("must not read Keychain for a custom endpoint");
         }).pipe(
           Effect.provideService(HostProcessPlatform, "darwin"),
           Effect.provideService(
             HttpClient.HttpClient,
-            HttpClient.make(() => Effect.die("must not send a credential to HTTP")),
+            HttpClient.make(() => Effect.die("must not send a Keychain credential to a proxy")),
           ),
         ),
       );
       expect(limits.unavailable?.reason).toBe("unsupported");
-      expect(limits.unavailable?.message).toContain("HTTPS endpoint");
+      expect(limits.unavailable?.message).toContain("default Cursor endpoint");
     }
   });
 

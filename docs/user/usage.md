@@ -92,7 +92,8 @@ the environment. T3 cannot report limits for external OpenCode servers because t
 belong to the remote server. Cursor reports
 its monthly allowance, including separate Auto and API usage, using the CLI login or
 `CURSOR_AUTH_TOKEN`. On macOS, this includes the default Keychain login after you enable Cursor
-usage.
+usage. Keychain login is used for limits only with Cursor's default API endpoint. If you configure
+a custom Cursor endpoint, use an explicit token or file-based CLI login for limits.
 
 Grok reports the remaining subscription allowance and reset time for its current billing period
 after signing in with `grok login`. Explicit `XAI_API_KEY` connections and custom authentication
