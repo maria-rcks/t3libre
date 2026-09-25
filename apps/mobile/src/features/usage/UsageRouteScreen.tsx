@@ -106,7 +106,7 @@ export function UsageRouteScreen() {
   );
   const refreshAfterCursorEnable = () => {
     void refresh();
-    void limits.refresh();
+    void limits.refreshAfterEnable();
   };
   const sourceMessages = [
     ...new Set(

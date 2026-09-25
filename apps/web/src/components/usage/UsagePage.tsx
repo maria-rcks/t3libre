@@ -198,7 +198,7 @@ export function UsagePage() {
     setPreferences(nextPreferences);
     saveUsagePagePreferences(nextPreferences);
   };
-  const refreshLimits = async (automatic = false) => {
+  const refreshLimits = async (automatic = false, afterPending = false) => {
     try {
       await Promise.all(
         Array.from(presentations, ([environmentId, presentation]) => {
@@ -208,6 +208,7 @@ export function UsagePage() {
               environmentId,
               () => refreshProviders({ environmentId, input: {} }),
               automatic,
+              afterPending,
             );
           }
         }),
@@ -422,7 +423,7 @@ export function UsagePage() {
                       environments={cursorAccessEnvironments}
                       onEnabled={() => {
                         void refresh();
-                        void refreshLimits();
+                        void refreshLimits(false, true);
                       }}
                     />
                   ) : null
@@ -466,7 +467,7 @@ export function UsagePage() {
                             showEnvironment={selectedEnvironments.length > 1}
                             onEnabled={() => {
                               void refresh();
-                              void refreshLimits();
+                              void refreshLimits(false, true);
                             }}
                           />
                         );
