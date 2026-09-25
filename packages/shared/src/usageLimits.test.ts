@@ -709,14 +709,10 @@ describe("Cursor limit presentation", () => {
     },
   };
 
-  it("separates the combined percentage and orders the two allowances", () => {
+  it("hides the combined percentage and orders the two pools", () => {
     const [pool] = collectLimitPools([cursorAccount], now);
     const display = displayLimitWindows(pool!);
-    expect(display.overall?.remainingPercent).toBe(85);
-    expect(display.windows.map((window) => window.id)).toEqual([
-      "autoPercentUsed",
-      "apiPercentUsed",
-    ]);
+    expect(display.map((window) => window.id)).toEqual(["autoPercentUsed", "apiPercentUsed"]);
   });
 
   it("keeps the combined percentage as a card if either allowance is missing", () => {
@@ -735,11 +731,7 @@ describe("Cursor limit presentation", () => {
       now,
     );
     const display = displayLimitWindows(pool!);
-    expect(display.overall).toBeUndefined();
-    expect(display.windows.map((window) => window.id)).toEqual([
-      "totalPercentUsed",
-      "autoPercentUsed",
-    ]);
+    expect(display.map((window) => window.id)).toEqual(["totalPercentUsed", "autoPercentUsed"]);
   });
 });
 

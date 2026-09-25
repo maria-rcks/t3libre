@@ -233,7 +233,7 @@ export function UsageLimitsSection({
         </Text>
       ) : null}
       {pools.map((pool, index) => {
-        const { overall, windows } = displayLimitWindows(pool);
+        const windows = displayLimitWindows(pool);
         return (
           <Fragment key={pool.driver}>
             {index === cursorPromptAt ? cursorPrompt : null}
@@ -244,14 +244,6 @@ export function UsageLimitsSection({
                   {DRIVER_LABEL[pool.driver] ?? pool.driver}
                 </Text>
               </View>
-              {overall ? (
-                <Text className="px-1 text-xs text-foreground-muted">
-                  <Text className="font-t3-medium text-foreground">
-                    {overall.remainingPercent}% overall left
-                  </Text>{" "}
-                  across both allowances, weighted by their size.
-                </Text>
-              ) : null}
               {windows.map((window) => {
                 const details =
                   pool.driver === "cursor" ? cursorUsageWindowDetails(window.id) : undefined;

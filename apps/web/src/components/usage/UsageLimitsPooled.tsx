@@ -521,7 +521,7 @@ function PoolWindowCard({
 function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
   const color = barColor(pool.driver);
   const label = getDriverOption(pool.driver)?.label ?? String(pool.driver);
-  const { overall, windows } = displayLimitWindows(pool);
+  const windows = displayLimitWindows(pool);
   return (
     <section className="flex flex-col gap-3">
       <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -534,14 +534,6 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
         />
         {label}
       </h2>
-      {overall ? (
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium text-foreground tabular-nums">
-            {overall.remainingPercent}% overall left
-          </span>{" "}
-          across both allowances, weighted by their size.
-        </p>
-      ) : null}
       {windows.map((window) => {
         const details = pool.driver === "cursor" ? cursorUsageWindowDetails(window.id) : undefined;
         return (

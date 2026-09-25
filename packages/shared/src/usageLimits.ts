@@ -33,12 +33,12 @@ export const CURSOR_USAGE_WINDOWS = [
   {
     id: "autoPercentUsed",
     label: "Cursor Models",
-    description: "Grok and Composer use this allowance. Auto can draw from it too.",
+    description: "Grok and Composer use this first. Auto can use either pool.",
   },
   {
     id: "apiPercentUsed",
     label: "Other Models",
-    description: "Claude, GPT, and Gemini use this allowance. Auto can draw from it too.",
+    description: "Claude, GPT, and Gemini use this pool. Grok and Composer fall back here.",
   },
 ] as const;
 
@@ -309,19 +309,15 @@ export interface LimitPool {
   readonly windows: readonly LimitPoolWindow[];
 }
 
-/** Show Cursor's combined figure separately when both actual allowances are available. */
+/** Show Cursor's two usable pools instead of a combined percentage when both are available. */
 export function displayLimitWindows(pool: LimitPool) {
-  if (pool.driver !== "cursor") return { overall: undefined, windows: pool.windows };
+  if (pool.driver !== "cursor") return pool.windows;
   const hasAuto = pool.windows.some((window) => window.id === "autoPercentUsed");
   const hasApi = pool.windows.some((window) => window.id === "apiPercentUsed");
-  const overall =
-    hasAuto && hasApi ? pool.windows.find((window) => window.id === "totalPercentUsed") : undefined;
-  return {
-    overall,
-    windows: pool.windows
-      .filter((window) => window !== overall)
-      .sort((left, right) => cursorUsageWindowRank(left.id) - cursorUsageWindowRank(right.id)),
-  };
+  const hasBothPools = hasAuto && hasApi;
+  return pool.windows
+    .filter((window) => !hasBothPools || window.id !== "totalPercentUsed")
+    .sort((left, right) => cursorUsageWindowRank(left.id) - cursorUsageWindowRank(right.id));
 }
 
 const WINDOW_KIND_ORDER: Record<ServerProviderUsageWindow["kind"], number> = {
