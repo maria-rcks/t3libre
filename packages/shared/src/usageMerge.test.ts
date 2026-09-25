@@ -292,11 +292,23 @@ describe("mergeUsage", () => {
     }
   });
 
-  it("uses a newer partial cell when it contains more records than the complete scan", () => {
+  it("retains a complete cell when a larger partial cell may have skipped old records", () => {
     const source = { provider: "claude" as const, hostId: "mac", homePath: "/home/theo/.claude" };
     const complete = environment("old", summary([bucket()], [source]));
     const partialSummary = summary(
-      [bucket({ costUsd: 12, records: 6 })],
+      [
+        bucket({
+          costUsd: 4,
+          records: 6,
+          totals: {
+            uncachedInputTokens: 80,
+            cachedInputTokens: 500,
+            cacheCreationTokens: 10,
+            outputTokens: 30,
+            reasoningTokens: 0,
+          },
+        }),
+      ],
       [{ ...source, distinctSessions: 2 }],
     );
     const partial = environment("new", {
@@ -306,10 +318,11 @@ describe("mergeUsage", () => {
     });
 
     const merged = mergeUsage([complete, partial], USAGE_CONTRACT_VERSION);
-    expect(merged.costUsd).toBe(12);
-    expect(merged.records).toBe(6);
-    expect(merged.sessions).toBe(2);
-    expect(merged.contributingEnvironments).toEqual(["new"]);
+    expect(merged.costUsd).toBe(10);
+    expect(merged.totalTokens).toBe(1160);
+    expect(merged.records).toBe(5);
+    expect(merged.sessions).toBe(1);
+    expect(merged.contributingEnvironments).toEqual(["old"]);
   });
 
   it("excludes an environment reporting an older contract version", () => {

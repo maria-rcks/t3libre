@@ -143,7 +143,6 @@ function bucketKey(bucket: UsageBucket): string {
 function claimSources(environments: readonly EnvironmentUsage[]): {
   readonly ownerByFingerprint: ReadonlyMap<string, EnvironmentId>;
   readonly supplementalBucketsByEnvironment: ReadonlyMap<EnvironmentId, ReadonlySet<UsageBucket>>;
-  readonly excludedBucketsByEnvironment: ReadonlyMap<EnvironmentId, ReadonlySet<UsageBucket>>;
   readonly sessionsByFingerprint: ReadonlyMap<string, number>;
   readonly duplicates: readonly string[];
 } {
@@ -152,12 +151,8 @@ function claimSources(environments: readonly EnvironmentUsage[]): {
     string,
     { environment: EnvironmentUsage; source: UsageSource }
   >();
-  const selectedBucketsByFingerprint = new Map<
-    string,
-    Map<string, { bucket: UsageBucket; environmentId: EnvironmentId }>
-  >();
+  const seenBucketKeysByFingerprint = new Map<string, Set<string>>();
   const supplementalBucketsByEnvironment = new Map<EnvironmentId, Set<UsageBucket>>();
-  const excludedBucketsByEnvironment = new Map<EnvironmentId, Set<UsageBucket>>();
   const sessionsByFingerprint = new Map<string, number>();
   const duplicates: string[] = [];
 
@@ -186,8 +181,8 @@ function claimSources(environments: readonly EnvironmentUsage[]): {
   }
 
   // A newer partial scan may contain usage recorded after an older complete
-  // scan. Keep its new cells, and use its overlapping cell only when it has
-  // more records. Aggregated cells cannot reveal the exact record overlap.
+  // scan. Keep cells absent from the complete scan. Aggregated cells do not
+  // reveal enough to reconcile overlapping records without double counting.
   for (const environment of ordered) {
     for (const source of environment.summary.sources) {
       if (source.status !== "partial") continue;
@@ -199,34 +194,18 @@ function claimSources(environments: readonly EnvironmentUsage[]): {
       ) {
         continue;
       }
-      let selected = selectedBucketsByFingerprint.get(key);
-      if (selected === undefined) {
-        selected = new Map(
-          bucketsForSource(owner.environment.summary, owner.source).map((bucket) => [
-            bucketKey(bucket),
-            { bucket, environmentId: owner.environment.environmentId },
-          ]),
-        );
-        selectedBucketsByFingerprint.set(key, selected);
+      let seen = seenBucketKeysByFingerprint.get(key);
+      if (seen === undefined) {
+        seen = new Set(bucketsForSource(owner.environment.summary, owner.source).map(bucketKey));
+        seenBucketKeysByFingerprint.set(key, seen);
       }
       const supplemental =
         supplementalBucketsByEnvironment.get(environment.environmentId) ?? new Set<UsageBucket>();
       let added = false;
       for (const bucket of bucketsForSource(environment.summary, source)) {
         const cell = bucketKey(bucket);
-        const previous = selected.get(cell);
-        if (previous !== undefined && previous.bucket.records >= bucket.records) continue;
-        if (previous !== undefined) {
-          if (previous.environmentId === owner.environment.environmentId) {
-            const excluded =
-              excludedBucketsByEnvironment.get(previous.environmentId) ?? new Set<UsageBucket>();
-            excluded.add(previous.bucket);
-            excludedBucketsByEnvironment.set(previous.environmentId, excluded);
-          } else {
-            supplementalBucketsByEnvironment.get(previous.environmentId)?.delete(previous.bucket);
-          }
-        }
-        selected.set(cell, { bucket, environmentId: environment.environmentId });
+        if (seen.has(cell)) continue;
+        seen.add(cell);
         supplemental.add(bucket);
         added = true;
       }
@@ -242,7 +221,6 @@ function claimSources(environments: readonly EnvironmentUsage[]): {
   return {
     ownerByFingerprint,
     supplementalBucketsByEnvironment,
-    excludedBucketsByEnvironment,
     sessionsByFingerprint,
     duplicates,
   };
@@ -253,7 +231,6 @@ function ownedContribution(
   environment: EnvironmentUsage,
   ownerByFingerprint: ReadonlyMap<string, EnvironmentId>,
   supplementalBuckets: ReadonlySet<UsageBucket>,
-  excludedBuckets: ReadonlySet<UsageBucket>,
   sessionsByFingerprint: ReadonlyMap<string, number>,
 ): {
   readonly buckets: readonly UsageBucket[];
@@ -281,11 +258,10 @@ function ownedContribution(
   return {
     buckets: environment.summary.buckets.filter(
       (bucket) =>
-        !excludedBuckets.has(bucket) &&
-        (supplementalBuckets.has(bucket) ||
-          (bucket.sourcePath === undefined
-            ? ownedProviders.has(bucket.provider)
-            : ownedSources.has(`${bucket.provider}\u0000${bucket.sourcePath}`))),
+        supplementalBuckets.has(bucket) ||
+        (bucket.sourcePath === undefined
+          ? ownedProviders.has(bucket.provider)
+          : ownedSources.has(`${bucket.provider}\u0000${bucket.sourcePath}`)),
     ),
     sessionsByProvider,
   };
@@ -360,7 +336,6 @@ export function mergeUsage(
   const {
     ownerByFingerprint,
     supplementalBucketsByEnvironment,
-    excludedBucketsByEnvironment,
     sessionsByFingerprint,
     duplicates,
   } = claimSources(current);
@@ -416,7 +391,6 @@ export function mergeUsage(
       environment,
       ownerByFingerprint,
       supplementalBucketsByEnvironment.get(environment.environmentId) ?? new Set(),
-      excludedBucketsByEnvironment.get(environment.environmentId) ?? new Set(),
       sessionsByFingerprint,
     );
     if (buckets.length > 0) contributingEnvironments.push(environment.environmentId);
