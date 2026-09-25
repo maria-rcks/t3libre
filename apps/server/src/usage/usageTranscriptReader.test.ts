@@ -743,4 +743,22 @@ describe("SQLite usage readers", () => {
     assert.strictEqual(result.files.flatMap((file) => file.records)[0]?.model, "gemini-2.5-pro");
     assert.strictEqual(result.files.flatMap((file) => file.records)[0]?.totals.outputTokens, 5);
   });
+
+  it("ignores large values in unused Antigravity protobuf fields", async () => {
+    const db = new NodeSqlite.DatabaseSync(NodePath.join(dir, "large-varint.db"));
+    try {
+      db.exec("CREATE TABLE steps (idx INTEGER, metadata BLOB)");
+      const unusedField = [...protoNumber(99, 0).slice(0, -1), ...Array(9).fill(0xff), 0x01];
+      const usage = [...protoNumber(1, 246), ...protoNumber(2, 10), ...unusedField];
+      db.prepare("INSERT INTO steps VALUES (?, ?)").run(0, new Uint8Array(protoBytes(9, usage)));
+    } finally {
+      db.close();
+    }
+    const result = await readAntigravityUsage(dir, 0);
+    assert.deepStrictEqual(result.errors, []);
+    assert.strictEqual(
+      result.files.flatMap((file) => file.records)[0]?.totals.uncachedInputTokens,
+      10,
+    );
+  });
 });

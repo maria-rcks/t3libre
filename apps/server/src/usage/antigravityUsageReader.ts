@@ -7,7 +7,8 @@ import * as NodeTimersPromises from "node:timers/promises";
 
 import type { UsageRecord } from "./usageTranscripts.ts";
 
-type Fields = Map<number, Array<number | Uint8Array>>;
+type FieldValue = number | bigint | Uint8Array;
+type Fields = Map<number, FieldValue[]>;
 
 /** Antigravity stores usage metadata as protobuf, independently of conversation text. */
 function fields(bytes: Uint8Array): Fields {
@@ -22,22 +23,23 @@ function fields(bytes: Uint8Array): Fields {
       }
       value |= BigInt(byte & 127) << shift;
       if (byte < 128) {
-        if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Unsafe protobuf number");
-        return Number(value);
+        return value > BigInt(Number.MAX_SAFE_INTEGER) ? value : Number(value);
       }
     }
     throw new Error("Invalid Antigravity protobuf varint");
   };
   while (offset < bytes.length) {
     const tag = varint();
+    if (typeof tag !== "number") throw new Error("Invalid protobuf field");
     const number = Math.floor(tag / 8);
     const wire = tag % 8;
     if (number === 0) throw new Error("Invalid protobuf field");
-    let value: number | Uint8Array;
+    let value: FieldValue;
     if (wire === 0) {
       value = varint();
     } else if (wire === 1 || wire === 5 || wire === 2) {
       const length = wire === 2 ? varint() : wire === 1 ? 8 : 4;
+      if (typeof length !== "number") throw new Error("Invalid protobuf field length");
       if (length > bytes.length - offset) throw new Error("Truncated protobuf field");
       value = bytes.subarray(offset, offset + length);
       offset += length;
@@ -62,7 +64,7 @@ const bytesAt = (value: Fields, key: number) => {
 };
 const nested = (value: Fields, key: number) => {
   const bytes = bytesAt(value, key);
-  return bytes === undefined ? new Map<number, Array<number | Uint8Array>>() : fields(bytes);
+  return bytes === undefined ? new Map<number, FieldValue[]>() : fields(bytes);
 };
 const textAt = (value: Fields, key: number) => {
   const bytes = bytesAt(value, key);
