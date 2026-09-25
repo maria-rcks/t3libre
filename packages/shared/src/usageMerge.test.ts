@@ -227,6 +227,28 @@ describe("mergeUsage", () => {
     }
   });
 
+  it("prefers a complete scan over a newer partial scan of the same directory", () => {
+    const source = { provider: "claude" as const, hostId: "mac", homePath: "/home/theo/.claude" };
+    const incomplete = summary([bucket({ costUsd: 4, records: 2 })], [source]);
+    const partial = environment("new", {
+      ...incomplete,
+      readAt: "2026-08-07T01:00:00.000Z",
+      sources: incomplete.sources.map((entry) => ({ ...entry, status: "partial" as const })),
+    });
+    const complete = environment("old", summary([bucket()], [source]));
+
+    for (const ordered of [
+      [partial, complete],
+      [complete, partial],
+    ]) {
+      const merged = mergeUsage(ordered, USAGE_CONTRACT_VERSION);
+      expect(merged.costUsd).toBe(10);
+      expect(merged.contributingEnvironments).toEqual(["old"]);
+      expect(merged.duplicateSources).toEqual(["new: /home/theo/.claude"]);
+    }
+    expect(mergeUsage([partial], USAGE_CONTRACT_VERSION).costUsd).toBe(4);
+  });
+
   it("excludes an environment reporting an older contract version", () => {
     const merged = mergeUsage(
       [

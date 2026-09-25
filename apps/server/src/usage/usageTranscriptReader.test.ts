@@ -288,6 +288,24 @@ describe("SQLite usage readers", () => {
     assert.isFalse(result.accountKey?.includes("demo") ?? true);
   });
 
+  it("reads Cursor account history beyond 100 pages", async () => {
+    const authPath = NodePath.join(dir, "auth.json");
+    const accessToken = `header.${Buffer.from(JSON.stringify({ sub: "auth|demo" })).toString("base64url")}.signature`;
+    await NodeFSP.writeFile(authPath, JSON.stringify({ accessToken }));
+    const fullPage = Array.from({ length: 1000 }, () => ({ tokenUsage: null }));
+    let requests = 0;
+    const result = await readCursorAccountUsage(authPath, 0, 1781000000000, async () => {
+      requests += 1;
+      return Response.json({
+        totalUsageEventsCount: 100_001,
+        usageEventsDisplay: requests <= 100 ? fullPage : [{ tokenUsage: null }],
+      });
+    });
+    assert.isNull(result.error);
+    assert.strictEqual(requests, 101);
+    assert.deepStrictEqual(result.records, []);
+  });
+
   it("accepts confirmed empty Cursor usage but rejects error envelopes", async () => {
     const authPath = NodePath.join(dir, "auth.json");
     const accessToken = `header.${Buffer.from(JSON.stringify({ sub: "auth|demo" })).toString("base64url")}.signature`;

@@ -135,15 +135,19 @@ function claimSources(environments: readonly EnvironmentUsage[]): {
       a.environmentId.localeCompare(b.environmentId),
   );
 
-  for (const environment of ordered) {
-    for (const source of environment.summary.sources) {
-      if (source.status === "missing") continue;
-      const key = fingerprintKey(source.fingerprint);
-      if (ownerByFingerprint.has(key)) {
-        duplicates.push(`${environment.label}: ${source.fingerprint.resolvedHomePath}`);
-        continue;
+  // A complete scan takes precedence over a newer partial scan of the same
+  // directory. Partial history still contributes when no complete copy exists.
+  for (const status of ["ok", "partial", "failed"] as const) {
+    for (const environment of ordered) {
+      for (const source of environment.summary.sources) {
+        if (source.status !== status) continue;
+        const key = fingerprintKey(source.fingerprint);
+        if (ownerByFingerprint.has(key)) {
+          duplicates.push(`${environment.label}: ${source.fingerprint.resolvedHomePath}`);
+          continue;
+        }
+        ownerByFingerprint.set(key, environment.environmentId);
       }
-      ownerByFingerprint.set(key, environment.environmentId);
     }
   }
 

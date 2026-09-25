@@ -90,7 +90,12 @@ export async function readCursorAccountUsage(
     let completed = false;
     const pageSize = 1000;
     let total: number | undefined;
-    for (let page = 1; page <= 100; page++) {
+    for (let page = 1; ; page++) {
+      // A count can include overlapping page boundaries. Allow room to
+      // reconcile them without imposing a fixed account-size limit.
+      if (page > (total === undefined ? 1000 : Math.ceil(total / pageSize) * 2 + 1)) {
+        throw new Error("Account usage page limit exceeded");
+      }
       const response = await request("https://cursor.com/api/dashboard/get-filtered-usage-events", {
         method: "POST",
         redirect: "error",
@@ -134,7 +139,6 @@ export async function readCursorAccountUsage(
           (typeof count !== "number" ||
             !Number.isSafeInteger(count) ||
             count < 0 ||
-            count > pageSize * 100 ||
             (total !== undefined && count !== total))) ||
         !Array.isArray(events) ||
         events.length > pageSize ||
