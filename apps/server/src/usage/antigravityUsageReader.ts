@@ -239,6 +239,7 @@ async function readDatabase(path: string, fallbackTimestamp: number): Promise<Us
               "antigravity-unknown",
             totals,
             reportedCostUsd: null,
+            fast: false,
             dedupeKey: keys[0] ?? `antigravity:${sessionId}:${source}:${index}:${usageIndex}`,
           };
           records.push({

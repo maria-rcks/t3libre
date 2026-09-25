@@ -235,6 +235,7 @@ export async function readCursorAccountUsage(
           sessionId,
           totals,
           reportedCostUsd,
+          fast: false,
           dedupeKey: `cursor-account:${accountKey}:${key}:${occurrence}`,
         });
       }
