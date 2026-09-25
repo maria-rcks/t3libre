@@ -1079,6 +1079,10 @@ describe("Cursor usage limits", () => {
               AGENT_CLI_CREDENTIAL_STORE: platform === "linux" ? "memory" : "default",
               ...(token ? { CURSOR_AUTH_TOKEN: token } : {}),
             },
+            false,
+            async () => {
+              throw new Error("must not read Keychain before opt-in");
+            },
           ).pipe(
             Effect.provideService(HostProcessPlatform, platform),
             Effect.provideService(
@@ -1106,6 +1110,33 @@ describe("Cursor usage limits", () => {
         else expect(limits.unavailable?.reason).toBe("unsupported");
       }
     }
+  });
+
+  it("reads the default macOS Cursor login from Keychain for limits", async () => {
+    const limits = await runNode(
+      readCursorUsageLimits({ apiEndpoint: "" }, {}, true, async () => "keychain-token").pipe(
+        Effect.provideService(HostProcessPlatform, "darwin"),
+        Effect.provideService(
+          FileSystem.FileSystem,
+          FileSystem.makeNoop({
+            readFileString: () => Effect.die("must not read a stale credential file"),
+          }),
+        ),
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make((request) => {
+            expect(request.headers.authorization).toBe("Bearer keychain-token");
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                Response.json({ planUsage: { totalPercentUsed: 42 } }),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+    expect(limits.windows[0]?.usedPercent).toBe(42);
   });
 
   it("reports failed requests without exposing credentials or response bodies", async () => {

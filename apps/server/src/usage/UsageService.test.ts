@@ -121,11 +121,36 @@ function totalOutputTokens(summary: { buckets: readonly { totals: { outputTokens
 }
 
 describe("UsageService", () => {
+  it.live("does not read the macOS Cursor Keychain before account usage is enabled", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      const service = yield* UsageService.make.pipe(
+        Effect.provide(
+          serviceLayers({
+            prefix: "usage-service-cursor-keychain-disabled",
+            home,
+            settings,
+            platform: "darwin",
+            environment: {},
+          }),
+        ),
+      );
+      const summary = yield* service.readSummary(WINDOW);
+      const cursor = summary.sources.find((source) => source.fingerprint.provider === "cursor");
+      assert.strictEqual(cursor?.status, "missing");
+      assert.strictEqual(cursor?.action, "enableCursorKeychain");
+    }).pipe(Effect.scoped),
+  );
+
   it.live("ignores stale Cursor file logins when the active credential store differs", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;
       for (const [index, testCase] of [
-        { platform: "darwin" as const, environment: {}, authPath: [".cursor", "auth.json"] },
+        {
+          platform: "darwin" as const,
+          environment: { AGENT_CLI_CREDENTIAL_STORE: "memory" },
+          authPath: [".cursor", "auth.json"],
+        },
         {
           platform: "linux" as const,
           environment: { AGENT_CLI_CREDENTIAL_STORE: "memory" },
@@ -159,7 +184,7 @@ describe("UsageService", () => {
         const summary = yield* service.readSummary(WINDOW);
         const cursor = summary.sources.find((source) => source.fingerprint.provider === "cursor");
         assert.strictEqual(cursor?.status, "missing");
-        assert.include(cursor?.message ?? "", "file-based CLI login");
+        assert.include(cursor?.message ?? "", "Cursor CLI login");
         assert.isFalse(summary.buckets.some((bucket) => bucket.provider === "cursor"));
       }
     }).pipe(Effect.scoped),

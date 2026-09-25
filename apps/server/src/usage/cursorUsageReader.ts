@@ -5,6 +5,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeTimersPromises from "node:timers/promises";
 
 import type { UsageRecord } from "./usageTranscripts.ts";
+import { readMacCursorAccessToken } from "../provider/cursorCredentialStore.ts";
 
 function object(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -51,29 +52,45 @@ function boundaryOverlap(previous: readonly string[], current: readonly string[]
 
 /** Dashboard usage includes headless agents and reports fresh input separately from cache reads. */
 export async function readCursorAccountUsage(
-  authPath: string,
+  credentialSource: string | { readonly kind: "keychain" },
   sinceMs: number,
   endDate: number,
   request: (url: string, init: RequestInit) => Promise<Response> = globalThis.fetch,
+  keychainToken: () => Promise<string | null> = readMacCursorAccessToken,
 ): Promise<CursorAccountUsageReadResult> {
-  let auth: Record<string, unknown>;
+  let accessToken: unknown;
   try {
-    auth = object(JSON.parse(await NodeFSP.readFile(authPath, "utf8")));
+    accessToken =
+      typeof credentialSource === "string"
+        ? object(JSON.parse(await NodeFSP.readFile(credentialSource, "utf8"))).accessToken
+        : await keychainToken();
   } catch (cause) {
-    const missing = object(cause).code === "ENOENT";
+    const missing = typeof credentialSource === "string" && object(cause).code === "ENOENT";
     return {
       accountKey: null,
       records: [],
       missing,
-      error: missing ? null : "Cursor credentials could not be read.",
+      error: missing
+        ? null
+        : typeof credentialSource === "string"
+          ? "Cursor credentials could not be read."
+          : "Cursor Keychain credentials could not be read.",
     };
   }
-  if (typeof auth.accessToken !== "string" || !auth.accessToken) {
-    return { accountKey: null, records: [], missing: true, error: null };
+  if (typeof accessToken !== "string" || !accessToken) {
+    return {
+      accountKey: null,
+      records: [],
+      missing: true,
+      error:
+        typeof credentialSource === "string"
+          ? null
+          : "Cursor account history needs a macOS Keychain CLI login on this server.",
+    };
   }
   let accountKey: string | null = null;
   try {
-    const payload = auth.accessToken.split(".")[1];
+    const payload = accessToken.split(".")[1];
     const subject = object(
       JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf8")),
     ).sub;
@@ -103,7 +120,7 @@ export async function readCursorAccountUsage(
         headers: {
           "Content-Type": "application/json",
           Origin: "https://cursor.com",
-          Cookie: `WorkosCursorSessionToken=${encodeURIComponent(`${userId}::${auth.accessToken}`)}`,
+          Cookie: `WorkosCursorSessionToken=${encodeURIComponent(`${userId}::${accessToken}`)}`,
         },
         body: JSON.stringify({
           page,

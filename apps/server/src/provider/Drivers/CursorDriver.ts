@@ -142,9 +142,15 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       ).pipe(
         Effect.flatMap((snapshot) =>
           effectiveConfig.enabled && snapshot.installed && snapshot.auth.status === "authenticated"
-            ? readCursorUsageLimits(effectiveConfig, processEnv).pipe(
-                Effect.map((usageLimits) => ({ ...snapshot, usageLimits })),
-              )
+            ? Effect.gen(function* () {
+                const settings = yield* serverSettings.getSettings;
+                const usageLimits = yield* readCursorUsageLimits(
+                  effectiveConfig,
+                  processEnv,
+                  settings.cursorKeychainUsageEnabled,
+                );
+                return { ...snapshot, usageLimits };
+              })
             : Effect.succeed(snapshot),
         ),
         Effect.map(stampIdentity),

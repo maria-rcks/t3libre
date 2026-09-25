@@ -118,12 +118,16 @@ export function UsagePage() {
     selectedEnvironmentIds,
   );
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
+  const cursorAccessEnvironments = selectedEnvironments.filter((environment) =>
+    environment.summary?.sources.some((source) => source.action === "enableCursorKeychain"),
+  );
   const sourceMessages = [
     ...new Set(
       selectedEnvironments.flatMap(
         (environment) =>
           environment.summary?.sources.flatMap((source) =>
             source.message &&
+            !source.action &&
             (source.status === "partial" ||
               source.status === "failed" ||
               source.fingerprint.provider === "cursor")
@@ -388,6 +392,17 @@ export function UsagePage() {
 
         <ScrollArea className="min-h-0 flex-1">
           <WorkspacePageContainer width="wide">
+            {cursorAccessEnvironments.map((environment) => (
+              <CursorKeychainAccessNotice
+                key={environment.environmentId}
+                environmentId={environment.environmentId}
+                label={environment.label}
+                onEnabled={() => {
+                  void refresh();
+                  void refreshLimits();
+                }}
+              />
+            ))}
             {selectedEnvironments.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {environments.length === 0
@@ -653,6 +668,44 @@ export function UsagePage() {
         </ScrollArea>
       </div>
     </SidebarInset>
+  );
+}
+
+function CursorKeychainAccessNotice({
+  environmentId,
+  label,
+  onEnabled,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  readonly onEnabled: () => void;
+}) {
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "enable Cursor account usage",
+  });
+  const [pending, setPending] = useState(false);
+  const enable = async () => {
+    setPending(true);
+    try {
+      const result = await updateSettings({
+        environmentId,
+        input: { patch: { cursorKeychainUsageEnabled: true } },
+      });
+      if (result._tag === "Success") onEnabled();
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-4">
+      <p className="text-sm text-muted-foreground">
+        To show Cursor history and monthly limits from {label}, T3 needs access to your Cursor CLI
+        login in macOS Keychain. macOS may ask you to allow it.
+      </p>
+      <Button size="sm" variant="outline" disabled={pending} onClick={() => void enable()}>
+        Enable Cursor usage
+      </Button>
+    </div>
   );
 }
 

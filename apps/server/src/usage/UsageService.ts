@@ -457,6 +457,7 @@ export const make = Effect.gen(function* () {
     readonly hostId?: string;
     readonly status?: UsageSource["status"];
     readonly message?: string;
+    readonly action?: UsageSource["action"];
     /** Parsed records per file, or `null` when the directory does not exist. */
     readonly files:
       | readonly { readonly path: string; readonly records: readonly UsageRecord[] }[]
@@ -597,21 +598,42 @@ export const make = Effect.gen(function* () {
         ? path.join(cursorUserHome, ".cursor", "auth.json")
         : path.join(cursorHome, platform === "win32" ? "Cursor" : "cursor", "auth.json");
     const credentialStore = hostEnvironment["AGENT_CLI_CREDENTIAL_STORE"];
-    const fileLoginUnavailable =
+    const loginUnavailable =
       Boolean(hostEnvironment["CURSOR_AUTH_TOKEN"]?.trim()) ||
       Boolean(hostEnvironment["CURSOR_API_KEY"]?.trim()) ||
-      credentialStore === "memory" ||
-      (platform === "darwin" && credentialStore !== "file");
+      credentialStore === "memory";
+    if (
+      platform === "darwin" &&
+      credentialStore !== "file" &&
+      !loginUnavailable &&
+      !settings.cursorKeychainUsageEnabled
+    ) {
+      scanned.push({
+        provider: "cursor",
+        dir: cursorAuthPath,
+        volumeId: "",
+        files: null,
+        message: "Cursor account usage is off on this environment.",
+        action: "enableCursorKeychain",
+      });
+      return scanned;
+    }
     const cursorUntilMs = yield* Clock.currentTimeMillis;
-    const account = fileLoginUnavailable
+    const account = loginUnavailable
       ? {
           accountKey: null,
           records: [],
           missing: true,
-          error: "Cursor account history needs a file-based CLI login on this server.",
+          error: "Cursor account history needs a Cursor CLI login on this server.",
         }
       : yield* Effect.promise(() =>
-          readCursorAccountUsage(cursorAuthPath, windowStartMs, cursorUntilMs),
+          readCursorAccountUsage(
+            platform === "darwin" && credentialStore !== "file"
+              ? { kind: "keychain" }
+              : cursorAuthPath,
+            windowStartMs,
+            cursorUntilMs,
+          ),
         );
     if (account.accountKey !== null && account.error === null && !account.missing) {
       // The same account includes CLI and desktop history from every machine.
@@ -717,6 +739,7 @@ export const make = Effect.gen(function* () {
       files,
       status,
       message,
+      action,
       hostId: sourceHostId,
     } of scannedDirs) {
       const retainedFiles = [...(files ?? [])];
@@ -780,6 +803,7 @@ export const make = Effect.gen(function* () {
         distinctSessions: sessionIds.size,
         message:
           message ?? (files === null ? "No transcript directory on this environment." : null),
+        ...(action ? { action } : {}),
       });
     }
 
@@ -814,6 +838,7 @@ export const make = Effect.gen(function* () {
   const scanKey = (
     input: UsageSummaryInput,
     priceOverrides: ServerSettingsValue["usagePriceOverrides"],
+    cursorKeychainUsageEnabled: boolean,
   ): string =>
     JSON.stringify([
       input.timeZone,
@@ -823,11 +848,12 @@ export const make = Effect.gen(function* () {
       input.sinceTime ?? null,
       input.untilTime ?? null,
       priceOverrides,
+      cursorKeychainUsageEnabled,
     ]);
 
   const readSummary = Effect.fn("UsageService.readSummary")(function* (input: UsageSummaryInput) {
     const settings = yield* readSettings;
-    const key = scanKey(input, settings.usagePriceOverrides);
+    const key = scanKey(input, settings.usagePriceOverrides, settings.cursorKeychainUsageEnabled);
     const deferred = yield* Effect.uninterruptible(
       Effect.gen(function* () {
         const existing = inflightScans.get(key);

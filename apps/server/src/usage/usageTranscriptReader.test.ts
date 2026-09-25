@@ -237,6 +237,28 @@ describe("readTranscriptRecords resume", () => {
 });
 
 describe("SQLite usage readers", () => {
+  it("reads Cursor account history with the default macOS Keychain login", async () => {
+    const accessToken = `header.${Buffer.from(JSON.stringify({ sub: "auth|demo" })).toString("base64url")}.signature`;
+    let keychainReads = 0;
+    const result = await readCursorAccountUsage(
+      { kind: "keychain" },
+      0,
+      1781000000000,
+      async (_url, init) => {
+        assert.include(new Headers(init.headers).get("cookie") ?? "", "demo%3A%3A");
+        return Response.json({ totalUsageEventsCount: 0, usageEventsDisplay: [] });
+      },
+      async () => {
+        keychainReads++;
+        return accessToken;
+      },
+    );
+    assert.strictEqual(keychainReads, 1);
+    assert.isNull(result.error);
+    assert.isFalse(result.missing);
+    assert.isNotNull(result.accountKey);
+  });
+
   it("reads paginated Cursor account history including headless calls with separate cache tokens", async () => {
     const authPath = NodePath.join(dir, "auth.json");
     const accessToken = `header.${Buffer.from(JSON.stringify({ sub: "auth|demo", exp: 4102444800 })).toString("base64url")}.signature`;

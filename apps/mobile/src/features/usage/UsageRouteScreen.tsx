@@ -28,6 +28,8 @@ import { AppText as Text } from "../../components/AppText";
 import { cn } from "../../lib/cn";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { UsageDailyChart } from "./UsageDailyChart";
 import { toggleUsageEnvironment } from "./usageEnvironmentSelection";
@@ -97,12 +99,16 @@ export function UsageRouteScreen() {
   );
   const isFocused = useIsFocused();
   const limits = useRefreshLimits(selectedEnvironmentIds, isFocused && tab === "limits");
+  const cursorAccessEnvironments = selectedEnvironments.filter((environment) =>
+    environment.summary?.sources.some((source) => source.action === "enableCursorKeychain"),
+  );
   const sourceMessages = [
     ...new Set(
       selectedEnvironments.flatMap(
         (environment) =>
           environment.summary?.sources.flatMap((source) =>
             source.message &&
+            !source.action &&
             (source.status === "partial" ||
               source.status === "failed" ||
               source.fingerprint.provider === "cursor")
@@ -266,6 +272,17 @@ export function UsageRouteScreen() {
         }
       >
         <SegmentedControl options={TAB_OPTIONS} selected={tab} onSelect={setTab} role="tab" />
+        {cursorAccessEnvironments.map((environment) => (
+          <CursorKeychainAccessNotice
+            key={environment.environmentId}
+            environmentId={environment.environmentId}
+            label={environment.label}
+            onEnabled={() => {
+              void refresh();
+              void limits.refresh();
+            }}
+          />
+        ))}
 
         <Animated.View
           key={tab}
@@ -341,6 +358,50 @@ export function UsageRouteScreen() {
         </Animated.View>
       </ScrollView>
     </SettingsScreen>
+  );
+}
+
+function CursorKeychainAccessNotice({
+  environmentId,
+  label,
+  onEnabled,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  readonly onEnabled: () => void;
+}) {
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "enable Cursor account usage",
+  });
+  const [pending, setPending] = useState(false);
+  const enable = async () => {
+    setPending(true);
+    try {
+      const result = await updateSettings({
+        environmentId,
+        input: { patch: { cursorKeychainUsageEnabled: true } },
+      });
+      if (result._tag === "Success") onEnabled();
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <View className="gap-3 rounded-[24px] border-continuous bg-card p-4">
+      <Text className="text-sm text-foreground-muted">
+        To show Cursor history and monthly limits from {label}, T3 needs access to your Cursor CLI
+        login in macOS Keychain. macOS may ask you to allow access on that Mac.
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Enable Cursor usage"
+        disabled={pending}
+        onPress={() => void enable()}
+        className="self-start rounded-full bg-primary px-4 py-2"
+      >
+        <Text className="text-sm font-medium text-primary-foreground">Enable Cursor usage</Text>
+      </Pressable>
+    </View>
   );
 }
 

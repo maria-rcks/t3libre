@@ -13,6 +13,7 @@ import {
   makeUnavailableUsageLimits,
   makeUsageLimits,
 } from "../providerUsageLimits.ts";
+import { readMacCursorAccessToken } from "../cursorCredentialStore.ts";
 
 const CursorCredentials = Schema.Struct({ accessToken: Schema.optional(Schema.String) });
 const decodeCredentials = Schema.decodeEffect(Schema.fromJsonString(CursorCredentials));
@@ -63,6 +64,8 @@ export function cursorUsageResponseToLimits(
 export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function* (
   settings: Pick<CursorSettings, "apiEndpoint">,
   environment: NodeJS.ProcessEnv = process.env,
+  allowKeychain = false,
+  keychainToken: () => Promise<string | null> = readMacCursorAccessToken,
 ) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   return yield* Effect.gen(function* () {
@@ -75,18 +78,23 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
       return makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
     }
     const credentialStore = environment.AGENT_CLI_CREDENTIAL_STORE;
-    if (
-      !token &&
-      (credentialStore === "memory" || (platform === "darwin" && credentialStore !== "file"))
-    ) {
-      // Cursor's default macOS login lives in the keychain; a leftover file may be another account.
+    if (!token && credentialStore === "memory") {
       return makeUnavailableUsageLimits({
         checkedAt,
         reason: "unsupported",
-        message: "Cursor usage requires a file-based login or CURSOR_AUTH_TOKEN.",
+        message: "Cursor usage requires a CLI login or CURSOR_AUTH_TOKEN.",
       });
     }
-    if (!token) {
+    if (!token && platform === "darwin" && credentialStore !== "file") {
+      if (!allowKeychain) {
+        return makeUnavailableUsageLimits({
+          checkedAt,
+          reason: "unsupported",
+          message: "Enable Cursor account usage in T3 Code to read its Keychain login.",
+        });
+      }
+      token = (yield* Effect.promise(keychainToken))?.trim();
+    } else if (!token) {
       const home =
         (platform === "win32" ? environment.USERPROFILE : environment.HOME) || NodeOS.homedir();
       const directory =
