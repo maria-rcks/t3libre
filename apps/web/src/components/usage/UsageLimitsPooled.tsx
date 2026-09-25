@@ -4,7 +4,6 @@ import {
   collectLimitPools,
   cursorUsageWindowDetails,
   displayLimitWindows,
-  formatDuration,
   formatResetsIn,
   type LimitAccount,
   type LimitPool,
@@ -226,6 +225,7 @@ function PoolSegment({
   color,
   now,
   index,
+  showAccountName,
 }: {
   readonly account: LimitAccount;
   readonly window: LimitPoolMember["window"];
@@ -234,6 +234,7 @@ function PoolSegment({
   readonly now: number;
   /** 1-based position in the bar, shown on the strip and its legend row to tie them together. */
   readonly index: number;
+  readonly showAccountName: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const remaining = remainingPercent(window);
@@ -276,7 +277,12 @@ function PoolSegment({
           {index}
         </span>
         <div className="relative hidden h-full min-w-0 items-center gap-1.5 px-2 text-xs @2xl/pool:flex">
-          <AccountName account={account} className="min-w-0 truncate font-medium text-foreground" />
+          {showAccountName ? (
+            <AccountName
+              account={account}
+              className="min-w-0 truncate font-medium text-foreground"
+            />
+          ) : null}
           <span className="shrink-0 font-semibold text-foreground tabular-nums">{remaining}%</span>
           {/* Countdown and badge get their own plate: fill and hatching run under them otherwise. */}
           <span className="ms-auto flex shrink-0 items-center gap-1.5 rounded-sm bg-background/85 px-1.5 py-0.5 text-2xs text-foreground tabular-nums">
@@ -465,6 +471,7 @@ function PoolBar({
               color={color}
               now={now}
               index={position + 1}
+              showAccountName={pool.columns.length > 1}
             />
           ) : null,
         )}
@@ -503,10 +510,9 @@ function PoolWindowCard({
           <span className="text-sm text-muted-foreground">left</span>
           {pool.pace ? <PaceIcon pace={pool.pace} /> : null}
         </span>
-        {nextRefill ? (
-          <span className="text-xs text-muted-foreground tabular-nums">
-            <span className="font-medium text-foreground">↻ +{nextRefill.restoresPercent}%</span>{" "}
-            {nextRefill.at <= now ? "now" : `in ${formatDuration(nextRefill.at - now)}`}
+        {nextRefill && pool.columns.length > 1 ? (
+          <span className="text-xs font-medium text-foreground tabular-nums">
+            ↻ +{nextRefill.restoresPercent}%
           </span>
         ) : null}
       </div>
