@@ -392,17 +392,6 @@ export function UsagePage() {
 
         <ScrollArea className="min-h-0 flex-1">
           <WorkspacePageContainer width="wide">
-            {cursorAccessEnvironments.map((environment) => (
-              <CursorKeychainAccessNotice
-                key={environment.environmentId}
-                environmentId={environment.environmentId}
-                label={environment.label}
-                onEnabled={() => {
-                  void refresh();
-                  void refreshLimits();
-                }}
-              />
-            ))}
             {selectedEnvironments.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {environments.length === 0
@@ -410,7 +399,28 @@ export function UsagePage() {
                   : `Select an environment to see ${showingLimits ? "limits" : "usage"}.`}
               </p>
             ) : showingLimits ? (
-              <UsageLimitsSection selectedEnvironmentIds={selectedEnvironmentIds} now={limitsNow} />
+              <>
+                {cursorAccessEnvironments.length > 0 ? (
+                  <div className="mb-6 flex flex-col gap-5 rounded-lg border border-border p-4">
+                    {cursorAccessEnvironments.map((environment) => (
+                      <CursorEnableRow
+                        key={environment.environmentId}
+                        environmentId={environment.environmentId}
+                        label={environment.label}
+                        showEnvironment={selectedEnvironments.length > 1}
+                        onEnabled={() => {
+                          void refresh();
+                          void refreshLimits();
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                <UsageLimitsSection
+                  selectedEnvironmentIds={selectedEnvironmentIds}
+                  now={limitsNow}
+                />
+              </>
             ) : isPending ? (
               <UsageSkeleton />
             ) : (
@@ -482,6 +492,18 @@ export function UsagePage() {
                         </div>
                       );
                     })}
+                    {cursorAccessEnvironments.map((environment) => (
+                      <CursorEnableRow
+                        key={environment.environmentId}
+                        environmentId={environment.environmentId}
+                        label={environment.label}
+                        showEnvironment={selectedEnvironments.length > 1}
+                        onEnabled={() => {
+                          void refresh();
+                          void refreshLimits();
+                        }}
+                      />
+                    ))}
                   </div>
 
                   <div className="flex min-w-0 flex-col gap-3">
@@ -671,13 +693,15 @@ export function UsagePage() {
   );
 }
 
-function CursorKeychainAccessNotice({
+function CursorEnableRow({
   environmentId,
   label,
+  showEnvironment,
   onEnabled,
 }: {
   readonly environmentId: EnvironmentId;
   readonly label: string;
+  readonly showEnvironment: boolean;
   readonly onEnabled: () => void;
 }) {
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
@@ -697,13 +721,24 @@ function CursorKeychainAccessNotice({
     }
   };
   return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-4">
-      <p className="text-sm text-muted-foreground">
-        To show Cursor history and monthly limits from {label}, T3 needs access to your Cursor CLI
-        login in macOS Keychain. macOS may ask you to allow it.
-      </p>
-      <Button size="sm" variant="outline" disabled={pending} onClick={() => void enable()}>
-        Enable Cursor usage
+    <div className="flex min-w-0 items-center justify-between gap-4">
+      <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
+        <span
+          aria-hidden
+          className="size-2 shrink-0 rounded-full"
+          style={{ backgroundColor: PROVIDER_PRESENTATION.cursor.color }}
+        />
+        <ProviderMark provider="cursor" className="size-4" />
+        <span className="truncate">Cursor{showEnvironment ? ` · ${label}` : ""}</span>
+      </span>
+      <Button
+        size="xs"
+        variant="outline"
+        disabled={pending}
+        aria-label={`Enable Cursor usage from ${label}`}
+        onClick={() => void enable()}
+      >
+        Enable
       </Button>
     </div>
   );

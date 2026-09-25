@@ -102,6 +102,10 @@ export function UsageRouteScreen() {
   const cursorAccessEnvironments = selectedEnvironments.filter((environment) =>
     environment.summary?.sources.some((source) => source.action === "enableCursorKeychain"),
   );
+  const refreshAfterCursorEnable = () => {
+    void refresh();
+    void limits.refresh();
+  };
   const sourceMessages = [
     ...new Set(
       selectedEnvironments.flatMap(
@@ -272,17 +276,20 @@ export function UsageRouteScreen() {
         }
       >
         <SegmentedControl options={TAB_OPTIONS} selected={tab} onSelect={setTab} role="tab" />
-        {cursorAccessEnvironments.map((environment) => (
-          <CursorKeychainAccessNotice
-            key={environment.environmentId}
-            environmentId={environment.environmentId}
-            label={environment.label}
-            onEnabled={() => {
-              void refresh();
-              void limits.refresh();
-            }}
-          />
-        ))}
+        {showingLimits && cursorAccessEnvironments.length > 0 ? (
+          <SettingsSection>
+            {cursorAccessEnvironments.map((environment, index) => (
+              <CursorEnableRow
+                key={environment.environmentId}
+                environmentId={environment.environmentId}
+                label={environment.label}
+                showEnvironment={selectedEnvironments.length > 1}
+                bordered={index > 0}
+                onEnabled={refreshAfterCursorEnable}
+              />
+            ))}
+          </SettingsSection>
+        ) : null}
 
         <Animated.View
           key={tab}
@@ -348,7 +355,13 @@ export function UsageRouteScreen() {
                     isPast24Hours={isPast24Hours}
                     timeZone={window.timeZone}
                   />
-                  <ProviderSection merged={merged} metric={metric} />
+                  <ProviderSection
+                    merged={merged}
+                    metric={metric}
+                    cursorAccessEnvironments={cursorAccessEnvironments}
+                    showCursorEnvironment={selectedEnvironments.length > 1}
+                    onCursorEnabled={refreshAfterCursorEnable}
+                  />
                   <TotalsSection merged={merged} isPast24Hours={isPast24Hours} />
                   <ModelsSection merged={merged} />
                 </>
@@ -361,15 +374,20 @@ export function UsageRouteScreen() {
   );
 }
 
-function CursorKeychainAccessNotice({
+function CursorEnableRow({
   environmentId,
   label,
+  showEnvironment,
+  bordered,
   onEnabled,
 }: {
   readonly environmentId: EnvironmentId;
   readonly label: string;
+  readonly showEnvironment: boolean;
+  readonly bordered: boolean;
   readonly onEnabled: () => void;
 }) {
+  const colors = useProviderColors();
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
     label: "enable Cursor account usage",
   });
@@ -387,19 +405,26 @@ function CursorKeychainAccessNotice({
     }
   };
   return (
-    <View className="gap-3 rounded-[24px] border-continuous bg-card p-4">
-      <Text className="text-sm text-foreground-muted">
-        To show Cursor history and monthly limits from {label}, T3 needs access to your Cursor CLI
-        login in macOS Keychain. macOS may ask you to allow access on that Mac.
-      </Text>
+    <View
+      className={cn(
+        "flex-row items-center justify-between gap-3 p-4",
+        bordered && "border-t border-border-subtle",
+      )}
+    >
+      <View className="min-w-0 flex-1 flex-row items-center gap-2">
+        <View className="size-2.5 rounded-full" style={{ backgroundColor: colors.cursor }} />
+        <Text className="shrink text-lg text-foreground">
+          Cursor{showEnvironment ? ` · ${label}` : ""}
+        </Text>
+      </View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Enable Cursor usage"
+        accessibilityLabel={`Enable Cursor usage from ${label}`}
         disabled={pending}
         onPress={() => void enable()}
-        className="self-start rounded-full bg-primary px-4 py-2"
+        className="rounded-full bg-primary px-4 py-2"
       >
-        <Text className="text-sm font-medium text-primary-foreground">Enable Cursor usage</Text>
+        <Text className="text-sm font-medium text-primary-foreground">Enable</Text>
       </Pressable>
     </View>
   );
@@ -481,10 +506,13 @@ function ChartCard(props: {
 function ProviderSection(props: {
   readonly merged: MergedUsage;
   readonly metric: UsageChartMetric;
+  readonly cursorAccessEnvironments: readonly EnvironmentUsageStatus[];
+  readonly showCursorEnvironment: boolean;
+  readonly onCursorEnabled: () => void;
 }) {
   const { merged, metric } = props;
   const colors = useProviderColors();
-  if (merged.providers.length === 0) return null;
+  if (merged.providers.length === 0 && props.cursorAccessEnvironments.length === 0) return null;
 
   // Ranked by whatever the toggle is showing, so the rows always descend.
   // .sort() on a copy, not .toSorted(): Hermes doesn't ship the ES2023 method.
@@ -530,6 +558,16 @@ function ProviderSection(props: {
           </View>
         );
       })}
+      {props.cursorAccessEnvironments.map((environment, index) => (
+        <CursorEnableRow
+          key={environment.environmentId}
+          environmentId={environment.environmentId}
+          label={environment.label}
+          showEnvironment={props.showCursorEnvironment}
+          bordered={ordered.length + index > 0}
+          onEnabled={props.onCursorEnabled}
+        />
+      ))}
     </SettingsSection>
   );
 }
