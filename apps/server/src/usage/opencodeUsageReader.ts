@@ -21,7 +21,7 @@ function text(value: unknown): string {
 }
 
 /** OpenCode stores uncached input and reasoning separately from input/output. */
-export function parseOpenCodeMessage(
+function parseOpenCodeMessage(
   source: string,
   fallback: {
     readonly id?: string;
