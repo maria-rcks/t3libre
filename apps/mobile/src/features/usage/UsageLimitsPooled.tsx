@@ -5,6 +5,8 @@ import {
   collectLimitAccounts,
   collectLimitNotices,
   collectLimitPools,
+  cursorUsageWindowDetails,
+  displayLimitWindows,
   formatDuration,
   formatResetsIn,
   remainingPercent,
@@ -70,11 +72,15 @@ function PoolWindowCard({
   color,
   now,
   environmentIds,
+  label,
+  description,
 }: {
   readonly pool: LimitPoolWindow;
   readonly color: string;
   readonly now: number;
   readonly environmentIds: readonly string[] | null;
+  readonly label?: string;
+  readonly description?: string;
 }) {
   const navigation = useNavigation();
   const nextRefill = pool.resets.find((reset) => reset.restoresPercent > 0);
@@ -96,7 +102,7 @@ function PoolWindowCard({
     <View className="gap-3 rounded-[24px] border-continuous bg-card p-4">
       <View className="flex-row items-start justify-between gap-3">
         <View className="gap-1">
-          <Text className="text-sm font-t3-medium text-foreground">{pool.label}</Text>
+          <Text className="text-sm font-t3-medium text-foreground">{label ?? pool.label}</Text>
           <View className="flex-row items-baseline gap-1.5">
             <Text className="text-3xl font-t3-bold tabular-nums text-foreground">
               {pool.remainingPercent}%
@@ -108,6 +114,7 @@ function PoolWindowCard({
           <Text className="text-xs text-foreground-tertiary">{PACE_LABEL[pool.pace]}</Text>
         ) : null}
       </View>
+      {description ? <Text className="text-xs text-foreground-muted">{description}</Text> : null}
       {nextRefill ? (
         <Text className="text-xs tabular-nums text-foreground-muted">
           ↻ +{nextRefill.restoresPercent}%{" "}
@@ -225,30 +232,47 @@ export function UsageLimitsSection({
             : "No provider on the selected environments reports subscription limits."}
         </Text>
       ) : null}
-      {pools.map((pool, index) => (
-        <Fragment key={pool.driver}>
-          {index === cursorPromptAt ? cursorPrompt : null}
-          <View className="gap-3">
-            <View className="flex-row items-center gap-2 px-1">
-              <ProviderIcon provider={pool.driver} size={18} />
-              <Text className="text-base font-t3-medium text-foreground">
-                {DRIVER_LABEL[pool.driver] ?? pool.driver}
-              </Text>
+      {pools.map((pool, index) => {
+        const { overall, windows } = displayLimitWindows(pool);
+        return (
+          <Fragment key={pool.driver}>
+            {index === cursorPromptAt ? cursorPrompt : null}
+            <View className="gap-3">
+              <View className="flex-row items-center gap-2 px-1">
+                <ProviderIcon provider={pool.driver} size={18} />
+                <Text className="text-base font-t3-medium text-foreground">
+                  {DRIVER_LABEL[pool.driver] ?? pool.driver}
+                </Text>
+              </View>
+              {overall ? (
+                <Text className="px-1 text-xs text-foreground-muted">
+                  <Text className="font-t3-medium text-foreground">
+                    {overall.remainingPercent}% overall left
+                  </Text>{" "}
+                  across both allowances, weighted by their size.
+                </Text>
+              ) : null}
+              {windows.map((window) => {
+                const details =
+                  pool.driver === "cursor" ? cursorUsageWindowDetails(window.id) : undefined;
+                return (
+                  <PoolWindowCard
+                    key={`${window.kind}:${window.id}`}
+                    pool={window}
+                    color={pool.driver === "claudeAgent" ? colors.claude : colors.codex}
+                    now={now}
+                    environmentIds={
+                      selectedEnvironmentIds === null ? null : [...selectedEnvironmentIds]
+                    }
+                    label={details?.label}
+                    description={details?.description}
+                  />
+                );
+              })}
             </View>
-            {pool.windows.map((window) => (
-              <PoolWindowCard
-                key={`${window.kind}:${window.id}`}
-                pool={window}
-                color={pool.driver === "claudeAgent" ? colors.claude : colors.codex}
-                now={now}
-                environmentIds={
-                  selectedEnvironmentIds === null ? null : [...selectedEnvironmentIds]
-                }
-              />
-            ))}
-          </View>
-        </Fragment>
-      ))}
+          </Fragment>
+        );
+      })}
       {cursorPromptAt === pools.length ? cursorPrompt : null}
       {notices.length > 0 || failedLabels.length > 0 ? (
         <View

@@ -1,6 +1,7 @@
 import * as NodeOS from "node:os";
 import type { CursorSettings, ServerProviderUsageWindow } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { CURSOR_USAGE_WINDOWS } from "@t3tools/shared/usageLimits";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -41,15 +42,11 @@ export function cursorUsageResponseToLimits(
       : undefined;
   const windows: ServerProviderUsageWindow[] = [];
   if (response.planUsage) {
-    for (const [key, label] of [
-      ["totalPercentUsed", "Monthly"],
-      ["autoPercentUsed", "Monthly · Auto"],
-      ["apiPercentUsed", "Monthly · API"],
-    ] as const) {
-      const usedPercent = response.planUsage[key];
+    for (const { id, label } of CURSOR_USAGE_WINDOWS) {
+      const usedPercent = response.planUsage[id];
       if (usedPercent === undefined || !Number.isFinite(usedPercent)) continue;
       windows.push({
-        id: key,
+        id,
         kind: "monthly",
         label,
         usedPercent: clampPercent(usedPercent),
