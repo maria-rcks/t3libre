@@ -576,6 +576,29 @@ describe("SQLite usage readers", () => {
     );
   });
 
+  it("uses the matching Antigravity generation model for each model-less step", async () => {
+    const db = new NodeSqlite.DatabaseSync(NodePath.join(dir, "model-switch.db"));
+    try {
+      db.exec(
+        "CREATE TABLE gen_metadata (idx INTEGER, data BLOB); CREATE TABLE steps (idx INTEGER, metadata BLOB)",
+      );
+      const generation = db.prepare("INSERT INTO gen_metadata VALUES (?, ?)");
+      const step = db.prepare("INSERT INTO steps VALUES (?, ?)");
+      for (const [idx, name] of ["Gemini 3 Pro", "Claude Opus 4.6"].entries()) {
+        generation.run(idx, new Uint8Array(protoBytes(1, protoText(19, name))));
+        step.run(idx, new Uint8Array(protoBytes(9, protoNumber(2, 10 + idx))));
+      }
+    } finally {
+      db.close();
+    }
+    const result = await readAntigravityUsage(dir, 0);
+    assert.deepStrictEqual(result.errors, []);
+    assert.deepStrictEqual(
+      result.files.flatMap((file) => file.records).map((record) => record.model),
+      ["gemini-3-pro", "claude-opus-4-6"],
+    );
+  });
+
   it("merges Antigravity aliases that bridge previously separate step records", async () => {
     const db = new NodeSqlite.DatabaseSync(NodePath.join(dir, "bridge.db"));
     try {

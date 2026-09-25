@@ -170,15 +170,16 @@ async function readDatabase(path: string, fallbackTimestamp: number): Promise<Us
       throw new Error("Missing Antigravity usage tables");
     }
     const readMetadata = async (query: string, column: string, step: boolean) => {
-      const entries: Metadata[] = [];
+      const entries: Array<{ idx: number; entry: Metadata }> = [];
       for (const row of db.prepare(query).iterate()) {
-        entries.push(metadata(blob(row[column]), step));
+        if (typeof row.idx !== "number") throw new Error("Invalid Antigravity metadata index");
+        entries.push({ idx: row.idx, entry: metadata(blob(row[column]), step) });
         if (entries.length % 256 === 0) await NodeTimersPromises.setImmediate();
       }
       return entries;
     };
     const generations = tables.has("gen_metadata")
-      ? await readMetadata("SELECT data FROM gen_metadata ORDER BY idx", "data", false)
+      ? await readMetadata("SELECT idx, data FROM gen_metadata ORDER BY idx", "data", false)
       : [];
     let trajectoryTimestamp: number | null = null;
     if (tables.has("trajectory_metadata_blob")) {
@@ -188,21 +189,19 @@ async function readDatabase(path: string, fallbackTimestamp: number): Promise<Us
     }
     const steps = tables.has("steps")
       ? await readMetadata(
-          "SELECT metadata FROM steps WHERE metadata IS NOT NULL ORDER BY idx",
+          "SELECT idx, metadata FROM steps WHERE metadata IS NOT NULL ORDER BY idx",
           "metadata",
           true,
         )
       : [];
     const sessionId = NodePath.basename(path, ".db");
     const records: UsageCandidate[] = [];
-    let currentModel = "";
-    const generationModel = generations.findLast((entry) => entry.model)?.model ?? "";
+    const generationModels = new Map(generations.map(({ idx, entry }) => [idx, entry.model]));
     for (const [source, entries] of [
       ["step", steps],
       ["generation", generations],
     ] as const) {
-      for (const [index, entry] of entries.entries()) {
-        if (entry.model) currentModel = entry.model;
+      for (const [index, { idx, entry }] of entries.entries()) {
         for (const [usageIndex, usage] of entry.usages.entries()) {
           const outputTokens = Math.max(
             numberAt(usage, 3),
@@ -234,7 +233,7 @@ async function readDatabase(path: string, fallbackTimestamp: number): Promise<Us
             model:
               MODEL_IDS[numberAt(usage, 1)] ||
               entry.model ||
-              (source === "step" ? generationModel : currentModel) ||
+              (source === "step" ? generationModels.get(idx) : "") ||
               modelName("", numberAt(usage, 1)) ||
               "antigravity-unknown",
             totals,
@@ -249,7 +248,6 @@ async function readDatabase(path: string, fallbackTimestamp: number): Promise<Us
           });
         }
       }
-      currentModel = "";
     }
     return records;
   } finally {
