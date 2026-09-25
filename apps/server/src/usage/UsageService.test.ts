@@ -84,10 +84,11 @@ const serviceLayers = (input: {
   /** Defaults to an unparsable document so every scan retries the fetch. */
   readonly ratesDocument?: unknown;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly platform?: NodeJS.Platform;
 }) =>
   ServerConfig.layerTest(process.cwd(), { prefix: input.prefix }).pipe(
     Layer.provideMerge(NodeServices.layer),
-    Layer.provideMerge(Layer.succeed(HostProcessPlatform, "linux")),
+    Layer.provideMerge(Layer.succeed(HostProcessPlatform, input.platform ?? "linux")),
     Layer.provideMerge(ServerSettings.layerTest(input.settings)),
     Layer.provideMerge(
       Layer.succeed(
@@ -104,6 +105,7 @@ const serviceLayers = (input: {
     ),
     Layer.provideMerge(
       Layer.succeed(HostProcessEnvironment, {
+        HOME: input.home,
         GROK_HOME: NodePath.join(input.home, "grok"),
         OPENCODE_DATA_DIR: NodePath.join(input.home, "opencode"),
         ANTIGRAVITY_DATA_DIR: NodePath.join(input.home, "antigravity"),
@@ -119,6 +121,47 @@ function totalOutputTokens(summary: { buckets: readonly { totals: { outputTokens
 }
 
 describe("UsageService", () => {
+  it.live("ignores stale Cursor file logins when the active credential store differs", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      for (const [index, testCase] of [
+        { platform: "darwin" as const, environment: {}, authPath: [".cursor", "auth.json"] },
+        {
+          platform: "linux" as const,
+          environment: { AGENT_CLI_CREDENTIAL_STORE: "memory" },
+          authPath: ["config", "cursor", "auth.json"],
+        },
+        {
+          platform: "linux" as const,
+          environment: { CURSOR_API_KEY: "different-account" },
+          authPath: ["config", "cursor", "auth.json"],
+        },
+      ].entries()) {
+        const authPath = NodePath.join(home, ...testCase.authPath);
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.dirname(authPath), { recursive: true });
+          await NodeFSP.writeFile(authPath, encodeUnknownJsonString({ accessToken: "stale-token" }));
+        });
+        const service = yield* UsageService.make.pipe(
+          Effect.provide(
+            serviceLayers({
+              prefix: `usage-service-cursor-store-${index}`,
+              home,
+              settings,
+              platform: testCase.platform,
+              environment: testCase.environment,
+            }),
+          ),
+        );
+        const summary = yield* service.readSummary(WINDOW);
+        const cursor = summary.sources.find((source) => source.fingerprint.provider === "cursor");
+        assert.strictEqual(cursor?.status, "missing");
+        assert.include(cursor?.message ?? "", "file-based CLI login");
+        assert.isFalse(summary.buckets.some((bucket) => bucket.provider === "cursor"));
+      }
+    }).pipe(Effect.scoped),
+  );
+
   it.live(
     "includes OpenCode history but does not substitute desktop usage for an unavailable Cursor account",
     () =>

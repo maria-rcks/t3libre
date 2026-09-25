@@ -576,23 +576,38 @@ export const make = Effect.gen(function* () {
         ...(failed ? { message: "Some Antigravity history could not be read." } : {}),
       });
     }
+    const cursorUserHome =
+      (platform === "win32" ? hostEnvironment["USERPROFILE"] : hostEnvironment["HOME"]) || home;
     const configHome = hostEnvironment["XDG_CONFIG_HOME"]?.trim();
     const cursorHome =
       platform === "darwin"
-        ? path.join(home, "Library", "Application Support")
+        ? path.join(cursorUserHome, "Library", "Application Support")
         : platform === "win32"
-          ? hostEnvironment["APPDATA"] || path.join(home, "AppData", "Roaming")
+          ? hostEnvironment["APPDATA"] || path.join(cursorUserHome, "AppData", "Roaming")
           : configHome && path.isAbsolute(configHome)
             ? configHome
-            : path.join(home, ".config");
+            : path.join(cursorUserHome, ".config");
     const cursorAuthPath =
       platform === "darwin"
-        ? path.join(home, ".cursor", "auth.json")
+        ? path.join(cursorUserHome, ".cursor", "auth.json")
         : path.join(cursorHome, platform === "win32" ? "Cursor" : "cursor", "auth.json");
+    const credentialStore = hostEnvironment["AGENT_CLI_CREDENTIAL_STORE"];
+    const fileLoginUnavailable =
+      Boolean(hostEnvironment["CURSOR_AUTH_TOKEN"]?.trim()) ||
+      Boolean(hostEnvironment["CURSOR_API_KEY"]?.trim()) ||
+      credentialStore === "memory" ||
+      (platform === "darwin" && credentialStore !== "file");
     const cursorUntilMs = yield* Clock.currentTimeMillis;
-    const account = yield* Effect.promise(() =>
-      readCursorAccountUsage(cursorAuthPath, windowStartMs, cursorUntilMs),
-    );
+    const account = fileLoginUnavailable
+      ? {
+          accountKey: null,
+          records: [],
+          missing: true,
+          error: "Cursor account history needs a file-based CLI login on this server.",
+        }
+      : yield* Effect.promise(() =>
+          readCursorAccountUsage(cursorAuthPath, windowStartMs, cursorUntilMs),
+        );
     if (account.accountKey !== null && account.error === null && !account.missing) {
       // The same account includes CLI and desktop history from every machine.
       // A stable remote fingerprint prevents connected environments counting it twice.
