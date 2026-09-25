@@ -140,7 +140,10 @@ describe("UsageService", () => {
         const authPath = NodePath.join(home, ...testCase.authPath);
         yield* Effect.promise(async () => {
           await NodeFSP.mkdir(NodePath.dirname(authPath), { recursive: true });
-          await NodeFSP.writeFile(authPath, encodeUnknownJsonString({ accessToken: "stale-token" }));
+          await NodeFSP.writeFile(
+            authPath,
+            encodeUnknownJsonString({ accessToken: "stale-token" }),
+          );
         });
         const service = yield* UsageService.make.pipe(
           Effect.provide(
