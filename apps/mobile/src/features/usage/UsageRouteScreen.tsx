@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { AppText as Text } from "../../components/AppText";
+import { ProviderIcon } from "../../components/ProviderIcon";
 import { cn } from "../../lib/cn";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
@@ -61,6 +62,7 @@ const METRIC_OPTIONS = [
 ] as const satisfies readonly { value: UsageChartMetric; label: string }[];
 
 const CHART_HEIGHT = 180;
+const CURSOR_KEYCHAIN_COPY = "Requires access to your Cursor login in macOS Keychain.";
 
 /**
  * Two tabs over one screen. Usage is the transcript-derived spend for a
@@ -276,21 +278,6 @@ export function UsageRouteScreen() {
         }
       >
         <SegmentedControl options={TAB_OPTIONS} selected={tab} onSelect={setTab} role="tab" />
-        {showingLimits && cursorAccessEnvironments.length > 0 ? (
-          <SettingsSection>
-            {cursorAccessEnvironments.map((environment, index) => (
-              <CursorEnableRow
-                key={environment.environmentId}
-                environmentId={environment.environmentId}
-                label={environment.label}
-                showEnvironment={selectedEnvironments.length > 1}
-                bordered={index > 0}
-                onEnabled={refreshAfterCursorEnable}
-              />
-            ))}
-          </SettingsSection>
-        ) : null}
-
         <Animated.View
           key={tab}
           entering={FadeIn.duration(160).reduceMotion(ReduceMotion.System)}
@@ -301,6 +288,14 @@ export function UsageRouteScreen() {
               now={limits.now}
               failedLabels={limits.failedLabels}
               selectedEnvironmentIds={selectedEnvironmentIds}
+              cursorPrompt={
+                cursorAccessEnvironments.length > 0 ? (
+                  <CursorEnableLimits
+                    environments={cursorAccessEnvironments}
+                    onEnabled={refreshAfterCursorEnable}
+                  />
+                ) : null
+              }
             />
           ) : (
             <>
@@ -374,20 +369,17 @@ export function UsageRouteScreen() {
   );
 }
 
-function CursorEnableRow({
+function CursorEnableAction({
   environmentId,
   label,
-  showEnvironment,
-  bordered,
   onEnabled,
+  buttonText = "Enable",
 }: {
   readonly environmentId: EnvironmentId;
   readonly label: string;
-  readonly showEnvironment: boolean;
-  readonly bordered: boolean;
   readonly onEnabled: () => void;
+  readonly buttonText?: string;
 }) {
-  const colors = useProviderColors();
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
     label: "enable Cursor account usage",
   });
@@ -405,6 +397,34 @@ function CursorEnableRow({
     }
   };
   return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Enable Cursor usage from ${label}`}
+      accessibilityHint={CURSOR_KEYCHAIN_COPY}
+      disabled={pending}
+      onPress={() => void enable()}
+      className="rounded-full bg-primary px-4 py-2"
+    >
+      <Text className="text-sm font-medium text-primary-foreground">{buttonText}</Text>
+    </Pressable>
+  );
+}
+
+function CursorEnableRow({
+  environmentId,
+  label,
+  showEnvironment,
+  bordered,
+  onEnabled,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  readonly showEnvironment: boolean;
+  readonly bordered: boolean;
+  readonly onEnabled: () => void;
+}) {
+  const colors = useProviderColors();
+  return (
     <View
       className={cn(
         "flex-row items-center justify-between gap-3 p-4",
@@ -417,15 +437,38 @@ function CursorEnableRow({
           Cursor{showEnvironment ? ` · ${label}` : ""}
         </Text>
       </View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Enable Cursor usage from ${label}`}
-        disabled={pending}
-        onPress={() => void enable()}
-        className="rounded-full bg-primary px-4 py-2"
-      >
-        <Text className="text-sm font-medium text-primary-foreground">Enable</Text>
-      </Pressable>
+      <CursorEnableAction environmentId={environmentId} label={label} onEnabled={onEnabled} />
+    </View>
+  );
+}
+
+function CursorEnableLimits({
+  environments,
+  onEnabled,
+}: {
+  readonly environments: readonly EnvironmentUsageStatus[];
+  readonly onEnabled: () => void;
+}) {
+  return (
+    <View className="gap-3">
+      <View className="flex-row items-center gap-2 px-1">
+        <ProviderIcon provider="cursor" size={18} />
+        <Text className="text-base font-t3-medium text-foreground">Cursor</Text>
+      </View>
+      <View className="items-start gap-3 rounded-[24px] border-continuous bg-card p-4">
+        <Text className="text-xs text-foreground-muted">{CURSOR_KEYCHAIN_COPY}</Text>
+        <View className="flex-row flex-wrap gap-2">
+          {environments.map((environment) => (
+            <CursorEnableAction
+              key={environment.environmentId}
+              environmentId={environment.environmentId}
+              label={environment.label}
+              buttonText={environments.length > 1 ? `Enable on ${environment.label}` : "Enable"}
+              onEnabled={onEnabled}
+            />
+          ))}
+        </View>
+      </View>
     </View>
   );
 }
@@ -519,10 +562,40 @@ function ProviderSection(props: {
   const ordered = [...merged.providers].sort((a, b) =>
     metric === "cost" ? b.costUsd - a.costUsd : b.totalTokens - a.totalTokens,
   );
+  const rows: Array<
+    | { readonly kind: "usage"; readonly provider: (typeof ordered)[number] }
+    | { readonly kind: "enable"; readonly environment: EnvironmentUsageStatus }
+  > = ordered.map((provider) => ({ kind: "usage", provider }));
+  const cursorInsertAt =
+    Math.max(
+      ordered.findIndex((provider) => provider.provider === "codex"),
+      ordered.findIndex((provider) => provider.provider === "claude"),
+    ) + 1;
+  rows.splice(
+    cursorInsertAt,
+    0,
+    ...props.cursorAccessEnvironments.map((environment) => ({
+      kind: "enable" as const,
+      environment,
+    })),
+  );
 
   return (
     <SettingsSection title="Providers">
-      {ordered.map((provider, index) => {
+      {rows.map((row, index) => {
+        if (row.kind === "enable") {
+          return (
+            <CursorEnableRow
+              key={`enable:${row.environment.environmentId}`}
+              environmentId={row.environment.environmentId}
+              label={row.environment.label}
+              showEnvironment={props.showCursorEnvironment}
+              bordered={index > 0}
+              onEnabled={props.onCursorEnabled}
+            />
+          );
+        }
+        const provider = row.provider;
         const share = metric === "cost" ? provider.costShare : provider.tokenShare;
         return (
           <View
@@ -558,16 +631,6 @@ function ProviderSection(props: {
           </View>
         );
       })}
-      {props.cursorAccessEnvironments.map((environment, index) => (
-        <CursorEnableRow
-          key={environment.environmentId}
-          environmentId={environment.environmentId}
-          label={environment.label}
-          showEnvironment={props.showCursorEnvironment}
-          bordered={ordered.length + index > 0}
-          onEnabled={props.onCursorEnabled}
-        />
-      ))}
     </SettingsSection>
   );
 }
