@@ -24,6 +24,6 @@ export function makeCachedCursorAccessTokenReader(
 
 /** Read the Cursor CLI's default macOS credential without invoking the shared security binary. */
 export const readMacCursorAccessToken = makeCachedCursorAccessTokenReader(async () => {
-  const { Entry } = await import("@napi-rs/keyring");
-  return new Entry("cursor-access-token", "cursor-user").getPassword();
+  const { AsyncEntry } = await import("@napi-rs/keyring");
+  return (await new AsyncEntry("cursor-access-token", "cursor-user").getPassword()) ?? null;
 });

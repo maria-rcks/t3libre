@@ -93,7 +93,7 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
           message: "Enable Cursor account usage in T3 Code to read its Keychain login.",
         });
       }
-      token = (yield* Effect.promise(keychainToken))?.trim();
+      token = (yield* Effect.tryPromise(keychainToken))?.trim();
     } else if (!token) {
       const home =
         (platform === "win32" ? environment.USERPROFILE : environment.HOME) || NodeOS.homedir();

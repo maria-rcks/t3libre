@@ -1139,6 +1139,21 @@ describe("Cursor usage limits", () => {
     expect(limits.windows[0]?.usedPercent).toBe(42);
   });
 
+  it("reports a Keychain initialization failure without failing the provider refresh", async () => {
+    const limits = await runNode(
+      readCursorUsageLimits({ apiEndpoint: "" }, {}, true, async () => {
+        throw new Error("Keychain initialization failed");
+      }).pipe(
+        Effect.provideService(HostProcessPlatform, "darwin"),
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make(() => Effect.die("must not request limits without a login")),
+        ),
+      ),
+    );
+    expect(limits.unavailable?.reason).toBe("probeFailed");
+  });
+
   it("reports failed requests without exposing credentials or response bodies", async () => {
     const limits = await runNode(
       readCursorUsageLimits({ apiEndpoint: "" }, { CURSOR_AUTH_TOKEN: "private-token" }).pipe(
