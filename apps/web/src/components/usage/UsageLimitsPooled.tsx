@@ -10,7 +10,7 @@ import {
   type LimitPoolWindow,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
-import { TicketIcon } from "lucide-react";
+import { AlertTriangleIcon, TicketIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
@@ -20,6 +20,7 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getDriverOption } from "../settings/providerDriverMeta";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { Button } from "../ui/button";
+import { Alert, AlertTitle } from "../ui/alert";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import {
   PaceIcon,
@@ -51,7 +52,7 @@ function AccountChip({ email }: { readonly email: string }) {
     <span
       role="img"
       aria-label={`Account ${accountInitials(email)}`}
-      className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-[9px] leading-none font-semibold"
+      className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-3xs leading-none font-semibold"
       style={{ backgroundColor: `oklch(0.85 0.08 ${hue})`, color: `oklch(0.35 0.1 ${hue})` }}
     >
       {accountInitials(email)}
@@ -235,7 +236,7 @@ function PoolSegment({
   const [open, setOpen] = useState(false);
   const remaining = remainingPercent(window);
   const resetsIn = formatResetsIn(window, now);
-  const credits = account.redeem ? (account.limits.resetCredits?.availableCount ?? 0) : 0;
+  const credits = account.limits.resetCredits?.availableCount ?? 0;
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -268,7 +269,7 @@ function PoolSegment({
         ) : null}
         <span
           aria-hidden
-          className="absolute inset-0 flex items-center justify-center text-[10px] leading-none font-semibold text-foreground/80 tabular-nums @2xl/pool:hidden"
+          className="absolute inset-0 flex items-center justify-center text-3xs leading-none font-semibold text-foreground/80 tabular-nums @2xl/pool:hidden"
         >
           {index}
         </span>
@@ -276,7 +277,7 @@ function PoolSegment({
           <AccountName account={account} className="min-w-0 truncate font-medium text-foreground" />
           <span className="shrink-0 font-semibold text-foreground tabular-nums">{remaining}%</span>
           {/* Countdown and badge get their own plate: fill and hatching run under them otherwise. */}
-          <span className="ms-auto flex shrink-0 items-center gap-1.5 rounded-sm bg-background/85 px-1.5 py-0.5 text-[11px] text-foreground tabular-nums">
+          <span className="ms-auto flex shrink-0 items-center gap-1.5 rounded-sm bg-background/85 px-1.5 py-0.5 text-2xs text-foreground tabular-nums">
             {resetsIn?.replace("resets in ", "↻ ") ?? ""}
             {credits ? (
               <>
@@ -340,13 +341,14 @@ function LegendRow({
 }) {
   const remaining = remainingPercent(window);
   const resetsIn = formatResetsIn(window, now);
-  const credits = account.redeem ? (account.limits.resetCredits?.availableCount ?? 0) : 0;
+  const credits = account.limits.resetCredits?.availableCount ?? 0;
   return (
     <PopoverTrigger
       style={{ gridColumn: "1 / -1", gridRow: index + 1 }}
-      className="flex min-h-7 min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-start text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring @2xl/pool:hidden"
+      render={<Button variant="ghost" size="compact" />}
+      className="min-w-0 @2xl/pool:hidden"
     >
-      <span className="relative inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-[10px] leading-none font-semibold text-foreground/80 tabular-nums">
+      <span className="relative inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-3xs leading-none font-semibold text-foreground/80 tabular-nums">
         <span
           aria-hidden
           className="absolute inset-0 rounded-sm opacity-35"
@@ -357,7 +359,7 @@ function LegendRow({
       </span>
       <AccountName account={account} className="min-w-0 truncate font-medium text-foreground" />
       <span className="shrink-0 font-semibold text-foreground tabular-nums">{remaining}%</span>
-      <span className="ms-auto flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground tabular-nums">
+      <span className="ms-auto flex shrink-0 items-center gap-1.5 text-2xs text-muted-foreground tabular-nums">
         {resetsIn?.replace("resets in ", "↻ ") ?? ""}
         {credits ? (
           <>
@@ -395,7 +397,7 @@ function RedeemableSegmentPopup({
   readonly redeemAt: NonNullable<LimitAccount["redeem"]>;
   readonly closePopover: () => void;
 }) {
-  const redeem = useResetCredit(redeemAt.environmentId, redeemAt.instanceId);
+  const redeem = useResetCredit(redeemAt.environmentId, redeemAt.input);
   return (
     <>
       <PopoverPopup side="top" sideOffset={6}>
@@ -449,28 +451,29 @@ function PoolBar({
     <div className="@container/pool min-w-0">
       <div
         className="grid gap-x-1 gap-y-1"
-        style={{ gridTemplateColumns: `repeat(${pool.members.length}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: `repeat(${pool.columns.length}, minmax(0, 1fr))` }}
       >
-        {pool.members.map(({ account, window }, position) => (
-          <PoolSegment
-            key={account.key}
-            account={account}
-            window={window}
-            reset={restores.get(account.key)}
-            color={color}
-            now={now}
-            index={position + 1}
-          />
-        ))}
+        {pool.columns.map((member, position) =>
+          member.window ? (
+            <PoolSegment
+              key={member.account.key}
+              account={member.account}
+              window={member.window}
+              reset={restores.get(member.account.key)}
+              color={color}
+              now={now}
+              index={position + 1}
+            />
+          ) : null,
+        )}
       </div>
     </div>
   );
 }
 
 /**
- * Big pooled number and the segment bar. The bar is sorted by reset, so who
- * refills next is its left edge; the exact time and share restored live in
- * each segment's popover rather than a list restating the bar.
+ * Big pooled number and the segment bar. Accounts keep the same column across
+ * windows; each segment's popover shows its own reset time and share restored.
  */
 function PoolWindowCard({
   pool,
@@ -544,7 +547,7 @@ export function UsageLimitsPooled({
   const notices = collectLimitNotices(presentations);
   return (
     <div className="flex flex-col gap-8">
-      {pools.length === 0 ? (
+      {pools.length === 0 && notices.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No provider on the selected environments reports subscription limits.
         </p>
@@ -561,10 +564,13 @@ export function UsageLimitsPooled({
 function LimitNotices({ notices }: { readonly notices: readonly string[] }) {
   if (notices.length === 0) return null;
   return (
-    <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+    <Alert variant="warning" controlAlignment="first-line">
+      <AlertTriangleIcon />
       {notices.map((notice) => (
-        <li key={notice}>{notice}</li>
+        <AlertTitle key={notice} className="break-words">
+          {notice}
+        </AlertTitle>
       ))}
-    </ul>
+    </Alert>
   );
 }
