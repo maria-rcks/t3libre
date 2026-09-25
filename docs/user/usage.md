@@ -21,6 +21,8 @@ Cursor reads account usage from Cursor's dashboard API using the CLI login saved
 This includes headless T3 sessions and desktop usage across machines; the same account counts
 once across connected environments. Without an accessible file-based CLI login, T3 shows a
 notice instead of incomplete local totals. T3 does not estimate missing tokens from conversation text.
+On macOS, [set up a file-based login](#track-subscription-limits) and set
+`AGENT_CLI_CREDENTIAL_STORE=file` on the server to enable Cursor history.
 
 Usage includes each configured account's history, including disabled accounts. Custom homes follow
 the account's home setting or its `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or `GROK_HOME` environment

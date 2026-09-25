@@ -242,6 +242,7 @@ describe("SQLite usage readers", () => {
     const accessToken = `header.${Buffer.from(JSON.stringify({ sub: "auth|demo", exp: 4102444800 })).toString("base64url")}.signature`;
     await NodeFSP.writeFile(authPath, JSON.stringify({ accessToken }));
     const pages: number[] = [];
+    const signals: AbortSignal[] = [];
     const request = async (url: string, init: RequestInit) => {
       assert.strictEqual(String(url), "https://cursor.com/api/dashboard/get-filtered-usage-events");
       assert.strictEqual(init?.redirect, "error");
@@ -250,6 +251,7 @@ describe("SQLite usage readers", () => {
       assert.include(headers.get("cookie") ?? "", "WorkosCursorSessionToken=demo%3A%3A");
       const body = JSON.parse(String(init?.body));
       pages.push(body.page);
+      if (init.signal) signals.push(init.signal);
       return Response.json({
         totalUsageEventsCount: 1001,
         usageEventsDisplay: Array.from({ length: body.page === 1 ? 1000 : 1 }, (_, index) => ({
@@ -271,6 +273,8 @@ describe("SQLite usage readers", () => {
     const result = await readCursorAccountUsage(authPath, 0, 1781000000000, request);
     assert.isNull(result.error);
     assert.deepStrictEqual(pages, [1, 2]);
+    assert.lengthOf(signals, 2);
+    assert.notStrictEqual(signals[0], signals[1]);
     assert.strictEqual(result.records.length, 1001);
     assert.strictEqual(result.records.at(-1)?.sessionId, "conversation-2");
     assert.deepStrictEqual(result.records[0]?.totals, {

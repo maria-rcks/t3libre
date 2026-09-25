@@ -83,7 +83,7 @@ export async function readCursorAccountUsage(
     accountKey = accountHash(subject);
     if (!Number.isFinite(sinceMs) || !Number.isFinite(endDate) || sinceMs < 0 || sinceMs > endDate)
       throw new Error("Invalid date window");
-    const signal = AbortSignal.timeout(10_000);
+    const deadline = AbortSignal.timeout(60_000);
     const records: UsageRecord[] = [];
     const occurrences = new Map<string, number>();
     const pages: unknown[][] = [];
@@ -94,7 +94,7 @@ export async function readCursorAccountUsage(
       const response = await request("https://cursor.com/api/dashboard/get-filtered-usage-events", {
         method: "POST",
         redirect: "error",
-        signal,
+        signal: AbortSignal.any([deadline, AbortSignal.timeout(10_000)]),
         headers: {
           "Content-Type": "application/json",
           Origin: "https://cursor.com",

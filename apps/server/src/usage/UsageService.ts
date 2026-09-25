@@ -494,19 +494,22 @@ export const make = Effect.gen(function* () {
     }
 
     const home = NodeOS.homedir();
-    const envRoots = (key: string, defaults: readonly string[]) => {
+    const envRoots = Effect.fnUntraced(function* (key: string, defaults: readonly string[]) {
       const roots = hostEnvironment[key]
         ?.split(",")
         .map((value) => value.trim())
         .filter(Boolean);
-      return [
-        ...new Set(
-          (roots?.length ? roots : defaults).map((root) => path.resolve(expandHomePath(root))),
-        ),
-      ];
-    };
+      const canonical = new Set<string>();
+      for (const root of roots?.length ? roots : defaults) {
+        const resolved = path.resolve(expandHomePath(root));
+        canonical.add(
+          yield* fileSystem.realPath(resolved).pipe(Effect.orElseSucceed(() => resolved)),
+        );
+      }
+      return [...canonical];
+    });
     const dataHome = hostEnvironment["XDG_DATA_HOME"]?.trim();
-    for (const dir of envRoots("OPENCODE_DATA_DIR", [
+    for (const dir of yield* envRoots("OPENCODE_DATA_DIR", [
       path.join(
         dataHome && path.isAbsolute(dataHome) ? dataHome : path.join(home, ".local", "share"),
         "opencode",
@@ -522,7 +525,7 @@ export const make = Effect.gen(function* () {
         ...(result.error ? { message: "Some OpenCode history could not be read." } : {}),
       });
     }
-    const antigravityRoots = envRoots("ANTIGRAVITY_DATA_DIR", [
+    const antigravityRoots = yield* envRoots("ANTIGRAVITY_DATA_DIR", [
       ...["antigravity", "antigravity-cli", "antigravity-ide", "antigravity-backup"].map((name) =>
         path.join(home, ".gemini", name),
       ),
@@ -549,14 +552,15 @@ export const make = Effect.gen(function* () {
       }
     }
     const antigravityDirs = new Set<string>();
-    for (const root of new Set(antigravityRoots)) {
-      const nested = path.join(root, "conversations");
+    for (const root of antigravityRoots) {
+      const resolvedRoot = yield* fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root));
+      const nested = path.join(resolvedRoot, "conversations");
       const dir = (yield* fileSystem
         .exists(nested)
         .pipe(Effect.catchCause(() => Effect.succeed(false))))
         ? nested
-        : root;
-      antigravityDirs.add(dir);
+        : resolvedRoot;
+      antigravityDirs.add(yield* fileSystem.realPath(dir).pipe(Effect.orElseSucceed(() => dir)));
     }
     const antigravity = yield* Effect.promise(() =>
       readAntigravityUsage([...antigravityDirs], windowStartMs),
