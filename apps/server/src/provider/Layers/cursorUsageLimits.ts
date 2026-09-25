@@ -72,6 +72,11 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const platform = yield* HostProcessPlatform;
+    const endpoint = (
+      settings.apiEndpoint.trim() ||
+      environment.CURSOR_API_ENDPOINT?.trim() ||
+      "https://api2.cursor.sh"
+    ).replace(/\/$/, "");
     let token = environment.CURSOR_AUTH_TOKEN?.trim();
     // An explicit API key can name a different account from the stored login.
     if (!token && environment.CURSOR_API_KEY?.trim()) {
@@ -91,6 +96,13 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
           checkedAt,
           reason: "unsupported",
           message: "Enable Cursor account usage in T3 Code to read its Keychain login.",
+        });
+      }
+      if (!endpoint.toLowerCase().startsWith("https://")) {
+        return makeUnavailableUsageLimits({
+          checkedAt,
+          reason: "unsupported",
+          message: "Cursor account usage requires an HTTPS endpoint when using Keychain.",
         });
       }
       token = (yield* Effect.tryPromise(keychainToken))?.trim();
@@ -114,11 +126,6 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
     }
     if (!token) return makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
     const client = yield* HttpClient.HttpClient;
-    const endpoint = (
-      settings.apiEndpoint.trim() ||
-      environment.CURSOR_API_ENDPOINT?.trim() ||
-      "https://api2.cursor.sh"
-    ).replace(/\/$/, "");
     const response = yield* client.execute(
       HttpClientRequest.post(`${endpoint}/aiserver.v1.DashboardService/GetCurrentPeriodUsage`).pipe(
         HttpClientRequest.bearerToken(token),

@@ -1154,6 +1154,27 @@ describe("Cursor usage limits", () => {
     expect(limits.unavailable?.reason).toBe("probeFailed");
   });
 
+  it("does not read Keychain or send its token to an HTTP endpoint", async () => {
+    for (const [apiEndpoint, environment] of [
+      ["http://localhost:3000", {}],
+      ["", { CURSOR_API_ENDPOINT: "http://localhost:3000" }],
+    ] as const) {
+      const limits = await runNode(
+        readCursorUsageLimits({ apiEndpoint }, environment, true, async () => {
+          throw new Error("must not read Keychain for an HTTP endpoint");
+        }).pipe(
+          Effect.provideService(HostProcessPlatform, "darwin"),
+          Effect.provideService(
+            HttpClient.HttpClient,
+            HttpClient.make(() => Effect.die("must not send a credential to HTTP")),
+          ),
+        ),
+      );
+      expect(limits.unavailable?.reason).toBe("unsupported");
+      expect(limits.unavailable?.message).toContain("HTTPS endpoint");
+    }
+  });
+
   it("reports failed requests without exposing credentials or response bodies", async () => {
     const limits = await runNode(
       readCursorUsageLimits({ apiEndpoint: "" }, { CURSOR_AUTH_TOKEN: "private-token" }).pipe(
