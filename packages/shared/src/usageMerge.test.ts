@@ -249,6 +249,49 @@ describe("mergeUsage", () => {
     expect(mergeUsage([partial], USAGE_CONTRACT_VERSION).costUsd).toBe(4);
   });
 
+  it("keeps new cells from a later partial scan without recounting older cells", () => {
+    const source = { provider: "claude" as const, hostId: "mac", homePath: "/home/theo/.claude" };
+    const complete = environment(
+      "old",
+      summary([bucket({ sourcePath: source.homePath })], [source]),
+    );
+    const partialSummary = summary(
+      [
+        bucket({ sourcePath: source.homePath, costUsd: 4, records: 2 }),
+        bucket({
+          day: "2026-08-08" as UsageDay,
+          sourcePath: source.homePath,
+          costUsd: 3,
+          records: 1,
+        }),
+      ],
+      [{ ...source, distinctSessions: 2 }],
+    );
+    const partial = environment("new", {
+      ...partialSummary,
+      readAt: "2026-08-08T01:00:00.000Z",
+      sources: partialSummary.sources.map((entry) => ({ ...entry, status: "partial" as const })),
+    });
+
+    for (const ordered of [
+      [complete, partial],
+      [partial, complete],
+    ]) {
+      const merged = mergeUsage(ordered, USAGE_CONTRACT_VERSION);
+      expect(merged.costUsd).toBe(13);
+      expect(merged.records).toBe(6);
+      expect(merged.sessions).toBe(2);
+      expect(merged.daily.map(({ day, costUsd }) => [day, costUsd])).toEqual([
+        ["2026-08-07", 10],
+        ["2026-08-08", 3],
+      ]);
+      expect(merged.contributingEnvironments).toEqual(
+        ordered.map(({ environmentId }) => environmentId),
+      );
+      expect(merged.duplicateSources).toEqual(["new: /home/theo/.claude"]);
+    }
+  });
+
   it("excludes an environment reporting an older contract version", () => {
     const merged = mergeUsage(
       [
