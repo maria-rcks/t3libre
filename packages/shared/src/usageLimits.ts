@@ -46,7 +46,7 @@ export function cursorUsageWindowDetails(id: string) {
   return CURSOR_USAGE_WINDOWS.find((window) => window.id === id);
 }
 
-export function cursorUsageWindowRank(id: string): number {
+function cursorUsageWindowRank(id: string): number {
   const rank = CURSOR_USAGE_WINDOWS.findIndex((window) => window.id === id);
   return rank < 0 ? CURSOR_USAGE_WINDOWS.length : rank;
 }
