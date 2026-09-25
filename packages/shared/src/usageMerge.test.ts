@@ -253,7 +253,7 @@ describe("mergeUsage", () => {
     const source = { provider: "claude" as const, hostId: "mac", homePath: "/home/theo/.claude" };
     const complete = environment(
       "old",
-      summary([bucket({ sourcePath: source.homePath })], [source]),
+      summary([bucket()], [source], USAGE_MERGE_COMPATIBLE_SINCE),
     );
     const partialSummary = summary(
       [
@@ -290,6 +290,26 @@ describe("mergeUsage", () => {
       );
       expect(merged.duplicateSources).toEqual(["new: /home/theo/.claude"]);
     }
+  });
+
+  it("uses a newer partial cell when it contains more records than the complete scan", () => {
+    const source = { provider: "claude" as const, hostId: "mac", homePath: "/home/theo/.claude" };
+    const complete = environment("old", summary([bucket()], [source]));
+    const partialSummary = summary(
+      [bucket({ costUsd: 12, records: 6 })],
+      [{ ...source, distinctSessions: 2 }],
+    );
+    const partial = environment("new", {
+      ...partialSummary,
+      readAt: "2026-08-07T01:00:00.000Z",
+      sources: partialSummary.sources.map((entry) => ({ ...entry, status: "partial" as const })),
+    });
+
+    const merged = mergeUsage([complete, partial], USAGE_CONTRACT_VERSION);
+    expect(merged.costUsd).toBe(12);
+    expect(merged.records).toBe(6);
+    expect(merged.sessions).toBe(2);
+    expect(merged.contributingEnvironments).toEqual(["new"]);
   });
 
   it("excludes an environment reporting an older contract version", () => {
