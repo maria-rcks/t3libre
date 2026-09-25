@@ -1,4 +1,5 @@
-// @effect-diagnostics nodeBuiltinImport:off - node:sqlite reads live OpenCode databases; Node fs walks legacy JSON history.
+// node:sqlite reads live OpenCode databases; Node fs walks legacy JSON history.
+// @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";

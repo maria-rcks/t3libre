@@ -14,7 +14,6 @@
  */
 import * as NodeOS from "node:os";
 
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
   ClaudeSettings,
   CodexSettings,
@@ -33,6 +32,7 @@ import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hos
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -150,6 +150,7 @@ export const layerTest = Layer.succeed(
 );
 
 export const make = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig;
@@ -533,8 +534,8 @@ export const make = Effect.gen(function* () {
           config.stateDir,
           ProviderInstanceId.make(instanceId),
         ).pipe(
+          Effect.provideService(Crypto.Crypto, crypto),
           Effect.provideService(Path.Path, path),
-          Effect.provide(NodeCrypto.layer),
           Effect.mapError(
             (cause) =>
               new UsageReadError({

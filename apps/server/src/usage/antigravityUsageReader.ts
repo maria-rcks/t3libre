@@ -1,4 +1,5 @@
-// @effect-diagnostics nodeBuiltinImport:off - node:sqlite reads live conversation databases while Node fs discovers them.
+// node:sqlite reads live conversation databases while Node fs discovers them.
+// @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";

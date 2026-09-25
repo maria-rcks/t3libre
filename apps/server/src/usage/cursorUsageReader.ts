@@ -1,4 +1,5 @@
-// @effect-diagnostics nodeBuiltinImport:off - Node fs reads CLI credentials, and crypto hashes account IDs for deduplication.
+// Node fs reads CLI credentials, and crypto hashes account IDs for deduplication.
+// @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
 import * as NodeCrypto from "node:crypto";
 import * as NodeTimersPromises from "node:timers/promises";
