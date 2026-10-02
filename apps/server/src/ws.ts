@@ -4,6 +4,7 @@ import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as NodeCrypto from "node:crypto";
 
 import * as DateTime from "effect/DateTime";
+import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Encoding from "effect/Encoding";
 import * as Effect from "effect/Effect";
@@ -842,6 +843,11 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     readonly afterSequence?: number;
     readonly requestCompletionMarker?: boolean;
   }) {
+    const shellLiveBufferMiB = yield* Config.Int("T3CODE_SHELL_LIVE_BUFFER_MIB").pipe(
+      Config.withDefault(8),
+      Config.map((value) => Math.max(1, Math.min(64, value))),
+      Effect.orDie,
+    );
     const sql = yield* SqlClient.SqlClient;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
@@ -943,6 +949,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
             project: toShellApplicationEvent,
           }),
         ),
+        { maxSerializedBytes: shellLiveBufferMiB * 1024 * 1024 },
       );
 
     const enrichmentRefreshes = Stream.fromSubscription(enrichmentChanges).pipe(
