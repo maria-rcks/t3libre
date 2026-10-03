@@ -56,9 +56,6 @@ function sanitizeMermaidSvg(svg: string): string {
   });
 }
 
-// Image shapes (`A@{ img: "https://..." }`) are fetched while Mermaid lays the
-// diagram out, before sanitizing can remove them.
-const REMOTE_IMAGE_SHAPE = /@\{[^}]*\bimg\s*:/i;
 // Mermaid also lazy-loads diagram chunks inside render(); losing the network
 // there is worth a retry, unlike a syntax error.
 const CHUNK_LOAD_ERROR = /dynamically imported module|importing a module script|failed to fetch/i;
@@ -67,9 +64,6 @@ async function renderMermaid(
   source: string,
   theme: "light" | "dark",
 ): Promise<MermaidRenderResult> {
-  if (REMOTE_IMAGE_SHAPE.test(source)) {
-    return { status: "error", message: "Remote images are not supported.", retryable: false };
-  }
   const id = `mermaid-diagram-${nextDiagramId++}`;
   let mermaid: Mermaid;
   try {
