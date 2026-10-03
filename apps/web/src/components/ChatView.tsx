@@ -2664,7 +2664,7 @@ export default function ChatView(props: ChatViewProps) {
         machine: resolveEnvironmentMachineKind(environment?.serverConfig ?? null),
       });
     };
-    if (activeProjectIsScratch) {
+    if (activeProjectIsScratch && draftId) {
       // Each machine keeps its own "No project" folder at its own path, so they
       // never group as one logical project. Offer every machine that has one.
       for (const environment of environments) {
@@ -2703,6 +2703,7 @@ export default function ChatView(props: ChatViewProps) {
     activeProject,
     activeProjectIsScratch,
     allProjects,
+    draftId,
     environments,
     projectGroupingSettings,
     primaryEnvironmentId,
