@@ -13,6 +13,11 @@
  *   client/              web app served by the server
  *   resource-monitor/    per-platform Rust helper, same paths as the npm package
  *   node_modules/        runtime externals (node-pty, msgpackr-extract, fff)
+ *
+ * `--node-bundle` writes the same tree with the server's JS bundle (`bin.mjs`
+ * and its chunks) in place of the executable, for hosts that bring their own
+ * Node, such as the container image in packaging/docker. It is named
+ * `<stem>-node` so nothing that looks up the executable archive matches it.
  */
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -462,11 +467,13 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   readonly version: string;
   readonly outputDir: string;
   readonly resourceMonitorDir: Option.Option<string>;
+  readonly nodeBundle: boolean;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const repoRoot = yield* RepoRoot;
   const serverDir = path.join(repoRoot, "apps/server");
+  const bundleDir = path.join(serverDir, "dist");
   const executableName = input.platform === "win" ? "t3.exe" : "t3";
   // tsdown suffixes cross-built executables with their target (t3-darwin-x64);
   // a host build is plain t3. Prefer the exact target when both exist.
@@ -490,23 +497,36 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     path.join(serverDir, "dist/resource-monitor"),
   );
 
-  yield* requireInput(
-    builtExecutable,
-    `Run \`node apps/server/scripts/cli.ts build-exe --target ${targetKey}\` first.`,
-  );
+  if (input.nodeBundle) {
+    yield* requireInput(path.join(bundleDir, "bin.mjs"), "Run `vp run --filter t3 build` first.");
+  } else {
+    yield* requireInput(
+      builtExecutable,
+      `Run \`node apps/server/scripts/cli.ts build-exe --target ${targetKey}\` first.`,
+    );
+  }
   yield* requireInput(path.join(webClient, "index.html"), "Run `vp run --filter t3 build` first.");
   yield* requireInput(
     resourceMonitorDir,
     "Build the resource monitor or pass --resource-monitor-dir.",
   );
 
-  const stem = cliArchiveStem(input.version, input.platform, input.arch);
+  const stem = `${cliArchiveStem(input.version, input.platform, input.arch)}${input.nodeBundle ? "-node" : ""}`;
+  const archiveFileName = `${stem}.${input.platform === "win" ? "zip" : "tar.gz"}`;
   const stageRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-archive-" });
   const contentDir = path.join(stageRoot, stem);
   yield* fs.makeDirectory(contentDir, { recursive: true });
 
   yield* Effect.log(`[cli-archive] Staging ${stem}...`);
-  yield* fs.copyFile(builtExecutable, path.join(contentDir, executableName));
+  if (input.nodeBundle) {
+    // The entry, its chunks, and the history worker it runs as a sibling file.
+    const modules = (yield* fs.readDirectory(bundleDir)).filter((entry) => entry.endsWith(".mjs"));
+    for (const entry of modules) {
+      yield* fs.copyFile(path.join(bundleDir, entry), path.join(contentDir, entry));
+    }
+  } else {
+    yield* fs.copyFile(builtExecutable, path.join(contentDir, executableName));
+  }
   yield* stageWebClient(webClient, path.join(contentDir, "client"));
   yield* fs.copy(resourceMonitorDir, path.join(contentDir, "resource-monitor"));
   yield* stageRuntimeExternals({
@@ -517,10 +537,11 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     version: input.version,
   });
 
-  const executablePath = path.join(contentDir, executableName);
-  if (input.platform === "mac") {
+  const executablePath = path.join(contentDir, input.nodeBundle ? "bin.mjs" : executableName);
+  // A Node bundle has no executable to sign; the host's Node loads it.
+  if (!input.nodeBundle && input.platform === "mac") {
     yield* signMacArchiveContents({ repoRoot, contentDir, executablePath });
-  } else if (input.platform === "win") {
+  } else if (!input.nodeBundle && input.platform === "win") {
     yield* signWindowsExecutable(executablePath);
   }
   if (input.platform !== "win") {
@@ -528,10 +549,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   }
 
   yield* fs.makeDirectory(input.outputDir, { recursive: true });
-  const archivePath = path.join(
-    input.outputDir,
-    cliArchiveFileName(input.version, input.platform, input.arch),
-  );
+  const archivePath = path.join(input.outputDir, archiveFileName);
   yield* fs.remove(archivePath, { force: true });
   if (input.platform === "win") {
     // Windows ships bsdtar, which writes zip natively. Name it by path: under
@@ -578,6 +596,12 @@ const command = Command.make(
         "Directory laid out like dist/resource-monitor (defaults to apps/server/dist/resource-monitor).",
       ),
       Flag.optional,
+    ),
+    nodeBundle: Flag.Boolean("node-bundle").pipe(
+      Flag.withDescription(
+        "Package the server's JS bundle (apps/server/dist) instead of the executable, for hosts that run it with their own Node.",
+      ),
+      Flag.withDefault(false),
     ),
   },
   (input) => buildCliArchive(input).pipe(Effect.scoped),

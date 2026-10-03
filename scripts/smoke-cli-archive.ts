@@ -107,8 +107,18 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     });
   }
   const contentDir = path.join(scratch, root);
-  const executable = path.join(contentDir, platform === "win32" ? "t3.exe" : "t3");
-  for (const required of [executable, path.join(contentDir, "client/index.html")]) {
+  // A Node bundle (`--node-bundle`) runs bin.mjs with this script's Node,
+  // addressed by absolute path so the empty PATH still holds.
+  const bundleEntry = path.join(contentDir, "bin.mjs");
+  const isNodeBundle = yield* fs.exists(bundleEntry);
+  const executable = isNodeBundle
+    ? process.execPath
+    : path.join(contentDir, platform === "win32" ? "t3.exe" : "t3");
+  const entryArgs = isNodeBundle ? [bundleEntry] : [];
+  for (const required of [
+    isNodeBundle ? bundleEntry : executable,
+    path.join(contentDir, "client/index.html"),
+  ]) {
     if (!(yield* fs.exists(required))) {
       return yield* new CliArchiveSmokeError({
         step: "checking the archive layout",
@@ -117,7 +127,7 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     }
   }
 
-  const version = yield* runExecutable(executable, ["--version"], contentDir);
+  const version = yield* runExecutable(executable, [...entryArgs, "--version"], contentDir);
   if (version.exitCode !== 0 || !version.stdout.includes(input.expectVersion)) {
     return yield* new CliArchiveSmokeError({
       step: "running --version",
@@ -135,7 +145,7 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   const server = yield* spawner.spawn(
     ChildProcess.make(
       executable,
-      ["serve", "--host", "127.0.0.1", "--port", String(port), "--no-browser"],
+      [...entryArgs, "serve", "--host", "127.0.0.1", "--port", String(port), "--no-browser"],
       {
         cwd: contentDir,
         env: {

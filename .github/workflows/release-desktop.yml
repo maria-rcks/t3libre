@@ -554,6 +554,34 @@ jobs:
           path: release-cli/*
           if-no-files-found: error
 
+      # Keep Node bundles separate from the executable artifact consumed by
+      # Windows/WSL and its single-archive smoke command. Release publishing
+      # collects cli-* artifacts; npm selects only exact executable filenames.
+      - name: Build Linux CLI Node archive
+        if: inputs.cli_archive && inputs.platform == 'linux'
+        shell: bash
+        run: |
+          node scripts/build-cli-archive.ts \
+            --platform linux \
+            --arch "${{ inputs.arch }}" \
+            --version "${{ inputs.version }}" \
+            --node-bundle \
+            --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" \
+            --output-dir release-cli-node
+
+      - name: Smoke-test Linux CLI Node archive
+        if: inputs.cli_archive && inputs.platform == 'linux'
+        shell: bash
+        run: node scripts/smoke-cli-archive.ts --archive release-cli-node/* --expect-version "${{ inputs.version }}"
+
+      - name: Upload Linux CLI Node archive
+        if: inputs.cli_archive && inputs.platform == 'linux'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cli-node-linux-${{ inputs.arch }}
+          path: release-cli-node/*
+          if-no-files-found: error
+
       - name: Collect release assets
         shell: bash
         run: |

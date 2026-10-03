@@ -1,0 +1,2 @@
+#!/bin/sh
+exec node /opt/t3/bin.mjs "$@"
