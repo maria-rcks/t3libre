@@ -1602,6 +1602,11 @@ export default function ChatView(props: ChatViewProps) {
     readonly existingAttachments: ReadonlyArray<ContractChatAttachment>;
     readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
   } | null>(null);
+  // Read after awaits in onSend, where the render's editingQueuedRun is stale.
+  const editingQueuedRunRef = useRef(editingQueuedRun);
+  useEffect(() => {
+    editingQueuedRunRef.current = editingQueuedRun;
+  }, [editingQueuedRun]);
   const queuedEditDraftTargetFor = useCallback(
     (runId: RunId) => DraftId.make(`queued-edit:${scopedThreadKey(routeThreadRef)}:${runId}`),
     [routeThreadRef],
@@ -8148,17 +8153,34 @@ export default function ChatView(props: ChatViewProps) {
     // Sending past the resume banner compacts first so the turn does not resend the stale
     // history. The message queues behind the /compact run; steering into it is rejected.
     // The composer is read after the wait, so edits made meanwhile go out with the message.
+    // Held queues and local mode commands (/plan, /default) skip it.
     const promptBeforeCompaction = promptRef.current.trim();
+    const sendCtxBeforeCompaction = composerRef.current?.getSendContext();
     const compactBeforeSend =
       resumeCompactionBannerItem !== null &&
       !compactDisabled &&
+      !hasHeldQueuedRuns &&
       editingQueuedRun === null &&
       (promptBeforeCompaction.length > 0 || composerHasNonPromptContent || !!directAnnotation) &&
       promptBeforeCompaction.toLowerCase() !== "/compact" &&
-      composerRef.current?.getSendContext().multipleModelSelections === null;
+      !(
+        sendCtxBeforeCompaction?.interactionModeEnabled &&
+        !composerHasNonPromptContent &&
+        parseStandaloneComposerSlashCommand(promptBeforeCompaction) !== null
+      ) &&
+      sendCtxBeforeCompaction?.multipleModelSelections === null;
     if (compactBeforeSend) {
       if (!(await onCompactContext())) return;
-      if (currentRouteThreadKeyRef.current !== routeThreadKey) return;
+      // Thread settings were persisted from this render's state; a switch made
+      // during the wait would be skipped, so leave that draft for another send.
+      if (
+        currentRouteThreadKeyRef.current !== routeThreadKey ||
+        editingQueuedRunRef.current !== null ||
+        composerRef.current?.getSendContext().interactionMode !==
+          sendCtxBeforeCompaction?.interactionMode
+      ) {
+        return;
+      }
     }
     const sendCtx = composerRef.current?.getSendContext();
     if (!sendCtx?.providerAvailable) {
