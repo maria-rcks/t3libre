@@ -7911,12 +7911,13 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError,
     ],
   );
-  const onCompactContext = async () => {
+  // Resolves true once the /compact turn is accepted.
+  const onCompactContext = async (): Promise<boolean> => {
     if (compactDisabled || !activeThread || !clientSettingsHydrated || sendInFlightRef.current) {
-      return;
+      return false;
     }
     const context = composerRef.current?.getSendContext();
-    if (!context?.providerAvailable) return;
+    if (!context?.providerAvailable) return false;
 
     // Compaction is a standalone command; the draft and its attachments stay local.
     const threadId = activeThread.id;
@@ -7974,9 +7975,10 @@ export default function ChatView(props: ChatViewProps) {
             error instanceof Error ? error.message : "Failed to compact context.",
           );
         }
-      } else {
-        clearUsageLimitsFor(routeThreadKey);
+        return false;
       }
+      clearUsageLimitsFor(routeThreadKey);
+      return true;
     } finally {
       sendInFlightRef.current = false;
     }
@@ -8586,7 +8588,16 @@ export default function ChatView(props: ChatViewProps) {
     );
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
-    const shouldQueueBehindActiveRun = phase === "running" && dispatchMode === "queue";
+    // Sending past the resume banner compacts first so the turn does not resend the stale
+    // history. The message queues behind the /compact run; steering into it is rejected.
+    const compactBeforeSend =
+      resumeCompactionBannerItem !== null &&
+      !compactDisabled &&
+      multipleModelSelections === null &&
+      messageTextForSend.toLowerCase() !== "/compact";
+    const turnDispatchMode = compactBeforeSend ? "queue" : dispatchMode;
+    const shouldQueueBehindActiveRun =
+      compactBeforeSend || (phase === "running" && dispatchMode === "queue");
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,
@@ -8659,6 +8670,7 @@ export default function ChatView(props: ChatViewProps) {
       });
     }
 
+    if (compactBeforeSend && !(await onCompactContext())) return;
     sendInFlightRef.current = true;
     const sendGeneration = ++composerSendGenerationRef.current;
     const attachmentCapabilitiesBeforeUpload = readLiveAttachmentCapabilities();
@@ -9227,7 +9239,7 @@ export default function ChatView(props: ChatViewProps) {
           titleSeed: title,
           runtimeMode,
           interactionMode: sendInteractionMode,
-          dispatchMode,
+          dispatchMode: turnDispatchMode,
           ...(bootstrap ? { bootstrap } : {}),
           createdAt: messageCreatedAt,
         },
