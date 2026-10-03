@@ -20,6 +20,7 @@
  */
 import {
   FILL_PREVIEW_VIEWPORT,
+  INCOGNITO_BROWSER_PROFILE_ID,
   PREVIEW_AUTOMATION_OPERATIONS,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type PreviewAutomationActionEvent,
@@ -84,6 +85,8 @@ const SCREENCAST_SETTLE_MS = 200;
 const SCREENCAST_MOTION_FRAMES = 4;
 const SCREENCAST_MOTION_WINDOW_MS = 300;
 const SCREENCAST_MOTION_QUALITY = 50;
+const HOST_RECONNECT_DELAY = "1 second";
+const VIEWER_OUTPUT_LIMIT = 64;
 const RECORDING_SCREENCAST = { format: "jpeg", quality: 90, everyNthFrame: 1 } as const;
 
 /** Resolves at `deadline`, in epoch ms. */
@@ -188,6 +191,8 @@ interface Recording {
   readonly encoder: Page;
   readonly session: CDPSession;
   readonly startedAt: string;
+  /** Frames still being handed to the encoder; stopping waits for them. */
+  readonly framesInFlight: Set<Promise<void>>;
 }
 
 interface ServerTab {
@@ -204,6 +209,12 @@ interface ServerTab {
   loading: boolean;
   closing: boolean;
   recording: Recording | null;
+  /** The latest queued start, so a stop can find a recording still starting. */
+  recordingStart: Promise<Recording> | null;
+  /** Serializes captures and recording start/stop. */
+  captureLock: Promise<void>;
+  /** Scaled captures rendering now; screencasts stay stopped meanwhile. */
+  capturing: number;
 }
 
 const tabKey = (threadId: string, tabId: string) => `${threadId}\u0000${tabId}`;
@@ -251,20 +262,35 @@ const make = Effect.gen(function* () {
 
   const launchContext = async (profileId: string): Promise<BrowserContext> => {
     const resolved = await Effect.runPromise(toolchain.resolve);
-    const userDataDir = NodePath.join(profilesDir, encodeURIComponent(profileId));
-    await NodeFSP.mkdir(userDataDir, { recursive: true });
     // Loaded on first use so servers that never open a server tab skip it.
     const { chromium } = await import("playwright-core");
-    const launch = (chromiumSandbox: boolean) =>
-      chromium.launchPersistentContext(userDataDir, {
+    const launch = async (chromiumSandbox: boolean) => {
+      const launchOptions = {
         executablePath: resolved.executablePath,
         env: { ...process.env, ...resolved.env },
         args: [...resolved.args, "--disable-gpu", `--force-device-scale-factor=${RENDER_SCALE}`],
         headless: true,
         chromiumSandbox,
+      };
+      const contextOptions = {
         viewport: UNATTACHED_FILL_VIEWPORT,
         deviceScaleFactor: RENDER_SCALE,
-      });
+      };
+      if (profileId === INCOGNITO_BROWSER_PROFILE_ID) {
+        const browser = await chromium.launch(launchOptions);
+        try {
+          const context = await browser.newContext(contextOptions);
+          context.on("close", () => void browser.close().catch(() => undefined));
+          return context;
+        } catch (cause) {
+          await browser.close().catch(() => undefined);
+          throw cause;
+        }
+      }
+      const userDataDir = NodePath.join(profilesDir, encodeURIComponent(profileId));
+      await NodeFSP.mkdir(userDataDir, { recursive: true });
+      return chromium.launchPersistentContext(userDataDir, { ...launchOptions, ...contextOptions });
+    };
     // The namespace sandbox needs unprivileged user namespaces, which some
     // containers disable. Running unsandboxed there matches what the agent
     // already has: a shell as the same user.
@@ -384,6 +410,9 @@ const make = Effect.gen(function* () {
       loading: false,
       closing: false,
       recording: null,
+      recordingStart: null,
+      captureLock: Promise.resolve(),
+      capturing: 0,
     };
     await page.setViewportSize(fixedViewportSize(tab.setting) ?? UNATTACHED_FILL_VIEWPORT);
     const isMainNavigation = (request: { isNavigationRequest(): boolean; frame(): unknown }) =>
@@ -457,6 +486,11 @@ const make = Effect.gen(function* () {
     page.on("close", () => {
       if (!tab.closing) dropTab(tab, true);
     });
+    // Playwright cannot reload a crashed page. Remove it so clients stop
+    // displaying its stale frame and the agent can open a fresh tab.
+    page.on("crash", () => {
+      if (!tab.closing) dropTab(tab, true);
+    });
     tabs.set(tabKey(tab.threadId, tab.tabId), tab);
     reportLiveTabs();
     if (snapshot.navStatus._tag === "Loading") {
@@ -477,7 +511,7 @@ const make = Effect.gen(function* () {
     return pending;
   };
 
-  /** Server tabs that exist in PreviewManager but not yet here (e.g. after a crash). */
+  /** Server tabs that exist in PreviewManager but have not finished opening here. */
   const findTab = (threadId: string, tabId: string) =>
     Effect.gen(function* () {
       const existing = tabs.get(tabKey(threadId, tabId));
@@ -589,122 +623,176 @@ const make = Effect.gen(function* () {
       .catch(() => undefined);
   };
 
-  const startRecording = async (tab: ServerTab) => {
-    if (tab.recording) return tab.recording;
-    const encoder = await tab.page.context().newPage();
-    await encoder.evaluate(ServerBrowserPage.RECORDING_ENCODER_SCRIPT);
-    const session = await tab.page.context().newCDPSession(tab.page);
-    session.on("Page.screencastFrame", (frame) => {
-      const cssWidth = tab.page.viewportSize()?.width ?? frame.metadata.deviceWidth;
-      void encoder
-        .evaluate(
-          ([data, width]) => {
-            const recorder = (
-              globalThis as unknown as {
-                __t3Recorder: { frame(data: string, width: number): Promise<void> };
-              }
-            ).__t3Recorder;
-            return recorder.frame(data, width);
-          },
-          [frame.data, cssWidth] as const,
-        )
-        .catch(() => undefined)
-        .finally(() => {
-          void session
-            .send("Page.screencastFrameAck", { sessionId: frame.sessionId })
-            .catch(() => undefined);
-        });
+  const withCaptureLock = <A>(tab: ServerTab, operation: () => Promise<A>): Promise<A> => {
+    const run = tab.captureLock.then(() => {
+      if (tab.closing) throw new Error("The preview tab closed.");
+      return operation();
     });
-    await session.send("Page.startScreencast", RECORDING_SCREENCAST);
-    const recording: Recording = { encoder, session, startedAt: new Date().toISOString() };
-    tab.recording = recording;
-    return recording;
+    tab.captureLock = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
+  const startRecording = (tab: ServerTab): Promise<Recording> => {
+    const started = withCaptureLock(tab, async () => tab.recording ?? beginRecording(tab)).finally(
+      () => {
+        if (tab.recordingStart === started) tab.recordingStart = null;
+      },
+    );
+    tab.recordingStart = started;
+    return started;
+  };
+
+  const beginRecording = async (tab: ServerTab) => {
+    const encoder = await tab.page.context().newPage();
+    let session: CDPSession | null = null;
+    try {
+      await encoder.evaluate(ServerBrowserPage.RECORDING_ENCODER_SCRIPT);
+      const opened = await tab.page.context().newCDPSession(tab.page);
+      session = opened;
+      const framesInFlight = new Set<Promise<void>>();
+      opened.on("Page.screencastFrame", (frame) => {
+        const cssWidth = tab.page.viewportSize()?.width ?? frame.metadata.deviceWidth;
+        const delivered: Promise<void> = encoder
+          .evaluate(
+            ([data, width]) => {
+              const recorder = (
+                globalThis as unknown as {
+                  __t3Recorder: { frame(data: string, width: number): Promise<boolean> };
+                }
+              ).__t3Recorder;
+              return recorder.frame(data, width);
+            },
+            [frame.data, cssWidth] as const,
+          )
+          .then(async (accepted) => {
+            if (!accepted) await opened.send("Page.stopScreencast");
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            framesInFlight.delete(delivered);
+            void opened
+              .send("Page.screencastFrameAck", { sessionId: frame.sessionId })
+              .catch(() => undefined);
+          });
+        framesInFlight.add(delivered);
+      });
+      await opened.send("Page.startScreencast", RECORDING_SCREENCAST);
+      if (tab.closing) throw new Error("The tab closed while the recording started.");
+      const recording: Recording = {
+        encoder,
+        session: opened,
+        startedAt: new Date().toISOString(),
+        framesInFlight,
+      };
+      tab.recording = recording;
+      return recording;
+    } catch (cause) {
+      // A start that fails partway must not leave its encoder page behind.
+      await encoder.close().catch(() => undefined);
+      await session?.detach().catch(() => undefined);
+      throw cause;
+    }
   };
 
   /**
    * Runs a scaled capture with the tab's screencasts stopped, so viewers and
    * recordings never receive the frame it renders at the capture scale.
    */
-  const withScreencastsPaused = async <A>(tab: ServerTab, capture: () => Promise<A>) => {
-    const viewers = [...tab.viewers];
-    const recording = tab.recording;
-    await Promise.all([
-      ...viewers.map((viewer) => viewer.pause()),
-      recording?.session.send("Page.stopScreencast").catch(() => undefined),
-    ]);
-    try {
-      return await capture();
-    } finally {
-      await Promise.all([
-        ...viewers.map((viewer) => viewer.resume()),
-        recording && tab.recording === recording
-          ? recording.session
-              .send("Page.startScreencast", RECORDING_SCREENCAST)
-              .catch(() => undefined)
-          : undefined,
-      ]);
-    }
-  };
+  const withScreencastsPaused = <A>(tab: ServerTab, capture: () => Promise<A>): Promise<A> =>
+    withCaptureLock(tab, async () => {
+      tab.capturing += 1;
+      const recording = tab.recording;
+      try {
+        await Promise.all([
+          ...[...tab.viewers].map((viewer) => viewer.pause()),
+          recording?.session.send("Page.stopScreencast").catch(() => undefined),
+        ]);
+        return await capture();
+      } finally {
+        tab.capturing -= 1;
+        // Viewers that attached during the capture start here too.
+        await Promise.all([
+          ...[...tab.viewers].map((viewer) => viewer.resume()),
+          recording && tab.recording === recording
+            ? recording.session
+                .send("Page.startScreencast", RECORDING_SCREENCAST)
+                .catch(() => undefined)
+            : undefined,
+        ]);
+      }
+    });
 
-  const stopRecording = async (tab: ServerTab) => {
-    const recording = tab.recording;
-    if (!recording) {
-      throw new ServerBrowserPage.ServerBrowserOperationError(
-        "PreviewAutomationRecordingNotActiveError",
-        "No recording is active for this tab.",
-      );
-    }
-    tab.recording = null;
-    await recording.session.send("Page.stopScreencast").catch(() => undefined);
-    await recording.session.detach().catch(() => undefined);
-    type EncoderWindow = {
-      __t3Recorder: {
-        stop(): Promise<{ mimeType: string | null; count: number }>;
-        chunk(index: number): Promise<string>;
+  const stopRecording = (tab: ServerTab) =>
+    withCaptureLock(tab, async () => {
+      const recording = tab.recording;
+      if (!recording) {
+        throw new ServerBrowserPage.ServerBrowserOperationError(
+          "PreviewAutomationRecordingNotActiveError",
+          "No recording is active for this tab.",
+        );
+      }
+      type EncoderWindow = {
+        __t3Recorder: {
+          stop(): Promise<{ mimeType: string | null; count: number; bytes: number }>;
+          chunk(index: number): Promise<string>;
+        };
       };
-    };
-    const { mimeType, count } = await recording.encoder.evaluate(() =>
-      (globalThis as unknown as EncoderWindow).__t3Recorder.stop(),
-    );
-    const chunks: Array<Buffer> = [];
-    for (let index = 0; index < count; index += 1) {
-      const chunk = await recording.encoder.evaluate(
-        (chunkIndex) => (globalThis as unknown as EncoderWindow).__t3Recorder.chunk(chunkIndex),
-        index,
-      );
-      chunks.push(Buffer.from(chunk, "base64"));
-    }
-    await recording.encoder.close().catch(() => undefined);
-    const data = Buffer.concat(chunks);
-    if (!mimeType || data.byteLength === 0) {
-      throw new ServerBrowserPage.ServerBrowserOperationError(
-        "PreviewAutomationExecutionError",
-        "The recording captured no frames.",
-      );
-    }
-    if (data.byteLength > PROVIDER_SEND_TURN_MAX_FILE_BYTES) {
-      throw new ServerBrowserPage.ServerBrowserOperationError(
-        "PreviewAutomationRecordingTooLargeError",
-        "The recording is larger than the attachment limit.",
-      );
-    }
-    // Written where a desktop upload would land, so the MCP handler claims
-    // both the same way.
-    const extension = mimeType.startsWith("video/mp4") ? "mp4" : "webm";
-    const pendingId = `${PENDING_ATTACHMENT_THREAD_SEGMENT}-${NodeCrypto.randomUUID()}-${extension}`;
-    const path = NodePath.join(config.attachmentsDir, `${pendingId}.${extension}`);
-    await NodeFSP.mkdir(config.attachmentsDir, { recursive: true });
-    await NodeFSP.writeFile(path, data);
-    return {
-      id: pendingId,
-      tabId: tab.tabId,
-      path,
-      mimeType: mimeType.split(";")[0]!,
-      sizeBytes: data.byteLength,
-      createdAt: new Date().toISOString(),
-      uploadedAttachmentId: pendingId,
-    };
-  };
+      let mimeType: string | null;
+      const chunks: Array<Buffer> = [];
+      try {
+        await recording.session.send("Page.stopScreencast").catch(() => undefined);
+        // The last frames may still be on their way into the encoder.
+        await Promise.all(recording.framesInFlight);
+        await recording.session.detach().catch(() => undefined);
+        const stopped = await recording.encoder.evaluate(() =>
+          (globalThis as unknown as EncoderWindow).__t3Recorder.stop(),
+        );
+        mimeType = stopped.mimeType;
+        // Checked before the transfer so an oversized video never lands in this process.
+        if (stopped.bytes > PROVIDER_SEND_TURN_MAX_FILE_BYTES) {
+          throw new ServerBrowserPage.ServerBrowserOperationError(
+            "PreviewAutomationRecordingTooLargeError",
+            "The recording is larger than the attachment limit.",
+          );
+        }
+        for (let index = 0; index < stopped.count; index += 1) {
+          const chunk = await recording.encoder.evaluate(
+            (chunkIndex) => (globalThis as unknown as EncoderWindow).__t3Recorder.chunk(chunkIndex),
+            index,
+          );
+          chunks.push(Buffer.from(chunk, "base64"));
+        }
+      } finally {
+        await recording.encoder.close().catch(() => undefined);
+        tab.recording = null;
+      }
+      const data = Buffer.concat(chunks);
+      if (!mimeType || data.byteLength === 0) {
+        throw new ServerBrowserPage.ServerBrowserOperationError(
+          "PreviewAutomationExecutionError",
+          "The recording captured no frames.",
+        );
+      }
+      // Written where a desktop upload would land, so the MCP handler claims
+      // both the same way.
+      const extension = mimeType.startsWith("video/mp4") ? "mp4" : "webm";
+      const pendingId = `${PENDING_ATTACHMENT_THREAD_SEGMENT}-${NodeCrypto.randomUUID()}-${extension}`;
+      const path = NodePath.join(config.attachmentsDir, `${pendingId}.${extension}`);
+      await NodeFSP.mkdir(config.attachmentsDir, { recursive: true });
+      await NodeFSP.writeFile(path, data);
+      return {
+        id: pendingId,
+        tabId: tab.tabId,
+        path,
+        mimeType: mimeType.split(";")[0]!,
+        sizeBytes: data.byteLength,
+        createdAt: new Date().toISOString(),
+        uploadedAttachmentId: pendingId,
+      };
+    });
 
   const recordAction = <A>(tab: ServerTab, action: string, run: () => Promise<A>): Promise<A> => {
     const event: {
@@ -774,6 +862,7 @@ const make = Effect.gen(function* () {
             threadId: request.threadId,
             ...(url ? { url } : {}),
             runtime: "server",
+            reveal: (open.open ?? open.show) !== false,
           }),
         );
         const tab = await ensureTab(snapshot);
@@ -877,7 +966,9 @@ const make = Effect.gen(function* () {
         const tab =
           request.tabId === undefined
             ? [...tabs.values()].find(
-                (candidate) => candidate.threadId === request.threadId && candidate.recording,
+                (candidate) =>
+                  candidate.threadId === request.threadId &&
+                  (candidate.recording || candidate.recordingStart),
               )
             : await requireTab(request);
         if (!tab) {
@@ -1041,7 +1132,10 @@ const make = Effect.gen(function* () {
   const attachViewer: ServerBrowser["Service"]["attachViewer"] = (input) =>
     Effect.gen(function* () {
       const tab = yield* findTab(input.threadId, input.tabId);
-      const output = yield* Queue.unbounded<ServerBrowserViewerOutput>();
+      const output = yield* Queue.make<ServerBrowserViewerOutput>({
+        capacity: VIEWER_OUTPUT_LIMIT,
+        strategy: "dropping",
+      });
       const session = yield* Effect.acquireRelease(
         Effect.tryPromise({
           try: () => tab.page.context().newCDPSession(tab.page),
@@ -1056,8 +1150,39 @@ const make = Effect.gen(function* () {
               .catch(() => undefined),
           ),
       );
+      const quality = Math.min(100, Math.max(1, Math.round(input.quality)));
+      // Frames that arrive while others are in flight may have pushed later ones
+      // out, and a page that then goes still never repaints them. A still
+      // after the burst shows the final state.
+      let framesInFlight = 0;
+      let mayHaveDropped = false;
+      let motion = false;
+      const recentFrames: Array<number> = [];
+      let screencastParams = Promise.resolve();
+      let screencastScale = 1;
+      const startScreencast = (scale: number) => {
+        screencastScale = scale;
+        screencastParams = screencastParams.then(async () => {
+          // A scaled capture is rendering; its resume starts the stream.
+          if (tab.capturing > 0) return;
+          await session.send("Page.stopScreencast").catch(() => undefined);
+          await session
+            .send("Page.startScreencast", {
+              format: "jpeg",
+              quality: screencastScale < 1 ? Math.min(quality, SCREENCAST_MOTION_QUALITY) : quality,
+              maxWidth: Math.max(1, Math.round(input.maxWidth * screencastScale)),
+              maxHeight: Math.max(1, Math.round(input.maxHeight * screencastScale)),
+            })
+            .catch(() => undefined);
+        });
+        return screencastParams;
+      };
       const viewer: ViewerState = {
-        push: (next) => void Queue.offerUnsafe(output, next),
+        push: (next) => {
+          // Bounded: a viewer that stops reading drops messages instead of
+          // growing this queue. A dropped frame still releases Chromium.
+          if (!Queue.offerUnsafe(output, next) && next._tag === "frame") runFork(next.ack);
+        },
         pause: () => {
           screencastParams = screencastParams.then(() =>
             session.send("Page.stopScreencast").then(
@@ -1067,7 +1192,7 @@ const make = Effect.gen(function* () {
           );
           return screencastParams;
         },
-        resume: () => startScreencast(motion ? 0.5 : 1),
+        resume: () => startScreencast(screencastScale),
         scrolledAt: 0,
       };
       yield* Effect.acquireRelease(
@@ -1081,38 +1206,17 @@ const make = Effect.gen(function* () {
             reportLiveTabs();
           }),
       );
-      const quality = Math.min(100, Math.max(1, Math.round(input.quality)));
       // Full scale: a scaled capture would flash in every other viewer.
       const pushStill = async () => {
-        const data = await ServerBrowserPage.captureViewport(tab.page, session, {
-          format: "jpeg",
-          quality,
-          scale: 1,
-        }).catch(() => null);
+        const data = await withCaptureLock(tab, () =>
+          ServerBrowserPage.captureViewport(tab.page, session, {
+            format: "jpeg",
+            quality,
+            scale: 1,
+          }),
+        ).catch(() => null);
         if (data)
           viewer.push({ _tag: "frame", data: Buffer.from(data, "base64"), ack: Effect.void });
-      };
-      // Frames that arrive while two are in flight may have pushed later ones
-      // out, and a page that then goes still never repaints them. A still
-      // after the burst shows the final state.
-      let framesInFlight = 0;
-      let mayHaveDropped = false;
-      let motion = false;
-      const recentFrames: Array<number> = [];
-      let screencastParams = Promise.resolve();
-      const startScreencast = (scale: number) => {
-        screencastParams = screencastParams.then(async () => {
-          await session.send("Page.stopScreencast").catch(() => undefined);
-          await session
-            .send("Page.startScreencast", {
-              format: "jpeg",
-              quality: scale < 1 ? Math.min(quality, SCREENCAST_MOTION_QUALITY) : quality,
-              maxWidth: Math.max(1, Math.round(input.maxWidth * scale)),
-              maxHeight: Math.max(1, Math.round(input.maxHeight * scale)),
-            })
-            .catch(() => undefined);
-        });
-        return screencastParams;
       };
       let settleTimer: ReturnType<typeof setTimeout> | null = null;
       yield* Effect.addFinalizer(() =>
@@ -1183,7 +1287,7 @@ const make = Effect.gen(function* () {
   if (enabled) {
     yield* manager.events.pipe(Stream.runForEach(mirrorManagerEvent), Effect.forkScoped);
     const environmentId = yield* environment.getEnvironmentId;
-    yield* broker
+    const hostSession = broker
       .connect(
         {
           clientId: SERVER_HOST_CLIENT_ID,
@@ -1207,8 +1311,16 @@ const make = Effect.gen(function* () {
             }),
           ),
         ),
-        Effect.forkScoped,
       );
+    // The broker ends a host's stream when a request outlives its deadline,
+    // e.g. the first open while Chromium installs. Register again, or agents
+    // lose the browser until the server restarts.
+    yield* hostSession.pipe(
+      Effect.exit,
+      Effect.andThen(Effect.sleep(HOST_RECONNECT_DELAY)),
+      Effect.forever,
+      Effect.forkScoped,
+    );
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
         for (const context of contexts.values()) {

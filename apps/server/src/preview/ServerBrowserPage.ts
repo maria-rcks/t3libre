@@ -1,4 +1,4 @@
-// @effect-diagnostics globalDate:off - Playwright callbacks run outside the Effect runtime.
+// @effect-diagnostics globalDate:off globalTimers:off - Playwright callbacks run outside the Effect runtime.
 /**
  * Page-level automation for server-hosted preview tabs.
  *
@@ -7,16 +7,17 @@
  * MCP preview tools cannot tell the two runtimes apart. Failures carry the
  * broker's error tags (see `PreviewAutomationBroker.classifyResponseError`).
  */
-import type {
-  PreviewAutomationClickInput,
-  PreviewAutomationConsoleEntry,
-  PreviewAutomationEvaluateInput,
-  PreviewAutomationNetworkEntry,
-  PreviewAutomationPressInput,
-  PreviewAutomationScrollInput,
-  PreviewAutomationSnapshot,
-  PreviewAutomationTypeInput,
-  PreviewAutomationWaitForInput,
+import {
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  type PreviewAutomationClickInput,
+  type PreviewAutomationConsoleEntry,
+  type PreviewAutomationEvaluateInput,
+  type PreviewAutomationNetworkEntry,
+  type PreviewAutomationPressInput,
+  type PreviewAutomationScrollInput,
+  type PreviewAutomationSnapshot,
+  type PreviewAutomationTypeInput,
+  type PreviewAutomationWaitForInput,
 } from "@t3tools/contracts";
 import type { CDPSession, Locator, Page } from "playwright-core";
 
@@ -25,6 +26,7 @@ const MAX_VISIBLE_TEXT_LENGTH = 20_000;
 const MAX_INTERACTIVE_ELEMENTS = 200;
 const MAX_INTERACTIVE_ELEMENT_NAME_LENGTH = 200;
 const MAX_SCREENSHOT_WIDTH = 1280;
+const WAIT_POLL_MS = 100;
 export const DIAGNOSTIC_BUFFER_LIMIT = 200;
 
 export class ServerBrowserOperationError extends Error {
@@ -214,13 +216,59 @@ export const click = async (
 export const type = async (page: Page, input: PreviewAutomationTypeInput) => {
   const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const locator = targetLocator(page, input);
-  if (locator !== null) {
-    if (input.clear) {
-      await locator.fill(input.text, { timeout });
-      return;
-    }
-    await locator.focus({ timeout });
-  } else if (input.clear) {
+  if (locator !== null && input.clear) {
+    await locator.fill(input.text, { timeout });
+    return;
+  }
+  // A shadow host also matches :focus; use its innermost focused descendant.
+  const target = locator ?? page.locator("*:focus").last();
+  const focused =
+    (locator !== null || (await target.count()) > 0) &&
+    (await target.evaluate(
+      (element) => {
+        // Like the desktop host: an enabled text control or contenteditable
+        // that actually takes focus. Anything else would swallow the text or
+        // send it to whichever field had focus before.
+        const control = element as unknown as {
+          readonly type?: string;
+          readonly disabled?: boolean;
+          readonly readOnly?: boolean;
+          readonly isContentEditable?: boolean;
+          readonly focus?: () => void;
+        };
+        const nonText = [
+          "button",
+          "checkbox",
+          "color",
+          "file",
+          "hidden",
+          "image",
+          "radio",
+          "range",
+          "reset",
+          "submit",
+        ];
+        const textControl =
+          element.tagName === "TEXTAREA" ||
+          (element.tagName === "INPUT" && !nonText.includes(control.type ?? "text"));
+        if (!(textControl || control.isContentEditable) || control.disabled || control.readOnly) {
+          return false;
+        }
+        control.focus?.();
+        const root = element.getRootNode() as { readonly activeElement?: typeof element | null };
+        const active = root.activeElement;
+        return active != null && (active === element || element.contains(active));
+      },
+      undefined,
+      { timeout },
+    ));
+  if (focused !== true) {
+    throw new ServerBrowserOperationError(
+      "PreviewAutomationTargetNotEditableError",
+      "The target is not an enabled text field, so no text was typed.",
+    );
+  }
+  if (input.clear) {
     await page.keyboard.press("ControlOrMeta+A");
     await page.keyboard.press("Delete");
   }
@@ -267,26 +315,35 @@ export const evaluate = async (cdp: CDPSession, input: PreviewAutomationEvaluate
   return value;
 };
 
+/** Resolves once every supplied condition holds at the same moment. */
 export const waitFor = async (page: Page, input: PreviewAutomationWaitForInput) => {
-  const deadline = Date.now() + (input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const remaining = () => Math.max(1, deadline - Date.now());
+  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   const locator = targetLocator(page, input);
-  if (locator !== null) await locator.waitFor({ state: "visible", timeout: remaining() });
-  if (input.text !== undefined) {
-    await page.waitForFunction(
-      `(document.body?.innerText ?? "").includes(${JSON.stringify(input.text)})`,
-      undefined,
-      { timeout: remaining() },
+  const { text, urlIncludes } = input;
+  const checks: Array<() => Promise<boolean>> = [];
+  // Like the desktop host: the selector must match an element, visible or not.
+  if (locator !== null) checks.push(async () => (await locator.count()) > 0);
+  if (text !== undefined) {
+    // A navigation can destroy the context mid-check; that counts as not yet.
+    checks.push(() =>
+      page
+        .evaluate(`(document.body?.innerText ?? "").includes(${JSON.stringify(text)})`)
+        .then((found) => found === true)
+        .catch(() => false),
     );
   }
-  if (input.urlIncludes !== undefined) {
-    await page.waitForFunction(
-      `location.href.includes(${JSON.stringify(input.urlIncludes)})`,
-      undefined,
-      {
-        timeout: remaining(),
-      },
-    );
+  if (urlIncludes !== undefined) checks.push(async () => page.url().includes(urlIncludes));
+  for (;;) {
+    const results = await Promise.all(checks.map((check) => check()));
+    if (results.every(Boolean)) return;
+    if (Date.now() >= deadline) {
+      throw new ServerBrowserOperationError(
+        "PreviewAutomationTimeoutError",
+        `Waited ${timeoutMs}ms without every condition holding.`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
   }
 };
 
@@ -322,6 +379,9 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
   const context = canvas.getContext("2d");
   const chunks = [];
   let recorder = null;
+  let stopped = null;
+  let sizeBytes = 0;
+  let tooLarge = false;
   let frame = null;
   let cursor = null;
   let ring = null;
@@ -374,15 +434,32 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
   };
   window.__t3Recorder = {
     async frame(base64, cssWidth) {
+      if (tooLarge) return false;
       const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
       const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/jpeg" }));
+      if (tooLarge) { bitmap.close(); return false; }
       if (!recorder) {
         canvas.width = bitmap.width;
         canvas.height = bitmap.height;
         const mimeType = ["video/mp4;codecs=avc1.640033", "video/webm;codecs=vp9", "video/webm"].find((type) => MediaRecorder.isTypeSupported(type));
         const bitsPerSecond = Math.min(50e6, Math.max(2.5e6, bitmap.width * bitmap.height * 30 * 0.05));
         recorder = new MediaRecorder(canvas.captureStream(30), { mimeType, videoBitsPerSecond: bitsPerSecond });
-        recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
+        stopped = new Promise((resolve) => { recorder.onstop = resolve; });
+        recorder.ondataavailable = (event) => {
+          if (tooLarge || event.data.size === 0) return;
+          sizeBytes += event.data.size;
+          if (sizeBytes > ${PROVIDER_SEND_TURN_MAX_FILE_BYTES}) {
+            tooLarge = true;
+            chunks.length = 0;
+            clearInterval(ringTimer);
+            frame?.close();
+            frame = null;
+            if (recorder.state !== "inactive") recorder.stop();
+            for (const track of recorder.stream.getTracks()) track.stop();
+            return;
+          }
+          chunks.push(event.data);
+        };
         recorder.start(1000);
       }
       // Frame px per page CSS px, before fitting into the canvas.
@@ -390,8 +467,10 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
       frame?.close();
       frame = bitmap;
       paint();
+      return true;
     },
     cursor(x, y, click) {
+      if (tooLarge) return;
       cursor = { x, y };
       if (click) {
         ring = { x, y, at: performance.now() };
@@ -403,12 +482,11 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
       }
       paint();
     },
-    stop() {
-      return new Promise((resolve) => {
-        if (!recorder) return resolve({ mimeType: null, count: 0 });
-        recorder.onstop = () => resolve({ mimeType: recorder.mimeType, count: chunks.length });
-        recorder.stop();
-      });
+    async stop() {
+      if (!recorder) return { mimeType: null, count: 0, bytes: 0 };
+      if (recorder.state !== "inactive") recorder.stop();
+      await stopped;
+      return { mimeType: recorder.mimeType, count: chunks.length, bytes: sizeBytes };
     },
     async chunk(index) {
       const bytes = new Uint8Array(await chunks[index].arrayBuffer());

@@ -40,11 +40,15 @@ type NativeStreamBridge = {
   readonly onGone?: () => void;
   readonly onViewport?: (viewport: { readonly width: number; readonly height: number }) => void;
   readonly onPictureInPicture?: (state: PreviewPictureInPictureState, detail?: string) => void;
+  /** True while frames show, so commands reach the page. Pass a stable function. */
+  readonly onStreamingChange?: (streaming: boolean) => void;
   /** The floating player shows a spinner without text or a reconnect button. */
   readonly compact?: boolean;
 };
 
-const UNAUTHORIZED_RETRY_MAX_MS = 30_000;
+// Consecutive refused tickets before the view stops and offers Reconnect, e.g. a
+// session without operate scope.
+const MAX_REFUSALS = 3;
 
 /** A server-hosted preview tab streamed into a WebView that runs the shared transport. */
 export function PreviewStreamWebView({
@@ -78,10 +82,11 @@ export function PreviewStreamWebView({
       onGone={props.onGone}
       onViewport={props.onViewport}
       onPictureInPicture={props.onPictureInPicture}
+      onStreamingChange={props.onStreamingChange}
       onUnauthorized={() => {
-        // The client has stopped. Restart it, and back off when fresh tickets keep
-        // getting refused, e.g. a session without operate scope.
-        const retry = unauthorized.current++;
+        // The client has stopped. Restart it with a fresh ticket, backing off between refusals.
+        const refusals = ++unauthorized.current;
+        if (refusals >= MAX_REFUSALS) return false;
         if (refreshTimer.current !== null) clearTimeout(refreshTimer.current);
         refreshTimer.current = setTimeout(
           () => {
@@ -89,11 +94,13 @@ export function PreviewStreamWebView({
             setAttempt((current) => current + 1);
             props.onUnauthorized();
           },
-          retry === 0 ? 0 : Math.min(1_000 * 2 ** retry, UNAUTHORIZED_RETRY_MAX_MS),
+          refusals === 1 ? 0 : 1_000 * 2 ** (refusals - 1),
         );
+        return true;
       }}
       onRetry={() => {
         processRetried.current = false;
+        unauthorized.current = 0;
         setAttempt((current) => current + 1);
         props.onUnauthorized();
       }}
@@ -120,13 +127,16 @@ function PreviewStreamDocumentView({
   onGone,
   onViewport,
   onPictureInPicture,
+  onStreamingChange,
   onRetry,
   onStreaming,
   onRecoverProcess,
-}: Omit<NativeStreamBridge, "compact"> & {
+}: Omit<NativeStreamBridge, "compact" | "onUnauthorized"> & {
   readonly configuration: string;
   readonly background: string;
   readonly compact: boolean;
+  /** False when the view should stop retrying and fail. */
+  readonly onUnauthorized: () => boolean;
   readonly onRetry: () => void;
   readonly onStreaming: () => void;
   readonly onRecoverProcess: () => boolean;
@@ -142,6 +152,7 @@ function PreviewStreamDocumentView({
     if (!active.current || failed.current) return;
     failed.current = true;
     webView.current?.injectJavaScript("window.T3PreviewStream?.stop(); true;");
+    onStreamingChange?.(false);
     setError(message);
     setStatus("error");
   };
@@ -177,6 +188,7 @@ function PreviewStreamDocumentView({
       view?.injectJavaScript("window.T3PreviewStream?.stop(); true;");
     };
   }, []);
+  useEffect(() => () => onStreamingChange?.(false), [onStreamingChange]);
   const processTerminated = () => {
     if (!active.current || failed.current) return;
     if (!onRecoverProcess()) fail("Browser viewer stopped. Reconnect to try again.");
@@ -211,7 +223,9 @@ function PreviewStreamDocumentView({
           if (message === null) return;
           switch (message.type) {
             case "unauthorized":
-              onUnauthorized();
+              if (!onUnauthorized()) {
+                fail("This session can't open the browser stream. Reconnect to try again.");
+              }
               return;
             case "gone":
               setGone(true);
@@ -231,6 +245,7 @@ function PreviewStreamDocumentView({
                 return;
               }
               setStatus(message.status);
+              onStreamingChange?.(message.status === "streaming");
               if (message.status === "streaming") onStreaming();
           }
         }}

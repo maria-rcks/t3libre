@@ -88,6 +88,8 @@ function BrowserPreviewScreen({
   const [foreground, setForeground] = useState(AppState.currentState !== "background");
   const [selectedTabId, setSelectedTabId] = useState(initialTabId);
   const [pictureInPicture, setPictureInPicture] = useState(NO_PICTURE_IN_PICTURE);
+  // Address bar commands only reach a page that is streaming.
+  const [streaming, setStreaming] = useState(false);
   const streamRef = useRef<PreviewStreamRef>(null);
   const { tabs, loaded } = useThreadServerBrowserTabs({ environmentId, threadId, enabled: true });
   const tab = tabs.find((entry) => entry.tabId === selectedTabId) ?? latestBrowserTab(tabs);
@@ -172,6 +174,7 @@ function BrowserPreviewScreen({
           <BrowserAddressBar
             key={tab.tabId}
             tab={tab}
+            ready={streaming}
             onCommand={(input) => streamRef.current?.command(input)}
           />
           {live ? (
@@ -182,6 +185,7 @@ function BrowserPreviewScreen({
               tabId={tab.tabId}
               streamRef={streamRef}
               onPictureInPicture={onPictureInPicture}
+              onStreamingChange={setStreaming}
             />
           ) : (
             <View className="flex-1" />
@@ -200,9 +204,11 @@ function BrowserPreviewScreen({
 
 function BrowserAddressBar({
   tab,
+  ready,
   onCommand,
 }: {
   readonly tab: PreviewSessionSnapshot;
+  readonly ready: boolean;
   readonly onCommand: PreviewStreamRef["command"];
 }) {
   const url = browserTabUrl(tab);
@@ -222,17 +228,18 @@ function BrowserAddressBar({
       <ControlPill
         icon="chevron.left"
         accessibilityLabel="Back"
-        disabled={!tab.canGoBack}
+        disabled={!ready || !tab.canGoBack}
         onPress={() => onCommand({ type: "history", delta: -1 })}
       />
       <ControlPill
         icon="chevron.right"
         accessibilityLabel="Forward"
-        disabled={!tab.canGoForward}
+        disabled={!ready || !tab.canGoForward}
         onPress={() => onCommand({ type: "history", delta: 1 })}
       />
       <TextInput
         accessibilityLabel="Address"
+        editable={ready}
         value={draft ?? url}
         onChangeText={setDraft}
         onBlur={() => setDraft(null)}
@@ -249,6 +256,7 @@ function BrowserAddressBar({
       <ControlPill
         icon="arrow.clockwise"
         accessibilityLabel="Reload page"
+        disabled={!ready}
         onPress={() => onCommand({ type: "reload" })}
       />
     </View>
@@ -261,12 +269,14 @@ function OpenBrowserPreview({
   tabId,
   streamRef,
   onPictureInPicture,
+  onStreamingChange,
 }: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly tabId: string;
   readonly streamRef: RefObject<PreviewStreamRef | null>;
   readonly onPictureInPicture: (state: PreviewPictureInPictureState, detail?: string) => void;
+  readonly onStreamingChange: (streaming: boolean) => void;
 }) {
   const { themeVariables } = useAppearancePreferences();
   const { access, error, refresh } = usePreviewStreamAccess(environmentId);
@@ -284,6 +294,7 @@ function OpenBrowserPreview({
       background={themeVariables["--color-sheet-solid"]}
       onUnauthorized={onUnauthorized}
       onPictureInPicture={onPictureInPicture}
+      onStreamingChange={onStreamingChange}
     />
   ) : (
     <View className="flex-1 items-center justify-center gap-4 px-6">

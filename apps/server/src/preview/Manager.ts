@@ -126,6 +126,7 @@ const buildLoadingSnapshot = (input: {
   readonly viewport: PreviewViewportSetting;
   readonly profileId?: string | undefined;
   readonly runtime?: PreviewRuntime | undefined;
+  readonly reveal?: boolean | undefined;
   readonly updatedAt: string;
 }): PreviewSessionSnapshot => ({
   threadId: input.threadId,
@@ -136,6 +137,7 @@ const buildLoadingSnapshot = (input: {
   viewport: input.viewport,
   ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
   ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
+  ...(input.reveal === undefined ? {} : { reveal: input.reveal }),
   updatedAt: input.updatedAt,
 });
 
@@ -145,6 +147,7 @@ const buildIdleSnapshot = (input: {
   readonly viewport: PreviewViewportSetting;
   readonly profileId?: string | undefined;
   readonly runtime?: PreviewRuntime | undefined;
+  readonly reveal?: boolean | undefined;
   readonly updatedAt: string;
 }): PreviewSessionSnapshot => ({
   threadId: input.threadId,
@@ -155,6 +158,7 @@ const buildIdleSnapshot = (input: {
   viewport: input.viewport,
   ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
   ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
+  ...(input.reveal === undefined ? {} : { reveal: input.reveal }),
   updatedAt: input.updatedAt,
 });
 
@@ -242,6 +246,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             viewport,
             profileId: input.profileId,
             runtime: input.runtime,
+            reveal: input.reveal,
             updatedAt,
           })
         : buildIdleSnapshot({
@@ -250,6 +255,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             viewport,
             profileId: input.profileId,
             runtime: input.runtime,
+            reveal: input.reveal,
             updatedAt,
           });
       yield* SynchronizedRef.modifyEffect(stateRef, (state) =>
@@ -301,6 +307,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             ...(session.snapshot.runtime === undefined
               ? {}
               : { runtime: session.snapshot.runtime }),
+            ...(session.snapshot.reveal === undefined ? {} : { reveal: session.snapshot.reveal }),
             updatedAt,
           };
           return {
@@ -338,6 +345,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             ? {}
             : { profileId: session.snapshot.profileId }),
           ...(session.snapshot.runtime === undefined ? {} : { runtime: session.snapshot.runtime }),
+          ...(session.snapshot.reveal === undefined ? {} : { reveal: session.snapshot.reveal }),
           updatedAt,
         };
         const emit: PreviewEventDraft =

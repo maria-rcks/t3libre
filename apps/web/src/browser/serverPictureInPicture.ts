@@ -19,6 +19,9 @@ import { readPreviewStreamAccess } from "~/state/previewStream";
 /** Frames cap for the floating window, in device px. */
 const STREAM_CAP_PX = 1280;
 const PLACEHOLDER = { width: 640, height: 400 };
+// Refused upgrades retry with backoff; past the limit the window closes.
+const UNAUTHORIZED_RETRY_BASE_MS = 1_000;
+const UNAUTHORIZED_RETRY_LIMIT = 5;
 
 interface WebKitVideo {
   webkitSupportsPresentationMode?: (mode: string) => boolean;
@@ -114,6 +117,8 @@ export async function openServerPictureInPicture(input: {
   const painter = createPreviewFramePainter(canvas);
   let client: PreviewStreamClient | null = null;
   let stopped = false;
+  let refusals = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
   const connect = async (refresh: boolean) => {
     const access = await readPreviewStreamAccess(input.environmentId, refresh);
     if (stopped) return;
@@ -130,10 +135,25 @@ export async function openServerPictureInPicture(input: {
         maxHeight: STREAM_CAP_PX,
       },
       {
-        onFrame: painter.paint,
+        onFrame: (jpeg) => {
+          refusals = 0;
+          painter.paint(jpeg);
+        },
         onViewport: () => undefined,
         onConnectedChange: () => undefined,
-        onUnauthorized: () => void connect(true),
+        onUnauthorized: () => {
+          if (stopped) return;
+          if (refusals >= UNAUTHORIZED_RETRY_LIMIT) {
+            if (active?.video === video) closeServerPictureInPicture();
+            return;
+          }
+          const delay = UNAUTHORIZED_RETRY_BASE_MS * 2 ** refusals;
+          refusals += 1;
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            void connect(true);
+          }, delay);
+        },
         onGone: () => {
           if (active?.video === video) closeServerPictureInPicture();
         },
@@ -152,6 +172,7 @@ export async function openServerPictureInPicture(input: {
     video,
     stop: () => {
       stopped = true;
+      if (retryTimer !== null) clearTimeout(retryTimer);
       client?.stop();
       painter.stop();
       video.removeEventListener("leavepictureinpicture", onLeave);

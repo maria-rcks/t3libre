@@ -15,10 +15,8 @@ import {
   resolveBrowserDefaults,
 } from "~/browser/browserDefaults";
 import { BrowserSettingsReadError } from "~/browser/openFileInPreview";
+import { previewRuntimeFor } from "~/browser/previewRuntime";
 import { applyPreviewServerSnapshot, rememberPreviewUrl } from "~/previewStateStore";
-
-import { trackLocalServerTabOpen } from "./localServerTabs";
-import { previewBridge } from "./previewBridge";
 
 interface OpenPreviewSessionInput<E> {
   openPreview: (input: {
@@ -44,22 +42,17 @@ export async function openPreviewSession<E>(
   if (defaults instanceof BrowserSettingsReadError) {
     return AsyncResult.failure(Cause.fail(defaults));
   }
-  const open = () =>
-    input.openPreview({
-      environmentId: input.threadRef.environmentId,
-      input: {
-        threadId: input.threadRef.threadId,
-        ...(input.url === undefined ? {} : { url: input.url }),
-        viewport: input.viewport ?? browserDefaultOpenViewport(defaults),
-        profileId: input.profileId ?? browserDefaultOpenProfileId(defaults),
-        // Only Electron can host a desktop tab; every other client asks the
-        // environment to run the page in its own browser.
-        ...(previewBridge ? {} : { runtime: "server" as const }),
-      },
-    });
-  const result = previewBridge
-    ? await open()
-    : await trackLocalServerTabOpen(input.threadRef, open);
+  const runtime = previewRuntimeFor(input.threadRef.environmentId);
+  const result = await input.openPreview({
+    environmentId: input.threadRef.environmentId,
+    input: {
+      threadId: input.threadRef.threadId,
+      ...(input.url === undefined ? {} : { url: input.url }),
+      viewport: input.viewport ?? browserDefaultOpenViewport(defaults),
+      profileId: input.profileId ?? browserDefaultOpenProfileId(defaults),
+      ...(runtime === undefined ? {} : { runtime }),
+    },
+  });
   if (result._tag === "Failure") {
     return result;
   }
