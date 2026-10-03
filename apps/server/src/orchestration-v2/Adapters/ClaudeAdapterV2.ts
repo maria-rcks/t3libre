@@ -1869,6 +1869,8 @@ function isClaudeSubagentAsyncLaunchAck(output: ClaudeNativeToolOutput): boolean
   return claudeSubagentResultText(output).startsWith("Async agent launched successfully.");
 }
 
+const WEB_FETCH_SNIPPET_MAX_CHARS = 8_000;
+
 function webSearchPatternsFromClaudeTool(input: {
   readonly toolInput: ClaudeNativeToolInput;
   readonly output: ClaudeNativeToolOutput;
@@ -3791,7 +3793,22 @@ export function makeClaudeAdapterV2(
                       ...(webSearchPatterns.length === 0
                         ? {}
                         : { patterns: [...webSearchPatterns] }),
-                      ...(webSearchResults.length === 0 ? {} : { results: [...webSearchResults] }),
+                      ...(webSearchResults.length > 0
+                        ? { results: [...webSearchResults] }
+                        : outputText.trim().length > 0
+                          ? {
+                              // WebFetch returns page text, not search hits. Keep a
+                              // bounded preview so the row has something to show.
+                              results: [
+                                {
+                                  ...(webSearchPatterns[0] === undefined
+                                    ? {}
+                                    : { url: webSearchPatterns[0].trim() }),
+                                  snippet: outputText.slice(0, WEB_FETCH_SNIPPET_MAX_CHARS),
+                                },
+                              ],
+                            }
+                          : {}),
                     }
                   : {
                       ...itemBase,
