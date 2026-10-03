@@ -124,8 +124,9 @@ export function isRestartNoteSource(
 /**
  * The note a restart continuation of `source` carries, and whether the turn it
  * continues had settled (the note is then the whole prompt). A continuation cut
- * before its attempt reached the provider never delivered its own note, so the
- * next continuation carries it forward from the run it continued.
+ * before its provider turn completed may not have delivered its own note:
+ * adapters can announce a running turn before accepting the prompt. Carry the
+ * note forward until a completed turn proves delivery.
  */
 export function restartContinuationNote(
   source: OrchestrationV2Run,
@@ -137,7 +138,9 @@ export function restartContinuationNote(
   const visited = new Set([current.id]);
   while (
     current.restartContinuationOfRunId !== undefined &&
-    !providerTurns.some((turn) => turn.runAttemptId === current.activeAttemptId)
+    !providerTurns.some(
+      (turn) => turn.runAttemptId === current.activeAttemptId && turn.status === "completed",
+    )
   ) {
     const previous = runs.find((candidate) => candidate.id === current.restartContinuationOfRunId);
     if (previous === undefined || visited.has(previous.id)) break;
@@ -171,8 +174,8 @@ export function isRestartNoteContinuation(
  * Work cancelled by a restart that the run's provider thread has not been told
  * about yet. The note belongs to the provider thread that lost the work: turns
  * on another provider (after a switch) neither owe it nor deliver it. A later
- * run on the same provider thread delivers it once its attempt reaches the
- * provider, so the pending set is derived rather than cleared. Compactions and
+ * completed turn on the same provider thread proves delivery, so the pending
+ * set is derived rather than cleared. Compactions and
  * resumed turns carry no note, and a rolled-back run left native history, so
  * none of them counts as delivery. A note continuation's own prompt is the note.
  */
@@ -205,7 +208,7 @@ export function pendingRestartCancelledBackgroundWork(input: {
   const providerThreadId = input.run.providerThreadId;
   const deliveredAttemptIds = new Set(
     input.providerTurns
-      .filter((turn) => turn.providerThreadId === providerThreadId)
+      .filter((turn) => turn.providerThreadId === providerThreadId && turn.status === "completed")
       .map((turn) => turn.runAttemptId),
   );
   const sameThread = input.runs.filter((run) => run.providerThreadId === providerThreadId);

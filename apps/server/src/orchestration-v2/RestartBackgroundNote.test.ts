@@ -193,4 +193,23 @@ it("counts a prompted mid-turn or chained continuation as delivering the note", 
     settled: false,
   });
   assert.isTrue(isRestartNoteContinuation(chained, [cut, unstarted, chained], [cutTurn]));
+  // Claude announces running before accepting the prompt. A second restart
+  // can cancel that turn without delivering anything to the provider.
+  for (const status of ["running", "cancelled"] as const) {
+    const turns = [cutTurn, { ...turnFor(unstarted), status }];
+    assert.deepEqual(restartContinuationNote(unstarted, [cut, unstarted], turns), {
+      work: lost,
+      settled: false,
+    });
+    assert.deepEqual(
+      pendingRestartCancelledBackgroundWork({
+        runs: [cut, unstarted, later],
+        providerTurns: turns,
+        compactionMessageIds: new Set(),
+        run: later,
+        runAttemptIds: [later.activeAttemptId!],
+      }),
+      lost,
+    );
+  }
 });

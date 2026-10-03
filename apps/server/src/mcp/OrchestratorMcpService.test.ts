@@ -11,10 +11,12 @@ import {
   type OrchestrationV2ThreadProjection,
   type ServerProvider,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
+import { OrchestratorProjectionError } from "../orchestration-v2/Orchestrator.ts";
 import type { ProviderAdapterV2Shape } from "../orchestration-v2/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -52,7 +54,22 @@ describe("OrchestratorMcpService", () => {
       } as unknown as OrchestrationV2ThreadProjection;
       const childProjection = {
         thread: { id: childThreadId },
-        runs: [{ id: childRunId, ordinal: 1, status: "completed" }],
+        runs: [
+          {
+            id: childRunId,
+            ordinal: 1,
+            status: "completed",
+            startedAt: DateTime.makeUnsafe("2026-10-03T10:00:00Z"),
+            completedAt: DateTime.makeUnsafe("2026-10-03T10:10:00Z"),
+          },
+          {
+            id: RunId.make("run:mcp-ack-continuation"),
+            ordinal: 2,
+            status: "failed",
+            startedAt: DateTime.makeUnsafe("2026-10-03T10:02:00Z"),
+            completedAt: DateTime.makeUnsafe("2026-10-03T10:05:00Z"),
+          },
+        ],
         contextTransfers: [],
         messages: [],
         subagents: [],
@@ -126,6 +143,8 @@ describe("OrchestratorMcpService", () => {
         const result = yield* service.taskStatus(scope, taskId);
         assert.equal(result.status, "completed");
         assert.equal(result.summary, "terminal result");
+        assert.equal(result.latestTerminalRunId, childRunId);
+        assert.equal(result.latestTerminalStatus, "completed");
         const commandIds = yield* Ref.get(acknowledgementCommandIds);
         assert.equal(commandIds.length, 2);
         assert.notEqual(commandIds[0], commandIds[1]);
@@ -140,6 +159,7 @@ describe("OrchestratorMcpService", () => {
       const taskId = NodeId.make("node:mcp-restart-task");
       const dispatched = yield* Ref.make(0);
       let awaitsRestart = true;
+      let readFails = true;
       const parentProjection = {
         thread: { id: parentThreadId },
         runs: [],
@@ -172,7 +192,10 @@ describe("OrchestratorMcpService", () => {
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
             Effect.succeed(threadId === parentThreadId ? parentProjection : childProjection),
-          delegatedTaskResultPending: () => Effect.sync(() => awaitsRestart),
+          delegatedTaskResultPending: () =>
+            readFails
+              ? Effect.fail(new OrchestratorProjectionError({ threadId: childThreadId }))
+              : Effect.succeed(awaitsRestart),
           dispatch: () => Ref.update(dispatched, (count) => count + 1).pipe(Effect.as({} as never)),
         }),
         Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
@@ -192,6 +215,10 @@ describe("OrchestratorMcpService", () => {
 
       yield* Effect.gen(function* () {
         const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const failed = yield* service.taskStatus(scope, taskId).pipe(Effect.flip);
+        assert.equal(failed.code, "orchestration_error");
+        assert.equal(yield* Ref.get(dispatched), 0);
+        readFails = false;
         const held = yield* service.taskStatus(scope, taskId);
         assert.equal(held.status, "running");
         assert.equal(held.workState, "working");

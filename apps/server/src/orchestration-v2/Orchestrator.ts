@@ -252,7 +252,9 @@ export interface OrchestratorV2Shape {
    * Whether a delegated child's apparent result is not final yet: a restart
    * continuation is pending, or the child is working again.
    */
-  readonly delegatedTaskResultPending: (childThreadId: ThreadId) => Effect.Effect<boolean>;
+  readonly delegatedTaskResultPending: (
+    childThreadId: ThreadId,
+  ) => Effect.Effect<boolean, OrchestratorProjectionError>;
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<OrchestratorV2DispatchResult, OrchestratorV2Error>;
@@ -9862,7 +9864,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (progress.state !== "result_available") return true;
       if (progress.resultRun === undefined) return false;
       return yield* childAwaitsRestartContinuation(child.runs, progress.resultRun);
-    }).pipe(Effect.orElseSucceed(() => false));
+    }).pipe(
+      Effect.mapError(
+        (cause) => new OrchestratorProjectionError({ threadId: childThreadId, cause }),
+      ),
+    );
 
   const recoverDelegatedTask = (threadId: ThreadId, sourceRunId: RunId) =>
     Effect.gen(function* () {

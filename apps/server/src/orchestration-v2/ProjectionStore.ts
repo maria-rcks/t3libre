@@ -3812,13 +3812,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     WHERE latest.thread_id = ${threadId}
                     ORDER BY latest.ordinal DESC LIMIT 1
                   )
-                  -- A background roster belongs to the run that ended last
-                  -- (ranAfter), which a queued or resumed run can outrank.
+                  -- Retain the latest run for each provider thread with lost
+                  -- background work, including owners used before a handoff.
                   OR (
                     run.run_id = (
                       SELECT ended.run_id FROM orchestration_v2_projection_runs AS ended
                       WHERE ended.thread_id = ${threadId}
-                        AND ended.status != 'queued'
+                        AND ended.provider_thread_id = run.provider_thread_id
+                        AND ended.status NOT IN ('queued', 'rolled_back')
                       ORDER BY ended.completed_at IS NULL DESC, ended.completed_at DESC,
                         ended.ordinal DESC
                       LIMIT 1
@@ -3826,6 +3827,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     AND EXISTS (
                       SELECT 1 FROM orchestration_v2_projection_provider_threads AS roster
                       WHERE roster.thread_id = ${threadId}
+                        AND roster.provider_thread_id = run.provider_thread_id
                         AND CASE WHEN json_valid(roster.payload_json)
                           THEN json_array_length(roster.payload_json, '$.pendingBackgroundTasks') > 0
                           ELSE 0 END

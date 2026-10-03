@@ -4397,6 +4397,36 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
         released && projectThreadAwarenessV2({ environmentId, project, thread: released });
       assert.equal(state?.phase, "completed");
       assert.equal(state?.updatedAt, DateTime.formatIso(releasedAt));
+
+      // A later provider must not hide this owner's roster from restart recovery.
+      yield* store.apply({
+        id: EventId.make("event:held-completion:monitor-restarted"),
+        type: "provider-thread.updated",
+        threadId,
+        occurredAt: releasedAt,
+        payload: { ...providerThread, updatedAt: releasedAt },
+      });
+      const newerRunId = RunId.make("run:held-completion:new-provider");
+      yield* store.apply({
+        id: EventId.make("event:held-completion:new-provider"),
+        type: "run.created",
+        threadId,
+        runId: newerRunId,
+        occurredAt: releasedAt,
+        payload: {
+          ...(yield* store.getThreadProjection(threadId)).runs[0]!,
+          id: newerRunId,
+          ordinal: 2,
+          providerThreadId: ProviderThreadId.make("provider-thread:held-completion:new-provider"),
+          requestedAt: releasedAt,
+          startedAt: releasedAt,
+          completedAt: releasedAt,
+        },
+      });
+      assert.deepEqual(
+        (yield* store.getRuntimeRecoveryProjection(threadId)).runs.map((run) => run.id),
+        [runId, newerRunId],
+      );
     }),
   );
 });

@@ -52,6 +52,7 @@ import {
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
+import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -412,7 +413,10 @@ function latestTerminalResultRun(
         run.status !== "rolled_back" &&
         (run.id === delegatedRun?.id || run.startedAt !== null),
     )
-    .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+    .reduce<OrchestrationV2Run | undefined>(
+      (latest, run) => (latest === undefined || runRanAfter(run, latest) ? run : latest),
+      undefined,
+    );
 }
 
 function canExposeTaskRunResult(run: OrchestrationV2Run | undefined): run is OrchestrationV2Run {
@@ -1060,7 +1064,9 @@ const make = Effect.gen(function* () {
       const heldForRestart =
         task.result === null &&
         progress.state === "result_available" &&
-        (yield* threadManagement.delegatedTaskResultPending(task.childThreadId));
+        (yield* threadManagement
+          .delegatedTaskResultPending(task.childThreadId)
+          .pipe(Effect.mapError(threadManagementFailure)));
       const workState =
         task.result !== null ? "result_available" : heldForRestart ? "working" : progress.state;
       const status =
