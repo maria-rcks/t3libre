@@ -4315,15 +4315,22 @@ export default function ChatView(props: ChatViewProps) {
           currentDraft.projectId !== originalDraft.projectId
         )
           return;
-        // Scratch projects are machine-local, so move their logical mapping too.
-        setLogicalProjectDraftThreadId(
-          activeProjectIsScratch
-            ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
-            : originalDraft.logicalProjectKey,
-          scopeProjectRef(target.environmentId, project.id),
-          draftId,
-          { environmentSelection: "manual", loadBalancedEnvironmentId: null },
-        );
+        const projectRef = scopeProjectRef(target.environmentId, project.id);
+        if (activeProjectIsScratch) {
+          // Scratch projects are machine-local, so move their logical mapping too.
+          setLogicalProjectDraftThreadId(
+            deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
+            projectRef,
+            draftId,
+            { environmentSelection: "manual", loadBalancedEnvironmentId: null },
+          );
+        } else {
+          setDraftThreadContext(draftId, {
+            projectRef,
+            environmentSelection: "manual",
+            loadBalancedEnvironmentId: null,
+          });
+        }
       };
       const finish = () => {
         if (environmentChangeRef.current === request) {
@@ -4358,6 +4365,7 @@ export default function ChatView(props: ChatViewProps) {
       openScratchProject,
       projectGroupingSettings,
       sendInFlightRef,
+      setDraftThreadContext,
       setLogicalProjectDraftThreadId,
     ],
   );
