@@ -185,6 +185,7 @@ import { deletePendingAttachment, issueAttachmentUploadUrl } from "./assets/Atta
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import { readTurnItem } from "./orchestration-v2/turnItemQuery.ts";
 import { readWorkflowScript } from "./orchestration-v2/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -1800,6 +1801,22 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,
             readWorkflowScript({ scriptPath: input.scriptPath }),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_V2_WS_METHODS.getTurnItem,
+            readTurnItem(input).pipe(
+              Effect.provideService(SqlClient.SqlClient, sql),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationV2GetThreadProjectionError({
+                    threadId: input.threadId,
+                    message: "Failed to load turn item",
+                    cause,
+                  }),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_V2_WS_METHODS.getTurnDiff]: (input) =>
