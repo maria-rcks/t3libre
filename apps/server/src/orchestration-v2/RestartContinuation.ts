@@ -107,7 +107,7 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
     const messageId = MessageId.make(`message:restart-continuation:${input.sourceRunId}`);
     const projection = yield* threads.getThreadRecords(
       input.threadId,
-      ["messages", "runs", "providerTurns"],
+      ["messages", "runs", "providerTurns", "attempts"],
       { messageIds: [messageId] },
     );
     if (
@@ -152,7 +152,12 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       (message) => message.id === source.userMessageId,
     );
     if (sourceMessage !== undefined && isNativeMaintenanceCommand(sourceMessage)) return;
-    const note = restartContinuationNote(source, projection.runs, projection.providerTurns);
+    const note = restartContinuationNote(
+      source,
+      projection.runs,
+      projection.providerTurns,
+      projection.attempts,
+    );
     const noteText =
       note.work.length === 0 ? undefined : restartCancelledBackgroundWorkNote(note.work);
     yield* threads.dispatch({

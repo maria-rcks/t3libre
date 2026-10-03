@@ -54,7 +54,7 @@ it("keeps the note for the provider thread that lost the work across a provider 
       providerTurns: runs.filter((source) => source.id !== target.id).map(turnFor),
       compactionMessageIds: new Set(),
       run: target,
-      runAttemptIds: target.activeAttemptId === null ? [] : [target.activeAttemptId],
+      attempts: [{ id: target.activeAttemptId!, runId: target.id }],
     });
 
   // Codex never lost the work, so it neither receives nor consumes the note.
@@ -83,7 +83,7 @@ it("delivers a resumed queued run's note even after a higher-ordinal run", () =>
       providerTurns: [resumed, ranFirst].map(turnFor),
       compactionMessageIds: new Set(),
       run: next,
-      runAttemptIds: next.activeAttemptId === null ? [] : [next.activeAttemptId],
+      attempts: [{ id: next.activeAttemptId!, runId: next.id }],
     }),
     lost,
   );
@@ -150,7 +150,7 @@ it("does not repeat the note when a steer restarts the run on a new attempt", ()
       ],
       compactionMessageIds: new Set(),
       run: steered,
-      runAttemptIds,
+      attempts: runAttemptIds.map((id) => ({ id, runId: steered.id })),
     });
 
   // The first attempt reached the provider with the note; its replacement must not repeat it.
@@ -164,12 +164,13 @@ it("counts a prompted mid-turn or chained continuation as delivering the note", 
   const cutTurn = { ...turnFor(cut), status: "cancelled" as const };
   const continuation = run(2, claudeThread, { restartContinuationOfRunId: cut.id });
   // A turn cut mid-way that lost work is prompted with the note, not resumed natively.
-  assert.isTrue(isRestartNoteContinuation(continuation, [cut, continuation], [cutTurn]));
+  assert.isTrue(isRestartNoteContinuation(continuation, [cut, continuation], [cutTurn], []));
   assert.isFalse(
     isRestartNoteContinuation(
       continuation,
       [{ ...cut, restartCancelledBackgroundWork: [] }, continuation],
       [cutTurn],
+      [],
     ),
   );
   const later = run(3, claudeThread);
@@ -179,7 +180,7 @@ it("counts a prompted mid-turn or chained continuation as delivering the note", 
       providerTurns: [cutTurn, ...(delivered ? [turnFor(continuation)] : [])],
       compactionMessageIds: new Set(),
       run: later,
-      runAttemptIds: [later.activeAttemptId!],
+      attempts: [{ id: later.activeAttemptId!, runId: later.id }],
     });
   assert.deepEqual(pending(true), []);
   // A continuation that never reached the provider delivered nothing.
@@ -188,16 +189,16 @@ it("counts a prompted mid-turn or chained continuation as delivering the note", 
   // Its own continuation carries the original note forward.
   const unstarted = { ...continuation, status: "cancelled" as const };
   const chained = run(3, claudeThread, { restartContinuationOfRunId: unstarted.id });
-  assert.deepEqual(restartContinuationNote(unstarted, [cut, unstarted], [cutTurn]), {
+  assert.deepEqual(restartContinuationNote(unstarted, [cut, unstarted], [cutTurn], []), {
     work: lost,
     settled: false,
   });
-  assert.isTrue(isRestartNoteContinuation(chained, [cut, unstarted, chained], [cutTurn]));
+  assert.isTrue(isRestartNoteContinuation(chained, [cut, unstarted, chained], [cutTurn], []));
   // Claude announces running before accepting the prompt. A second restart
   // can cancel that turn without delivering anything to the provider.
   for (const status of ["running", "cancelled"] as const) {
     const turns = [cutTurn, { ...turnFor(unstarted), status }];
-    assert.deepEqual(restartContinuationNote(unstarted, [cut, unstarted], turns), {
+    assert.deepEqual(restartContinuationNote(unstarted, [cut, unstarted], turns, []), {
       work: lost,
       settled: false,
     });
@@ -207,9 +208,30 @@ it("counts a prompted mid-turn or chained continuation as delivering the note", 
         providerTurns: turns,
         compactionMessageIds: new Set(),
         run: later,
-        runAttemptIds: [later.activeAttemptId!],
+        attempts: [{ id: later.activeAttemptId!, runId: later.id }],
       }),
       lost,
     );
   }
+
+  // A steer replaced the attempt after its completed turn delivered the note.
+  const steered = { ...unstarted, activeAttemptId: RunAttemptId.make("attempt:replacement") };
+  const attempts = [{ id: unstarted.activeAttemptId!, runId: steered.id }];
+  const turns = [
+    cutTurn,
+    turnFor(unstarted),
+    { ...turnFor(steered), status: "cancelled" as const },
+  ];
+  assert.deepEqual(restartContinuationNote(steered, [cut, steered], turns, attempts).work, []);
+  assert.isFalse(isRestartNoteContinuation(chained, [cut, steered, chained], turns, attempts));
+  assert.deepEqual(
+    pendingRestartCancelledBackgroundWork({
+      runs: [cut, steered, later],
+      providerTurns: turns,
+      compactionMessageIds: new Set(),
+      run: later,
+      attempts,
+    }),
+    [],
+  );
 });

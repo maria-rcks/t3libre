@@ -3,11 +3,13 @@ import type {
   OrchestrationV2ProviderTurn,
   OrchestrationV2RestartCancelledBackgroundWork,
   OrchestrationV2Run,
+  OrchestrationV2RunAttempt,
   OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 
 type Work = OrchestrationV2RestartCancelledBackgroundWork;
+type Attempt = Pick<OrchestrationV2RunAttempt, "id" | "runId">;
 
 const MAX_LABEL_LENGTH = 160;
 
@@ -132,15 +134,21 @@ export function restartContinuationNote(
   source: OrchestrationV2Run,
   runs: ReadonlyArray<OrchestrationV2Run>,
   providerTurns: ReadonlyArray<Pick<ProviderTurnState, "runAttemptId" | "status">>,
+  attempts: ReadonlyArray<Attempt>,
 ): { readonly work: ReadonlyArray<Work>; readonly settled: boolean } {
+  const completedAttempts = new Set(
+    providerTurns.filter((turn) => turn.status === "completed").map((turn) => turn.runAttemptId),
+  );
+  const completedRuns = new Set(
+    attempts.filter((attempt) => completedAttempts.has(attempt.id)).map((attempt) => attempt.runId),
+  );
   let current = source;
   let work = current.restartCancelledBackgroundWork ?? [];
   const visited = new Set([current.id]);
   while (
     current.restartContinuationOfRunId !== undefined &&
-    !providerTurns.some(
-      (turn) => turn.runAttemptId === current.activeAttemptId && turn.status === "completed",
-    )
+    !completedRuns.has(current.id) &&
+    !(current.activeAttemptId !== null && completedAttempts.has(current.activeAttemptId))
   ) {
     const previous = runs.find((candidate) => candidate.id === current.restartContinuationOfRunId);
     if (previous === undefined || visited.has(previous.id)) break;
@@ -160,13 +168,15 @@ export function isRestartNoteContinuation(
   run: Pick<OrchestrationV2Run, "restartContinuationOfRunId">,
   runs: ReadonlyArray<OrchestrationV2Run>,
   providerTurns: ReadonlyArray<Pick<ProviderTurnState, "runAttemptId" | "status">>,
+  attempts: ReadonlyArray<Attempt>,
 ): boolean {
   const source =
     run.restartContinuationOfRunId === undefined
       ? undefined
       : runs.find((candidate) => candidate.id === run.restartContinuationOfRunId);
   return (
-    source !== undefined && restartContinuationNote(source, runs, providerTurns).work.length > 0
+    source !== undefined &&
+    restartContinuationNote(source, runs, providerTurns, attempts).work.length > 0
   );
 }
 
@@ -193,8 +203,8 @@ export function pendingRestartCancelledBackgroundWork(input: {
     | "restartContinuationOfRunId"
     | "activeAttemptId"
   >;
-  /** Every attempt id of `run`; a steer replaces the attempt but not the run. */
-  readonly runAttemptIds: ReadonlyArray<OrchestrationV2Run["activeAttemptId"] & string>;
+  /** Include earlier attempts: a steer replaces the attempt but not the run. */
+  readonly attempts: ReadonlyArray<Attempt>;
 }): ReadonlyArray<Work> {
   const isCompaction = (run: typeof input.run) => input.compactionMessageIds.has(run.userMessageId);
   // The current run prepends the note unless it is a compaction or a
@@ -217,15 +227,21 @@ export function pendingRestartCancelledBackgroundWork(input: {
       candidate.id !== input.run.id &&
       candidate.activeAttemptId !== null &&
       candidate.status !== "rolled_back" &&
-      deliveredAttemptIds.has(candidate.activeAttemptId) &&
+      (deliveredAttemptIds.has(candidate.activeAttemptId) ||
+        input.attempts.some(
+          (attempt) => attempt.runId === candidate.id && deliveredAttemptIds.has(attempt.id),
+        )) &&
       !isCompaction(candidate) &&
       (candidate.restartContinuationOfRunId === undefined ||
-        isRestartNoteContinuation(candidate, input.runs, input.providerTurns)),
+        isRestartNoteContinuation(candidate, input.runs, input.providerTurns, input.attempts)),
   );
   // A steer restarts this run on a new attempt: an earlier attempt that already
   // reached the provider delivered the note, so the replacement must not repeat it.
-  const alreadyDelivered = input.runAttemptIds.some(
-    (attemptId) => attemptId !== input.run.activeAttemptId && deliveredAttemptIds.has(attemptId),
+  const alreadyDelivered = input.attempts.some(
+    (attempt) =>
+      attempt.runId === input.run.id &&
+      attempt.id !== input.run.activeAttemptId &&
+      deliveredAttemptIds.has(attempt.id),
   );
   if (alreadyDelivered) return [];
   return sameThread
