@@ -2669,7 +2669,9 @@ export default function ChatView(props: ChatViewProps) {
       // never group as one logical project. Offer every machine that has one.
       for (const environment of environments) {
         const scratchRoot = scratchWorkspaceRootFor(environment.environmentId);
-        if (scratchRoot === null) continue;
+        // Keep the current machine visible so an offline source can still switch away.
+        if (scratchRoot === null && environment.environmentId !== activeProject.environmentId)
+          continue;
         const scratchProject =
           environment.environmentId === activeProject.environmentId
             ? activeProject
