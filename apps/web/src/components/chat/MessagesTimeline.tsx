@@ -44,6 +44,7 @@ import {
   workEntryViewedImagePath,
 } from "@t3tools/client-runtime/work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
+import { turnItemHasDetail } from "@t3tools/client-runtime/work-log/item-detail";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import {
   subagentGroupSummary,
@@ -5076,10 +5077,20 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             viewedImage ? viewedImagePath : null,
           )
       : null;
+  // Projected rows expand to the item inspector, so only offer a disclosure
+  // when it has something to show, even if that output still has to load.
   const canExpandProjectedItem =
     plainOutput !== undefined
       ? Boolean(plainOutput || viewedImage || workEntry.questionAnswer)
-      : canExpand || workEntry.projectedItem !== undefined;
+      : workEntry.projectedItem === undefined
+        ? canExpand
+        : isReasoning
+          ? Boolean(workEntry.detail?.trim())
+          : Boolean(
+              viewedImage ||
+              workEntry.questionAnswer ||
+              turnItemHasDetail(workEntry.projectedItem.item),
+            );
   // Reserve destructive row styling for severe failures, not routine tool errors.
   const iconWrapperClass = cn(
     "flex size-4 items-center justify-center",

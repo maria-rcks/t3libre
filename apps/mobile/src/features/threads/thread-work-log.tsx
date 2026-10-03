@@ -50,9 +50,12 @@ import { cn } from "../../lib/cn";
 import { THREAD_WORK_ROW_MIN_HEIGHT, type deriveThreadWorkLogSizing } from "../../lib/layout";
 import {
   type AgentSpawnSummary,
+  formatItemFullDetail,
   type ThreadFeedActivity,
   workEntryRowLabel,
 } from "../../lib/threadActivity";
+import { turnItemOutputText } from "@t3tools/client-runtime/work-log/item-detail";
+import { useTurnItemDetail } from "../../state/queries";
 import {
   resolveThreadWorkGroupInitialScroll,
   shouldFollowThreadWorkGroupAppend,
@@ -788,6 +791,11 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
 ) {
   const { row, expanded } = props;
   const navigation = useNavigation();
+  const fetchedDetail = useTurnItemDetail(
+    expanded && row.fetchesDetail
+      ? { environmentId: props.environmentId, row: row.projectedItem }
+      : null,
+  );
   const failureItem = row.projectedItem.item;
   if (failureItem.type === "error" && failureItem.status === "failed") {
     const warning = failureItem.failure.class === "usage_limit";
@@ -861,7 +869,24 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
       : undefined;
   const canExpand = row.canExpand && notifiedSubagentThreadId === undefined;
   const reasoning = row.projectedItem.item.type === "reasoning" ? row.projectedItem.item : null;
-  const fullDetail = expanded && !reasoning ? row.getFullDetail() : null;
+  const fetchedItem = fetchedDetail.data?.item ?? null;
+  const fullDetail =
+    expanded && !reasoning
+      ? fetchedItem
+        ? formatItemFullDetail(row.projectedItem, fetchedItem)
+        : row.getFullDetail()
+      : null;
+  const fetchedOutput = !expanded
+    ? null
+    : fetchedItem
+      ? turnItemOutputText(fetchedItem)
+      : fetchedDetail.error
+        ? `Couldn't load output: ${fetchedDetail.error}`
+        : row.fetchesDetail
+          ? fetchedDetail.data
+            ? "Output is no longer available."
+            : "Loading output…"
+          : null;
   const viewedImagePath = workEntryViewedImagePath(row.workEntry);
   const toolPresentation = resolveWorkEntryToolPresentation(row.workEntry);
   const previewText = workEntryRowLabel(row.workEntry);
@@ -1036,6 +1061,14 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
                 {fullDetail}
               </Text>
             )}
+            {fetchedOutput ? (
+              <Text
+                selectable
+                className="mt-1.5 font-mono text-2xs leading-normal text-foreground-muted"
+              >
+                {fetchedOutput}
+              </Text>
+            ) : null}
           </ScrollView>
         </Animated.View>
       ) : null}

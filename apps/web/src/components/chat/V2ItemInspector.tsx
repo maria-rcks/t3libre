@@ -4,9 +4,16 @@ import type {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import {
+  formatToolValue,
+  turnItemNeedsDetailFetch,
+  turnItemOutputText,
+} from "@t3tools/client-runtime/work-log/item-detail";
+import * as DateTime from "effect/DateTime";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 
+import { useTurnItemDetail } from "../../state/queries";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { Button } from "../ui/button";
@@ -36,8 +43,57 @@ function StructuredValue({ value }: { readonly value: unknown }) {
   );
 }
 
+function SectionLabel({ children }: { readonly children: ReactNode }) {
+  return (
+    <p className="mb-1 text-3xs font-medium tracking-wide uppercase text-muted-foreground">
+      {children}
+    </p>
+  );
+}
+
+/** Output the timeline withheld, fetched while the row is open. */
+function ToolOutput(props: {
+  readonly text: string | null;
+  readonly pending: boolean;
+  readonly error: string | null;
+}) {
+  const body = props.text ? (
+    <StructuredValue value={props.text} />
+  ) : props.pending ? (
+    <p className="text-muted-foreground">Loading output…</p>
+  ) : props.error ? (
+    <p className="text-destructive">Couldn&apos;t load output: {props.error}</p>
+  ) : null;
+  if (body === null) return null;
+  return (
+    <div>
+      <SectionLabel>Output</SectionLabel>
+      {body}
+    </div>
+  );
+}
+
 export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspectorProps) {
-  const { item } = props.projectedItem;
+  const wireItem = props.projectedItem.item;
+  const detail = useTurnItemDetail(
+    turnItemNeedsDetailFetch(wireItem)
+      ? {
+          environmentId: props.environmentId,
+          threadId: props.projectedItem.sourceThreadId,
+          itemId: props.projectedItem.sourceItemId,
+          revision: DateTime.formatIso(wireItem.updatedAt),
+        }
+      : null,
+  );
+  const fetchedItem = detail.data?.item;
+  const item = fetchedItem?.type === wireItem.type ? fetchedItem : wireItem;
+  const output = (
+    <ToolOutput
+      text={turnItemOutputText(item)}
+      pending={item === wireItem && detail.isPending}
+      error={item === wireItem ? detail.error : null}
+    />
+  );
   const support = useV2ItemSupport({
     environmentId: props.environmentId,
     sourceThreadId: props.projectedItem.sourceThreadId,
@@ -62,6 +118,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       {item.type === "command_execution" ? (
         <div className="space-y-2">
           <StructuredValue value={item.input} />
+          {output}
           {item.exitCode !== undefined ? (
             <p className={item.exitCode === 0 ? "text-success" : "text-destructive"}>
               Process exited with code {item.exitCode}
@@ -106,6 +163,14 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
             </ul>
           ) : null}
         </div>
+      ) : null}
+
+      {item.type === "file_search" && item.pattern?.trim() && !item.results?.length ? (
+        <StructuredValue value={item.pattern} />
+      ) : null}
+
+      {item.type === "web_search" && item.patterns?.length && !item.results?.length ? (
+        <StructuredValue value={item.patterns.join("\n")} />
       ) : null}
 
       {item.type === "file_search" && item.results ? (
@@ -154,11 +219,14 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       ) : null}
 
       {item.type === "dynamic_tool" ? (
-        <div>
-          <p className="mb-1 text-3xs font-medium tracking-wide uppercase text-muted-foreground">
-            Input
-          </p>
-          <StructuredValue value={item.input} />
+        <div className="space-y-2">
+          {formatToolValue(item.input) ? (
+            <div>
+              <SectionLabel>Input</SectionLabel>
+              <StructuredValue value={formatToolValue(item.input)} />
+            </div>
+          ) : null}
+          {output}
         </div>
       ) : null}
 
@@ -168,6 +236,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       ) : null}
       {item.type === "notification" ? <StructuredValue value={item.detail} /> : null}
       {item.type === "system_notice" ? <StructuredValue value={item.message} /> : null}
+      {item.type === "error" ? <StructuredValue value={item.failure.message} /> : null}
       {item.type === "proposed_plan" ? <StructuredValue value={item.markdown} /> : null}
       {item.type === "todo_list" ? (
         <StructuredValue
