@@ -16,6 +16,8 @@ import * as Data from "effect/Data";
 import { AsyncResult } from "effect/unstable/reactivity";
 
 import { resolveAssetUrl } from "~/assets/assetUrls";
+import { trackLocalServerTabOpen } from "~/components/preview/localServerTabs";
+import { previewBridge } from "~/components/preview/previewBridge";
 import {
   applyPreviewServerSnapshot,
   isPreviewSupportedInRuntime,
@@ -62,18 +64,24 @@ export async function openUrlInPreview<E>(input: {
   if (defaults instanceof BrowserSettingsReadError) {
     return AsyncResult.failure(Cause.fail(defaults));
   }
-  const result = await input.openPreview({
-    environmentId: input.threadRef.environmentId,
-    input: {
-      threadId: input.threadRef.threadId,
-      url: input.url,
-      // Built here rather than via `openPreviewSession` because this path
-      // maps the result differently, so the configured defaults have to be
-      // applied explicitly or file/link opens would ignore them.
-      viewport: browserDefaultOpenViewport(defaults),
-      profileId: browserDefaultOpenProfileId(defaults),
-    },
-  });
+  const open = () =>
+    input.openPreview({
+      environmentId: input.threadRef.environmentId,
+      input: {
+        threadId: input.threadRef.threadId,
+        url: input.url,
+        // Built here rather than via `openPreviewSession` because this path
+        // maps the result differently, so the configured defaults have to be
+        // applied explicitly or file/link opens would ignore them.
+        viewport: browserDefaultOpenViewport(defaults),
+        profileId: browserDefaultOpenProfileId(defaults),
+        // Same runtime rule as `openPreviewSession`.
+        ...(previewBridge ? {} : { runtime: "server" as const }),
+      },
+    });
+  const result = previewBridge
+    ? await open()
+    : await trackLocalServerTabOpen(input.threadRef, open);
   return mapAtomCommandResult(result, (snapshot) => {
     applyPreviewServerSnapshot(input.threadRef, snapshot);
     rememberPreviewUrl(input.threadRef, input.url);

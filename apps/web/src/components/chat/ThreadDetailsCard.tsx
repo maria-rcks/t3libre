@@ -29,12 +29,17 @@ export function ThreadDetailsCard({
   const preferredPlacement = canvas
     ? resolveThreadDetailsCardLayout({
         container: canvas.container,
-        chat: canvas.layout.chat,
+        chat: canvas.cardChat,
         frame: null,
       })
     : null;
   const placement = canvas
-    ? resolveThreadDetailsCardLayout({ container: canvas.container, ...canvas.layout })
+    ? resolveThreadDetailsCardLayout({
+        container: canvas.container,
+        chat: canvas.cardChat,
+        frame: canvas.layout.frame,
+        overlapsDetailsCard: canvas.layout.overlapsDetailsCard,
+      })
     : null;
   const mode = placement ? "inline" : "popover";
   const inlineOpen = useRightPanelStore((state) =>
