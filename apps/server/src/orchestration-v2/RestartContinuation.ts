@@ -1,3 +1,4 @@
+import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   CommandId,
@@ -15,7 +16,6 @@ import { isNativeMaintenanceCommand } from "./Orchestrator.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import {
   isRestartNoteSource,
-  ranAfter,
   restartCancelledBackgroundWorkNote,
   restartContinuationNote,
 } from "./RestartBackgroundNote.ts";
@@ -38,7 +38,7 @@ export function restartContinuationRun(
   // Queued runs never started; recovery holds them behind the cut run.
   const run = projection.runs.reduce<OrchestrationV2Run | undefined>(
     (latest, candidate) =>
-      candidate.status !== "queued" && (!latest || ranAfter(candidate, latest))
+      candidate.status !== "queued" && (!latest || runRanAfter(candidate, latest))
         ? candidate
         : latest,
     undefined,
@@ -127,7 +127,7 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
     // prompt. Queued runs never started and stay held behind this one.
     if (
       projection.runs.some(
-        (run) => run.id !== source.id && run.status !== "queued" && ranAfter(run, source),
+        (run) => run.id !== source.id && run.status !== "queued" && runRanAfter(run, source),
       )
     )
       return;
@@ -181,7 +181,7 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       Effect.andThen(
         Effect.gen(function* () {
           const threads = yield* ThreadManagementService.ThreadManagementService;
-          yield* threads.recoverDelegatedTask(input.threadId);
+          yield* threads.recoverDelegatedTask(input.threadId, input.sourceRunId);
         }),
       ),
     ),

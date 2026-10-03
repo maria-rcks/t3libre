@@ -1,6 +1,7 @@
 import {
   latestExecutedRun,
   latestRootProviderFailure,
+  runRanAfter,
   usageLimitBlockedRun,
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
@@ -74,7 +75,7 @@ import { CommandPolicyV2, resolveMessageDispatchIntent } from "./CommandPolicy.t
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
 import { notificationTurnItem } from "./Notification.ts";
-import { isRestartNoteSource, ranAfter } from "./RestartBackgroundNote.ts";
+import { isRestartNoteSource } from "./RestartBackgroundNote.ts";
 import { isUndeliveredMailboxSteer } from "./NotificationMailbox.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
@@ -245,10 +246,13 @@ export interface OrchestratorV2Shape {
   readonly resumeQueuedRuns: Effect.Effect<number, OrchestratorV2Error>;
   /** Startup pass that settles delegated-task results and deliveries runs left behind. */
   readonly recoverDelegatedTasks: Effect.Effect<void>;
-  /** Settles a delegated child whose restart continuation declined to start. */
-  readonly recoverDelegatedTask: (threadId: ThreadId) => Effect.Effect<void>;
-  /** Whether a delegated child's apparent result waits on a restart continuation. */
-  readonly delegatedTaskAwaitsRestart: (childThreadId: ThreadId) => Effect.Effect<boolean>;
+  /** Settles a delegated child whose restart continuation of `sourceRunId` declined or failed. */
+  readonly recoverDelegatedTask: (threadId: ThreadId, sourceRunId: RunId) => Effect.Effect<void>;
+  /**
+   * Whether a delegated child's apparent result is not final yet: a restart
+   * continuation is pending, or the child is working again.
+   */
+  readonly delegatedTaskResultPending: (childThreadId: ThreadId) => Effect.Effect<boolean>;
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<OrchestratorV2DispatchResult, OrchestratorV2Error>;
@@ -4368,7 +4372,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           projection.thread.providerInstanceId !== source.providerInstanceId ||
           // Held queued runs never started; they wait behind the continuation.
           projection.runs.some(
-            (run) => run.id !== source.id && run.status !== "queued" && ranAfter(run, source),
+            (run) => run.id !== source.id && run.status !== "queued" && runRanAfter(run, source),
           )
         ) {
           // Preserve the current row so stale automatic deliveries receive an
@@ -8463,15 +8467,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
 
   /**
-   * A delegated child's result is held while its result run, or a later run a
-   * second restart cut before it started, still has a continuation pending.
+   * A delegated child's result is held while its result run, or a run after it
+   * that a second restart cut before it started, still has a continuation pending.
    */
   const childAwaitsRestartContinuation = (
     runs: ReadonlyArray<OrchestrationV2Run>,
     resultRun: OrchestrationV2Run,
+    settledContinuationOf?: RunId,
   ) =>
     Effect.forEach(
-      runs.filter((run) => run.id === resultRun.id || run.ordinal > resultRun.ordinal),
+      runs.filter(
+        (run) =>
+          run.id !== settledContinuationOf &&
+          (run.id === resultRun.id || runRanAfter(run, resultRun)),
+      ),
       awaitsRestartContinuation,
     ).pipe(Effect.map((pending) => pending.includes(true)));
 
@@ -8678,12 +8687,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
    * delegated_task.wake-policy handler rewrites the same subagent row under
    * that lock with a full-row payload, and unserialized writers clobber each
    * other (stale policy on the terminal row, or a terminal row regressed to
-   * running). `ignoreRestartContinuation` settles a restart-cancelled run whose
-   * continuation declined to start.
+   * running). `settledContinuationOf` names the restart continuation that just
+   * declined or failed, so its own still-running effect does not hold the child.
    */
   const finalizeAppOwnedSubagent = (
     childThreadId: ThreadId,
-    options?: { readonly ignoreRestartContinuation?: boolean },
+    options?: { readonly settledContinuationOf?: RunId },
   ) =>
     Effect.gen(function* () {
       const childControls = yield* projectionStore.getThreadRecords(
@@ -8708,8 +8717,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         return;
       }
       if (
-        options?.ignoreRestartContinuation !== true &&
-        (yield* childAwaitsRestartContinuation(childControls.runs, childRun))
+        yield* childAwaitsRestartContinuation(
+          childControls.runs,
+          childRun,
+          options?.settledContinuationOf,
+        )
       ) {
         return;
       }
@@ -9842,7 +9854,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     );
   });
 
-  const delegatedTaskAwaitsRestart = (childThreadId: ThreadId) =>
+  const delegatedTaskResultPending = (childThreadId: ThreadId) =>
     Effect.gen(function* () {
       const child = yield* projectionStore.getThreadRecords(
         childThreadId,
@@ -9850,17 +9862,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         { messageRoles: ["user"] },
       );
       const progress = delegatedTaskProgress(child);
-      if (progress.state !== "result_available" || progress.resultRun === undefined) return false;
+      // A caller's older read saw a result; newer work since then means it is not final.
+      if (progress.state !== "result_available") return true;
+      if (progress.resultRun === undefined) return false;
       return yield* childAwaitsRestartContinuation(child.runs, progress.resultRun);
     }).pipe(Effect.orElseSucceed(() => false));
 
-  const recoverDelegatedTask = (threadId: ThreadId) =>
+  const recoverDelegatedTask = (threadId: ThreadId, sourceRunId: RunId) =>
     Effect.gen(function* () {
       const parentThreadId = yield* appOwnedSubagentParentThreadId(threadId);
       if (parentThreadId === undefined) return;
       yield* threadDispatch.withLock(
         parentThreadId,
-        finalizeAppOwnedSubagent(threadId, { ignoreRestartContinuation: true }),
+        finalizeAppOwnedSubagent(threadId, { settledContinuationOf: sourceRunId }),
       );
     }).pipe(
       Effect.catchCause((cause) =>
@@ -9875,7 +9889,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     resumeQueuedRuns,
     recoverDelegatedTasks,
     recoverDelegatedTask,
-    delegatedTaskAwaitsRestart,
+    delegatedTaskResultPending,
     dispatch: dispatchWithReceipt,
     getTimelinePage: (threadId, options) =>
       projectionStore
@@ -9995,7 +10009,7 @@ const layerUnavailable: Layer.Layer<OrchestratorV2> = Layer.succeed(
     ),
     recoverDelegatedTasks: Effect.void,
     recoverDelegatedTask: () => Effect.void,
-    delegatedTaskAwaitsRestart: () => Effect.succeed(false),
+    delegatedTaskResultPending: () => Effect.succeed(false),
     dispatch: (command) =>
       Effect.fail(
         new OrchestratorDispatchError({

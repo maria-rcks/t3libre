@@ -988,9 +988,27 @@ it.layer(TestLayer)("delegated tasks across a server restart", (it) => {
       assert.equal(task(backgrounded.taskId)?.status, "running");
       assert.isNull(task(backgrounded.taskId)?.result ?? null);
       assert.equal(task(recut.taskId)?.status, "running");
-      assert.isTrue(yield* orchestrator.delegatedTaskAwaitsRestart(recut.childThreadId));
-      assert.isTrue(yield* orchestrator.delegatedTaskAwaitsRestart(resumed.childThreadId));
-      assert.isFalse(yield* orchestrator.delegatedTaskAwaitsRestart(stopped.childThreadId));
+      assert.isTrue(yield* orchestrator.delegatedTaskResultPending(recut.childThreadId));
+      assert.isTrue(yield* orchestrator.delegatedTaskResultPending(resumed.childThreadId));
+      assert.isFalse(yield* orchestrator.delegatedTaskResultPending(stopped.childThreadId));
+      // A replayed first continuation settling must not release the second one's hold.
+      yield* orchestrator.recoverDelegatedTask(recut.childThreadId, recut.childRunId);
+      const replayed = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(replayed.subagents.find((row) => row.id === recut.taskId)?.status, "running");
+      // A caller that read the cancelled run before the child resumed sees it as pending.
+      yield* eventSink.write({
+        commandId: CommandId.make("command:restart-stopped-child:resumed"),
+        events: [
+          runEvent({
+            threadId: stopped.childThreadId,
+            runId: RunId.make("run:restart-stopped-child:2"),
+            ordinal: 2,
+            status: "running",
+            now,
+          }),
+        ],
+      });
+      assert.isTrue(yield* orchestrator.delegatedTaskResultPending(stopped.childThreadId));
       assert.isFalse(
         recovered.contextTransfers.some(
           (transfer) => transfer.sourceThreadId === resumed.childThreadId,
