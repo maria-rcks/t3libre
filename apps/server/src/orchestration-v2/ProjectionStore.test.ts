@@ -2276,8 +2276,33 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
         },
       });
       yield* assertSummary("Plan limit reached.", "usage_limit");
+      // A restart continuation ran ahead of the held queue and ended before the
+      // resumed failed run: the failure is still the latest executed run.
+      const aheadRunId = RunId.make("run:limit-shell:ran-ahead");
+      yield* store.apply({
+        id: EventId.make("event:limit-shell:ran-ahead"),
+        type: "run.created",
+        threadId,
+        runId: aheadRunId,
+        nodeId: NodeId.make("node:limit-shell:ran-ahead"),
+        driver,
+        providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...original,
+          id: aheadRunId,
+          ordinal: original.ordinal + 3,
+          rootNodeId: NodeId.make("node:limit-shell:ran-ahead"),
+          userMessageId: MessageId.make("message:limit-shell:ran-ahead"),
+          status: "completed",
+          startedAt: DateTime.subtract(now, { minutes: 10 }),
+          completedAt: DateTime.subtract(now, { minutes: 5 }),
+        },
+      });
+      yield* assertSummary("Plan limit reached.", "usage_limit");
       const sql = yield* SqlClient.SqlClient;
       // The rest of this case treats the failed run as the latest run.
+      yield* sql`DELETE FROM orchestration_v2_projection_runs WHERE run_id = ${aheadRunId}`;
       yield* sql`DELETE FROM orchestration_v2_projection_runs WHERE run_id = ${queuedRunId}`;
       yield* assertSummary("Plan limit reached.", "usage_limit");
       yield* sql`DELETE FROM orchestration_v2_projection_runs WHERE run_id = ${cancelledRunId}`;

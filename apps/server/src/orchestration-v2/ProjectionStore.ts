@@ -3303,7 +3303,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 latest.status = 'cancelled'
                 AND json_extract(latest.payload_json, '$.startedAt') IS NULL
               )
-            ORDER BY latest.ordinal DESC, latest.run_id DESC LIMIT 1
+            -- latestExecutedRun: the run that ended last (runRanAfter).
+            ORDER BY latest.completed_at IS NULL DESC, latest.completed_at DESC,
+              latest.ordinal DESC, latest.run_id DESC
+            LIMIT 1
           ) AND r.status = 'failed'
           INNER JOIN orchestration_v2_projection_turn_items item ON item.turn_item_id = (
             SELECT error.turn_item_id FROM orchestration_v2_projection_turn_items error
@@ -3816,11 +3819,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                       SELECT ended.run_id FROM orchestration_v2_projection_runs AS ended
                       WHERE ended.thread_id = ${threadId}
                         AND ended.status != 'queued'
-                      ORDER BY
-                        CASE WHEN json_valid(ended.payload_json)
-                          THEN json_extract(ended.payload_json, '$.completedAt') END IS NULL DESC,
-                        CASE WHEN json_valid(ended.payload_json)
-                          THEN json_extract(ended.payload_json, '$.completedAt') END DESC,
+                      ORDER BY ended.completed_at IS NULL DESC, ended.completed_at DESC,
                         ended.ordinal DESC
                       LIMIT 1
                     )
@@ -4926,7 +4925,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   candidate.status = 'cancelled'
                   AND json_extract(candidate.payload_json, '$.startedAt') IS NULL
                 )
-              ORDER BY candidate.ordinal DESC, candidate.run_id DESC LIMIT 1
+              -- latestExecutedRun: the run that ended last (runRanAfter).
+              ORDER BY candidate.completed_at IS NULL DESC, candidate.completed_at DESC,
+                candidate.ordinal DESC, candidate.run_id DESC
+              LIMIT 1
             ) AND blocked.status = 'failed'
             WHERE t.deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND t.thread_id = ${threadId}`}${
               location === "active"

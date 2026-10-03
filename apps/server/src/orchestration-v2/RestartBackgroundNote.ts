@@ -5,6 +5,7 @@ import type {
   OrchestrationV2Run,
   OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
+import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 
 type Work = OrchestrationV2RestartCancelledBackgroundWork;
 
@@ -183,6 +184,7 @@ export function pendingRestartCancelledBackgroundWork(input: {
     OrchestrationV2Run,
     | "id"
     | "ordinal"
+    | "completedAt"
     | "userMessageId"
     | "providerThreadId"
     | "restartContinuationOfRunId"
@@ -226,9 +228,9 @@ export function pendingRestartCancelledBackgroundWork(input: {
   return sameThread
     .filter(
       (source) =>
-        source.ordinal < input.run.ordinal &&
+        runRanAfter(input.run, source) &&
         (source.restartCancelledBackgroundWork?.length ?? 0) > 0 &&
-        !prompted.some((later) => later.ordinal > source.ordinal),
+        !prompted.some((later) => runRanAfter(later, source)),
     )
     .reduce<ReadonlyArray<Work>>(
       (work, source) =>

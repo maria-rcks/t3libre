@@ -1115,7 +1115,10 @@ it.layer(TestLayer)("delegated tasks across a server restart", (it) => {
     }),
   );
 
-  it.effect("re-offers a cut delivery unless a continuation resumes it", () =>
+  // A running provider turn does not prove the provider consumed the delivery
+  // (Claude marks the turn running before it reads the prompt), so a cut
+  // delivery is offered again even when a continuation resumes that turn.
+  it.effect("re-offers a cut delivery even when a continuation resumes its turn", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const eventSink = yield* EventSink.EventSinkV2;
@@ -1191,26 +1194,17 @@ it.layer(TestLayer)("delegated tasks across a server restart", (it) => {
 
       yield* orchestrator.recoverDelegatedTasks;
 
-      const cutProjection = yield* orchestrator.getThreadProjection(cut.threadId);
-      assert.deepEqual(
-        cutProjection.subagents.find((row) => row.id === cut.taskId)?.completionDelivery?.state,
-        "claimed",
-      );
-      const cutDelivery = cutProjection.runs.find((row) => row.id === cut.runId)
-        ?.delegatedCompletion?.delivery;
-      assert.equal(cutDelivery?.generation, 2);
-      assert.deepEqual(cutDelivery?.taskIds, [cut.taskId]);
-
-      const resumedProjection = yield* orchestrator.getThreadProjection(resumed.threadId);
-      assert.equal(
-        resumedProjection.subagents.find((row) => row.id === resumed.taskId)?.completionDelivery
-          ?.state,
-        "delivered",
-      );
-      assert.isNull(
-        resumedProjection.runs.find((row) => row.id === resumed.runId)?.delegatedCompletion
-          ?.delivery ?? null,
-      );
+      for (const seeded of [cut, resumed]) {
+        const projection = yield* orchestrator.getThreadProjection(seeded.threadId);
+        assert.deepEqual(
+          projection.subagents.find((row) => row.id === seeded.taskId)?.completionDelivery?.state,
+          "claimed",
+        );
+        const delivery = projection.runs.find((row) => row.id === seeded.runId)?.delegatedCompletion
+          ?.delivery;
+        assert.equal(delivery?.generation, 2);
+        assert.deepEqual(delivery?.taskIds, [seeded.taskId]);
+      }
     }),
   );
 

@@ -9019,10 +9019,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
 
       const now = yield* DateTime.now;
-      // The provider already received this delivery's message; a restart
-      // continuation resumes that turn, so offering it again would duplicate it.
-      const redeliver =
-        deliveryRun.status === "cancelled" && !(yield* awaitsRestartContinuation(deliveryRun));
       const nextTaskStates = new Map<
         OrchestrationV2Subagent["id"],
         OrchestrationV2Subagent["completionDelivery"]
@@ -9037,7 +9033,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           continue;
         }
         nextTaskStates.set(task.id, {
-          state: redeliver ? "pending" : "delivered",
+          state: deliveryRun.status === "cancelled" ? "pending" : "delivered",
           observedByRunId: null,
         });
       }

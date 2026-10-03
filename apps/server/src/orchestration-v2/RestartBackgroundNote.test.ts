@@ -6,6 +6,7 @@ import {
   RunId,
   type OrchestrationV2Run,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 
 import {
   cancelledRosterTaskWork,
@@ -62,6 +63,30 @@ it("keeps the note for the provider thread that lost the work across a provider 
   // Once Claude was told, later Claude turns are not.
   const later = run(4, claudeThread);
   assert.deepEqual(pending(later, [root, onCodex, backOnClaude, later]), []);
+});
+
+it("delivers a resumed queued run's note even after a higher-ordinal run", () => {
+  // Run 3 ran ahead of held run 2; run 2 then resumed, lost background work in
+  // a second restart, and its continuation was superseded by a new message.
+  const ranFirst = run(3, claudeThread, {
+    completedAt: DateTime.makeUnsafe("2026-10-03T10:00:00.000Z"),
+  });
+  const resumed = run(2, claudeThread, {
+    completedAt: DateTime.makeUnsafe("2026-10-03T10:05:00.000Z"),
+    restartCancelledBackgroundWork: lost,
+  });
+  const next = run(4, claudeThread);
+  const runs = [resumed, ranFirst, next];
+  assert.deepEqual(
+    pendingRestartCancelledBackgroundWork({
+      runs,
+      providerTurns: [resumed, ranFirst].map(turnFor),
+      compactionMessageIds: new Set(),
+      run: next,
+      runAttemptIds: next.activeAttemptId === null ? [] : [next.activeAttemptId],
+    }),
+    lost,
+  );
 });
 
 it("bounds the note so it cannot crowd out the turn's context", () => {
