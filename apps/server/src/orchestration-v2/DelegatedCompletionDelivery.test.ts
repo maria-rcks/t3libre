@@ -709,6 +709,8 @@ const seedRestartCancelledChild = (input: {
   readonly name: string;
   readonly completionWake: "always" | "settled_only";
   readonly continuationPending: boolean;
+  /** "completed" seeds a settled turn whose background work the restart cancelled. */
+  readonly runStatus?: "cancelled" | "completed";
   readonly now: DateTime.Utc;
 }) =>
   Effect.gen(function* () {
@@ -793,7 +795,7 @@ const seedRestartCancelledChild = (input: {
           threadId: childThreadId,
           runId: childRunId,
           ordinal: 1,
-          status: "cancelled",
+          status: input.runStatus ?? "cancelled",
           now: input.now,
         }),
       ],
@@ -830,7 +832,11 @@ it.layer(TestLayer)("delegated tasks across a server restart", (it) => {
         deliveryState: "delivered",
         now,
       });
-      const child = (name: string, continuationPending: boolean) =>
+      const child = (
+        name: string,
+        continuationPending: boolean,
+        runStatus?: "cancelled" | "completed",
+      ) =>
         seedRestartCancelledChild({
           parentThreadId: threadId,
           projectId,
@@ -839,10 +845,13 @@ it.layer(TestLayer)("delegated tasks across a server restart", (it) => {
           name,
           completionWake: "always",
           continuationPending,
+          ...(runStatus === undefined ? {} : { runStatus }),
           now,
         });
       const resumed = yield* child("restart-resumed-child", true);
       const stopped = yield* child("restart-stopped-child", false);
+      // Settled with only background work left: its interim reply is not the result.
+      const backgrounded = yield* child("restart-backgrounded-child", true, "completed");
 
       yield* orchestrator.recoverDelegatedTasks;
 
@@ -852,6 +861,8 @@ it.layer(TestLayer)("delegated tasks across a server restart", (it) => {
       assert.equal(task(stopped.taskId)?.completionDelivery?.state, "claimed");
       assert.equal(task(resumed.taskId)?.status, "running");
       assert.isNull(task(resumed.taskId)?.result ?? null);
+      assert.equal(task(backgrounded.taskId)?.status, "running");
+      assert.isNull(task(backgrounded.taskId)?.result ?? null);
       assert.isFalse(
         recovered.contextTransfers.some(
           (transfer) => transfer.sourceThreadId === resumed.childThreadId,

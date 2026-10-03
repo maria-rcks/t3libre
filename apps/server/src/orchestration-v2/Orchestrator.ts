@@ -8447,21 +8447,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
 
   /**
-   * Restart reconciliation cancels a run that a pending restart continuation
-   * resumes, so that cancellation is not the run's outcome yet. The
-   * continuation's own run settles it, or RestartContinuation recovers the
-   * thread when it declines to continue.
+   * A run with a pending restart continuation has no outcome yet: restart
+   * reconciliation cancelled it mid-turn, or cancelled the background work a
+   * settled turn was waiting on. The continuation's own run settles it, or
+   * RestartContinuation recovers the thread when it declines to continue.
    */
   const awaitsRestartContinuation = (run: OrchestrationV2Run) =>
-    run.status !== "cancelled"
-      ? Effect.succeed(false)
-      : effectOutbox
-          .get(`effect:restart-continuation:${run.id}`)
-          .pipe(
-            Effect.map(
-              Option.exists((effect) => effect.status === "pending" || effect.status === "running"),
-            ),
-          );
+    effectOutbox
+      .get(`effect:restart-continuation:${run.id}`)
+      .pipe(
+        Effect.map(
+          Option.exists((effect) => effect.status === "pending" || effect.status === "running"),
+        ),
+      );
 
   const planDelegatedCompletionDelivery = Effect.fn(
     "orchestrationV2.planDelegatedCompletionDelivery",
