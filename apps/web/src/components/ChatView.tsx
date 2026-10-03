@@ -8145,6 +8145,21 @@ export default function ChatView(props: ChatViewProps) {
       onAdvanceActivePendingUserInput();
       return;
     }
+    // Sending past the resume banner compacts first so the turn does not resend the stale
+    // history. The message queues behind the /compact run; steering into it is rejected.
+    // The composer is read after the wait, so edits made meanwhile go out with the message.
+    const promptBeforeCompaction = promptRef.current.trim();
+    const compactBeforeSend =
+      resumeCompactionBannerItem !== null &&
+      !compactDisabled &&
+      editingQueuedRun === null &&
+      (promptBeforeCompaction.length > 0 || composerHasNonPromptContent || !!directAnnotation) &&
+      promptBeforeCompaction.toLowerCase() !== "/compact" &&
+      composerRef.current?.getSendContext().multipleModelSelections === null;
+    if (compactBeforeSend) {
+      if (!(await onCompactContext())) return;
+      if (currentRouteThreadKeyRef.current !== routeThreadKey) return;
+    }
     const sendCtx = composerRef.current?.getSendContext();
     if (!sendCtx?.providerAvailable) {
       notifyDirectAnnotationAttached();
@@ -8588,13 +8603,6 @@ export default function ChatView(props: ChatViewProps) {
     );
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
-    // Sending past the resume banner compacts first so the turn does not resend the stale
-    // history. The message queues behind the /compact run; steering into it is rejected.
-    const compactBeforeSend =
-      resumeCompactionBannerItem !== null &&
-      !compactDisabled &&
-      multipleModelSelections === null &&
-      messageTextForSend.toLowerCase() !== "/compact";
     const turnDispatchMode = compactBeforeSend ? "queue" : dispatchMode;
     const shouldQueueBehindActiveRun =
       compactBeforeSend || (phase === "running" && dispatchMode === "queue");
@@ -8670,7 +8678,6 @@ export default function ChatView(props: ChatViewProps) {
       });
     }
 
-    if (compactBeforeSend && !(await onCompactContext())) return;
     sendInFlightRef.current = true;
     const sendGeneration = ++composerSendGenerationRef.current;
     const attachmentCapabilitiesBeforeUpload = readLiveAttachmentCapabilities();
