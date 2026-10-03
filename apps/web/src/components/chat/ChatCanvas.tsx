@@ -11,7 +11,10 @@ import { ChatCanvasContext } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout, type ChatCanvasPreview } from "./chatCanvasLayout";
 import type { PreviewMiniPlayerObstacles } from "../preview/previewMiniPlayerLayout";
 
-/** Owns the available conversation space. Floating cards never reserve it themselves. */
+/**
+ * Owns the available conversation space. Cards only report where they sit; the
+ * canvas decides when chat moves over to make room for them.
+ */
 export function ChatCanvas({
   composerOverlayElement,
   children,
@@ -97,13 +100,8 @@ export function ChatCanvas({
     const layout = resolveChatCanvasLayout({ ...measurements, container, preview, detailsCard });
     return {
       container,
+      lane: { padding: measurements.padding, minChatWidth: measurements.minChatWidth },
       layout,
-      // The card sizes itself from the lane it leaves without its own obstacle.
-      // Sizing from the final lane loops: a tall preview dodging a wide card
-      // moves the chat, which narrows the card, which moves the preview back.
-      cardChat: detailsCard
-        ? resolveChatCanvasLayout({ ...measurements, container, preview }).chat
-        : layout.chat,
       previewKey: preview?.key ?? null,
       reportPreview,
       clearPreview,

@@ -29,14 +29,14 @@ export function ThreadDetailsCard({
   const preferredPlacement = canvas
     ? resolveThreadDetailsCardLayout({
         container: canvas.container,
-        chat: canvas.cardChat,
+        lane: canvas.lane,
         frame: null,
       })
     : null;
   const placement = canvas
     ? resolveThreadDetailsCardLayout({
         container: canvas.container,
-        chat: canvas.cardChat,
+        lane: canvas.lane,
         frame: canvas.layout.frame,
         overlapsDetailsCard: canvas.layout.overlapsDetailsCard,
       })

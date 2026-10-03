@@ -4,9 +4,8 @@ import type { PreviewMiniPlayerObstacles } from "../preview/previewMiniPlayerLay
 
 export const ChatCanvasContext = createContext<{
   container: { width: number; height: number };
+  lane: { padding: number; minChatWidth: number };
   layout: ReturnType<typeof resolveChatCanvasLayout>;
-  /** Chat lane the details card sizes against. */
-  cardChat: ReturnType<typeof resolveChatCanvasLayout>["chat"];
   previewKey: string | null;
   reportPreview: (preview: ChatCanvasPreview) => void;
   clearPreview: (key: string) => void;
