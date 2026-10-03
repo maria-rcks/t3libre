@@ -2647,7 +2647,10 @@ export default function ChatView(props: ChatViewProps) {
   const { scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
   const activeProjectIsScratch =
     activeProject !== null &&
-    isScratchProject(activeProject, scratchWorkspaceRootFor(activeProject.environmentId));
+    isScratchProject(
+      activeProject,
+      environmentById.get(activeProject.environmentId)?.serverConfig?.scratchWorkspaceRoot ?? null,
+    );
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const envs: EnvironmentOption[] = [];
