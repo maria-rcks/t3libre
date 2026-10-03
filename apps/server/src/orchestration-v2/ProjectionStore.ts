@@ -516,8 +516,10 @@ function needsRecovery(
     }
     case "runtime":
       return (
-        projection.runs.some((run) =>
-          ["queued", "preparing", "starting", "running", "waiting"].includes(run.status),
+        projection.runs.some(
+          (run) =>
+            ["preparing", "starting", "running", "waiting"].includes(run.status) ||
+            (run.status === "queued" && run.queueHeld !== true),
         ) ||
         projection.runtimeRequests.some((request) => request.status === "pending") ||
         projection.providerSessions.some(
@@ -3427,7 +3429,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                       ELSE 0 END
                 )
                 SELECT thread_id FROM orchestration_v2_projection_runs
-                WHERE status IN ('queued', 'preparing', 'starting', 'running', 'waiting')
+                WHERE status IN ('preparing', 'starting', 'running', 'waiting')
+                  -- A held queue already went through recovery; rereading it
+                  -- on every boot costs a projection read per held thread.
+                  OR (status = 'queued' AND json_extract(payload_json, '$.queueHeld') IS NOT 1)
                 UNION
                 SELECT thread_id FROM orchestration_v2_projection_runtime_requests
                 WHERE status = 'pending'

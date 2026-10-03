@@ -120,7 +120,38 @@ export function isRestartNoteSource(
   );
 }
 
-/** A restart continuation whose prompt is the note rather than a resume. */
+/**
+ * The note a restart continuation of `source` carries, and whether the turn it
+ * continues had settled (the note is then the whole prompt). A continuation cut
+ * before its attempt reached the provider never delivered its own note, so the
+ * next continuation carries it forward from the run it continued.
+ */
+export function restartContinuationNote(
+  source: OrchestrationV2Run,
+  runs: ReadonlyArray<OrchestrationV2Run>,
+  providerTurns: ReadonlyArray<Pick<ProviderTurnState, "runAttemptId" | "status">>,
+): { readonly work: ReadonlyArray<Work>; readonly settled: boolean } {
+  let current = source;
+  let work = current.restartCancelledBackgroundWork ?? [];
+  const visited = new Set([current.id]);
+  while (
+    current.restartContinuationOfRunId !== undefined &&
+    !providerTurns.some((turn) => turn.runAttemptId === current.activeAttemptId)
+  ) {
+    const previous = runs.find((candidate) => candidate.id === current.restartContinuationOfRunId);
+    if (previous === undefined || visited.has(previous.id)) break;
+    visited.add(previous.id);
+    current = previous;
+    work = mergeRestartCancelledBackgroundWork(current.restartCancelledBackgroundWork ?? [], work);
+  }
+  return { work, settled: isRestartNoteSource(current, providerTurns) };
+}
+
+/**
+ * A restart continuation prompted with the note rather than a native resume.
+ * A turn cut mid-way that lost background work is prompted too, so the note
+ * is delivered with it; only a continuation without a note resumes natively.
+ */
 export function isRestartNoteContinuation(
   run: Pick<OrchestrationV2Run, "restartContinuationOfRunId">,
   runs: ReadonlyArray<OrchestrationV2Run>,
@@ -130,7 +161,9 @@ export function isRestartNoteContinuation(
     run.restartContinuationOfRunId === undefined
       ? undefined
       : runs.find((candidate) => candidate.id === run.restartContinuationOfRunId);
-  return source !== undefined && isRestartNoteSource(source, providerTurns);
+  return (
+    source !== undefined && restartContinuationNote(source, runs, providerTurns).work.length > 0
+  );
 }
 
 /**

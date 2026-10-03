@@ -10,8 +10,10 @@ import {
 import {
   cancelledRosterTaskWork,
   cancelledTurnItemWork,
+  isRestartNoteContinuation,
   pendingRestartCancelledBackgroundWork,
   restartCancelledBackgroundWorkNote,
+  restartContinuationNote,
   mergeRestartCancelledBackgroundWork,
 } from "./RestartBackgroundNote.ts";
 
@@ -130,4 +132,40 @@ it("does not repeat the note when a steer restarts the run on a new attempt", ()
   assert.deepEqual(pending([firstAttempt, RunAttemptId.make("attempt:2b")], true), []);
   // A first attempt that never reached the provider did not deliver it.
   assert.deepEqual(pending([firstAttempt, RunAttemptId.make("attempt:2b")], false), lost);
+});
+
+it("counts a prompted mid-turn or chained continuation as delivering the note", () => {
+  const cut = run(1, claudeThread, { status: "cancelled", restartCancelledBackgroundWork: lost });
+  const cutTurn = { ...turnFor(cut), status: "cancelled" as const };
+  const continuation = run(2, claudeThread, { restartContinuationOfRunId: cut.id });
+  // A turn cut mid-way that lost work is prompted with the note, not resumed natively.
+  assert.isTrue(isRestartNoteContinuation(continuation, [cut, continuation], [cutTurn]));
+  assert.isFalse(
+    isRestartNoteContinuation(
+      continuation,
+      [{ ...cut, restartCancelledBackgroundWork: [] }, continuation],
+      [cutTurn],
+    ),
+  );
+  const later = run(3, claudeThread);
+  const pending = (delivered: boolean) =>
+    pendingRestartCancelledBackgroundWork({
+      runs: [cut, continuation, later],
+      providerTurns: [cutTurn, ...(delivered ? [turnFor(continuation)] : [])],
+      compactionMessageIds: new Set(),
+      run: later,
+      runAttemptIds: [later.activeAttemptId!],
+    });
+  assert.deepEqual(pending(true), []);
+  // A continuation that never reached the provider delivered nothing.
+  assert.deepEqual(pending(false), lost);
+
+  // Its own continuation carries the original note forward.
+  const unstarted = { ...continuation, status: "cancelled" as const };
+  const chained = run(3, claudeThread, { restartContinuationOfRunId: unstarted.id });
+  assert.deepEqual(restartContinuationNote(unstarted, [cut, unstarted], [cutTurn]), {
+    work: lost,
+    settled: false,
+  });
+  assert.isTrue(isRestartNoteContinuation(chained, [cut, unstarted, chained], [cutTurn]));
 });

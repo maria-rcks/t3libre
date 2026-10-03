@@ -433,6 +433,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
         dispatch: orchestrator.dispatch,
         getThreadRecords: orchestrator.getThreadRecords,
         getThreadProjection: orchestrator.getThreadProjection,
+        recoverDelegatedTask: orchestrator.recoverDelegatedTask,
       });
     }),
   ).pipe(Layer.provide(orchestratorProvided));
