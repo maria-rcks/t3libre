@@ -1,6 +1,8 @@
 import DOMPurify from "dompurify";
 import type { Mermaid } from "mermaid";
-import { use } from "react";
+import { use, useState } from "react";
+
+import { Button } from "../ui/button";
 
 type MermaidRenderResult =
   | { readonly status: "rendered"; readonly svg: string }
@@ -26,24 +28,48 @@ function loadMermaid(): Promise<Mermaid> {
   return mermaidModulePromise;
 }
 
+const REMOTE_CSS_URL = /url\(\s*(?!['"]?#)[^)]*\)/gi;
+let purifier: ReturnType<typeof DOMPurify> | null = null;
+
 // Diagrams can come from untrusted PR descriptions, so strip anything that can
 // navigate, run script, or fetch remote content on top of Mermaid's own strict
-// sanitization. HTML labels inside foreignObject stay, since authors can enable
-// them per diagram. Only local url(#id) references survive in CSS.
+// sanitization. CSS keeps only local url(#id) references; label text is untouched.
 function sanitizeMermaidSvg(svg: string): string {
-  return DOMPurify.sanitize(svg, {
+  if (!purifier) {
+    purifier = DOMPurify(window);
+    purifier.addHook("uponSanitizeElement", (node, data) => {
+      if (data.tagName === "style" && node.textContent) {
+        node.textContent = node.textContent.replace(REMOTE_CSS_URL, "none");
+      }
+    });
+    purifier.addHook("uponSanitizeAttribute", (_node, data) => {
+      if (data.attrName === "style")
+        data.attrValue = data.attrValue.replace(REMOTE_CSS_URL, "none");
+    });
+  }
+  return purifier.sanitize(svg, {
     ADD_TAGS: ["foreignObject"],
     HTML_INTEGRATION_POINTS: { foreignobject: true },
     FORBID_ATTR: ["href", "xlink:href", "src", "srcset"],
     FORBID_TAGS: ["a", "img", "image", "script"],
     USE_PROFILES: { svg: true, svgFilters: true, html: true },
-  }).replace(/url\(\s*(?!['"]?#)[^)]*\)/gi, "none");
+  });
 }
+
+// Image shapes (`A@{ img: "https://..." }`) are fetched while Mermaid lays the
+// diagram out, before sanitizing can remove them.
+const REMOTE_IMAGE_SHAPE = /@\{[^}]*\bimg\s*:/i;
+// Mermaid also lazy-loads diagram chunks inside render(); losing the network
+// there is worth a retry, unlike a syntax error.
+const CHUNK_LOAD_ERROR = /dynamically imported module|importing a module script|failed to fetch/i;
 
 async function renderMermaid(
   source: string,
   theme: "light" | "dark",
 ): Promise<MermaidRenderResult> {
+  if (REMOTE_IMAGE_SHAPE.test(source)) {
+    return { status: "error", message: "Remote images are not supported.", retryable: false };
+  }
   const id = `mermaid-diagram-${nextDiagramId++}`;
   let mermaid: Mermaid;
   try {
@@ -76,18 +102,26 @@ async function renderMermaid(
     const { svg } = await mermaid.render(id, source);
     return { status: "rendered", svg: sanitizeMermaidSvg(svg) };
   } catch (error) {
-    return {
-      status: "error",
-      message: error instanceof Error ? error.message : "The diagram could not be rendered.",
-      retryable: false,
-    };
+    const message = error instanceof Error ? error.message : "The diagram could not be rendered.";
+    return { status: "error", message, retryable: CHUNK_LOAD_ERROR.test(message) };
   } finally {
     document.getElementById(`d${id}`)?.remove();
   }
 }
 
+function evictSettledRenders() {
+  for (const [key, result] of renderCache) {
+    if (renderCache.size <= MAX_CACHED_RENDERS) return;
+    if (settledRenders.has(result)) renderCache.delete(key);
+  }
+}
+
+function mermaidRenderKey(source: string, theme: "light" | "dark") {
+  return `${theme}\n${source}`;
+}
+
 function mermaidRenderPromise(source: string, theme: "light" | "dark") {
-  const key = `${theme}\n${source}`;
+  const key = mermaidRenderKey(source, theme);
   const cached = renderCache.get(key);
   if (cached) {
     renderCache.delete(key);
@@ -96,36 +130,25 @@ function mermaidRenderPromise(source: string, theme: "light" | "dark") {
   }
   const result = renderQueue.then(() => renderMermaid(source, theme));
   renderQueue = result;
-  void result.then((settled) => {
+  void result.then(() => {
     settledRenders.add(result);
-    // A failed load retries the next time the diagram mounts.
-    if (settled.status === "error" && settled.retryable && renderCache.get(key) === result) {
-      renderCache.delete(key);
-    }
+    evictSettledRenders();
   });
   renderCache.set(key, result);
-  if (renderCache.size > MAX_CACHED_RENDERS) {
-    for (const [oldKey, oldResult] of renderCache) {
-      if (settledRenders.has(oldResult)) {
-        renderCache.delete(oldKey);
-        break;
-      }
-    }
-  }
+  evictSettledRenders();
   return result;
 }
 
-const imageUrls = new WeakMap<MermaidRenderResult, string>();
+let expandedImageUrl: string | null = null;
 
 /**
  * Converts a rendered diagram into a standalone image with fixed size and background.
  * A blob URL, unlike a data URL, passes the desktop connect-src policy that media
- * save and copy actions fetch through.
+ * save and copy actions fetch through. Only one diagram is expanded at a time, so
+ * the previous URL is released.
  */
-function mermaidImageUrl(result: MermaidRenderResult & { status: "rendered" }): string {
-  const cached = imageUrls.get(result);
-  if (cached) return cached;
-  const svgDocument = new DOMParser().parseFromString(result.svg, "image/svg+xml");
+function mermaidImageUrl(svg: string): string {
+  const svgDocument = new DOMParser().parseFromString(svg, "image/svg+xml");
   const element = svgDocument.documentElement;
   const viewBox = element.getAttribute("viewBox")?.trim().split(/\s+/).map(Number);
   if (viewBox?.length === 4 && viewBox.every(Number.isFinite)) {
@@ -135,11 +158,11 @@ function mermaidImageUrl(result: MermaidRenderResult & { status: "rendered" }): 
   element.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   element.style.maxWidth = "none";
   element.style.backgroundColor = getComputedStyle(document.body).backgroundColor;
-  const url = URL.createObjectURL(
+  if (expandedImageUrl) URL.revokeObjectURL(expandedImageUrl);
+  expandedImageUrl = URL.createObjectURL(
     new Blob([new XMLSerializer().serializeToString(element)], { type: "image/svg+xml" }),
   );
-  imageUrls.set(result, url);
-  return url;
+  return expandedImageUrl;
 }
 
 /** Suspends until the diagram renders; failures show the parser message above the source. */
@@ -152,12 +175,28 @@ export function MermaidDiagram({
   theme: "light" | "dark";
   onExpand: (imageUrl: string) => void;
 }) {
+  const [, setAttempt] = useState(0);
   const result = use(mermaidRenderPromise(source.trim(), theme));
 
   if (result.status === "error") {
     return (
       <div className="px-3 pt-1 pb-3">
-        <p className="m-0 text-xs text-destructive">Unable to render diagram: {result.message}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="m-0 text-xs text-destructive">Unable to render diagram: {result.message}</p>
+          {result.retryable ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => {
+                renderCache.delete(mermaidRenderKey(source.trim(), theme));
+                setAttempt((attempt) => attempt + 1);
+              }}
+            >
+              Retry
+            </Button>
+          ) : null}
+        </div>
         <pre className="mt-2 mb-0 overflow-auto font-mono text-xs whitespace-pre-wrap">
           {source}
         </pre>
@@ -171,7 +210,7 @@ export function MermaidDiagram({
         type="button"
         aria-label="Expand diagram"
         className="flex w-full cursor-zoom-in justify-center rounded-md focus-visible:outline-2 focus-visible:outline-ring [&_svg]:h-auto [&_svg]:max-w-full"
-        onClick={() => onExpand(mermaidImageUrl(result))}
+        onClick={() => onExpand(mermaidImageUrl(result.svg))}
         dangerouslySetInnerHTML={{ __html: result.svg }}
       />
     </div>
