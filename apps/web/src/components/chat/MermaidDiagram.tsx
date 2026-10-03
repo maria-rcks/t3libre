@@ -175,7 +175,7 @@ export function MermaidDiagram({
 
   if (result.status === "error") {
     return (
-      <div className="px-3 pt-1 pb-3">
+      <div>
         <div className="flex items-center justify-between gap-2">
           <p className="m-0 text-xs text-destructive">Unable to render diagram: {result.message}</p>
           {result.retryable ? (
@@ -200,7 +200,7 @@ export function MermaidDiagram({
   }
 
   return (
-    <div className="overflow-x-auto px-3 pt-2 pb-3">
+    <div className="overflow-x-auto">
       <button
         type="button"
         aria-label="Expand diagram"
