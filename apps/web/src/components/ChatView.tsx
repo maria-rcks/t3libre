@@ -1602,11 +1602,6 @@ export default function ChatView(props: ChatViewProps) {
     readonly existingAttachments: ReadonlyArray<ContractChatAttachment>;
     readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
   } | null>(null);
-  // Read after awaits in onSend, where the render's editingQueuedRun is stale.
-  const editingQueuedRunRef = useRef(editingQueuedRun);
-  useEffect(() => {
-    editingQueuedRunRef.current = editingQueuedRun;
-  }, [editingQueuedRun]);
   const queuedEditDraftTargetFor = useCallback(
     (runId: RunId) => DraftId.make(`queued-edit:${scopedThreadKey(routeThreadRef)}:${runId}`),
     [routeThreadRef],
@@ -7916,13 +7911,12 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError,
     ],
   );
-  // Resolves true once the /compact turn is accepted.
-  const onCompactContext = async (): Promise<boolean> => {
+  const onCompactContext = async () => {
     if (compactDisabled || !activeThread || !clientSettingsHydrated || sendInFlightRef.current) {
-      return false;
+      return;
     }
     const context = composerRef.current?.getSendContext();
-    if (!context?.providerAvailable) return false;
+    if (!context?.providerAvailable) return;
 
     // Compaction is a standalone command; the draft and its attachments stay local.
     const threadId = activeThread.id;
@@ -7980,10 +7974,9 @@ export default function ChatView(props: ChatViewProps) {
             error instanceof Error ? error.message : "Failed to compact context.",
           );
         }
-        return false;
+      } else {
+        clearUsageLimitsFor(routeThreadKey);
       }
-      clearUsageLimitsFor(routeThreadKey);
-      return true;
     } finally {
       sendInFlightRef.current = false;
     }
@@ -8149,38 +8142,6 @@ export default function ChatView(props: ChatViewProps) {
       }
       onAdvanceActivePendingUserInput();
       return;
-    }
-    // Sending past the resume banner compacts first so the turn does not resend the stale
-    // history. The message queues behind the /compact run; steering into it is rejected.
-    // The composer is read after the wait, so edits made meanwhile go out with the message.
-    // Held queues and local mode commands (/plan, /default) skip it.
-    const promptBeforeCompaction = promptRef.current.trim();
-    const sendCtxBeforeCompaction = composerRef.current?.getSendContext();
-    const compactBeforeSend =
-      resumeCompactionBannerItem !== null &&
-      !compactDisabled &&
-      !hasHeldQueuedRuns &&
-      editingQueuedRun === null &&
-      (promptBeforeCompaction.length > 0 || composerHasNonPromptContent || !!directAnnotation) &&
-      promptBeforeCompaction.toLowerCase() !== "/compact" &&
-      !(
-        sendCtxBeforeCompaction?.interactionModeEnabled &&
-        !composerHasNonPromptContent &&
-        parseStandaloneComposerSlashCommand(promptBeforeCompaction) !== null
-      ) &&
-      sendCtxBeforeCompaction?.multipleModelSelections === null;
-    if (compactBeforeSend) {
-      if (!(await onCompactContext())) return;
-      // Thread settings were persisted from this render's state; a switch made
-      // during the wait would be skipped, so leave that draft for another send.
-      if (
-        currentRouteThreadKeyRef.current !== routeThreadKey ||
-        editingQueuedRunRef.current !== null ||
-        composerRef.current?.getSendContext().interactionMode !==
-          sendCtxBeforeCompaction?.interactionMode
-      ) {
-        return;
-      }
     }
     const sendCtx = composerRef.current?.getSendContext();
     if (!sendCtx?.providerAvailable) {
@@ -8625,6 +8586,15 @@ export default function ChatView(props: ChatViewProps) {
     );
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
+    // Sending past the resume banner compacts first so the turn does not resend the stale
+    // history. The message queues behind the /compact run; steering into it is rejected,
+    // and a held queue would strand it.
+    const compactBeforeSend =
+      resumeCompactionBannerItem !== null &&
+      !compactDisabled &&
+      !hasHeldQueuedRuns &&
+      multipleModelSelections === null &&
+      messageTextForSend.toLowerCase() !== "/compact";
     const turnDispatchMode = compactBeforeSend ? "queue" : dispatchMode;
     const shouldQueueBehindActiveRun =
       compactBeforeSend || (phase === "running" && dispatchMode === "queue");
@@ -9189,6 +9159,22 @@ export default function ChatView(props: ChatViewProps) {
     });
     if (failure === null && turnAttachmentsResult._tag === "Failure") {
       failure = turnAttachmentsResult;
+    }
+
+    if (failure === null && compactBeforeSend) {
+      const compactResult = await startThreadTurn({
+        environmentId,
+        input: {
+          threadId: threadIdForSend,
+          message: { messageId: newMessageId(), role: "user", text: "/compact", attachments: [] },
+          modelSelection: ctxSelectedModelSelection,
+          runtimeMode,
+          interactionMode: sendInteractionMode,
+        },
+      });
+      if (compactResult._tag === "Failure") {
+        failure = compactResult;
+      }
     }
 
     let backgroundDraftOpened = false;
