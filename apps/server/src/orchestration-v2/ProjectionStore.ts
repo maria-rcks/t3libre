@@ -3818,6 +3818,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                         AND ended.status != 'queued'
                       ORDER BY
                         CASE WHEN json_valid(ended.payload_json)
+                          THEN json_extract(ended.payload_json, '$.completedAt') END IS NULL DESC,
+                        CASE WHEN json_valid(ended.payload_json)
                           THEN json_extract(ended.payload_json, '$.completedAt') END DESC,
                         ended.ordinal DESC
                       LIMIT 1
