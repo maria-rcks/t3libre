@@ -1055,7 +1055,13 @@ const make = Effect.gen(function* () {
         messages: [...childControls.messages, ...resultRecords.messages],
         turnItems: resultRecords.turnItems,
       };
-      const workState = task.result !== null ? "result_available" : progress.state;
+      // A restart cut the child's run and its continuation has not settled yet.
+      const heldForRestart =
+        task.result === null &&
+        progress.state === "result_available" &&
+        (yield* threadManagement.delegatedTaskAwaitsRestart(task.childThreadId));
+      const workState =
+        task.result !== null ? "result_available" : heldForRestart ? "working" : progress.state;
       const status =
         task.result !== null
           ? taskStatusForRun(

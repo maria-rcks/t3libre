@@ -15,6 +15,7 @@ import { isNativeMaintenanceCommand } from "./Orchestrator.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import {
   isRestartNoteSource,
+  ranAfter,
   restartCancelledBackgroundWorkNote,
   restartContinuationNote,
 } from "./RestartBackgroundNote.ts";
@@ -37,7 +38,7 @@ export function restartContinuationRun(
   // Queued runs never started; recovery holds them behind the cut run.
   const run = projection.runs.reduce<OrchestrationV2Run | undefined>(
     (latest, candidate) =>
-      candidate.status !== "queued" && (!latest || candidate.ordinal > latest.ordinal)
+      candidate.status !== "queued" && (!latest || ranAfter(candidate, latest))
         ? candidate
         : latest,
     undefined,
@@ -124,7 +125,11 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
     if (!source || (source.status !== "cancelled" && !noteSource)) return;
     // A user submission after reconciliation takes precedence over an automatic
     // prompt. Queued runs never started and stay held behind this one.
-    if (projection.runs.some((run) => run.ordinal > source.ordinal && run.status !== "queued"))
+    if (
+      projection.runs.some(
+        (run) => run.id !== source.id && run.status !== "queued" && ranAfter(run, source),
+      )
+    )
       return;
     if (projection.thread.providerInstanceId !== source.providerInstanceId) return;
     const sourceRecords = yield* threads.getThreadRecords(

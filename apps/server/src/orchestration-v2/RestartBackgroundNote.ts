@@ -5,8 +5,26 @@ import type {
   OrchestrationV2Run,
   OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 
 type Work = OrchestrationV2RestartCancelledBackgroundWork;
+
+/**
+ * Whether started `run` ran after `other`. Ordinals follow submission, but a
+ * restart continuation runs ahead of the held queue, so a queued run resumed
+ * later can have a lower ordinal than one that already ended. An unfinished
+ * run is the latest.
+ */
+export function ranAfter(
+  run: Pick<OrchestrationV2Run, "ordinal" | "completedAt">,
+  other: Pick<OrchestrationV2Run, "ordinal" | "completedAt">,
+): boolean {
+  const end = (candidate: typeof run) =>
+    !candidate.completedAt
+      ? Number.POSITIVE_INFINITY
+      : DateTime.toEpochMillis(candidate.completedAt);
+  return end(run) === end(other) ? run.ordinal > other.ordinal : end(run) > end(other);
+}
 
 const MAX_LABEL_LENGTH = 160;
 

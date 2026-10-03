@@ -25,6 +25,7 @@ import {
   cancelledRosterTaskWork,
   cancelledTurnItemWork,
   mergeRestartCancelledBackgroundWork,
+  ranAfter,
 } from "./RestartBackgroundNote.ts";
 
 export class ProviderRuntimeRecoveryError extends Schema.TaggedError<ProviderRuntimeRecoveryError>()(
@@ -189,7 +190,7 @@ function latestStartedRun(
       run.providerThreadId === providerThreadId &&
       run.status !== "queued" &&
       run.status !== "rolled_back" &&
-      (latest === undefined || run.ordinal > latest.ordinal)
+      (latest === undefined || ranAfter(run, latest))
         ? run
         : latest,
     undefined,

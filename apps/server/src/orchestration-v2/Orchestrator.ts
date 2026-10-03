@@ -74,14 +74,11 @@ import { CommandPolicyV2, resolveMessageDispatchIntent } from "./CommandPolicy.t
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
 import { notificationTurnItem } from "./Notification.ts";
-import { isRestartNoteSource } from "./RestartBackgroundNote.ts";
+import { isRestartNoteSource, ranAfter } from "./RestartBackgroundNote.ts";
 import { isUndeliveredMailboxSteer } from "./NotificationMailbox.ts";
 import { EventSinkV2 } from "./EventSink.ts";
-import {
-  EffectOutboxV2,
-  type OrchestrationEffectRequestV2,
-  type PendingOrchestrationEffectV2,
-} from "./EffectOutbox.ts";
+import * as EffectOutbox from "./EffectOutbox.ts";
+import type { OrchestrationEffectRequestV2, PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
 import { IdAllocatorV2 } from "./IdAllocator.ts";
 import {
   ThreadCommandExecutor,
@@ -250,6 +247,8 @@ export interface OrchestratorV2Shape {
   readonly recoverDelegatedTasks: Effect.Effect<void>;
   /** Settles a delegated child whose restart continuation declined to start. */
   readonly recoverDelegatedTask: (threadId: ThreadId) => Effect.Effect<void>;
+  /** Whether a delegated child's apparent result waits on a restart continuation. */
+  readonly delegatedTaskAwaitsRestart: (childThreadId: ThreadId) => Effect.Effect<boolean>;
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<OrchestratorV2DispatchResult, OrchestratorV2Error>;
@@ -727,7 +726,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const idAllocator = yield* IdAllocatorV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
   const projectionStore = yield* ProjectionStoreV2;
-  const effectOutbox = yield* EffectOutboxV2;
+  const effectOutbox = yield* EffectOutbox.EffectOutboxV2;
   const nextTurnItemOrdinal = (
     projection: Pick<OrchestrationV2ThreadProjection, "thread"> &
       Partial<Pick<OrchestrationV2ThreadProjection, "turnItems">>,
@@ -4368,7 +4367,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           projection.thread.deletedAt !== null ||
           projection.thread.providerInstanceId !== source.providerInstanceId ||
           // Held queued runs never started; they wait behind the continuation.
-          projection.runs.some((run) => run.ordinal > source.ordinal && run.status !== "queued")
+          projection.runs.some(
+            (run) => run.id !== source.id && run.status !== "queued" && ranAfter(run, source),
+          )
         ) {
           // Preserve the current row so stale automatic deliveries receive an
           // accepted receipt without changing work or repeatedly retrying.
@@ -8461,6 +8462,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ),
       );
 
+  /**
+   * A delegated child's result is held while its result run, or a later run a
+   * second restart cut before it started, still has a continuation pending.
+   */
+  const childAwaitsRestartContinuation = (
+    runs: ReadonlyArray<OrchestrationV2Run>,
+    resultRun: OrchestrationV2Run,
+  ) =>
+    Effect.forEach(
+      runs.filter((run) => run.id === resultRun.id || run.ordinal > resultRun.ordinal),
+      awaitsRestartContinuation,
+    ).pipe(Effect.map((pending) => pending.includes(true)));
+
   const planDelegatedCompletionDelivery = Effect.fn(
     "orchestrationV2.planDelegatedCompletionDelivery",
   )(function* (input: {
@@ -8695,7 +8709,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       if (
         options?.ignoreRestartContinuation !== true &&
-        (yield* awaitsRestartContinuation(childRun))
+        (yield* childAwaitsRestartContinuation(childControls.runs, childRun))
       ) {
         return;
       }
@@ -9131,7 +9145,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
       return;
     }
-    const parentIsLive = hasLiveRun(projection);
+    // settled_only tasks defer only to a blocking wait in their spawning run.
+    const parentIsLive = hasLiveRun({ runs: [parentRun] });
     const pendingTaskIds =
       projection.thread.archivedAt === null && projection.thread.deletedAt === null
         ? projection.subagents
@@ -9827,6 +9842,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     );
   });
 
+  const delegatedTaskAwaitsRestart = (childThreadId: ThreadId) =>
+    Effect.gen(function* () {
+      const child = yield* projectionStore.getThreadRecords(
+        childThreadId,
+        ["runs", "messages", "subagents", "providerThreads", "providerTurns", "attempts"],
+        { messageRoles: ["user"] },
+      );
+      const progress = delegatedTaskProgress(child);
+      if (progress.state !== "result_available" || progress.resultRun === undefined) return false;
+      return yield* childAwaitsRestartContinuation(child.runs, progress.resultRun);
+    }).pipe(Effect.orElseSucceed(() => false));
+
   const recoverDelegatedTask = (threadId: ThreadId) =>
     Effect.gen(function* () {
       const parentThreadId = yield* appOwnedSubagentParentThreadId(threadId);
@@ -9848,6 +9875,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     resumeQueuedRuns,
     recoverDelegatedTasks,
     recoverDelegatedTask,
+    delegatedTaskAwaitsRestart,
     dispatch: dispatchWithReceipt,
     getTimelinePage: (threadId, options) =>
       projectionStore
@@ -9941,7 +9969,7 @@ export const layer: Layer.Layer<
   | CommandPolicyV2
   | CommandReceiptStoreV2
   | ContextHandoffServiceV2
-  | EffectOutboxV2
+  | EffectOutbox.EffectOutboxV2
   | EventSinkV2
   | IdAllocatorV2
   | ProjectStore.ProjectStoreV2
@@ -9967,6 +9995,7 @@ const layerUnavailable: Layer.Layer<OrchestratorV2> = Layer.succeed(
     ),
     recoverDelegatedTasks: Effect.void,
     recoverDelegatedTask: () => Effect.void,
+    delegatedTaskAwaitsRestart: () => Effect.succeed(false),
     dispatch: (command) =>
       Effect.fail(
         new OrchestratorDispatchError({

@@ -3434,7 +3434,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 -- A held queue already went through recovery; rereading it on
                 -- every boot costs a projection read per held thread.
                 SELECT thread_id FROM orchestration_v2_projection_runs
-                WHERE status = 'queued' AND json_extract(payload_json, '$.queueHeld') IS NOT 1
+                WHERE status = 'queued'
+                  AND CASE WHEN json_valid(payload_json)
+                    THEN json_extract(payload_json, '$.queueHeld') IS NOT 1
+                    ELSE 1 END
                 UNION
                 SELECT thread_id FROM orchestration_v2_projection_runtime_requests
                 WHERE status = 'pending'
@@ -3805,6 +3808,27 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     SELECT latest.run_id FROM orchestration_v2_projection_runs AS latest
                     WHERE latest.thread_id = ${threadId}
                     ORDER BY latest.ordinal DESC LIMIT 1
+                  )
+                  -- A background roster belongs to the run that ended last
+                  -- (ranAfter), which a queued or resumed run can outrank.
+                  OR (
+                    run.run_id = (
+                      SELECT ended.run_id FROM orchestration_v2_projection_runs AS ended
+                      WHERE ended.thread_id = ${threadId}
+                        AND ended.status != 'queued'
+                      ORDER BY
+                        CASE WHEN json_valid(ended.payload_json)
+                          THEN json_extract(ended.payload_json, '$.completedAt') END DESC,
+                        ended.ordinal DESC
+                      LIMIT 1
+                    )
+                    AND EXISTS (
+                      SELECT 1 FROM orchestration_v2_projection_provider_threads AS roster
+                      WHERE roster.thread_id = ${threadId}
+                        AND CASE WHEN json_valid(roster.payload_json)
+                          THEN json_array_length(roster.payload_json, '$.pendingBackgroundTasks') > 0
+                          ELSE 0 END
+                    )
                   )
                   OR run.run_id IN (
                     SELECT item.run_id FROM orchestration_v2_projection_turn_items AS item

@@ -12,6 +12,7 @@ import {
   ThreadId,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ServerSettings from "../serverSettings.ts";
@@ -577,6 +578,35 @@ it.effect("continues a cut run past queued follow-ups, which stay held", () =>
     const texts = yield* continuationTexts({
       ...cut,
       runs: [...cut.runs, queuedFollowUp],
+    } as unknown as OrchestrationV2ThreadProjection);
+    assert.deepEqual(texts, ["Continue where you left off."]);
+  }),
+);
+
+it.effect("continues a resumed queued run that ran after an earlier continuation", () =>
+  Effect.gen(function* () {
+    // The continuation (ordinal 3) ran ahead of the held queue, then the user
+    // resumed the queued run (ordinal 1 here) and the server restarted again.
+    const finishedContinuation = {
+      id: RunId.make("run:earlier-continuation"),
+      ordinal: 3,
+      providerInstanceId: instanceId,
+      providerThreadId,
+      status: "completed",
+      completedAt: DateTime.makeUnsafe("2026-10-03T10:00:00.000Z"),
+    };
+    const live = makeProjection();
+    assert.equal(
+      restartContinuationRun({
+        ...live,
+        runs: [...live.runs, finishedContinuation],
+      } as unknown as OrchestrationV2ThreadProjection)?.id,
+      runId,
+    );
+    const cut = cutMidTurn({ completedAt: DateTime.makeUnsafe("2026-10-03T10:05:00.000Z") });
+    const texts = yield* continuationTexts({
+      ...cut,
+      runs: [...cut.runs, finishedContinuation],
     } as unknown as OrchestrationV2ThreadProjection);
     assert.deepEqual(texts, ["Continue where you left off."]);
   }),
