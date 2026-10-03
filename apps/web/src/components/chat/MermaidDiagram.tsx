@@ -2,17 +2,18 @@ import DOMPurify from "dompurify";
 import type { Mermaid } from "mermaid";
 import { use } from "react";
 
-import { fnv1a32 } from "../../lib/diffRendering";
-import { LRUCache } from "../../lib/lruCache";
-
 type MermaidRenderResult =
   | { readonly status: "rendered"; readonly svg: string }
-  | { readonly status: "error"; readonly message: string };
+  | { readonly status: "error"; readonly message: string; readonly retryable: boolean };
 
 let mermaidModulePromise: Promise<Mermaid> | null = null;
 let renderQueue: Promise<unknown> = Promise.resolve();
 let nextDiagramId = 0;
-const renderCache = new LRUCache<Promise<MermaidRenderResult>>(64, 8 * 1024 * 1024);
+const MAX_CACHED_RENDERS = 64;
+// Keyed by the full source so distinct diagrams never share an entry. Pending
+// renders are never evicted, because use() must get the same promise on retry.
+const renderCache = new Map<string, Promise<MermaidRenderResult>>();
+const settledRenders = new WeakSet<Promise<MermaidRenderResult>>();
 
 // Mermaid is ~1MB, so it only loads once a diagram is actually shown.
 function loadMermaid(): Promise<Mermaid> {
@@ -26,13 +27,17 @@ function loadMermaid(): Promise<Mermaid> {
 }
 
 // Diagrams can come from untrusted PR descriptions, so strip anything that can
-// navigate or run script on top of Mermaid's own strict sanitization.
+// navigate, run script, or fetch remote content on top of Mermaid's own strict
+// sanitization. HTML labels inside foreignObject stay, since authors can enable
+// them per diagram. Only local url(#id) references survive in CSS.
 function sanitizeMermaidSvg(svg: string): string {
   return DOMPurify.sanitize(svg, {
-    FORBID_ATTR: ["href", "xlink:href", "onerror", "onload", "onclick"],
-    FORBID_TAGS: ["foreignObject", "script"],
-    USE_PROFILES: { svg: true, svgFilters: true },
-  });
+    ADD_TAGS: ["foreignObject"],
+    HTML_INTEGRATION_POINTS: { foreignobject: true },
+    FORBID_ATTR: ["href", "xlink:href", "src", "srcset"],
+    FORBID_TAGS: ["a", "img", "image", "script"],
+    USE_PROFILES: { svg: true, svgFilters: true, html: true },
+  }).replace(/url\(\s*(?!['"]?#)[^)]*\)/gi, "none");
 }
 
 async function renderMermaid(
@@ -40,13 +45,29 @@ async function renderMermaid(
   theme: "light" | "dark",
 ): Promise<MermaidRenderResult> {
   const id = `mermaid-diagram-${nextDiagramId++}`;
+  let mermaid: Mermaid;
   try {
-    const mermaid = await loadMermaid();
+    mermaid = await loadMermaid();
+  } catch {
+    return { status: "error", message: "Mermaid failed to load.", retryable: true };
+  }
+  try {
     // initialize() mutates global config, so renders run one at a time.
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: "strict",
       suppressErrorRendering: true,
+      // HTML labels are mounted while Mermaid lays them out, before sanitizing,
+      // so diagram directives must not turn them back on.
+      secure: [
+        "secure",
+        "securityLevel",
+        "startOnLoad",
+        "maxTextSize",
+        "suppressErrorRendering",
+        "maxEdges",
+        "htmlLabels",
+      ],
       htmlLabels: false,
       flowchart: { htmlLabels: false },
       theme: theme === "dark" ? "dark" : "default",
@@ -58,6 +79,7 @@ async function renderMermaid(
     return {
       status: "error",
       message: error instanceof Error ? error.message : "The diagram could not be rendered.",
+      retryable: false,
     };
   } finally {
     document.getElementById(`d${id}`)?.remove();
@@ -65,19 +87,46 @@ async function renderMermaid(
 }
 
 function mermaidRenderPromise(source: string, theme: "light" | "dark") {
-  const key = `${fnv1a32(source).toString(36)}:${source.length}:${theme}`;
+  const key = `${theme}\n${source}`;
   const cached = renderCache.get(key);
-  if (cached) return cached;
+  if (cached) {
+    renderCache.delete(key);
+    renderCache.set(key, cached);
+    return cached;
+  }
   const result = renderQueue.then(() => renderMermaid(source, theme));
   renderQueue = result;
-  renderCache.set(key, result, source.length * 8);
+  void result.then((settled) => {
+    settledRenders.add(result);
+    // A failed load retries the next time the diagram mounts.
+    if (settled.status === "error" && settled.retryable && renderCache.get(key) === result) {
+      renderCache.delete(key);
+    }
+  });
+  renderCache.set(key, result);
+  if (renderCache.size > MAX_CACHED_RENDERS) {
+    for (const [oldKey, oldResult] of renderCache) {
+      if (settledRenders.has(oldResult)) {
+        renderCache.delete(oldKey);
+        break;
+      }
+    }
+  }
   return result;
 }
 
-/** Converts a rendered diagram into a standalone image URL with fixed size and background. */
-function mermaidSvgImageUrl(svg: string, background: string): string {
-  const document = new DOMParser().parseFromString(svg, "image/svg+xml");
-  const element = document.documentElement;
+const imageUrls = new WeakMap<MermaidRenderResult, string>();
+
+/**
+ * Converts a rendered diagram into a standalone image with fixed size and background.
+ * A blob URL, unlike a data URL, passes the desktop connect-src policy that media
+ * save and copy actions fetch through.
+ */
+function mermaidImageUrl(result: MermaidRenderResult & { status: "rendered" }): string {
+  const cached = imageUrls.get(result);
+  if (cached) return cached;
+  const svgDocument = new DOMParser().parseFromString(result.svg, "image/svg+xml");
+  const element = svgDocument.documentElement;
   const viewBox = element.getAttribute("viewBox")?.trim().split(/\s+/).map(Number);
   if (viewBox?.length === 4 && viewBox.every(Number.isFinite)) {
     element.setAttribute("width", String(viewBox[2]));
@@ -85,8 +134,12 @@ function mermaidSvgImageUrl(svg: string, background: string): string {
   }
   element.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   element.style.maxWidth = "none";
-  element.style.backgroundColor = background;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(element))}`;
+  element.style.backgroundColor = getComputedStyle(document.body).backgroundColor;
+  const url = URL.createObjectURL(
+    new Blob([new XMLSerializer().serializeToString(element)], { type: "image/svg+xml" }),
+  );
+  imageUrls.set(result, url);
+  return url;
 }
 
 /** Suspends until the diagram renders; failures show the parser message above the source. */
@@ -118,9 +171,7 @@ export function MermaidDiagram({
         type="button"
         aria-label="Expand diagram"
         className="flex w-full cursor-zoom-in justify-center rounded-md focus-visible:outline-2 focus-visible:outline-ring [&_svg]:h-auto [&_svg]:max-w-full"
-        onClick={() =>
-          onExpand(mermaidSvgImageUrl(result.svg, getComputedStyle(document.body).backgroundColor))
-        }
+        onClick={() => onExpand(mermaidImageUrl(result))}
         dangerouslySetInnerHTML={{ __html: result.svg }}
       />
     </div>
