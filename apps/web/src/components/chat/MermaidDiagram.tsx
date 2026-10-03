@@ -77,8 +77,8 @@ async function renderMermaid(
       startOnLoad: false,
       securityLevel: "strict",
       suppressErrorRendering: true,
-      // HTML labels are mounted while Mermaid lays them out, before sanitizing,
-      // so diagram directives must not turn them back on.
+      // HTML labels and theme CSS are mounted while Mermaid lays the diagram
+      // out, before sanitizing, so diagram directives must not set them.
       secure: [
         "secure",
         "securityLevel",
@@ -87,6 +87,7 @@ async function renderMermaid(
         "suppressErrorRendering",
         "maxEdges",
         "htmlLabels",
+        "themeCSS",
       ],
       htmlLabels: false,
       flowchart: { htmlLabels: false },
