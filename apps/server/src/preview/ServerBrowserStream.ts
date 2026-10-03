@@ -2,11 +2,13 @@
  * `/api/preview-stream/ws`: one server preview tab over a WebSocket.
  *
  * Frames go out as binary JPEG messages, viewport changes as JSON text, and
- * viewer input comes back as JSON text. Each frame is acknowledged to Chromium
- * only after the socket write drains, so a slow link (phone over T3 Connect)
- * gets fewer frames instead of a growing buffer. Authentication matches the
- * device hub proxy; the socket drives the page, so it needs operate scope.
+ * viewer input comes back as JSON text. The viewer acknowledges each frame and
+ * Chromium's acknowledgement waits for it, so a slow link (phone over T3
+ * Connect) gets fewer frames instead of a growing buffer. Authentication
+ * matches the device hub proxy; the socket drives the page, so it needs
+ * operate scope.
  */
+import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequest";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -22,12 +24,17 @@ export const PREVIEW_STREAM_ROUTE_PREFIX = "/api/preview-stream";
 const TAB_GONE_CODE = 4404;
 
 const DEFAULT_QUALITY = 70;
+const MAX_SOCKET_BUFFER_BYTES = 8 * 1024 * 1024;
+const MAX_UNACKNOWLEDGED_FRAMES = 64;
 const textDecoder = new TextDecoder();
 
 const intParam = (params: URLSearchParams, name: string, fallback: number, max: number) => {
   const value = Number(params.get(name));
   return Number.isFinite(value) && value > 0 ? Math.min(Math.round(value), max) : fallback;
 };
+
+const isAck = (message: unknown) =>
+  typeof message === "object" && message !== null && "type" in message && message.type === "ack";
 
 const parseMessage = (chunk: Uint8Array | string): unknown => {
   try {
@@ -69,7 +76,14 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
             Effect.map(Option.some),
             Effect.catchTag("ServerBrowserTabNotFoundError", () => Effect.succeedNone),
           );
+        const incoming = NodeHttpServerRequest.toIncomingMessage(request);
+        // JPEGs are already compressed. Disabling deflate also keeps all
+        // pending writes in the socket buffer we bound below, not a zlib queue.
+        delete incoming.headers["sec-websocket-extensions"];
+        const transport = incoming.socket;
         const socket = yield* request.upgrade;
+        // The reader performs the upgrade; writes wait for it.
+        const reader = yield* socket.reader;
         const writer = yield* socket.writer;
         // A refused upgrade reads as an auth failure to ticket clients, so a
         // missing tab is a close code they stop on.
@@ -79,18 +93,37 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
           return HttpServerResponse.empty();
         }
         const viewer = attached.value;
-        const reader = yield* socket.reader;
+        // `write` returns once the frame is queued, so Chromium's ack for each
+        // frame waits for the viewer's `ack` message instead.
+        const unacknowledged: Array<Effect.Effect<void>> = [];
+        const disconnectSlowViewer = Effect.sync(() => transport.destroy()).pipe(
+          Effect.andThen(Effect.interrupt),
+        );
+        const write = (data: Uint8Array | string) =>
+          Effect.suspend(() => {
+            const bytes = typeof data === "string" ? Buffer.byteLength(data) : data.byteLength;
+            // Include the WebSocket frame header in the budget.
+            if (transport.writableLength + bytes + 14 > MAX_SOCKET_BUFFER_BYTES) {
+              return disconnectSlowViewer;
+            }
+            return writer.write(data);
+          });
         const sendOutput = Queue.take(viewer.output).pipe(
           Effect.flatMap((output) => {
             switch (output._tag) {
               case "frame":
-                return writer.write(output.data).pipe(Effect.ensuring(output.ack));
+                if (unacknowledged.length >= MAX_UNACKNOWLEDGED_FRAMES) {
+                  return disconnectSlowViewer;
+                }
+                return write(output.data).pipe(
+                  Effect.andThen(Effect.sync(() => unacknowledged.push(output.ack))),
+                );
               case "viewport":
-                return writer.write(
+                return write(
                   JSON.stringify({ type: "viewport", width: output.width, height: output.height }),
                 );
               case "probe":
-                return writer.write(
+                return write(
                   JSON.stringify({
                     type: "probe",
                     x: output.x,
@@ -103,10 +136,15 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
             }
           }),
         );
+        const receive = (chunk: Uint8Array | string) => {
+          const message = parseMessage(chunk);
+          if (!isAck(message)) return viewer.input(message);
+          const ack = unacknowledged.shift();
+          // Forked: Chromium acks are paced and must not hold up input.
+          return ack ? Effect.forkScoped(ack).pipe(Effect.asVoid) : Effect.void;
+        };
         const receiveInput = reader.pull.pipe(
-          Effect.flatMap((chunks) =>
-            Effect.forEach(chunks, (chunk) => viewer.input(parseMessage(chunk)), { discard: true }),
-          ),
+          Effect.flatMap((chunks) => Effect.forEach(chunks, receive, { discard: true })),
         );
         // Whichever side ends first closes the other through scope teardown.
         return yield* Effect.raceFirst(Effect.forever(sendOutput), Effect.forever(receiveInput));

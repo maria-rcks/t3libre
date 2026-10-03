@@ -55,8 +55,6 @@ describe("addBrowserSurface", () => {
       threadId: "thread-1",
       viewport: FILL_PREVIEW_VIEWPORT,
       profileId: "profile-work",
-      // No Electron bridge here, so the environment hosts the tab.
-      runtime: "server",
     });
   });
 
@@ -73,7 +71,6 @@ describe("addBrowserSurface", () => {
       threadId: "thread-1",
       viewport: FILL_PREVIEW_VIEWPORT,
       profileId: DEFAULT_BROWSER_PROFILE_ID,
-      runtime: "server",
     });
     expect(Object.keys(readThreadPreviewState(threadRef).sessions)).toEqual(["tab-1", "tab-2"]);
     expect(

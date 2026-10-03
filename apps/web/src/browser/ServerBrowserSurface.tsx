@@ -25,6 +25,7 @@ import {
   useState,
 } from "react";
 
+import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 import { refreshPreviewStreamAccess, usePreviewStreamAccess } from "~/state/previewStream";
 
@@ -39,7 +40,16 @@ export interface ServerBrowserHandle {
 
 const RESIZE_DEBOUNCE_MS = 150;
 const ACCESS_RETRY_MS = 10_000;
-const UNAUTHORIZED_RETRY_MAX_MS = 30_000;
+// A recent probe answer near a new tap stands in for that tap's own answer,
+// which on a slow link arrives after the tap ends.
+const PROBE_REUSE_PX = 24;
+const PROBE_REUSE_MS = 10_000;
+// Kept in the input so soft keyboards have something to delete: Android
+// reports Backspace only as a deletion of text, not as a key.
+const INPUT_SENTINEL = "\u200b";
+const BACKSPACE = { key: "Backspace", code: "Backspace", keyCode: 8 } as const;
+const DELETE = { key: "Delete", code: "Delete", keyCode: 46 } as const;
+const MAX_UNAUTHORIZED_REFUSALS = 3;
 const TAP_SLOP_PX = 8;
 const MULTI_CLICK_MS = 500;
 const MULTI_CLICK_SLOP_PX = 4;
@@ -69,6 +79,8 @@ interface TouchProbe {
   readonly x: number;
   readonly y: number;
   editable: boolean | null;
+  /** True only for this tap's own reply, never for a cached answer. */
+  answered: boolean;
   /** The tap ended before the answer arrived. */
   tapped: boolean;
 }
@@ -119,6 +131,7 @@ export function ServerBrowserSurface(props: {
   const hasFrameRef = useRef(false);
   const pendingCommandRef = useRef<PreviewStreamInput | null>(null);
   const unauthorizedRef = useRef(0);
+  const [accessDenied, setAccessDenied] = useState(false);
   const pendingMoveRef = useRef<MouseInput | null>(null);
   const pendingWheelRef = useRef<WheelInput | null>(null);
   const inputFrameRef = useRef<number | null>(null);
@@ -132,6 +145,7 @@ export function ServerBrowserSurface(props: {
   } | null>(null);
   const touchRef = useRef<TouchGesture | null>(null);
   const probeRef = useRef<TouchProbe | null>(null);
+  const lastProbeRef = useRef<{ x: number; y: number; editable: boolean; at: number } | null>(null);
   const firstFrame = useEffectEvent(() => onFirstFrame?.());
   const viewportChanged = useEffectEvent((viewport: PreviewStreamViewport) =>
     onViewport?.(viewport),
@@ -217,22 +231,18 @@ export function ServerBrowserSurface(props: {
 
   const focusInput = () => inputRef.current?.focus({ preventScroll: true });
 
-  useImperativeHandle(
-    ref,
-    () => {
-      const command = (input: PreviewStreamInput) => {
-        if (clientRef.current?.send(input)) return;
-        pendingCommandRef.current = input;
-      };
-      return {
-        navigate: (url) => command({ type: "navigate", url }),
-        history: (delta) => command({ type: "history", delta }),
-        reload: () => command({ type: "reload" }),
-        canvas: () => (hasFrameRef.current ? canvasRef.current : null),
-      };
-    },
-    [],
-  );
+  useImperativeHandle(ref, () => {
+    const command = (input: PreviewStreamInput) => {
+      if (clientRef.current?.send(input)) return;
+      pendingCommandRef.current = input;
+    };
+    return {
+      navigate: (url) => command({ type: "navigate", url }),
+      history: (delta) => command({ type: "history", delta }),
+      reload: () => command({ type: "reload" }),
+      canvas: () => (hasFrameRef.current ? canvasRef.current : null),
+    };
+  }, []);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -273,7 +283,7 @@ export function ServerBrowserSurface(props: {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!visible || !access || !cap || !canvas) return;
+    if (!visible || accessDenied || !access || !cap || !canvas) return;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     const painter = createPreviewFramePainter(canvas, () => {
       if (hasFrameRef.current) return;
@@ -288,9 +298,11 @@ export function ServerBrowserSurface(props: {
           painter.paint(jpeg);
         },
         onProbe: (result) => {
+          lastProbeRef.current = { ...result, at: performance.now() };
           const probe = probeRef.current;
           if (!probe || probe.x !== result.x || probe.y !== result.y) return;
           probe.editable = result.editable;
+          probe.answered = true;
           if (!probe.tapped) return;
           // Late answer: Android still raises the keyboard; iOS waits for the next tap.
           probeRef.current = null;
@@ -310,12 +322,16 @@ export function ServerBrowserSurface(props: {
           if (command) client.send(command);
         },
         onUnauthorized: () => {
-          // A fresh ticket re-runs this effect through `access`. Back off when
-          // new tickets keep getting refused, e.g. a session without operate scope.
-          const attempt = unauthorizedRef.current++;
+          // Fresh tickets re-run this effect. Repeated refusals need an explicit retry.
+          const refusals = ++unauthorizedRef.current;
+          if (refusals >= MAX_UNAUTHORIZED_REFUSALS) {
+            inputRef.current?.blur();
+            setAccessDenied(true);
+            return;
+          }
           refreshTimer = setTimeout(
             () => refreshPreviewStreamAccess(environmentId),
-            attempt === 0 ? 0 : Math.min(1_000 * 2 ** attempt, UNAUTHORIZED_RETRY_MAX_MS),
+            refusals === 1 ? 0 : 1_000 * 2 ** (refusals - 1),
           );
         },
       },
@@ -327,14 +343,14 @@ export function ServerBrowserSurface(props: {
       client.stop();
       if (clientRef.current === client) clientRef.current = null;
     };
-  }, [access, cap, environmentId, followSize, tabId, threadId, visible]);
+  }, [access, accessDenied, cap, environmentId, followSize, tabId, threadId, visible]);
 
   useEffect(() => {
-    if (!visible || access !== null) return;
+    if (!visible || accessDenied || access !== null) return;
     // A failed ticket mint, e.g. while the server restarts, never retries on its own.
-    const timer = setTimeout(() => refreshPreviewStreamAccess(environmentId), ACCESS_RETRY_MS);
-    return () => clearTimeout(timer);
-  }, [access, environmentId, visible]);
+    const timer = setInterval(() => refreshPreviewStreamAccess(environmentId), ACCESS_RETRY_MS);
+    return () => clearInterval(timer);
+  }, [access, accessDenied, environmentId, visible]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -375,7 +391,21 @@ export function ServerBrowserSurface(props: {
         panning: false,
       };
       const point = pagePoint(event.clientX, event.clientY, false);
-      probeRef.current = point ? { x: point.x, y: point.y, editable: null, tapped: false } : null;
+      const last = lastProbeRef.current;
+      const reusable =
+        point !== null &&
+        last !== null &&
+        performance.now() - last.at < PROBE_REUSE_MS &&
+        Math.hypot(point.x - last.x, point.y - last.y) < PROBE_REUSE_PX;
+      probeRef.current = point
+        ? {
+            x: point.x,
+            y: point.y,
+            editable: reusable ? last.editable : null,
+            answered: false,
+            tapped: false,
+          }
+        : null;
       if (point) send({ type: "probe", x: point.x, y: point.y });
       return;
     }
@@ -453,7 +483,7 @@ export function ServerBrowserSurface(props: {
       // Focusing inside the tap's user activation is what lets iOS raise the keyboard.
       if (probe?.editable === true) focusInput();
       else if (probe?.editable === false) inputRef.current?.blur();
-      if (probe?.editable === null) probe.tapped = true;
+      if (probe && !probe.answered) probe.tapped = true;
       else probeRef.current = null;
       flushInput();
       const clickCount = countClick("left", event.clientX, event.clientY, event.timeStamp);
@@ -481,7 +511,37 @@ export function ServerBrowserSurface(props: {
   };
 
   const handlePointerCancel = (event: PointerEvent<HTMLCanvasElement>) => {
-    if (touchRef.current?.pointerId === event.pointerId) touchRef.current = null;
+    if (touchRef.current?.pointerId === event.pointerId) {
+      touchRef.current = null;
+      probeRef.current = null;
+      return;
+    }
+    if (!mousePressedRef.current) return;
+    // A cancelled drag still has to release the page's pressed button.
+    mousePressedRef.current = false;
+    const point = pagePoint(event.clientX, event.clientY, true);
+    if (!point) return;
+    flushInput();
+    send({
+      type: "mouse",
+      action: "up",
+      x: point.x,
+      y: point.y,
+      button: lastClickRef.current?.button ?? "left",
+      buttons: 0,
+      clickCount: lastClickRef.current?.count ?? 1,
+      modifiers: 0,
+    });
+  };
+
+  const resetInput = (textarea: HTMLTextAreaElement) => {
+    textarea.value = INPUT_SENTINEL;
+    textarea.setSelectionRange(INPUT_SENTINEL.length, INPUT_SENTINEL.length);
+  };
+
+  const sendKeyPress = (key: typeof BACKSPACE | typeof DELETE) => {
+    send({ type: "key", action: "down", ...key, modifiers: 0 });
+    send({ type: "key", action: "up", ...key, modifiers: 0 });
   };
 
   const handleKey = (action: "down" | "up", event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -521,15 +581,22 @@ export function ServerBrowserSurface(props: {
   };
 
   const handleInput = (event: FormEvent<HTMLTextAreaElement>) => {
-    if (event.nativeEvent instanceof InputEvent && event.nativeEvent.isComposing) return;
+    const native = event.nativeEvent;
+    if (native instanceof InputEvent && native.isComposing) return;
     const textarea = event.currentTarget;
-    if (textarea.value) send({ type: "text", text: textarea.value });
-    textarea.value = "";
+    const inputType = native instanceof InputEvent ? native.inputType : "";
+    if (inputType === "deleteContentBackward") sendKeyPress(BACKSPACE);
+    else if (inputType === "deleteContentForward") sendKeyPress(DELETE);
+    else {
+      const text = textarea.value.replaceAll(INPUT_SENTINEL, "");
+      if (text) send({ type: "text", text });
+    }
+    resetInput(textarea);
   };
 
   const handleCompositionEnd = (event: CompositionEvent<HTMLTextAreaElement>) => {
     if (event.data) send({ type: "text", text: event.data });
-    event.currentTarget.value = "";
+    resetInput(event.currentTarget);
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -564,6 +631,9 @@ export function ServerBrowserSurface(props: {
         autoComplete="off"
         autoCorrect="off"
         spellCheck={false}
+        defaultValue={INPUT_SENTINEL}
+        // The caret must sit after the sentinel for a deletion to have something to delete.
+        onFocus={(event) => resetInput(event.currentTarget)}
         className="sr-only top-0 left-0 text-base"
         onKeyDown={(event) => handleKey("down", event)}
         onKeyUp={(event) => handleKey("up", event)}
@@ -571,6 +641,25 @@ export function ServerBrowserSurface(props: {
         onCompositionEnd={handleCompositionEnd}
         onPaste={handlePaste}
       />
+      {visible && accessDenied ? (
+        // The page can be invisible beneath an empty or unreachable state; reconnect must remain reachable.
+        <div className="visible absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background p-3 text-center">
+          <p role="alert" className="text-xs text-muted-foreground">
+            Browser connection was refused.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              unauthorizedRef.current = 0;
+              setAccessDenied(false);
+              refreshPreviewStreamAccess(environmentId);
+            }}
+          >
+            Reconnect
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

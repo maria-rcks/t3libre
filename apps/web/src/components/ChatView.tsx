@@ -254,7 +254,6 @@ import { BrowserSettingsReadError } from "../browser/openFileInPreview";
 import { previewRuntimeTabId } from "../browser/previewRuntimeTabId";
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
-import { isLocalServerTab } from "./preview/localServerTabs";
 import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
 import { usePreviewSession } from "./preview/usePreviewSession";
 import { subscribePreviewAction } from "./preview/previewActionBus";
@@ -5124,30 +5123,39 @@ export default function ChatView(props: ChatViewProps) {
     deviceState.sessions,
     deviceState.devices,
   ]);
-  // A server tab the agent opens floats over chat, as a desktop automation
-  // host does for its own tabs. The first snapshot is a baseline so reloads do
-  // not resurrect tabs; tabs this client opened or already shows stay put.
+  // A server tab an agent opens and asks to show floats over chat, as a
+  // desktop automation host does for its own tabs. Tabs present when the
+  // thread's preview state first loads are a baseline, so reloads do not
+  // resurrect them, and tabs already shown in a surface stay where they are.
   const previousServerPreviewTabs = useRef(new Map<string, Set<string>>());
   useEffect(() => {
     if (!activeThreadRef || !activeEnvironmentServerBrowser) return;
+    // Nothing has loaded yet; an empty baseline would make every tab look new.
+    if (!activePreviewState.listLoaded) return;
     const threadKey = scopedThreadKey(activeThreadRef);
-    const serverTabIds = Object.values(activePreviewState.sessions)
-      .filter((session) => session.runtime === "server")
-      .map((session) => session.tabId);
+    const serverSessions = Object.values(activePreviewState.sessions).filter(
+      (session) => session.runtime === "server",
+    );
     const previous = previousServerPreviewTabs.current.get(threadKey);
-    previousServerPreviewTabs.current.set(threadKey, new Set(serverTabIds));
+    previousServerPreviewTabs.current.set(
+      threadKey,
+      new Set(serverSessions.map((session) => session.tabId)),
+    );
     if (!previous || !autoShowFloatingPreview) return;
-    for (const tabId of serverTabIds) {
-      if (previous.has(tabId)) continue;
+    for (const session of serverSessions) {
+      if (previous.has(session.tabId) || session.reveal !== true) continue;
       const shown = rightPanelState.surfaces.some(
-        (surface) => surface.kind === "preview" && surface.resourceId === tabId,
+        (surface) => surface.kind === "preview" && surface.resourceId === session.tabId,
       );
-      if (!shown && !isLocalServerTab(activeThreadRef, tabId)) {
-        usePreviewMiniPlayerStore.getState().open(activeThreadRef, browserMiniPlayerSource(tabId));
+      if (!shown) {
+        usePreviewMiniPlayerStore
+          .getState()
+          .open(activeThreadRef, browserMiniPlayerSource(session.tabId));
       }
     }
   }, [
     activeEnvironmentServerBrowser,
+    activePreviewState.listLoaded,
     activePreviewState.sessions,
     activeThreadRef,
     autoShowFloatingPreview,

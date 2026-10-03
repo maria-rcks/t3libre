@@ -5,8 +5,9 @@
  * The environment runs the page in headless Chromium and streams it over
  * `/api/preview-stream/ws`. Binary messages are complete JPEG frames; text
  * messages report the page viewport in CSS px. Input goes back as JSON in page
- * CSS px. The server keeps one frame in flight per socket, so a slow viewer
- * gets fewer frames instead of a growing buffer.
+ * CSS px. The client acknowledges every frame and the server keeps only a few
+ * unacknowledged, so a slow viewer gets fewer frames instead of a growing
+ * buffer.
  *
  * The socket reconnects with backoff while the owner keeps it running. A
  * refused upgrade stops it and asks the owner for fresh credentials.
@@ -112,6 +113,7 @@ export interface PreviewStreamClient {
   readonly stop: () => void;
 }
 
+const ACK_MESSAGE = JSON.stringify({ type: "ack" });
 const RETRY_BASE_MS = 500;
 const RETRY_MAX_MS = 10_000;
 
@@ -157,6 +159,7 @@ export function createPreviewStreamClient(
       if (socket !== ws) return;
       if (event.data instanceof ArrayBuffer) {
         failures = 0;
+        ws.send(ACK_MESSAGE);
         events.onFrame(event.data);
         return;
       }

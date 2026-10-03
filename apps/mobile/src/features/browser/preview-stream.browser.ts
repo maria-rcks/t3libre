@@ -17,12 +17,14 @@ declare global {
 
 /** WebKit's presentation API, the only picture in picture entry on older iOS. */
 interface PresentationVideo extends HTMLVideoElement {
-  webkitSupportsPresentationMode?: (mode: string) => boolean;
   webkitSetPresentationMode?: (mode: "inline" | "picture-in-picture") => void;
   webkitPresentationMode?: string;
 }
 
 type WheelInput = Extract<PreviewStreamInput, { type: "wheel" }>;
+type MouseInput = Extract<PreviewStreamInput, { type: "mouse" }>;
+const mouseButton = (button: number): MouseInput["button"] =>
+  button === 0 ? "left" : button === 1 ? "middle" : button === 2 ? "right" : "none";
 
 const RESIZE_DEBOUNCE_MS = 150;
 const TAP_SLOP_PX = 8;
@@ -31,6 +33,13 @@ const MULTI_CLICK_SLOP_PX = 4;
 const WHEEL_LINE_PX = 16;
 // JPEG frames past 2x cost bandwidth without a visible gain on a phone.
 const MAX_PIXEL_RATIO = 2;
+// A tap this close to an answered probe, this soon, reuses its answer. On a slow
+// link the answer lands after touch end, too late for iOS to raise the keyboard.
+const PROBE_REUSE_PX = 24;
+const PROBE_REUSE_MS = 10_000;
+// Kept in the hidden textarea so a soft keyboard's backspace has something to
+// delete and fires `input`; Gboard's keydown carries keyCode 229 and no key.
+const SENTINEL = "\u200b";
 
 interface Viewer {
   readonly stop: () => void;
@@ -133,8 +142,27 @@ export function start(configuration: PreviewStreamConfiguration) {
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
   let wheelFrame: number | null = null;
   let pendingWheel: WheelInput | null = null;
-  // Whether the page point under a touch takes text; null until the server answers.
-  let probe: { x: number; y: number; editable: boolean | null; tapped: boolean } | null = null;
+  let mouseFrame: number | null = null;
+  let pendingMouse: MouseInput | null = null;
+  let mousePressed: MouseInput["button"] | null = null;
+  // The latest probe. `editable` is the answer its tap acts on, null until known;
+  // `end` records what touch end did, so a late answer can still act or correct it.
+  let probe: {
+    readonly x: number;
+    readonly y: number;
+    readonly clientX: number;
+    readonly clientY: number;
+    editable: boolean | null;
+    end: "touching" | "acted" | "late" | "panned";
+  } | null = null;
+  let probeCache: {
+    readonly clientX: number;
+    readonly clientY: number;
+    readonly editable: boolean;
+    readonly time: number;
+  } | null = null;
+  // A keydown already sent this key; its `input` must not send it again.
+  let keySent = false;
   let touch: {
     pointerId: number;
     startX: number;
@@ -143,7 +171,13 @@ export function start(configuration: PreviewStreamConfiguration) {
     lastY: number;
     panning: boolean;
   } | null = null;
-  let lastTap: { time: number; x: number; y: number; count: number } | null = null;
+  let lastTap: {
+    time: number;
+    x: number;
+    y: number;
+    count: number;
+    button: MouseInput["button"];
+  } | null = null;
 
   const reportStatus = (status: "connecting" | "streaming") => {
     streaming = status === "streaming";
@@ -175,10 +209,21 @@ export function start(configuration: PreviewStreamConfiguration) {
         onProbe: (result) => {
           const current = probe;
           if (!current || current.x !== result.x || current.y !== result.y) return;
-          current.editable = result.editable;
-          if (!current.tapped) return;
-          // Late answer: Android still raises the keyboard; iOS waits for the next tap.
+          probeCache = {
+            clientX: current.clientX,
+            clientY: current.clientY,
+            editable: result.editable,
+            time: performance.now(),
+          };
+          if (current.end === "touching") {
+            current.editable = result.editable;
+            return;
+          }
           probe = null;
+          if (current.end === "panned") return;
+          if (current.end === "acted" && current.editable === result.editable) return;
+          // Late or corrected answer: Android still raises the keyboard; iOS waits
+          // for the next tap, which can reuse this answer.
           if (result.editable) input.focus({ preventScroll: true });
           else input.blur();
         },
@@ -276,9 +321,47 @@ export function start(configuration: PreviewStreamConfiguration) {
     wheelFrame ??= requestAnimationFrame(flushWheel);
   };
 
+  const flushMouse = () => {
+    if (mouseFrame !== null) cancelAnimationFrame(mouseFrame);
+    mouseFrame = null;
+    if (pendingMouse) send(pendingMouse);
+    pendingMouse = null;
+  };
+  const countClick = (event: PointerEvent, button: MouseInput["button"]) => {
+    const last = lastTap;
+    const count =
+      last &&
+      last.button === button &&
+      event.timeStamp - last.time < MULTI_CLICK_MS &&
+      Math.hypot(event.clientX - last.x, event.clientY - last.y) < MULTI_CLICK_SLOP_PX
+        ? last.count + 1
+        : 1;
+    lastTap = { time: event.timeStamp, x: event.clientX, y: event.clientY, count, button };
+    return count;
+  };
   const onPointerDown = (event: PointerEvent) => {
     if (!event.isPrimary) return;
     event.preventDefault();
+    if (event.pointerType !== "touch") {
+      const point = pagePoint(event.clientX, event.clientY, false);
+      if (!point) return;
+      canvas.setPointerCapture(event.pointerId);
+      input.focus({ preventScroll: true });
+      flushMouse();
+      flushWheel();
+      mousePressed = mouseButton(event.button);
+      send({
+        type: "mouse",
+        action: "down",
+        x: point.x,
+        y: point.y,
+        button: mousePressed,
+        buttons: event.buttons,
+        clickCount: countClick(event, mousePressed),
+        modifiers: previewStreamModifiers(event),
+      });
+      return;
+    }
     touch = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -288,10 +371,43 @@ export function start(configuration: PreviewStreamConfiguration) {
       panning: false,
     };
     const point = pagePoint(event.clientX, event.clientY, false);
-    probe = point ? { x: point.x, y: point.y, editable: null, tapped: false } : null;
-    if (point) send({ type: "probe", x: point.x, y: point.y });
+    if (!point) {
+      probe = null;
+      return;
+    }
+    const cached = probeCache;
+    const reuse =
+      cached !== null &&
+      performance.now() - cached.time < PROBE_REUSE_MS &&
+      Math.hypot(event.clientX - cached.clientX, event.clientY - cached.clientY) <= PROBE_REUSE_PX;
+    probe = {
+      x: point.x,
+      y: point.y,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      editable: reuse ? cached.editable : null,
+      end: "touching",
+    };
+    // Sent even with a cached answer, so the next tap reuses a fresh one.
+    send({ type: "probe", x: point.x, y: point.y });
   };
   const onPointerMove = (event: PointerEvent) => {
+    if (event.pointerType !== "touch") {
+      const point = pagePoint(event.clientX, event.clientY, mousePressed !== null);
+      if (!point) return;
+      pendingMouse = {
+        type: "mouse",
+        action: "move",
+        x: point.x,
+        y: point.y,
+        button: mousePressed ?? "none",
+        buttons: event.buttons,
+        clickCount: 0,
+        modifiers: previewStreamModifiers(event),
+      };
+      mouseFrame ??= requestAnimationFrame(flushMouse);
+      return;
+    }
     if (!touch || touch.pointerId !== event.pointerId) return;
     if (
       !touch.panning &&
@@ -312,13 +428,36 @@ export function start(configuration: PreviewStreamConfiguration) {
     touch.lastX = event.clientX;
     touch.lastY = event.clientY;
   };
+  const releaseMouse = (event: PointerEvent, cancelled: boolean) => {
+    const button = mousePressed;
+    if (button === null) return;
+    mousePressed = null;
+    flushMouse();
+    flushWheel();
+    const point = pagePoint(event.clientX, event.clientY, true);
+    if (!point) return;
+    send({
+      type: "mouse",
+      action: "up",
+      x: point.x,
+      y: point.y,
+      button,
+      buttons: cancelled ? 0 : event.buttons,
+      clickCount: lastTap?.count ?? 1,
+      modifiers: previewStreamModifiers(event),
+    });
+  };
   const onPointerUp = (event: PointerEvent) => {
+    if (event.pointerType !== "touch") {
+      releaseMouse(event, false);
+      return;
+    }
     const ended = touch;
     if (!ended || ended.pointerId !== event.pointerId) return;
     touch = null;
     const answered = probe;
     if (ended.panning) {
-      probe = null;
+      if (answered) answered.end = "panned";
       return;
     }
     const point = pagePoint(event.clientX, event.clientY, false);
@@ -326,24 +465,22 @@ export function start(configuration: PreviewStreamConfiguration) {
     // Focusing inside the tap's user activation is what lets iOS raise the keyboard.
     if (answered?.editable === true) input.focus({ preventScroll: true });
     else if (answered?.editable === false) input.blur();
-    if (answered?.editable === null) answered.tapped = true;
-    else probe = null;
+    if (answered) answered.end = answered.editable === null ? "late" : "acted";
     flushWheel();
-    const last = lastTap;
-    const clickCount =
-      last &&
-      event.timeStamp - last.time < MULTI_CLICK_MS &&
-      Math.hypot(event.clientX - last.x, event.clientY - last.y) < MULTI_CLICK_SLOP_PX
-        ? last.count + 1
-        : 1;
-    lastTap = { time: event.timeStamp, x: event.clientX, y: event.clientY, count: clickCount };
+    const clickCount = countClick(event, "left");
     const at = { x: point.x, y: point.y, modifiers: 0 };
     send({ type: "mouse", action: "move", ...at, button: "none", buttons: 0, clickCount: 0 });
     send({ type: "mouse", action: "down", ...at, button: "left", buttons: 1, clickCount });
     send({ type: "mouse", action: "up", ...at, button: "left", buttons: 0, clickCount });
   };
   const onPointerCancel = (event: PointerEvent) => {
-    if (touch?.pointerId === event.pointerId) touch = null;
+    if (event.pointerType !== "touch") {
+      releaseMouse(event, true);
+      return;
+    }
+    if (touch?.pointerId !== event.pointerId) return;
+    touch = null;
+    if (probe) probe.end = "panned";
   };
   // Trackpads and mice on tablets scroll with wheel events.
   const onWheel = (event: WheelEvent) => {
@@ -389,18 +526,38 @@ export function start(configuration: PreviewStreamConfiguration) {
       ...(action === "down" && text !== undefined ? { text } : {}),
       modifiers: previewStreamModifiers(event),
     });
+    // Some Android keyboards edit the textarea even when keydown is prevented.
+    // Shortcuts keep their default, so a paste still arrives as text.
+    keySent = action === "down" && !shortcut;
     if (!shortcut) event.preventDefault();
   };
   const onKeyDown = (event: KeyboardEvent) => onKey("down", event);
   const onKeyUp = (event: KeyboardEvent) => onKey("up", event);
+  const resetInput = () => {
+    input.value = SENTINEL;
+    input.setSelectionRange(SENTINEL.length, SENTINEL.length);
+  };
+  const pressKey = (key: "Backspace" | "Delete", keyCode: number) => {
+    for (const action of ["down", "up"] as const) {
+      send({ type: "key", action, key, code: key, keyCode, modifiers: 0 });
+    }
+  };
   const onInput = (event: Event) => {
     if (event instanceof InputEvent && event.isComposing) return;
-    if (input.value) send({ type: "text", text: input.value });
-    input.value = "";
+    const inputType = event instanceof InputEvent ? event.inputType : "";
+    if (keySent) keySent = false;
+    else if (inputType === "deleteContentBackward") pressKey("Backspace", 8);
+    else if (inputType === "deleteContentForward") pressKey("Delete", 46);
+    else {
+      const text = input.value.replaceAll(SENTINEL, "");
+      if (text) send({ type: "text", text });
+    }
+    resetInput();
   };
   const onCompositionEnd = (event: CompositionEvent) => {
-    if (event.data) send({ type: "text", text: event.data });
-    input.value = "";
+    const text = event.data.replaceAll(SENTINEL, "");
+    if (text) send({ type: "text", text });
+    resetInput();
   };
 
   if (interactive) {
@@ -415,17 +572,21 @@ export function start(configuration: PreviewStreamConfiguration) {
     input.addEventListener("keyup", onKeyUp);
     input.addEventListener("input", onInput);
     input.addEventListener("compositionend", onCompositionEnd);
+    input.addEventListener("focus", resetInput);
+    resetInput();
   }
 
   // Picture in picture plays the canvas as a muted video. It is created on first
   // use so a viewer that never pops out pays nothing for it.
-  const supportsPresentationMode = (element: PresentationVideo) =>
-    element.webkitSupportsPresentationMode?.("picture-in-picture") === true;
+  // Checks the API, not an element: WebKit reports no support for a video
+  // that has not loaded yet.
+  const videoPrototype: PresentationVideo = HTMLVideoElement.prototype;
   const pictureInPictureSupported =
     interactive &&
     typeof canvas.captureStream === "function" &&
-    (document.pictureInPictureEnabled === true ||
-      supportsPresentationMode(document.createElement("video")));
+    ((document.pictureInPictureEnabled === true &&
+      typeof videoPrototype.requestPictureInPicture === "function") ||
+      typeof videoPrototype.webkitSetPresentationMode === "function");
   let video: PresentationVideo | null = null;
   const pictureInPictureActive = () =>
     video !== null &&
@@ -499,6 +660,7 @@ export function start(configuration: PreviewStreamConfiguration) {
       visualViewport?.removeEventListener("scroll", followVisualViewport);
       if (resizeTimer !== null) clearTimeout(resizeTimer);
       if (wheelFrame !== null) cancelAnimationFrame(wheelFrame);
+      if (mouseFrame !== null) cancelAnimationFrame(mouseFrame);
       painter.stop();
       client?.stop();
       client = null;

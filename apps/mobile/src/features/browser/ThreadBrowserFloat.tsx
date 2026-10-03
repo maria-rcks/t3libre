@@ -35,8 +35,8 @@ export function ThreadBrowserFloat(props: {
     known.current = new Set(ids);
     // The first list is a baseline, so reopening a thread does not resurface old tabs.
     if (previous === null) return;
-    const opened = ids.findLast((id) => !previous.has(id));
-    if (opened !== undefined) setTabId(opened);
+    const opened = props.tabs.findLast((tab) => tab.reveal === true && !previous.has(tab.tabId));
+    if (opened !== undefined) setTabId(opened.tabId);
   }, [props.loaded, props.tabs]);
   const focused = useIsFocused();
   const [foreground, setForeground] = useState(AppState.currentState !== "background");

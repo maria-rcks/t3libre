@@ -39,21 +39,16 @@ const EMPTY_TABS: ThreadPreviewTabs = {
 };
 const emptyTabsAtom = Atom.make(EMPTY_TABS).pipe(Atom.withLabel("mobile-preview-tabs:empty"));
 
-function reconcileList(current: ThreadPreviewTabs, result: PreviewListResult): ThreadPreviewTabs {
-  if (
-    current.listed &&
-    current.serverEpoch === result.serverEpoch &&
-    result.revision <= current.revision
-  ) {
-    return current;
-  }
-  return {
-    serverEpoch: result.serverEpoch,
-    revision: result.revision,
-    sessions: result.sessions,
-    listed: true,
-  };
-}
+// Events kept for replay onto a list that lands after them. Only a list older
+// than this many of the thread's events would miss one.
+const MAX_REPLAY_EVENTS = 200;
+
+const listTabs = (result: PreviewListResult): ThreadPreviewTabs => ({
+  serverEpoch: result.serverEpoch,
+  revision: result.revision,
+  sessions: result.sessions,
+  listed: true,
+});
 
 function applyEvent(current: ThreadPreviewTabs, event: PreviewEvent): ThreadPreviewTabs {
   if (event.revision <= current.revision) return current;
@@ -110,28 +105,46 @@ const threadPreviewTabsAtom = Atom.family((threadKey: string) => {
   return Atom.make((get) => {
     let disposed = false;
     let state = EMPTY_TABS;
+    // The newest list applied, and this thread's events newer than it. A list
+    // can land after events it predates (the first one, or a stale cached one
+    // then its refresh), so each list is the base and newer events replay on top.
+    let list: PreviewListResult | null = null;
+    let events: ReadonlyArray<PreviewEvent> = [];
     const publish = (next: ThreadPreviewTabs) => {
       if (next === state) return;
       state = next;
       get.setSelf(next);
     };
+    const applyList = (result: PreviewListResult) => {
+      if (list?.serverEpoch === result.serverEpoch && result.revision < list.revision) return;
+      list = result;
+      events = events.filter(
+        (event) => event.serverEpoch === result.serverEpoch && event.revision > result.revision,
+      );
+      return events.reduce(applyEvent, listTabs(result));
+    };
     get.addFinalizer(() => {
       disposed = true;
     });
     get.subscribe(listAtom, (result) => {
-      if (AsyncResult.isSuccess(result)) publish(reconcileList(state, result.value));
+      if (!AsyncResult.isSuccess(result)) return;
+      const next = applyList(result.value);
+      if (next) publish(next);
     });
     get.subscribe(eventsAtom, (result) => {
       if (!AsyncResult.isSuccess(result) || result.value.threadId !== ref.threadId) return;
+      const event = result.value;
+      if (list?.serverEpoch === event.serverEpoch && event.revision <= list.revision) return;
+      events = [...events.slice(1 - MAX_REPLAY_EVENTS), event];
       // A restarted server resets revisions; only a fresh list is authoritative.
-      if (state.serverEpoch !== null && result.value.serverEpoch !== state.serverEpoch) {
+      if (state.serverEpoch !== null && event.serverEpoch !== state.serverEpoch) {
         get.refresh(listAtom);
         return;
       }
-      publish(applyEvent(state, result.value));
+      publish(applyEvent(state, event));
     });
     const cached = get.once(listAtom);
-    if (AsyncResult.isSuccess(cached)) state = reconcileList(state, cached.value);
+    if (AsyncResult.isSuccess(cached)) state = applyList(cached.value) ?? state;
     // The cached list can predate an agent-opened tab.
     queueMicrotask(() => {
       if (!disposed) get.refresh(listAtom);

@@ -528,9 +528,11 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
                 )
                 .sort(
                   (left, right) =>
+                    Number(input.tabId !== undefined && ownsTargetTab(right)) -
+                      Number(input.tabId !== undefined && ownsTargetTab(left)) ||
+                    Number(right.preferred) - Number(left.preferred) ||
                     Number(ownsTargetTab(right, true)) - Number(ownsTargetTab(left, true)) ||
                     Number(ownsTargetTab(right)) - Number(ownsTargetTab(left)) ||
-                    Number(right.preferred) - Number(left.preferred) ||
                     Number(right.focused) - Number(left.focused) ||
                     right.focusOrder - left.focusOrder,
                 )[0];

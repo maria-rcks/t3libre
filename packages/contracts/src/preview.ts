@@ -186,6 +186,8 @@ export const PreviewSessionSnapshot = Schema.Struct({
    */
   profileId: Schema.optional(BrowserProfileId),
   runtime: Schema.optional(PreviewRuntime),
+  /** An agent opened this tab and asked to show it, so viewers float it. */
+  reveal: Schema.optional(Schema.Boolean),
   updatedAt: Schema.String,
 });
 export type PreviewSessionSnapshot = typeof PreviewSessionSnapshot.Type;
@@ -205,6 +207,8 @@ export const PreviewOpenInput = Schema.Struct({
   profileId: Schema.optional(BrowserProfileId),
   /** Omit for a desktop tab. `server` requires the `serverBrowser` capability. */
   runtime: Schema.optional(PreviewRuntime),
+  /** Set by agent opens that should float for viewers; see the snapshot field. */
+  reveal: Schema.optional(Schema.Boolean),
 });
 export type PreviewOpenInput = typeof PreviewOpenInput.Type;
 

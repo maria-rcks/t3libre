@@ -110,6 +110,7 @@ const fontconfigFile = (
 
 const BROWSER_INSTALL_TIMEOUT = Duration.minutes(10);
 const FONTS_INSTALL_TIMEOUT = Duration.minutes(3);
+const FONTS_LAUNCH_WAIT = Duration.seconds(1);
 const browserInstallLock = Semaphore.makeUnsafe(1);
 const fontsInstallLock = Semaphore.makeUnsafe(1);
 
@@ -258,10 +259,15 @@ const playwrightCacheDir = (
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
   path: Path.Path,
+  playwrightRoot: string | undefined,
 ): string | undefined => {
-  if (env.PLAYWRIGHT_BROWSERS_PATH && env.PLAYWRIGHT_BROWSERS_PATH !== "0") {
-    return env.PLAYWRIGHT_BROWSERS_PATH;
+  // Playwright's rules: "0" is the hermetic install beside playwright-core,
+  // and a relative path is relative to where the install ran.
+  const configured = env.PLAYWRIGHT_BROWSERS_PATH;
+  if (configured === "0") {
+    return playwrightRoot === undefined ? undefined : path.join(playwrightRoot, ".local-browsers");
   }
+  if (configured) return path.resolve(env.INIT_CWD || ".", configured);
   if (platform === "win32") {
     return env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, "ms-playwright") : undefined;
   }
@@ -484,7 +490,11 @@ const make = Effect.gen(function* () {
       ),
     ),
   );
-  const ensureFonts = Effect.flatMap(fontsFiber, Fiber.join);
+  // The first launch waits briefly for fonts, then goes without; later
+  // launches pick them up once the background install lands.
+  const ensureFonts = Effect.flatMap(fontsFiber, (fiber) =>
+    Fiber.join(fiber).pipe(Effect.timeoutOption(FONTS_LAUNCH_WAIT), Effect.asVoid),
+  );
 
   const bundledLaunch: ServerBrowserLaunch = {
     executablePath: path.join(browserDir, "chromium"),
@@ -541,7 +551,19 @@ const make = Effect.gen(function* () {
         source: "system",
       } satisfies ServerBrowserLaunch;
     }
-    const cacheDir = playwrightCacheDir(platform, hostEnv, path);
+    const playwrightRoot = yield* Effect.try(() =>
+      import.meta.resolve("playwright-core/package.json"),
+    ).pipe(
+      Effect.flatMap((url) => path.fromFileUrl(new URL(url))),
+      Effect.map((file) => path.dirname(file)),
+      Effect.option,
+    );
+    const cacheDir = playwrightCacheDir(
+      platform,
+      hostEnv,
+      path,
+      Option.getOrUndefined(playwrightRoot),
+    );
     const relative = PLAYWRIGHT_HEADLESS_SHELL[`${platform}-${architecture}`];
     if (cacheDir !== undefined && relative !== undefined) {
       const revisions = (yield* fs.readDirectory(cacheDir).pipe(Effect.orElseSucceed(() => [])))

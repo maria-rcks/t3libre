@@ -62,8 +62,6 @@ describe("openPreviewSession", () => {
       threadId: "thread-1",
       viewport: FILL_PREVIEW_VIEWPORT,
       profileId: DEFAULT_BROWSER_PROFILE_ID,
-      // No Electron bridge here, so the environment hosts the tab.
-      runtime: "server",
     });
     expect(readThreadPreviewState(threadRef).snapshot).toEqual(idleSnapshot);
     expect(readThreadPreviewState(threadRef).recentlySeenUrls).toEqual([]);
@@ -83,7 +81,6 @@ describe("openPreviewSession", () => {
       url: "t3.chat",
       viewport: FILL_PREVIEW_VIEWPORT,
       profileId: DEFAULT_BROWSER_PROFILE_ID,
-      runtime: "server",
     });
     expect(readThreadPreviewState(threadRef).snapshot).toEqual(snapshot);
     expect(readThreadPreviewState(threadRef).recentlySeenUrls).toEqual(["https://t3.chat/"]);
@@ -138,7 +135,6 @@ describe("openPreviewSession", () => {
           url: input.url,
           viewport,
           profileId: "work",
-          runtime: "server",
         },
       });
     },
