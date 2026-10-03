@@ -21,6 +21,7 @@ import {
   type PreviewRefreshInput,
   type PreviewReportStatusInput,
   type PreviewResizeInput,
+  type PreviewRuntime,
   FILL_PREVIEW_VIEWPORT,
   PreviewSessionLookupError,
   type PreviewSessionSnapshot,
@@ -124,6 +125,7 @@ const buildLoadingSnapshot = (input: {
   readonly title: string;
   readonly viewport: PreviewViewportSetting;
   readonly profileId?: string | undefined;
+  readonly runtime?: PreviewRuntime | undefined;
   readonly updatedAt: string;
 }): PreviewSessionSnapshot => ({
   threadId: input.threadId,
@@ -133,6 +135,7 @@ const buildLoadingSnapshot = (input: {
   canGoForward: false,
   viewport: input.viewport,
   ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
+  ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
   updatedAt: input.updatedAt,
 });
 
@@ -141,6 +144,7 @@ const buildIdleSnapshot = (input: {
   readonly tabId: string;
   readonly viewport: PreviewViewportSetting;
   readonly profileId?: string | undefined;
+  readonly runtime?: PreviewRuntime | undefined;
   readonly updatedAt: string;
 }): PreviewSessionSnapshot => ({
   threadId: input.threadId,
@@ -150,6 +154,7 @@ const buildIdleSnapshot = (input: {
   canGoForward: false,
   viewport: input.viewport,
   ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
+  ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
   updatedAt: input.updatedAt,
 });
 
@@ -236,6 +241,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             title: "",
             viewport,
             profileId: input.profileId,
+            runtime: input.runtime,
             updatedAt,
           })
         : buildIdleSnapshot({
@@ -243,6 +249,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             tabId,
             viewport,
             profileId: input.profileId,
+            runtime: input.runtime,
             updatedAt,
           });
       yield* SynchronizedRef.modifyEffect(stateRef, (state) =>
@@ -291,6 +298,9 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             ...(session.snapshot.profileId === undefined
               ? {}
               : { profileId: session.snapshot.profileId }),
+            ...(session.snapshot.runtime === undefined
+              ? {}
+              : { runtime: session.snapshot.runtime }),
             updatedAt,
           };
           return {
@@ -327,6 +337,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
           ...(session.snapshot.profileId === undefined
             ? {}
             : { profileId: session.snapshot.profileId }),
+          ...(session.snapshot.runtime === undefined ? {} : { runtime: session.snapshot.runtime }),
           updatedAt,
         };
         const emit: PreviewEventDraft =

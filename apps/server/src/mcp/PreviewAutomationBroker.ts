@@ -52,11 +52,21 @@ export interface PreviewAutomationInvokeInput {
   readonly onTargetTab?: (tabId: PreviewTabId | undefined) => void;
 }
 
+export interface PreviewAutomationConnectOptions {
+  /**
+   * New agent work goes to a preferred host before any desktop. The server's
+   * own headless browser registers this way so a standalone environment keeps
+   * browsing when every desktop disconnects.
+   */
+  readonly preferred?: boolean;
+}
+
 export class PreviewAutomationBroker extends Context.Service<
   PreviewAutomationBroker,
   {
     readonly connect: (
       host: PreviewAutomationHost,
+      options?: PreviewAutomationConnectOptions,
     ) => Effect.Effect<Stream.Stream<PreviewAutomationStreamEvent>>;
     readonly focusHost: (host: PreviewAutomationHostFocus) => Effect.Effect<void>;
     readonly respond: (
@@ -74,6 +84,7 @@ interface ClientConnection {
   readonly environmentId: PreviewAutomationHost["environmentId"];
   readonly supportedOperations: ReadonlySet<PreviewAutomationOperation>;
   readonly focused: boolean;
+  readonly preferred: boolean;
   readonly liveTabs: NonNullable<PreviewAutomationHostFocus["liveTabs"]>;
   readonly focusOrder: number;
   readonly queue: Queue.Queue<PreviewAutomationStreamEvent, Cause.Done>;
@@ -367,6 +378,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
 
   const acquireConnection = Effect.fn("PreviewAutomationBroker.acquireConnection")(function* (
     host: PreviewAutomationHost,
+    options: PreviewAutomationConnectOptions | undefined,
   ) {
     const clientId = host.clientId;
     const queue = yield* Queue.unbounded<PreviewAutomationStreamEvent, Cause.Done>();
@@ -378,6 +390,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       environmentId: host.environmentId,
       supportedOperations: new Set(host.supportedOperations ?? PREVIEW_AUTOMATION_V1_OPERATIONS),
       focused: false,
+      preferred: options?.preferred ?? false,
       liveTabs: [],
       focusOrder: 0,
       queue,
@@ -408,10 +421,10 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
 
   const connect: PreviewAutomationBroker["Service"]["connect"] = Effect.fn(
     "PreviewAutomationBroker.connect",
-  )((host) =>
+  )((host, options) =>
     Effect.succeed(
       Stream.unwrap(
-        Effect.acquireRelease(acquireConnection(host), (connection) =>
+        Effect.acquireRelease(acquireConnection(host, options), (connection) =>
           disconnect(connection.clientId, connection.queue),
         ).pipe(Effect.map((connection) => Stream.fromQueue(connection.queue))),
       ),
@@ -518,6 +531,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
                   (left, right) =>
                     Number(ownsTargetTab(right, true)) - Number(ownsTargetTab(left, true)) ||
                     Number(ownsTargetTab(right)) - Number(ownsTargetTab(left)) ||
+                    Number(right.preferred) - Number(left.preferred) ||
                     Number(right.focused) - Number(left.focused) ||
                     right.focusOrder - left.focusOrder,
                 )[0];
