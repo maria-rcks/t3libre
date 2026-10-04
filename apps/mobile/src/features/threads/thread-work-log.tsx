@@ -54,10 +54,7 @@ import {
   type ThreadFeedActivity,
   workEntryRowLabel,
 } from "../../lib/threadActivity";
-import {
-  toolCallLines,
-  turnItemOutputText,
-} from "@t3tools/client-runtime/work-log/item-detail";
+import { toolCallLines, turnItemOutputText } from "@t3tools/client-runtime/work-log/item-detail";
 import { useTurnItemDetail } from "../../state/queries";
 import {
   resolveThreadWorkGroupInitialScroll,
@@ -1078,7 +1075,11 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
             {reasoning ? (
               props.renderReasoning(reasoning.text)
             ) : call ? (
-              [call.command, ...(call.args ?? []).map(([key, value]) => `${key} ${value}`), call.argsText]
+              [
+                call.command,
+                ...(call.args ?? []).map(([key, value]) => `${key} ${value}`),
+                call.argsText,
+              ]
                 .filter((line): line is string => Boolean(line))
                 .map((line) => (
                   <Text

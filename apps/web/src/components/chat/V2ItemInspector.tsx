@@ -273,9 +273,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
         </ul>
       ) : null}
 
-      {item.type === "dynamic_tool" ? (
-        <ToolCallBody args={item.input} {...outputState} />
-      ) : null}
+      {item.type === "dynamic_tool" ? <ToolCallBody args={item.input} {...outputState} /> : null}
 
       {item.type === "approval_request" ? <StructuredValue value={item.prompt} /> : null}
       {item.type === "user_input_request" ? (

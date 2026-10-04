@@ -57,7 +57,7 @@ function prettyJsonText(text: string): string {
 }
 
 /** Formats a tool input or output for display: text blocks as text, the rest as JSON. */
-export function formatToolValue(value: unknown): string | null {
+function formatToolValue(value: unknown): string | null {
   if (value === undefined || value === null) return null;
   const text = textFromBlocks(value, 0);
   if (text !== null) return text.trim() ? prettyJsonText(text) : null;
@@ -93,10 +93,14 @@ export function toolCallLines(input: {
   }
   const args = input.args;
   if (isRecord(args) && !isSummarizedValue(args)) {
-    const entries = Object.entries(args).flatMap(([key, value]): Array<readonly [string, string]> => {
-      if (value === undefined || value === null || value === "") return [];
-      return [[key, typeof value === "string" ? value : (JSON.stringify(value) ?? String(value))]];
-    });
+    const entries = Object.entries(args).flatMap(
+      ([key, value]): Array<readonly [string, string]> => {
+        if (value === undefined || value === null || value === "") return [];
+        return [
+          [key, typeof value === "string" ? value : (JSON.stringify(value) ?? String(value))],
+        ];
+      },
+    );
     return { command: null, args: entries.length > 0 ? entries : null, argsText: null };
   }
   return { command: null, args: null, argsText: formatToolValue(args) };
