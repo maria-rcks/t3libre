@@ -143,12 +143,13 @@ it("displays the global Codex tier across models and leaves unreadable tiers unk
     }),
   }));
 
-  for (const [tier, label] of [
-    ["priority", "Fast"],
-    ["default", "Standard"],
-    [undefined, "Standard"],
-    [null, undefined],
-    ["unsupported", undefined],
+  for (const [tier, label, expectedValue] of [
+    ["priority", "Fast", "priority"],
+    ["fast", "Fast", "priority"],
+    ["default", "Standard", "default"],
+    [undefined, "Standard", "default"],
+    [null, undefined, undefined],
+    ["unsupported", undefined, undefined],
   ] as const) {
     const result = applyCodexServiceTierDefault(models, tier);
     for (const model of result) {
@@ -156,11 +157,9 @@ it("displays the global Codex tier across models and leaves unreadable tiers unk
         (candidate) => candidate.id === "serviceTier",
       );
       assert.equal(getProviderOptionCurrentLabel(descriptor), label);
+      assert.equal(descriptor?.currentValue, expectedValue);
       if (descriptor?.type === "select") {
-        assert.equal(
-          descriptor.options.find((option) => option.isDefault)?.id,
-          label === undefined ? undefined : (tier ?? "default"),
-        );
+        assert.equal(descriptor.options.find((option) => option.isDefault)?.id, expectedValue);
       }
       assert.equal(model.isDefault, model.slug === "gpt-6-luna");
       assert.equal(

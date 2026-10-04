@@ -276,7 +276,10 @@ export function applyCodexServiceTierDefault(
         ...model.capabilities,
         optionDescriptors: (model.capabilities.optionDescriptors ?? []).map((descriptor) => {
           if (descriptor.id !== "serviceTier" || descriptor.type !== "select") return descriptor;
-          const value = descriptor.options.find((option) => option.id === serviceTier)?.id;
+          const value = descriptor.options.find(
+            (option) =>
+              option.id === serviceTier || (serviceTier === "fast" && option.id === "priority"),
+          )?.id;
           const { currentValue: _currentValue, ...rest } = descriptor;
           return {
             ...rest,
