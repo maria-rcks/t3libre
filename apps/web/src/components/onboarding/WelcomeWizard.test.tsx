@@ -176,6 +176,12 @@ it.each([
     await click("Continue");
     await click("Import 1 project");
     expect(onDone).toHaveBeenCalledOnce();
+    if (skippedCount === 0) {
+      expect(onDone).toHaveBeenCalledWith({
+        environmentId: EnvironmentId.make("test-env"),
+        projectId: ProjectId.make("test-project"),
+      });
+    }
     if (warning === null && importedCount > 0) {
       expect(mocks.toast).toHaveBeenCalledWith({
         type: "success",

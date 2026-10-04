@@ -31,11 +31,12 @@ const providerInstanceId = ProviderInstanceId.make("codex");
 const providerSessionId = "native-codex-thread";
 const threadId = ThreadId.make(`import:${providerInstanceId}:${providerSessionId}`);
 
-it.effect("imports messages once and preserves the provider native resume binding", () => {
+it.effect("retries failed writes and preserves the provider native resume binding", () => {
   const writes: Array<ReadonlyArray<OrchestrationV2DomainEvent>> = [];
   const upserts: Array<unknown> = [];
   const recorded: Array<unknown> = [];
   let imported = false;
+  let failWrite = true;
   const scanner = AgentSessionScanner.AgentSessionScanner.of({
     scan: Effect.die("unused"),
     recentThreads: () =>
@@ -87,7 +88,13 @@ it.effect("imports messages once and preserves the provider native resume bindin
         }),
         Layer.mock(EventSink.EventSinkV2)({
           write: (input) =>
-            Effect.sync(() => {
+            Effect.gen(function* () {
+              if (failWrite) {
+                failWrite = false;
+                return yield* new EventSink.EventSinkWriteError({
+                  eventCount: input.events.length,
+                });
+              }
               writes.push(input.events);
               imported = true;
               return input.events.map((event, index) => ({
@@ -109,6 +116,13 @@ it.effect("imports messages once and preserves the provider native resume bindin
 
   return Effect.gen(function* () {
     const importer = yield* AgentSessionImporter.AgentSessionImporter;
+    expect(yield* importer.importRecentAgentThreads({ projectId })).toEqual({
+      importedCount: 0,
+      skippedCount: 1,
+    });
+    expect(writes).toHaveLength(0);
+    expect(upserts).toHaveLength(0);
+    expect(recorded).toHaveLength(0);
     expect(yield* importer.importRecentAgentThreads({ projectId })).toEqual({
       importedCount: 1,
       skippedCount: 0,
@@ -162,12 +176,14 @@ it.effect("imports messages once and preserves the provider native resume bindin
 it.effect.each(
   (["codex", "claudeAgent"] as const).flatMap((provider) =>
     (["active", "archived", "deleted", "other-instance", "none"] as const).flatMap((owner) =>
-      [false, true].map((reserved) => ({ provider, owner, reserved })),
+      [false, true].flatMap((reserved) =>
+        [false, true].map((skipped) => ({ provider, owner, reserved, skipped })),
+      ),
     ),
   ),
 )(
-  "rechecks $provider import (reserved=$reserved) with $owner native ownership",
-  ({ provider, owner, reserved }) => {
+  "rechecks $provider import (reserved=$reserved, skipped=$skipped) with $owner native ownership",
+  ({ provider, owner, reserved, skipped }) => {
     const database = SqlitePersistenceMemory;
     const stores = Layer.mergeAll(EventStore.layer, ProjectionStore.layer).pipe(
       Layer.provideMerge(database),
@@ -334,6 +350,10 @@ it.effect.each(
                       },
                     };
                   }),
+                ).pipe(
+                  Stream.concat(
+                    skipped ? Stream.succeed({ _tag: "Skipped" as const }) : Stream.empty,
+                  ),
                 ),
             }),
           ),
@@ -345,7 +365,7 @@ it.effect.each(
         for (let attempt = 0; attempt < 2; attempt++) {
           expect(yield* importer.importRecentAgentThreads({ projectId })).toEqual({
             importedCount: ownsSession ? 0 : 1,
-            skippedCount: ownsSession ? 1 : 0,
+            skippedCount: skipped ? 1 : 0,
           });
           if (owner === "none" && attempt === 0) {
             // Recover an interrupted runtime write after history was committed.

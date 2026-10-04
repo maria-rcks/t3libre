@@ -376,7 +376,7 @@ const make = Effect.gen(function* () {
               },
             ],
           });
-          if (committed.length === 0) return false;
+          if (committed.length === 0) return null;
           yield* persistRuntime;
           yield* runtimes.recordImportedTranscript({ threadId, source });
           return true;
@@ -389,10 +389,10 @@ const make = Effect.gen(function* () {
             }).pipe(Effect.as(false)),
           ),
         );
-        if (imported) {
+        if (imported === true) {
           importedThreadIds.add(threadId);
           importedCount += 1;
-        } else {
+        } else if (imported === false) {
           skippedCount += 1;
         }
       }),
