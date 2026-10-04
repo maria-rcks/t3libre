@@ -129,7 +129,8 @@ function boundDynamicValue(value: unknown): unknown {
   if (typeof value === "string") return truncateDetail(value, MAX_ON_DEMAND_BYTES);
   let json: string;
   try {
-    json = JSON.stringify(value, null, 2) ?? String(value);
+    // Compact, so measuring does not inflate the value; clients indent it.
+    json = JSON.stringify(value) ?? String(value);
   } catch {
     return "Unserializable tool value";
   }

@@ -150,7 +150,12 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
   const outputState = {
     output: turnItemOutputText(item),
     pending: item === wireItem && detail.isPending,
-    error: item === wireItem ? detail.error : null,
+    error:
+      item !== wireItem
+        ? null
+        : detail.data?.item === null
+          ? "Output is no longer available."
+          : detail.error,
   };
   const support = useV2ItemSupport({
     environmentId: props.environmentId,
@@ -223,7 +228,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
         <StructuredValue value={item.patterns.join("\n")} />
       ) : null}
 
-      {item.type === "file_search" && item.results ? (
+      {item.type === "file_search" && item.results?.length ? (
         <ul className="space-y-1">
           {item.results.map((result) => (
             <li key={JSON.stringify(result)}>
@@ -240,7 +245,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
         </ul>
       ) : null}
 
-      {item.type === "web_search" && item.results ? (
+      {item.type === "web_search" && item.results?.length ? (
         <ul className="space-y-1.5">
           {item.results.map((result) => {
             const safeHref = resolveExternalWebLinkHref(result.url);
