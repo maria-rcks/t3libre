@@ -110,12 +110,11 @@ it.layer(layer)("PreviewManager", (it) => {
       const first = (yield* manager.list({ threadId })).sessions[0];
       expect(first?.reveal).toBe(true);
       expect(first?.revealRequest?.force).toBe(true);
-      const navigated = yield* manager.navigate({
-        threadId,
-        tabId: opened.tabId,
-        url: "localhost:5173",
-      });
-      expect(navigated.revealRequest).toEqual(first?.revealRequest);
+      // Server tabs report navigation through their controlling browser.
+      const refused = yield* manager
+        .navigate({ threadId, tabId: opened.tabId, url: "localhost:5173" })
+        .pipe(Effect.flip);
+      expect(refused._tag).toBe("PreviewControlRequiredError");
       yield* manager.reportStatus({
         threadId,
         tabId: opened.tabId,

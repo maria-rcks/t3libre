@@ -2,6 +2,7 @@ import {
   PREVIEW_AUTOMATION_V1_OPERATIONS,
   PreviewAutomationClientDisconnectedError,
   PreviewAutomationControlInterruptedError,
+  PreviewAutomationControlReason,
   PreviewAutomationExecutionError,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationMalformedResponseError,
@@ -176,6 +177,7 @@ const hostAssignmentKey = (scope: McpInvocationContext.McpThreadInvocationScope)
   `${scope.environmentId}\u0000${scope.thread.providerSessionId}`;
 
 const isPreviewTabId = Schema.is(PreviewTabId);
+const decodeControlReason = Schema.decodeUnknownOption(PreviewAutomationControlReason);
 
 const readResultTabId = (result: unknown): PreviewTabId | null | undefined => {
   if (typeof result !== "object" || result === null || !("tabId" in result)) return undefined;
@@ -256,11 +258,14 @@ const classifyResponseError = (
         ...context,
         ...remoteDiagnostics,
       });
-    case "PreviewAutomationControlInterruptedError":
+    case "PreviewAutomationControlInterruptedError": {
+      const reason = decodeControlReason(error.detail);
       return new PreviewAutomationControlInterruptedError({
         ...context,
         ...remoteDiagnostics,
+        ...(Option.isSome(reason) ? { reason: reason.value } : {}),
       });
+    }
     case "PreviewAutomationInvalidSelectorError": {
       return new PreviewAutomationInvalidSelectorError({
         ...context,
@@ -618,6 +623,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
             threadId: input.scope.thread.threadId,
             tabId: requestContext.tabId,
             tabIdExplicit: input.tabId !== undefined,
+            agentSessionId: hostAssignmentKey(input.scope),
             operation: input.operation,
             input: input.input,
             timeoutMs,

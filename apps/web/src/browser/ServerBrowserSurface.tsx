@@ -5,11 +5,12 @@ import {
   createPreviewStreamClient,
   previewStreamModifiers,
   type PreviewStreamClient,
+  type PreviewStreamControl,
   type PreviewStreamInput,
   type PreviewStreamMouseButton,
   type PreviewStreamViewport,
 } from "@t3tools/client-runtime/preview/server-browser-stream";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, PreviewViewportSetting } from "@t3tools/contracts";
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -24,14 +25,16 @@ import {
 } from "react";
 
 import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
 import { cn } from "~/lib/utils";
 import { refreshPreviewStreamAccess, usePreviewStreamAccess } from "~/state/previewStream";
 
-/** Chrome-row controls for a server tab. A command issued before the socket opens waits for it. */
+/** Chrome-row controls for a server tab; commands require current ownership. */
 export interface ServerBrowserHandle {
   readonly navigate: (url: string) => void;
   readonly history: (delta: -1 | 1) => void;
   readonly reload: () => void;
+  readonly viewport: (setting: PreviewViewportSetting) => void;
   readonly canvas: () => HTMLCanvasElement | null;
 }
 
@@ -95,8 +98,11 @@ export function ServerBrowserSurface(props: {
   readonly visible: boolean;
   /** Sends the surface size so fill-mode tabs follow it. The floating player scales the page instead. */
   readonly followSize?: boolean;
+  /** Floating previews reserve the top edge for their existing hover controls. */
+  readonly controlPosition?: "top" | "bottom";
   readonly onFirstFrame?: () => void;
   readonly onViewport?: (viewport: PreviewStreamViewport) => void;
+  readonly onControl?: (control: PreviewStreamControl | null) => void;
   readonly className?: string;
   readonly ref?: Ref<ServerBrowserHandle>;
 }) {
@@ -106,8 +112,10 @@ export function ServerBrowserSurface(props: {
     tabId,
     visible,
     followSize = true,
+    controlPosition = "top",
     onFirstFrame,
     onViewport,
+    onControl,
     className,
     ref,
   } = props;
@@ -119,7 +127,9 @@ export function ServerBrowserSurface(props: {
   const viewportRef = useRef<PreviewStreamViewport | null>(null);
   const sizeRef = useRef<{ width: number; height: number } | null>(null);
   const hasFrameRef = useRef(false);
-  const pendingCommandRef = useRef<PreviewStreamInput | null>(null);
+  const controlRef = useRef<PreviewStreamControl | null>(null);
+  const [control, setControl] = useState<PreviewStreamControl | null>(null);
+  const [promptText, setPromptText] = useState("");
   const unauthorizedRef = useRef(0);
   const [accessDenied, setAccessDenied] = useState(false);
   const pendingMoveRef = useRef<MouseInput | null>(null);
@@ -141,12 +151,26 @@ export function ServerBrowserSurface(props: {
   const viewportChanged = useEffectEvent((viewport: PreviewStreamViewport) =>
     onViewport?.(viewport),
   );
+  const controlChanged = useEffectEvent((next: PreviewStreamControl | null) => onControl?.(next));
   // Frame cap in device px, fixed per socket. It grows with the surface and
   // never shrinks, so only outgrowing it reconnects.
   const [cap, setCap] = useState<{ width: number; height: number } | null>(null);
 
   const send = useCallback((input: PreviewStreamInput) => {
     clientRef.current?.send(input);
+  }, []);
+
+  const clearInput = useCallback(() => {
+    if (inputFrameRef.current !== null) cancelAnimationFrame(inputFrameRef.current);
+    inputFrameRef.current = null;
+    pendingMoveRef.current = pendingWheelRef.current = null;
+    mouseButtonsRef.current = 0;
+    mouseClicksRef.current = { left: 1, middle: 1, right: 1, none: 1 };
+    lastClickRef.current = null;
+    touchRef.current = probeRef.current = lastProbeRef.current = null;
+    keySentRef.current = false;
+    if (inputRef.current) inputRef.current.value = INPUT_SENTINEL;
+    inputRef.current?.blur();
   }, []);
 
   const flushInput = useCallback(() => {
@@ -185,7 +209,8 @@ export function ServerBrowserSurface(props: {
     (clientX: number, clientY: number, clamp: boolean): PagePoint | null => {
       const canvas = canvasRef.current;
       const viewport = viewportRef.current;
-      if (!canvas || !viewport || !hasFrameRef.current) return null;
+      if (!canvas || !viewport || !hasFrameRef.current || controlRef.current?.controller !== "you")
+        return null;
       const rect = canvas.getBoundingClientRect();
       // `object-contain` letterboxes the frame inside the canvas box.
       const fit = Math.min(rect.width / canvas.width, rect.height / canvas.height);
@@ -223,13 +248,13 @@ export function ServerBrowserSurface(props: {
 
   useImperativeHandle(ref, () => {
     const command = (input: PreviewStreamInput) => {
-      if (clientRef.current?.send(input)) return;
-      pendingCommandRef.current = input;
+      clientRef.current?.send(input);
     };
     return {
       navigate: (url) => command({ type: "navigate", url }),
       history: (delta) => command({ type: "history", delta }),
       reload: () => command({ type: "reload" }),
+      viewport: (setting) => command({ type: "viewport", setting }),
       canvas: () => (hasFrameRef.current ? canvasRef.current : null),
     };
   }, []);
@@ -288,6 +313,7 @@ export function ServerBrowserSurface(props: {
           painter.paint(jpeg);
         },
         onProbe: (result) => {
+          if (controlRef.current?.controller !== "you") return;
           lastProbeRef.current = { ...result, at: performance.now() };
           const probe = probeRef.current;
           if (!probe || probe.x !== result.x || probe.y !== result.y) return;
@@ -303,13 +329,29 @@ export function ServerBrowserSurface(props: {
           viewportRef.current = viewport;
           viewportChanged(viewport);
         },
+        onControl: (next) => {
+          const previous = controlRef.current;
+          controlRef.current = next;
+          setControl(next);
+          controlChanged(next);
+          if (
+            next.dialog?.message !== previous?.dialog?.message ||
+            next.dialog?.defaultValue !== previous?.dialog?.defaultValue
+          )
+            setPromptText(next.dialog?.defaultValue ?? "");
+          if (next.controller !== "you") {
+            clearInput();
+          } else if (previous?.controller !== "you") {
+            const size = sizeRef.current;
+            if (followSize && size) client.send({ type: "resize", ...size });
+          }
+        },
         onConnectedChange: (connected) => {
-          if (!connected) return;
-          const size = sizeRef.current;
-          if (followSize && size) client.send({ type: "resize", ...size });
-          const command = pendingCommandRef.current;
-          pendingCommandRef.current = null;
-          if (command) client.send(command);
+          if (connected) return;
+          controlRef.current = null;
+          setControl(null);
+          controlChanged(null);
+          clearInput();
         },
         onUnauthorized: () => {
           // Fresh tickets re-run this effect. Repeated refusals need an explicit retry.
@@ -332,8 +374,12 @@ export function ServerBrowserSurface(props: {
       if (refreshTimer !== null) clearTimeout(refreshTimer);
       client.stop();
       if (clientRef.current === client) clientRef.current = null;
+      controlRef.current = null;
+      setControl(null);
+      controlChanged(null);
+      clearInput();
     };
-  }, [access, accessDenied, cap, environmentId, followSize, tabId, threadId, visible]);
+  }, [access, accessDenied, cap, clearInput, environmentId, followSize, tabId, threadId, visible]);
 
   useEffect(() => {
     if (!visible || accessDenied || access !== null) return;
@@ -370,6 +416,7 @@ export function ServerBrowserSurface(props: {
   );
 
   const handlePointer = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (controlRef.current?.controller !== "you") return;
     const { type, pointerId, clientX, clientY } = event;
     const cancelled = type === "pointercancel";
     const touch = touchRef.current;
@@ -518,6 +565,7 @@ export function ServerBrowserSurface(props: {
   };
 
   const handleKey = (action: "down" | "up", event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (controlRef.current?.controller !== "you") return;
     keySentRef.current = false;
     // IME and soft keyboards deliver text through composition and input events.
     if (
@@ -585,49 +633,130 @@ export function ServerBrowserSurface(props: {
   };
 
   return (
-    <div className={cn("relative overflow-hidden", className)} data-server-browser-surface={tabId}>
-      <canvas
-        ref={canvasRef}
-        className="block size-full touch-none object-contain"
-        onPointerDown={handlePointer}
-        onPointerMove={handlePointer}
-        onPointerUp={handlePointer}
-        onPointerCancel={handlePointer}
-        // Keeps focus in the page input below and stops native text selection.
-        onMouseDown={(event) => event.preventDefault()}
-        onContextMenu={(event) => event.preventDefault()}
-      />
-      {/* Focus target for page keyboard input. Pinned top-left so focusing it never
+    <div
+      className={cn("relative flex flex-col overflow-hidden", className)}
+      data-server-browser-surface={tabId}
+    >
+      <div
+        className={cn(
+          "visible relative z-20 flex shrink-0 items-center justify-between gap-2 border-border bg-background px-2 py-1",
+          controlPosition === "bottom" ? "order-last border-t" : "border-b",
+        )}
+      >
+        <span role="status" className="text-xs text-muted-foreground">
+          {!control
+            ? "Connecting..."
+            : !control.canOperate
+              ? "Read-only"
+              : control.controller === "you"
+                ? "You have control"
+                : control.controller === "agent"
+                  ? "Agent has control"
+                  : control.controller === "another-viewer"
+                    ? "Another viewer has control"
+                    : "Watching"}
+        </span>
+        {control?.canOperate ? (
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={control.controller === "another-viewer"}
+            onClick={() =>
+              send({ type: control.controller === "you" ? "releaseControl" : "takeControl" })
+            }
+          >
+            {control.controller === "you" ? "Release control" : "Take control"}
+          </Button>
+        ) : null}
+      </div>
+      <div className="relative min-h-0 flex-1">
+        <canvas
+          ref={canvasRef}
+          className="block size-full touch-none object-contain"
+          onPointerDown={handlePointer}
+          onPointerMove={handlePointer}
+          onPointerUp={handlePointer}
+          onPointerCancel={handlePointer}
+          // Keeps focus in the page input below and stops native text selection.
+          onMouseDown={(event) => event.preventDefault()}
+          onContextMenu={(event) => event.preventDefault()}
+        />
+        {/* Focus target for page keyboard input. Pinned top-left so focusing it never
           scrolls the surface; 16px keeps iOS from zooming the app on focus. */}
-      <textarea
-        ref={inputRef}
-        aria-label="Browser page"
-        aria-description="Press Shift+Escape to leave the browser page."
-        autoCapitalize="off"
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
-        defaultValue={INPUT_SENTINEL}
-        // The caret must sit after the sentinel for a deletion to have something to delete.
-        onFocus={(event) => resetInput(event.currentTarget)}
-        className="sr-only top-0 left-0 text-base"
-        onKeyDown={(event) => handleKey("down", event)}
-        onKeyUp={(event) => handleKey("up", event)}
-        onInput={handleInput}
-        onCompositionEnd={(event) => {
-          const text = event.data.replace(/^\u200b/, "");
-          if (text) send({ type: "text", text });
-          resetInput(event.currentTarget);
-        }}
-        // Copying the input would put its sentinel on this device's clipboard.
-        onCopy={(event) => event.preventDefault()}
-        onCut={(event) => event.preventDefault()}
-        onPaste={(event) => {
-          event.preventDefault();
-          const text = event.clipboardData.getData("text/plain");
-          if (text) send({ type: "text", text });
-        }}
-      />
+        <textarea
+          ref={inputRef}
+          aria-label="Browser page"
+          aria-description="Press Shift+Escape to leave the browser page."
+          autoCapitalize="off"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={control?.controller !== "you"}
+          defaultValue={INPUT_SENTINEL}
+          // The caret must sit after the sentinel for a deletion to have something to delete.
+          onFocus={(event) => resetInput(event.currentTarget)}
+          className="sr-only top-0 left-0 text-base"
+          onKeyDown={(event) => handleKey("down", event)}
+          onKeyUp={(event) => handleKey("up", event)}
+          onInput={handleInput}
+          onCompositionEnd={(event) => {
+            const text = event.data.replace(/^\u200b/, "");
+            if (text) send({ type: "text", text });
+            resetInput(event.currentTarget);
+          }}
+          // Copying the input would put its sentinel on this device's clipboard.
+          onCopy={(event) => event.preventDefault()}
+          onCut={(event) => event.preventDefault()}
+          onPaste={(event) => {
+            event.preventDefault();
+            const text = event.clipboardData.getData("text/plain");
+            if (text) send({ type: "text", text });
+          }}
+        />
+        {control?.dialog ? (
+          <div
+            className="absolute inset-x-2 top-2 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 shadow-lg"
+            role="dialog"
+            aria-label="Browser dialog"
+          >
+            <p className="break-words text-sm">{control.dialog.message}</p>
+            {control.controller === "you" ? (
+              <>
+                {control.dialog.type === "prompt" ? (
+                  <Input
+                    aria-label="Dialog response"
+                    value={promptText}
+                    onChange={(event) => setPromptText(event.target.value)}
+                  />
+                ) : null}
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => send({ type: "dialog", accept: false })}
+                  >
+                    Dismiss
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      send({
+                        type: "dialog",
+                        accept: true,
+                        ...(control.dialog?.type === "prompt" ? { promptText } : {}),
+                      })
+                    }
+                  >
+                    Accept
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">Take control to respond.</p>
+            )}
+          </div>
+        ) : null}
+      </div>
       {visible && accessDenied ? (
         // The page can be invisible beneath an empty or unreachable state; reconnect must remain reachable.
         <div className="visible absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background p-3 text-center">

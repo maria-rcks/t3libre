@@ -185,6 +185,14 @@ T3 home. To use a browser already installed on the host, set
 `T3CODE_PREVIEW_BROWSER_PATH` to its executable. Set `T3CODE_SERVER_BROWSER=0`
 to turn host browser tabs off.
 
+Agent tabs have separate storage and share a Chromium process. Take control before
+typing into an agent's tab, then release control when you want the agent to
+continue. Read-only connections can watch without changing the page.
+
+Chromium's sandbox is enabled by default. If your container cannot support it,
+configure the host sandbox or explicitly set `T3CODE_SERVER_BROWSER_SANDBOX=0`
+for that environment. A launch failure never disables the sandbox automatically.
+
 On a phone, tap the floating preview's corner dot to show its controls, then
 **Pop into separate window** to keep watching in picture-in-picture over other
 apps.

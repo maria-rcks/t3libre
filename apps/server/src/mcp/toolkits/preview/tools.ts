@@ -1,6 +1,7 @@
 import {
   ToolActivityIcon,
   PreviewAutomationClickInput,
+  PreviewAutomationDialogInput,
   PreviewAutomationError,
   PreviewAutomationEvaluateInput,
   PreviewAutomationNavigateInput,
@@ -52,7 +53,7 @@ const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "Report whether a collaborative browser tab is automation-capable, including its URL, title, visibility, loading state, viewport mode, and measured CSS-pixel size. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab.",
+    "Report whether a collaborative browser tab is automation-capable, including its control owner, pending dialog, URL, title, visibility, loading state, viewport mode, and measured CSS-pixel size. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
   failure: PreviewAutomationError,
@@ -66,7 +67,7 @@ const PreviewStatusTool = Tool.make("preview_status", {
 const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Initialize a collaborative browser tab and open its thread-bound inline preview by default. Set open=false for background-only automation. Pass tabId to reuse a specific existing tab, set reuseExistingTab=false to create another tab, or omit both to use this agent session's current tab.",
+      "Initialize a collaborative browser tab and open its thread-bound inline preview by default. Set open=false for background-only automation. Pass tabId to reuse a specific existing tab, set reuseExistingTab=false to create another tab, or omit both to use this agent session's current tab. Parallel subagents sharing a provider session must each open with reuseExistingTab=false and pass their returned tabId on every call. Server tabs use isolated storage and cannot be operated by a different agent session.",
     parameters: PreviewAutomationOpenInput,
     success: PreviewAutomationStatus,
     failure: PreviewAutomationError,
@@ -74,6 +75,17 @@ const PreviewOpenTool = browserTool(
   })
     .annotate(Tool.Title, "Open browser preview")
     .annotate(Tool.Destructive, false),
+);
+
+const PreviewDialogTool = browserTool(
+  Tool.make("preview_dialog", {
+    description:
+      "Accept or dismiss the server browser dialog reported by preview_status. For a prompt, supply promptText when accepting. Requires this agent to own the tab. Desktop hosts may not support this operation.",
+    parameters: PreviewAutomationDialogInput,
+    success: PreviewAutomationStatus,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Resolve browser dialog"),
 );
 
 const PreviewNavigateTool = safeBrowserTool(
@@ -119,7 +131,7 @@ const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = readonlyBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect a page before interacting. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab. Returns page state, semantic elements, diagnostics, action history, and a PNG screenshot. The text is capped near 20 KB and lists what it omitted; use preview_evaluate to read more. Set includeImage=false for text-only output with the same page metadata. Set save=true to also write the PNG to disk and get screenshotPath back; with includeImage=false, save=true returns only the url and screenshotPath. Embed that path in your reply as ![alt](screenshotPath) so the user sees it. This is the only way to show the user a screenshot; the image in the tool result is not saved anywhere.",
+      "Inspect a page before interacting. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab. Returns page state, semantic elements, diagnostics, action history, and a PNG screenshot. Server snapshots include an accessibilityTree with refs; pass locator=aria-ref=<ref> to target one exact element, including inside frames. Refresh refs after navigation, another snapshot, or human takeover. The text is capped near 20 KB and lists what it omitted; use preview_evaluate to read more. Set includeImage=false for text-only output with the same page metadata. Set save=true to also write the PNG to disk and get screenshotPath back; with includeImage=false, save=true returns only the url and screenshotPath. Embed that path in your reply as ![alt](screenshotPath) so the user sees it. This is the only way to show the user a screenshot; the image in the tool result is not saved anywhere.",
     parameters: Schema.Struct({
       ...PreviewAutomationTabTargetInput.fields,
       includeImage: Schema.optional(
@@ -242,6 +254,7 @@ const PreviewRecordingStopTool = safeBrowserTool(
 );
 
 export const PreviewToolkit = Toolkit.make(
+  PreviewDialogTool,
   PreviewStatusTool,
   PreviewOpenTool,
   PreviewNavigateTool,
@@ -259,6 +272,7 @@ export const PreviewToolkit = Toolkit.make(
 );
 
 export const PreviewStandardToolkit = Toolkit.make(
+  PreviewDialogTool,
   PreviewStatusTool,
   PreviewOpenTool,
   PreviewNavigateTool,

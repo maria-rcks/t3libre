@@ -1,4 +1,5 @@
 import type { DeviceHubAccess } from "@t3tools/client-runtime/device/hub-access";
+import type { PreviewStreamControl } from "@t3tools/client-runtime/preview/server-browser-stream";
 
 export interface PreviewStreamConfiguration {
   readonly access: DeviceHubAccess;
@@ -11,6 +12,7 @@ export interface PreviewStreamConfiguration {
 
 /** Messages the WebView document posts to the native view. */
 export type PreviewStreamMessage =
+  | ({ readonly type: "control" } & PreviewStreamControl)
   | {
       readonly type: "status";
       readonly status: "connecting" | "streaming" | "error";

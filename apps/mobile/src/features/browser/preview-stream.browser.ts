@@ -3,6 +3,7 @@ import {
   createPreviewStreamClient,
   previewStreamModifiers,
   type PreviewStreamClient,
+  type PreviewStreamControl,
   type PreviewStreamInput,
   type PreviewStreamViewport,
 } from "@t3tools/client-runtime/preview/server-browser-stream";
@@ -54,7 +55,7 @@ export function stop() {
   activeViewer = null;
 }
 
-/** Navigation and history from the native chrome. Waits for the socket if it is not open yet. */
+/** Navigation and history from the native chrome require current browser control. */
 export function command(input: PreviewStreamInput) {
   activeViewer?.command(input);
 }
@@ -82,6 +83,7 @@ export function start(configuration: PreviewStreamConfiguration) {
   input.autocomplete = "off";
   input.spellcheck = false;
   input.setAttribute("autocorrect", "off");
+  input.disabled = true;
   document.body.replaceChildren(container, ...(interactive ? [input] : []));
 
   let stopped = false;
@@ -91,7 +93,7 @@ export function start(configuration: PreviewStreamConfiguration) {
   // Frame cap in device px, fixed per socket. It only grows, so only outgrowing it reconnects.
   let cap: { width: number; height: number } | null = null;
   let client: PreviewStreamClient | null = null;
-  let pendingCommand: PreviewStreamInput | null = null;
+  let control: PreviewStreamControl | null = null;
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
   let wheelFrame: number | null = null;
   let pendingWheel: WheelInput | null = null;
@@ -138,9 +140,24 @@ export function start(configuration: PreviewStreamConfiguration) {
     if (!streaming && !stopped) reportStatus("streaming");
   });
   const send = (message: PreviewStreamInput) => client?.send(message) ?? false;
+  const clearInput = () => {
+    if (wheelFrame !== null) cancelAnimationFrame(wheelFrame);
+    if (mouseFrame !== null) cancelAnimationFrame(mouseFrame);
+    wheelFrame = mouseFrame = null;
+    pendingWheel = pendingMouse = null;
+    mouseButtons = 0;
+    Object.assign(mouseClicks, { left: 1, middle: 1, right: 1, none: 1 });
+    probe = probeCache = touch = lastTap = null;
+    keySent = false;
+    input.value = SENTINEL;
+    input.disabled = true;
+    input.blur();
+  };
 
   const connect = () => {
     client?.stop();
+    control = null;
+    clearInput();
     if (!cap || stopped) return;
     const next = createPreviewStreamClient(
       {
@@ -149,6 +166,7 @@ export function start(configuration: PreviewStreamConfiguration) {
         tabId: configuration.tabId,
         maxWidth: cap.width,
         maxHeight: cap.height,
+        interactive,
       },
       {
         onFrame: (jpeg) => painter.paint(jpeg),
@@ -158,6 +176,7 @@ export function start(configuration: PreviewStreamConfiguration) {
           post({ type: "viewport", width: page.width, height: page.height });
         },
         onProbe: (result) => {
+          if (control?.controller !== "you") return;
           const current = probe;
           if (!current || current.x !== result.x || current.y !== result.y) return;
           probeCache = {
@@ -178,15 +197,24 @@ export function start(configuration: PreviewStreamConfiguration) {
           if (result.editable) input.focus({ preventScroll: true });
           else input.blur();
         },
+        onControl: (nextControl) => {
+          const previous = control;
+          control = nextControl;
+          post({ type: "control", ...nextControl });
+          if (nextControl.controller !== "you") clearInput();
+          else {
+            input.disabled = !interactive;
+            if (interactive && size && previous?.controller !== "you")
+              next.send({ type: "resize", ...size });
+          }
+        },
         onConnectedChange: (connected) => {
           if (!connected) {
+            control = null;
+            clearInput();
             if (streaming) reportStatus("connecting");
             return;
           }
-          if (interactive && size) next.send({ type: "resize", ...size });
-          const queued = pendingCommand;
-          pendingCommand = null;
-          if (queued) next.send(queued);
         },
         onUnauthorized: () => post({ type: "unauthorized" }),
         onGone: () => post({ type: "gone" }),
@@ -233,7 +261,8 @@ export function start(configuration: PreviewStreamConfiguration) {
   }
 
   const pagePoint = (clientX: number, clientY: number, clamp: boolean) => {
-    if (!viewport || canvas.width === 0 || canvas.height === 0) return null;
+    if (!viewport || canvas.width === 0 || canvas.height === 0 || control?.controller !== "you")
+      return null;
     const rect = canvas.getBoundingClientRect();
     // `object-fit: contain` letterboxes the frame inside the canvas box.
     const fit = Math.min(rect.width / canvas.width, rect.height / canvas.height);
@@ -308,6 +337,7 @@ export function start(configuration: PreviewStreamConfiguration) {
     modifiers: previewStreamModifiers(event),
   });
   const onPointerDown = (event: PointerEvent) => {
+    if (control?.controller !== "you") return;
     if (!event.isPrimary) return;
     event.preventDefault();
     if (event.pointerType !== "touch") {
@@ -346,6 +376,7 @@ export function start(configuration: PreviewStreamConfiguration) {
     send({ type: "probe", x: point.x, y: point.y });
   };
   const onPointerMove = (event: PointerEvent) => {
+    if (control?.controller !== "you") return;
     if (event.pointerType !== "touch") {
       const point = pagePoint(event.clientX, event.clientY, mouseButtons !== 0);
       if (!point) return;
@@ -454,6 +485,7 @@ export function start(configuration: PreviewStreamConfiguration) {
   const preventDefault = (event: Event) => event.preventDefault();
 
   const onKey = (action: "down" | "up", event: KeyboardEvent) => {
+    if (control?.controller !== "you") return;
     // IME and soft keyboards deliver text through composition and input events.
     if (
       event.isComposing ||
@@ -626,7 +658,7 @@ export function start(configuration: PreviewStreamConfiguration) {
       }
     },
     command: (message) => {
-      if (!send(message)) pendingCommand = message;
+      send(message);
     },
     togglePictureInPicture,
   };

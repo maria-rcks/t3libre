@@ -45,7 +45,12 @@ export const PREVIEW_AUTOMATION_OPERATIONS = [
   "setColorScheme",
 ] as const;
 
-export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_OPERATIONS);
+export const PREVIEW_AUTOMATION_SERVER_OPERATIONS = [
+  ...PREVIEW_AUTOMATION_OPERATIONS,
+  "dialog",
+  "close",
+] as const;
+export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_SERVER_OPERATIONS);
 export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type;
 
 const PreviewAutomationTabTargetFields = {
@@ -70,12 +75,39 @@ export const PreviewAutomationStatus = Schema.Struct({
   url: Schema.NullOr(Schema.String),
   title: Schema.NullOr(Schema.String),
   loading: Schema.Boolean,
+  control: Schema.optional(
+    Schema.Struct({
+      owner: Schema.Literals(["agent", "human", "unclaimed"]),
+      ownedByCaller: Schema.Boolean,
+      generation: Schema.Number,
+    }),
+  ),
+  dialog: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        type: Schema.String,
+        message: Schema.String,
+        defaultValue: Schema.String,
+      }),
+    ),
+  ),
   /** Optional for compatibility with desktop hosts predating viewport sizing. */
   viewportSetting: Schema.optional(PreviewViewportSetting),
   /** Measured guest-page viewport in CSS pixels when a webview is ready. */
   viewport: Schema.optional(PreviewRenderedViewportSize),
 });
 export type PreviewAutomationStatus = typeof PreviewAutomationStatus.Type;
+
+export const PreviewAutomationDialogInput = Schema.Struct({
+  ...PreviewAutomationTabTargetFields,
+  accept: Schema.Boolean.annotate({
+    description: "Accept the pending browser dialog when true, or dismiss it when false.",
+  }),
+  promptText: Schema.optional(Schema.String).annotate({
+    description: "Optional text to submit when accepting a prompt dialog.",
+  }),
+});
+export type PreviewAutomationDialogInput = typeof PreviewAutomationDialogInput.Type;
 
 export const PreviewAutomationOpenInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
@@ -282,7 +314,7 @@ export type PreviewAutomationSetColorSchemeResult =
 
 const Locator = TrimmedNonEmptyString.annotate({
   description:
-    "Playwright selector, preferably role/text based, for example role=button[name='Send'] or text=Continue. Use snapshot first to inspect the page.",
+    "Use locator='aria-ref=<ref>' with a ref from the latest server snapshot (including iframe elements), or a unique Playwright role/text selector. Refs expire on navigation, a new snapshot, or control handoff; refresh the snapshot after a stale-ref error.",
 });
 
 const LegacySelector = TrimmedNonEmptyString.annotate({
@@ -298,7 +330,7 @@ export const PreviewAutomationClickInput = Schema.Struct({
   }),
   locator: Schema.optional(Locator).annotate({
     description:
-      "Playwright selector, preferably role/text based, for example role=button[name='Send'] or text=Continue. Use snapshot first to inspect the page.",
+      "Use locator='aria-ref=<ref>' with a ref from the latest server snapshot (including iframe elements), or a unique Playwright role/text selector. Refs expire on navigation, a new snapshot, or control handoff; refresh the snapshot after a stale-ref error.",
   }),
   x: Schema.optional(
     Schema.Finite.annotate({
@@ -607,6 +639,8 @@ export const PreviewAutomationRequest = Schema.Struct({
   threadId: ThreadId,
   tabId: Schema.optional(PreviewTabId),
   tabIdExplicit: Schema.optional(Schema.Boolean),
+  /** Supplied by the broker from authenticated scope, never from tool input. */
+  agentSessionId: Schema.optional(Schema.String),
   operation: PreviewAutomationOperation,
   input: Schema.Unknown,
   timeoutMs: Schema.Int.check(Schema.isGreaterThan(0)),
@@ -767,14 +801,36 @@ export class PreviewAutomationTimeoutError extends Schema.TaggedError<PreviewAut
   }
 }
 
+export const PreviewAutomationControlReason = Schema.Literals([
+  "agentMismatch",
+  "humanControl",
+  "tabRequired",
+  "closed",
+  "interrupted",
+  "dialogPending",
+]);
+export type PreviewAutomationControlReason = typeof PreviewAutomationControlReason.Type;
+
 export class PreviewAutomationControlInterruptedError extends Schema.TaggedError<PreviewAutomationControlInterruptedError>()(
   "PreviewAutomationControlInterruptedError",
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
+    reason: Schema.optional(PreviewAutomationControlReason),
   },
 ) {
   override get message(): string {
+    if (this.reason === "agentMismatch")
+      return "This browser tab belongs to another agent session or a human. Open your own tab.";
+    if (this.reason === "humanControl")
+      return "A human controls this browser tab. Wait until they release control.";
+    if (this.reason === "tabRequired")
+      return "Multiple browser tabs belong to this session. Pass the explicit tabId returned by preview_open.";
+    if (this.reason === "dialogPending")
+      return "A browser dialog is pending. Read preview_status and resolve it with preview_dialog.";
+    if (this.reason === "closed") return "This browser tab is closed. Call preview_open.";
+    if (this.reason === "interrupted")
+      return "Browser control changed. Take a fresh snapshot before trying again.";
     return `Preview automation ${this.operation} was interrupted on client ${this.clientId}.`;
   }
 }

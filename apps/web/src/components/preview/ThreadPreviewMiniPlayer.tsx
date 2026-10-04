@@ -222,6 +222,7 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
               tabId={tabId}
               visible
               followSize={false}
+              controlPosition="bottom"
               onViewport={setStreamViewport}
               className="size-full"
             />

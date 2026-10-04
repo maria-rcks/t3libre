@@ -1,5 +1,8 @@
 import previewStreamScript from "@t3tools/mobile-preview-stream";
-import type { PreviewStreamInput } from "@t3tools/client-runtime/preview/server-browser-stream";
+import type {
+  PreviewStreamControl,
+  PreviewStreamInput,
+} from "@t3tools/client-runtime/preview/server-browser-stream";
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
   useEffect,
@@ -11,7 +14,7 @@ import {
   useState,
   type Ref,
 } from "react";
-import { ActivityIndicator, Platform, Pressable, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, TextInput, View } from "react-native";
 import { WebView } from "react-native-webview";
 
 import { AppText } from "../../components/AppText";
@@ -24,7 +27,7 @@ import {
 } from "./preview-stream-document";
 
 export interface PreviewStreamRef {
-  /** `navigate`, `history`, and `reload` wait for the socket if it is not open yet. */
+  /** Navigation requires current control of the browser. */
   readonly command: (input: PreviewStreamInput) => void;
   readonly togglePictureInPicture: () => void;
 }
@@ -41,6 +44,7 @@ type NativeStreamBridge = {
   /** The tab was closed on the server. */
   readonly onGone?: () => void;
   readonly onViewport?: (viewport: { readonly width: number; readonly height: number }) => void;
+  readonly onControl?: (control: PreviewStreamControl | null) => void;
   readonly onPictureInPicture?: (state: PreviewPictureInPictureState, detail?: string) => void;
   /** True while frames show, so commands reach the page. Pass a stable function. */
   readonly onStreamingChange?: (streaming: boolean) => void;
@@ -171,6 +175,7 @@ function PreviewStreamDocumentView({
   onUnauthorized,
   onGone,
   onViewport,
+  onControl,
   onPictureInPicture,
   onStreamingChange,
   onRetry,
@@ -192,11 +197,20 @@ function PreviewStreamDocumentView({
   const [error, setError] = useState<string | null>(null);
   const [gone, setGone] = useState(false);
   const [started, setStarted] = useState(false);
+  const [control, setControl] = useState<PreviewStreamControl | null>(null);
+  const [promptText, setPromptText] = useState("");
+  const controlChanged = useEffectEvent((next: PreviewStreamControl | null) => onControl?.(next));
+  const command = (input: PreviewStreamInput) =>
+    webView.current?.injectJavaScript(
+      `window.T3PreviewStream?.command(${JSON.stringify(input)}); true;`,
+    );
   const fail = (message: string) => {
     if (!active.current || failed.current) return;
     failed.current = true;
     webView.current?.injectJavaScript("window.T3PreviewStream?.stop(); true;");
     onStreamingChange?.(false);
+    setControl(null);
+    onControl?.(null);
     setError(message);
     setStatus("error");
   };
@@ -217,10 +231,7 @@ function PreviewStreamDocumentView({
     [configuration],
   );
   useImperativeHandle(ref, () => ({
-    command: (input) =>
-      webView.current?.injectJavaScript(
-        `window.T3PreviewStream?.command(${JSON.stringify(input)}); true;`,
-      ),
+    command,
     togglePictureInPicture: () =>
       webView.current?.injectJavaScript("window.T3PreviewStream?.pictureInPicture(); true;"),
   }));
@@ -233,12 +244,45 @@ function PreviewStreamDocumentView({
     };
   }, []);
   useEffect(() => () => onStreamingChange?.(false), [onStreamingChange]);
+  useEffect(() => () => controlChanged(null), []);
   const processTerminated = () => {
     if (!active.current || failed.current) return;
     if (!onRecoverProcess()) fail("Browser viewer stopped. Reconnect to try again.");
   };
   return (
     <View className="flex-1" style={{ backgroundColor: background }}>
+      {!compact ? (
+        <View className="flex-row items-center justify-between gap-2 border-b border-secondary-border px-3 py-2">
+          <AppText className="text-xs text-foreground-muted">
+            {!control
+              ? "Connecting..."
+              : !control.canOperate
+                ? "Read-only"
+                : control.controller === "you"
+                  ? "You have control"
+                  : control.controller === "agent"
+                    ? "Agent has control"
+                    : control.controller === "another-viewer"
+                      ? "Another viewer has control"
+                      : "Watching"}
+          </AppText>
+          {control?.canOperate ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={control.controller === "another-viewer"}
+              accessibilityState={{ disabled: control.controller === "another-viewer" }}
+              className="rounded-full border border-secondary-border bg-secondary px-3 py-2"
+              onPress={() =>
+                command({ type: control.controller === "you" ? "releaseControl" : "takeControl" })
+              }
+            >
+              <AppText className="text-xs text-secondary-foreground">
+                {control.controller === "you" ? "Release control" : "Take control"}
+              </AppText>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
       <WebView<object>
         ref={webView}
         source={source}
@@ -266,6 +310,11 @@ function PreviewStreamDocumentView({
           const message = previewStreamMessage(event.nativeEvent.data);
           if (message === null) return;
           switch (message.type) {
+            case "control":
+              setControl(message);
+              setPromptText(message.dialog?.defaultValue ?? "");
+              onControl?.(message);
+              return;
             case "unauthorized":
               if (!onUnauthorized()) {
                 fail("This session can't open the browser stream. Reconnect to try again.");
@@ -289,11 +338,56 @@ function PreviewStreamDocumentView({
                 return;
               }
               setStatus(message.status);
+              if (message.status === "connecting") {
+                setControl(null);
+                onControl?.(null);
+              }
               onStreamingChange?.(message.status === "streaming");
               if (message.status === "streaming") onStreaming();
           }
         }}
       />
+      {!compact && control?.dialog ? (
+        <View className="absolute inset-x-3 top-16 gap-3 rounded-xl border border-secondary-border bg-secondary p-4">
+          <AppText className="text-sm text-secondary-foreground">{control.dialog.message}</AppText>
+          {control.controller === "you" ? (
+            <>
+              {control.dialog.type === "prompt" ? (
+                <TextInput
+                  accessibilityLabel="Dialog response"
+                  className="rounded-lg border border-secondary-border bg-background px-3 py-2 text-foreground"
+                  value={promptText}
+                  onChangeText={setPromptText}
+                />
+              ) : null}
+              <View className="flex-row justify-end gap-3">
+                <Pressable
+                  accessibilityRole="button"
+                  className="px-3 py-2"
+                  onPress={() => command({ type: "dialog", accept: false })}
+                >
+                  <AppText className="text-secondary-foreground">Dismiss</AppText>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  className="px-3 py-2"
+                  onPress={() =>
+                    command({
+                      type: "dialog",
+                      accept: true,
+                      ...(control.dialog?.type === "prompt" ? { promptText } : {}),
+                    })
+                  }
+                >
+                  <AppText className="text-secondary-foreground">Accept</AppText>
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <AppText className="text-xs text-foreground-muted">Take control to respond.</AppText>
+          )}
+        </View>
+      ) : null}
       {status !== "streaming" ? (
         <View
           className="absolute inset-0 items-center justify-center gap-4 px-6"

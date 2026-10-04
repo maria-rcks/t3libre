@@ -1,4 +1,4 @@
-// @effect-diagnostics globalDate:off globalTimers:off - Playwright callbacks run outside the Effect runtime.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off - Playwright callbacks run outside the Effect runtime.
 
 import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
@@ -13,11 +13,11 @@ import {
   type PreviewAutomationWaitForInput,
 } from "@t3tools/contracts";
 import type { CDPSession, Locator, Page } from "playwright-core";
+import * as NodeCrypto from "node:crypto";
+import { BrowserControlInterrupted } from "./SessionControl.ts";
 
 const MAX_EVALUATION_BYTES = 64_000;
 const MAX_VISIBLE_TEXT_LENGTH = 20_000;
-const MAX_INTERACTIVE_ELEMENTS = 200;
-const MAX_INTERACTIVE_ELEMENT_NAME_LENGTH = 200;
 const MAX_SCREENSHOT_WIDTH = 1280;
 const WAIT_POLL_MS = 100;
 export const DIAGNOSTIC_BUFFER_LIMIT = 200;
@@ -34,13 +34,21 @@ export class ServerBrowserOperationError extends Error {
 }
 
 export const toOperationError = (cause: unknown): ServerBrowserOperationError => {
+  if (cause instanceof BrowserControlInterrupted)
+    return new ServerBrowserOperationError(
+      "PreviewAutomationControlInterruptedError",
+      cause.message,
+      cause.reason,
+    );
   if (cause instanceof ServerBrowserOperationError) return cause;
   const message = cause instanceof Error ? cause.message : String(cause);
   const firstLine = message.split("\n")[0] ?? message;
   if (cause instanceof Error && cause.name === "TimeoutError") {
     return new ServerBrowserOperationError("PreviewAutomationTimeoutError", firstLine);
   }
-  if (/while parsing selector|Unknown engine|Unexpected token/i.test(message)) {
+  if (
+    /while parsing selector|Unknown engine|Unexpected token|strict mode violation/i.test(message)
+  ) {
     return new ServerBrowserOperationError("PreviewAutomationInvalidSelectorError", firstLine);
   }
   if (/not an <input>|not editable|not an editable/i.test(message)) {
@@ -51,57 +59,60 @@ export const toOperationError = (cause: unknown): ServerBrowserOperationError =>
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
+const pageRefs = new WeakMap<Page, { generation: string; refs: Map<string, string> }>();
+// A compact runtime namespace prevents old refs from aliasing after a server restart.
+const refNamespace = NodeCrypto.randomUUID().slice(0, 8);
+let snapshotSequence = 0;
+const nextRefGeneration = () => `${refNamespace}-${(++snapshotSequence).toString(36)}`;
+
+/** A takeover revokes previously issued refs even when the document stays unchanged. */
+export const invalidateRefs = (page: Page) => {
+  const state = pageRefs.get(page);
+  if (state) {
+    state.generation = nextRefGeneration();
+    state.refs.clear();
+  }
+};
+
+const refsFor = (page: Page) => {
+  let state = pageRefs.get(page);
+  if (!state) {
+    state = { generation: nextRefGeneration(), refs: new Map<string, string>() };
+    pageRefs.set(page, state);
+    page.on("framenavigated", () => invalidateRefs(page));
+    page.on("framedetached", () => invalidateRefs(page));
+  }
+  return state;
+};
+
 const targetLocator = (
   page: Page,
   input: { readonly locator?: string | undefined; readonly selector?: string | undefined },
 ): Locator | null => {
   const selector = input.locator ?? input.selector;
-  return selector === undefined ? null : page.locator(selector).first();
+  if (selector === undefined) return null;
+  if (selector.includes("aria-ref=")) {
+    const ref = /^aria-ref=(.+)$/.exec(selector)?.[1];
+    const nativeRef = ref === undefined ? undefined : pageRefs.get(page)?.refs.get(ref);
+    if (nativeRef === undefined) {
+      throw new ServerBrowserOperationError(
+        "PreviewAutomationInvalidSelectorError",
+        "This element ref is stale or belongs to another tab. Take a fresh snapshot and use its locator.",
+      );
+    }
+    return page.locator(`aria-ref=${nativeRef}`);
+  }
+  // Playwright's strict locators reject ambiguous controls rather than acting on row one.
+  return page.locator(selector);
 };
 
 const SNAPSHOT_SCRIPT = `(() => {
-  const selectorFor = (element) => {
-    if (element.id) return "#" + CSS.escape(element.id);
-    for (const attribute of ["data-testid", "name"]) {
-      const value = element.getAttribute(attribute);
-      if (value) return element.tagName.toLowerCase() + "[" + attribute + "=" + JSON.stringify(value) + "]";
-    }
-    const parts = [];
-    for (let current = element; current && current.nodeType === Node.ELEMENT_NODE && parts.length < 8; current = current.parentElement) {
-      const parent = current.parentElement;
-      const siblings = parent ? Array.from(parent.children).filter((child) => child.tagName === current.tagName) : [];
-      const base = current.tagName.toLowerCase();
-      parts.unshift(siblings.length > 1 ? base + ":nth-of-type(" + (siblings.indexOf(current) + 1) + ")" : base);
-    }
-    return parts.join(" > ");
-  };
-  const visible = (element) => {
-    const style = getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
-  };
-  const elements = Array.from(document.querySelectorAll("a[href],button,input,textarea,select,[role],[tabindex]"))
-    .filter(visible)
-    .slice(0, ${MAX_INTERACTIVE_ELEMENTS})
-    .map((element) => {
-      const rect = element.getBoundingClientRect();
-      return {
-        tag: element.tagName.toLowerCase(),
-        role: element.getAttribute("role"),
-        name: (element.getAttribute("aria-label") || element.innerText || element.getAttribute("name") || "").slice(0, ${MAX_INTERACTIVE_ELEMENT_NAME_LENGTH}),
-        selector: selectorFor(element),
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-      };
-    });
   return {
     url: location.href,
     title: document.title,
     loading: document.readyState !== "complete",
     visibleText: (document.body?.innerText || "").slice(0, ${MAX_VISIBLE_TEXT_LENGTH}),
-    interactiveElements: elements,
+    interactiveElements: [],
   };
 })()`;
 
@@ -140,19 +151,35 @@ export const snapshot = async (input: {
 }): Promise<PreviewAutomationSnapshot> => {
   const viewport = input.page.viewportSize() ?? { width: 1280, height: 800 };
   const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * input.renderScale));
-  const [page, data] = await Promise.all([
+  const state = refsFor(input.page);
+  invalidateRefs(input.page);
+  const generation = state.generation;
+  const [page, tree, data] = await Promise.all([
     input.page.evaluate(SNAPSHOT_SCRIPT) as Promise<
       Pick<
         PreviewAutomationSnapshot,
         "url" | "title" | "loading" | "visibleText" | "interactiveElements"
       >
     >,
+    input.page.ariaSnapshot({ mode: "ai", boxes: true, timeout: DEFAULT_TIMEOUT_MS }),
     captureViewport(input.page, input.cdp, { format: "png", scale }),
   ]);
+  if (state.generation !== generation) {
+    throw new ServerBrowserOperationError(
+      "PreviewAutomationExecutionError",
+      "The page changed while capturing its snapshot. Take another snapshot.",
+    );
+  }
+  const accessibilityTree = tree
+    .slice(0, MAX_VISIBLE_TEXT_LENGTH)
+    .replace(/\[ref=((?:f\d+)?e\d+)\]/g, (_match, nativeRef: string) => {
+      const ref = `t3-${generation}-${nativeRef}`;
+      state.refs.set(ref, nativeRef);
+      return `[ref=${ref}]`;
+    });
   return {
     ...page,
-    // The MCP layer drops the AX tree before it reaches the agent.
-    accessibilityTree: null,
+    accessibilityTree,
     consoleEntries: [...input.consoleEntries],
     networkEntries: [...input.networkEntries],
     actionTimeline: [...input.actionTimeline],

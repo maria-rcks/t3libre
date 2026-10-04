@@ -1,5 +1,5 @@
 import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequest";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -45,8 +45,11 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
     ) {
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
-    yield* authenticateMediaRequest(AuthOrchestrationOperateScope);
+    const session = yield* authenticateMediaRequest(AuthOrchestrationReadScope);
     const params = url.value.searchParams;
+    const canOperate =
+      session.scopes.includes(AuthOrchestrationOperateScope) &&
+      params.get("interactive") !== "false";
     const threadId = params.get("threadId") ?? "";
     const tabId = params.get("tabId") ?? "";
     if (!browser.enabled || threadId.length === 0 || tabId.length === 0) {
@@ -58,6 +61,7 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
           .attachViewer({
             threadId,
             tabId,
+            canOperate,
             maxWidth: intParam(params, "maxWidth", 1280, 7680),
             maxHeight: intParam(params, "maxHeight", 800, 4320),
             quality: intParam(params, "quality", DEFAULT_QUALITY, 100),
@@ -109,6 +113,7 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
                   Effect.andThen(Effect.sync(() => unacknowledged.push(output.ack))),
                 );
               case "viewport":
+              case "control":
               case "probe": {
                 const { _tag: type, ...data } = output;
                 return write(JSON.stringify({ type, ...data }));
@@ -120,7 +125,12 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
         );
         const receive = (chunk: Uint8Array | string) => {
           const message = parseMessage(chunk);
-          if (!isAck(message)) return viewer.input(message);
+          // Ownership serializes actions in the service. Keep reading so dialog
+          // replies and takeover can unblock an action already waiting on the page.
+          if (!isAck(message))
+            return canOperate
+              ? viewer.input(message).pipe(Effect.forkScoped, Effect.asVoid)
+              : Effect.void;
           const ack = unacknowledged.shift();
           // Forked: Chromium acks are paced and must not hold up input.
           return ack ? Effect.forkScoped(ack).pipe(Effect.asVoid) : Effect.void;

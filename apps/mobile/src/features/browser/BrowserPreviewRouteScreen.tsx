@@ -77,6 +77,7 @@ function BrowserPreviewScreen({
   const [pictureInPicture, setPictureInPicture] = useState(NO_PICTURE_IN_PICTURE);
   // Address bar commands only reach a page that is streaming.
   const [streaming, setStreaming] = useState(false);
+  const [canControl, setCanControl] = useState(false);
   const streamRef = useRef<PreviewStreamRef>(null);
   const { tabs, loaded } = useThreadServerBrowserTabs({ environmentId, threadId, enabled: true });
   const tab = tabs.find((entry) => entry.tabId === selectedTabId) ?? latestBrowserTab(tabs);
@@ -161,7 +162,7 @@ function BrowserPreviewScreen({
           <BrowserAddressBar
             key={tab.tabId}
             tab={tab}
-            ready={streaming}
+            ready={streaming && canControl}
             onCommand={(input) => streamRef.current?.command(input)}
           />
           {live ? (
@@ -175,6 +176,7 @@ function BrowserPreviewScreen({
               background={themeVariables["--color-sheet-solid"]}
               onPictureInPicture={onPictureInPicture}
               onStreamingChange={setStreaming}
+              onControl={(control) => setCanControl(control?.controller === "you")}
             />
           ) : (
             <View className="flex-1" />

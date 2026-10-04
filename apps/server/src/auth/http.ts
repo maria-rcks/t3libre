@@ -184,6 +184,7 @@ export const authenticateMediaRequest = (requiredScope: AuthEnvironmentScope) =>
     if (!session.scopes.includes(requiredScope)) {
       return yield* failEnvironmentScopeRequired(requiredScope);
     }
+    return session;
   });
 
 export function failEnvironmentInternal(reason: EnvironmentInternalErrorReason, error?: unknown) {

@@ -155,6 +155,8 @@ export function PreviewView({
   // Server tabs run in the environment's own browser and stream to any client.
   const isServerTab = snapshot?.runtime === "server";
   const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
+  const [serverControlledTabId, setServerControlledTabId] = useState<string | null>(null);
+  const serverInputDisabled = isServerTab && serverControlledTabId !== runtimeTabId;
   const [serverFrameTabId, setServerFrameTabId] = useState<string | null>(null);
   const desktopOverlay = tabId ? (previewState.desktopByTabId[tabId] ?? null) : null;
   const navStatus = snapshot?.navStatus ?? { _tag: "Idle" as const };
@@ -196,6 +198,7 @@ export function PreviewView({
   const navigateToResolvedUrl = useCallback(
     async (resolvedUrl: string) => {
       if (isServerTab && serverSurfaceRef.current) {
+        if (serverInputDisabled) return false;
         serverSurfaceRef.current.navigate(resolvedUrl);
         rememberPreviewUrl(threadRef, resolvedUrl);
         return true;
@@ -219,7 +222,7 @@ export function PreviewView({
       }
       return result._tag === "Success";
     },
-    [isServerTab, open, runtimeTabId, threadRef],
+    [isServerTab, open, runtimeTabId, serverInputDisabled, threadRef],
   );
 
   const handleSubmitUrl = useCallback(
@@ -274,6 +277,12 @@ export function PreviewView({
   const handleViewportChange = useCallback(
     async (nextViewport: PreviewViewportSetting) => {
       if (!tabId) return;
+      if (isServerTab) {
+        if (serverInputDisabled)
+          throw new Error("Take control before changing the browser viewport.");
+        serverSurfaceRef.current?.viewport(nextViewport);
+        return;
+      }
       const result = await resize({
         environmentId: threadRef.environmentId,
         input: {
@@ -293,7 +302,7 @@ export function PreviewView({
       }
       updatePreviewServerSnapshot(threadRef, result.value);
     },
-    [resize, tabId, threadRef],
+    [isServerTab, resize, serverInputDisabled, tabId, threadRef],
   );
 
   const handleToggleDeviceToolbar = () => {
@@ -733,9 +742,10 @@ export function PreviewView({
       <PreviewChromeRow
         url={url}
         loading={loading || serverStreamPending}
-        canGoBack={canGoBack}
-        canGoForward={canGoForward}
-        refreshDisabled={refreshDisabled}
+        canGoBack={canGoBack && !serverInputDisabled}
+        canGoForward={canGoForward && !serverInputDisabled}
+        refreshDisabled={refreshDisabled || serverInputDisabled}
+        inputDisabled={serverInputDisabled}
         focusUrlNonce={focusUrlNonce}
         onBack={handleBack}
         onForward={handleForward}
@@ -812,6 +822,9 @@ export function PreviewView({
             tabId={snapshot.tabId}
             visible={visible}
             onFirstFrame={() => setServerFrameTabId(runtimeTabId)}
+            onControl={(control) =>
+              setServerControlledTabId(control?.controller === "you" ? runtimeTabId : null)
+            }
             // Stays connected under the empty state so a URL picked there reaches the page.
             className={cn(
               "absolute inset-0 h-full w-full",

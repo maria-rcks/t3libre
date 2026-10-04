@@ -186,6 +186,8 @@ export const PreviewSessionSnapshot = Schema.Struct({
    */
   profileId: Schema.optional(BrowserProfileId),
   runtime: Schema.optional(PreviewRuntime),
+  /** Authenticated provider session owning an isolated server tab. */
+  automationOwner: Schema.optional(Schema.String),
   /** An agent opened this tab and asked to show it, so viewers float it. */
   reveal: Schema.optional(Schema.Boolean),
   /** A fresh presentation request, including whether it overrides automatic-floating settings. */
@@ -368,5 +370,18 @@ export class PreviewInvalidUrlError extends Schema.TaggedError<PreviewInvalidUrl
   }
 }
 
-export const PreviewError = Schema.Union([PreviewSessionLookupError, PreviewInvalidUrlError]);
+export class PreviewControlRequiredError extends Schema.TaggedError<PreviewControlRequiredError>()(
+  "PreviewControlRequiredError",
+  { tabId: Schema.String },
+) {
+  override get message() {
+    return "Take control of the server browser and use its viewer controls.";
+  }
+}
+
+export const PreviewError = Schema.Union([
+  PreviewSessionLookupError,
+  PreviewInvalidUrlError,
+  PreviewControlRequiredError,
+]);
 export type PreviewError = typeof PreviewError.Type;

@@ -17,6 +17,7 @@ import * as ServerConfig from "../../../config.ts";
 import * as Preview from "../../../preview/Manager.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewControlsHandlers from "./handlers.ts";
 import { PreviewControlsToolkit } from "./tools.ts";
 
@@ -60,6 +61,7 @@ it.effect.each([
       );
       const tab = yield* manager.open({ threadId, url: "http://localhost:3000" });
       const layerDependencies = Layer.mergeAll(
+        PreviewAutomationBroker.layer.pipe(Layer.provide(NodeServices.layer)),
         Layer.succeed(Preview.PreviewManager, manager),
         Layer.succeed(McpInvocationContext.McpInvocationContext, scope),
         Layer.mock(ServerSettings.ServerSettingsService)({
