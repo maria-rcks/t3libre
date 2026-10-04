@@ -1864,6 +1864,21 @@ function claudeNativeToolOutputText(output: ClaudeNativeToolOutput): string {
   return typeof value === "string" ? value : value === undefined ? "" : jsonStringifyForTool(value);
 }
 
+/** Bash results arrive as `{ stdout, stderr, interrupted, ... }`; keep only the text. */
+function claudeCommandOutputText(output: ClaudeNativeToolOutput): string {
+  const value = claudeNativeToolOutputValue(output);
+  if (typeof value === "object" && value !== null) {
+    const stdout = Reflect.get(value, "stdout");
+    const stderr = Reflect.get(value, "stderr");
+    if (typeof stdout === "string" || typeof stderr === "string") {
+      return [stdout, stderr]
+        .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+        .join("\n");
+    }
+  }
+  return claudeNativeToolOutputText(output);
+}
+
 function claudeSubagentResultText(output: ClaudeNativeToolOutput): string {
   const value = claudeNativeToolOutputValue(output);
   const content = Array.isArray(value)
@@ -3810,7 +3825,10 @@ export function makeClaudeAdapterV2(
           });
           const webSearchResults = webSearchResultsFromClaudeOutput(input.output);
           const outputValue = claudeNativeToolOutputValue(input.output);
-          const outputText = claudeNativeToolOutputText(input.output);
+          const outputText =
+            itemType === "command_execution"
+              ? claudeCommandOutputText(input.output)
+              : claudeNativeToolOutputText(input.output);
           const turnItem: OrchestrationV2TurnItem =
             itemType === "command_execution"
               ? {

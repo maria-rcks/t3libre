@@ -27,8 +27,11 @@ function textFromBlocks(value: unknown, depth: number): string | null {
     if (typeof resource.text === "string") return resource.text;
     if (typeof resource.uri === "string") return resource.uri;
   }
-  const keys = Object.keys(value).filter((key) => key !== "isError" && key !== "is_error");
-  // MCP results and provider tool results wrap their text in `content`.
+  const keys = Object.keys(value).filter(
+    (key) => key !== "isError" && key !== "is_error" && key !== "structuredContent",
+  );
+  // MCP results and provider tool results wrap their text in `content`;
+  // `structuredContent` repeats it as data.
   if (keys.length === 1 && keys[0] === "content") return textFromBlocks(value.content, depth + 1);
   return null;
 }
@@ -83,11 +86,21 @@ export function turnItemNeedsDetailFetch(item: OrchestrationV2TurnItem): boolean
   }
 }
 
+/** Older Claude bash rows stored the raw `{ stdout, stderr, ... }` result. */
+function commandOutputText(output: string): string {
+  if (!output.trimStart().startsWith('{"stdout"')) return output;
+  const parsed = parseJson(output.trim());
+  if (!isRecord(parsed)) return output;
+  return [parsed.stdout, parsed.stderr]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .join("\n");
+}
+
 /** The tool output carried by a fetched item, formatted for display. */
 export function turnItemOutputText(item: OrchestrationV2TurnItem): string | null {
   switch (item.type) {
     case "command_execution":
-      return item.output?.trim() ? item.output : null;
+      return item.output?.trim() ? commandOutputText(item.output) || null : null;
     case "dynamic_tool":
       return item.outputOmitted === true ? null : formatToolValue(item.output);
     default:
