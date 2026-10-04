@@ -294,6 +294,14 @@ describe("orchestration V2 wire projection", () => {
     expect(projected).not.toHaveProperty("newStr");
     expect(projected).toMatchObject({ fileName: "src/main.ts", additions: 3, deletions: 1 });
     expect(item.diffStr).toBe("+new code");
+    // A failed edit keeps the provider's error so expanding the row can show it.
+    const failed = projectTurnItemForWire({
+      ...item,
+      status: "failed",
+      diffStr: "String to replace not found",
+    });
+    expect(failed).toMatchObject({ diffStr: "String to replace not found" });
+    expect(failed).not.toHaveProperty("newStr");
   });
 
   it("retains only result identities and failure metadata in live tool events", () => {

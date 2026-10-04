@@ -92,8 +92,11 @@ export function projectTurnItemForWire(item: OrchestrationV2TurnItem): Orchestra
     case "file_change": {
       // File identity and counts are enough for activity. Full diffs already
       // have a dedicated read path and remain intact in persistence.
-      const { diffStr: _diff, oldStr: _old, newStr: _new, ...projected } = item;
-      return projected;
+      const { diffStr, oldStr: _old, newStr: _new, ...projected } = item;
+      // A failed edit stores the provider's error where the diff would be.
+      return item.status === "failed" && diffStr?.trim()
+        ? { ...projected, diffStr: truncateDetail(diffStr) }
+        : projected;
     }
     case "subagent":
       return {
