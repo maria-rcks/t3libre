@@ -116,15 +116,35 @@ of \`main\` for that work, never the tag-pinned diagnosis clone.
 
 - Match the structure of the \`via-triage\` issue template
   (\`.github/ISSUE_TEMPLATE/via-triage.yml\` in the repo): what happened, diagnosis,
-  repro steps, environment, evidence, related issues.
-- Label it \`via-triage\`. Use a plain, specific title with no prefix.
+  repro steps, version, environment, evidence, related issues, workaround, and
+  agent/model attribution. Use a plain, specific title with no prefix.
 - Show the user the complete final issue text and get an explicit yes before
   posting. Never post without it.
-- Note at the end of the issue which model and agent produced it.
-- If \`gh\` is not authenticated, offer \`gh auth login\`, or build a prefilled
-  https://github.com/pingdotgg/t3code/issues/new URL with title and body query
-  parameters; print the URL, and open it in their browser only after they
-  approve.
+- Before filing through \`gh\`, check the authenticated account's label permission:
+
+      gh api repos/pingdotgg/t3code --jq '.permissions.triage or .permissions.push or .permissions.admin'
+
+  Only if this returns \`true\`, use \`gh issue create --repo pingdotgg/t3code\`
+  with \`--label via-triage\`, a title, and the approved report via \`--body-file\`.
+  Confirm the created issue has the label. If creation reports an error, check
+  whether it created an issue before retrying. If an issue exists without the
+  label, report that to the user; do not create a duplicate.
+
+- If \`gh\` is missing, unauthenticated, the permission check fails, or label
+  permission is absent, use the issue form, which applies \`via-triage\` for the
+  user. Select it with this URL:
+
+      https://github.com/pingdotgg/t3code/issues/new?template=via-triage.yml
+
+  Prefill \`title\` and the individual form fields using URL-encoded values:
+  \`what-happened\`, \`diagnosis\`, \`steps\`, \`version\`, \`environment\`, \`evidence\`,
+  \`related\`, \`workaround\`, and \`agent\`. Do not use \`body\` or \`labels\` query
+  parameters. Print the URL and open it in their browser only after they
+  approve; the user reviews and submits the form. If the URL is too long to
+  open reliably, provide the bare form URL and the approved report with each
+  field clearly separated for pasting. If authentication is the only obstacle
+  to direct filing, you may also offer \`gh auth login\`.
+
 - If the user pasted screenshots, remind them to drag the images into the issue
   after it is created; they cannot be attached from here.
 

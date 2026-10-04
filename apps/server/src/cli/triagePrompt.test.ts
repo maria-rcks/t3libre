@@ -29,6 +29,25 @@ it("seed prompt names the context file and embeds the playbook", () => {
   assert.include(prompt, TRIAGE_PLAYBOOK);
 });
 
+it("seed prompt selects the triage form and names its current prefill fields", () => {
+  const prompt = buildTriageSeedPrompt("/tmp/triage-run/context.md");
+  const filing = prompt.split("## 8. File the issue well")[1]!.split("## 9. Redact")[0]!;
+  const formUrl = filing.match(
+    /https:\/\/github\.com\/pingdotgg\/t3code\/issues\/new\?template=[^\s`]+/,
+  );
+  assert.ok(formUrl, "ordinary contributors need the labeled issue form");
+  assert.equal(new URL(formUrl[0]).searchParams.get("template"), "via-triage.yml");
+  const form = NodeFS.readFileSync(
+    NodePath.join(import.meta.dirname, "../../../../.github/ISSUE_TEMPLATE/via-triage.yml"),
+    "utf8",
+  );
+  for (const [, fieldId] of form.matchAll(/^\s+id: ([\w-]+)$/gm)) {
+    assert.include(filing, `\`${fieldId}\``);
+  }
+  assert.include(filing, ".permissions.triage");
+  assert.include(filing, "explicit yes before");
+});
+
 it("launch prompt stays a single argv-safe line naming the prompt file", () => {
   // The launch argument goes through cmd.exe on Windows (.cmd shims), which
   // cannot carry newlines; the playbook itself must stay on disk.
