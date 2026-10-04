@@ -263,12 +263,12 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
         </div>
       ) : null}
 
-      {item.type === "file_search" && item.pattern?.trim() && !item.results?.length ? (
-        <StructuredValue value={item.pattern} />
+      {item.type === "file_search" && item.pattern?.trim() ? (
+        <div className={cn("text-foreground/85", monoClassName)}>{item.pattern}</div>
       ) : null}
 
-      {item.type === "web_search" && item.patterns?.length && !item.results?.length ? (
-        <StructuredValue value={item.patterns.join("\n")} />
+      {item.type === "web_search" && item.patterns?.length ? (
+        <div className={cn("text-foreground/85", monoClassName)}>{item.patterns.join("\n")}</div>
       ) : null}
 
       {item.type === "file_search" && item.results?.length ? (
