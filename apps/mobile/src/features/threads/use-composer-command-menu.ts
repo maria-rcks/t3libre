@@ -259,8 +259,17 @@ export function useComposerCommandMenu({
     environmentId && projectCwd && selectedProviderInstanceId
       ? `${environmentId}:${selectedProviderInstanceId}:${projectCwd}`
       : null;
+  const workspaceSlashCommandsPending =
+    selectedProviderStatus?.workspaceSnapshots?.some(
+      (snapshot) => snapshot.cwd === projectCwd && snapshot.slashCommandsPending === true,
+    ) ?? false;
   useEffect(() => {
-    if (!workspaceRefreshRetry || workspaceRefreshRetry.key !== workspaceRefreshScopeKey) return;
+    if (
+      !workspaceSlashCommandsPending ||
+      !workspaceRefreshRetry ||
+      workspaceRefreshRetry.key !== workspaceRefreshScopeKey
+    )
+      return;
     const timeout = setTimeout(
       () => {
         setWorkspaceRefreshRetry((current) => (current === workspaceRefreshRetry ? null : current));
@@ -268,7 +277,7 @@ export function useComposerCommandMenu({
       Math.max(0, workspaceRefreshRetry.notBefore - Date.now()),
     );
     return () => clearTimeout(timeout);
-  }, [workspaceRefreshRetry, workspaceRefreshScopeKey]);
+  }, [workspaceRefreshRetry, workspaceRefreshScopeKey, workspaceSlashCommandsPending]);
   const hadWorkspaceSnapshotRef = useRef(false);
   useEffect(() => {
     if (hadWorkspaceSnapshotRef.current && !hasWorkspaceSnapshot) {

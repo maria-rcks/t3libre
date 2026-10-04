@@ -2188,8 +2188,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     gitCwd && selectedProviderEntry
       ? `${environmentId}:${selectedProviderEntry.instanceId}:${gitCwd}`
       : null;
+  const workspaceSlashCommandsPending =
+    selectedProviderStatus?.workspaceSnapshots?.some(
+      (snapshot) => snapshot.cwd === gitCwd && snapshot.slashCommandsPending === true,
+    ) ?? false;
   useEffect(() => {
-    if (!workspaceRefreshRetry || workspaceRefreshRetry.key !== workspaceRefreshScopeKey) return;
+    if (
+      !workspaceSlashCommandsPending ||
+      !workspaceRefreshRetry ||
+      workspaceRefreshRetry.key !== workspaceRefreshScopeKey
+    )
+      return;
     const timeout = setTimeout(
       () => {
         setWorkspaceRefreshRetry((current) => (current === workspaceRefreshRetry ? null : current));
@@ -2197,7 +2206,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       Math.max(0, workspaceRefreshRetry.notBefore - Date.now()),
     );
     return () => clearTimeout(timeout);
-  }, [workspaceRefreshRetry, workspaceRefreshScopeKey]);
+  }, [workspaceRefreshRetry, workspaceRefreshScopeKey, workspaceSlashCommandsPending]);
   const hadWorkspaceSnapshotRef = useRef(false);
   useEffect(() => {
     const hasWorkspaceSnapshot = hasCompleteProviderWorkspaceSnapshot(

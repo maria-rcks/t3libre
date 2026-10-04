@@ -140,13 +140,13 @@ describe("workspace command discovery retry", () => {
     ],
   } satisfies ServerProvider;
 
-  function Probe({ cwd }: { cwd: string }) {
+  function Probe({ cwd, status = provider }: { cwd: string; status?: ServerProvider }) {
     useComposerCommandMenu({
       draftMessage: "/project",
       ownerKey: null,
       environmentId,
       projectCwd: cwd,
-      selectedProviderStatus: provider,
+      selectedProviderStatus: status,
       hasThread: false,
       hasCompactableConversation: false,
       onChangeDraftMessage: () => {},
@@ -200,6 +200,94 @@ describe("workspace command discovery retry", () => {
       environmentId,
       input: { instanceId, cwd: "/project-a" },
     });
+    await act(() => vi.advanceTimersByTimeAsync(20_000));
+    expect(refreshProviders).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["pi", "acpRegistry"])(
+    "does not poll a healthy %s workspace without discovery",
+    async (driver) => {
+      const unsupported = {
+        ...provider,
+        driver: ProviderDriverKind.make(driver),
+        workspaceSnapshots: [],
+      };
+      refreshProviders.mockResolvedValue({ _tag: "Success", value: { providers: [unsupported] } });
+      await act(async () => {
+        root.render(createElement(Probe, { cwd: "/project-a", status: unsupported }));
+      });
+      expect(refreshProviders).toHaveBeenCalledTimes(1);
+      await act(() => vi.advanceTimersByTimeAsync(30_000));
+      expect(refreshProviders).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("arms the remaining cooldown when a concurrent scan publishes partial commands", async () => {
+    const missing = { ...provider, workspaceSnapshots: [] };
+    const recovered = {
+      ...provider,
+      workspaceSnapshots: provider.workspaceSnapshots.map((snapshot) => ({
+        ...snapshot,
+        slashCommandsPending: false,
+      })),
+    };
+    refreshProviders.mockResolvedValueOnce({ _tag: "Success", value: { providers: [missing] } });
+    refreshProviders.mockResolvedValue({ _tag: "Success", value: { providers: [recovered] } });
+    await act(async () => {
+      root.render(createElement(Probe, { cwd: "/project-a", status: missing }));
+    });
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    expect(refreshProviders).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => {
+      root.render(createElement(Probe, { cwd: "/project-a", status: provider }));
+    });
+    await act(() => vi.advanceTimersByTimeAsync(4_999));
+    expect(refreshProviders).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(refreshProviders).toHaveBeenCalledTimes(2);
+    await act(() => vi.advanceTimersByTimeAsync(20_000));
+    expect(refreshProviders).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry when a concurrent scan publishes a complete workspace", async () => {
+    const missing = { ...provider, workspaceSnapshots: [] };
+    const recovered = {
+      ...provider,
+      workspaceSnapshots: provider.workspaceSnapshots.map((snapshot) => ({
+        ...snapshot,
+        slashCommandsPending: false,
+      })),
+    };
+    refreshProviders.mockResolvedValue({ _tag: "Success", value: { providers: [missing] } });
+    await act(async () => {
+      root.render(createElement(Probe, { cwd: "/project-a", status: missing }));
+    });
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    await act(async () => {
+      root.render(createElement(Probe, { cwd: "/project-a", status: recovered }));
+    });
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(refreshProviders).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("retries a rejected refresh while published discovery remains pending", async () => {
+    const recovered = {
+      ...provider,
+      workspaceSnapshots: provider.workspaceSnapshots.map((snapshot) => ({
+        ...snapshot,
+        slashCommandsPending: false,
+      })),
+    };
+    refreshProviders.mockRejectedValueOnce(new Error("Connection lost"));
+    refreshProviders.mockResolvedValue({ _tag: "Success", value: { providers: [recovered] } });
+    await act(async () => {
+      root.render(createElement(Probe, { cwd: "/project-a" }));
+    });
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(refreshProviders).toHaveBeenCalledTimes(2);
     await act(() => vi.advanceTimersByTimeAsync(20_000));
     expect(refreshProviders).toHaveBeenCalledTimes(2);
   });
