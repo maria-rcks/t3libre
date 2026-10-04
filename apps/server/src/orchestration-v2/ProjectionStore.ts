@@ -4511,7 +4511,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         FROM orchestration_v2_projection_turn_items
         WHERE turn_item_id = ${itemId} AND thread_id = ${threadId}`.pipe(
         Effect.flatMap((rows) =>
-          rows[0] === undefined ? Effect.succeed(null) : decodeTurnItemPayload(rows[0].payload_json),
+          rows[0] === undefined
+            ? Effect.succeed(null)
+            : decodeTurnItemPayload(rows[0].payload_json),
         ),
         Effect.mapError(controlReadError(threadId)),
       );
@@ -5798,8 +5800,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
         Ref.get(replayState).pipe(
           Effect.map(
             (state) =>
-              state.projections.get(threadId)?.turnItems.find((item) => item.id === itemId) ??
-              null,
+              state.projections.get(threadId)?.turnItems.find((item) => item.id === itemId) ?? null,
           ),
         ),
       getThreadAttachmentIds: (threadId) =>
