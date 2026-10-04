@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { RuntimeMode } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, type RuntimeMode } from "@t3tools/contracts";
 import { act, createElement } from "react";
 import { create } from "react-test-renderer";
 
@@ -135,6 +135,12 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useParams: () => null,
   useRouter: () => testState.router,
+  useNavigate: () => testState.router.navigate,
+  useLocation: ({
+    select,
+  }: {
+    select: (location: { hash: string; pathname: string }) => unknown;
+  }) => select({ hash: "", pathname: testState.router.state.location.href }),
   createFileRoute: () => (options: unknown) => ({
     options,
     useRouteContext: () => ({ authGateState: { status: "server" } }),
@@ -203,6 +209,7 @@ vi.mock("../state/environments", () => ({
   useEnvironments: () => ({ environments: [], isReady: true }),
 }));
 vi.mock("../components/NoProjectsHero", () => ({ NoProjectsHero: () => null }));
+vi.mock("../components/onboarding/WelcomeWizard", () => ({ WelcomeWizard: "dialog" }));
 vi.mock("../components/WorkspacePageHeader", () => ({ WorkspacePageHeader: () => null }));
 vi.mock("../components/ui/button", () => ({ Button: "button" }));
 vi.mock("../components/ui/sidebar", () => ({ SidebarInset: "main" }));
@@ -248,6 +255,7 @@ vi.mock("../components/ui/toast", () => ({
 import { useNewThreadHandler } from "./useHandleNewThread";
 import * as newThread from "./useHandleNewThread";
 import { Route } from "../routes/_chat.index";
+import { Route as WelcomeRoute } from "../routes/welcome";
 
 describe.each([
   ["new", null],
@@ -459,6 +467,49 @@ it("shows the index retry action after an unavailable result and opens the same 
     expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
       "remote-project",
       { environmentId: "environment-ssh", projectId: "project-remote" },
+      "draft-delayed",
+      expect.anything(),
+    );
+  } finally {
+    await act(async () => renderer.unmount());
+    handler.mockRestore();
+    testState.connectionPhase = "connected";
+    vi.unstubAllGlobals();
+  }
+});
+
+it("keeps welcome open when an imported checkout is unavailable and retries that checkout after reconnect", async () => {
+  testState.reset(null);
+  testState.toast.mockClear();
+  testState.projectFileReads.mockClear();
+  testState.connectionPhase = "disconnected";
+  testState.router.state.location.href = "/welcome";
+  const projectRef = {
+    environmentId: EnvironmentId.make("environment-ssh"),
+    projectId: ProjectId.make("project-remote"),
+  };
+  const openThread = useNewThreadHandler();
+  const handler = vi.spyOn(newThread, "useNewThreadHandler").mockReturnValue(openThread);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  await WelcomeRoute.options.component!.preload?.();
+  const renderer = await act(async () => create(createElement(WelcomeRoute.options.component!)));
+  try {
+    const wizard = renderer.root.findByType("dialog");
+    await act(async () => wizard.props.onDone(projectRef));
+    expect(renderer.root.findByType("dialog")).toBe(wizard);
+    expect(testState.router.state.location.href).toBe("/welcome");
+    expect(testState.router.navigate).not.toHaveBeenCalled();
+    expect(testState.projectFileReads).not.toHaveBeenCalled();
+    expect(testState.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Environment unavailable" }),
+    );
+    testState.connectionPhase = "connected";
+    await act(async () => wizard.props.onDone(projectRef));
+    expect(testState.router.state.location.href).toBe("/draft/draft-delayed");
+    expect(renderer.root.findAllByType("dialog")).toHaveLength(0);
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      projectRef,
       "draft-delayed",
       expect.anything(),
     );

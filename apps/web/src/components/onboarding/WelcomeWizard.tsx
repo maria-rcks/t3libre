@@ -113,7 +113,7 @@ export function WelcomeWizard({
   /** Whether this client is authenticated to the server serving the app. */
   readonly localAvailable: boolean;
   readonly resumeEnvironmentId?: EnvironmentId | undefined;
-  readonly onDone: (projectRef?: ScopedProjectRef) => void | Promise<void>;
+  readonly onDone: (projectRef?: ScopedProjectRef) => boolean | void | Promise<boolean | void>;
 }) {
   const completeOnboarding = useCompleteOnboarding();
   const [step, setStep] = useState<WizardStep>(resumeEnvironmentId ? "agents" : "connection");
@@ -170,7 +170,7 @@ export function WelcomeWizard({
             toastManager.close(completionErrorToastIdRef.current);
             completionErrorToastIdRef.current = null;
           }
-          await onDone(projectRef);
+          if ((await onDone(projectRef)) === false) return false;
           if (importWarning) {
             toastManager.add({
               type: "warning",

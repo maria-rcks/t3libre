@@ -212,3 +212,26 @@ it("keeps setup open when saving completion fails and preserves the import warni
     }),
   );
 });
+
+it("retries the same imported project when opening it is unavailable", async () => {
+  const onDone = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(undefined);
+  await act(async () => root.render(<WelcomeWizard localAvailable onDone={onDone} />));
+  await click("Continue");
+  await click("Continue");
+  await click("Import 1 project");
+  expect(onDone).toHaveBeenCalledWith({
+    environmentId: EnvironmentId.make("test-env"),
+    projectId: ProjectId.make("test-project"),
+  });
+  expect(mocks.toast).not.toHaveBeenCalled();
+  await click("Do not import projects");
+  expect(onDone).toHaveBeenCalledTimes(2);
+  expect(onDone.mock.calls[1]).toEqual(onDone.mock.calls[0]);
+  expect(mocks.importThreads).toHaveBeenCalledOnce();
+  expect(mocks.toast).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      type: "warning",
+      description: "Imported 28 threads. 1 thread could not be imported.",
+    }),
+  );
+});
