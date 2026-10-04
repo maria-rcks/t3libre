@@ -434,7 +434,7 @@ export function reconcileClaudeUsage(previous: UsageRecord, next: UsageRecord): 
     totals[key] = Math.max(totals[key], next.totals[key]);
     changed ||= totals[key] !== previous.totals[key];
     billableChanged ||= key !== "reasoningTokens" && totals[key] !== previous.totals[key];
-    matchesNext &&= totals[key] === next.totals[key];
+    matchesNext &&= key === "reasoningTokens" || totals[key] === next.totals[key];
   }
   if (!changed) return previous;
   return {

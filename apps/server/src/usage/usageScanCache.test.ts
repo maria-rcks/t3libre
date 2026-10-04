@@ -286,7 +286,11 @@ describe("dedupeWithinFile", () => {
     expect(dedupeWithinFile([first, next])[0]).toEqual({
       ...first,
       totals: { ...next.totals, reasoningTokens: 30 },
-      reportedCostUsd: null,
+      reportedCostUsd: 2,
+    });
+    expect(dedupeWithinFile([next, first])[0]).toEqual({
+      ...next,
+      totals: { ...next.totals, reasoningTokens: 30 },
     });
   });
 
