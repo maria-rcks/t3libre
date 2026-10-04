@@ -162,6 +162,7 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
         if (
           /["'[\]]/u.test(includePattern) ||
           /%|\$\{/u.test(includePattern) ||
+          /^~[^/\\]/u.test(includePattern) ||
           /[*?]/u.test(path.dirname(resolvedPattern))
         ) {
           // Unexpanded includes may establish either value before later rules.

@@ -291,6 +291,21 @@ describe("ssh config", () => {
       known: "fallback.example.com",
     },
     {
+      name: "reads supported current-home Include paths",
+      config: "Host work\n  Include ~/.ssh/target.conf\n  HostName fallback.example.com\n",
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+    {
+      name: "reads quoted current-home Include paths containing spaces",
+      config:
+        'Host work\n  Include "~/.ssh/target with spaces.conf"\n  HostName fallback.example.com\n',
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+    {
       name: "preserves quoted hostname hashes and strips ordinary comments",
       config:
         'Host work # alias comment\n  HostName "work#blue.example.com" # hostname comment\n  Port 22 # port comment\n',
@@ -443,6 +458,26 @@ describe("ssh config", () => {
           "Host work\n  Include config-%h.conf\n  HostName work.example.com\n  Port 22\n",
           "work",
           true,
+        ],
+        [
+          "Host work\n  Include ~maria/.ssh/target.conf\n  HostName work.example.com\n  Port 22\n",
+          "work",
+          true,
+        ],
+        [
+          'Host work\n  Include "~maria/.ssh/target.conf"\n  HostName work.example.com\n  Port 22\n',
+          "work",
+          true,
+        ],
+        [
+          "Host skip*\n  Include ~maria/.ssh/target.conf\nHost work\n  HostName work.example.com\n  Port 22\n",
+          "work.example.com",
+          false,
+        ],
+        [
+          "Host work\n  HostName work.example.com\n  Port 22\n  Include ~maria/.ssh/target.conf\n",
+          "work.example.com",
+          false,
         ],
         [
           "Host work\n  Include ${T3_SSH_INCLUDE_FILE}\n  HostName work.example.com\n  Port 22\n",
