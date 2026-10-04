@@ -11,13 +11,17 @@ import {
 } from "@t3tools/client-runtime/work-log/item-detail";
 import * as DateTime from "effect/DateTime";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
-import { memo, type ReactNode } from "react";
+import { memo, type ReactNode, Suspense, use, useMemo } from "react";
 
+import { useTheme } from "../../hooks/useTheme";
+import { resolveDiffThemeName } from "../../lib/diffRendering";
+import { getSyntaxHighlighterPromise } from "../../lib/syntaxHighlighting";
 import { useTurnItemDetail } from "../../state/queries";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { Button } from "../ui/button";
 import ChatMarkdown from "../ChatMarkdown";
+import { RenderErrorBoundary } from "../RenderErrorBoundary";
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 
 interface V2ItemInspectorProps {
@@ -33,12 +37,53 @@ interface V2ItemInspectorProps {
   }) => void;
 }
 
-function StructuredValue({ value }: { readonly value: unknown }) {
+function JsonTokens({ text }: { readonly text: string }) {
+  const { resolvedTheme } = useTheme();
+  const highlighter = use(getSyntaxHighlighterPromise("json"));
+  const { tokens } = useMemo(
+    () =>
+      highlighter.codeToTokens(text, { lang: "json", theme: resolveDiffThemeName(resolvedTheme) }),
+    [highlighter, text, resolvedTheme],
+  );
+  return tokens.flatMap((line, lineIndex) => [
+    lineIndex > 0 ? "\n" : "",
+    ...line.map((token) => (
+      <span key={token.offset} style={{ color: token.color }}>
+        {token.content}
+      </span>
+    )),
+  ]);
+}
+
+function StructuredValue({
+  value,
+  highlightJson = false,
+}: {
+  readonly value: unknown;
+  readonly highlightJson?: boolean;
+}) {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  const isJson = useMemo(() => {
+    if (!highlightJson || !text) return false;
+    try {
+      JSON.parse(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [highlightJson, text]);
   if (!text) return null;
   return (
     <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/50 bg-background/60 p-2 font-mono text-2xs leading-relaxed text-muted-foreground select-text">
-      {text}
+      {isJson ? (
+        <RenderErrorBoundary fallback={text}>
+          <Suspense fallback={text}>
+            <JsonTokens text={text} />
+          </Suspense>
+        </RenderErrorBoundary>
+      ) : (
+        text
+      )}
     </pre>
   );
 }
@@ -117,7 +162,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
 
       {item.type === "command_execution" ? (
         <div className="space-y-2">
-          <StructuredValue value={item.input} />
+          <StructuredValue value={item.input} highlightJson />
           {output}
           {item.exitCode !== undefined ? (
             <p className={item.exitCode === 0 ? "text-success" : "text-destructive"}>
@@ -223,7 +268,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
           {formatToolValue(item.input) ? (
             <div>
               <SectionLabel>Input</SectionLabel>
-              <StructuredValue value={formatToolValue(item.input)} />
+              <StructuredValue value={formatToolValue(item.input)} highlightJson />
             </div>
           ) : null}
           {output}
