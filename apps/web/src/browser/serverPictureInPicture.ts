@@ -108,6 +108,7 @@ export async function openServerPictureInPicture(input: {
         tabId: input.tabId,
         maxWidth: 1280,
         maxHeight: 1280,
+        interactive: false,
       },
       {
         onFrame: (jpeg) => {

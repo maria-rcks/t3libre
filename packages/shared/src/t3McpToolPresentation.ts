@@ -158,6 +158,11 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "browser",
     "browser",
   ),
+  preview_dialog: tool(
+    ["Respond", "Responding", "Responded", "to a preview browser dialog"],
+    "browser",
+    "browser",
+  ),
   preview_snapshot: tool(
     ["Take a snapshot of", "Taking a snapshot of", "Took a snapshot of", "the preview page"],
     "browser",

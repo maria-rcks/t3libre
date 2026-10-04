@@ -633,7 +633,7 @@ const make = Effect.gen(function* () {
             : "load",
     });
     if (readiness === "none") {
-      void navigation.catch(constVoid);
+      tab.control.track(navigation);
       return;
     }
     await navigation.catch((cause: unknown) => {
@@ -951,6 +951,18 @@ const make = Effect.gen(function* () {
         });
       }
       case "recordingStop": {
+        if (
+          !request.tabIdExplicit &&
+          [...tabs.values()].filter(
+            (candidate) =>
+              candidate.threadId === request.threadId &&
+              candidate.control.agentId === request.agentSessionId,
+          ).length > 1
+        )
+          throw new BrowserControlInterrupted(
+            "Multiple tabs belong to this agent session. Pass the explicit tabId returned by preview_open.",
+            "tabRequired",
+          );
         const recordings = [...tabs.values()].filter(
           (candidate) =>
             candidate.threadId === request.threadId &&

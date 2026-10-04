@@ -16,6 +16,7 @@ export class SessionControl {
   readonly agentId: string | null;
   private readonly onGenerationChange: () => void;
   private tail: Promise<unknown> = Promise.resolve();
+  private pending: Promise<void> = Promise.resolve();
   private owner: string | null = null;
   private epoch = 0;
   private closed = false;
@@ -35,8 +36,20 @@ export class SessionControl {
 
   private enqueue<A>(run: () => Promise<A>): Promise<A> {
     const result = this.tail.then(run);
-    this.tail = result.catch(() => undefined);
+    this.tail = result.then(
+      () => this.pending,
+      () => this.pending,
+    );
     return result;
+  }
+
+  /** An action can respond before its navigation commits, while later actions still wait. */
+  track(work: Promise<unknown>) {
+    const settled = work.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.pending = Promise.all([this.pending, settled]).then(() => undefined);
   }
 
   private assertOpen() {

@@ -173,6 +173,49 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
+it.live("readiness none responds immediately but takeover input waits for navigation commit", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, broker, tabId } = yield* ready;
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      const committed = Promise.withResolvers<void>();
+      const events: string[] = [];
+      contexts[0]!.page.goto.mockImplementationOnce(async () => {
+        await committed.promise;
+        events.push("navigation committed");
+      });
+      yield* Effect.addFinalizer(() => Effect.sync(() => committed.resolve()));
+      const response = yield* broker.invoke<PreviewAutomationStatus>({
+        scope,
+        tabId,
+        operation: "navigate",
+        input: { url: "http://localhost:5173/next", readiness: "none" },
+      });
+      expect(response.available).toBe(true);
+      expect(events).toEqual([]);
+      yield* Queue.clear(viewer.output);
+      const takeover = yield* viewer.input({ type: "takeControl" }).pipe(Effect.forkScoped);
+      let control = yield* Queue.take(viewer.output);
+      while (control._tag !== "control" || control.controller !== "you") {
+        control = yield* Queue.take(viewer.output);
+      }
+      const cdp = contexts[0]!.sessions.at(-1)!;
+      const send = cdp.send.getMockImplementation()!;
+      cdp.send.mockImplementation(async (operation, input) => {
+        if (operation === "Input.insertText") events.push("human typed");
+        return send(operation, input);
+      });
+      const typing = yield* viewer.input({ type: "text", text: "hello" }).pipe(Effect.forkScoped);
+      yield* broker.invoke({ scope, tabId, operation: "status", input: {} });
+      expect(events).toEqual([]);
+      committed.resolve();
+      yield* Fiber.join(takeover);
+      yield* Fiber.join(typing);
+      expect(events).toEqual(["navigation committed", "human typed"]);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
 it.live.each([
   { method: "goto" as const, message: { type: "navigate", url: "http://localhost:5173/next" } },
   { method: "goBack" as const, message: { type: "history", delta: -1 } },
@@ -259,6 +302,20 @@ it.live("enforces provider ownership and explicit targets when a session has mul
       expect(ambiguous).toMatchObject({
         _tag: "PreviewAutomationControlInterruptedError",
         reason: "tabRequired",
+      });
+      const ambiguousStop = yield* broker
+        .invoke<void>({ scope, operation: "recordingStop", input: {} })
+        .pipe(Effect.flip);
+      expect(ambiguousStop).toMatchObject({
+        _tag: "PreviewAutomationControlInterruptedError",
+        reason: "tabRequired",
+      });
+      const explicitStop = yield* broker
+        .invoke<void>({ scope, tabId, operation: "recordingStop", input: {} })
+        .pipe(Effect.flip);
+      expect(explicitStop).toMatchObject({
+        _tag: "PreviewAutomationExecutionError",
+        cause: { _tag: "PreviewAutomationRecordingNotActiveError" },
       });
       const result = yield* broker.invoke({
         scope,

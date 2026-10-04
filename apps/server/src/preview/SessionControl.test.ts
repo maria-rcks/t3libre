@@ -3,6 +3,30 @@ import { describe, expect, it } from "vite-plus/test";
 import { BrowserControlInterrupted, SessionControl } from "./SessionControl.ts";
 
 describe("SessionControl", () => {
+  it("returns an action result before tracked navigation but drains it before already queued actions", async () => {
+    const control = new SessionControl("agent");
+    const committed = Promise.withResolvers<void>();
+    const events: string[] = [];
+    const navigation = control.agent("agent", async () => {
+      control.track(committed.promise.then(() => events.push("navigation committed")));
+      return "started";
+    });
+    const next = control.agent("agent", async () => events.push("next action"));
+    await expect(navigation).resolves.toBe("started");
+    expect(events).toEqual([]);
+    committed.resolve();
+    await next;
+    expect(events).toEqual(["navigation committed", "next action"]);
+  });
+
+  it("handles tracked navigation failures without poisoning the next action", async () => {
+    const control = new SessionControl("agent");
+    const committed = Promise.withResolvers<void>();
+    await control.agent("agent", async () => control.track(committed.promise));
+    committed.reject(new Error("navigation failed"));
+    await expect(control.agent("agent", async () => "resumed")).resolves.toBe("resumed");
+  });
+
   it("only lets the assigned agent act and restores that agent after human control", async () => {
     const control = new SessionControl("agent-a");
     await expect(control.agent("agent-b", async () => "wrong agent")).rejects.toThrow(
