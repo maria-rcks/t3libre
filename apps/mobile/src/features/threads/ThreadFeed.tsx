@@ -723,7 +723,7 @@ interface MarkdownStyleSet {
 }
 
 const failedMarkdownFaviconHosts = new Set<string>();
-const MarkdownLinkLabelContext = createContext(false);
+const MarkdownLinkLabelContext = createContext<"file" | "other" | null>(null);
 const markdownLinkStyles = StyleSheet.create({
   inlineIcon: {
     width: 14,
@@ -820,7 +820,8 @@ function MarkdownImage(props: {
   readonly renderImage: MarkdownImageRenderer;
 }) {
   const insideLink = useContext(MarkdownLinkLabelContext);
-  if (insideLink) return <NativeText>{props.node.alt ?? props.node.title ?? ""}</NativeText>;
+  if (insideLink === "file")
+    return <NativeText>{props.node.alt ?? props.node.title ?? ""}</NativeText>;
   return props.node.href
     ? props.renderImage({
         href: props.node.href,
@@ -1204,7 +1205,7 @@ function useMarkdownStyles(
         const presentation = resolveMarkdownLinkPresentation(href);
         if (presentation.kind === "file") {
           return (
-            <MarkdownLinkLabelContext.Provider value>
+            <MarkdownLinkLabelContext.Provider value="file">
               <NativeText onPress={() => onLinkPress(href)} style={{ color: inlineTextColor }}>
                 {!isMarkdownFileLinkLabel(getTextContent(node), href) && <>{children} </>}
                 <NativeText
@@ -1224,7 +1225,7 @@ function useMarkdownStyles(
         }
         if (presentation.kind === "external") {
           return (
-            <MarkdownLinkLabelContext.Provider value>
+            <MarkdownLinkLabelContext.Provider value="other">
               <MarkdownExternalLink
                 href={presentation.href}
                 host={presentation.host}
@@ -1238,7 +1239,7 @@ function useMarkdownStyles(
         }
         const linkHref = presentation.href;
         return (
-          <MarkdownLinkLabelContext.Provider value>
+          <MarkdownLinkLabelContext.Provider value="other">
             <NativeText
               className="underline"
               onPress={
