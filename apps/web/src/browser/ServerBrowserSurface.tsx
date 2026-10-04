@@ -608,9 +608,10 @@ export function ServerBrowserSurface(props: {
     }
     const shortcut = event.ctrlKey || event.metaKey;
     // Paste arrives as a paste event carrying this device's clipboard. Cut is not forwarded:
-    // the page's selection never reaches this clipboard, so it would be lost (also Shift+Delete).
+    // the page's selection never reaches this clipboard, so it would be lost.
+    // Shift+Insert and Shift+Delete are the same paste and cut.
     if (shortcut && ["v", "x"].includes(event.key.toLowerCase())) return;
-    if (event.shiftKey && event.key === "Delete") return;
+    if (event.shiftKey && ["Delete", "Insert"].includes(event.key)) return;
     // Enter carries "\r" like Puppeteer's key table, so forms submit and textareas break lines.
     const text = shortcut
       ? undefined
