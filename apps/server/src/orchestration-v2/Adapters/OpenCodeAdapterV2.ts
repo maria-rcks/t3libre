@@ -1100,11 +1100,12 @@ export function makeOpenCodeAdapterV2(
           );
 
         const contextWindows = new Map<string, number>();
-        let readingContextWindows = false;
+        let readingContextWindows: Deferred.Deferred<void> | null = null;
         const readContextWindows = () =>
           Effect.suspend(() => {
-            if (readingContextWindows) return Effect.void;
-            readingContextWindows = true;
+            if (readingContextWindows !== null) return Deferred.await(readingContextWindows);
+            const completed = Deferred.makeUnsafe<void>();
+            readingContextWindows = completed;
             return OpenCodeRuntime.runOpenCodeSdk("provider.list", (signal) =>
               client.provider.list(undefined, { signal }),
             ).pipe(
@@ -1125,8 +1126,8 @@ export function makeOpenCodeAdapterV2(
               Effect.ignore,
               Effect.ensuring(
                 Effect.sync(() => {
-                  readingContextWindows = false;
-                }),
+                  readingContextWindows = null;
+                }).pipe(Effect.andThen(Deferred.succeed(completed, undefined))),
               ),
             );
           });
@@ -2104,16 +2105,23 @@ export function makeOpenCodeAdapterV2(
               yield* resolveRuntimeRequest(pending.nativeRequestId, "cancelled");
             }
           }
-          yield* emitProviderTurn(state, turn, status, completedAt);
           const contextMessage = turn.usage.contextMessage;
           if (
             contextMessage !== null &&
             !contextWindows.has(`${contextMessage.providerID}/${contextMessage.modelID}`)
           ) {
-            // A fresh server may list models lazily. Retry for the next turn
-            // without delaying this turn's terminal event or the SSE pump.
-            yield* Effect.forkIn(readContextWindows(), scope);
+            // A fresh server may list models lazily. Resolve the limit before
+            // turn.terminal closes the run's event subscription; the probe is bounded.
+            yield* readContextWindows();
+            const maxTokens = contextWindows.get(
+              `${contextMessage.providerID}/${contextMessage.modelID}`,
+            );
+            const tokenUsage = turn.providerTurn.tokenUsage;
+            if (maxTokens !== undefined && tokenUsage !== undefined) {
+              Object.assign(turn.providerTurn, { tokenUsage: { ...tokenUsage, maxTokens } });
+            }
           }
+          yield* emitProviderTurn(state, turn, status, completedAt);
           const threadDisposition = terminal?.threadDisposition ?? "reusable";
           yield* updateProviderThread(state, {
             status: turn.isRoot ? "active" : threadDisposition === "broken" ? "error" : "idle",

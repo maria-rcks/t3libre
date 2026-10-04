@@ -468,11 +468,19 @@ describe("OpenCodeAdapterV2", () => {
     { name: "invalid context", limit: { context: -1 }, maxTokens: null },
     { name: "missing limit", limit: {}, maxTokens: null },
     { name: "unavailable catalog", limit: { context: 200 }, maxTokens: null },
+    { name: "delayed catalog", limit: { context: 200 }, maxTokens: 200 },
+    { name: "delayed interrupted catalog", limit: { context: 200 }, maxTokens: 200 },
+    { name: "catalog timeout", limit: { context: 200 }, maxTokens: null },
     { name: "interrupted", limit: { context: 200 }, maxTokens: 200 },
     { name: "native total", limit: { context: 200 }, maxTokens: 200 },
   ])("reports context usage with $name", ({ name, limit, maxTokens }) =>
     Effect.gen(function* () {
       const nativeEvents = asyncEventStream();
+      const catalogReleased = promiseGate<void>();
+      const catalogRetryStarted = promiseGate<void>();
+      const delayedCatalog = name.startsWith("delayed");
+      const retryCatalog = delayedCatalog || name === "catalog timeout";
+      let catalogCalls = 0;
       let promptId = "";
       const harness = yield* makeOpenCodeRuntimeHarness(
         `context-${name.replaceAll(" ", "-")}`,
@@ -482,6 +490,11 @@ describe("OpenCodeAdapterV2", () => {
           provider: {
             list: async () => {
               if (name === "unavailable catalog") throw new Error("catalog unavailable");
+              if (retryCatalog && catalogCalls++ === 0) return { data: { all: [] } };
+              if (retryCatalog) {
+                catalogRetryStarted.resolve();
+                await catalogReleased.promise;
+              }
               return {
                 data: {
                   all: [
@@ -539,7 +552,7 @@ describe("OpenCodeAdapterV2", () => {
           },
         }),
       );
-      if (name === "interrupted") {
+      if (name.includes("interrupted")) {
         const snapshot = yield* harness.runtime.readThreadSnapshot({
           providerThread: harness.providerThread,
         });
@@ -548,12 +561,18 @@ describe("OpenCodeAdapterV2", () => {
           providerTurnId: snapshot.providerTurns.at(-1)!.id,
         });
       }
-      yield* Effect.promise(() =>
+      const idle = yield* Effect.promise(() =>
         nativeEvents.push({
           type: "session.status",
           properties: { sessionID: "root", status: { type: "idle" } },
         }),
-      );
+      ).pipe(Effect.forkScoped);
+      if (retryCatalog) {
+        yield* Effect.promise(() => catalogRetryStarted.promise);
+        if (name === "catalog timeout") yield* TestClock.adjust("2 seconds");
+        else catalogReleased.resolve();
+      }
+      yield* Fiber.join(idle);
       const events = yield* Fiber.join(received);
       const completed = events.findLast((event) => event.type === "provider_turn.updated");
       assert.strictEqual(
@@ -561,6 +580,22 @@ describe("OpenCodeAdapterV2", () => {
         name === "native total" ? 73 : 22,
       );
       assert.strictEqual(completed?.providerTurn.tokenUsage?.maxTokens, maxTokens);
+      if (delayedCatalog) {
+        const terminal = events.find((event) => event.type === "turn.terminal");
+        const initial = events.find(
+          (event) =>
+            event.type === "provider_turn.updated" && event.providerTurn.tokenUsage !== undefined,
+        );
+        assert.ok(terminal);
+        assert.ok(initial?.type === "provider_turn.updated");
+        assert.ok(completed?.providerTurn.tokenUsage);
+        assert.strictEqual(completed?.providerTurn.status, terminal.status);
+        assert.ok(completed?.providerTurn.completedAt);
+        assert.deepEqual(
+          { ...completed?.providerTurn.tokenUsage, maxTokens: null },
+          initial?.providerTurn.tokenUsage,
+        );
+      }
     }).pipe(Effect.provide(IdAllocator.layer), Effect.scoped),
   );
 
