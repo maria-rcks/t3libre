@@ -50,6 +50,9 @@ export class PreviewManager extends Context.Service<
       input: PreviewNavigateInput,
     ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
     readonly reportStatus: (input: PreviewReportStatusInput) => Effect.Effect<void, PreviewError>;
+    readonly requestReveal: (
+      input: PreviewCloseInput & { readonly tabId: string; readonly force: boolean },
+    ) => Effect.Effect<void, PreviewError>;
     readonly resize: (
       input: PreviewResizeInput,
     ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
@@ -308,6 +311,9 @@ export const make = Effect.gen(function* PreviewManagerMake() {
               ? {}
               : { runtime: session.snapshot.runtime }),
             ...(session.snapshot.reveal === undefined ? {} : { reveal: session.snapshot.reveal }),
+            ...(session.snapshot.revealRequest === undefined
+              ? {}
+              : { revealRequest: session.snapshot.revealRequest }),
             updatedAt,
           };
           return {
@@ -346,6 +352,9 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             : { profileId: session.snapshot.profileId }),
           ...(session.snapshot.runtime === undefined ? {} : { runtime: session.snapshot.runtime }),
           ...(session.snapshot.reveal === undefined ? {} : { reveal: session.snapshot.reveal }),
+          ...(session.snapshot.revealRequest === undefined
+            ? {}
+            : { revealRequest: session.snapshot.revealRequest }),
           updatedAt,
         };
         const emit: PreviewEventDraft =
@@ -465,8 +474,37 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     },
   );
 
+  const requestReveal: PreviewManager["Service"]["requestReveal"] = Effect.fn(
+    "PreviewManager.requestReveal",
+  )(function* (input) {
+    yield* mutateExistingSession(
+      input.threadId,
+      input.tabId,
+      Effect.fn("PreviewManager.revealSession")(function* (session) {
+        const snapshot = {
+          ...session.snapshot,
+          reveal: true,
+          revealRequest: { id: NodeCrypto.randomUUID(), force: input.force },
+          updatedAt: yield* currentIsoTimestamp,
+        };
+        return {
+          next: { ...session, snapshot },
+          emit: {
+            type: "navigated" as const,
+            threadId: session.threadId,
+            tabId: session.tabId,
+            createdAt: snapshot.updatedAt,
+            snapshot,
+          },
+          result: undefined,
+        };
+      }),
+    );
+  });
+
   return PreviewManager.of({
     open,
+    requestReveal,
     navigate,
     reportStatus,
     resize,

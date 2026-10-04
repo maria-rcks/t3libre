@@ -185,6 +185,8 @@ interface ViewerState {
   readonly resume: () => Promise<void>;
   /** Last wheel input from this viewer, for motion mode. */
   scrolledAt: number;
+  /** Panel bounds, retained in fixed mode; passive viewers never request a size. */
+  requestedSize: { width: number; height: number; order: number } | null;
 }
 
 interface Recording {
@@ -257,6 +259,7 @@ const make = Effect.gen(function* () {
   const pendingTabs = new Map<string, Promise<ServerTab>>();
   const contexts = new Map<string, Promise<BrowserContext>>();
   let hostConnectionId: string | null = null;
+  let viewerResizeOrder = 0;
 
   const profilesDir = NodePath.join(config.stateDir, "server-browser", "profiles");
 
@@ -373,8 +376,13 @@ const make = Effect.gen(function* () {
 
   const applySetting = async (tab: ServerTab, setting: PreviewViewportSetting) => {
     tab.setting = setting;
-    const size = fixedViewportSize(setting);
-    if (size) await tab.page.setViewportSize(size);
+    const size =
+      fixedViewportSize(setting) ??
+      [...tab.viewers]
+        .map((viewer) => viewer.requestedSize)
+        .filter((requested) => requested !== null)
+        .sort((left, right) => right.order - left.order)[0];
+    if (size) await tab.page.setViewportSize({ width: size.width, height: size.height });
     broadcastViewport(tab);
   };
 
@@ -853,8 +861,20 @@ const make = Effect.gen(function* () {
           reuse && request.tabId !== undefined
             ? tabs.get(tabKey(request.threadId, request.tabId))
             : undefined;
+        const reveal = open.open ?? open.show;
+        const revealTab = async (tab: ServerTab) => {
+          if (reveal === false) return;
+          await Effect.runPromise(
+            manager.requestReveal({
+              threadId: tab.threadId,
+              tabId: tab.tabId,
+              force: reveal === true,
+            }),
+          );
+        };
         if (existing) {
           if (url) await navigate(existing, url, "load", request.timeoutMs);
+          await revealTab(existing);
           return statusWithTitle(existing);
         }
         const snapshot = await Effect.runPromise(
@@ -862,10 +882,11 @@ const make = Effect.gen(function* () {
             threadId: request.threadId,
             ...(url ? { url } : {}),
             runtime: "server",
-            reveal: (open.open ?? open.show) !== false,
+            reveal: false,
           }),
         );
         const tab = await ensureTab(snapshot);
+        await revealTab(tab);
         if (url) {
           await tab.page
             .waitForLoadState("load", { timeout: request.timeoutMs })
@@ -963,14 +984,15 @@ const make = Effect.gen(function* () {
         return { tabId: tab.tabId, recording: true, startedAt: recording.startedAt };
       }
       case "recordingStop": {
+        const recordings = [...tabs.values()].filter(
+          (candidate) =>
+            candidate.threadId === request.threadId &&
+            (candidate.recording || candidate.recordingStart),
+        );
+        const targetTabId = request.tabId ?? latestThreadTab(request.threadId)?.tabId;
         const tab =
-          request.tabId === undefined
-            ? [...tabs.values()].find(
-                (candidate) =>
-                  candidate.threadId === request.threadId &&
-                  (candidate.recording || candidate.recordingStart),
-              )
-            : await requireTab(request);
+          recordings.find((candidate) => candidate.tabId === targetTabId) ??
+          (!request.tabIdExplicit && recordings.length === 1 ? recordings[0] : undefined);
         if (!tab) {
           throw new ServerBrowserPage.ServerBrowserOperationError(
             "PreviewAutomationRecordingNotActiveError",
@@ -1090,15 +1112,14 @@ const make = Effect.gen(function* () {
         }
         return;
       case "resize": {
-        const width = Math.round(num(message.width));
-        const height = Math.round(num(message.height));
-        if (tab.setting._tag !== "fill" || width < 100 || height < 100) return;
+        const width = Math.min(Math.round(num(message.width)), 3840);
+        const height = Math.min(Math.round(num(message.height)), 2160);
+        if (width < 100 || height < 100) return;
+        viewer.requestedSize = { width, height, order: ++viewerResizeOrder };
+        if (tab.setting._tag !== "fill") return;
         const current = tab.page.viewportSize();
         if (current?.width === width && current.height === height) return;
-        await tab.page.setViewportSize({
-          width: Math.min(width, 3840),
-          height: Math.min(height, 2160),
-        });
+        await tab.page.setViewportSize({ width, height });
         broadcastViewport(tab);
         return;
       }
@@ -1194,6 +1215,7 @@ const make = Effect.gen(function* () {
         },
         resume: () => startScreencast(screencastScale),
         scrolledAt: 0,
+        requestedSize: null,
       };
       yield* Effect.acquireRelease(
         Effect.sync(() => {

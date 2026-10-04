@@ -67,6 +67,8 @@ const previewSessionSyncAtom = Atom.family((threadKey: string) => {
       eventsVersion += 1;
       applyLatestEvent(result);
     });
+    get.mount(sessionsAtom);
+    get.mount(eventsAtom);
     queueMicrotask(() => {
       if (disposed) return;
       // The cached list can predate an automation-created tab. Keep the local

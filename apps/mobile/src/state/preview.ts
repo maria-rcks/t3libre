@@ -143,6 +143,8 @@ const threadPreviewTabsAtom = Atom.family((threadKey: string) => {
       }
       publish(applyEvent(state, event));
     });
+    get.mount(listAtom);
+    get.mount(eventsAtom);
     const cached = get.once(listAtom);
     if (AsyncResult.isSuccess(cached)) state = applyList(cached.value) ?? state;
     // The cached list can predate an agent-opened tab.
