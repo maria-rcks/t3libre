@@ -144,7 +144,8 @@ export function start(configuration: PreviewStreamConfiguration) {
   let pendingWheel: WheelInput | null = null;
   let mouseFrame: number | null = null;
   let pendingMouse: MouseInput | null = null;
-  let mousePressed: MouseInput["button"] | null = null;
+  let mouseButtons = 0;
+  const mouseClicks = { left: 1, middle: 1, right: 1, none: 1 };
   // The latest probe. `editable` is the answer its tap acts on, null until known;
   // `end` records what touch end did, so a late answer can still act or correct it.
   let probe: {
@@ -349,15 +350,18 @@ export function start(configuration: PreviewStreamConfiguration) {
       input.focus({ preventScroll: true });
       flushMouse();
       flushWheel();
-      mousePressed = mouseButton(event.button);
+      mouseButtons = event.buttons & 7;
+      const button = mouseButton(event.button);
+      const clickCount = countClick(event, button);
+      mouseClicks[button] = clickCount;
       send({
         type: "mouse",
         action: "down",
         x: point.x,
         y: point.y,
-        button: mousePressed,
+        button,
         buttons: event.buttons,
-        clickCount: countClick(event, mousePressed),
+        clickCount,
         modifiers: previewStreamModifiers(event),
       });
       return;
@@ -393,14 +397,44 @@ export function start(configuration: PreviewStreamConfiguration) {
   };
   const onPointerMove = (event: PointerEvent) => {
     if (event.pointerType !== "touch") {
-      const point = pagePoint(event.clientX, event.clientY, mousePressed !== null);
+      const point = pagePoint(event.clientX, event.clientY, mouseButtons !== 0);
       if (!point) return;
+      // Chorded presses and releases arrive as pointermove while another button is held.
+      const changed = mouseButtons ^ (event.buttons & 7);
+      if (mouseButtons !== 0 && changed !== 0) {
+        flushMouse();
+        flushWheel();
+        for (const bit of [1, 2, 4]) {
+          if (!(changed & bit)) continue;
+          const button = bit === 1 ? "left" : bit === 2 ? "right" : "middle";
+          const down = (event.buttons & bit) !== 0;
+          mouseButtons ^= bit;
+          if (down) mouseClicks[button] = countClick(event, button);
+          send({
+            type: "mouse",
+            action: down ? "down" : "up",
+            x: point.x,
+            y: point.y,
+            button,
+            buttons: mouseButtons,
+            clickCount: mouseClicks[button],
+            modifiers: previewStreamModifiers(event),
+          });
+        }
+      }
       pendingMouse = {
         type: "mouse",
         action: "move",
         x: point.x,
         y: point.y,
-        button: mousePressed ?? "none",
+        button:
+          mouseButtons & 1
+            ? "left"
+            : mouseButtons & 2
+              ? "right"
+              : mouseButtons & 4
+                ? "middle"
+                : "none",
         buttons: event.buttons,
         clickCount: 0,
         modifiers: previewStreamModifiers(event),
@@ -429,23 +463,28 @@ export function start(configuration: PreviewStreamConfiguration) {
     touch.lastY = event.clientY;
   };
   const releaseMouse = (event: PointerEvent, cancelled: boolean) => {
-    const button = mousePressed;
-    if (button === null) return;
-    mousePressed = null;
+    let buttons = mouseButtons;
+    if (buttons === 0) return;
+    mouseButtons = cancelled ? 0 : event.buttons & 7;
     flushMouse();
     flushWheel();
     const point = pagePoint(event.clientX, event.clientY, true);
     if (!point) return;
-    send({
-      type: "mouse",
-      action: "up",
-      x: point.x,
-      y: point.y,
-      button,
-      buttons: cancelled ? 0 : event.buttons,
-      clickCount: lastTap?.count ?? 1,
-      modifiers: previewStreamModifiers(event),
-    });
+    for (const bit of [1, 2, 4]) {
+      if (!(buttons & bit) || (mouseButtons & bit) !== 0) continue;
+      buttons &= ~bit;
+      const button = bit === 1 ? "left" : bit === 2 ? "right" : "middle";
+      send({
+        type: "mouse",
+        action: "up",
+        x: point.x,
+        y: point.y,
+        button,
+        buttons,
+        clickCount: mouseClicks[button],
+        modifiers: previewStreamModifiers(event),
+      });
+    }
   };
   const onPointerUp = (event: PointerEvent) => {
     if (event.pointerType !== "touch") {

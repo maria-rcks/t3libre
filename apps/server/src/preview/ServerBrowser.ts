@@ -507,10 +507,9 @@ const make = Effect.gen(function* () {
     if (snapshot.navStatus._tag === "Loading") {
       tab.initialNavigation = page
         .goto(snapshot.navStatus.url, { waitUntil: "commit", timeout: NAVIGATION_TIMEOUT_MS })
-        .then(
-          () => undefined,
-          () => undefined,
-        );
+        .then(() => undefined);
+      // Background creation keeps the failed tab; automation awaits the original error.
+      void tab.initialNavigation.catch(() => undefined);
     }
     return tab;
   };

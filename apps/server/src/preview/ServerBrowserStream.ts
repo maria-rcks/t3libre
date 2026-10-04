@@ -19,7 +19,7 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { authenticateMediaRequest } from "../auth/http.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
 
-export const PREVIEW_STREAM_ROUTE_PREFIX = "/api/preview-stream";
+const PREVIEW_STREAM_ROUTE_PREFIX = "/api/preview-stream";
 /** Matches `PREVIEW_STREAM_TAB_GONE_CODE` in the client. */
 const TAB_GONE_CODE = 4404;
 
