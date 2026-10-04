@@ -140,12 +140,20 @@ describe("ssh config", () => {
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
-  it.effect("only suppresses known targets on the configured port", () =>
+  it.effect("only suppresses known targets with a proven hostname and configured port", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      for (const [configuredPort, knownTarget, suppressed] of [
+      for (const [
+        configuredPort,
+        knownTarget,
+        suppressed,
+        alias = "work",
+        hostname = "work.example.com",
+      ] of [
         [null, "work.example.com", false],
+        [22, "work", false, "Work", null],
+        [22, "work", true, "Work", "work"],
         [22, "work.example.com", true],
         [22, "[work.example.com]:2222", false],
         [2222, "[work.example.com]:2222", true],
@@ -157,7 +165,7 @@ describe("ssh config", () => {
         yield* fs.makeDirectory(sshDir);
         yield* fs.writeFileString(
           path.join(sshDir, "config"),
-          `Host work\n  HostName work.example.com\n${configuredPort === null ? "" : `Host *\n  Port ${configuredPort}\n`}`,
+          `Host ${alias}\n${hostname === null ? "" : `  HostName ${hostname}\n`}${configuredPort === null ? "" : `Host *\n  Port ${configuredPort}\n`}`,
         );
         yield* fs.writeFileString(
           path.join(sshDir, "known_hosts"),
@@ -166,7 +174,9 @@ describe("ssh config", () => {
         const hosts = yield* discoverSshHosts({ homeDir });
         assert.deepEqual(
           hosts.map(({ alias }) => alias),
-          suppressed ? ["work"] : ["work", "work.example.com"],
+          suppressed
+            ? [alias]
+            : [alias, hostname ?? knownTarget].toSorted((left, right) => left.localeCompare(right)),
         );
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
@@ -269,6 +279,31 @@ describe("ssh config", () => {
           'Host work\n  Include config.d/"team hosts.conf"\n  HostName work.example.com\n  Port 22\n',
           "work",
           true,
+        ],
+        [
+          'Host work\n  Include "target".conf\n  HostName work.example.com\n  Port 22\n',
+          "work",
+          true,
+        ],
+        [
+          'Host work\n  Include tar"get".conf\n  HostName work.example.com\n  Port 22\n',
+          "work",
+          true,
+        ],
+        [
+          'Host work\n  Include target".conf"\n  HostName work.example.com\n  Port 22\n',
+          "work",
+          true,
+        ],
+        [
+          'Host skip*\n  Include "target".conf\nHost work\n  HostName work.example.com\n  Port 22\n',
+          "work.example.com",
+          false,
+        ],
+        [
+          'Host work\n  HostName work.example.com\n  Port 22\n  Include "target".conf\n',
+          "work.example.com",
+          false,
         ],
         [
           "Host work\n  Include config.d/[pt]rod/target.conf\n  HostName work.example.com\n  Port 22\n",

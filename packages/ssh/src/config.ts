@@ -17,7 +17,7 @@ function stripInlineComment(line: string): string {
 }
 
 function splitDirectiveArgs(value: string): ReadonlyArray<string> {
-  const args = value.replace(/=(?!=)/gu, " ").match(/"[^"]*"|'[^']*'|[^\s]+/gu) ?? [];
+  const args = value.replace(/=(?!=)/gu, " ").match(/(?:"[^"]*"|'[^']*'|\S)+/gu) ?? [];
   return args.map((entry) => entry.replace(/^(["'])(.*)\1$/u, "$2"));
 }
 
@@ -338,7 +338,7 @@ export const discoverSshHosts = Effect.fnUntraced(
           !hostnameRule.guards.some((guard) => guard.values === null)
           ? expandConfiguredHostname(hostnameRule.value, alias)
           : null
-        : alias;
+        : null;
       const hostname = configuredHostname ?? alias;
       const portRule = targetRules.find(
         (rule) =>
