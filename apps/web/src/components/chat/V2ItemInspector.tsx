@@ -5,15 +5,16 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import {
-  formatToolValue,
+  toolCallLines,
   turnItemNeedsDetailFetch,
   turnItemOutputText,
 } from "@t3tools/client-runtime/work-log/item-detail";
 import * as DateTime from "effect/DateTime";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
-import { memo, type ReactNode, Suspense, use, useMemo } from "react";
+import { memo, Suspense, use, useMemo } from "react";
 
 import { useTheme } from "../../hooks/useTheme";
+import { cn } from "../../lib/utils";
 import { resolveDiffThemeName } from "../../lib/diffRendering";
 import { getSyntaxHighlighterPromise } from "../../lib/syntaxHighlighting";
 import { useTurnItemDetail } from "../../state/queries";
@@ -55,6 +56,9 @@ function JsonTokens({ text }: { readonly text: string }) {
   ]);
 }
 
+const monoClassName =
+  "font-mono text-(length:--font-size-code,var(--text-2xs)) leading-relaxed whitespace-pre-wrap break-words select-text";
+
 function StructuredValue({
   value,
   highlightJson = false,
@@ -74,7 +78,7 @@ function StructuredValue({
   }, [highlightJson, text]);
   if (!text) return null;
   return (
-    <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/50 bg-background/60 p-2 font-mono text-2xs leading-relaxed text-muted-foreground select-text">
+    <pre className={cn("max-h-80 overflow-auto text-muted-foreground", monoClassName)}>
       {isJson ? (
         <RenderErrorBoundary fallback={text}>
           <Suspense fallback={text}>
@@ -88,32 +92,43 @@ function StructuredValue({
   );
 }
 
-function SectionLabel({ children }: { readonly children: ReactNode }) {
-  return (
-    <p className="mb-1 text-3xs font-medium tracking-wide uppercase text-muted-foreground">
-      {children}
-    </p>
-  );
-}
-
-/** Output the timeline withheld, fetched while the row is open. */
-function ToolOutput(props: {
-  readonly text: string | null;
+/**
+ * A tool call's body: the call itself in the foreground, its result muted below.
+ * The row title already shows short commands, so only long ones repeat here.
+ */
+function ToolCallBody(props: {
+  readonly command?: string;
+  readonly args?: unknown;
+  readonly output: string | null;
   readonly pending: boolean;
   readonly error: string | null;
+  readonly exitCode?: number | undefined;
 }) {
-  const body = props.text ? (
-    <StructuredValue value={props.text} />
-  ) : props.pending ? (
-    <p className="text-muted-foreground">Loading output…</p>
-  ) : props.error ? (
-    <p className="text-destructive">Couldn&apos;t load output: {props.error}</p>
-  ) : null;
-  if (body === null) return null;
+  const call = toolCallLines({ command: props.command, args: props.args });
   return (
-    <div>
-      <SectionLabel>Output</SectionLabel>
-      {body}
+    <div className={cn("space-y-1.5", monoClassName)}>
+      {call.command ? <div className="text-foreground/85">{call.command}</div> : null}
+      {call.args ? (
+        <div className="text-foreground/85">
+          {call.args.map(([key, value]) => (
+            <div key={key}>
+              <span className="text-muted-foreground">{key} </span>
+              {value}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {call.argsText ? <StructuredValue value={call.argsText} highlightJson /> : null}
+      {props.output ? (
+        <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
+      ) : props.pending ? (
+        <div className="text-muted-foreground italic">Loading output…</div>
+      ) : props.error ? (
+        <div className="text-destructive">Couldn&apos;t load output: {props.error}</div>
+      ) : null}
+      {props.exitCode !== undefined && props.exitCode !== 0 ? (
+        <div className="text-destructive">exit {props.exitCode}</div>
+      ) : null}
     </div>
   );
 }
@@ -132,13 +147,11 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
   );
   const fetchedItem = detail.data?.item;
   const item = fetchedItem?.type === wireItem.type ? fetchedItem : wireItem;
-  const output = (
-    <ToolOutput
-      text={turnItemOutputText(item)}
-      pending={item === wireItem && detail.isPending}
-      error={item === wireItem ? detail.error : null}
-    />
-  );
+  const outputState = {
+    output: turnItemOutputText(item),
+    pending: item === wireItem && detail.isPending,
+    error: item === wireItem ? detail.error : null,
+  };
   const support = useV2ItemSupport({
     environmentId: props.environmentId,
     sourceThreadId: props.projectedItem.sourceThreadId,
@@ -161,15 +174,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       ) : null}
 
       {item.type === "command_execution" ? (
-        <div className="space-y-2">
-          <StructuredValue value={item.input} highlightJson />
-          {output}
-          {item.exitCode !== undefined ? (
-            <p className={item.exitCode === 0 ? "text-success" : "text-destructive"}>
-              Process exited with code {item.exitCode}
-            </p>
-          ) : null}
-        </div>
+        <ToolCallBody command={item.input} exitCode={item.exitCode} {...outputState} />
       ) : null}
 
       {item.type === "file_change" ? (
@@ -219,7 +224,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       ) : null}
 
       {item.type === "file_search" && item.results ? (
-        <ul className="space-y-1 rounded-md border border-border/45 p-2">
+        <ul className="space-y-1">
           {item.results.map((result) => (
             <li key={JSON.stringify(result)}>
               <span className="font-mono text-foreground/80">
@@ -236,7 +241,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       ) : null}
 
       {item.type === "web_search" && item.results ? (
-        <ul className="space-y-1.5 rounded-md border border-border/45 p-2">
+        <ul className="space-y-1.5">
           {item.results.map((result) => {
             const safeHref = resolveExternalWebLinkHref(result.url);
             return (
@@ -264,15 +269,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       ) : null}
 
       {item.type === "dynamic_tool" ? (
-        <div className="space-y-2">
-          {formatToolValue(item.input) ? (
-            <div>
-              <SectionLabel>Input</SectionLabel>
-              <StructuredValue value={formatToolValue(item.input)} highlightJson />
-            </div>
-          ) : null}
-          {output}
-        </div>
+        <ToolCallBody args={item.input} {...outputState} />
       ) : null}
 
       {item.type === "approval_request" ? <StructuredValue value={item.prompt} /> : null}
@@ -328,7 +325,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       ) : null}
 
       {item.type === "handoff" ? (
-        <div className="space-y-1 rounded-md border border-border/45 p-2 text-muted-foreground">
+        <div className="space-y-1 text-muted-foreground">
           <p>
             {item.fromProviderInstanceIds.join(", ")} → {item.toProviderInstanceId}
           </p>

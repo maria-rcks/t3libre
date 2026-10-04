@@ -74,6 +74,41 @@ export function formatToolValue(value: unknown): string | null {
   return json;
 }
 
+/** Commands longer than this are cut off in the row title, so the body repeats them. */
+const TITLE_COMMAND_MAX_CHARS = 90;
+
+/**
+ * The call a tool row's body shows above its result: a long command, the
+ * arguments as `key value` pairs, or formatted text when they are not flat.
+ */
+export function toolCallLines(input: {
+  readonly command?: string | undefined;
+  readonly args?: unknown;
+}): {
+  readonly command: string | null;
+  readonly args: ReadonlyArray<readonly [string, string]> | null;
+  readonly argsText: string | null;
+} {
+  if (input.command !== undefined) {
+    const command = input.command.trim();
+    const long = command.length > TITLE_COMMAND_MAX_CHARS || command.includes("\n");
+    return { command: long ? command : null, args: null, argsText: null };
+  }
+  const args = input.args;
+  if (isRecord(args) && !isSummarizedValue(args)) {
+    const entries = Object.entries(args).flatMap(([key, value]): Array<readonly [string, string]> => {
+      if (value === undefined || value === null || value === "") return [];
+      return [[key, typeof value === "string" ? value : (JSON.stringify(value) ?? String(value))]];
+    });
+    return { command: null, args: entries.length > 0 ? entries : null, argsText: null };
+  }
+  return { command: null, args: null, argsText: formatToolValue(args) };
+}
+
+function toolCallHasLines(lines: ReturnType<typeof toolCallLines>): boolean {
+  return lines.command !== null || lines.args !== null || lines.argsText !== null;
+}
+
 /** True when the timeline item withholds content that `getTurnItem` returns. */
 export function turnItemNeedsDetailFetch(item: OrchestrationV2TurnItem): boolean {
   switch (item.type) {
@@ -118,10 +153,10 @@ export function turnItemHasDetail(item: OrchestrationV2TurnItem): boolean {
       return item.text.trim().length > 0;
     case "command_execution":
       return (
-        item.input.trim().length > 0 ||
+        toolCallLines({ command: item.input }).command !== null ||
         item.outputOmitted === true ||
         Boolean(item.output?.trim()) ||
-        item.exitCode !== undefined
+        (item.exitCode !== undefined && item.exitCode !== 0)
       );
     case "file_change":
     case "checkpoint":
@@ -133,7 +168,7 @@ export function turnItemHasDetail(item: OrchestrationV2TurnItem): boolean {
     case "web_search":
       return (item.results?.length ?? 0) > 0 || (item.patterns?.length ?? 0) > 0;
     case "dynamic_tool":
-      return item.outputOmitted === true || formatToolValue(item.input) !== null;
+      return item.outputOmitted === true || toolCallHasLines(toolCallLines({ args: item.input }));
     case "approval_request":
       return Boolean(item.prompt?.trim());
     case "user_input_request":
