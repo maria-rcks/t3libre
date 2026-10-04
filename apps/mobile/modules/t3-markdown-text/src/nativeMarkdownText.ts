@@ -451,6 +451,36 @@ function nodeTextContent(node: MarkdownNode): string {
   return (node.children ?? []).map(nodeTextContent).join("");
 }
 
+function fileLinkLabelMarkdown(node: MarkdownNode): string {
+  const children = (node.children ?? []).map(fileLinkLabelMarkdown).join("");
+  switch (node.type) {
+    case "bold":
+      return `**${children}**`;
+    case "italic":
+      return `*${children}*`;
+    case "strikethrough":
+      return `~~${children}~~`;
+    case "code_inline": {
+      const content = nodeTextContent(node);
+      const fence = "`".repeat(
+        Math.max(0, ...(content.match(/`+/g) ?? []).map((run) => run.length)) + 1,
+      );
+      const padding = /^`|`$|^ .* $/.test(content) && content.trim().length > 0 ? " " : "";
+      return `${fence}${padding}${content}${padding}${fence}`;
+    }
+    case "soft_break":
+      return "\n";
+    case "line_break":
+      return "  \n";
+    case "text":
+      return textNodeContent(nodeTextContent(node)).replace(/[\\[\]*_`~]/g, "\\$&");
+    case "image":
+      return `![${(node.alt ?? "").replace(/[\\[\]]/g, "\\$&")}](<${node.href ?? ""}>)`;
+    default:
+      return node.content ?? children;
+  }
+}
+
 function appendNode(
   runs: NativeMarkdownTextRun[],
   node: MarkdownNode,
@@ -507,7 +537,7 @@ function appendNode(
           const fileContext = {
             ...context,
             href: presentation.href,
-            sourceText: `[${label.replace(/[\\[\]]/g, "\\$&")}](<${presentation.href}>)`,
+            sourceText: `[${fileLinkLabelMarkdown(node)}](<${presentation.href}>)`,
           };
           appendChildren(fileRuns, node, fileContext);
           appendRun(fileRuns, " ", fileContext);

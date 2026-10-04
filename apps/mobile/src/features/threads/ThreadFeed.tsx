@@ -37,7 +37,7 @@ import {
 } from "@t3tools/client-runtime/codex-artifact-templates";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import { isMarkdownFileLinkLabel } from "@t3tools/client-runtime/markdown-links";
-import { getTextContent } from "react-native-nitro-markdown/headless";
+import { getTextContent, type MarkdownNode } from "react-native-nitro-markdown/headless";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -815,6 +815,21 @@ function MarkdownInlineCode(props: {
   );
 }
 
+function MarkdownImage(props: {
+  readonly node: MarkdownNode;
+  readonly renderImage: MarkdownImageRenderer;
+}) {
+  const insideLink = useContext(MarkdownLinkLabelContext);
+  if (insideLink) return <NativeText>{props.node.alt ?? props.node.title ?? ""}</NativeText>;
+  return props.node.href
+    ? props.renderImage({
+        href: props.node.href,
+        alt: props.node.alt ?? null,
+        title: props.node.title ?? null,
+      })
+    : null;
+}
+
 const ARTIFACT_TEMPLATE_SYMBOL_BY_KIND: Record<
   CodexArtifactTemplate["artifactKind"],
   AppSymbolName
@@ -1272,14 +1287,7 @@ function useMarkdownStyles(
           })}
         </View>
       ),
-      image: ({ node }) =>
-        node.href
-          ? (renderImage({
-              href: node.href,
-              alt: node.alt ?? null,
-              title: node.title ?? null,
-            }) ?? undefined)
-          : undefined,
+      image: ({ node }) => <MarkdownImage node={node} renderImage={renderImage} />,
       code_inline: ({ content }) => (
         <MarkdownInlineCode
           content={content ?? ""}
