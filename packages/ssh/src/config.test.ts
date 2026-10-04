@@ -206,6 +206,30 @@ describe("ssh config", () => {
       known: "shared.example.com",
     },
     {
+      name: "keeps partly quoted originalhost ports uncertain",
+      config:
+        'Host work\n  HostName shared.example.com\nMatch originalhost "wo"rk\n  Port 2222\nHost *\n  Port 22\n',
+      included: "",
+      hostname: "shared.example.com",
+      known: "shared.example.com",
+    },
+    {
+      name: "keeps adjacent quoted originalhost segments uncertain",
+      config:
+        'Host work\n  HostName shared.example.com\nMatch originalhost "wo""rk"\n  Port 2222\nHost *\n  Port 22\n',
+      included: "",
+      hostname: "shared.example.com",
+      known: "shared.example.com",
+    },
+    {
+      name: "keeps partly quoted originalhost Include guards uncertain",
+      config:
+        'Match originalhost "wo"rk\n  Include target.conf\nHost work\n  HostName fallback.example.com\n  Port 22\n',
+      included: "HostName actual.example.com\n  Port 2222\n",
+      hostname: "work",
+      known: "fallback.example.com",
+    },
+    {
       name: "keeps originalhost Include guards case-insensitive",
       config:
         'Match originalhost "WORK"\n  Include target.conf\nHost work\n  HostName fallback.example.com\n',
@@ -251,6 +275,37 @@ describe("ssh config", () => {
       hostname: "actual.example.com",
       known: "fallback.example.com",
     },
+    {
+      name: "preserves literal equals signs in quoted Include paths",
+      config:
+        'Host work\n  Include "target=prod.conf"\n  HostName fallback.example.com\n  Port 22\n',
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+    {
+      name: "preserves literal equals signs in unquoted Include paths",
+      config: "Host work\n  Include target=prod.conf\n  HostName fallback.example.com\n  Port 22\n",
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+    {
+      name: "preserves Include equals separator with literal equals filename",
+      config:
+        'Host work\n  Include="target=prod.conf"\n  HostName fallback.example.com\n  Port 22\n',
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+    {
+      name: "preserves spaced Include equals separator with literal equals filename",
+      config:
+        'Host work\n  Include = "target=prod.conf"\n  HostName fallback.example.com\n  Port 22\n',
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
   ])("$name", (fixture) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -259,7 +314,12 @@ describe("ssh config", () => {
       const sshDir = path.join(homeDir, ".ssh");
       yield* fs.makeDirectory(sshDir);
       yield* fs.writeFileString(path.join(sshDir, "config"), fixture.config);
-      for (const name of ["target.conf", "target with spaces.conf", "target#blue.conf"]) {
+      for (const name of [
+        "target.conf",
+        "target with spaces.conf",
+        "target#blue.conf",
+        "target=prod.conf",
+      ]) {
         yield* fs.writeFileString(path.join(sshDir, name), fixture.included);
       }
       yield* fs.writeFileString(
@@ -289,6 +349,11 @@ describe("ssh config", () => {
           "Match exec true\n  Port 2222\nHost work\n  HostName work.example.com\n  Port 22\n",
           "work.example.com",
           true,
+        ],
+        [
+          'Host work\n  HostName work.example.com\n  Port 22\nMatch originalhost "wo"rk\n  Port 2222\n',
+          "work.example.com",
+          false,
         ],
         [
           "Match exec true\n  Include target.conf\nHost work\n  HostName work.example.com\n  Port 22\n",

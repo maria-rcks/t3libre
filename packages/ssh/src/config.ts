@@ -16,7 +16,7 @@ function stripInlineComment(line: string): string {
 }
 
 function splitDirectiveArgs(value: string): ReadonlyArray<string> {
-  const args = value.replace(/=(?!=)/gu, " ").match(/(?:"[^"]*"|'[^']*'|\S)+/gu) ?? [];
+  const args = value.replace(/^([^\s=]+)\s*=/u, "$1 ").match(/(?:"[^"]*"|'[^']*'|\S)+/gu) ?? [];
   return args.map((entry) => entry.replace(/^(["'])(.*)\1$/u, "$2"));
 }
 
@@ -202,7 +202,9 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
           values:
             condition === "all" && rawArgs.length === 1
               ? ["*"]
-              : condition === "originalhost" && rawArgs.length === 2
+              : condition === "originalhost" &&
+                  rawArgs.length === 2 &&
+                  !/["']/u.test(rawArgs[1] ?? "")
                 ? (rawArgs[1]?.split(",") ?? [])
                 : null,
           caseInsensitive: condition === "originalhost",
