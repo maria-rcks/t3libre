@@ -13,6 +13,82 @@ import {
 } from "./modelOptions";
 
 describe("mobile model options", () => {
+  it("preserves a selected project agent only in the matching workspace catalog", () => {
+    const config = {
+      providers: [
+        {
+          instanceId: "opencode",
+          driver: "opencode",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          models: [
+            {
+              slug: "opencode/model",
+              name: "Model",
+              isCustom: false,
+              capabilities: {
+                optionDescriptors: [
+                  {
+                    id: "variant",
+                    label: "Reasoning",
+                    type: "select",
+                    options: [
+                      { id: "high", label: "High" },
+                      { id: "low", label: "Low", isDefault: true },
+                    ],
+                    currentValue: "low",
+                  },
+                  {
+                    id: "agent",
+                    label: "Agent",
+                    type: "select",
+                    options: [{ id: "build", label: "Build", isDefault: true }],
+                    currentValue: "build",
+                  },
+                ],
+              },
+            },
+          ],
+          workspaceSnapshots: ["readonly", "audit"].map((name) => ({
+            cwd: "/work/" + name,
+            checkedAt: "2026-01-01T00:00:00.000Z",
+            skills: [],
+            slashCommands: [],
+            optionDescriptors: [
+              {
+                id: "agent",
+                label: "Agent",
+                type: "select",
+                currentValue: "build",
+                options: [
+                  { id: "build", label: "Build", isDefault: true },
+                  { id: name, label: name },
+                ],
+              },
+            ],
+          })),
+        },
+      ],
+    } as unknown as ServerConfig;
+    const selection: ModelSelection = {
+      instanceId: ProviderInstanceId.make("opencode"),
+      model: "opencode/model",
+      options: [
+        { id: "variant", value: "high" },
+        { id: "agent", value: "readonly" },
+      ],
+    };
+    const [local] = buildModelOptions(config, selection, undefined, "/work/readonly");
+    expect(local?.selection).toEqual(selection);
+    const [other] = buildModelOptions(config, selection, undefined, "/work/audit");
+    expect(other?.selection.options).toEqual([
+      { id: "variant", value: "high" },
+      { id: "agent", value: "build" },
+    ]);
+    const [global] = buildModelOptions(config, selection);
+    expect(global?.selection.options).toEqual(other?.selection.options);
+  });
   it("groups models by provider and flags legacy entries", () => {
     const config = {
       providers: [

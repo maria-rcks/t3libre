@@ -37,6 +37,7 @@ import { ProviderDriverError } from "../Errors.ts";
 import { readOpenCodeGoUsageLimits } from "../Layers/openCodeUsageLimits.ts";
 import {
   checkOpenCodeProviderStatus,
+  openCodeAgentOptionDescriptor,
   loadOpenCode2Workspace,
   makeOpenCode2ModelLoader,
   makePendingOpenCodeProvider,
@@ -313,7 +314,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           ),
         ),
       );
-      // A 2.x server lists skills and commands per directory, so one server
+      // A 2.x server lists agents, skills and commands per directory, so one server
       // answers every workspace. Its event stream says when a directory it had
       // not served yet finished scanning.
       const listOpenCode2Workspace = (cwd: string) =>
@@ -321,7 +322,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           Effect.gen(function* () {
             const location = { directory: cwd };
             const scanned = yield* Deferred.make<void>();
-            const pending = new Set(["command.updated", "skill.updated"]);
+            const pending = new Set(["command.updated", "skill.updated", "agent.updated"]);
             const stream = yield* events.pipe(Effect.option);
             if (stream._tag === "Some") {
               yield* stream.value.pipe(
@@ -340,6 +341,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
             return yield* loadOpenCode2Workspace(
               Effect.all(
                 {
+                  agents: client.agent.list({ location }).pipe(Effect.map((list) => list.data)),
                   skills: client.skill.list({ location }).pipe(Effect.map((list) => list.data)),
                   commands: client.command.list({ location }).pipe(Effect.map((list) => list.data)),
                 },
@@ -404,6 +406,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       ) =>
         Effect.all(
           {
+            agents: OpenCodeRuntime.loadOpenCodeAgents(client),
             skills: openCodeRuntime.loadOpenCodeSkills(client),
             commands: OpenCodeRuntime.loadOpenCodeCommands(client).pipe(
               Effect.timeout("10 seconds"),
@@ -503,14 +506,19 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
                         new ProviderDriverError({
                           driver: DRIVER_KIND,
                           instanceId,
-                          detail: `Failed to list OpenCode commands and skills for '${cwd}'`,
+                          detail: `Failed to list OpenCode agents, commands and skills for '${cwd}'`,
                           cause,
                         }),
                     ),
                   ),
                 ]).pipe(
-                  Effect.map(([machineSnapshot, { skills, commands }]) => ({
+                  Effect.map(([machineSnapshot, { agents, skills, commands }]) => ({
                     ...machineSnapshot,
+                    optionDescriptors: [
+                      openCodeAgentOptionDescriptor(
+                        agents.map((agent) => ({ ...agent, name: agent.id })),
+                      ),
+                    ],
                     skills: openCode2SkillsToServerProviderSkills(skills),
                     slashCommands: openCode2CommandsToServerProviderSlashCommands(commands),
                   })),
@@ -519,8 +527,9 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
                   snapshot.getSnapshot,
                   loadWorkspaceForCwd(cwd).pipe(Effect.timeout("20 seconds")),
                 ]).pipe(
-                  Effect.map(([machineSnapshot, { skills, commands }]) => ({
+                  Effect.map(([machineSnapshot, { agents, skills, commands }]) => ({
                     ...machineSnapshot,
+                    optionDescriptors: [openCodeAgentOptionDescriptor(agents)],
                     skills: openCodeSkillsToServerProviderSkills(skills),
                     slashCommands: openCodeCommandsToServerProviderSlashCommands(commands),
                   })),
@@ -529,7 +538,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
                       new ProviderDriverError({
                         driver: DRIVER_KIND,
                         instanceId,
-                        detail: `Failed to probe OpenCode commands and skills for '${cwd}'`,
+                        detail: `Failed to probe OpenCode agents, commands and skills for '${cwd}'`,
                         cause,
                       }),
                   ),

@@ -11,7 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
@@ -22,6 +22,7 @@ import * as ProviderEventLoggers from "../Layers/ProviderEventLoggers.ts";
 import * as ProviderMaintenance from "../providerMaintenance.ts";
 import * as OpenCodeRuntime from "../opencodeRuntime.ts";
 import {
+  OPENCODE_1_RESPONSES,
   OPENCODE_2_RESPONSES,
   OPENCODE_2_WORKSPACE_RESPONSES,
   replayOpenCodeServer,
@@ -87,31 +88,136 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("lists an OpenCode 2 workspace's own skills and commands from its server", () =>
-    Effect.gen(function* () {
-      serverStarts.length = 0;
-      const requested: Array<string> = [];
-      const server = replayOpenCodeServer(
-        { ...OPENCODE_2_RESPONSES, ...OPENCODE_2_WORKSPACE_RESPONSES },
-        "secret",
-        requested,
-      );
-      const instance = yield* create(
-        { serverUrl: "http://127.0.0.1:4096", serverPassword: "secret" },
-        server,
-      );
+  it.effect(
+    "lists each OpenCode 2 workspace's own agents, skills and commands from its server",
+    () =>
+      Effect.gen(function* () {
+        serverStarts.length = 0;
+        const requested: Array<string> = [];
+        const replay = replayOpenCodeServer(
+          { ...OPENCODE_2_RESPONSES, ...OPENCODE_2_WORKSPACE_RESPONSES },
+          "secret",
+          requested,
+        );
+        const directories: string[] = [];
+        const server = HttpClient.make((request) => {
+          if (new URL(request.url).pathname !== "/api/agent") return replay.execute(request);
+          const directory = request.urlParams.params.find(
+            ([key]) => key === "location[directory]",
+          )?.[1];
+          assert.isDefined(directory);
+          directories.push(directory!);
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                location: { directory },
+                data: [
+                  { id: "build", mode: "primary", hidden: false },
+                  { id: "plan", mode: "primary", hidden: false },
+                  { id: directory === "/work" ? "readonly" : "audit", mode: "all", hidden: false },
+                  { id: "secret", mode: "primary", hidden: true },
+                  { id: "explore", mode: "subagent", hidden: false },
+                ].map((agent) => ({
+                  ...agent,
+                  name: agent.id,
+                  request: { settings: {}, headers: {}, body: {} },
+                  permissions: [],
+                })),
+              }),
+            ),
+          );
+        });
+        const instance = yield* create(
+          { serverUrl: "http://127.0.0.1:4096", serverPassword: "secret" },
+          server,
+        );
 
-      const workspace = yield* instance.snapshotForCwd!("/work");
-      assert.includeMembers(
-        workspace.skills.map((skill) => skill.name),
-        ["plum", "opencode"],
-      );
-      assert.deepStrictEqual(
-        workspace.slashCommands.map((command) => command.name),
-        ["compact", "init", "review", "bee"],
-      );
-      assert.include(requested, "/api/skill");
-      assert.deepStrictEqual(serverStarts, []);
+        const workspace = yield* instance.snapshotForCwd!("/work");
+        assert.includeMembers(
+          workspace.skills.map((skill) => skill.name),
+          ["plum", "opencode"],
+        );
+        assert.deepStrictEqual(
+          workspace.slashCommands.map((command) => command.name),
+          ["compact", "init", "review", "bee"],
+        );
+        assert.deepStrictEqual(workspace.optionDescriptors?.[0], {
+          id: "agent",
+          label: "Agent",
+          type: "select",
+          currentValue: "build",
+          options: [
+            { id: "build", label: "Build", isDefault: true },
+            { id: "plan", label: "Plan" },
+            { id: "readonly", label: "Readonly" },
+          ],
+        });
+        const other = yield* instance.snapshotForCwd!("/other");
+        const agent = other.optionDescriptors?.[0];
+        assert.deepStrictEqual(
+          agent?.type === "select" ? agent.options.map((option) => option.id) : [],
+          ["build", "plan", "audit"],
+        );
+        assert.deepStrictEqual(directories, ["/work", "/other"]);
+        assert.deepStrictEqual((yield* instance.snapshot.getSnapshot).models, workspace.models);
+        assert.include(requested, "/api/skill");
+        assert.deepStrictEqual(serverStarts, []);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("loads OpenCode 1 project agents through a client bound to each directory", () =>
+    Effect.gen(function* () {
+      const directories: string[] = [];
+      const runtime = {
+        ...openCode2Runtime,
+        connectToOpenCodeServer: () =>
+          Effect.succeed({ url: "http://127.0.0.1:4096", version: "1.18.32" }),
+        createOpenCodeSdkClient: (input: { directory: string }) => ({
+          app: {
+            agents: async () => {
+              directories.push(input.directory);
+              return {
+                data: [
+                  { name: "build", mode: "primary", hidden: false },
+                  {
+                    name: input.directory === "/work" ? "readonly" : "audit",
+                    mode: "all",
+                    hidden: false,
+                  },
+                  { name: "hidden", mode: "all", hidden: true },
+                  { name: "explore", mode: "subagent", hidden: false },
+                ],
+              };
+            },
+          },
+          command: { list: async () => ({ data: [] }) },
+        }),
+        loadOpenCodeSkills: () => Effect.succeed([]),
+        loadOpenCodeInventory: () =>
+          Effect.succeed({
+            providerList: { all: [], connected: [], default: {} },
+            agents: [],
+            skills: [],
+          }),
+      } as unknown as OpenCodeRuntime.OpenCodeRuntimeShape;
+      const instance = yield* create(
+        { serverUrl: "http://127.0.0.1:4096", customModels: ["openai/gpt-5.4"] },
+        replayOpenCodeServer(OPENCODE_1_RESPONSES, ""),
+      ).pipe(Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, runtime));
+      for (const [cwd, name] of [
+        ["/work", "readonly"],
+        ["/other", "audit"],
+      ] as const) {
+        const workspace = yield* instance.snapshotForCwd!(cwd);
+        const agent = workspace.optionDescriptors?.[0];
+        assert.deepStrictEqual(
+          agent?.type === "select" ? agent.options.map((option) => option.id) : [],
+          ["build", name],
+        );
+        assert.deepStrictEqual(workspace.models, (yield* instance.snapshot.getSnapshot).models);
+      }
+      assert.deepStrictEqual(directories, ["/work", "/other"]);
     }).pipe(Effect.scoped),
   );
 

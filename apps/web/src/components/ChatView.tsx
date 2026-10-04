@@ -398,7 +398,10 @@ import {
 import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment } from "../state/threads";
 import { workspacePreparationRetryRunIds } from "@t3tools/client-runtime/state/turn-item-presentation";
-import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
+import {
+  resolveProviderForCwd,
+  resolveProviderSkillsForCwd,
+} from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
@@ -3161,12 +3164,23 @@ export default function ChatView(props: ChatViewProps) {
     versionMismatchThreadContinuation,
     versionMismatchServerLabel,
   ]);
+  const gitCwd = activeProject
+    ? projectScriptCwd({
+        project: { cwd: activeProject.workspaceRoot },
+        worktreePath: activeThread?.worktreePath ?? null,
+      })
+    : null;
   const providerInstanceEntries = useMemo(
     () =>
       sortProviderInstanceEntries(
-        applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
+        applyProviderInstanceSettings(
+          deriveProviderInstanceEntries(
+            providerStatuses.map((provider) => resolveProviderForCwd(provider, gitCwd)),
+          ),
+          settings,
+        ),
       ),
-    [providerStatuses, settings],
+    [providerStatuses, settings, gitCwd],
   );
   const { selectedProviderEntry, requestedDriverKind } = useMemo(
     () =>
@@ -4018,12 +4032,6 @@ export default function ChatView(props: ChatViewProps) {
       : JSON.stringify([itemId, latestCheckpointCompletedAt]);
   }, [serverVisibleTurnItems, turnDiffSummaries]);
 
-  const gitCwd = activeProject
-    ? projectScriptCwd({
-        project: { cwd: activeProject.workspaceRoot },
-        worktreePath: activeThread?.worktreePath ?? null,
-      })
-    : null;
   const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null

@@ -608,7 +608,7 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
     });
 
     describe("ProviderRegistryLive", () => {
-      it("stores workspace skills and commands without changing machine metadata", () => {
+      it("stores workspace skills, commands and options without changing machine metadata", () => {
         const provider = {
           instanceId: ProviderInstanceId.make("codex"),
           driver: ProviderDriverKind.make("codex"),
@@ -627,18 +627,28 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
           checkedAt: "2026-03-25T00:01:00.000Z",
           slashCommands: [{ name: "project" }],
           skills: [{ name: "project", path: "/project/SKILL.md", enabled: true }],
-        } satisfies ServerProvider;
+          optionDescriptors: [
+            {
+              id: "agent",
+              label: "Agent",
+              type: "select",
+              options: [{ id: "readonly", label: "Readonly" }],
+            },
+          ],
+        } satisfies ProviderWorkspaceSnapshot;
 
         const result = upsertProviderWorkspaceSnapshot(provider, "/project", scopedSnapshot);
 
         assert.deepStrictEqual(result.slashCommands, provider.slashCommands);
         assert.deepStrictEqual(result.skills, provider.skills);
+        assert.strictEqual(result.models, provider.models);
         assert.deepStrictEqual(result.workspaceSnapshots, [
           {
             cwd: "/project",
             checkedAt: scopedSnapshot.checkedAt,
             slashCommands: scopedSnapshot.slashCommands,
             skills: scopedSnapshot.skills,
+            optionDescriptors: scopedSnapshot.optionDescriptors,
           },
         ]);
 

@@ -398,6 +398,59 @@ const history = {
 };
 
 describe("OpenCode2 adapter", () => {
+  it.effect("switches to the selected project agent and back to build before prompting", () =>
+    Effect.gen(function* () {
+      const { runtime, thread } = yield* resumed([
+        out("session.switchAgent", { sessionID: SESSION, agent: "readonly" }),
+        reply("session.switchAgent", null),
+        out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+        promptAccepted,
+        event("session.execution.succeeded", { sessionID: SESSION }),
+        out("session.switchAgent", { sessionID: SESSION, agent: "build" }),
+        reply("session.switchAgent", null),
+        out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+        promptAccepted,
+        event("session.execution.succeeded", { sessionID: SESSION }),
+      ]);
+      const first = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+      yield* runtime.startTurn(
+        turnInput(thread, { ...bigPickle, options: [{ id: "agent", value: "readonly" }] }),
+      );
+      assert.equal((yield* Fiber.join(first))?.status, "completed");
+      const second = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+      yield* runtime.startTurn(turnInput(thread));
+      assert.equal((yield* Fiber.join(second))?.status, "completed");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps plan mode authoritative over an explicit project agent", () =>
+    Effect.gen(function* () {
+      const { runtime, thread } = yield* resumed([
+        out("session.switchAgent", { sessionID: SESSION, agent: "plan" }),
+        reply("session.switchAgent", null),
+        out("agent.list", "<any>"),
+        reply("agent.list", agentList),
+        out("session.update", {
+          sessionID: SESSION,
+          permissions: [
+            { action: "*", resource: "*", effect: "allow" },
+            { action: "edit", resource: "*", effect: "deny" },
+            ...mcpRules,
+          ],
+        }),
+        reply("session.update", null),
+        out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+        promptAccepted,
+        event("session.execution.succeeded", { sessionID: SESSION }),
+      ]);
+      const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+      yield* runtime.startTurn({
+        ...turnInput(thread, { ...bigPickle, options: [{ id: "agent", value: "readonly" }] }),
+        runtimePolicy: { ...policy(), interactionMode: "plan" },
+      });
+      assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+    }).pipe(Effect.scoped),
+  );
   it.effect("switches the session's model and variant before a turn that changed them", () =>
     Effect.gen(function* () {
       const { runtime, thread } = yield* resumed([
