@@ -411,9 +411,9 @@ export function ServerBrowserSurface(props: {
       if (point) send({ type: "probe", x: point.x, y: point.y });
       return;
     }
-    focusInput();
     const point = pagePoint(event.clientX, event.clientY, false);
     if (!point) return;
+    focusInput();
     event.currentTarget.setPointerCapture(event.pointerId);
     flushInput();
     mouseButtonsRef.current = event.buttons & 7;
@@ -649,7 +649,8 @@ export function ServerBrowserSurface(props: {
     else if (inputType === "deleteContentBackward") sendKeyPress(BACKSPACE);
     else if (inputType === "deleteContentForward") sendKeyPress(DELETE);
     else {
-      const text = textarea.value.replaceAll(INPUT_SENTINEL, "");
+      const value = textarea.value;
+      const text = value.startsWith(INPUT_SENTINEL) ? value.slice(INPUT_SENTINEL.length) : value;
       if (text) send({ type: "text", text });
     }
     resetInput(textarea);

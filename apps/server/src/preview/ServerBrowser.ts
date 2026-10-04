@@ -355,6 +355,8 @@ const make = Effect.gen(function* () {
     // Chromium's error page loads after `requestfailed` and must not clear LoadFailed.
     if (url === "about:blank" || url.startsWith("chrome-error://")) return;
     const title = (await tab.page.title().catch(() => "")).slice(0, 512);
+    // A navigation that started while reading the title owns the status now.
+    if (tab.loading || tab.page.url() !== url) return;
     report(tab, { _tag: "Success", url: url.slice(0, 2048), title });
   };
 
@@ -874,9 +876,14 @@ const make = Effect.gen(function* () {
         const open = input as PreviewAutomationOpenInput;
         const url = open.url === undefined ? undefined : normalizePreviewUrl(open.url);
         const reuse = open.reuseExistingTab ?? true;
+        // A tab still launching exists only as a session, so resolve it like a viewer would.
         const existing =
           reuse && request.tabId !== undefined
-            ? tabs.get(tabKey(request.threadId, request.tabId))
+            ? await Effect.runPromise(
+                findTab(request.threadId, request.tabId).pipe(
+                  Effect.catchTag("ServerBrowserTabNotFoundError", () => Effect.succeed(undefined)),
+                ),
+              )
             : undefined;
         const reveal = open.open ?? open.show;
         const revealTab = async (tab: ServerTab) => {
@@ -1223,7 +1230,12 @@ const make = Effect.gen(function* () {
         push: (next) => {
           // Bounded: a viewer that stops reading drops messages instead of
           // growing this queue. A dropped frame still releases Chromium.
-          if (!Queue.offerUnsafe(output, next) && next._tag === "frame") runFork(next.ack);
+          if (Queue.offerUnsafe(output, next)) return;
+          if (next._tag === "frame") runFork(next.ack);
+          // The stream only ends on `gone`, so it replaces a stalled backlog.
+          else if (next._tag === "gone") {
+            runFork(Queue.clear(output).pipe(Effect.andThen(Queue.offer(output, next))));
+          }
         },
         pause: () => {
           screencastParams = screencastParams.then(() =>

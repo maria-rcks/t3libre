@@ -572,7 +572,10 @@ export function start(configuration: PreviewStreamConfiguration) {
     });
     // Some Android keyboards edit the textarea even when keydown is prevented.
     // Shortcuts keep their default, so a paste still arrives as text.
-    keySent = action === "down" && !shortcut;
+    keySent =
+      action === "down" &&
+      !shortcut &&
+      (text !== undefined || event.key === "Backspace" || event.key === "Delete");
     if (!shortcut) event.preventDefault();
   };
   const onKeyDown = (event: KeyboardEvent) => onKey("down", event);
@@ -593,7 +596,8 @@ export function start(configuration: PreviewStreamConfiguration) {
     else if (inputType === "deleteContentBackward") pressKey("Backspace", 8);
     else if (inputType === "deleteContentForward") pressKey("Delete", 46);
     else {
-      const text = input.value.replaceAll(SENTINEL, "");
+      const value = input.value;
+      const text = value.startsWith(SENTINEL) ? value.slice(SENTINEL.length) : value;
       if (text) send({ type: "text", text });
     }
     resetInput();

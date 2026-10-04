@@ -1,4 +1,5 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { type PreviewEvent, ThreadId } from "@t3tools/contracts";
 import { PreviewUrlNormalizationError } from "@t3tools/shared/preview";
@@ -7,6 +8,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import { expect } from "vite-plus/test";
 
+import * as ServerConfig from "../config.ts";
 import * as PreviewManager from "./Manager.ts";
 
 const DRAIN_LIMIT = 100;
@@ -38,7 +40,13 @@ const collectEvents = Effect.gen(function* () {
   return collector;
 }).pipe(Effect.withSpan("preview.test.collectEvents"));
 
-it.layer(PreviewManager.layer.pipe(Layer.provide(NodeCrypto.layer)))("PreviewManager", (it) => {
+const layer = PreviewManager.layer.pipe(
+  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-preview-manager-" })),
+  Layer.provide(NodeCrypto.layer),
+  Layer.provide(NodeServices.layer),
+);
+
+it.layer(layer)("PreviewManager", (it) => {
   it.effect("opens a session and emits opened with normalized URL", () =>
     Effect.gen(function* () {
       const threadId = freshThreadId();
