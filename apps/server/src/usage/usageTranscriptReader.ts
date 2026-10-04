@@ -151,9 +151,9 @@ function fnv1a(buffer: Buffer): number {
 /**
  * Lists `.jsonl` transcripts under `root` last modified at or after `sinceMs`.
  *
- * Errors on individual entries are swallowed: session files rotate and get
- * removed while the walk is in flight, and a partial listing is far better than
- * failing the page.
+ * Removed entries are skipped as session files rotate during the walk.
+ * Other directory listing failures are reported through `onDirectoryError`
+ * while the walk continues, so callers can identify partial coverage.
  *
  * `fileName` restricts the walk to a single basename (Grok's `updates.jsonl`).
  * Grok sessions also ship multi-megabyte `chat_history` and `events` logs that
@@ -167,7 +167,10 @@ function fnv1a(buffer: Buffer): number {
 export async function listTranscriptFiles(
   root: string,
   sinceMs: number,
-  options?: { readonly fileName?: string },
+  options?: {
+    readonly fileName?: string;
+    readonly onDirectoryError?: (path: string) => void;
+  },
 ): Promise<readonly TranscriptFile[]> {
   const fileName = options?.fileName;
   const candidates: string[] = [];
@@ -175,7 +178,10 @@ export async function listTranscriptFiles(
     let entries;
     try {
       entries = await NodeFSP.readdir(dir, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+        options?.onDirectoryError?.(dir);
+      }
       return;
     }
     for (const entry of entries) {

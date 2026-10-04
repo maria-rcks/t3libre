@@ -582,6 +582,7 @@ export const make = Effect.gen(function* () {
     );
     const scanned: ScannedDir[] = [];
     for (const { provider, dir, volumeId, transcriptDirs, fileName } of dirs) {
+      const listingErrors: string[] = [];
       const filesByRoot = yield* Effect.forEach(new Set(transcriptDirs ?? [dir]), (root) =>
         Effect.gen(function* () {
           const exists = yield* fileSystem
@@ -589,11 +590,10 @@ export const make = Effect.gen(function* () {
             .pipe(Effect.catchCause(() => Effect.succeed(false)));
           return exists
             ? yield* Effect.promise(() =>
-                listTranscriptFiles(
-                  root,
-                  windowStartMs,
-                  fileName === undefined ? undefined : { fileName },
-                ),
+                listTranscriptFiles(root, windowStartMs, {
+                  ...(fileName === undefined ? {} : { fileName }),
+                  onDirectoryError: (path) => listingErrors.push(path),
+                }),
               )
             : null;
         }),
@@ -641,6 +641,12 @@ export const make = Effect.gen(function* () {
         volumeId,
         ...(transcriptDirs ? { transcriptDirs } : {}),
         files: parsedFiles,
+        ...(listingErrors.length > 0
+          ? {
+              status: "partial" as const,
+              message: `Could not list transcript directories: ${listingErrors.join(", ")}`,
+            }
+          : {}),
       });
     }
 

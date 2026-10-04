@@ -316,7 +316,7 @@ function bucketTokens(bucket: UsageBucket): number {
   );
 }
 
-export function isCompatibleUsageContractVersion(version: number, expected: number): boolean {
+function isCompatibleUsageContractVersion(version: number, expected: number): boolean {
   return version >= USAGE_MERGE_COMPATIBLE_SINCE && version <= expected;
 }
 

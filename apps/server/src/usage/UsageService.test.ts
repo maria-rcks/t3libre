@@ -619,6 +619,27 @@ describe("UsageService", () => {
         sources.filter((source) => source.fingerprint.provider === "codex").length,
         1,
       );
+
+      const archives = NodePath.join(codexHome, "archived_sessions");
+      yield* Effect.promise(async () => {
+        await NodeFSP.rm(archives, { recursive: true });
+        await NodeFSP.writeFile(archives, "not a directory");
+      });
+      const partial = yield* service.readSummary(WINDOW);
+      assert.deepStrictEqual(partial.buckets, removed.buckets);
+      const partialSource = partial.sources.find(
+        (source) => source.fingerprint.provider === "codex",
+      );
+      assert.strictEqual(partialSource?.status, "partial");
+      assert.include(partialSource?.message ?? "", archives);
+
+      yield* Effect.promise(() => NodeFSP.rm(archives));
+      const missingArchive = yield* service.readSummary(WINDOW);
+      assert.deepStrictEqual(missingArchive.buckets, removed.buckets);
+      assert.strictEqual(
+        missingArchive.sources.find((source) => source.fingerprint.provider === "codex")?.status,
+        "ok",
+      );
     }).pipe(Effect.scoped),
   );
 
