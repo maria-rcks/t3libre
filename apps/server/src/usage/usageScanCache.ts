@@ -436,17 +436,15 @@ export function reconcileClaudeUsage(previous: UsageRecord, next: UsageRecord): 
     billableChanged ||= key !== "reasoningTokens" && totals[key] !== previous.totals[key];
     matchesNext &&= key === "reasoningTokens" || totals[key] === next.totals[key];
   }
-  if (!changed) return previous;
-  return {
-    ...previous,
-    totals,
-    // A partial snapshot's reported cost must not override corrected token pricing.
-    reportedCostUsd: billableChanged
-      ? matchesNext
-        ? next.reportedCostUsd
-        : null
-      : previous.reportedCostUsd,
-  };
+  // A matching snapshot can supply a missing cost even after counts stop changing.
+  // A partial snapshot still cannot price the reconciled billable totals.
+  const reportedCostUsd = billableChanged
+    ? matchesNext
+      ? next.reportedCostUsd
+      : null
+    : (previous.reportedCostUsd ?? (matchesNext ? next.reportedCostUsd : null));
+  if (!changed && reportedCostUsd === previous.reportedCostUsd) return previous;
+  return { ...previous, totals, reportedCostUsd };
 }
 
 /** The provisional tail can override a message without changing its resumable base. */

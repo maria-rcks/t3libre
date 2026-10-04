@@ -292,6 +292,19 @@ describe("dedupeWithinFile", () => {
       ...next,
       totals: { ...next.totals, reasoningTokens: 30 },
     });
+    // The final cost can arrive after the token counts have stopped changing.
+    const withoutCost = { ...next, reportedCostUsd: null };
+    for (const reportedCostUsd of [0, 2]) {
+      expect(dedupeWithinFile([first, withoutCost, { ...next, reportedCostUsd }])[0]).toEqual({
+        ...first,
+        totals: { ...next.totals, reasoningTokens: 30 },
+        reportedCostUsd,
+      });
+    }
+    // A stale partial snapshot still cannot price the fuller token counts.
+    expect(
+      dedupeWithinFile([first, withoutCost, { ...first, reportedCostUsd: 1 }])[0]?.reportedCostUsd,
+    ).toBeNull();
   });
 
   it("keeps the first duplicate for other providers", () => {

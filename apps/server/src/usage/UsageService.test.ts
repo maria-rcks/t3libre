@@ -999,10 +999,18 @@ describe("UsageService", () => {
             };
             const current = {
               ...document,
-              files: { [transcript]: structuredClone(document.files[transcript]) },
+              files: {
+                [transcript]: structuredClone(document.files[transcript]),
+                ...(keepCurrent ? { [deleted]: structuredClone(document.files[deleted]) } : {}),
+              },
             };
             // Old parsers kept only the first block despite valid append positions.
             document.files[transcript]!.r[0]![6] = 10;
+            if (keepCurrent) {
+              // A downgrade scanned later, but lost counts already recovered by v7.
+              document.files[deleted]!.m += 1000;
+              document.files[deleted]!.r[0]![6] = 10;
+            }
             for (const file of Object.values(document.files)) {
               for (const row of [...file.r, ...file.t]) row[7] = 0;
             }
@@ -1042,9 +1050,9 @@ describe("UsageService", () => {
           const service = yield* UsageService.make;
           const upgraded = yield* service.readSummary(WINDOW);
           assert.strictEqual(totalOutputTokens(upgraded), 65);
-          // The unchanged live file must re-parse from byte zero. The deleted
-          // file retains its tokens and cost, but its thinking is unrecoverable.
-          assert.strictEqual(thinking(upgraded), 6);
+          // Re-parse the live file; retain deleted counts from both cache versions.
+          // Thinking is recoverable only when the v7 snapshot still exists.
+          assert.strictEqual(thinking(upgraded), keepCurrent ? 18 : 6);
           assert.strictEqual(
             upgraded.buckets.reduce((sum, bucket) => sum + bucket.costUsd, 0),
             original.buckets.reduce((sum, bucket) => sum + bucket.costUsd, 0),
@@ -1054,7 +1062,7 @@ describe("UsageService", () => {
           );
           const appended = yield* service.readSummary(WINDOW);
           assert.strictEqual(totalOutputTokens(appended), 72);
-          assert.strictEqual(thinking(appended), 9);
+          assert.strictEqual(thinking(appended), keepCurrent ? 21 : 9);
 
           yield* Effect.promise(() => NodeFSP.rm(transcript));
           const restored = yield* (yield* UsageService.make).readSummary(WINDOW);

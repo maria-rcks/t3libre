@@ -418,7 +418,21 @@ export const make = Effect.gen(function* () {
         for (const [path, entry] of decodeScanCache(document)) {
           const previous = fileCache.get(path);
           if (previous === undefined || entry.mtimeMs > previous.mtimeMs) {
-            fileCache.set(path, entry);
+            // Legacy Claude snapshots may be newer but less complete. They already
+            // force a cold parse, so retain keyed usage only for unavailable files;
+            // never import an old provisional tail into a resumable base.
+            const retained =
+              previous?.provider === "claude" && entry.provider === "claude"
+                ? {
+                    ...entry,
+                    records: dedupeWithinFile([
+                      ...cachedFileRecords(previous).filter((record) => record.dedupeKey !== null),
+                      ...cachedFileRecords(entry),
+                    ]),
+                    tailRecords: [],
+                  }
+                : entry;
+            fileCache.set(path, retained);
             if (document !== current) cacheDirty = true;
           }
         }
