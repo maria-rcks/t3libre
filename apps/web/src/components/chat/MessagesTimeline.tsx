@@ -5093,9 +5093,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           )
       : null;
   const canExpandProjectedItem =
-    plainOutput !== undefined
-      ? Boolean(plainOutput || viewedImage || workEntry.questionAnswer)
-      : canExpand || workEntry.projectedItem !== undefined;
+    workEntry.projectedItem?.item.type === "notification"
+      ? Boolean(workEntry.projectedItem.item.detail)
+      : plainOutput !== undefined
+        ? Boolean(plainOutput || viewedImage || workEntry.questionAnswer)
+        : canExpand || workEntry.projectedItem !== undefined;
   // Reserve destructive row styling for severe failures, not routine tool errors.
   const iconWrapperClass = cn(
     "flex size-4 items-center justify-center",

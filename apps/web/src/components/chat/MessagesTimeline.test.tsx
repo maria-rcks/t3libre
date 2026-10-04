@@ -3,9 +3,12 @@ import {
   CheckpointRef,
   EnvironmentId,
   MessageId,
+  NodeId,
   RunId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
+import { DateTime } from "effect";
 import {
   act,
   createRef,
@@ -2543,6 +2546,118 @@ describe("MessagesTimeline", () => {
         await act(() => row().props.onClick());
         expect(previewText()).toContain(expected);
         expect(renderer!.root.findAllByType("strong")).toHaveLength(0);
+      } finally {
+        await act(() => renderer?.unmount());
+      }
+    },
+  );
+
+  it.each([
+    ["missing delegated detail", undefined, "delegated_task", false],
+    ["empty delegated detail", "", "delegated_task", false],
+    ["grouped background notification", undefined, "background_task", false],
+    ["notification with detail", "Process exited with code 0", "delegated_task", true],
+    ["whitespace detail rendered by the inspector", " \n\t", "delegated_task", true],
+  ] as const)(
+    "preserves notification actions for %s",
+    async (_, detail, sourceKind, expandable) => {
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      vi.stubGlobal("requestAnimationFrame", () => 0);
+      vi.stubGlobal("cancelAnimationFrame", () => {});
+      const onOpenThread = vi.fn();
+      const childThreadId = ThreadId.make("thread-child");
+      const summary =
+        sourceKind === "delegated_task"
+          ? 'Delegated task "Check status" finished'
+          : "11 background tasks failed";
+      let renderer: ReactTestRenderer | undefined;
+      try {
+        await act(() => {
+          renderer = create(
+            <MessagesTimeline
+              {...buildProps()}
+              onOpenThread={onOpenThread}
+              timelineEntries={[
+                {
+                  id: "notification-1",
+                  kind: "work",
+                  createdAt: MESSAGE_CREATED_AT,
+                  entry: {
+                    id: "notification-1",
+                    createdAt: MESSAGE_CREATED_AT,
+                    label: summary,
+                    tone: "info",
+                    itemType: "notification",
+                    projectedItem: {
+                      position: 0,
+                      visibility: "local",
+                      sourceThreadId: ThreadId.make("thread-1"),
+                      sourceItemId: TurnItemId.make("notification-1"),
+                      item: {
+                        id: TurnItemId.make("notification-1"),
+                        threadId: ThreadId.make("thread-1"),
+                        runId: null,
+                        nodeId: null,
+                        providerThreadId: null,
+                        providerTurnId: null,
+                        nativeItemRef: null,
+                        parentItemId: null,
+                        ordinal: 0,
+                        status: "completed",
+                        title: null,
+                        startedAt: null,
+                        completedAt: null,
+                        updatedAt: DateTime.makeUnsafe(MESSAGE_CREATED_AT),
+                        type: "notification",
+                        source:
+                          sourceKind === "delegated_task"
+                            ? { kind: sourceKind, taskIds: [NodeId.make("task-1")], childThreadId }
+                            : { kind: sourceKind },
+                        outcome: sourceKind === "delegated_task" ? "completed" : "failed",
+                        summary,
+                        detail,
+                      },
+                    },
+                  },
+                },
+              ]}
+            />,
+          );
+        });
+        const row = renderer!.root.findAll(
+          (node) => node.type === "div" && node.props["data-v2-item-type"] === "notification",
+        )[0]!;
+        expect(renderer!.root.findAllByType("pre")).toHaveLength(0);
+        if (expandable) {
+          expect(row.props["aria-label"]).toBe(summary);
+          expect(row.props.tabIndex).toBe(0);
+          await act(() => row.props.onClick());
+          expect(row.props["aria-expanded"]).toBe(true);
+          expect(renderer!.root.findByType("pre").children).toEqual([detail]);
+          const preventDefault = vi.fn();
+          await act(() => row.props.onKeyDown({ key: "Enter", preventDefault }));
+          expect(row.props["aria-expanded"]).toBe(false);
+          expect(renderer!.root.findAllByType("pre")).toHaveLength(0);
+          await act(() => row.props.onKeyDown({ key: " ", preventDefault }));
+          expect(preventDefault).toHaveBeenCalledTimes(2);
+          expect(row.props["aria-expanded"]).toBe(true);
+          expect(renderer!.root.findByType("pre").children).toEqual([detail]);
+        } else {
+          expect(row.props.role).toBeUndefined();
+          expect(row.props.tabIndex).toBeUndefined();
+          expect(row.props["aria-expanded"]).toBeUndefined();
+          expect(row.props.onClick).toBeUndefined();
+          expect(row.props.onKeyDown).toBeUndefined();
+        }
+        if (sourceKind === "delegated_task") {
+          const stopPropagation = vi.fn();
+          const openSubagent = renderer!.root.findByProps({ "aria-label": "Open subagent thread" });
+          await act(() => openSubagent.props.onKeyDown({ stopPropagation }));
+          await act(() => openSubagent.props.onClick({ stopPropagation }));
+          expect(stopPropagation).toHaveBeenCalledTimes(2);
+          expect(onOpenThread).toHaveBeenCalledWith(childThreadId);
+          expect(row.props["aria-expanded"]).toBe(expandable ? true : undefined);
+        }
       } finally {
         await act(() => renderer?.unmount());
       }
