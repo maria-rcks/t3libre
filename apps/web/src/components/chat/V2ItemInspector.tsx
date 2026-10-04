@@ -244,6 +244,9 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
               </Button>
             ) : null}
           </div>
+          {item.status === "failed" && item.diffStr?.trim() ? (
+            <StructuredValue value={item.diffStr} />
+          ) : null}
           {item.changes !== undefined && item.changes.length > 0 ? (
             <ul className="space-y-1 font-mono text-muted-foreground">
               {item.changes.map((change, index) => (
