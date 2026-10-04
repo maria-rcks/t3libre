@@ -1152,9 +1152,12 @@ const make = Effect.gen(function* () {
           reportLiveTabs();
         }),
         () =>
-          Effect.sync(() => {
+          Effect.promise(async () => {
             tab.viewers.delete(viewer);
             reportLiveTabs();
+            if (!tab.closing && tab.setting._tag === "fill" && viewer.requestedSize) {
+              await applySetting(tab, tab.setting).catch(constVoid);
+            }
           }),
       );
       // Full scale: a scaled capture would flash in every other viewer.

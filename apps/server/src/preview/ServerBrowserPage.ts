@@ -450,7 +450,12 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
     },
     async stop() {
       if (!recorder) return { mimeType: null, count: 0, bytes: 0 };
-      if (recorder.state !== "inactive") recorder.stop();
+      if (recorder.state !== "inactive") {
+        // Flush an end frame so a static page retains its recording duration.
+        paint();
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        recorder.stop();
+      }
       await stopped;
       return { mimeType: recorder.mimeType, count: chunks.length, bytes: sizeBytes };
     },
