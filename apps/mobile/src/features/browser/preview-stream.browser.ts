@@ -549,8 +549,9 @@ export function start(configuration: PreviewStreamConfiguration) {
     }
     const shortcut = event.ctrlKey || event.metaKey;
     // Paste arrives as input text from this device's clipboard. Cut is not forwarded:
-    // the page's selection never reaches this clipboard, so it would be lost.
+    // the page's selection never reaches this clipboard, so it would be lost (also Shift+Delete).
     if (shortcut && ["v", "x"].includes(event.key.toLowerCase())) return;
+    if (event.shiftKey && event.key === "Delete") return;
     // Enter carries "\r" like Puppeteer's key table, so forms submit and textareas break lines.
     const text = shortcut
       ? undefined
