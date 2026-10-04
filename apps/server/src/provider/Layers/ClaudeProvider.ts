@@ -37,6 +37,7 @@ import {
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
+import type { ProviderWorkspaceSnapshot } from "../ProviderDriver.ts";
 import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
 import {
   type ClaudeScopedLimitNames,
@@ -428,18 +429,18 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
   machineSnapshot: ServerProvider,
   cwd: string,
   environment?: NodeJS.ProcessEnv,
-): Effect.fn.Return<ServerProvider, never, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<ProviderWorkspaceSnapshot, never, FileSystem.FileSystem | Path.Path> {
   if (!claudeSettings.enabled) return machineSnapshot;
-  const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false);
-  if (!capabilities) {
-    // The registry skips failed workspace snapshots, leaving discovery retryable.
-    return { ...machineSnapshot, status: "error" };
-  }
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, environment);
+  const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false);
   return {
     ...machineSnapshot,
     skills,
-    slashCommands: dedupeSlashCommands([COMPACT_SLASH_COMMAND, ...capabilities.slashCommands]),
+    slashCommands: dedupeSlashCommands([
+      COMPACT_SLASH_COMMAND,
+      ...(capabilities?.slashCommands ?? []),
+    ]),
+    slashCommandsPending: !capabilities,
   };
 });
 

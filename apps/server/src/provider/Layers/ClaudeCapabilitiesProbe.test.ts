@@ -125,6 +125,7 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
           );
           assert.deepEqual(scoped, {
             ...machineSnapshot,
+            slashCommandsPending: false,
             slashCommands: [
               COMPACT_SLASH_COMMAND,
               {
@@ -154,10 +155,17 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
       }).pipe(Effect.scoped),
   );
 
-  it.effect("keeps failed workspace probes retryable and skips disabled providers", () =>
+  it.effect("keeps readable skills during failed command discovery and recovers on retry", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
       const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-workspace-retry-" });
+      const skillDir = path.join(cwd, ".claude", "skills", "existing-skill");
+      yield* fs.makeDirectory(skillDir, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(skillDir, "SKILL.md"),
+        "---\nname: existing-skill\ndescription: Existing project skill\n---\nUse this skill.",
+      );
       const machineSnapshot = {
         instanceId: ProviderInstanceId.make("claude"),
         driver: ProviderDriverKind.make("claudeAgent"),
@@ -168,7 +176,7 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
         checkedAt: "2026-03-25T00:00:00.000Z",
         version: "2.1.288",
         models: [],
-        slashCommands: [COMPACT_SLASH_COMMAND],
+        slashCommands: [{ name: "server-cwd-only" }],
         skills: [],
       } satisfies ServerProvider;
       const query = vi.spyOn(ClaudeSdk, "query").mockImplementation(
@@ -187,7 +195,20 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
       yield* Effect.addFinalizer(() => Effect.sync(() => query.mockRestore()));
       const settings = decodeClaudeSettings({ homePath: cwd });
       const failed = yield* probeClaudeWorkspaceSnapshot(settings, machineSnapshot, cwd);
-      assert.deepEqual(failed, { ...machineSnapshot, status: "error" });
+      assert.deepEqual(failed, {
+        ...machineSnapshot,
+        slashCommands: [COMPACT_SLASH_COMMAND],
+        slashCommandsPending: true,
+        skills: [
+          {
+            name: "existing-skill",
+            path: path.join(skillDir, "SKILL.md"),
+            enabled: true,
+            scope: "project",
+            description: "Existing project skill",
+          },
+        ],
+      });
       query.mockImplementation(
         () =>
           ({
@@ -203,6 +224,8 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
       const recovered = yield* probeClaudeWorkspaceSnapshot(settings, machineSnapshot, cwd);
       assert.deepEqual(recovered.slashCommands, [COMPACT_SLASH_COMMAND, { name: "recovered" }]);
       assert.equal(recovered.status, "ready");
+      assert.equal(recovered.slashCommandsPending, false);
+      assert.deepEqual(recovered.skills, failed.skills);
       const disabled = yield* probeClaudeWorkspaceSnapshot(
         { ...settings, enabled: false },
         machineSnapshot,
