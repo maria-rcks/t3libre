@@ -58,7 +58,7 @@ describe("sshEnvironment", () => {
       yield* fs.makeDirectory(path.join(sshDir, "config.d"), { recursive: true });
       yield* fs.writeFileString(
         path.join(sshDir, "config"),
-        ["Host devbox", "  HostName devbox.example.com", "Include config.d/*.conf", ""].join("\n"),
+        ["Include config.d/*.conf", "Host devbox", "  HostName devbox.example.com", ""].join("\n"),
       );
       yield* fs.writeFileString(
         path.join(sshDir, "config.d", "team.conf"),
@@ -73,6 +73,8 @@ describe("sshEnvironment", () => {
       yield* fs.writeFileString(
         path.join(sshDir, "known_hosts"),
         [
+          "devbox.example.com ssh-ed25519 AAAA",
+          "staging.example.com ssh-ed25519 AAAA",
           "known.example.com ssh-ed25519 AAAA",
           "|1|hashed|entry ssh-ed25519 AAAA",
           "[bastion.example.com]:2222 ssh-ed25519 AAAA",
@@ -92,7 +94,7 @@ describe("sshEnvironment", () => {
         },
         {
           alias: "devbox",
-          hostname: "devbox",
+          hostname: "devbox.example.com",
           username: null,
           port: null,
           source: "ssh-config",
@@ -106,7 +108,7 @@ describe("sshEnvironment", () => {
         },
         {
           alias: "staging",
-          hostname: "staging",
+          hostname: "staging.example.com",
           username: null,
           port: null,
           source: "ssh-config",

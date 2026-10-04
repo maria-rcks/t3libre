@@ -20,7 +20,7 @@ describe("filterDiscoveredSshHosts", () => {
   const suggestions: ReadonlyArray<DesktopDiscoveredSshHost> = [
     {
       alias: "grape",
-      hostname: "grape",
+      hostname: "prod.example.com",
       port: null,
       source: "known-hosts",
       username: null,
@@ -75,6 +75,7 @@ describe("filterDiscoveredSshHosts", () => {
       suggestions[3],
       suggestions[4],
       suggestions[5],
+      suggestions[0],
       suggestions[2],
     ]);
   });
@@ -90,6 +91,13 @@ describe("filterDiscoveredSshHosts", () => {
   it("matches case-insensitively", () => {
     expect(filterDiscoveredSshHosts(suggestions, "PINOT")).toEqual([suggestions[1]]);
   });
+
+  it.each(["devbox", "DEVBOX.LOCAL", "box.local"])(
+    "finds a configured alias by its alias or target %j",
+    (query) => {
+      expect(filterDiscoveredSshHosts(hosts, query)).toEqual(hosts);
+    },
+  );
 
   it("returns an empty array when no hosts match", () => {
     expect(filterDiscoveredSshHosts(suggestions, "merlot")).toEqual([]);
