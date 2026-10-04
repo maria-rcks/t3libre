@@ -191,6 +191,16 @@ describe("ssh config", () => {
   );
 
   it.effect.each([
+    ...["missing*/../target.conf", "missing/../target.conf", "config.d/*/../target.conf"].map(
+      (operand) => ({
+        name: `keeps parent-traversing Include ${operand} uncertain`,
+        config: `Host work\n  Include ${operand}\n  HostName fallback.example.com\n  Port 22\nHost *\n  HostName %h\n  Port 22\n`,
+        included: "HostName wrong.example.com\n",
+        files: { "config.d/target.conf": "HostName wrong.example.com\n" },
+        hostname: "work",
+        known: "wrong.example.com",
+      }),
+    ),
     {
       name: "reads Include files in byte order instead of display locale order",
       config: "Host work\n  Include order/*.conf\n  HostName fallback.example.com\n",
@@ -664,6 +674,16 @@ describe("ssh config", () => {
         ],
         [
           "Host work\n  HostName work.example.com\n  Port 22\n  Include config.d/*/target.conf\n",
+          "work.example.com",
+          false,
+        ],
+        [
+          "Host skip*\n  Include missing*/../target.conf\nHost work\n  HostName work.example.com\n  Port 22\n",
+          "work.example.com",
+          false,
+        ],
+        [
+          "Host work\n  HostName work.example.com\n  Port 22\n  Include missing*/../target.conf\n",
           "work.example.com",
           false,
         ],
