@@ -140,19 +140,28 @@ describe("server browser element refs", () => {
     await expect(ServerBrowserPage.click(page, { locator })).rejects.toThrow(/stale/);
   });
 
-  it("does not allow native refs to bypass generation validation", async () => {
-    await page.setContent("<button>continue</button>");
-    await takeSnapshot();
-    await expect(ServerBrowserPage.click(page, { locator: "aria-ref=e1" })).rejects.toThrow(
-      /stale/,
-    );
-  });
+  it.each(["aria-ref=e1", " aria-ref=e1", "css=body >> aria-ref=e1"])(
+    "does not allow native refs to bypass generation validation (%s)",
+    async (locator) => {
+      await page.setContent("<button>continue</button>");
+      await takeSnapshot();
+      await expect(ServerBrowserPage.click(page, { locator })).rejects.toThrow(/stale/);
+    },
+  );
 
   it("preserves CSS selectors containing an aria-ref attribute", async () => {
     await page.setContent(
       '<button aria-ref="save" onclick="this.textContent=\'saved\'">save</button>',
     );
     await ServerBrowserPage.click(page, { selector: 'button[aria-ref="save"]' });
+    expect(await page.locator("button").textContent()).toBe("saved");
+  });
+
+  it("preserves quoted attribute values containing ref engine text", async () => {
+    await page.setContent(
+      '<button data-example=" >> aria-ref=e1" onclick="this.textContent=\'saved\'">save</button>',
+    );
+    await ServerBrowserPage.click(page, { selector: 'button[data-example=" >> aria-ref=e1"]' });
     expect(await page.locator("button").textContent()).toBe("saved");
   });
 });

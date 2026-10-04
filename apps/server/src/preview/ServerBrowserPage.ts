@@ -91,8 +91,13 @@ const targetLocator = (
 ): Locator | null => {
   const selector = input.locator ?? input.selector;
   if (selector === undefined) return null;
-  if (selector.startsWith("aria-ref=")) {
-    const ref = /^aria-ref=(.+)$/.exec(selector)?.[1];
+  // Ignore quoted/escaped CSS values when looking for a selector-engine boundary.
+  const engines = selector.replace(
+    /\\.|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g,
+    " ",
+  );
+  if (/(?:^|>>)\s*\*?aria-ref\s*=/.test(engines)) {
+    const ref = /^\s*aria-ref\s*=\s*(\S+)\s*$/.exec(selector)?.[1];
     const nativeRef = ref === undefined ? undefined : pageRefs.get(page)?.refs.get(ref);
     if (nativeRef === undefined) {
       throw new ServerBrowserOperationError(
