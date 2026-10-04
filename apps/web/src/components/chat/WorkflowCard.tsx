@@ -99,8 +99,11 @@ export function WorkflowCard({
     phases.push({ index: -1, title: "Other agents" });
   }
   const activeMember = members.find((member) => isActiveSubagentStatus(member.status));
-  const activePhase =
-    selectedPhase ?? (activeMember ? (activeMember.phaseIndex ?? -1) : phases[0]?.index);
+  const activePhase = phases.some((phase) => phase.index === selectedPhase)
+    ? selectedPhase
+    : activeMember
+      ? (activeMember.phaseIndex ?? -1)
+      : phases[0]?.index;
   const visibleMembers =
     phases.length === 0
       ? members

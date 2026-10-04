@@ -5959,6 +5959,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   label: "Reviewer",
                   state: "done",
                   phaseIndex: 1,
+                  phaseTitle: "Review",
                   promptPreview: "Review the code",
                   resultPreview: "Code reviewed",
                   tokens: 350,
@@ -6080,6 +6081,16 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             retry.startedAt && DateTime.toEpochMillis(retry.startedAt),
             memberStartedAt + 1_000,
           );
+          const retriedWorkflow = harness.events
+            .flatMap((event) =>
+              event.type === "subagent.updated" && event.subagent.workflow?.agents[0]?.attempt === 2
+                ? [event.subagent.workflow]
+                : [],
+            )
+            .at(-1);
+          assert.equal(retriedWorkflow?.agents[0]?.phaseIndex, 1);
+          assert.equal(retriedWorkflow?.agents[0]?.phaseTitle, "Review");
+          assert.isUndefined(retriedWorkflow?.agents[0]?.totalTokens);
           yield* harness.offerAndWait(
             claudeSdkFrame({
               type: "system",

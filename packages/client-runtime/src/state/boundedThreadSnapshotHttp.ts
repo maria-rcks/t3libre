@@ -1,9 +1,15 @@
-import type { ThreadId } from "@t3tools/contracts";
+import type { NodeId, ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpClient } from "effect/unstable/http";
+import { Atom } from "effect/unstable/reactivity";
+
+import type { EnvironmentRegistry } from "../connection/registry.ts";
+import { EnvironmentSupervisor } from "../connection/supervisor.ts";
+import { createEnvironmentQueryAtomFamily } from "./runtime.ts";
 
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import type { PreparedConnection } from "../connection/model.ts";
@@ -24,6 +30,7 @@ export const fetchEnvironmentBoundedThreadSnapshot = Effect.fn(
 )(function* (input: {
   readonly prepared: PreparedConnection;
   readonly threadId: ThreadId;
+  readonly requiredSubagentId?: NodeId;
   readonly signer: Option.Option<ManagedRelay.ManagedRelayDpopSigner["Service"]>;
   readonly remoteAuthorization?: Option.Option<
     RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]
@@ -40,10 +47,43 @@ export const fetchEnvironmentBoundedThreadSnapshot = Effect.fn(
     request: ({ client, headers }) =>
       client.threadBoundedSnapshot({
         params: { threadId: input.threadId },
+        query:
+          input.requiredSubagentId === undefined
+            ? {}
+            : { requiredSubagentId: input.requiredSubagentId },
         headers: withOrchestrationProtocolHeader(headers),
       }),
   });
 });
+
+/** Resolve a child's owning subagent without expanding the parent's timeline window. */
+export function createEnvironmentSubagentQuery<R, E>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | HttpClient.HttpClient | R, E>,
+) {
+  return createEnvironmentQueryAtomFamily(runtime, {
+    label: "environment-data:thread:owning-subagent",
+    execute: (input: { threadId: ThreadId; requiredSubagentId: NodeId }) =>
+      Effect.gen(function* () {
+        const supervisor = yield* EnvironmentSupervisor;
+        const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+        if (Option.isNone(prepared)) return null;
+        const signer = yield* Effect.serviceOption(ManagedRelay.ManagedRelayDpopSigner);
+        const remoteAuthorization = yield* Effect.serviceOption(
+          RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization,
+        );
+        const snapshot = yield* fetchEnvironmentBoundedThreadSnapshot({
+          ...input,
+          prepared: prepared.value,
+          signer,
+          remoteAuthorization,
+        });
+        return (
+          snapshot.projection.subagents.find((agent) => agent.id === input.requiredSubagentId) ??
+          null
+        );
+      }),
+  });
+}
 
 /**
  * Shared ThreadSnapshotLoader for clients that render progressive history.

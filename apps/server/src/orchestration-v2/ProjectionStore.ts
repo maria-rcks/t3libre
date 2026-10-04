@@ -470,6 +470,7 @@ export interface ProjectionStoreV2Shape {
       readonly anchorItemId?: TurnItemId | undefined;
       readonly anchorThreadId?: ThreadId | undefined;
       readonly requiredRunId?: RunId | undefined;
+      readonly requiredSubagentId?: NodeId | undefined;
     },
   ) => Effect.Effect<
     {
@@ -2566,6 +2567,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         readonly userTurnLimit?: number | undefined;
         readonly anchorItemId?: TurnItemId | undefined;
         readonly requiredRunId?: RunId | undefined;
+        readonly requiredSubagentId?: NodeId | undefined;
         readonly suppressLocal?: boolean | undefined;
       },
       fields?: ReadonlyArray<ProjectionRecordField>,
@@ -2860,7 +2862,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             WHERE thread_id = ${threadId}
               AND (status IN ('pending','starting','running','waiting')
                 OR run_id IN (SELECT value FROM json_each(${cohortRunIds}))
-                OR parent_node_id IN (SELECT value FROM json_each(${cohortNodeIds})))
+                OR parent_node_id IN (SELECT value FROM json_each(${cohortNodeIds}))
+                OR subagent_id = ${window.requiredSubagentId ?? null})
             ORDER BY COALESCE(started_at, ''), subagent_id ASC
           `,
           fields !== undefined && !fields.includes("providerSessions")
@@ -3146,6 +3149,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         readonly userTurnLimit?: number | undefined;
         readonly anchorItemId?: TurnItemId | undefined;
         readonly requiredRunId?: RunId | undefined;
+        readonly requiredSubagentId?: NodeId | undefined;
         readonly suppressLocal?: boolean | undefined;
         readonly historyAnchor?:
           | { readonly threadId: ThreadId; readonly itemId: TurnItemId }
@@ -4775,6 +4779,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             const projection = yield* readProjection(threadId, new Set(), {
               rowLimit: options.rowLimit,
               userTurnLimit: options.userTurnLimit,
+              requiredSubagentId: options.requiredSubagentId,
               ...(historyAnchor?.threadId === threadId
                 ? { anchorItemId: historyAnchor.itemId }
                 : {}),

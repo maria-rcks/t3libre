@@ -33,7 +33,7 @@ import {
 } from "@t3tools/contracts";
 import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
-import { environmentThreadDetails } from "../../state/threads";
+import { environmentThreadDetails, useOwningSubagent } from "../../state/threads";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
@@ -1955,19 +1955,23 @@ function ProviderUserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "m
   const ctx = use(TimelineRowCtx);
   const shell = useThreadShell(ctx.threadRef);
   const lineage = shell?.source.lineage;
-  const parent = useThreadProjection(
+  const parentRef =
     lineage?.relationshipToParent === "subagent" && lineage.parentThreadId
       ? scopeThreadRef(ctx.activeThreadEnvironmentId, lineage.parentThreadId)
-      : null,
+      : null;
+  const parent = useThreadProjection(parentRef);
+  const liveAgent = parent?.projection.subagents.find(
+    (agent) => agent.childThreadId === ctx.threadRef?.threadId,
   );
-  const workflow = parent?.projection.subagents.find(
-    (agent) =>
-      agent.workflow &&
-      agent.childThreadId === ctx.threadRef?.threadId &&
-      agent.prompt === row.message.text,
+  const retainedAgent = useOwningSubagent(
+    liveAgent ? null : parentRef,
+    shell?.source.forkedFrom?.type === "node" ? shell.source.forkedFrom.nodeId : null,
   );
-  return workflow ? (
-    <WorkflowCard agent={workflow} onOpenThread={ctx.onOpenThread} inWorkflowThread />
+  const agent = liveAgent ?? retainedAgent;
+  return agent?.workflow &&
+    agent.childThreadId === ctx.threadRef?.threadId &&
+    agent.prompt === row.message.text ? (
+    <WorkflowCard agent={agent} onOpenThread={ctx.onOpenThread} inWorkflowThread />
   ) : (
     <UserMessageTimelineRow row={row} />
   );

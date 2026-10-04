@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
+  NodeId,
   ORCHESTRATION_PROTOCOL_HEADER,
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
   ProjectId,
@@ -242,6 +243,22 @@ const LOADERS: ReadonlyArray<{
 ];
 
 describe("authenticated environment HTTP requests", () => {
+  it.effect("requests an owning subagent within the bounded snapshot over relay", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness(() => Response.json(encodeBoundedSnapshot(BOUNDED_THREAD)));
+      const result = yield* fetchEnvironmentBoundedThreadSnapshot({
+        ...harness.input,
+        threadId: THREAD.projection.thread.id,
+        requiredSubagentId: NodeId.make("workflow:coordinator"),
+      }).pipe(Effect.provide(harness.httpLayer));
+      expect(result).toEqual(BOUNDED_THREAD);
+      expect(harness.calls).toHaveLength(1);
+      const url = new URL(harness.calls[0]!.url);
+      expect(url.origin).toBe(CURRENT_ORIGIN);
+      expect(url.searchParams.get("requiredSubagentId")).toBe("workflow:coordinator");
+    }),
+  );
+
   it.effect.each(LOADERS)("rejects an invalid $name response", (loader) =>
     Effect.gen(function* () {
       const harness = makeHarness(() => Response.json({}));

@@ -139,6 +139,9 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         anchorThreadId?: Parameters<
           typeof threadManagement.getThreadSnapshotWindow
         >[1]["anchorThreadId"],
+        requiredSubagentId?: Parameters<
+          typeof threadManagement.getThreadSnapshotWindow
+        >[1]["requiredSubagentId"],
       ) {
         return yield* threadManagement
           .getThreadSnapshotWindow(threadId, {
@@ -149,6 +152,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
                 : OLDER_THREAD_USER_TURN_LIMIT,
             ...(anchorItemId === undefined ? {} : { anchorItemId }),
             ...(anchorThreadId === undefined ? {} : { anchorThreadId }),
+            ...(requiredSubagentId === undefined ? {} : { requiredSubagentId }),
           })
           .pipe(
             Effect.map((snapshot) => ({
@@ -200,7 +204,12 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.threadBoundedSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
-          const snapshot = yield* loadThreadSnapshotWindow(args.params.threadId);
+          const snapshot = yield* loadThreadSnapshotWindow(
+            args.params.threadId,
+            undefined,
+            undefined,
+            args.query.requiredSubagentId,
+          );
           const bounded = buildBoundedThreadProjection({
             projection: snapshot.projection,
             snapshotSequence: snapshot.snapshotSequence,

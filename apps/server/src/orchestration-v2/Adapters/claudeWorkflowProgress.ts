@@ -104,7 +104,17 @@ export function mergeClaudeWorkflowProgress(input: {
             (prior?.state === "running" && agent.state === "queued"));
         agents.set(
           agent.index,
-          regressed ? { ...agent, ...prior } : { ...(restarted ? {} : prior), ...agent },
+          regressed
+            ? { ...agent, ...prior }
+            : {
+                ...(restarted
+                  ? {
+                      ...optional("phaseIndex", prior.phaseIndex),
+                      ...optional("phaseTitle", prior.phaseTitle),
+                    }
+                  : prior),
+                ...agent,
+              },
         );
       }
     }
