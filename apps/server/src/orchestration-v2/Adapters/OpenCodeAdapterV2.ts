@@ -329,6 +329,7 @@ interface ActiveOpenCodeTurn {
   admissionMessageId: string | null;
   interrupted: boolean;
   finalized: boolean;
+  readonly finalizationSettled: Deferred.Deferred<void>;
   planId: PlanId | null;
   admissionGeneration: number;
   admissionReconciliationGeneration: number | null;
@@ -2076,122 +2077,132 @@ export function makeOpenCodeAdapterV2(
           );
         });
 
-        const finalizeTurn = Effect.fnUntraced(function* (
-          state: OpenCodeThreadState,
-          turn: ActiveOpenCodeTurn,
-          status: TerminalTurnStatus,
-          terminal?: {
-            readonly failure?: OrchestrationV2ProviderFailure;
-            readonly threadDisposition?: "reusable" | "broken";
-          },
-        ) {
-          if (turn.finalized) return;
-          if (nativeStreamFailure !== null) {
-            status = "failed";
-            terminal = { failure: nativeStreamFailure, threadDisposition: "broken" };
-          }
-          turn.finalized = true;
-          const completedAt = yield* DateTime.now;
-          for (const part of turn.parts.values()) {
-            if (part.type === "text" || part.type === "reasoning") {
-              yield* emitTextPart(state, turn, part, true);
-            }
-          }
-          for (const pending of Array.from(pendingRequests.values())) {
-            if (
-              pending.turn.providerTurnId === turn.providerTurnId ||
-              pending.nativeSessionId === state.nativeSessionId
-            ) {
-              yield* resolveRuntimeRequest(pending.nativeRequestId, "cancelled");
-            }
-          }
-          const contextMessage = turn.usage.contextMessage;
-          if (
-            contextMessage !== null &&
-            !contextWindows.has(`${contextMessage.providerID}/${contextMessage.modelID}`)
+        const finalizeTurn = Effect.fnUntraced(
+          function* (
+            state: OpenCodeThreadState,
+            turn: ActiveOpenCodeTurn,
+            status: TerminalTurnStatus,
+            terminal?: {
+              readonly failure?: OrchestrationV2ProviderFailure;
+              readonly threadDisposition?: "reusable" | "broken";
+            },
           ) {
-            // A fresh server may list models lazily. Resolve the limit before
-            // turn.terminal closes the run's event subscription; the probe is bounded.
-            yield* readContextWindows();
-            const maxTokens = contextWindows.get(
-              `${contextMessage.providerID}/${contextMessage.modelID}`,
-            );
-            const tokenUsage = turn.providerTurn.tokenUsage;
-            if (maxTokens !== undefined && tokenUsage !== undefined) {
-              Object.assign(turn.providerTurn, { tokenUsage: { ...tokenUsage, maxTokens } });
+            const completedAt = yield* DateTime.now;
+            for (const part of turn.parts.values()) {
+              if (part.type === "text" || part.type === "reasoning") {
+                yield* emitTextPart(state, turn, part, true);
+              }
             }
-          }
-          yield* emitProviderTurn(state, turn, status, completedAt);
-          const threadDisposition = terminal?.threadDisposition ?? "reusable";
-          yield* updateProviderThread(state, {
-            status: turn.isRoot ? "active" : threadDisposition === "broken" ? "error" : "idle",
-            nativeConversationHeadRef:
-              turn.nativeUserMessageId === null
-                ? state.providerThread.nativeConversationHeadRef
-                : providerRef(turn.nativeUserMessageId, "weak"),
-          });
-          state.activeTurn = null;
-          if (!turn.isRoot) {
-            yield* emitProviderEvent({
-              type: "node.updated",
-              driver: OPENCODE_PROVIDER,
-              node: {
-                id: turn.rootNodeId,
-                threadId: turn.threadId,
-                runId: null,
-                parentNodeId: null,
-                rootNodeId: turn.rootNodeId,
-                kind: "root_turn",
-                status,
-                countsForRun: false,
-                providerThreadId: state.providerThread.id,
-                providerTurnId: turn.providerTurnId,
-                nativeItemRef: providerRef(state.nativeSessionId),
-                runtimeRequestId: null,
-                checkpointScopeId: null,
-                startedAt: turn.startedAt,
-                completedAt,
-              },
+            for (const pending of Array.from(pendingRequests.values())) {
+              if (
+                pending.turn.providerTurnId === turn.providerTurnId ||
+                pending.nativeSessionId === state.nativeSessionId
+              ) {
+                yield* resolveRuntimeRequest(pending.nativeRequestId, "cancelled");
+              }
+            }
+            const contextMessage = turn.usage.contextMessage;
+            if (contextMessage !== null) {
+              // A fresh server may list models lazily. Resolve the limit before
+              // turn.terminal closes the run's event subscription; the probe is bounded.
+              if (!contextWindows.has(`${contextMessage.providerID}/${contextMessage.modelID}`)) {
+                yield* readContextWindows();
+              }
+              const maxTokens = contextWindows.get(
+                `${contextMessage.providerID}/${contextMessage.modelID}`,
+              );
+              const tokenUsage = turn.providerTurn.tokenUsage;
+              if (maxTokens !== undefined && tokenUsage !== undefined) {
+                Object.assign(turn.providerTurn, { tokenUsage: { ...tokenUsage, maxTokens } });
+              }
+            }
+            if (nativeStreamFailure !== null) {
+              status = "failed";
+              terminal = { failure: nativeStreamFailure, threadDisposition: "broken" };
+            }
+            yield* emitProviderTurn(state, turn, status, completedAt);
+            const threadDisposition = terminal?.threadDisposition ?? "reusable";
+            yield* updateProviderThread(state, {
+              status: turn.isRoot ? "active" : threadDisposition === "broken" ? "error" : "idle",
+              nativeConversationHeadRef:
+                turn.nativeUserMessageId === null
+                  ? state.providerThread.nativeConversationHeadRef
+                  : providerRef(turn.nativeUserMessageId, "weak"),
             });
-            return;
-          }
-          const anotherTurnIsActive = Array.from(threads.values()).some(
-            (candidate) => candidate.activeTurn?.isRoot === true,
-          );
-          yield* updateProviderSession(
-            anotherTurnIsActive ? "running" : status === "failed" ? "error" : "ready",
-            status === "failed" ? sessionEntity.lastError : null,
-          );
-          yield* emitProviderEvent(
-            status === "failed"
-              ? {
-                  type: "turn.terminal",
-                  driver: OPENCODE_PROVIDER,
+            state.activeTurn = null;
+            if (!turn.isRoot) {
+              yield* emitProviderEvent({
+                type: "node.updated",
+                driver: OPENCODE_PROVIDER,
+                node: {
+                  id: turn.rootNodeId,
+                  threadId: turn.threadId,
+                  runId: null,
+                  parentNodeId: null,
+                  rootNodeId: turn.rootNodeId,
+                  kind: "root_turn",
+                  status,
+                  countsForRun: false,
                   providerThreadId: state.providerThread.id,
                   providerTurnId: turn.providerTurnId,
-                  runOrdinal: turn.runOrdinal,
-                  failureItemOrdinal: itemOrdinal(turn, `terminal-failure:${turn.providerTurnId}`),
-                  status,
-                  failure:
-                    terminal?.failure ??
-                    makeProviderFailure({
-                      message: sessionEntity.lastError ?? undefined,
-                      class: "provider_error",
-                    }),
-                  threadDisposition,
-                }
-              : {
-                  type: "turn.terminal",
-                  driver: OPENCODE_PROVIDER,
-                  providerThreadId: state.providerThread.id,
-                  providerTurnId: turn.providerTurnId,
-                  runOrdinal: turn.runOrdinal,
-                  status,
-                  failure: null,
-                  threadDisposition,
+                  nativeItemRef: providerRef(state.nativeSessionId),
+                  runtimeRequestId: null,
+                  checkpointScopeId: null,
+                  startedAt: turn.startedAt,
+                  completedAt,
                 },
-          );
-        });
+              });
+              return;
+            }
+            const anotherTurnIsActive = Array.from(threads.values()).some(
+              (candidate) => candidate.activeTurn?.isRoot === true,
+            );
+            yield* updateProviderSession(
+              anotherTurnIsActive ? "running" : status === "failed" ? "error" : "ready",
+              status === "failed" ? sessionEntity.lastError : null,
+            );
+            yield* emitProviderEvent(
+              status === "failed"
+                ? {
+                    type: "turn.terminal",
+                    driver: OPENCODE_PROVIDER,
+                    providerThreadId: state.providerThread.id,
+                    providerTurnId: turn.providerTurnId,
+                    runOrdinal: turn.runOrdinal,
+                    failureItemOrdinal: itemOrdinal(
+                      turn,
+                      `terminal-failure:${turn.providerTurnId}`,
+                    ),
+                    status,
+                    failure:
+                      terminal?.failure ??
+                      makeProviderFailure({
+                        message: sessionEntity.lastError ?? undefined,
+                        class: "provider_error",
+                      }),
+                    threadDisposition,
+                  }
+                : {
+                    type: "turn.terminal",
+                    driver: OPENCODE_PROVIDER,
+                    providerThreadId: state.providerThread.id,
+                    providerTurnId: turn.providerTurnId,
+                    runOrdinal: turn.runOrdinal,
+                    status,
+                    failure: null,
+                    threadDisposition,
+                  },
+            );
+          },
+          (effect, _state, turn) =>
+            Effect.suspend(() => {
+              if (turn.finalized) return Deferred.await(turn.finalizationSettled);
+              turn.finalized = true;
+              return effect.pipe(
+                Effect.ensuring(Deferred.succeed(turn.finalizationSettled, undefined)),
+              );
+            }),
+        );
 
         const promptAdmissionIsCurrent = (
           state: OpenCodeThreadState,
@@ -2320,6 +2331,7 @@ export function makeOpenCodeAdapterV2(
             admissionMessageId: null,
             interrupted: false,
             finalized: false,
+            finalizationSettled: Deferred.makeUnsafe<void>(),
             planId: null,
             admissionGeneration: 0,
             admissionReconciliationGeneration: null,
@@ -3039,6 +3051,9 @@ export function makeOpenCodeAdapterV2(
                 Effect.orElseSucceed(() => []),
               )).find((entry) => entry.name === match[1])
             : undefined;
+          if (turn.finalized || state.activeTurn !== turn) {
+            return yield* protocolError(`OpenCode turn ${turn.providerTurnId} is not active`);
+          }
           if (!command) {
             return yield* sdkCall("session.promptAsync", payload, (signal) =>
               client.session.promptAsync(payload, {
@@ -3285,6 +3300,7 @@ export function makeOpenCodeAdapterV2(
                 admissionMessageId,
                 interrupted: false,
                 finalized: false,
+                finalizationSettled: Deferred.makeUnsafe<void>(),
                 planId: null,
                 admissionGeneration: state.nextAdmissionGeneration++,
                 admissionReconciliationGeneration: null,
@@ -3415,7 +3431,8 @@ export function makeOpenCodeAdapterV2(
                 turn === undefined ||
                 turn === null ||
                 turn.providerTurnId !== steerInput.providerTurnId ||
-                turn.interrupted
+                turn.interrupted ||
+                turn.finalized
               ) {
                 return yield* protocolError(
                   `OpenCode turn ${steerInput.providerTurnId} is not active`,
