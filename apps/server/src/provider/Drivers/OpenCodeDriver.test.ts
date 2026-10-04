@@ -100,6 +100,7 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
           requested,
         );
         const directories: string[] = [];
+        let agentsUnavailable = true;
         const server = HttpClient.make((request) => {
           if (new URL(request.url).pathname !== "/api/agent") return replay.execute(request);
           const directory = request.urlParams.params.find(
@@ -107,6 +108,11 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
           )?.[1];
           assert.isDefined(directory);
           directories.push(directory!);
+          if (directory === "/unavailable" && agentsUnavailable) {
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(request, new Response(null, { status: 503 })),
+            );
+          }
           return Effect.succeed(
             HttpClientResponse.fromWeb(
               request,
@@ -133,7 +139,9 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
           server,
         );
 
-        const workspace = yield* instance.snapshotForCwd!("/work");
+        const first = yield* instance.snapshotForCwd!("/work").pipe(Effect.forkChild);
+        yield* TestClock.adjust("11 seconds");
+        const workspace = yield* Fiber.join(first);
         assert.includeMembers(
           workspace.skills.map((skill) => skill.name),
           ["plum", "opencode"],
@@ -153,17 +161,35 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
             { id: "readonly", label: "Readonly" },
           ],
         });
-        const other = yield* instance.snapshotForCwd!("/other");
+        const second = yield* instance.snapshotForCwd!("/other").pipe(Effect.forkChild);
+        yield* TestClock.adjust("11 seconds");
+        const other = yield* Fiber.join(second);
         const agent = other.optionDescriptors?.[0];
         assert.deepStrictEqual(
           agent?.type === "select" ? agent.options.map((option) => option.id) : [],
           ["build", "plan", "audit"],
         );
-        assert.deepStrictEqual(directories, ["/work", "/other"]);
+        assert.deepStrictEqual(
+          (yield* instance.snapshotForCwd!("/work")).optionDescriptors,
+          workspace.optionDescriptors,
+        );
+        const unavailable = yield* instance.snapshotForCwd!("/unavailable").pipe(Effect.forkChild);
+        yield* TestClock.adjust("11 seconds");
+        const failedAgents = yield* Fiber.join(unavailable);
+        assert.deepStrictEqual(failedAgents.skills, workspace.skills);
+        assert.deepStrictEqual(failedAgents.slashCommands, workspace.slashCommands);
+        const failedAgent = failedAgents.optionDescriptors?.[0];
+        assert.deepStrictEqual(failedAgent?.type === "select" ? failedAgent.options : [], []);
+        agentsUnavailable = false;
+        assert.deepStrictEqual(
+          (yield* instance.snapshotForCwd!("/unavailable")).optionDescriptors,
+          other.optionDescriptors,
+        );
+        assert.deepStrictEqual([...new Set(directories)], ["/work", "/other", "/unavailable"]);
         assert.deepStrictEqual((yield* instance.snapshot.getSnapshot).models, workspace.models);
         assert.include(requested, "/api/skill");
         assert.deepStrictEqual(serverStarts, []);
-      }).pipe(Effect.scoped),
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
 
   it.effect("loads OpenCode 1 project agents through a client bound to each directory", () =>

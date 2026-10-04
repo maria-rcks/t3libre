@@ -317,9 +317,17 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       // A 2.x server lists agents, skills and commands per directory, so one server
       // answers every workspace. Its event stream says when a directory it had
       // not served yet finished scanning.
+      const loadedOpenCode2Directories = new WeakMap<
+        OpenCode2Server.OpenCode2Connection,
+        Set<string>
+      >();
       const listOpenCode2Workspace = (cwd: string) =>
-        openCode2Server.withConnection(({ client, events }) =>
+        openCode2Server.withConnection((connection) =>
           Effect.gen(function* () {
+            const { client, events } = connection;
+            const loadedDirectories =
+              loadedOpenCode2Directories.get(connection) ?? new Set<string>();
+            loadedOpenCode2Directories.set(connection, loadedDirectories);
             const location = { directory: cwd };
             const scanned = yield* Deferred.make<void>();
             const pending = new Set(["command.updated", "skill.updated", "agent.updated"]);
@@ -338,17 +346,23 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
                 Effect.forkScoped,
               );
             }
-            return yield* loadOpenCode2Workspace(
+            const workspace = yield* loadOpenCode2Workspace(
               Effect.all(
                 {
-                  agents: client.agent.list({ location }).pipe(Effect.map((list) => list.data)),
+                  agents: client.agent.list({ location }).pipe(
+                    Effect.map((list) => list.data),
+                    Effect.orElseSucceed(() => []),
+                  ),
                   skills: client.skill.list({ location }).pipe(Effect.map((list) => list.data)),
                   commands: client.command.list({ location }).pipe(Effect.map((list) => list.data)),
                 },
                 { concurrency: "unbounded" },
               ),
               Deferred.await(scanned),
+              loadedDirectories.has(cwd),
             );
+            loadedDirectories.add(cwd);
+            return workspace;
           }).pipe(Effect.scoped),
         );
       const serverOwner = yield* OpenCodeServerOwner.make({

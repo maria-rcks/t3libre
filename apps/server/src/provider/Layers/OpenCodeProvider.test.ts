@@ -815,7 +815,10 @@ const builtinSkills = [
   { id: "report", name: "Report", path: "/builtin/report.md" },
 ];
 const scanned: OpenCode2Workspace = {
-  agents: [{ id: "build", mode: "primary", hidden: false }],
+  agents: [
+    { id: "build", mode: "primary", hidden: false },
+    { id: "readonly", mode: "all", hidden: false },
+  ],
   commands: [...builtinCommands, { name: "hello", description: "Say hello to the workspace" }],
   skills: [
     ...builtinSkills,
@@ -844,9 +847,16 @@ it.effect("reads a fresh OpenCode 2 directory again once its scan has ended", ()
   }),
 );
 
-it.effect("waits for agents when an OpenCode 2 directory already lists commands", () =>
+it.effect("waits for project agents when OpenCode 2 already lists built-ins", () =>
   Effect.gen(function* () {
-    const reads: Array<OpenCode2Workspace> = [{ ...scanned, agents: [] }, scanned];
+    const reads: Array<OpenCode2Workspace> = [
+      {
+        ...scanned,
+        agents: [{ id: "build", mode: "primary", hidden: false }],
+        commands: builtinCommands,
+      },
+      scanned,
+    ];
     const scanEnded = yield* Deferred.make<void>();
     const load = yield* loadOpenCode2Workspace(
       Effect.sync(() => reads.shift()!),
@@ -861,7 +871,7 @@ it.effect("waits for agents when an OpenCode 2 directory already lists commands"
 
 it.effect("takes a served OpenCode 2 directory's first listing as is", () =>
   Effect.gen(function* () {
-    const workspace = yield* loadOpenCode2Workspace(Effect.succeed(scanned), Effect.never);
+    const workspace = yield* loadOpenCode2Workspace(Effect.succeed(scanned), Effect.never, true);
     NodeAssert.deepEqual(workspace, scanned);
   }),
 );
