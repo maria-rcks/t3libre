@@ -1,6 +1,7 @@
 import {
   type ClaudeSettings,
   type ModelCapabilities,
+  type ServerProvider,
   type ServerProviderSlashCommand,
   type ServerProviderResetCredits,
 } from "@t3tools/contracts";
@@ -415,6 +416,27 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
     shell: spawnCommand.shell,
   });
   return yield* spawnAndCollect(claudeSettings.binaryPath, command);
+});
+
+/** Read commands from the same cwd Claude uses for a workspace session. */
+export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnapshot")(function* (
+  claudeSettings: ClaudeSettings,
+  machineSnapshot: ServerProvider,
+  cwd: string,
+  environment?: NodeJS.ProcessEnv,
+): Effect.fn.Return<ServerProvider, never, FileSystem.FileSystem | Path.Path> {
+  if (!claudeSettings.enabled) return machineSnapshot;
+  const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd);
+  if (!capabilities) {
+    // The registry skips failed workspace snapshots, leaving discovery retryable.
+    return { ...machineSnapshot, status: "error" };
+  }
+  const skills = yield* discoverClaudeSkills(claudeSettings, cwd, environment);
+  return {
+    ...machineSnapshot,
+    skills,
+    slashCommands: dedupeSlashCommands([COMPACT_SLASH_COMMAND, ...capabilities.slashCommands]),
+  };
 });
 
 export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(function* (
