@@ -34,7 +34,7 @@ export const runDefaultServerCommand = (flags: CliServerFlags) =>
     if (Option.isSome(flags.cwd)) {
       const cwd = flags.cwd.value.trim();
       const fs = yield* FileSystem.FileSystem;
-      const explicitPath = cwd === "." || cwd === ".." || cwd === "~" || /[/\\]/.test(cwd);
+      const explicitPath = cwd === "." || cwd === ".." || cwd === "~" || /[/\\]|^[a-z]:/i.test(cwd);
       if (
         !explicitPath &&
         (!(yield* fs.exists(cwd)) || (yield* fs.stat(cwd)).type !== "Directory")

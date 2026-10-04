@@ -182,6 +182,7 @@ describe("t3 server command safety", () => {
           ["start"],
           ["."],
           ["node_modules"],
+          ["C:new-project"],
           [newDirectory],
           ["start", newDirectory],
         ]) {
