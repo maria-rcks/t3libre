@@ -5,6 +5,7 @@ import {
   CheckpointRef,
   EnvironmentId,
   MessageId,
+  ProjectId,
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -275,7 +276,13 @@ describe("timeline tooltip scroll dismissal", () => {
     "hover then focus",
     "outside timeline",
     "wheel without scroll",
-  ])("handles %s through the real tooltip interactions", async (interaction) => {
+    "pr hover",
+    "pr delayed hover",
+    "pr focus",
+    "pr hover then focus",
+  ])("handles %s through the real tooltip interactions", async (scenario) => {
+    const isPullRequest = scenario.startsWith("pr ");
+    const interaction = isPullRequest ? scenario.slice(3) : scenario;
     vi.unstubAllGlobals();
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.useFakeTimers();
@@ -285,7 +292,33 @@ describe("timeline tooltip scroll dismissal", () => {
     document.body.append(container);
     const root = createRoot(container);
     const onMouseEnter = vi.fn();
-    const tooltip = (
+    const query = await import("~/state/query");
+    const querySpy = isPullRequest
+      ? vi.spyOn(query, "useEnvironmentQuery").mockReturnValue({
+          data: null,
+          dataUpdatedAt: 0,
+          error: "Pull request not found",
+          failure: null,
+          isPending: false,
+          isSuccess: false,
+          refresh: vi.fn(),
+        })
+      : null;
+    const { PullRequestLinkPreview } = await import("../pullRequest/PullRequestLinkPreview");
+    const tooltip = isPullRequest ? (
+      <PullRequestLinkPreview
+        link={<button onMouseEnter={onMouseEnter}>message link</button>}
+        originalUrl="https://example.com"
+        target={{
+          environmentId: ACTIVE_THREAD_ENVIRONMENT_ID,
+          input: {
+            projectId: ProjectId.make("project-1"),
+            repository: "pingdotgg/t3code",
+            number: 1,
+          },
+        }}
+      />
+    ) : (
       <Tooltip>
         <TooltipTrigger delay={50} onMouseEnter={onMouseEnter}>
           message link
@@ -318,7 +351,9 @@ describe("timeline tooltip scroll dismissal", () => {
           document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
           trigger.focus();
         }
-        if (interaction !== "delayed hover") await vi.advanceTimersByTimeAsync(60);
+        if (interaction !== "delayed hover") {
+          await vi.advanceTimersByTimeAsync(isPullRequest ? 400 : 60);
+        }
       });
       expect(onMouseEnter).toHaveBeenCalledTimes(interaction === "focus" ? 0 : 1);
       expect(
@@ -331,7 +366,7 @@ describe("timeline tooltip scroll dismissal", () => {
             ? new WheelEvent("wheel", { bubbles: true, deltaY: 100 })
             : new Event("scroll"),
         );
-        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(isPullRequest ? 1000 : 100);
       });
       expect(
         document.querySelector('[data-slot="tooltip-popup"][data-open]')?.textContent ?? null,
@@ -343,6 +378,7 @@ describe("timeline tooltip scroll dismissal", () => {
       }
     } finally {
       await act(async () => root.unmount());
+      querySpy?.mockRestore();
       container.remove();
       vi.useRealTimers();
       vi.unstubAllGlobals();
