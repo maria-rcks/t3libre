@@ -90,6 +90,7 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
           slashCommands: [{ name: "server-cwd-only" }],
           skills: [],
         } satisfies ServerProvider;
+        let usageCalls = 0;
         const query = vi.spyOn(ClaudeSdk, "query").mockImplementation(({ options }) => {
           assert.equal(options?.env?.CLAUDE_CONFIG_DIR, configDir);
           assert.equal(options?.env?.T3_WORKSPACE_PROBE, "owned-instance");
@@ -108,10 +109,10 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
                 { name: "user-command", description: "Existing user command", argumentHint: "" },
               ],
             }),
-            usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => ({
-              rate_limits_available: false,
-              rate_limits: null,
-            }),
+            usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => {
+              usageCalls++;
+              return { rate_limits_available: false, rate_limits: null };
+            },
           } as ReturnType<typeof ClaudeSdk.query>;
         });
         yield* Effect.addFinalizer(() => Effect.sync(() => query.mockRestore()));
@@ -149,6 +150,7 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
           query.mock.calls.map(([input]) => input.options?.cwd),
           workspaces,
         );
+        assert.equal(usageCalls, 0);
       }).pipe(Effect.scoped),
   );
 

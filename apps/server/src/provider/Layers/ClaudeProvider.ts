@@ -334,6 +334,7 @@ const probeClaudeCapabilities = (
   claudeSettings: ClaudeSettings,
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
+  includeUsage = true,
 ) => {
   const abort = new AbortController();
   return Effect.gen(function* () {
@@ -365,15 +366,18 @@ const probeClaudeCapabilities = (
     Effect.flatMap(({ q, init }) =>
       Effect.gen(function* () {
         // Usage has its own deadline so a slow optional request cannot discard initialization.
-        const usageResult = yield* Effect.tryPromise(() =>
-          q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(),
-        ).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result);
-        const usage = Result.isSuccess(usageResult)
-          ? {
-              rate_limits_available: usageResult.success.rate_limits_available,
-              rate_limits: usageResult.success.rate_limits,
-            }
+        const usageResult = includeUsage
+          ? yield* Effect.tryPromise(() =>
+              q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(),
+            ).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result)
           : undefined;
+        const usage =
+          usageResult && Result.isSuccess(usageResult)
+            ? {
+                rate_limits_available: usageResult.success.rate_limits_available,
+                rate_limits: usageResult.success.rate_limits,
+              }
+            : undefined;
         const account = init.account as
           | {
               readonly email?: string;
@@ -426,7 +430,7 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
   environment?: NodeJS.ProcessEnv,
 ): Effect.fn.Return<ServerProvider, never, FileSystem.FileSystem | Path.Path> {
   if (!claudeSettings.enabled) return machineSnapshot;
-  const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd);
+  const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false);
   if (!capabilities) {
     // The registry skips failed workspace snapshots, leaving discovery retryable.
     return { ...machineSnapshot, status: "error" };
