@@ -298,7 +298,7 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => false),
     );
 
-  /** Stages, publishes, and prunes `<baseDir>/tools/<tool>/<version>` unless it is already complete. */
+  /** Stages and atomically publishes `<baseDir>/tools/<tool>/<version>` if not already complete. */
   const installOnce = Effect.fn("ServerBrowserToolchain.installOnce")(function* (
     tool: string,
     version: string,
@@ -311,9 +311,6 @@ const make = Effect.gen(function* () {
     if (yield* isInstalled(installDir, version)) return;
 
     yield* fs
-      .remove(installDir, { recursive: true, force: true })
-      .pipe(Effect.mapError(fail("removing an incomplete install")));
-    yield* fs
       .makeDirectory(parentDir, { recursive: true })
       .pipe(Effect.mapError(fail("preparing the install directory")));
     const stagingDir = yield* fs
@@ -325,6 +322,8 @@ const make = Effect.gen(function* () {
       yield* fs
         .writeFileString(path.join(stagingDir, SENTINEL), `${version}\n`)
         .pipe(Effect.mapError(fail("recording the completed install")));
+      // Published versions may be in use by other servers. Never remove them;
+      // rename cannot replace a completed, nonempty install directory.
       yield* fs.rename(stagingDir, installDir).pipe(
         Effect.catch((cause) =>
           // A concurrent server may have published the same version first.
@@ -335,12 +334,6 @@ const make = Effect.gen(function* () {
           ),
         ),
       );
-      // Only runs right after an upgrade; dot entries are other installs' staging dirs.
-      const names = yield* fs.readDirectory(parentDir).pipe(Effect.orElseSucceed(() => []));
-      yield* Effect.forEach(
-        names.filter((name) => !name.startsWith(".") && name !== version),
-        (name) => fs.remove(path.join(parentDir, name), { recursive: true, force: true }),
-      ).pipe(Effect.ignore);
     }).pipe(
       Effect.ensuring(fs.remove(stagingDir, { recursive: true, force: true }).pipe(Effect.ignore)),
     );

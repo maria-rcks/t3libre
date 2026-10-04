@@ -211,6 +211,7 @@ interface ServerTab {
   loading: boolean;
   closing: boolean;
   recording: Recording | null;
+  initialNavigation: Promise<void> | null;
   /** The latest queued start, so a stop can find a recording still starting. */
   recordingStart: Promise<Recording> | null;
   /** Serializes captures and recording start/stop. */
@@ -381,8 +382,9 @@ const make = Effect.gen(function* () {
       [...tab.viewers]
         .map((viewer) => viewer.requestedSize)
         .filter((requested) => requested !== null)
-        .sort((left, right) => right.order - left.order)[0];
-    if (size) await tab.page.setViewportSize({ width: size.width, height: size.height });
+        .sort((left, right) => right.order - left.order)[0] ??
+      UNATTACHED_FILL_VIEWPORT;
+    await tab.page.setViewportSize({ width: size.width, height: size.height });
     broadcastViewport(tab);
   };
 
@@ -419,6 +421,7 @@ const make = Effect.gen(function* () {
       closing: false,
       recording: null,
       recordingStart: null,
+      initialNavigation: null,
       captureLock: Promise.resolve(),
       capturing: 0,
     };
@@ -502,21 +505,25 @@ const make = Effect.gen(function* () {
     tabs.set(tabKey(tab.threadId, tab.tabId), tab);
     reportLiveTabs();
     if (snapshot.navStatus._tag === "Loading") {
-      void page.goto(snapshot.navStatus.url).catch(() => undefined);
+      tab.initialNavigation = page
+        .goto(snapshot.navStatus.url, { waitUntil: "commit", timeout: NAVIGATION_TIMEOUT_MS })
+        .then(
+          () => undefined,
+          () => undefined,
+        );
     }
     return tab;
   };
 
   const ensureTab = (snapshot: PreviewSessionSnapshot): Promise<ServerTab> => {
     const key = tabKey(snapshot.threadId, snapshot.tabId);
+    const pending = pendingTabs.get(key);
+    if (pending) return pending;
     const existing = tabs.get(key);
     if (existing) return Promise.resolve(existing);
-    let pending = pendingTabs.get(key);
-    if (!pending) {
-      pending = createTab(snapshot).finally(() => pendingTabs.delete(key));
-      pendingTabs.set(key, pending);
-    }
-    return pending;
+    const opening = createTab(snapshot).finally(() => pendingTabs.delete(key));
+    pendingTabs.set(key, opening);
+    return opening;
   };
 
   /** Server tabs that exist in PreviewManager but have not finished opening here. */
@@ -872,8 +879,9 @@ const make = Effect.gen(function* () {
             }),
           );
         };
+        const navigationTimeout = Math.min(request.timeoutMs, NAVIGATION_TIMEOUT_MS);
         if (existing) {
-          if (url) await navigate(existing, url, "load", request.timeoutMs);
+          if (url) await navigate(existing, url, "load", navigationTimeout);
           await revealTab(existing);
           return statusWithTitle(existing);
         }
@@ -886,10 +894,12 @@ const make = Effect.gen(function* () {
           }),
         );
         const tab = await ensureTab(snapshot);
+        // Wait for the requested document without blocking manager events for other tabs.
+        await tab.initialNavigation;
         await revealTab(tab);
         if (url) {
           await tab.page
-            .waitForLoadState("load", { timeout: request.timeoutMs })
+            .waitForLoadState("load", { timeout: navigationTimeout })
             .catch(() => undefined);
         }
         return statusWithTitle(tab);

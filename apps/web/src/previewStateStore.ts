@@ -315,7 +315,7 @@ export function reconcilePreviewServerSessions(
   updateThreadPreviewState(ref, (current) => {
     const sameServer = current.serverEpoch === result.serverEpoch;
     if (sameServer && result.revision < current.serverRevision) {
-      return current.listLoaded ? current : { ...current, listLoaded: true };
+      return current;
     }
     const snapshots = result.sessions;
     const sessions: Record<string, PreviewSessionSnapshot> = {};
