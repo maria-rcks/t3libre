@@ -7,7 +7,12 @@ import {
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
-import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  type ScopedProjectRef,
+  type ScopedThreadRef,
+  ThreadId,
+} from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
@@ -49,6 +54,16 @@ import { useClientSettings } from "./useSettings";
 import * as ThreadUndo from "./threadUndo";
 import { showThreadUndoNotice } from "./showThreadUndoNotice";
 import { useAtomCommand } from "../state/use-atom-command";
+
+declare module "@tanstack/react-router" {
+  interface HistoryState {
+    archiveDraftRetry?: {
+      projectRef: ScopedProjectRef;
+      threadRef: ScopedThreadRef;
+      cancelled?: boolean;
+    };
+  }
+}
 
 export class ThreadArchiveBlockedError extends Schema.TaggedError<ThreadArchiveBlockedError>()(
   "ThreadArchiveBlockedError",
@@ -325,15 +340,39 @@ export function useThreadActions() {
   const unarchiveThread = useCallback(
     async (target: ScopedThreadRef, opts: { navigate?: boolean } = {}) => {
       ThreadUndo.invalidate("archive", scopedThreadKey(target));
+      const recoveryLocation = router.history.location;
+      const recovery = recoveryLocation.state.archiveDraftRetry;
+      const cancelsRecovery =
+        recovery?.threadRef.environmentId === target.environmentId &&
+        recovery.threadRef.threadId === target.threadId;
+      if (cancelsRecovery) {
+        // Replacing the history key cancels an in-flight retry before Undo's RPC settles.
+        router.history.replace(recoveryLocation.href, {
+          ...recoveryLocation.state,
+          archiveDraftRetry: { ...recovery, cancelled: true },
+        });
+      }
+      const requestingHistoryKey = router.history.location.state.__TSR_key;
+      const requestingRouteHref = router.state.location.href;
+      const routeUnchanged = () =>
+        router.history.location.state.__TSR_key === requestingHistoryKey &&
+        router.state.location.href === requestingRouteHref;
       const result = await unarchiveThreadMutation({
         environmentId: target.environmentId,
         input: { threadId: target.threadId },
       });
+      const remainsOnRecovery = cancelsRecovery && routeUnchanged();
+      if (remainsOnRecovery) {
+        router.history.replace(recoveryLocation.href, {
+          ...router.history.location.state,
+          archiveDraftRetry: recovery,
+        });
+      }
       if (result._tag === "Failure") {
         return result;
       }
       refreshArchivedThreadsForEnvironment(target.environmentId);
-      if (opts.navigate) {
+      if (opts.navigate && (!cancelsRecovery || remainsOnRecovery)) {
         return settlePromise(() =>
           router.navigate({
             to: "/$environmentId/$threadId",
@@ -366,12 +405,30 @@ export function useThreadActions() {
       const shouldNavigateToDraft =
         currentRouteThreadRef?.threadId === threadRef.threadId &&
         currentRouteThreadRef.environmentId === threadRef.environmentId;
+      const requestingRouteHref = router.state.location.href;
+      const projectRef = scopeProjectRef(thread.environmentId, thread.projectId);
+      if (shouldNavigateToDraft) {
+        router.history.replace(requestingRouteHref, {
+          ...router.history.location.state,
+          archiveDraftRetry: { projectRef, threadRef },
+        });
+      }
+      const requestingHistoryKey = router.history.location.state.__TSR_key;
+      const routeUnchanged = () =>
+        router.state.location.href === requestingRouteHref &&
+        router.history.location.state.__TSR_key === requestingHistoryKey;
       const action = ThreadUndo.begin("archive", scopedThreadKey(threadRef));
       const archiveResult = await archiveThreadMutation({
         environmentId: threadRef.environmentId,
         input: { threadId: threadRef.threadId },
       });
       if (archiveResult._tag === "Failure") {
+        if (shouldNavigateToDraft && routeUnchanged()) {
+          router.history.replace(requestingRouteHref, {
+            ...router.history.location.state,
+            archiveDraftRetry: undefined,
+          });
+        }
         action.finish();
         return archiveResult;
       }
@@ -389,12 +446,27 @@ export function useThreadActions() {
         failureTitle: "Failed to undo archive",
       });
 
-      if (shouldNavigateToDraft) {
+      if (shouldNavigateToDraft && routeUnchanged()) {
+        let unavailable = false;
         const navigationResult = await settlePromise(() =>
-          handleNewThreadRef.current(scopeProjectRef(thread.environmentId, thread.projectId)),
+          handleNewThreadRef.current(projectRef, {
+            onUnavailable: () => {
+              unavailable = true;
+            },
+          }),
         );
         if (navigationResult._tag === "Failure") {
           return navigationResult;
+        }
+        if (navigationResult.value === null && unavailable && routeUnchanged()) {
+          const recoveryResult = await settlePromise(() =>
+            router.navigate({
+              to: "/",
+              replace: true,
+              state: { archiveDraftRetry: { projectRef, threadRef } },
+            }),
+          );
+          if (recoveryResult._tag === "Failure") return recoveryResult;
         }
         return archiveResult;
       }
@@ -406,6 +478,7 @@ export function useThreadActions() {
       getCurrentRouteThreadRef,
       markThreadVisited,
       resolveThreadTarget,
+      router,
       unarchiveThread,
     ],
   );

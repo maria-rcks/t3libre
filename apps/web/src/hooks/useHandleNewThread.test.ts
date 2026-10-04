@@ -1,5 +1,13 @@
-import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId, type RuntimeMode } from "@t3tools/contracts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  type ModelSelection,
+  type RuntimeMode,
+  ThreadId,
+} from "@t3tools/contracts";
+import type { HistoryState } from "@tanstack/react-router";
 import { act, createElement } from "react";
 import { create } from "react-test-renderer";
 
@@ -9,7 +17,7 @@ const testState = vi.hoisted(() => {
   let targetSettings = {
     defaultThreadEnvMode: "local" as "local" | "worktree" | null,
     newWorktreesStartFromOrigin: false,
-    defaultModelSelection: null,
+    defaultModelSelection: null as ModelSelection | null,
     defaultRuntimeMode: "full-access" as RuntimeMode,
   };
   let storedDraft: {
@@ -18,17 +26,60 @@ const testState = vi.hoisted(() => {
     readonly promotedTo: null;
     readonly threadId: string;
   } | null = null;
+  let historyKey = 0;
+  const location = {
+    href: "/",
+    state: { __TSR_key: "initial" } as HistoryState & { __TSR_key: string },
+  };
+  const previousLocations: (typeof location)[] = [];
   const router = {
     state: {
-      location: { href: "/" },
-      matches: [{ params: {} }],
+      location,
+      matches: [{ params: {} as Record<string, string> }],
     },
-    navigate: vi.fn(async (request: { readonly params: { readonly draftId: string } }) => {
-      router.state.location.href = `/draft/${request.params.draftId}`;
-    }),
+    history: {
+      location,
+      replace: vi.fn((href: string, state: HistoryState) => {
+        location.href = href;
+        location.state = { ...state, __TSR_key: `history-${++historyKey}` };
+      }),
+      back: () => {
+        const previous = previousLocations.pop();
+        if (previous) Object.assign(location, previous);
+      },
+    },
+    navigate: vi.fn(
+      async (request: {
+        readonly to: string;
+        readonly params?: {
+          readonly draftId?: string;
+          readonly threadId?: string;
+          readonly environmentId?: string;
+        };
+        readonly state?: HistoryState;
+        readonly replace?: boolean;
+      }) => {
+        if (!request.replace) previousLocations.push({ ...location, state: { ...location.state } });
+        location.href =
+          request.to === "/draft/$draftId"
+            ? `/draft/${request.params?.draftId}`
+            : request.to === "/$environmentId/$threadId"
+              ? `/environment-ssh/${request.params?.threadId}`
+              : request.to;
+        location.state = { ...request.state, __TSR_key: `history-${++historyKey}` };
+        router.state.matches[0]!.params = request.params ? { ...request.params } : {};
+      },
+    ),
+  };
+  const defaultProject = {
+    id: "project-remote",
+    environmentId: "environment-ssh",
+    workspaceRoot: "/remote/project",
+    defaultThreadEnvMode: null,
+    defaultModelSelection: null,
   };
   const draftStore = {
-    getComposerDraft: vi.fn(() => ({})),
+    getComposerDraft: vi.fn((_key?: unknown) => ({})),
     getDraftSessionByLogicalProjectKey: vi.fn(() => storedDraft),
     getDraftSession: vi.fn(() => null),
     getDraftThread: vi.fn(() => null),
@@ -47,6 +98,20 @@ const testState = vi.hoisted(() => {
       | null,
     toast: vi.fn(),
     projectFileReads: vi.fn(),
+    projects: [defaultProject],
+    bootstrapped: true,
+    nearbyThreads: true,
+    resolveRouteTargets: false,
+    archiveShell: null as { environmentId: string; projectId: string } | null,
+    archive:
+      vi.fn<
+        () => Promise<{ _tag: "Success"; value: undefined } | { _tag: "Failure"; cause: unknown }>
+      >(),
+    unarchive:
+      vi.fn<
+        () => Promise<{ _tag: "Success"; value: undefined } | { _tag: "Failure"; cause: unknown }>
+      >(),
+    archiveNotice: vi.fn<(notice: { undo: () => Promise<unknown> }) => void>(),
     completeProjectFileRead: (value: null) => completeProjectFileRead(value),
     draftStore,
     get projectFileRead() {
@@ -70,14 +135,31 @@ const testState = vi.hoisted(() => {
         defaultRuntimeMode: "full-access",
       };
       router.state.location.href = "/";
+      router.state.location.state = { __TSR_key: `history-${++historyKey}` };
+      router.state.matches[0]!.params = {};
       router.navigate.mockClear();
+      router.history.replace.mockClear();
+      previousLocations.length = 0;
+      this.projects = [defaultProject];
+      this.bootstrapped = true;
+      this.nearbyThreads = true;
+      this.resolveRouteTargets = false;
+      this.archiveShell = null;
+      this.archive.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
+      this.unarchive.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
+      this.archiveNotice.mockClear();
+      this.projectFileReads.mockReset();
+      this.toast.mockClear();
       draftStore.setDraftThreadContext.mockClear();
       draftStore.setLogicalProjectDraftThreadId.mockClear();
+      draftStore.getComposerDraft.mockReset().mockReturnValue({});
+      draftStore.setModelSelection.mockClear();
       projectFileRead = new Promise<null>((resolve) => {
         completeProjectFileRead = resolve;
       });
     },
     router,
+    previousLocations,
   };
 });
 
@@ -139,8 +221,13 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   useLocation: ({
     select,
   }: {
-    select: (location: { hash: string; pathname: string }) => unknown;
-  }) => select({ hash: "", pathname: testState.router.state.location.href }),
+    select: (location: { hash: string; pathname: string; state: HistoryState }) => unknown;
+  }) =>
+    select({
+      hash: "",
+      pathname: testState.router.state.location.href,
+      state: testState.router.state.location.state,
+    }),
   createFileRoute: () => (options: unknown) => ({
     options,
     useRouteContext: () => ({ authGateState: { status: "server" } }),
@@ -150,7 +237,6 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 vi.mock("react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react")>()),
   useCallback: <T>(callback: T) => callback,
-  useMemo: <T>(factory: () => T) => factory(),
 }));
 vi.mock("../components/Sidebar.logic", () => ({
   orderItemsByPreferredIds: () => [],
@@ -163,13 +249,14 @@ vi.mock("../composerDraftStore", () => {
   return {
     composerDraftHasUserContent: () => false,
     markPromotedDraftThreadByRef: vi.fn(),
+    finalizePromotedDraftThreadByRef: vi.fn(),
+    useBackgroundDraftSubmissionPending: () => false,
     useComposerDraftStore,
   };
 });
 vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/chatThreadActions")>()),
   hasExplicitComposerModelSelection: () => false,
-  resolveNewThreadModelSelectionOverride: () => null,
 }));
 vi.mock("../lib/t3ProjectFileDefaults", () => ({
   readT3ProjectFile: () => {
@@ -186,25 +273,29 @@ vi.mock("../logicalProject", () => ({
   getProjectOrderKey: () => "remote-project",
   selectProjectGroupingSettings: () => ({}),
 }));
-vi.mock("../state/entities", () => {
-  const projects = [
-    {
-      id: "project-remote",
-      environmentId: "environment-ssh",
-      workspaceRoot: "/remote/project",
-      defaultThreadEnvMode: null,
-      defaultModelSelection: null,
-    },
-  ];
-  return {
-    readProjects: () => projects,
-    readThreadShell: () => null,
-    useProjects: () => projects,
-    useThreadShells: () => [],
-    useAllEnvironmentShellsBootstrapped: () => true,
-    useThread: () => null,
-  };
-});
+vi.mock("../state/entities", () => ({
+  readProjects: () => testState.projects,
+  readThreadShell: (ref: { threadId: string }) =>
+    ref.threadId === "archive-last" ? testState.archiveShell : null,
+  useProjects: () => testState.projects,
+  useThreadShells: () => [],
+  useAllEnvironmentShellsBootstrapped: () => testState.bootstrapped,
+  useThread: () => null,
+  useThreadShell: () => testState.archiveShell,
+  useThreadRefs: () => [],
+  useEnvironmentThreadRefs: () =>
+    testState.nearbyThreads
+      ? [{ environmentId: "environment-ssh", threadId: "nearby-thread" }]
+      : [],
+}));
+vi.mock("../state/query", () => ({
+  useEnvironmentQuery: () => ({ data: { snapshot: { _tag: "Some" } } }),
+}));
+vi.mock("../components/ChatView", () => ({ default: "article" }));
+vi.mock("../components/ChatView.logic", () => ({
+  threadHasStarted: () => false,
+  resolveDraftPromotionNavigationTarget: () => null,
+}));
 vi.mock("../state/environments", () => ({
   useEnvironments: () => ({ environments: [], isReady: true }),
 }));
@@ -226,26 +317,46 @@ vi.mock("../state/server", () => ({
   environmentServerConfigsAtom: {},
   primaryServerSettingsAtom: "primary-settings",
 }));
-vi.mock("../threadRoutes", () => ({ resolveThreadRouteTarget: () => null }));
+vi.mock("../threadRoutes", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../threadRoutes")>();
+  return {
+    ...original,
+    resolveThreadRouteTarget: (params: Parameters<typeof original.resolveThreadRouteTarget>[0]) =>
+      testState.resolveRouteTargets ? original.resolveThreadRouteTarget(params) : null,
+  };
+});
 vi.mock("../uiStateStore", () => ({
   legacyProjectCwdPreferenceKey: () => "remote-project",
   useUiStateStore: () => [],
 }));
 vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
+vi.mock("../terminalUiStateStore", () => ({ useTerminalUiStateStore: () => vi.fn() }));
+vi.mock("../lib/archivedThreadsState", () => ({ refreshArchivedThreadsForEnvironment: vi.fn() }));
+vi.mock("./showThreadUndoNotice", () => ({ showThreadUndoNotice: testState.archiveNotice }));
+vi.mock("../state/use-atom-command", () => ({
+  useAtomCommand: (command: unknown) =>
+    command === threadEnvironment.archive
+      ? testState.archive
+      : command === threadEnvironment.unarchive
+        ? testState.unarchive
+        : vi.fn(),
+}));
 
 vi.mock("../rpc/atomRegistry", () => ({
   appAtomRegistry: {
-    get: () =>
+    get: (atom: unknown) =>
       testState.connectionPhase === null
         ? null
         : {
-            connection: { phase: testState.connectionPhase },
+            connection: {
+              phase: atom === "environment-primary" ? "connected" : testState.connectionPhase,
+            },
             entry: { target: { label: "Build box" } },
           },
   },
 }));
 vi.mock("../state/presentation", () => ({
-  environmentPresentations: { presentationAtom: () => "environment-presentation" },
+  environmentPresentations: { presentationAtom: (environmentId: string) => environmentId },
 }));
 vi.mock("../components/ui/toast", () => ({
   stackedThreadToast: <T>(input: T) => input,
@@ -253,9 +364,12 @@ vi.mock("../components/ui/toast", () => ({
 }));
 
 import { useNewThreadHandler } from "./useHandleNewThread";
+import { useThreadActions } from "./useThreadActions";
+import { threadEnvironment } from "../state/threads";
 import * as newThread from "./useHandleNewThread";
 import { Route } from "../routes/_chat.index";
 import { Route as WelcomeRoute } from "../routes/welcome";
+import { ThreadRouteView } from "../components/ThreadRouteView";
 
 describe.each([
   ["new", null],
@@ -519,4 +633,392 @@ it("keeps welcome open when an imported checkout is unavailable and retries that
     testState.connectionPhase = "connected";
     vi.unstubAllGlobals();
   }
+});
+
+describe("archive draft recovery", () => {
+  const target = {
+    environmentId: EnvironmentId.make("environment-ssh"),
+    threadId: ThreadId.make("archive-last"),
+  };
+  const projectRef = {
+    environmentId: target.environmentId,
+    projectId: ProjectId.make("project-remote"),
+  };
+  let actions: ReturnType<typeof useThreadActions>;
+  let renderer: ReturnType<typeof create>;
+
+  function Probe() {
+    actions = useThreadActions();
+    return createElement(ThreadRouteView, { target: { kind: "server", threadRef: target } });
+  }
+
+  beforeEach(async () => {
+    testState.reset(null);
+    testState.connectionPhase = "connected";
+    testState.archiveShell = projectRef;
+    testState.router.state.location.href = "/environment-ssh/archive-last";
+    testState.router.state.matches[0]!.params = target;
+    testState.projects.unshift({
+      ...testState.projects[0]!,
+      environmentId: "environment-primary",
+      id: "project-other",
+    });
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    await Route.options.component!.preload?.();
+    renderer = await act(async () => create(createElement(Probe)));
+  });
+
+  afterEach(async () => {
+    await act(async () => renderer.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it("retains the archived checkout after disconnect and retries that same checkout", async () => {
+    let resolveArchive!: (value: { _tag: "Success"; value: undefined }) => void;
+    const archiveDone = new Promise<{ _tag: "Success"; value: undefined }>((resolve) => {
+      resolveArchive = resolve;
+    });
+    testState.archive.mockReturnValueOnce(archiveDone);
+    const pendingArchive = actions.archiveThread(target);
+    await act(async () => {
+      testState.connectionPhase = "reconnecting";
+      testState.archiveShell = null;
+      renderer.update(createElement(Probe));
+    });
+    expect(testState.router.state.location.href).toBe("/");
+    expect(testState.router.state.location.state.archiveDraftRetry?.projectRef).toEqual(projectRef);
+    resolveArchive({ _tag: "Success", value: undefined });
+    await pendingArchive;
+
+    expect(testState.router.state.location.href).toBe("/");
+    expect(testState.router.state.location.state.archiveDraftRetry?.projectRef).toEqual(projectRef);
+    expect(testState.projectFileReads).not.toHaveBeenCalled();
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    const retry = renderer.root.findByType("button");
+    expect(retry.children).toContain("Try again");
+    expect(renderer.toJSON()).not.toBeNull();
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+
+    await act(async () => retry.props.onClick());
+    expect(testState.projectFileReads).not.toHaveBeenCalled();
+    expect(testState.router.state.location.href).toBe("/");
+    testState.connectionPhase = "connected";
+    await act(async () => renderer.root.findByType("button").props.onClick());
+    expect(testState.router.state.location.href).toBe("/draft/draft-delayed");
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledExactlyOnceWith(
+      "remote-project",
+      projectRef,
+      "draft-delayed",
+      expect.objectContaining({ envMode: "local" }),
+    );
+    expect(testState.archive).toHaveBeenCalledOnce();
+  });
+
+  it("preserves user navigation during the archive rpc", async () => {
+    let resolveArchive!: (value: { _tag: "Success"; value: undefined }) => void;
+    const archiveDone = new Promise<{ _tag: "Success"; value: undefined }>((resolve) => {
+      resolveArchive = resolve;
+    });
+    testState.archive.mockReturnValueOnce(archiveDone);
+    const pendingArchive = actions.archiveThread(target);
+    await testState.router.navigate({ to: "/usage" });
+    testState.connectionPhase = "reconnecting";
+    resolveArchive({ _tag: "Success", value: undefined });
+    await pendingArchive;
+    expect(testState.router.state.location.href).toBe("/usage");
+    expect(testState.router.state.location.state.archiveDraftRetry).toBeUndefined();
+    expect(testState.router.navigate).toHaveBeenCalledOnce();
+    expect(testState.toast).not.toHaveBeenCalled();
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+    testState.archiveShell = null;
+    testState.router.history.back();
+    await act(async () => renderer.update(createElement(Probe)));
+    expect(testState.router.state.location.href).toBe("/");
+    expect(testState.router.state.location.state.archiveDraftRetry?.projectRef).toEqual(projectRef);
+  });
+
+  it("recovers the archived checkout when back reaches the missing thread", async () => {
+    await actions.archiveThread(target);
+    expect(testState.router.state.location.href).toBe("/draft/draft-delayed");
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledOnce();
+    testState.archiveShell = null;
+    testState.router.history.back();
+    await act(async () => renderer.update(createElement(Probe)));
+    expect(testState.router.state.location.href).toBe("/");
+    expect(testState.router.state.location.state.archiveDraftRetry?.projectRef).toEqual(projectRef);
+  });
+
+  it("clears archive recovery context when its rpc fails", async () => {
+    testState.archive.mockResolvedValueOnce({
+      _tag: "Failure",
+      cause: new Error("archive failed"),
+    });
+    const result = await actions.archiveThread(target);
+    expect(result._tag).toBe("Failure");
+    expect(testState.router.state.location.href).toBe("/environment-ssh/archive-last");
+    expect(testState.router.state.location.state.archiveDraftRetry).toBeUndefined();
+    expect(testState.router.navigate).not.toHaveBeenCalled();
+    expect(testState.archiveNotice).not.toHaveBeenCalled();
+  });
+
+  it("automatically opens the exact checkout when its missing-thread redirect precedes the rpc", async () => {
+    let resolveArchive!: (value: { _tag: "Success"; value: undefined }) => void;
+    const archiveDone = new Promise<{ _tag: "Success"; value: undefined }>((resolve) => {
+      resolveArchive = resolve;
+    });
+    testState.archive.mockReturnValueOnce(archiveDone);
+    const pendingArchive = actions.archiveThread(target);
+    testState.archiveShell = null;
+    await act(async () => renderer.update(createElement(Probe)));
+    expect(testState.router.state.location.href).toBe("/");
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    expect(testState.router.state.location.href).toBe("/draft/draft-delayed");
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledExactlyOnceWith(
+      "remote-project",
+      projectRef,
+      "draft-delayed",
+      expect.objectContaining({ envMode: "local" }),
+    );
+    resolveArchive({ _tag: "Success", value: undefined });
+    await pendingArchive;
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledOnce();
+    expect(testState.toast).not.toHaveBeenCalled();
+  });
+
+  it("keeps the last archived thread's checkout available to retry", async () => {
+    testState.nearbyThreads = false;
+    let resolveArchive!: (value: { _tag: "Success"; value: undefined }) => void;
+    const archiveDone = new Promise<{ _tag: "Success"; value: undefined }>((resolve) => {
+      resolveArchive = resolve;
+    });
+    testState.archive.mockReturnValueOnce(archiveDone);
+    const pendingArchive = actions.archiveThread(target);
+    testState.connectionPhase = "reconnecting";
+    testState.archiveShell = null;
+    await act(async () => renderer.update(createElement(Probe)));
+    expect(testState.router.state.location.href).toBe("/");
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    resolveArchive({ _tag: "Success", value: undefined });
+    await pendingArchive;
+    expect(renderer.root.findByType("button").props.disabled).toBe(false);
+    expect(testState.router.state.location.state.archiveDraftRetry?.projectRef).toEqual(projectRef);
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary missing-thread recovery free of archive context", async () => {
+    testState.archiveShell = null;
+    await act(async () => renderer.update(createElement(Probe)));
+    expect(testState.router.state.location.href).toBe("/");
+    expect(testState.router.state.location.state.archiveDraftRetry).toBeUndefined();
+  });
+
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])(
+    "carries the archived thread's working mode and model (early redirect: %s, configured model: %s)",
+    async (early, configured) => {
+      testState.resolveRouteTargets = true;
+      const { useComposerDraftStore: realComposerDraftStore } =
+        await vi.importActual<typeof import("../composerDraftStore")>("../composerDraftStore");
+      const originStore = realComposerDraftStore.getState();
+      const carriedSelection = {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "carried-model",
+      };
+      const configuredSelection = {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "configured-model",
+      };
+      testState.targetSettings.defaultModelSelection = configured ? configuredSelection : null;
+      originStore.clearDraftThread(target);
+      originStore.setInteractionMode(target, "plan");
+      originStore.setModelSelection(target, carriedSelection, { explicit: true });
+      testState.draftStore.getComposerDraft.mockImplementation((key) =>
+        typeof key === "object" &&
+        key !== null &&
+        "threadId" in key &&
+        key.threadId === target.threadId
+          ? (realComposerDraftStore.getState().getComposerDraft(target) ?? {})
+          : {},
+      );
+      let resolveArchive!: (value: { _tag: "Success"; value: undefined }) => void;
+      testState.archive.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveArchive = resolve;
+        }),
+      );
+      const pendingArchive = actions.archiveThread(target);
+      testState.archiveShell = null;
+      expect(originStore.getComposerDraft(target)?.interactionMode).toBe("plan");
+      expect(
+        originStore.getComposerDraft(target)?.modelSelectionByProvider[carriedSelection.instanceId],
+      ).toEqual(carriedSelection);
+      if (early) {
+        await act(async () => renderer.update(createElement(Probe)));
+        await act(async () => renderer.update(createElement(Route.options.component!)));
+      }
+      resolveArchive({ _tag: "Success", value: undefined });
+      await pendingArchive;
+      expect.soft(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+        "remote-project",
+        projectRef,
+        "draft-delayed",
+        expect.objectContaining({
+          interactionMode: "plan",
+          runtimeMode: "full-access",
+          envMode: "local",
+        }),
+      );
+      expect
+        .soft(testState.draftStore.setModelSelection)
+        .toHaveBeenCalledWith(
+          "draft-delayed",
+          configured ? configuredSelection : carriedSelection,
+          { replaceOptions: true },
+        );
+      originStore.clearDraftThread(target);
+    },
+  );
+
+  it("does not turn a stale draft result into an archive retry", async () => {
+    testState.targetSettings.defaultThreadEnvMode = null;
+    let resolveReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => {
+      resolveReadStarted = resolve;
+    });
+    testState.projectFileReads.mockImplementationOnce(() => resolveReadStarted());
+    const pendingArchive = actions.archiveThread(target);
+    await readStarted;
+    await testState.router.navigate({ to: "/usage" });
+    testState.completeProjectFileRead(null);
+    await pendingArchive;
+    expect(testState.router.state.location.href).toBe("/usage");
+    expect(testState.router.state.location.state.archiveDraftRetry).toBeUndefined();
+    expect(testState.router.navigate).toHaveBeenCalledOnce();
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+  });
+
+  it("cancels a pending recovery retry as soon as undo starts", async () => {
+    testState.connectionPhase = "reconnecting";
+    await actions.archiveThread(target);
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    testState.connectionPhase = "connected";
+    testState.targetSettings.defaultThreadEnvMode = null;
+    await act(async () => renderer.root.findByType("button").props.onClick());
+    expect(testState.projectFileReads).toHaveBeenCalledOnce();
+    let resolveUnarchive!: (value: { _tag: "Success"; value: undefined }) => void;
+    const unarchiveDone = new Promise<{ _tag: "Success"; value: undefined }>((resolve) => {
+      resolveUnarchive = resolve;
+    });
+    testState.unarchive.mockReturnValueOnce(unarchiveDone);
+    const undo = testState.archiveNotice.mock.lastCall![0].undo();
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    expect(renderer.root.findByType("button").props.disabled).toBe(true);
+    await act(async () => testState.completeProjectFileRead(null));
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+    expect(testState.router.state.location.href).toBe("/");
+    resolveUnarchive({ _tag: "Success", value: undefined });
+    await undo;
+    expect(testState.router.state.location.href).toBe("/environment-ssh/archive-last");
+  });
+
+  it("does not overwrite navigation after undo starts", async () => {
+    testState.connectionPhase = "reconnecting";
+    await actions.archiveThread(target);
+    let resolveUnarchive!: (value: { _tag: "Success"; value: undefined }) => void;
+    const unarchiveDone = new Promise<{ _tag: "Success"; value: undefined }>((resolve) => {
+      resolveUnarchive = resolve;
+    });
+    testState.unarchive.mockReturnValueOnce(unarchiveDone);
+    const undo = testState.archiveNotice.mock.lastCall![0].undo();
+    await testState.router.navigate({ to: "/usage" });
+    resolveUnarchive({ _tag: "Success", value: undefined });
+    await undo;
+    expect(testState.router.state.location.href).toBe("/usage");
+    expect(testState.router.state.location.state.archiveDraftRetry).toBeUndefined();
+  });
+
+  it("retries the same checkout after undo fails", async () => {
+    testState.connectionPhase = "reconnecting";
+    await actions.archiveThread(target);
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    testState.unarchive.mockResolvedValueOnce({ _tag: "Failure", cause: new Error("undo failed") });
+    await testState.archiveNotice.mock.lastCall![0].undo();
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    expect(renderer.root.findByType("button").props.disabled).toBe(false);
+    testState.connectionPhase = "connected";
+    await act(async () => renderer.root.findByType("button").props.onClick());
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledExactlyOnceWith(
+      "remote-project",
+      projectRef,
+      "draft-delayed",
+      expect.objectContaining({ envMode: "local" }),
+    );
+  });
+
+  it("can recover the checkout after successful undo and back", async () => {
+    testState.connectionPhase = "reconnecting";
+    await actions.archiveThread(target);
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    await testState.archiveNotice.mock.lastCall![0].undo();
+    await act(async () => renderer.update(createElement(Probe)));
+    testState.connectionPhase = "connected";
+    testState.router.history.back();
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledExactlyOnceWith(
+      "remote-project",
+      projectRef,
+      "draft-delayed",
+      expect.objectContaining({ envMode: "local" }),
+    );
+  });
+
+  it("keeps retry available after unarchiving without navigation", async () => {
+    testState.connectionPhase = "reconnecting";
+    await actions.archiveThread(target);
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    await actions.unarchiveThread(target);
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    expect(testState.router.state.location.href).toBe("/");
+    expect(renderer.root.findByType("button").props.disabled).toBe(false);
+    testState.connectionPhase = "connected";
+    await act(async () => renderer.root.findByType("button").props.onClick());
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledExactlyOnceWith(
+      "remote-project",
+      projectRef,
+      "draft-delayed",
+      expect.objectContaining({ envMode: "local" }),
+    );
+  });
+
+  it("keeps a removed recovery checkout visible without opening another project", async () => {
+    testState.connectionPhase = "reconnecting";
+    await actions.archiveThread(target);
+    testState.projects = testState.projects.filter(
+      (project) => project.id !== projectRef.projectId,
+    );
+    testState.connectionPhase = "connected";
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    expect(renderer.toJSON()).not.toBeNull();
+    expect(renderer.root.findByType("button").props.disabled).toBe(true);
+    expect(testState.router.state.location.state.archiveDraftRetry?.projectRef).toEqual(projectRef);
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary index startup on its most recent project", async () => {
+    testState.router.state.location.href = "/";
+    await act(async () => renderer.update(createElement(Route.options.component!)));
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledExactlyOnceWith(
+      "remote-project",
+      { environmentId: "environment-primary", projectId: "project-other" },
+      "draft-delayed",
+      expect.objectContaining({ envMode: "local" }),
+    );
+    expect(testState.router.state.location.href).toBe("/draft/draft-delayed");
+    expect(testState.archive).not.toHaveBeenCalled();
+  });
 });

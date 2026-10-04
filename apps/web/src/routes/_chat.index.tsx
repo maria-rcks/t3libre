@@ -1,6 +1,6 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -44,6 +44,7 @@ function IndexDraftLanding() {
   const threads = useThreadShells();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const handleNewThread = useNewThreadHandler();
+  const archiveDraftRetry = useLocation({ select: (location) => location.state.archiveDraftRetry });
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
 
@@ -54,34 +55,60 @@ function IndexDraftLanding() {
         : null,
     [bootstrapped, projects, threads],
   );
+  const recoveryProjectMissing =
+    bootstrapped &&
+    archiveDraftRetry !== undefined &&
+    !projects.some(
+      (project) =>
+        project.environmentId === archiveDraftRetry.projectRef.environmentId &&
+        project.id === archiveDraftRetry.projectRef.projectId,
+    );
+  const retryDisabled =
+    archiveDraftRetry !== undefined &&
+    (!bootstrapped || archiveDraftRetry.cancelled === true || recoveryProjectMissing);
 
   useEffect(() => {
-    if (mostRecentProject === null || startingRef.current) {
+    const projectRef =
+      archiveDraftRetry?.projectRef ??
+      (mostRecentProject
+        ? scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id)
+        : null);
+    if (projectRef === null || startingRef.current || retryDisabled || !bootstrapped) {
       return;
     }
     startingRef.current = true;
-    void handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
+    void handleNewThread(projectRef, {
       replace: true,
     })
       .then((opened) => {
         if (opened === null) {
-          startingRef.current = false;
+          startingRef.current = archiveDraftRetry !== undefined;
           setStartState((state) => ({ ...state, failed: true }));
         }
       })
       .catch(() => {
-        startingRef.current = false;
+        startingRef.current = archiveDraftRetry !== undefined;
         setStartState((state) => ({ ...state, failed: true }));
       });
-  }, [handleNewThread, mostRecentProject, startState.retryRequest]);
+  }, [
+    archiveDraftRetry,
+    bootstrapped,
+    handleNewThread,
+    mostRecentProject,
+    retryDisabled,
+    startState.retryRequest,
+  ]);
 
-  if (!bootstrapped) {
+  if (!bootstrapped && archiveDraftRetry === undefined) {
     return null;
   }
-  if (mostRecentProject !== null) {
-    return startState.failed ? (
+  if (archiveDraftRetry !== undefined || mostRecentProject !== null) {
+    return startState.failed || retryDisabled ? (
       <DraftStartError
+        disabled={retryDisabled}
+        projectMissing={recoveryProjectMissing}
         onRetry={() => {
+          startingRef.current = false;
           setStartState((state) => ({
             failed: false,
             retryRequest: state.retryRequest + 1,
@@ -95,7 +122,15 @@ function IndexDraftLanding() {
   return <NoProjectsHero />;
 }
 
-function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
+function DraftStartError({
+  onRetry,
+  disabled = false,
+  projectMissing = false,
+}: {
+  readonly onRetry: () => void;
+  readonly disabled?: boolean;
+  readonly projectMissing?: boolean;
+}) {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       {isElectron ? <WorkspacePageHeader electron /> : null}
@@ -103,10 +138,12 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
         <EmptyHeader className="max-w-md">
           <EmptyTitle>Couldn’t start a new thread</EmptyTitle>
           <EmptyDescription>
-            The project is still available. Try opening the draft again.
+            {projectMissing
+              ? "This checkout is no longer registered. Choose another checkout from New thread in..."
+              : "The project is still available. Try opening the draft again."}
           </EmptyDescription>
           <div className="mt-5 flex justify-center">
-            <Button size="sm" onClick={onRetry}>
+            <Button size="sm" onClick={onRetry} disabled={disabled}>
               <RefreshIcon size="md" />
               Try again
             </Button>
