@@ -34,6 +34,7 @@ import { projectMutationOperation } from "../project/ProjectMutation.ts";
 import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
 import {
   clearPersistedServerRuntimeState,
+  isProcessAlive,
   readPersistedServerRuntimeState,
 } from "../serverRuntimeState.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -101,6 +102,20 @@ export class ProjectLiveServerRequestError extends Schema.TaggedError<ProjectLiv
   }
 }
 
+export class ProjectLiveServerUnavailableError extends Schema.TaggedError<ProjectLiveServerUnavailableError>()(
+  "ProjectLiveServerUnavailableError",
+  {
+    operation: Schema.Literal("resolveLiveServer"),
+    origin: Schema.String,
+    pid: Schema.Int,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `The recorded server process (pid ${this.pid}) is still running, but the server at ${this.origin} could not be reached. Retry the command, or stop that server before using offline project commands.`;
+  }
+}
+
 export class ProjectTitleEmptyError extends Schema.TaggedError<ProjectTitleEmptyError>()(
   "ProjectTitleEmptyError",
   {
@@ -158,6 +173,7 @@ export const ProjectCommandError = Schema.Union([
   ProjectLiveServerDeclaredResponseError,
   ProjectLiveServerUndeclaredStatusError,
   ProjectLiveServerRequestError,
+  ProjectLiveServerUnavailableError,
   ProjectTitleEmptyError,
   ProjectIdentifierEmptyError,
   ProjectNotFoundError,
@@ -370,6 +386,16 @@ const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecu
       origin: runtimeState.value.origin,
       cause: attempted.failure,
     });
+    // A failed request does not prove the process released its database.
+    if (isProcessAlive(runtimeState.value.pid)) {
+      return yield* new ProjectLiveServerUnavailableError({
+        operation: "resolveLiveServer",
+        origin: runtimeState.value.origin,
+        pid: runtimeState.value.pid,
+        cause: attempted.failure,
+      });
+    }
+
     yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
     return Option.none<{ readonly origin: string }>();
   },

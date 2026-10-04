@@ -1,6 +1,7 @@
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 // @effect-diagnostics nodeBuiltinImport:off - CLI integration uses temporary Node paths.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -18,12 +19,16 @@ import {
 } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { Command } from "effect/unstable/cli";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 
 import { cli } from "../binCli.ts";
 import * as ServerConfig from "../config.ts";
@@ -40,6 +45,7 @@ import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
+import * as ServerRuntimeState from "../serverRuntimeState.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import {
   ProjectLiveServerDeclaredResponseError,
@@ -443,6 +449,102 @@ it.layer(NodeServices.layer)("project lookup with unavailable workspaces", (it) 
         [project.id],
       );
       assert.isTrue(NodeFS.existsSync(workspaceRoot));
+    }),
+  );
+});
+
+it.layer(NodeServices.layer)("project CLI live-server probe failures", (it) => {
+  it.effect.each(
+    ["add", "rename", "remove"].flatMap((operation) =>
+      ["timeout", "unauthorized", "unavailable", "refused"].map((failure) => ({
+        operation,
+        failure,
+      })),
+    ),
+  )(
+    "preserves live ownership and project state for $operation after $failure",
+    ({ operation, failure }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const { baseDir, workspaceRoot, project } = yield* makeProjectLookupFixture();
+        yield* fs.makeDirectory(workspaceRoot + "-new");
+        const config = yield* makeConfig(baseDir);
+        const before = yield* readProjects(baseDir);
+        const state = yield* ServerRuntimeState.makePersistedServerRuntimeState({
+          config,
+          port: 4971,
+        });
+        yield* ServerRuntimeState.persistServerRuntimeState({
+          path: config.serverRuntimeStatePath,
+          state,
+        });
+        const runtimeBefore = yield* fs.readFileString(config.serverRuntimeStatePath);
+        const started = yield* Deferred.make<void>();
+        const args =
+          operation === "add"
+            ? ["add", workspaceRoot + "-new"]
+            : operation === "rename"
+              ? ["rename", project.id, "Should not change"]
+              : ["remove", project.id];
+        const fiber = yield* runCli(["project", ...args, "--base-dir", baseDir]).pipe(
+          Effect.provideService(FetchHttpClient.Fetch, (_input, init) => {
+            Deferred.doneUnsafe(started, Effect.void);
+            if (failure === "timeout") {
+              return new Promise<Response>((_resolve, reject) => {
+                init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+                  once: true,
+                });
+              });
+            }
+            if (failure === "refused") {
+              return Promise.reject({ code: "ECONNREFUSED" });
+            }
+            return Promise.resolve(
+              new Response(null, { status: failure === "unauthorized" ? 401 : 503 }),
+            );
+          }),
+          Effect.result,
+          Effect.forkChild,
+        );
+        yield* Deferred.await(started);
+        if (failure === "timeout") yield* TestClock.adjust("1 second");
+        const result = yield* Fiber.join(fiber);
+
+        assert.equal(result._tag, "Failure");
+        if (result._tag !== "Failure") return;
+        assert.include(result.failure.message, "still running");
+        assert.include(result.failure.message, "Retry");
+        assert.include(result.failure.message, "stop");
+        assert.equal(yield* fs.readFileString(config.serverRuntimeStatePath), runtimeBefore);
+        assert.deepEqual((yield* readProjects(baseDir)).projects, before.projects);
+      }),
+  );
+
+  it.effect("clears a dead owner's runtime record and retains offline project mutations", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { baseDir, project } = yield* makeProjectLookupFixture();
+      const config = yield* makeConfig(baseDir);
+      const exited = NodeChildProcess.spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+      assert.equal(exited.status, 0);
+      const state = yield* ServerRuntimeState.makePersistedServerRuntimeState({
+        config,
+        port: 4971,
+      });
+      yield* ServerRuntimeState.persistServerRuntimeState({
+        path: config.serverRuntimeStatePath,
+        state: { ...state, pid: exited.pid },
+      });
+      assert.isFalse(ServerRuntimeState.isProcessAlive(exited.pid));
+
+      yield* runCli(["project", "rename", project.id, "Offline", "--base-dir", baseDir]).pipe(
+        Effect.provideService(FetchHttpClient.Fetch, () =>
+          Promise.reject({ code: "ECONNREFUSED" }),
+        ),
+      );
+
+      assert.isFalse(yield* fs.exists(config.serverRuntimeStatePath));
+      assert.equal((yield* readProjects(baseDir)).projects[0]?.title, "Offline");
     }),
   );
 });
