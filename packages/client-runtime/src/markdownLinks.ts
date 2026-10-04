@@ -265,6 +265,22 @@ export function formatFilePathPosition(position: FilePathPosition): string {
   return `${position.path}:${position.line}${position.column ? `:${position.column}` : ""}`;
 }
 
+/** Keeps filename and destination-path labels compact without discarding prose. */
+export function isMarkdownFileLinkLabel(label: string, href: string): boolean {
+  const destination = parseMarkdownFileLink(href);
+  if (!destination) return false;
+  const normalize = (path: string) =>
+    path.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+$/, "");
+  let labelPath = normalize(splitFilePathPosition(label.trim()).path);
+  let destinationPath = normalize(destination.path);
+  if (labelPath.length === 0) return true;
+  if (isWindowsAbsolutePath(destination.path)) {
+    labelPath = labelPath.toLowerCase();
+    destinationPath = destinationPath.toLowerCase();
+  }
+  return destinationPath === labelPath || destinationPath.endsWith(`/${labelPath}`);
+}
+
 export function isRelativeFilePath(path: string): boolean {
   return (
     RELATIVE_PATH_PREFIX_PATTERN.test(path) ||
