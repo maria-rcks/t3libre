@@ -464,6 +464,7 @@ export const make = Effect.gen(function* () {
     provider: UsageProviderKind,
   ): Effect.Effect<{
     readonly records: readonly UsageRecord[];
+    readonly failed?: boolean;
     readonly update?: { readonly entry: CachedFile; readonly replaces: CachedFile | undefined };
   }> =>
     Effect.gen(function* () {
@@ -499,6 +500,7 @@ export const make = Effect.gen(function* () {
       if (parsed === null)
         return {
           records: cached?.provider === provider ? [...cached.records, ...cached.tailRecords] : [],
+          failed: true,
         };
 
       // Stored already de-duplicated within the file, which is 99% of all
@@ -546,20 +548,17 @@ export const make = Effect.gen(function* () {
     );
     const scanned: ScannedDir[] = [];
     for (const { provider, dir, volumeId, fileName } of dirs) {
-      const exists = yield* fileSystem
-        .exists(dir)
-        .pipe(Effect.catchCause(() => Effect.succeed(false)));
-      if (!exists) {
+      const listing = yield* Effect.promise(() =>
+        listTranscriptFiles(dir, windowStartMs, fileName === undefined ? undefined : { fileName }),
+      );
+      if (listing.rootStatus === "missing") {
         scanned.push({ provider, dir, volumeId, files: null });
         continue;
       }
-      const files = yield* Effect.promise(() =>
-        listTranscriptFiles(dir, windowStartMs, fileName === undefined ? undefined : { fileName }),
-      );
       // A cold parse waits on disk reads, so a few files in flight read
       // close to twice as fast. Results keep walk order.
       const read = yield* Effect.forEach(
-        files,
+        listing.files,
         (file) =>
           readFileRecords(file.path, file.size, file.mtimeMs, provider).pipe(
             Effect.map((result) => ({ path: file.path, ...result })),
@@ -582,7 +581,21 @@ export const make = Effect.gen(function* () {
         }
         return { path, records };
       });
-      scanned.push({ provider, dir, volumeId, files: parsedFiles });
+      const failedPaths = listing.failedPaths + read.filter((file) => file.failed).length;
+      scanned.push({
+        provider,
+        dir,
+        volumeId,
+        files: parsedFiles,
+        status: listing.rootStatus === "failed" ? "failed" : failedPaths > 0 ? "partial" : "ok",
+        ...(listing.rootStatus === "failed"
+          ? { message: "Transcript directory could not be read; usage may be incomplete." }
+          : failedPaths > 0
+            ? {
+                message: `${failedPaths} transcript path(s) could not be read; usage may be incomplete.`,
+              }
+            : {}),
+      });
     }
 
     const home = NodeOS.homedir();

@@ -7,8 +7,9 @@ import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 
 import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
-import { readTranscriptRecords } from "./usageTranscriptReader.ts";
+import { listTranscriptFiles, readTranscriptRecords } from "./usageTranscriptReader.ts";
 import { readOpenCodeUsage } from "./opencodeUsageReader.ts";
 import { readCursorAccountUsage } from "./cursorUsageReader.ts";
 import { readAntigravityUsage } from "./antigravityUsageReader.ts";
@@ -94,6 +95,42 @@ function codexUsageLine(outputTokens: number, secondsOffset: number): string {
     },
   })}\n`;
 }
+
+describe("listTranscriptFiles", () => {
+  it("distinguishes missing roots from roots that cannot be listed", async () => {
+    const missing = await listTranscriptFiles(NodePath.join(dir, "missing"), 0);
+    assert.deepStrictEqual(missing, { files: [], rootStatus: "missing", failedPaths: 0 });
+    const file = NodePath.join(dir, "file");
+    await NodeFSP.writeFile(file, "");
+    assert.deepStrictEqual(await listTranscriptFiles(file, 0), {
+      files: [],
+      rootStatus: "failed",
+      failedPaths: 0,
+    });
+  });
+
+  it.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+    "counts missing and unstatable transcript entries while ignoring unrelated files",
+    async () => {
+      const readable = NodePath.join(dir, "readable.jsonl");
+      await NodeFSP.writeFile(readable, claudeLine(1, 5));
+      await NodeFSP.symlink(NodePath.join(dir, "absent"), NodePath.join(dir, "missing.jsonl"));
+      await NodeFSP.symlink("loop.jsonl", NodePath.join(dir, "loop.jsonl"));
+      await NodeFSP.symlink(NodePath.join(dir, "absent"), NodePath.join(dir, "ignored.txt"));
+      const listing = await listTranscriptFiles(dir, 0);
+      assert.strictEqual(listing.rootStatus, "ok");
+      assert.strictEqual(listing.failedPaths, 2);
+      assert.deepStrictEqual(
+        listing.files.map((file) => file.path),
+        [readable],
+      );
+
+      const filtered = await listTranscriptFiles(dir, 0, { fileName: "readable.jsonl" });
+      assert.strictEqual(filtered.failedPaths, 0);
+      assert.deepStrictEqual(filtered.files, listing.files);
+    },
+  );
+});
 
 describe("readTranscriptRecords resume", () => {
   it("parses only appended lines when resuming a grown file", async () => {

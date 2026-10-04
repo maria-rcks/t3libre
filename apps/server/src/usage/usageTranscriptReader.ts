@@ -42,6 +42,12 @@ export interface TranscriptFile {
   readonly mtimeMs: number;
 }
 
+export interface TranscriptFileListing {
+  readonly files: readonly TranscriptFile[];
+  readonly rootStatus: "ok" | "missing" | "failed";
+  readonly failedPaths: number;
+}
+
 /**
  * Where a parse stopped, with enough state to continue from there.
  *
@@ -151,9 +157,8 @@ function fnv1a(buffer: Buffer): number {
 /**
  * Lists `.jsonl` transcripts under `root` last modified at or after `sinceMs`.
  *
- * Errors on individual entries are swallowed: session files rotate and get
- * removed while the walk is in flight, and a partial listing is far better than
- * failing the page.
+ * Missing roots are distinct from unreadable roots. Nested listing and entry
+ * failures are counted while keeping readable files in their original order.
  *
  * `fileName` restricts the walk to a single basename (Grok's `updates.jsonl`).
  * Grok sessions also ship multi-megabyte `chat_history` and `events` logs that
@@ -168,14 +173,24 @@ export async function listTranscriptFiles(
   root: string,
   sinceMs: number,
   options?: { readonly fileName?: string },
-): Promise<readonly TranscriptFile[]> {
+): Promise<TranscriptFileListing> {
   const fileName = options?.fileName;
   const candidates: string[] = [];
+  let rootStatus: TranscriptFileListing["rootStatus"] = "ok";
+  let failedPaths = 0;
   const walk = async (dir: string): Promise<void> => {
     let entries;
     try {
       entries = await NodeFSP.readdir(dir, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      if (dir === root) {
+        rootStatus =
+          error instanceof Error && "code" in error && error.code === "ENOENT"
+            ? "missing"
+            : "failed";
+      } else {
+        failedPaths += 1;
+      }
       return;
     }
     for (const entry of entries) {
@@ -199,14 +214,15 @@ export async function listTranscriptFiles(
           found[index] = { path, size: stats.size, mtimeMs: stats.mtimeMs };
         }
       } catch {
-        // Vanished between readdir and stat.
+        // A listed transcript disappearing also leaves coverage incomplete.
+        failedPaths += 1;
       }
     }
   };
   await Promise.all(
     Array.from({ length: Math.min(STAT_CONCURRENCY, candidates.length) }, statQueued),
   );
-  return found.filter((file) => file !== undefined);
+  return { files: found.filter((file) => file !== undefined), rootStatus, failedPaths };
 }
 
 /**

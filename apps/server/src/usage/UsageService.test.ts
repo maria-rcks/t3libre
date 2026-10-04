@@ -917,6 +917,82 @@ describe("UsageService", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.live.skipIf(HostProcessPlatform.defaultValue() === "win32" || process.getuid?.() === 0)(
+    "reports failed and partial scans without losing readable or cached usage, then recovers",
+    () =>
+      Effect.gen(function* () {
+        const { transcript, settings, home } = yield* setup;
+        const root = NodePath.join(home, "claude", "projects");
+        const nested = NodePath.join(root, "nested");
+        const unreadable = NodePath.join(nested, "session.jsonl");
+        yield* Effect.promise(async () => {
+          await NodeFSP.writeFile(transcript, claudeLine(1, 5));
+          await NodeFSP.mkdir(nested);
+          await NodeFSP.writeFile(unreadable, claudeLine(2, 7));
+          await NodeFSP.chmod(unreadable, 0);
+        });
+        // Restore permissions even if an assertion fails, before setup removes the tree.
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(async () => {
+            await NodeFSP.chmod(root, 0o700);
+            await NodeFSP.chmod(nested, 0o700);
+          }),
+        );
+        yield* Effect.gen(function* () {
+          const service = yield* UsageService.make;
+          const cold = yield* service.readSummary(WINDOW);
+          assert.strictEqual(totalOutputTokens(cold), 5);
+          assert.strictEqual(cold.sources[0]?.status, "partial");
+          assert.strictEqual(cold.sources[0]?.skippedFiles, 1);
+          assert.include(cold.sources[0]?.message ?? "", "1 transcript path(s)");
+
+          yield* Effect.promise(() => NodeFSP.chmod(unreadable, 0o600));
+          const healthy = yield* service.readSummary(WINDOW);
+          assert.strictEqual(totalOutputTokens(healthy), 12);
+          assert.strictEqual(healthy.sources[0]?.status, "ok");
+          assert.isNull(healthy.sources[0]?.message);
+
+          yield* Effect.promise(async () => {
+            await NodeFSP.appendFile(unreadable, claudeLine(3, 11));
+            await NodeFSP.chmod(unreadable, 0);
+          });
+          const readFailure = yield* service.readSummary(WINDOW);
+          assert.deepStrictEqual(readFailure.buckets, healthy.buckets);
+          assert.strictEqual(readFailure.sources[0]?.status, "partial");
+
+          yield* Effect.promise(() => NodeFSP.chmod(nested, 0));
+          const partialWalk = yield* (yield* UsageService.make).readSummary(WINDOW);
+          assert.deepStrictEqual(partialWalk.buckets, healthy.buckets);
+          assert.strictEqual(partialWalk.sources[0]?.status, "partial");
+
+          yield* Effect.promise(() => NodeFSP.chmod(nested, 0o400));
+          const failedStat = yield* service.readSummary(WINDOW);
+          assert.deepStrictEqual(failedStat.buckets, healthy.buckets);
+          assert.strictEqual(failedStat.sources[0]?.status, "partial");
+
+          yield* Effect.promise(() => NodeFSP.chmod(root, 0));
+          const failedRoot = yield* (yield* UsageService.make).readSummary(WINDOW);
+          assert.deepStrictEqual(failedRoot.buckets, healthy.buckets);
+          assert.strictEqual(failedRoot.sources[0]?.status, "failed");
+          assert.include(failedRoot.sources[0]?.message ?? "", "directory could not be read");
+
+          yield* Effect.promise(async () => {
+            await NodeFSP.chmod(root, 0o700);
+            await NodeFSP.chmod(nested, 0o700);
+            await NodeFSP.chmod(unreadable, 0o600);
+          });
+          const recovered = yield* (yield* UsageService.make).readSummary(WINDOW);
+          assert.strictEqual(totalOutputTokens(recovered), 23);
+          assert.strictEqual(recovered.sources[0]?.status, "ok");
+          assert.isNull(recovered.sources[0]?.message);
+        }).pipe(
+          Effect.provide(
+            serviceLayers({ prefix: "usage-service-scan-health-test", home, settings }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
   it.live("preserves saved tokens, costs and sessions after transcript cleanup and restart", () =>
     Effect.gen(function* () {
       const { transcript, settings, home } = yield* setup;
@@ -1177,8 +1253,8 @@ describe("UsageService", () => {
         const service = yield* UsageService.make.pipe(
           Effect.provideService(FileSystem.FileSystem, {
             ...fileSystem,
-            exists: (path) =>
-              fileSystem.exists(path).pipe(
+            realPath: (path) =>
+              fileSystem.realPath(path).pipe(
                 Effect.tap(() => {
                   if (path !== transcriptDir) return Effect.void;
                   homeProbes += 1;
