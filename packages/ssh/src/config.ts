@@ -12,7 +12,11 @@ import { SshHostDiscoveryError } from "./errors.ts";
 const NO_HOSTS: ReadonlyArray<string> = [] as const;
 
 function stripInlineComment(line: string): string {
-  return line.replace(/"[^"]*"|'[^']*'|#.*/gu, (part) => (part.startsWith("#") ? "" : part)).trim();
+  return line
+    .replace(/"[^"]*"|'[^']*'|(?:^|\s)#.*/gu, (part) =>
+      part.trimStart().startsWith("#") ? "" : part,
+    )
+    .trim();
 }
 
 function splitDirectiveArgs(value: string): ReadonlyArray<string> {
@@ -68,7 +72,7 @@ const expandGlob = Effect.fnUntraced(function* (pattern: string) {
   const entries = yield* fs.readDirectory(directory);
   const matchedPaths: string[] = [];
   for (const entry of entries) {
-    if (!matcher.test(entry)) {
+    if ((entry.startsWith(".") && !basePattern.startsWith(".")) || !matcher.test(entry)) {
       continue;
     }
     const entryPath = path.join(directory, entry);
@@ -127,6 +131,7 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
     guards: ReadonlyArray<SshHostPatterns>;
   },
   targetRules: Array<SshTargetRule>,
+  expansions = new Map<string, number>(),
 ): Effect.fn.Return<
   ReadonlyArray<string>,
   PlatformError.PlatformError,
@@ -138,6 +143,20 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
   if (visited.has(resolvedPath) || !(yield* fs.exists(resolvedPath))) {
     return NO_HOSTS;
   }
+  const expansionCount = expansions.get(resolvedPath) ?? 0;
+  if (expansionCount >= 16) {
+    // Bound repeated reads without reusing rules from another Host/Match context.
+    for (const directive of ["hostname", "port"] as const) {
+      targetRules.push({
+        guards: [...context.guards, context.patterns],
+        patterns: { values: null, caseInsensitive: false },
+        directive,
+        value: "",
+      });
+    }
+    return NO_HOSTS;
+  }
+  expansions.set(resolvedPath, expansionCount + 1);
   visited.add(resolvedPath);
 
   const aliases = new Set<string>();
@@ -163,6 +182,7 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
           /["'[\]]/u.test(includePattern) ||
           /%|\$\{/u.test(includePattern) ||
           /^~[^/\\]/u.test(includePattern) ||
+          /\\(?:\s|$)/u.test(includePattern) ||
           /[*?]/u.test(path.dirname(resolvedPattern))
         ) {
           // Unexpanded includes may establish either value before later rules.
@@ -187,6 +207,7 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
               guards: [...context.guards, context.patterns],
             },
             targetRules,
+            expansions,
           );
           for (const alias of includedAliases) {
             aliases.add(alias);

@@ -330,6 +330,41 @@ describe("ssh config", () => {
       known: "fallback.example.com",
     },
     {
+      name: "reads unquoted Include paths containing embedded hashes",
+      config: "Host work\n  Include target#blue.conf # comment\n  HostName fallback.example.com\n",
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+    {
+      name: "keeps escaped-space Include paths uncertain",
+      config: "Host work\n  Include target\\ with\\ spaces.conf\n  HostName fallback.example.com\n",
+      included: "HostName actual.example.com\n",
+      hostname: "work",
+      known: "fallback.example.com",
+    },
+    {
+      name: "ignores hidden files in ordinary Include wildcards",
+      config: "Host work\n  Include hidden/*.conf\n  HostName fallback.example.com\n",
+      included: "HostName hidden.example.com\n",
+      hostname: "fallback.example.com",
+      known: "hidden.example.com",
+    },
+    {
+      name: "reads explicitly requested hidden Include wildcards",
+      config: "Host work\n  Include hidden/.*.conf\n  HostName fallback.example.com\n",
+      included: "HostName hidden.example.com\n",
+      hostname: "hidden.example.com",
+      known: "fallback.example.com",
+    },
+    {
+      name: "reads explicitly requested hidden Include paths",
+      config: "Host work\n  Include hidden/.disabled.conf\n  HostName fallback.example.com\n",
+      included: "HostName hidden.example.com\n",
+      hostname: "hidden.example.com",
+      known: "fallback.example.com",
+    },
+    {
       name: "preserves literal equals signs in quoted Include paths",
       config:
         'Host work\n  Include "target=prod.conf"\n  HostName fallback.example.com\n  Port 22\n',
@@ -366,13 +401,14 @@ describe("ssh config", () => {
       const path = yield* Path.Path;
       const homeDir = yield* makeTempHomeDir();
       const sshDir = path.join(homeDir, ".ssh");
-      yield* fs.makeDirectory(sshDir);
+      yield* fs.makeDirectory(path.join(sshDir, "hidden"), { recursive: true });
       yield* fs.writeFileString(path.join(sshDir, "config"), fixture.config);
       for (const name of [
         "target.conf",
         "target with spaces.conf",
         "target#blue.conf",
         "target=prod.conf",
+        "hidden/.disabled.conf",
       ]) {
         yield* fs.writeFileString(path.join(sshDir, name), fixture.included);
       }
@@ -458,6 +494,21 @@ describe("ssh config", () => {
           "Host work\n  Include config-%h.conf\n  HostName work.example.com\n  Port 22\n",
           "work",
           true,
+        ],
+        [
+          "Host work\n  Include target\\ file.conf\n  HostName work.example.com\n  Port 22\n",
+          "work",
+          true,
+        ],
+        [
+          "Host skip*\n  Include target\\ file.conf\nHost work\n  HostName work.example.com\n  Port 22\n",
+          "work.example.com",
+          false,
+        ],
+        [
+          "Host work\n  HostName work.example.com\n  Port 22\n  Include target\\ file.conf\n",
+          "work.example.com",
+          false,
         ],
         [
           "Host work\n  Include ~maria/.ssh/target.conf\n  HostName work.example.com\n  Port 22\n",
@@ -546,6 +597,69 @@ describe("ssh config", () => {
         assert.equal(hosts.find(({ alias }) => alias === "work")?.hostname, hostname);
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect(
+    "bounds repeated Include reads while retaining context uncertainty and first values",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        for (const context of ["active", "inactive", "earlier"] as const) {
+          const homeDir = yield* makeTempHomeDir();
+          const sshDir = path.join(homeDir, ".ssh");
+          yield* fs.makeDirectory(sshDir);
+          yield* fs.writeFileString(
+            path.join(sshDir, "config"),
+            (context === "earlier"
+              ? "Host work\n  HostName fallback.example.com\n  Port 22\n"
+              : "") +
+              (context === "active" ? "Host work\n" : "Host skip*\n") +
+              "  Include repeat0.conf\nHost work\n  Include repeat6.conf\n  HostName fallback.example.com\n  Port 22\nHost *\n  HostName %h\n  Port 22\n",
+          );
+          for (let depth = 0; depth < 6; depth++) {
+            yield* fs.writeFileString(
+              path.join(sshDir, `repeat${depth}.conf`),
+              `Include repeat${depth + 1}.conf repeat${depth + 1}.conf\n`,
+            );
+          }
+          yield* fs.writeFileString(
+            path.join(sshDir, "repeat6.conf"),
+            "HostName actual.example.com\n  Port 22\n",
+          );
+          yield* fs.writeFileString(
+            path.join(sshDir, "known_hosts"),
+            "actual.example.com ssh-ed25519 AAAA\nfallback.example.com ssh-ed25519 BBBB\n",
+          );
+          const reads = new Map<string, number>();
+          const hosts = yield* discoverSshHosts({ homeDir }).pipe(
+            Effect.updateService(FileSystem.FileSystem, (service) => ({
+              ...service,
+              readFileString: (filePath, ...args) => {
+                reads.set(filePath, (reads.get(filePath) ?? 0) + 1);
+                return service.readFileString(filePath, ...args);
+              },
+            })),
+          );
+          assert.ok([...reads.values()].every((count) => count <= 16));
+          assert.equal(
+            hosts.find(({ alias }) => alias === "work")?.hostname,
+            context === "active"
+              ? "actual.example.com"
+              : context === "earlier"
+                ? "fallback.example.com"
+                : "work",
+          );
+          assert.deepEqual(
+            hosts.filter(({ source }) => source === "known-hosts").map(({ alias }) => alias),
+            context === "active"
+              ? ["fallback.example.com"]
+              : context === "earlier"
+                ? ["actual.example.com"]
+                : ["actual.example.com", "fallback.example.com"],
+          );
+        }
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
   it.effect("uses the effective HostName across includes, wildcards, and Match all", () =>
