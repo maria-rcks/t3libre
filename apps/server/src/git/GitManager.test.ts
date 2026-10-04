@@ -3247,7 +3247,14 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect.each(["origin/main", "origin/team/fix"])("publishes local namespace $0", (branch) =>
+  it.effect.each([
+    ["origin/main", "origin/main", "origin"],
+    ["origin/team/fix", "origin/team/fix", "origin"],
+    ["origin/main", "origin/main", "fork"],
+    ["origin/main", "origin/main", "team/fork"],
+    ["heads/origin/main", "heads/origin/main", "team/fork"],
+    ["plain", "feature/plain", "team/fork"],
+  ] as const)("publishes local namespace $0 to $2", ([suggestedBranch, branch, remoteName]) =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -3255,34 +3262,120 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
       yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
       const mainSha = (yield* runGit(remoteDir, ["rev-parse", "refs/heads/main"])).stdout.trim();
+      const publishDir = remoteName === "origin" ? remoteDir : yield* createBareRemote();
+      if (remoteName !== "origin") {
+        yield* configureRemote(repoDir, remoteName, publishDir, remoteName);
+        yield* runGit(repoDir, ["config", "remote.pushDefault", remoteName]);
+      }
+      if (branch.startsWith("heads/")) {
+        yield* runGit(repoDir, ["tag", branch]);
+      }
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\npublication\n");
 
       const { manager } = yield* makeManager({
+        ghScenario: {
+          prListByHeadSelector: {
+            [branch]: encodeCliJson([
+              {
+                number: 7073,
+                title: "Preserve branch namespace",
+                url: "https://github.com/pingdotgg/codething-mvp/pull/7073",
+                baseRefName: "main",
+                headRefName: branch,
+                state: "OPEN",
+                isCrossRepository: remoteName !== "origin",
+                headRepository: {
+                  nameWithOwner: `${remoteName === "origin" ? "pingdotgg" : "contributor"}/codething-mvp`,
+                },
+                headRepositoryOwner: {
+                  login: remoteName === "origin" ? "pingdotgg" : "contributor",
+                },
+              },
+            ]),
+          },
+        },
         textGeneration: {
           generateCommitMessage: () =>
-            Effect.succeed({ subject: "Fix branch publication", body: "", branch }),
+            Effect.succeed({
+              subject: "Fix branch publication",
+              body: "",
+              branch: suggestedBranch,
+            }),
         },
       });
       const result = yield* runStackedAction(manager, {
         cwd: repoDir,
-        action: "commit_push",
+        action: "commit",
         featureBranch: true,
       });
 
       expect(result.branch).toEqual({ status: "created", name: branch });
       expect(result.commit.status).toBe("created");
-      expect(result.push.status).toBe("pushed");
+      const unpublished = yield* manager.status({ cwd: repoDir });
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const preview = yield* driver.getReviewDiffPreview({ cwd: repoDir });
+      const changes = preview.sources.find((source) => source.kind === "branch-range");
+      expect(
+        yield* driver.getReviewDiffFileContents({
+          cwd: repoDir,
+          sourceKind: "branch-range",
+          changeType: "change",
+          baseRef: changes?.baseRef ?? null,
+          headRef: branch,
+          oldPath: "README.md",
+          newPath: "README.md",
+        }),
+      ).toMatchObject({ oldContents: "hello\n", newContents: "hello\npublication\n" });
+      expect(unpublished.aheadCount).toBe(1);
+      expect(unpublished.aheadOfDefaultCount).toBe(1);
+      expect(unpublished.branchChanges).toMatchObject({ insertions: 1, deletions: 0 });
+      expect(changes).toMatchObject({
+        baseRef: "refs/remotes/origin/main",
+        headRef: branch,
+        title: "Changes vs origin/main",
+        files: [{ path: "README.md", previousPath: null, additions: 1, deletions: 0 }],
+      });
+      expect(
+        (yield* driver.getReviewDiffPreview({
+          cwd: repoDir,
+          baseRef: changes?.baseRef ?? undefined,
+          file: { path: "README.md", previousPath: null, sourceKind: "branch-range" },
+        })).sources.find((source) => source.kind === "branch-range")?.files,
+      ).toEqual(changes?.files);
+      expect((yield* runStackedAction(manager, { cwd: repoDir, action: "push" })).push.status).toBe(
+        "pushed",
+      );
       expect((yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim()).toBe(branch);
       expect((yield* runGit(remoteDir, ["rev-parse", "refs/heads/main"])).stdout.trim()).toBe(
         mainSha,
       );
       const headSha = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout.trim();
-      expect((yield* runGit(remoteDir, ["rev-parse", `refs/heads/${branch}`])).stdout.trim()).toBe(
+      expect((yield* runGit(publishDir, ["rev-parse", `refs/heads/${branch}`])).stdout.trim()).toBe(
         headSha,
       );
       expect((yield* runGit(repoDir, ["config", `branch.${branch}.merge`])).stdout.trim()).toBe(
         `refs/heads/${branch}`,
       );
+      yield* configureVisibleRemoteUrlWithLocalRewrite(
+        repoDir,
+        remoteName,
+        `git@github.com:${remoteName === "origin" ? "pingdotgg" : "contributor"}/codething-mvp.git`,
+        publishDir,
+      );
+      const status = yield* manager.status({ cwd: repoDir });
+      expect(status.refName).toBe(branch);
+      expect(status.aheadCount).toBe(0);
+      expect(status.aheadOfDefaultCount).toBe(1);
+      expect(status.branchChanges).toMatchObject({ insertions: 1, deletions: 0 });
+      expect(
+        (yield* driver.getReviewDiffPreview({ cwd: repoDir })).sources.find(
+          (source) => source.kind === "branch-range",
+        )?.files,
+      ).toEqual(changes?.files);
+      expect(status.pr).toMatchObject({ number: 7073, headRef: branch });
+      expect(
+        (yield* manager.remoteStatus({ cwd: repoDir }, { refreshUpstream: false }))?.pr,
+      ).toEqual(status.pr);
     }),
   );
 

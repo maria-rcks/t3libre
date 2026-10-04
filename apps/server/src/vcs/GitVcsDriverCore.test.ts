@@ -332,7 +332,7 @@ it.effect("uses stable diagnostics for every parsed non-repository command", () 
     assert.deepStrictEqual(commands, [
       { args: ["rev-parse", "--git-path", "index"], lcAll: "C" },
       { args: ["status", "--porcelain=2", "--branch"], lcAll: "C" },
-      { args: ["rev-parse", "--abbrev-ref", "HEAD"], lcAll: "C" },
+      { args: ["branch", "--show-current"], lcAll: "C" },
       { args: ["rev-parse", "--git-common-dir"], lcAll: "C" },
     ]);
   }).pipe(Effect.provide(layer));
@@ -1824,7 +1824,8 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         yield* git(cwd, ["fetch", "origin"]);
         const preview = yield* driver.getReviewDiffPreview({ cwd });
         const changes = preview.sources.find((source) => source.kind === "branch-range")!;
-        assert.strictEqual(changes.baseRef, "origin/main");
+        assert.strictEqual(changes.baseRef, "refs/remotes/origin/main");
+        assert.strictEqual(changes.title, "Changes vs origin/main");
         assert.deepStrictEqual(changes.files, [
           { path: "unpushed.txt", previousPath: null, additions: 1, deletions: 0 },
         ]);
@@ -1930,7 +1931,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           includeBranchChanges: true,
         });
         assert.deepStrictEqual(status.branchChanges, {
-          baseRef: "main",
+          baseRef: "refs/heads/main",
           insertions: 3,
           deletions: 0,
         });
@@ -1946,6 +1947,10 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         const refs = yield* driver.listRefs({ cwd });
         assert.equal(refs.isRepo, false);
         assert.deepStrictEqual(refs.refs, []);
+        assert.equal(
+          (yield* driver.statusDetailsRemote(cwd, { refreshUpstream: false })).isRepo,
+          false,
+        );
       }),
     );
 
@@ -2072,35 +2077,41 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("reports remote divergence without reading working-tree details", () =>
-      Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
-        const remote = yield* makeTmpDir("git-vcs-driver-remote-");
-        const { initialBranch } = yield* initRepoWithCommit(cwd);
-        yield* git(remote, ["init", "--bare"]);
-        yield* git(cwd, ["remote", "add", "origin", remote]);
-        yield* git(cwd, ["push", "-u", "origin", initialBranch]);
-        yield* git(cwd, ["checkout", "-b", "feature/remote-status"]);
-        yield* writeTextFile(cwd, "feature.txt", "feature\n");
-        yield* git(cwd, ["add", "feature.txt"]);
-        yield* git(cwd, ["commit", "-m", "feature commit"]);
-        yield* git(cwd, ["push", "-u", "origin", "feature/remote-status"]);
-        yield* writeTextFile(cwd, "untracked.txt", "local-only\n");
+    it.effect.each(["feature/remote-status", "origin/main", "heads/origin/main"])(
+      "reports remote divergence for $0 without reading working-tree details",
+      (branch) =>
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          const remote = yield* makeTmpDir("git-vcs-driver-remote-");
+          yield* initRepoWithCommit(cwd);
+          yield* git(cwd, ["branch", "-M", "main"]);
+          yield* git(remote, ["init", "--bare"]);
+          yield* git(cwd, ["remote", "add", "origin", remote]);
+          yield* git(cwd, ["push", "-u", "origin", "main"]);
+          yield* git(cwd, ["checkout", "-b", branch]);
+          if (branch.startsWith("heads/")) {
+            yield* git(cwd, ["tag", branch]);
+          }
+          yield* writeTextFile(cwd, "feature.txt", "feature\n");
+          yield* git(cwd, ["add", "feature.txt"]);
+          yield* git(cwd, ["commit", "-m", "feature commit"]);
+          yield* git(cwd, ["push", "-u", "origin", `HEAD:refs/heads/${branch}`]);
+          yield* writeTextFile(cwd, "untracked.txt", "local-only\n");
 
-        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsRemote(cwd);
+          const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsRemote(cwd);
 
-        assert.equal(status.isRepo, true);
-        assert.equal(status.branch, "feature/remote-status");
-        assert.equal(status.hasUpstream, true);
-        assert.equal(status.aheadCount, 0);
-        assert.equal(status.behindCount, 0);
-        assert.equal(status.aheadOfDefaultCount, 1);
-        assert.notProperty(status, "workingTree");
-        assert.notProperty(status, "hasWorkingTreeChanges");
-      }),
+          assert.equal(status.isRepo, true);
+          assert.equal(status.branch, branch);
+          assert.equal(status.hasUpstream, true);
+          assert.equal(status.aheadCount, 0);
+          assert.equal(status.behindCount, 0);
+          assert.equal(status.aheadOfDefaultCount, 1);
+          assert.notProperty(status, "workingTree");
+          assert.notProperty(status, "hasWorkingTreeChanges");
+        }),
     );
 
-    it.effect("reports remote status on unborn HEAD without failing", () =>
+    it.effect("reports remote status on unborn or detached HEAD without failing", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
         const driver = yield* GitVcsDriver.GitVcsDriver;
@@ -2114,6 +2125,17 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(status.hasUpstream, false);
         assert.equal(status.aheadCount, 0);
         assert.equal(status.behindCount, 0);
+        yield* git(cwd, ["symbolic-ref", "HEAD", "refs/heads/heads/origin/main"]);
+        assert.equal(
+          (yield* driver.statusDetailsRemote(cwd, { refreshUpstream: false })).branch,
+          "heads/origin/main",
+        );
+        yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["checkout", "--detach"]);
+        const detachedStatus = yield* driver.statusDetailsRemote(cwd, { refreshUpstream: false });
+        assert.equal(detachedStatus.isRepo, true);
+        assert.equal(detachedStatus.branch, null);
+        assert.equal(detachedStatus.hasUpstream, false);
       }),
     );
 

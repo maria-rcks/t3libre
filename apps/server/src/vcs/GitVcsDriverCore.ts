@@ -1204,7 +1204,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         executeGit(
           "GitVcsDriver.resolveRepositoryPaths.currentBranch",
           cwd,
-          ["symbolic-ref", "--quiet", "--short", "HEAD"],
+          ["branch", "--show-current"],
           {
             timeoutMs: 5_000,
             allowNonZeroExit: true,
@@ -1532,6 +1532,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   // `allowRemoteOfCurrent` lets the review diff compare the default branch with its remote copy.
+  // Full refs keep local branches and tags from shadowing the comparison base.
   const resolveBaseBranchForNoUpstream = Effect.fn("resolveBaseBranchForNoUpstream")(function* (
     cwd: string,
     refName: string,
@@ -1580,7 +1581,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             refName: normalizedCandidate,
           }))
         ) {
-          return `${primaryRemoteName}/${normalizedCandidate}`;
+          return `refs/remotes/${primaryRemoteName}/${normalizedCandidate}`;
         }
         continue;
       }
@@ -1593,11 +1594,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           refName: normalizedCandidate,
         }))
       ) {
-        return `${primaryRemoteName}/${normalizedCandidate}`;
+        return `refs/remotes/${primaryRemoteName}/${normalizedCandidate}`;
       }
 
       if (yield* branchExists(cwd, normalizedCandidate)) {
-        return normalizedCandidate;
+        return `refs/heads/${normalizedCandidate}`;
       }
     }
 
@@ -1631,7 +1632,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const branchResult = yield* executeGitWithStableDiagnostics(
       "GitVcsDriver.statusDetailsRemote.branch",
       cwd,
-      ["rev-parse", "--abbrev-ref", "HEAD"],
+      ["branch", "--show-current"],
       { allowNonZeroExit: true },
     ).pipe(
       Effect.catchTags({
@@ -1643,35 +1644,23 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (branchResult === null) {
       return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
     }
-    let branch: string | null;
     if (branchResult.exitCode !== 0) {
       if (isNonRepositoryGitStderr(branchResult.stderr)) {
         return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
       }
-      if (!isUnbornHeadStderr(branchResult.stderr)) {
-        return yield* new GitCommandError({
-          ...gitCommandContext({
-            operation: "GitVcsDriver.statusDetailsRemote.branch",
-            cwd,
-            args: ["rev-parse", "--abbrev-ref", "HEAD"],
-          }),
-          detail: "Git branch lookup failed.",
-          exitCode: branchResult.exitCode,
-          stdoutLength: branchResult.stdout.length,
-          stderrLength: branchResult.stderr.length,
-        });
-      }
-
-      const branchValue = yield* runGitStdout(
-        "GitVcsDriver.statusDetailsRemote.unbornBranch",
-        cwd,
-        ["symbolic-ref", "--quiet", "--short", "HEAD"],
-      );
-      branch = branchValue.trim() || null;
-    } else {
-      const branchValue = branchResult.stdout.trim();
-      branch = branchValue.length > 0 && branchValue !== "HEAD" ? branchValue : null;
+      return yield* new GitCommandError({
+        ...gitCommandContext({
+          operation: "GitVcsDriver.statusDetailsRemote.branch",
+          cwd,
+          args: ["branch", "--show-current"],
+        }),
+        detail: "Git branch lookup failed.",
+        exitCode: branchResult.exitCode,
+        stdoutLength: branchResult.stdout.length,
+        stderrLength: branchResult.stderr.length,
+      });
     }
+    const branch = branchResult.stdout.trim() || null;
     const upstream = yield* resolveCurrentUpstream(cwd);
     const upstreamRef = upstream?.upstreamRef ?? null;
     let aheadCount = 0;
@@ -2730,7 +2719,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       {
         id: "branch-range",
         kind: "branch-range",
-        title: review.baseRef ? `Changes vs ${review.baseRef}` : "Changes",
+        title: review.baseRef
+          ? `Changes vs ${review.baseRef.replace(/^refs\/(?:heads|remotes)\//, "")}`
+          : "Changes",
         baseRef: review.baseRef,
         // For display only. The new side is the working tree.
         headRef: repository.currentBranch ?? "HEAD",
