@@ -451,9 +451,26 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
     async stop() {
       if (!recorder) return { mimeType: null, count: 0, bytes: 0 };
       if (recorder.state !== "inactive") {
-        // Flush an end frame so a static page retains its recording duration.
-        paint();
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        // Consume the cached frame, then wait for the final paint to reach the
+        // capture stream. Animation ticks alone can stop before it is delivered.
+        const video = document.createElement("video");
+        video.muted = true;
+        video.srcObject = recorder.stream;
+        const nextFrame = () => Promise.race([
+          new Promise(resolve => video.requestVideoFrameCallback(resolve)),
+          stopped,
+        ]);
+        const initial = nextFrame();
+        void video.play().catch(() => {});
+        await initial;
+        if (recorder.state !== "inactive") {
+          const delivered = nextFrame();
+          recorder.stream.getVideoTracks()[0].requestFrame();
+          paint();
+          await delivered;
+        }
+        video.pause();
+        video.srcObject = null;
         if (recorder.state !== "inactive") recorder.stop();
       }
       await stopped;
