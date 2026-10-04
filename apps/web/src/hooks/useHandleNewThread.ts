@@ -75,6 +75,7 @@ export function useNewThreadHandler() {
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
         replace?: boolean;
+        environmentSelection?: "manual";
       },
       // Which draft the thread ended up in, so a caller that has something to put in it — a
       // prepared checkout, a task to write — addresses that one rather than looking the project
@@ -184,6 +185,10 @@ export function useNewThreadHandler() {
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
       const hasStartFromOriginOption = options?.startFromOrigin !== undefined;
+      const selectionOptions =
+        options?.environmentSelection === "manual"
+          ? { environmentSelection: "manual" as const, loadBalancedEnvironmentId: null }
+          : {};
       const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
       const storedDraftThreadRef = storedDraftThread
         ? scopeThreadRef(storedDraftThread.environmentId, storedDraftThread.threadId)
@@ -315,6 +320,7 @@ export function useNewThreadHandler() {
             {
               threadId: emptyStoredDraftThread.threadId,
               ...workspaceContext,
+              ...selectionOptions,
               ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             },
@@ -365,6 +371,7 @@ export function useNewThreadHandler() {
           runtimeMode: latestActiveDraftThread.runtimeMode,
           interactionMode: latestActiveDraftThread.interactionMode,
           ...pickExplicitWorkspaceOptions(options),
+          ...selectionOptions,
         });
         return Promise.resolve({
           draftId: currentRouteTarget.draftId,
@@ -408,6 +415,7 @@ export function useNewThreadHandler() {
             runtimeMode: racedDraft.runtimeMode,
             interactionMode: racedDraft.interactionMode,
             ...pickExplicitWorkspaceOptions(options),
+            ...selectionOptions,
           });
           await router.navigate({
             to: "/draft/$draftId",
@@ -429,6 +437,7 @@ export function useNewThreadHandler() {
               newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
             }),
           runtimeMode: defaultRuntimeMode,
+          ...selectionOptions,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
         });
         applyStickyState(draftId);

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { RuntimeMode } from "@t3tools/contracts";
+import { act, createElement } from "react";
+import { create } from "react-test-renderer";
 
 const testState = vi.hoisted(() => {
   let completeProjectFileRead: (value: null) => void = () => undefined;
@@ -96,12 +98,14 @@ vi.mock("@effect/atom-react", () => ({
           ["environment-ssh", { settings: testState.targetSettings }],
         ]),
 }));
-vi.mock("@t3tools/client-runtime/environment", () => ({
+vi.mock("@t3tools/client-runtime/environment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@t3tools/client-runtime/environment")>()),
   scopedProjectKey: () => "remote-project",
   scopeProjectRef: (environmentId: string, projectId: string) => ({ environmentId, projectId }),
   scopeThreadRef: (environmentId: string, threadId: string) => ({ environmentId, threadId }),
 }));
-vi.mock("@t3tools/contracts", () => ({
+vi.mock("@t3tools/contracts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@t3tools/contracts")>()),
   DEFAULT_RUNTIME_MODE: "default",
   DEFAULT_SERVER_SETTINGS: {},
 }));
@@ -127,15 +131,25 @@ vi.mock("@t3tools/shared/projectSettings", () => ({
     overrides: {},
   }),
 }));
-vi.mock("@tanstack/react-router", () => ({
+vi.mock("@tanstack/react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useParams: () => null,
   useRouter: () => testState.router,
+  createFileRoute: () => (options: unknown) => ({
+    options,
+    useRouteContext: () => ({ authGateState: { status: "server" } }),
+  }),
+  Link: "a",
 }));
-vi.mock("react", () => ({
+vi.mock("react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react")>()),
   useCallback: <T>(callback: T) => callback,
   useMemo: <T>(factory: () => T) => factory(),
 }));
-vi.mock("../components/Sidebar.logic", () => ({ orderItemsByPreferredIds: () => [] }));
+vi.mock("../components/Sidebar.logic", () => ({
+  orderItemsByPreferredIds: () => [],
+  sortScopedProjectsForSidebar: <T>(projects: T) => projects,
+}));
 vi.mock("../composerDraftStore", () => {
   const useComposerDraftStore = Object.assign(() => null, {
     getState: () => testState.draftStore,
@@ -166,8 +180,8 @@ vi.mock("../logicalProject", () => ({
   getProjectOrderKey: () => "remote-project",
   selectProjectGroupingSettings: () => ({}),
 }));
-vi.mock("../state/entities", () => ({
-  readProjects: () => [
+vi.mock("../state/entities", () => {
+  const projects = [
     {
       id: "project-remote",
       environmentId: "environment-ssh",
@@ -175,11 +189,32 @@ vi.mock("../state/entities", () => ({
       defaultThreadEnvMode: null,
       defaultModelSelection: null,
     },
-  ],
-  readThreadShell: () => null,
-  useProjects: () => [],
-  useThread: () => null,
+  ];
+  return {
+    readProjects: () => projects,
+    readThreadShell: () => null,
+    useProjects: () => projects,
+    useThreadShells: () => [],
+    useAllEnvironmentShellsBootstrapped: () => true,
+    useThread: () => null,
+  };
+});
+vi.mock("../state/environments", () => ({
+  useEnvironments: () => ({ environments: [], isReady: true }),
 }));
+vi.mock("../components/NoProjectsHero", () => ({ NoProjectsHero: () => null }));
+vi.mock("../components/WorkspacePageHeader", () => ({ WorkspacePageHeader: () => null }));
+vi.mock("../components/ui/button", () => ({ Button: "button" }));
+vi.mock("../components/ui/sidebar", () => ({ SidebarInset: "main" }));
+vi.mock("../components/ui/empty", () => ({
+  Empty: "section",
+  EmptyDescription: "p",
+  EmptyHeader: "header",
+  EmptyTitle: "h1",
+}));
+vi.mock("../components/ui/refresh-icon", () => ({ RefreshIcon: "svg" }));
+vi.mock("../localEnvironment", () => ({ isLocalEnvironmentDisabled: () => false }));
+vi.mock("../env", () => ({ isElectron: false }));
 vi.mock("../state/server", () => ({
   environmentServerConfigsAtom: {},
   primaryServerSettingsAtom: "primary-settings",
@@ -211,6 +246,8 @@ vi.mock("../components/ui/toast", () => ({
 }));
 
 import { useNewThreadHandler } from "./useHandleNewThread";
+import * as newThread from "./useHandleNewThread";
+import { Route } from "../routes/_chat.index";
 
 describe.each([
   ["new", null],
@@ -224,6 +261,57 @@ describe.each([
     },
   ],
 ])("useNewThreadHandler with a %s draft", (_, draft) => {
+  it.each([false, true])(
+    "keeps physical checkout selection intent (manual: %s)",
+    async (manual) => {
+      testState.reset(draft);
+      const actual =
+        await vi.importActual<typeof import("../composerDraftStore")>("../composerDraftStore");
+      actual.useComposerDraftStore.setState({
+        draftsByThreadKey: {},
+        draftThreadsByThreadKey: {},
+        logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+      });
+      const projectRef = {
+        environmentId: "environment-ssh",
+        projectId: "project-worktree",
+      } as never;
+      const store = actual.useComposerDraftStore.getState();
+      if (draft) {
+        store.setLogicalProjectDraftThreadId(
+          "remote-project",
+          { environmentId: "environment-ssh", projectId: "project-remote" } as never,
+          actual.DraftId.make(draft.draftId),
+          {
+            threadId: draft.threadId as never,
+            environmentSelection: "auto",
+            loadBalancedEnvironmentId: "previous-environment" as never,
+          },
+        );
+      }
+      testState.draftStore.setLogicalProjectDraftThreadId.mockImplementation(
+        store.setLogicalProjectDraftThreadId as never,
+      );
+      try {
+        const opened = await useNewThreadHandler()(
+          projectRef,
+          manual ? { environmentSelection: "manual" } : undefined,
+        );
+        expect(store.getDraftThread(opened!.draftId)).toMatchObject({
+          environmentId: "environment-ssh",
+          projectId: "project-worktree",
+        });
+        expect(store.getDraftThread(opened!.draftId)?.environmentSelection).toBe(
+          manual ? "manual" : draft ? "auto" : undefined,
+        );
+        if (manual)
+          expect(store.getDraftThread(opened!.draftId)?.loadBalancedEnvironmentId).toBeNull();
+      } finally {
+        testState.draftStore.setLogicalProjectDraftThreadId.mockReset();
+      }
+    },
+  );
+
   it.each(["connecting", "reconnecting", "disconnected", null] as const)(
     "reports an unavailable %s environment without reading defaults or changing the draft",
     async (phase) => {
@@ -346,4 +434,38 @@ describe.each([
       );
     },
   );
+});
+
+it("shows the index retry action after an unavailable result and opens the same checkout after reconnect", async () => {
+  testState.reset(null);
+  testState.toast.mockClear();
+  testState.connectionPhase = "disconnected";
+  const openThread = useNewThreadHandler();
+  const handler = vi.spyOn(newThread, "useNewThreadHandler").mockReturnValue(openThread);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  await Route.options.component!.preload?.();
+  const renderer = await act(async () => create(createElement(Route.options.component!)));
+  try {
+    expect(testState.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Environment unavailable" }),
+    );
+    expect(renderer.toJSON()).not.toBeNull();
+    const retry = renderer.root.findByType("button");
+    expect(retry.children).toContain("Try again");
+    expect(testState.router.navigate).not.toHaveBeenCalled();
+    testState.connectionPhase = "connected";
+    await act(async () => retry.props.onClick());
+    expect(testState.router.state.location.href).toBe("/draft/draft-delayed");
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      { environmentId: "environment-ssh", projectId: "project-remote" },
+      "draft-delayed",
+      expect.anything(),
+    );
+  } finally {
+    await act(async () => renderer.unmount());
+    handler.mockRestore();
+    testState.connectionPhase = "connected";
+    vi.unstubAllGlobals();
+  }
 });

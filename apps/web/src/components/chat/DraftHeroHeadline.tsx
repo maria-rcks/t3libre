@@ -224,6 +224,7 @@ export function DraftHeroHeadline({
       logicalProjectKey,
       scopeProjectRef(project.environmentId, project.id),
       draftId,
+      { environmentSelection: "manual", loadBalancedEnvironmentId: null },
     );
     if (!hasExplicitComposerModelSelection(currentDraft)) {
       applyStickyState(draftId);

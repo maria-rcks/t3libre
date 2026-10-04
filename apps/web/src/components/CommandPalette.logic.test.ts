@@ -845,6 +845,67 @@ it.each([
 });
 
 describe("filterCommandPaletteGroups", () => {
+  it.each(["", "shared"])(
+    "refreshes an open checkout picker while keeping its query %s",
+    (query) => {
+      const remote = makeProject({ environmentId: EnvironmentId.make("remote") });
+      const local = makeProject({ environmentId: EnvironmentId.make("local") });
+      const runProject = vi.fn(async () => undefined);
+      const offline = buildProjectActionItems({
+        projects: [remote, local].map((project) => ({ ...project, displayName: "shared-repo" })),
+        valuePrefix: "new-thread-in",
+        icon: () => null,
+        runProject,
+        disabled: (project) => project.environmentId === remote.environmentId,
+        renderDescription: (project) =>
+          project.environmentId === remote.environmentId ? "Reconnecting" : "Connected",
+      });
+      const activeGroups = [
+        {
+          value: "projects",
+          label: "Projects",
+          items: enumerateCommandPaletteItems([offline[1]!, offline[0]!]),
+        },
+      ];
+      const connected = buildProjectActionItems({
+        projects: [remote, local].map((project) => ({ ...project, displayName: "shared-repo" })),
+        valuePrefix: "new-thread-in",
+        icon: () => null,
+        runProject,
+        disabled: () => false,
+        renderDescription: () => "Connected",
+      });
+      const groups = filterCommandPaletteGroups({
+        activeGroups,
+        projectThreadItems: connected,
+        query,
+        isInSubmenu: true,
+        projectSearchItems: [],
+        threadSearchItems: [],
+      });
+      expect(buildCommandPaletteRows(groups).itemValues).toEqual([
+        connected[1]!.value,
+        connected[0]!.value,
+      ]);
+      expect(groups[0]?.items.map((item) => item.shortcutCommand)).toEqual(
+        activeGroups[0]?.items.map((item) => item.shortcutCommand),
+      );
+      expect(findHighlightedCommandPaletteItem(groups, offline[0]!.value)?.description).toBe(
+        "Connected",
+      );
+      const disconnected = filterCommandPaletteGroups({
+        activeGroups: groups,
+        projectThreadItems: offline,
+        query,
+        isInSubmenu: true,
+        projectSearchItems: [],
+        threadSearchItems: [],
+      });
+      expect(buildCommandPaletteRows(disconnected).itemValues).toEqual([offline[1]!.value]);
+      expect(disconnected[0]?.items[1]?.description).toBe("Reconnecting");
+    },
+  );
+
   it("sorts secondary settings results after other matches", () => {
     const item = (value: string, title: string, secondary?: boolean) =>
       ({

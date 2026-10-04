@@ -1380,7 +1380,9 @@ function OpenCommandPaletteDialog(props: {
           },
           icon: projectFaviconIcon,
           runProject: async (project) => {
-            await handleNewThread(scopeProjectRef(project.environmentId, project.id));
+            await handleNewThread(scopeProjectRef(project.environmentId, project.id), {
+              environmentSelection: "manual",
+            });
           },
         }),
         ...(scratchTargetEnvironmentId === null
@@ -2349,6 +2351,7 @@ function OpenCommandPaletteDialog(props: {
 
   const filteredGroups = filterCommandPaletteGroups({
     activeGroups,
+    projectThreadItems,
     query: deferredQuery,
     isInSubmenu: currentView !== null,
     projectSearchItems: projectSearchItems,

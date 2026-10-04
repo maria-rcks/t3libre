@@ -442,6 +442,7 @@ function rankCommandPaletteItemMatch(
 
 export function filterCommandPaletteGroups(input: {
   activeGroups: ReadonlyArray<CommandPaletteGroup>;
+  projectThreadItems?: ReadonlyArray<CommandPaletteActionItem>;
   query: string;
   isInSubmenu: boolean;
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
@@ -451,16 +452,34 @@ export function filterCommandPaletteGroups(input: {
   const isActionsFilter = input.query.startsWith(">");
   const searchQuery = isActionsFilter ? input.query.slice(1) : input.query;
   const normalizedQuery = normalizeSearchText(searchQuery);
+  const projectThreadItems = input.projectThreadItems;
+  const activeGroups =
+    input.isInSubmenu && projectThreadItems
+      ? input.activeGroups.map((group) => {
+          if (group.value !== "projects") return group;
+          const itemOrder = new Map(group.items.map((item, index) => [item.value, index]));
+          return {
+            ...group,
+            items: enumerateCommandPaletteItems(
+              projectThreadItems.toSorted(
+                (left, right) =>
+                  (itemOrder.get(left.value) ?? itemOrder.size) -
+                  (itemOrder.get(right.value) ?? itemOrder.size),
+              ),
+            ),
+          };
+        })
+      : input.activeGroups;
 
   if (normalizedQuery.length === 0) {
     if (isActionsFilter) {
-      return input.activeGroups.filter((group) => group.value === "actions");
+      return activeGroups.filter((group) => group.value === "actions");
     }
-    return [...input.activeGroups];
+    return [...activeGroups];
   }
   const queryTokens = normalizedQuery.split(" ");
 
-  let baseGroups = [...input.activeGroups];
+  let baseGroups = [...activeGroups];
   if (isActionsFilter) {
     baseGroups = baseGroups.filter((group) => group.value === "actions");
   } else if (!input.isInSubmenu) {
