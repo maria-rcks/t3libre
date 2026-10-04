@@ -339,6 +339,190 @@ it.effect("keeps other database work runnable while discovering compaction candi
 );
 
 it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
+  it.effect.each(["live", "deleted"] as const)(
+    "preserves an existing %s thread when a fresh sink receives another create",
+    (state) =>
+      Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const eventStore = yield* EventStore.EventStoreV2;
+        const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+        const now = yield* DateTime.now;
+        const thread = makeThread(ThreadId.make(`thread:foundation-repeat-create:${state}`), now);
+        const created = threadCreatedEvent({
+          id: `event:foundation-repeat-create:${state}:created`,
+          thread,
+          now,
+        });
+        assert.deepEqual(
+          (yield* eventSink.write({ events: [created] })).map((stored) => stored.event.id),
+          [created.id],
+        );
+        assert.deepEqual((yield* projectionStore.getThreadProjection(thread.id)).thread, thread);
+
+        const edited = {
+          ...thread,
+          title: "User-edited member",
+          branch: "user/member-branch",
+          worktreePath: "/workspace/member",
+          updatedAt: DateTime.add(now, { seconds: 1 }),
+        };
+        yield* eventSink.write({
+          events: [
+            {
+              id: EventId.make(`event:foundation-repeat-create:${state}:edited`),
+              type: "thread.metadata-updated",
+              threadId: thread.id,
+              occurredAt: edited.updatedAt,
+              payload: edited,
+            },
+          ],
+        });
+        const preserved = {
+          ...edited,
+          ...(state === "deleted"
+            ? {
+                deletedAt: DateTime.add(now, { seconds: 2 }),
+                updatedAt: DateTime.add(now, { seconds: 2 }),
+              }
+            : {}),
+        };
+        if (state === "deleted") {
+          yield* eventSink.write({
+            events: [
+              {
+                id: EventId.make(`event:foundation-repeat-create:${state}:deleted`),
+                type: "thread.deleted",
+                threadId: thread.id,
+                occurredAt: preserved.updatedAt,
+                payload: preserved,
+              },
+            ],
+          });
+        }
+        const beforeReplay = yield* eventStore
+          .read({ threadId: thread.id })
+          .pipe(Stream.runCollect);
+        const publishedSequences: Array<number> = [];
+        const restartedSinkLayer = Layer.fresh(EventSink.layer).pipe(
+          Layer.provide(
+            Layer.succeed(EventStore.EventStoreV2, {
+              ...eventStore,
+              publishCommitted: (events) =>
+                eventStore.publishCommitted(events).pipe(
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      publishedSequences.push(...events.map((stored) => stored.sequence));
+                    }),
+                  ),
+                ),
+            }),
+          ),
+        );
+
+        yield* Effect.gen(function* () {
+          const restartedSink = yield* EventSink.EventSinkV2;
+          const replayedCreate = threadCreatedEvent({
+            id: `event:foundation-repeat-create:${state}:replayed`,
+            thread,
+            now: DateTime.add(now, { seconds: 3 }),
+          });
+          assert.deepEqual(yield* restartedSink.write({ events: [replayedCreate] }), []);
+          assert.deepEqual(publishedSequences, []);
+          assert.deepEqual(
+            (yield* projectionStore.getThreadProjection(thread.id)).thread,
+            preserved,
+          );
+          assert.deepEqual(
+            yield* eventStore.read({ threadId: thread.id }).pipe(Stream.runCollect),
+            beforeReplay,
+          );
+
+          const updated = {
+            ...preserved,
+            title: "Member renamed after restart",
+            updatedAt: DateTime.add(now, { seconds: 4 }),
+          };
+          const update: OrchestrationV2DomainEvent = {
+            id: EventId.make(`event:foundation-repeat-create:${state}:updated`),
+            type: "thread.metadata-updated",
+            threadId: thread.id,
+            occurredAt: updated.updatedAt,
+            payload: updated,
+          };
+          const stored = yield* restartedSink.write({ events: [replayedCreate, update] });
+          assert.deepEqual(
+            stored.map((event) => event.event.id),
+            [update.id],
+          );
+          assert.deepEqual(
+            publishedSequences,
+            stored.map((event) => event.sequence),
+          );
+          assert.deepEqual((yield* projectionStore.getThreadProjection(thread.id)).thread, updated);
+          assert.deepEqual(
+            yield* eventStore.read({ threadId: thread.id }).pipe(Stream.runCollect),
+            [...beforeReplay, ...stored],
+          );
+        }).pipe(Effect.provide(restartedSinkLayer));
+      }),
+  );
+
+  it.effect(
+    "accepts each thread's first create in a batch without reverting metadata updates",
+    () =>
+      Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const eventStore = yield* EventStore.EventStoreV2;
+        const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+        const now = yield* DateTime.now;
+        const first = makeThread(ThreadId.make("thread:foundation-batch-create:first"), now);
+        const second = makeThread(ThreadId.make("thread:foundation-batch-create:second"), now);
+        const firstCreate = threadCreatedEvent({
+          id: "event:foundation-batch-create:first",
+          thread: first,
+          now,
+        });
+        const secondCreate = threadCreatedEvent({
+          id: "event:foundation-batch-create:second",
+          thread: second,
+          now,
+        });
+        const updated = { ...first, title: "Edited within the batch" };
+        const update: OrchestrationV2DomainEvent = {
+          id: EventId.make("event:foundation-batch-create:updated"),
+          type: "thread.metadata-updated",
+          threadId: first.id,
+          occurredAt: now,
+          payload: updated,
+        };
+        const afterSequence = yield* eventSink.latestSequence();
+        const stored = yield* eventSink.write({
+          events: [
+            firstCreate,
+            secondCreate,
+            update,
+            threadCreatedEvent({
+              id: "event:foundation-batch-create:first-repeat",
+              thread: first,
+              now,
+            }),
+            threadCreatedEvent({
+              id: "event:foundation-batch-create:second-repeat",
+              thread: { ...second, title: "Repeated provider title" },
+              now,
+            }),
+          ],
+        });
+        assert.deepEqual(
+          stored.map((event) => event.event.id),
+          [firstCreate.id, secondCreate.id, update.id],
+        );
+        assert.deepEqual((yield* projectionStore.getThreadProjection(first.id)).thread, updated);
+        assert.deepEqual((yield* projectionStore.getThreadProjection(second.id)).thread, second);
+        assert.deepEqual(yield* eventStore.read({ afterSequence }).pipe(Stream.runCollect), stored);
+      }),
+  );
+
   it.effect("projects oversized tool bodies before both replay and live RPC retention", () =>
     Effect.scoped(
       Effect.gen(function* () {

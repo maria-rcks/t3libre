@@ -305,7 +305,26 @@ const baseLayer: Layer.Layer<
         });
       });
 
-    const normalizeEvents = (events: ReadonlyArray<OrchestrationV2DomainEvent>) => {
+    const normalizeEvents = Effect.fnUntraced(function* (
+      events: ReadonlyArray<OrchestrationV2DomainEvent>,
+    ) {
+      // Providers can re-emit deterministic thread IDs after a restart. Check
+      // inside the transaction, before appending or publishing duplicate creates.
+      const createdThreadIds = new Set<ThreadId>();
+      const acceptedEvents: Array<OrchestrationV2DomainEvent> = [];
+      for (const event of events) {
+        if (event.type === "thread.created") {
+          if (createdThreadIds.has(event.payload.id)) continue;
+          const existing = yield* sql<{ readonly thread_id: string }>`
+            SELECT thread_id FROM orchestration_v2_projection_threads
+            WHERE thread_id = ${event.payload.id}
+            LIMIT 1
+          `;
+          if (existing.length > 0) continue;
+          createdThreadIds.add(event.payload.id);
+        }
+        acceptedEvents.push(event);
+      }
       const runOrdinals = new Map(
         events.flatMap((event) =>
           event.type === "run.created" || event.type === "run.updated"
@@ -313,8 +332,8 @@ const baseLayer: Layer.Layer<
             : [],
         ),
       );
-      return Effect.forEach(
-        events,
+      return yield* Effect.forEach(
+        acceptedEvents,
         (event): Effect.Effect<OrchestrationV2DomainEvent, unknown> =>
           event.type === "turn-item.updated"
             ? turnItemPositions
@@ -326,7 +345,7 @@ const baseLayer: Layer.Layer<
             : Effect.succeed(event),
         { concurrency: 1 },
       );
-    };
+    });
 
     const applyStoredEvents = (storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>) =>
       Effect.gen(function* () {

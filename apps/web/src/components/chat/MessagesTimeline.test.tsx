@@ -2138,6 +2138,211 @@ describe("MessagesTimeline", () => {
     },
   );
 
+  it.each(["subagent event", "provider message"])(
+    "guards missing workflow threads in a %s while keeping phases and scripts inspectable",
+    async (source) => {
+      vi.unstubAllGlobals();
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        },
+      );
+      vi.useFakeTimers();
+      activityTestState.expandedRuns = true;
+      const { Atom } = await import("effect/unstable/reactivity");
+      const DateTime = await import("effect/DateTime");
+      const entities = await import("../../state/entities");
+      const { environmentThreadDetails } = await import("../../state/threads");
+      const archivedThreads = await import("../../lib/archivedThreadsState");
+      const filePreview = await import("../files/AttachmentFilePreview");
+      const agent = {
+        id: "workflow-node",
+        childThreadId: "workflow-child",
+        title: "Review workflow",
+        prompt: "await workflow.run();",
+        model: null,
+        status: "completed",
+        result: null,
+        startedAt: null,
+        completedAt: null,
+        updatedAt: DateTime.makeUnsafe(MESSAGE_CREATED_AT),
+        workflow: {
+          name: "Release review",
+          phases: [{ index: 1, title: "Inspect" }],
+          agents: ["deleted", "live", "archived", "foreign-live", "foreign-archived"].map(
+            (availability, index) => ({
+              index,
+              label: `${availability} reviewer`,
+              state: "completed",
+              phaseIndex: 1,
+              childThreadId: `${availability}-child`,
+            }),
+          ),
+        },
+      };
+      const parent = { projection: { subagents: [agent] } };
+      const spies = [
+        vi
+          .spyOn(environmentThreadDetails, "threadAtom")
+          .mockReturnValue(Atom.make(parent) as never),
+        vi.spyOn(entities, "useThreadShell").mockReturnValue({
+          source: {
+            id: "workflow-child",
+            lineage: { relationshipToParent: "subagent", parentThreadId: "thread-1" },
+          },
+        } as never),
+        vi.spyOn(entities, "useThreadShells").mockReturnValue([
+          { environmentId: ACTIVE_THREAD_ENVIRONMENT_ID, source: { id: "live-child" } },
+          { environmentId: "environment-foreign", source: { id: "foreign-live-child" } },
+          { environmentId: "environment-foreign", source: { id: "workflow-child" } },
+        ] as never),
+        vi.spyOn(archivedThreads, "useArchivedThreadSnapshots").mockReturnValue({
+          snapshots: [
+            {
+              environmentId: "environment-foreign",
+              snapshot: { threads: [{ id: "foreign-archived-child" }] },
+            },
+            {
+              environmentId: ACTIVE_THREAD_ENVIRONMENT_ID,
+              snapshot: { threads: [{ id: "archived-child" }] },
+            },
+          ],
+          isLoading: false,
+          error: null,
+          refresh: vi.fn(),
+        } as never),
+        // Keep the real script dialog; only replace its worker-backed syntax highlighter.
+        vi
+          .spyOn(filePreview, "ReadOnlySourcePreview")
+          .mockImplementation(({ text }) => <pre>{text}</pre>),
+      ];
+      const onOpenThread = vi.fn();
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      const message = buildUserTimelineEntry(agent.prompt);
+      try {
+        await act(async () => {
+          root.render(
+            <MessagesTimeline
+              {...buildProps()}
+              routeThreadKey={`environment-local:${source === "provider message" ? "workflow-child" : "thread-1"}`}
+              onOpenThread={onOpenThread}
+              timelineEntries={
+                source === "provider message"
+                  ? [
+                      {
+                        ...message,
+                        message: {
+                          ...message.message,
+                          createdBy: "agent",
+                          creationSource: "provider",
+                        },
+                      },
+                    ]
+                  : [
+                      {
+                        id: "workflow-event",
+                        kind: "event",
+                        createdAt: MESSAGE_CREATED_AT,
+                        projectedItem: {
+                          position: 0,
+                          visibility: "local",
+                          sourceThreadId: "thread-1",
+                          sourceItemId: "workflow-event",
+                          item: {
+                            id: "workflow-event",
+                            threadId: "thread-1",
+                            runId: "run-1",
+                            nodeId: agent.id,
+                            providerThreadId: "provider-thread-1",
+                            providerTurnId: "provider-turn-1",
+                            nativeItemRef: null,
+                            parentItemId: null,
+                            ordinal: 1,
+                            status: "completed",
+                            title: agent.title,
+                            startedAt: null,
+                            completedAt: null,
+                            updatedAt: agent.updatedAt,
+                            type: "subagent",
+                            subagentId: agent.id,
+                            origin: "provider_native",
+                            driver: "claudeAgent",
+                            providerInstanceId: "claudeAgent",
+                            childThreadId: agent.childThreadId,
+                            prompt: agent.prompt,
+                            result: null,
+                          },
+                        } as never,
+                      },
+                    ]
+              }
+            />,
+          );
+        });
+        expect(container.querySelector('[aria-label="Workflow: Release review"]')).not.toBeNull();
+        const coordinator = [...container.querySelectorAll("button")].find(
+          (button) => button.textContent === "Open workflow",
+        );
+        if (source === "subagent event") {
+          expect(coordinator).toBeDefined();
+          expect(coordinator!.disabled).toBe(true);
+          await act(async () => coordinator!.click());
+        } else {
+          expect(coordinator).toBeUndefined();
+        }
+        for (const availability of ["deleted", "foreign-live", "foreign-archived"]) {
+          const member = container.querySelector<HTMLButtonElement>(
+            `button[aria-label="Open ${availability} reviewer"]`,
+          )!;
+          expect(member.disabled).toBe(true);
+          await act(async () => member.click());
+        }
+        expect(onOpenThread).not.toHaveBeenCalled();
+        for (const availability of ["live", "archived"]) {
+          const member = container.querySelector<HTMLButtonElement>(
+            `button[aria-label="Open ${availability} reviewer"]`,
+          )!;
+          expect(member.disabled).toBe(false);
+          await act(async () => member.click());
+          expect(onOpenThread).toHaveBeenLastCalledWith(`${availability}-child`);
+        }
+        expect(onOpenThread).toHaveBeenCalledTimes(2);
+        onOpenThread.mockClear();
+        const phase = container.querySelector<HTMLButtonElement>(
+          'button[aria-label="Inspect: 5/5"]',
+        )!;
+        await act(async () => phase.click());
+        expect(container.querySelector('[aria-label="Open deleted reviewer"]')).toBeNull();
+        await act(async () => phase.click());
+        expect(
+          container.querySelector('[aria-label="Open deleted reviewer"]')?.textContent,
+        ).toContain("deleted reviewer");
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
+        const script = [...container.querySelectorAll("button")].find(
+          (button) => button.textContent === "View script",
+        )!;
+        await act(async () => script.click());
+        const dialog = document.querySelector('[role="dialog"]')!;
+        expect(dialog.textContent).toContain("Workflow script");
+        expect(dialog.textContent).toContain(agent.prompt);
+        expect(onOpenThread).not.toHaveBeenCalled();
+      } finally {
+        await act(async () => root.unmount());
+        await act(async () => vi.runOnlyPendingTimersAsync());
+        for (const spy of spies) spy.mockRestore();
+        container.remove();
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
   it("renders V2 provider retries in the normal work log", () => {
     activityTestState.expanded = true;
     const retryItem = {

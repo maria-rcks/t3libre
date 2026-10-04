@@ -23,6 +23,7 @@ import {
   type EnvironmentId,
   type MessageId,
   type OrchestrationV2TurnItem,
+  type OrchestrationV2Subagent,
   type RunAttemptId,
   type ScopedThreadRef,
   type ServerProvider,
@@ -171,7 +172,13 @@ import {
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
-import { useProject, useThreadProjection, useThreadShell } from "../../state/entities";
+import {
+  useProject,
+  useThreadProjection,
+  useThreadShell,
+  useThreadShells,
+} from "../../state/entities";
+import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
   readTimelinePosition,
@@ -1956,6 +1963,39 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   );
 }
 
+function TimelineWorkflowCard({
+  agent,
+  inWorkflowThread = false,
+}: {
+  agent: OrchestrationV2Subagent;
+  inWorkflowThread?: boolean;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const shells = useThreadShells();
+  const archived = useArchivedThreadSnapshots([ctx.activeThreadEnvironmentId]);
+  const archivedShells = archived.snapshots.find(
+    (entry) => entry.environmentId === ctx.activeThreadEnvironmentId,
+  )?.snapshot.threads;
+  const available = useMemo(
+    () =>
+      new Set([
+        ...shells
+          .filter((shell) => shell.environmentId === ctx.activeThreadEnvironmentId)
+          .map((shell) => shell.source.id),
+        ...(archivedShells ?? []).map((shell) => shell.id),
+      ]),
+    [shells, archivedShells, ctx.activeThreadEnvironmentId],
+  );
+  return (
+    <WorkflowCard
+      agent={agent}
+      onOpenThread={ctx.onOpenThread}
+      inWorkflowThread={inWorkflowThread}
+      isThreadUnavailable={(threadId) => !available.has(threadId)}
+    />
+  );
+}
+
 function ProviderUserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const shell = useThreadShell(ctx.threadRef);
@@ -1976,7 +2016,7 @@ function ProviderUserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "m
   return agent?.workflow &&
     agent.childThreadId === ctx.threadRef?.threadId &&
     agent.prompt === row.message.text ? (
-    <WorkflowCard agent={agent} onOpenThread={ctx.onOpenThread} inWorkflowThread />
+    <TimelineWorkflowCard agent={agent} inWorkflowThread />
   ) : (
     <UserMessageTimelineRow row={row} />
   );
@@ -3056,7 +3096,7 @@ function V2SubagentTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "eve
   return (
     <>
       {workflows.map((agent) => (
-        <WorkflowCard key={agent.id} agent={agent} onOpenThread={ctx.onOpenThread} />
+        <TimelineWorkflowCard key={agent.id} agent={agent} />
       ))}
       {ordinary.length > 1 ? (
         <V2SubagentGroup row={{ ...row, projectedItem: ordinary[0]!, subagents: ordinary }} />

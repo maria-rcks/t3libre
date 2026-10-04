@@ -6375,6 +6375,23 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               assert.equal(resultItems.at(-1)?.id, resultItems[0]?.id);
               assert.equal(resultItems.at(-1)?.text, expectedResult);
               assert.equal(task?.result, outcome === "completed" ? null : "Final review");
+            } else {
+              assert.isFalse(
+                harness.events.some(
+                  (event) =>
+                    event.type === "message.updated" &&
+                    event.message.threadId === finalMember.childThreadId &&
+                    event.message.role === "user",
+                ),
+              );
+              assert.isFalse(
+                harness.events.some(
+                  (event) =>
+                    event.type === "turn_item.updated" &&
+                    event.turnItem.threadId === finalMember.childThreadId &&
+                    event.turnItem.type === "user_message",
+                ),
+              );
             }
             assert.equal(
               harness.events.filter(

@@ -17,8 +17,6 @@ export interface ComposerTaskStep {
   readonly status: "pending" | "inProgress" | "completed";
 }
 
-const MAX_TASK_SEGMENTS = 10;
-
 const taskStatusLabels = {
   pending: "Pending",
   inProgress: "Running",
@@ -32,34 +30,6 @@ function keyedTaskSteps(steps: readonly ComposerTaskStep[]) {
     occurrences.set(step.step, occurrence + 1);
     return { key: `${step.step}:${occurrence}`, step };
   });
-}
-
-function TaskSegments({
-  className,
-  steps,
-}: {
-  readonly className?: string;
-  readonly steps: readonly ComposerTaskStep[];
-}) {
-  if (steps.length <= 1 || steps.length > MAX_TASK_SEGMENTS) return null;
-
-  return (
-    <span aria-hidden className={cn("flex w-10 shrink-0 items-center gap-0.5", className)}>
-      {keyedTaskSteps(steps).map(({ key, step }) => (
-        <span
-          key={key}
-          className={cn(
-            "h-[3px] min-w-0 flex-1 rounded-full",
-            step.status === "completed"
-              ? "bg-success"
-              : step.status === "inProgress"
-                ? "bg-primary"
-                : "bg-muted-foreground/25",
-          )}
-        />
-      ))}
-    </span>
-  );
 }
 
 function TaskSummary({
@@ -92,7 +62,10 @@ function TaskSummary({
         >
           {progress.completedSteps}/{progress.totalSteps}
         </ComposerBanner.Count>
-        <TaskSegments className="hidden w-20 @min-[560px]:flex" steps={steps} />
+        <ComposerBanner.Segments
+          className="hidden w-20 @min-[560px]:flex"
+          statuses={steps.map((step) => step.status)}
+        />
         <ComposerBanner.ToggleIcon expanded={expanded} />
       </ComposerBanner.Actions>
     </>

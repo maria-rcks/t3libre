@@ -305,6 +305,39 @@ function Count({ className, ...props }: ComponentProps<"span">) {
   );
 }
 
+/** One short progress line per task or workflow member, bounded like the Tasks banner. */
+function Segments({
+  statuses,
+  className,
+}: {
+  statuses: readonly ("pending" | "inProgress" | "completed" | "failed")[];
+  className?: string;
+}) {
+  if (statuses.length <= 1 || statuses.length > 10) return null;
+
+  return (
+    <span aria-hidden className={cn("flex w-10 shrink-0 items-center gap-0.5", className)}>
+      {statuses.map((status, index) => (
+        <span
+          // Segments represent ordered progress slots, with no per-item state.
+          // oxlint-disable-next-line react/no-array-index-key
+          key={index}
+          className={cn(
+            "h-[3px] min-w-0 flex-1 rounded-full",
+            status === "completed"
+              ? "bg-success"
+              : status === "inProgress"
+                ? "bg-primary"
+                : status === "failed"
+                  ? "bg-destructive"
+                  : "bg-muted-foreground/25",
+          )}
+        />
+      ))}
+    </span>
+  );
+}
+
 function Body({ className, ...props }: ComponentProps<"div">) {
   return <div className={cn("min-w-0 ps-8 sm:ps-7", className)} {...props} />;
 }
@@ -353,6 +386,7 @@ export const ComposerBanner = {
   Children,
   Scroll,
   Count,
+  Segments,
   Body,
   Dot,
   ToggleIcon,

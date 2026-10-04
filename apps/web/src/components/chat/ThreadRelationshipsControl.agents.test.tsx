@@ -257,7 +257,7 @@ it.each(["live", "retained"])(
       status: "running",
       workflow: undefined,
     };
-    state.projection = {
+    const projection = {
       thread: {
         id: "parent",
         lineage: { parentThreadId: null, relationshipToParent: null },
@@ -269,6 +269,7 @@ it.each(["live", "retained"])(
       contextTransfers: [],
       subagents: source === "live" ? [agent, ordinary] : [ordinary],
     };
+    state.projection = projection;
     const shells = [
       ...[agent, ordinary].map((entry) => ({
         id: entry.childThreadId,
@@ -313,6 +314,11 @@ it.each(["live", "retained"])(
       );
     }
     expect(text()).toContain("Release review");
+    expect(
+      renderer.root.findAllByProps({
+        "aria-label": `${source === "live" ? 1 : 2} of 2 agents completed`,
+      }).length,
+    ).toBeGreaterThan(0);
     expect(text()).toContain("Ordinary agent");
     expect(text()).not.toContain("Inspect");
     expect(text()).not.toContain("Code reviewer");
@@ -384,6 +390,34 @@ it.each(["live", "retained"])(
       to: "/$environmentId/$threadId",
       params: { environmentId: "test", threadId: "writer-child" },
     });
+
+    const completedAgent = {
+      ...agent,
+      workflow: {
+        ...agent.workflow,
+        agents: agent.workflow.agents.map((member) => ({ ...member, state: "completed" })),
+      },
+    };
+    state.projection = {
+      ...projection,
+      subagents: source === "live" ? [completedAgent, ordinary] : [ordinary],
+    };
+    state.owningAgents.set("parent:workflow-node", completedAgent);
+    await act(async () =>
+      renderer.update(
+        <ThreadRelationshipsPanel
+          environmentId={EnvironmentId.make("test")}
+          threadId={ThreadId.make("parent")}
+        />,
+      ),
+    );
+    expect(renderer.root.findAllByProps({ "aria-label": "1 of 2 agents completed" })).toHaveLength(
+      0,
+    );
+    expect(
+      renderer.root.findAllByProps({ "aria-label": "2 of 2 agents completed" }).length,
+    ).toBeGreaterThan(0);
+    expect(buttonWithLabel("Publish: 1/1")).toBeDefined();
   },
 );
 
