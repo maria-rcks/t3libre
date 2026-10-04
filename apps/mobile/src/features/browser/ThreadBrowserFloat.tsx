@@ -27,15 +27,20 @@ export function ThreadBrowserFloat(props: {
   readonly onOpen: (tabId: string) => void;
 }) {
   const [tabId, setTabId] = useState<string | null>(null);
-  const known = useRef<ReadonlySet<string> | null>(null);
+  const known = useRef<ReadonlyMap<string, string | undefined> | null>(null);
   useEffect(() => {
     if (!props.loaded) return;
-    const ids = props.tabs.map((tab) => tab.tabId);
     const previous = known.current;
-    known.current = new Set(ids);
+    known.current = new Map(props.tabs.map((tab) => [tab.tabId, tab.revealRequest?.id]));
     // The first list is a baseline, so reopening a thread does not resurface old tabs.
     if (previous === null) return;
-    const opened = props.tabs.findLast((tab) => tab.reveal === true && !previous.has(tab.tabId));
+    const opened = props.tabs.findLast(
+      (tab) =>
+        tab.reveal === true &&
+        (tab.revealRequest
+          ? previous.get(tab.tabId) !== tab.revealRequest.id
+          : !previous.has(tab.tabId)),
+    );
     if (opened !== undefined) setTabId(opened.tabId);
   }, [props.loaded, props.tabs]);
   const focused = useIsFocused();

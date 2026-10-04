@@ -2243,6 +2243,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const activePreviewState = useThreadPreviewState(activeThreadRef);
   const activePreviewServerEpoch = activePreviewState.serverEpoch;
+  const previewSessionsReady = !activeEnvironmentServerBrowser || activePreviewState.listLoaded;
   const resolvePreviewRuntimeTabId = useMemo(
     () =>
       activeThreadRef
@@ -2317,21 +2318,26 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   useEffect(() => {
-    if (!activeThreadRef) return;
+    if (!activeThreadRef || !previewSessionsReady) return;
     useRightPanelStore
       .getState()
       .reconcileBrowserSurfaces(activeThreadRef, Object.keys(activePreviewState.sessions));
-  }, [activePreviewState.sessions, activeThreadRef]);
+  }, [activePreviewState.sessions, activeThreadRef, previewSessionsReady]);
 
   useEffect(() => {
-    if (!activeThreadRef || activePreviewMiniPlayer?.source.kind !== "browser") return;
+    if (
+      !activeThreadRef ||
+      !previewSessionsReady ||
+      activePreviewMiniPlayer?.source.kind !== "browser"
+    )
+      return;
     const miniTabStillExists = Boolean(
       activePreviewState.sessions[activePreviewMiniPlayer.source.tabId],
     );
     if (!miniTabStillExists) {
       usePreviewMiniPlayerStore.getState().close(activeThreadRef);
     }
-  }, [activePreviewMiniPlayer, activePreviewState.sessions, activeThreadRef]);
+  }, [activePreviewMiniPlayer, activePreviewState.sessions, activeThreadRef, previewSessionsReady]);
 
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
@@ -5127,7 +5133,7 @@ export default function ChatView(props: ChatViewProps) {
   // desktop automation host does for its own tabs. Tabs present when the
   // thread's preview state first loads are a baseline, so reloads do not
   // resurrect them, and tabs already shown in a surface stay where they are.
-  const previousServerPreviewTabs = useRef(new Map<string, Set<string>>());
+  const previousServerPreviewTabs = useRef(new Map<string, Map<string, string | undefined>>());
   useEffect(() => {
     if (!activeThreadRef || !activeEnvironmentServerBrowser) return;
     // Nothing has loaded yet; an empty baseline would make every tab look new.
@@ -5139,15 +5145,22 @@ export default function ChatView(props: ChatViewProps) {
     const previous = previousServerPreviewTabs.current.get(threadKey);
     previousServerPreviewTabs.current.set(
       threadKey,
-      new Set(serverSessions.map((session) => session.tabId)),
+      new Map(serverSessions.map((session) => [session.tabId, session.revealRequest?.id])),
     );
-    if (!previous || !autoShowFloatingPreview) return;
+    if (!previous) return;
     for (const session of serverSessions) {
-      if (previous.has(session.tabId) || session.reveal !== true) continue;
-      const shown = rightPanelState.surfaces.some(
+      const requested = session.revealRequest;
+      const fresh = requested
+        ? previous.get(session.tabId) !== requested.id
+        : !previous.has(session.tabId);
+      if (!fresh || session.reveal !== true) continue;
+      if (!autoShowFloatingPreview && requested?.force !== true) continue;
+      const surface = rightPanelState.surfaces.find(
         (surface) => surface.kind === "preview" && surface.resourceId === session.tabId,
       );
-      if (!shown) {
+      if (surface && requested?.force === true) {
+        useRightPanelStore.getState().activateSurface(activeThreadRef, surface.id);
+      } else if (!surface) {
         usePreviewMiniPlayerStore
           .getState()
           .open(activeThreadRef, browserMiniPlayerSource(session.tabId));
