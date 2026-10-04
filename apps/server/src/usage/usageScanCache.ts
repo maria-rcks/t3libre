@@ -35,7 +35,8 @@ const SPEED_COMPATIBLE_SINCE_VERSION = 4;
  * Each cache version writes its own file in the state directory. An older
  * server sharing that directory cannot read a newer cache and would replace
  * it, dropping saved usage for deleted transcripts. Separate files keep both.
- * A new server reads the newest available legacy file when its own is missing.
+ * A new server combines retained legacy entries when its own file is missing,
+ * using each transcript's latest cached modification time to resolve overlap.
  */
 export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v6.json";
 export const LEGACY_SCAN_CACHE_FILE_NAMES = [

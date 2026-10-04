@@ -845,9 +845,11 @@ describe("UsageService", () => {
       Effect.gen(function* () {
         const { transcript, settings, home } = yield* setup;
         const deleted = NodePath.join(NodePath.dirname(transcript), "deleted.jsonl");
+        const legacyOnly = NodePath.join(NodePath.dirname(transcript), "legacy-only.jsonl");
         yield* Effect.promise(async () => {
           await NodeFSP.writeFile(transcript, claudeLine(1, 10, "claude-fable-5", 4));
           await NodeFSP.writeFile(deleted, claudeLine(2, 30, "claude-fable-5", 12));
+          await NodeFSP.writeFile(legacyOnly, claudeLine(4, 20, "claude-fable-5", 8));
         });
         yield* Effect.gen(function* () {
           const { stateDir } = yield* ServerConfig.ServerConfig;
@@ -856,11 +858,11 @@ describe("UsageService", () => {
           const original = yield* (yield* UsageService.make).readSummary(WINDOW);
           const thinking = (summary: typeof original) =>
             summary.buckets.reduce((sum, bucket) => sum + bucket.totals.reasoningTokens, 0);
-          assert.strictEqual(thinking(original), 16);
+          assert.strictEqual(thinking(original), 24);
 
           const legacy = yield* Effect.promise(async () => {
             const document = decodeUnknownJsonString(await NodeFSP.readFile(cachePath, "utf8")) as {
-              files: Record<string, { r: unknown[][]; t: unknown[][] }>;
+              files: Record<string, { m: number; r: unknown[][]; t: unknown[][] }>;
             };
             // Old parsers saved zero thinking but valid sizes and append positions.
             for (const file of Object.values(document.files)) {
@@ -873,15 +875,34 @@ describe("UsageService", () => {
                 NodePath.join(stateDir, "usage-scan-cache.json"),
                 encodeUnknownJsonString({ ...document, version: 4, files: {} }),
               );
+            } else {
+              // A v4 server kept scanning after v5 first ran. Its retained
+              // snapshot is newer, and includes a file absent from v5.
+              const older = document.files[deleted]!;
+              await NodeFSP.writeFile(
+                NodePath.join(stateDir, "usage-scan-cache-v5.json"),
+                encodeUnknownJsonString({
+                  ...document,
+                  version: 5,
+                  files: {
+                    [deleted]: {
+                      ...older,
+                      m: older.m - 1000,
+                      r: older.r.map((row) => row.map((value, index) => (index === 6 ? 1 : value))),
+                    },
+                  },
+                }),
+              );
             }
             await NodeFSP.rm(cachePath);
             await NodeFSP.rm(deleted);
+            await NodeFSP.rm(legacyOnly);
             return text;
           });
 
           const service = yield* UsageService.make;
           const upgraded = yield* service.readSummary(WINDOW);
-          assert.strictEqual(totalOutputTokens(upgraded), 40);
+          assert.strictEqual(totalOutputTokens(upgraded), 60);
           // The unchanged live file must re-parse from byte zero. The deleted
           // file retains its tokens and cost, but its thinking is unrecoverable.
           assert.strictEqual(thinking(upgraded), 4);
@@ -893,7 +914,7 @@ describe("UsageService", () => {
             NodeFSP.appendFile(transcript, claudeLine(3, 7, "claude-fable-5", 3)),
           );
           const appended = yield* service.readSummary(WINDOW);
-          assert.strictEqual(totalOutputTokens(appended), 47);
+          assert.strictEqual(totalOutputTokens(appended), 67);
           assert.strictEqual(thinking(appended), 7);
 
           yield* Effect.promise(() => NodeFSP.rm(transcript));
