@@ -2358,16 +2358,13 @@ export default function ChatView(props: ChatViewProps) {
   }, [activePreviewState.sessions, activeThreadRef, previewSessionsReady]);
 
   useEffect(() => {
+    const source = activePreviewMiniPlayer?.source;
     if (
-      !activeThreadRef ||
-      !previewSessionsReady ||
-      activePreviewMiniPlayer?.source.kind !== "browser"
-    )
-      return;
-    const miniTabStillExists = Boolean(
-      activePreviewState.sessions[activePreviewMiniPlayer.source.tabId],
-    );
-    if (!miniTabStillExists) {
+      activeThreadRef &&
+      previewSessionsReady &&
+      source?.kind === "browser" &&
+      !activePreviewState.sessions[source.tabId]
+    ) {
       usePreviewMiniPlayerStore.getState().close(activeThreadRef);
     }
   }, [activePreviewMiniPlayer, activePreviewState.sessions, activeThreadRef, previewSessionsReady]);
@@ -5371,15 +5368,11 @@ export default function ChatView(props: ChatViewProps) {
     deviceState.sessions,
     deviceState.devices,
   ]);
-  // A server tab an agent opens and asks to show floats over chat, as a
-  // desktop automation host does for its own tabs. Tabs present when the
-  // thread's preview state first loads are a baseline, so reloads do not
-  // resurrect them, and tabs already shown in a surface stay where they are.
+  // Baseline loaded tabs so reloads never reopen previews the user dismissed.
   const previousServerPreviewTabs = useRef(new Map<string, Map<string, string | undefined>>());
   useEffect(() => {
-    if (!activeThreadRef || !activeEnvironmentServerBrowser) return;
-    // Nothing has loaded yet; an empty baseline would make every tab look new.
-    if (!activePreviewState.listLoaded) return;
+    if (!activeThreadRef || !activeEnvironmentServerBrowser || !activePreviewState.listLoaded)
+      return;
     const threadKey = scopedThreadKey(activeThreadRef);
     const serverSessions = Object.values(activePreviewState.sessions).filter(
       (session) => session.runtime === "server",

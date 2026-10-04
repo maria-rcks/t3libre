@@ -2,27 +2,14 @@ import { useIsFocused, useNavigation, type StaticScreenProps } from "@react-navi
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { EnvironmentId, ThreadId, type PreviewSessionSnapshot } from "@t3tools/contracts";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  AppState,
-  Platform,
-  Pressable,
-  TextInput,
-  View,
-} from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, AppState, Platform, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppText } from "../../components/AppText";
 import { ControlPill } from "../../components/ControlPill";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { NativeHeaderToolbar } from "../../native/StackHeader";
-import {
-  refreshPreviewStreamAccess,
-  usePreviewStreamAccess,
-  useThreadServerBrowserTabs,
-} from "../../state/preview";
+import { useThreadServerBrowserTabs } from "../../state/preview";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { browserTabTitle, browserTabUrl, latestBrowserTab } from "./browserTabs";
 import {
@@ -178,12 +165,14 @@ function BrowserPreviewScreen({
             onCommand={(input) => streamRef.current?.command(input)}
           />
           {live ? (
-            <OpenBrowserPreview
+            <PreviewStreamWebView
               key={tab.tabId}
               environmentId={environmentId}
               threadId={threadId}
               tabId={tab.tabId}
-              streamRef={streamRef}
+              ref={streamRef}
+              interactive
+              background={themeVariables["--color-sheet-solid"]}
               onPictureInPicture={onPictureInPicture}
               onStreamingChange={setStreaming}
             />
@@ -259,64 +248,6 @@ function BrowserAddressBar({
         disabled={!ready}
         onPress={() => onCommand({ type: "reload" })}
       />
-    </View>
-  );
-}
-
-function OpenBrowserPreview({
-  environmentId,
-  threadId,
-  tabId,
-  streamRef,
-  onPictureInPicture,
-  onStreamingChange,
-}: {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly tabId: string;
-  readonly streamRef: RefObject<PreviewStreamRef | null>;
-  readonly onPictureInPicture: (state: PreviewPictureInPictureState, detail?: string) => void;
-  readonly onStreamingChange: (streaming: boolean) => void;
-}) {
-  const { themeVariables } = useAppearancePreferences();
-  const { access, error, refresh } = usePreviewStreamAccess(environmentId);
-  const onUnauthorized = useCallback(
-    () => refreshPreviewStreamAccess(environmentId),
-    [environmentId],
-  );
-  return access ? (
-    <PreviewStreamWebView
-      ref={streamRef}
-      access={access}
-      threadId={threadId}
-      tabId={tabId}
-      interactive
-      background={themeVariables["--color-sheet-solid"]}
-      onUnauthorized={onUnauthorized}
-      onPictureInPicture={onPictureInPicture}
-      onStreamingChange={onStreamingChange}
-    />
-  ) : (
-    <View className="flex-1 items-center justify-center gap-4 px-6">
-      {error ? (
-        <>
-          <AppText selectable className="text-center text-sm text-foreground-muted">
-            {error}
-          </AppText>
-          <Pressable
-            accessibilityRole="button"
-            className="rounded-full border border-secondary-border bg-secondary px-6 py-3"
-            onPress={refresh}
-          >
-            <AppText className="text-secondary-foreground">Retry</AppText>
-          </Pressable>
-        </>
-      ) : (
-        <>
-          <ActivityIndicator color={themeVariables["--color-icon"]} />
-          <AppText className="text-sm text-foreground-muted">Connecting to browser...</AppText>
-        </>
-      )}
     </View>
   );
 }

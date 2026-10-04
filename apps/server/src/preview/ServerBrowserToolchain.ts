@@ -1,19 +1,5 @@
-/**
- * The Chromium the environment server runs for server-side preview tabs.
- *
- * Servers are often GPU-less containers without root or Chrome's system
- * libraries, so on glibc Linux we install a pinned headless build from the
- * `@sparticuz/chromium` GitHub release (its npm package ships x64 only): the
- * executable with SwiftShader beside it, and NSS/NSPR/expat in `lib/` for
- * `LD_LIBRARY_PATH`. A private fontconfig file layers optional T3-owned emoji
- * and CJK fonts over whatever the system has. Everywhere else nothing is
- * downloaded: we use an installed Chrome, Chromium, or Edge, or a Playwright
- * cache build.
- *
- * Installs follow the pinned-runtime recipe: stage into a temp sibling, write
- * the sentinel only after the tree is complete (and, for the browser, after
- * the executable runs), then rename into place.
- */
+// glibc Linux uses a pinned Chromium pack with its own libraries and fonts.
+// Other hosts use installed browsers or the Playwright cache.
 import * as NodeStream from "@effect/platform-node/NodeStream";
 import {
   HostProcessArchitecture,
@@ -88,12 +74,8 @@ const SENTINEL = ".install-complete";
 const xmlText = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-/**
- * Our cache dir comes first so fontconfig writes there (a relative cachedir
- * resolves against the cwd, so it must be absolute). <dir> is scanned
- * recursively and dot entries are skipped, so the fonts tool's staging dirs
- * stay invisible and whichever fonts version is installed gets picked up.
- */
+// Fontconfig skips dot staging directories and scans every installed fonts version.
+// Put our absolute cache directory first so fontconfig can write without root.
 const fontconfigFile = (
   browserDir: string,
   fontsToolDir: string,
@@ -114,15 +96,9 @@ const FONTS_LAUNCH_WAIT = Duration.seconds(1);
 const browserInstallLock = Semaphore.makeUnsafe(1);
 const fontsInstallLock = Semaphore.makeUnsafe(1);
 
-export type ServerBrowserSource = "override" | "bundled" | "system" | "playwright-cache";
-
 export interface ServerBrowserLaunch {
   readonly executablePath: string;
-  /** Merge over the server's environment when spawning. */
   readonly env: Readonly<Record<string, string>>;
-  /** Flags this build needs beyond the launcher's own. */
-  readonly args: ReadonlyArray<string>;
-  readonly source: ServerBrowserSource;
 }
 
 export class ServerBrowserInstallError extends Schema.TaggedError<ServerBrowserInstallError>()(
@@ -137,6 +113,9 @@ export class ServerBrowserInstallError extends Schema.TaggedError<ServerBrowserI
     return `Installing ${this.tool} failed while ${this.step}.`;
   }
 }
+
+const installFailure = (tool: string, step: string) => (cause?: unknown) =>
+  new ServerBrowserInstallError({ tool, step, cause });
 
 export class ServerBrowserNotFoundError extends Schema.TaggedError<ServerBrowserNotFoundError>()(
   "ServerBrowserNotFoundError",
@@ -163,18 +142,10 @@ export class ServerBrowserToolchain extends Context.Service<
   }
 >()("t3/preview/ServerBrowserToolchain") {}
 
-interface TarEntry {
-  readonly name: string;
-  readonly type: string;
-  readonly mode: number;
-  readonly data: Uint8Array;
-}
-
 /** Reads the plain GNU/ustar tarballs in the pinned pack: files, directories, long names. */
-const readTar = (archive: Uint8Array): ReadonlyArray<TarEntry> => {
+function* readTar(archive: Uint8Array) {
   const decoder = new TextDecoder();
   const text = (bytes: Uint8Array) => decoder.decode(bytes).replace(/\0[\s\S]*$/, "");
-  const entries: Array<TarEntry> = [];
   let longName: string | undefined;
   let offset = 0;
   while (offset + 512 <= archive.length) {
@@ -193,10 +164,9 @@ const readTar = (archive: Uint8Array): ReadonlyArray<TarEntry> => {
     const prefix = field(257, 6) === "ustar" ? field(345, 155) : "";
     const name = longName ?? (prefix ? `${prefix}/${field(0, 100)}` : field(0, 100));
     longName = undefined;
-    entries.push({ name, type, mode: Number.parseInt(field(100, 8).trim() || "644", 8), data });
+    yield { name, type, mode: Number.parseInt(field(100, 8).trim() || "644", 8), data };
   }
-  return entries;
-};
+}
 
 const brotliDecompress = NodeUtil.promisify(NodeZlib.brotliDecompress);
 
@@ -298,14 +268,12 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => false),
     );
 
-  /** Stages and atomically publishes `<baseDir>/tools/<tool>/<version>` if not already complete. */
   const installOnce = Effect.fn("ServerBrowserToolchain.installOnce")(function* (
     tool: string,
     version: string,
     populate: (stagingDir: string) => Effect.Effect<void, ServerBrowserInstallError>,
   ) {
-    const fail = (step: string) => (cause: unknown) =>
-      new ServerBrowserInstallError({ tool, step, cause });
+    const fail = (step: string) => installFailure(tool, step);
     const parentDir = path.join(toolsDir, tool);
     const installDir = path.join(parentDir, version);
     if (yield* isInstalled(installDir, version)) return;
@@ -347,9 +315,7 @@ const make = Effect.gen(function* () {
       Effect.flatMap(HttpClientResponse.filterStatusOk),
       Effect.flatMap((response) => response.arrayBuffer),
       Effect.map((buffer) => new Uint8Array(buffer)),
-      Effect.mapError(
-        (cause) => new ServerBrowserInstallError({ tool, step: `downloading ${asset.url}`, cause }),
-      ),
+      Effect.mapError(installFailure(tool, `downloading ${asset.url}`)),
     );
     if (NodeCrypto.createHash("sha256").update(bytes).digest("hex") !== asset.sha256) {
       return yield* new ServerBrowserInstallError({ tool, step: `verifying ${asset.url}` });
@@ -366,10 +332,12 @@ const make = Effect.gen(function* () {
 
   const populateBrowser = (pack: PinnedAsset) =>
     Effect.fn("ServerBrowserToolchain.populateBrowser")(function* (stagingDir: string) {
-      const fail = (step: string) => (cause: unknown) =>
-        new ServerBrowserInstallError({ tool: BROWSER_TOOL, step, cause });
+      const fail = (step: string) => installFailure(BROWSER_TOOL, step);
       const members = new Map(
-        readTar(yield* download(BROWSER_TOOL, pack)).map((entry) => [entry.name, entry.data]),
+        Array.from(
+          readTar(yield* download(BROWSER_TOOL, pack)),
+          ({ name, data }) => [name, data] as const,
+        ),
       );
       const member = (name: string) => {
         const data = members.get(name);
@@ -377,7 +345,7 @@ const make = Effect.gen(function* () {
           ? Effect.fail(
               new ServerBrowserInstallError({ tool: BROWSER_TOOL, step: `finding ${name}` }),
             )
-          : Effect.succeed(Buffer.from(data.buffer, data.byteOffset, data.byteLength));
+          : Effect.succeed(data);
       };
 
       // Stream the ~200 MB executable to disk instead of inflating it in memory.
@@ -389,8 +357,6 @@ const make = Effect.gen(function* () {
         Effect.mapError(fail("unpacking chromium.br")),
       );
 
-      // SwiftShader sits beside the executable, NSS/NSPR/expat land in lib/,
-      // and fonts.tar adds Open Sans for hosts with no fonts at all.
       for (const name of ["swiftshader.tar.br", "al2023.tar.br", "fonts.tar.br"]) {
         const compressed = yield* member(name);
         const archive = yield* Effect.tryPromise({
@@ -438,42 +404,25 @@ const make = Effect.gen(function* () {
       }
     });
 
-  const populateFonts = Effect.fn("ServerBrowserToolchain.populateFonts")(function* (
-    stagingDir: string,
-  ) {
-    yield* Effect.forEach(
+  const populateFonts = (stagingDir: string) =>
+    Effect.forEach(
       FONTS,
-      (font) =>
-        download(FONTS_TOOL, font).pipe(
-          Effect.flatMap((bytes) =>
-            fs.writeFile(path.join(stagingDir, font.file), bytes).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ServerBrowserInstallError({
-                    tool: FONTS_TOOL,
-                    step: `saving ${font.file}`,
-                    cause,
-                  }),
-              ),
-            ),
-          ),
-        ),
+      Effect.fn(function* (font) {
+        const bytes = yield* download(FONTS_TOOL, font);
+        yield* fs
+          .writeFile(path.join(stagingDir, font.file), bytes)
+          .pipe(Effect.mapError(installFailure(FONTS_TOOL, `saving ${font.file}`)));
+      }),
       { concurrency: "unbounded", discard: true },
     );
-  });
 
-  // Fonts are optional: one attempt per server process that never fails the
-  // browser. It runs detached so a cancelled or failed resolve cannot
-  // interrupt it, which would cache the interruption for every later call.
+  // Detach optional fonts so cancellation cannot poison the cached install attempt.
   const fontsFiber = yield* Effect.cached(
     Effect.forkDetach(
       fontsInstallLock.withPermit(installOnce(FONTS_TOOL, FONTS_VERSION, populateFonts)).pipe(
         Effect.timeoutOrElse({
           duration: FONTS_INSTALL_TIMEOUT,
-          orElse: () =>
-            Effect.fail(
-              new ServerBrowserInstallError({ tool: FONTS_TOOL, step: "downloading (timed out)" }),
-            ),
+          orElse: () => Effect.fail(installFailure(FONTS_TOOL, "downloading (timed out)")()),
         }),
         Effect.catch((cause) =>
           Effect.logWarning("Preview browser fonts unavailable; emoji and CJK may not render", {
@@ -483,18 +432,10 @@ const make = Effect.gen(function* () {
       ),
     ),
   );
-  // The first launch waits briefly for fonts, then goes without; later
-  // launches pick them up once the background install lands.
   const ensureFonts = Effect.flatMap(fontsFiber, (fiber) =>
     Fiber.join(fiber).pipe(Effect.timeoutOption(FONTS_LAUNCH_WAIT), Effect.asVoid),
   );
 
-  const bundledLaunch: ServerBrowserLaunch = {
-    executablePath: path.join(browserDir, "chromium"),
-    env: launchEnv(browserDir),
-    args: [],
-    source: "bundled",
-  };
   const bundled = (pack: PinnedAsset) =>
     Effect.all(
       [
@@ -503,21 +444,16 @@ const make = Effect.gen(function* () {
           .pipe(
             Effect.timeoutOrElse({
               duration: BROWSER_INSTALL_TIMEOUT,
-              orElse: () =>
-                Effect.fail(
-                  new ServerBrowserInstallError({
-                    tool: BROWSER_TOOL,
-                    step: "installing (timed out)",
-                  }),
-                ),
+              orElse: () => Effect.fail(installFailure(BROWSER_TOOL, "installing (timed out)")()),
             }),
           ),
         ensureFonts,
       ],
       { concurrency: "unbounded", discard: true },
-    ).pipe(Effect.as(bundledLaunch));
+    ).pipe(
+      Effect.as({ executablePath: path.join(browserDir, "chromium"), env: launchEnv(browserDir) }),
+    );
 
-  /** Resolves bare names through PATH and checks absolute paths are executable. */
   const executable = (candidate: string) =>
     resolveCommandPath(candidate).pipe(
       Effect.option,
@@ -540,8 +476,6 @@ const make = Effect.gen(function* () {
       return {
         executablePath: system,
         env: {},
-        args: [],
-        source: "system",
       } satisfies ServerBrowserLaunch;
     }
     const playwrightRoot = yield* Effect.try(() =>
@@ -572,8 +506,6 @@ const make = Effect.gen(function* () {
         return {
           executablePath: cached,
           env: {},
-          args: [],
-          source: "playwright-cache",
         } satisfies ServerBrowserLaunch;
       }
     }
@@ -591,8 +523,6 @@ const make = Effect.gen(function* () {
       return {
         executablePath: resolved.value,
         env: libraryPath ? { LD_LIBRARY_PATH: libraryPath } : {},
-        args: [],
-        source: "override",
       } satisfies ServerBrowserLaunch;
     }
     if (browserPack === undefined) return yield* discover;

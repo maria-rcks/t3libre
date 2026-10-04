@@ -13,12 +13,7 @@ import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentSession } from "./session";
 
-/**
- * Stream access for server-hosted preview tabs on one environment. Same ticket
- * flow as the device hub; a socket refused for credentials refreshes this atom
- * and reconnects. Keyed on the prepared connection so a re-pair produces new
- * credentials.
- */
+// Re-pairing changes the prepared connection, invalidating its cached ticket.
 const previewStreamAccessAtom = Atom.family((environmentId: EnvironmentId) =>
   connectionAtomRuntime
     .atom((get) => {

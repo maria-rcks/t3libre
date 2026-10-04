@@ -1,12 +1,5 @@
 // @effect-diagnostics globalDate:off globalTimers:off - Playwright callbacks run outside the Effect runtime.
-/**
- * Page-level automation for server-hosted preview tabs.
- *
- * Plain async helpers over one Playwright page, called by `ServerBrowser`.
- * Results mirror what desktop hosts return for the same operations, so the
- * MCP preview tools cannot tell the two runtimes apart. Failures carry the
- * broker's error tags (see `PreviewAutomationBroker.classifyResponseError`).
- */
+
 import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type PreviewAutomationClickInput,
@@ -40,7 +33,6 @@ export class ServerBrowserOperationError extends Error {
   }
 }
 
-/** Maps a Playwright failure onto the tag the broker classifies. */
 export const toOperationError = (cause: unknown): ServerBrowserOperationError => {
   if (cause instanceof ServerBrowserOperationError) return cause;
   const message = cause instanceof Error ? cause.message : String(cause);
@@ -113,59 +105,29 @@ const SNAPSHOT_SCRIPT = `(() => {
   };
 })()`;
 
-/**
- * The visible viewport as an image, `scale` relative to the rendered pixels.
- *
- * A scaled capture briefly re-renders the page at that scale, and every live
- * screencast on the page streams that frame; callers pause them around it.
- * At full scale there is no clip and nothing re-renders. The clip is
- * document-relative, so it starts at the scroll offset.
- */
+// Scaled captures repaint live screencasts, so callers pause them. Clips use document offsets.
 export const captureViewport = async (
   page: Page,
   cdp: CDPSession,
   options: { readonly format: "png" | "jpeg"; readonly quality?: number; readonly scale: number },
 ) => {
-  const quality = options.quality === undefined ? {} : { quality: options.quality };
-  if (options.scale >= 1) {
-    const { data } = await cdp.send("Page.captureScreenshot", {
-      format: options.format,
-      ...quality,
-    });
-    return data;
-  }
-  const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
-  const { cssVisualViewport } = await cdp.send("Page.getLayoutMetrics");
-  const { data } = await cdp.send("Page.captureScreenshot", {
-    format: options.format,
-    ...quality,
-    clip: {
+  let clip;
+  if (options.scale < 1) {
+    const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
+    const { cssVisualViewport } = await cdp.send("Page.getLayoutMetrics");
+    clip = {
       x: cssVisualViewport.pageX,
       y: cssVisualViewport.pageY,
-      width: viewport.width,
-      height: viewport.height,
+      ...viewport,
       scale: options.scale,
-    },
+    };
+  }
+  const { data } = await cdp.send("Page.captureScreenshot", {
+    format: options.format,
+    ...(options.quality === undefined ? {} : { quality: options.quality }),
+    ...(clip ? { clip } : {}),
   });
   return data;
-};
-
-/**
- * Screenshot of the current viewport at device resolution, scaled down to at
- * most `MAX_SCREENSHOT_WIDTH` like desktop snapshots. `clip.scale` multiplies
- * the render scale, so this needs no image library on the server.
- */
-
-const captureViewportPng = async (page: Page, cdp: CDPSession, renderScale: number) => {
-  const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
-  const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * renderScale));
-  const data = await captureViewport(page, cdp, { format: "png", scale });
-  return {
-    mimeType: "image/png" as const,
-    data,
-    width: Math.round(viewport.width * renderScale * scale),
-    height: Math.round(viewport.height * renderScale * scale),
-  };
 };
 
 export const snapshot = async (input: {
@@ -176,14 +138,16 @@ export const snapshot = async (input: {
   readonly networkEntries: ReadonlyArray<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: PreviewAutomationSnapshot["actionTimeline"];
 }): Promise<PreviewAutomationSnapshot> => {
-  const [page, screenshot] = await Promise.all([
+  const viewport = input.page.viewportSize() ?? { width: 1280, height: 800 };
+  const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * input.renderScale));
+  const [page, data] = await Promise.all([
     input.page.evaluate(SNAPSHOT_SCRIPT) as Promise<
       Pick<
         PreviewAutomationSnapshot,
         "url" | "title" | "loading" | "visibleText" | "interactiveElements"
       >
     >,
-    captureViewportPng(input.page, input.cdp, input.renderScale),
+    captureViewport(input.page, input.cdp, { format: "png", scale }),
   ]);
   return {
     ...page,
@@ -192,11 +156,15 @@ export const snapshot = async (input: {
     consoleEntries: [...input.consoleEntries],
     networkEntries: [...input.networkEntries],
     actionTimeline: [...input.actionTimeline],
-    screenshot,
+    screenshot: {
+      mimeType: "image/png",
+      data,
+      width: Math.round(viewport.width * input.renderScale * scale),
+      height: Math.round(viewport.height * input.renderScale * scale),
+    },
   };
 };
 
-/** Resolves the viewport point an action targets, for the agent cursor. */
 export const click = async (
   page: Page,
   input: PreviewAutomationClickInput,
@@ -225,40 +193,16 @@ export const type = async (page: Page, input: PreviewAutomationTypeInput) => {
   const focused =
     (locator !== null || (await target.count()) > 0) &&
     (await target.evaluate(
-      (element) => {
-        // Like the desktop host: an enabled text control or contenteditable
-        // that actually takes focus. Anything else would swallow the text or
-        // send it to whichever field had focus before.
-        const control = element as unknown as {
-          readonly type?: string;
-          readonly disabled?: boolean;
-          readonly readOnly?: boolean;
-          readonly isContentEditable?: boolean;
-          readonly focus?: () => void;
-        };
-        const nonText = [
-          "button",
-          "checkbox",
-          "color",
-          "file",
-          "hidden",
-          "image",
-          "radio",
-          "range",
-          "reset",
-          "submit",
-        ];
-        const textControl =
-          element.tagName === "TEXTAREA" ||
-          (element.tagName === "INPUT" && !nonText.includes(control.type ?? "text"));
-        if (!(textControl || control.isContentEditable) || control.disabled || control.readOnly) {
-          return false;
-        }
-        control.focus?.();
-        const root = element.getRootNode() as { readonly activeElement?: typeof element | null };
-        const active = root.activeElement;
+      // Source avoids duplicating DOM types in this server-only module.
+      `(element) => {
+        const nonText = ["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"];
+        const textControl = element.tagName === "TEXTAREA" ||
+          (element.tagName === "INPUT" && !nonText.includes(element.type ?? "text"));
+        if (!(textControl || element.isContentEditable) || element.disabled || element.readOnly) return false;
+        element.focus?.();
+        const active = element.getRootNode().activeElement;
         return active != null && (active === element || element.contains(active));
-      },
+      }`,
       undefined,
       { timeout },
     ));
@@ -315,7 +259,6 @@ export const evaluate = async (cdp: CDPSession, input: PreviewAutomationEvaluate
   return value;
 };
 
-/** Resolves once every supplied condition holds at the same moment. */
 export const waitFor = async (page: Page, input: PreviewAutomationWaitForInput) => {
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
@@ -347,7 +290,6 @@ export const waitFor = async (page: Page, input: PreviewAutomationWaitForInput) 
   }
 };
 
-/** Chromium net error names reported for failed main-frame loads. */
 const NET_ERROR_CODES: Readonly<Record<string, number>> = {
   ERR_FAILED: -2,
   ERR_TIMED_OUT: -7,
@@ -366,14 +308,8 @@ export const parseNetError = (errorText: string) => {
   return { description, code: NET_ERROR_CODES[description] ?? -2 };
 };
 
-/**
- * In-page video encoder for recordings. Screencast frames are drawn onto a
- * canvas and encoded by the browser's own MediaRecorder, so recording needs
- * no ffmpeg on the server and costs about the same CPU as piping to x264.
- * The agent cursor is drawn on the canvas, not injected into the page. The
- * video keeps its first frame's size; a page resized mid-recording is
- * letterboxed into it.
- */
+// Browser-side encoding avoids ffmpeg. Resizes are letterboxed into the first frame;
+// the agent cursor is drawn here so it never changes the page under test.
 export const RECORDING_ENCODER_SCRIPT = `(() => {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");

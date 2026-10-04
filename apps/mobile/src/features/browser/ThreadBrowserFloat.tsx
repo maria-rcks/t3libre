@@ -1,11 +1,10 @@
 import { useIsFocused } from "@react-navigation/native";
 import type { EnvironmentId, PreviewSessionSnapshot, ThreadId } from "@t3tools/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Pressable, View } from "react-native";
+import { AppState, Pressable, View } from "react-native";
 import Animated, { FadeIn, FadeOut, ReduceMotion } from "react-native-reanimated";
 
 import { SymbolView } from "../../components/AppSymbol";
-import { refreshPreviewStreamAccess, usePreviewStreamAccess } from "../../state/preview";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { browserTabTitle } from "./browserTabs";
 import { PreviewStreamWebView } from "./PreviewStreamWebView";
@@ -14,10 +13,6 @@ const PLAYER_LONG_SIDE = 184;
 const PLAYER_ENTERING = FadeIn.duration(180).reduceMotion(ReduceMotion.System);
 const PLAYER_EXITING = FadeOut.duration(120).reduceMotion(ReduceMotion.System);
 
-/**
- * Floats a server browser tab over chat when the agent opens one, like web's
- * "Float preview over chat". View-only: a tap opens the browser screen.
- */
 export function ThreadBrowserFloat(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
@@ -82,13 +77,7 @@ function FloatingBrowserPlayer(props: {
   readonly onOpen: () => void;
   readonly onClose: () => void;
 }) {
-  const { environmentId } = props;
   const { themeVariables } = useAppearancePreferences();
-  const { access } = usePreviewStreamAccess(environmentId);
-  const onUnauthorized = useCallback(
-    () => refreshPreviewStreamAccess(environmentId),
-    [environmentId],
-  );
   const [viewport, setViewport] = useState<{ width: number; height: number } | null>(null);
   // The page keeps its own size; the player scales it into a box of the same shape.
   const aspect = Math.min(Math.max(viewport ? viewport.width / viewport.height : 16 / 10, 0.5), 2);
@@ -110,23 +99,17 @@ function FloatingBrowserPlayer(props: {
         className="flex-1"
       >
         <View pointerEvents="none" className="flex-1">
-          {access && props.live ? (
-            <PreviewStreamWebView
-              access={access}
-              threadId={props.threadId}
-              tabId={props.tab.tabId}
-              interactive={false}
-              background={background}
-              compact
-              onUnauthorized={onUnauthorized}
-              onViewport={setViewport}
-              onGone={props.onClose}
-            />
-          ) : (
-            <View className="flex-1 items-center justify-center">
-              <ActivityIndicator colorClassName="accent-icon" />
-            </View>
-          )}
+          <PreviewStreamWebView
+            environmentId={props.environmentId}
+            threadId={props.threadId}
+            tabId={props.tab.tabId}
+            interactive={false}
+            background={background}
+            compact
+            paused={!props.live}
+            onViewport={setViewport}
+            onGone={props.onClose}
+          />
         </View>
       </Pressable>
       <Pressable

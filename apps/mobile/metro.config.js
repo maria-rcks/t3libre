@@ -108,29 +108,25 @@ async function prepareStreamScripts() {
     let rebuild = Promise.resolve();
     for (const [directory, files, generate] of [
       [
-        path.join(__dirname, "src/features/devices"),
+        "apps/mobile/src/features/devices",
         ["device-stream.browser.ts"],
         generateDeviceStreamScript,
       ],
       [
-        path.join(__dirname, "src/features/browser"),
+        "apps/mobile/src/features/browser",
         ["preview-stream.browser.ts"],
         generatePreviewStreamScript,
       ],
       // The preview transport also imports `hubAccess.ts`.
+      ["packages/client-runtime/src/device", ["stream.ts", "hubAccess.ts"], generateAll],
       [
-        path.join(workspaceRoot, "packages/client-runtime/src/device"),
-        ["stream.ts", "hubAccess.ts"],
-        generateAll,
-      ],
-      [
-        path.join(workspaceRoot, "packages/client-runtime/src/preview"),
+        "packages/client-runtime/src/preview",
         ["serverBrowserStream.ts"],
         generatePreviewStreamScript,
       ],
     ]) {
       // The generated modules participate in Metro's normal Fast Refresh.
-      fs.watch(directory, { persistent: false }, (_event, filename) => {
+      fs.watch(path.join(workspaceRoot, directory), { persistent: false }, (_event, filename) => {
         if (filename && !files.includes(String(filename))) return;
         rebuild = rebuild
           .then(generate)

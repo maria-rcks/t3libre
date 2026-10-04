@@ -31,46 +31,28 @@ export function previewStreamDocument(configuration: string, script: string) {
   const safeConfiguration = configuration.replace(/</g, "\\u003c");
   const safeScript = script.replace(/<\/script/gi, "<\\/script");
   const failure = `window.ReactNativeWebView.postMessage(JSON.stringify({type:"status",status:"error",detail:"Browser viewer stopped unexpectedly."}));`;
-  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"></head><body><script>window.addEventListener("error",function(){${failure}});window.addEventListener("unhandledrejection",function(){${failure}});\n${safeScript}\ntry{T3PreviewStream.start(${safeConfiguration});}catch{${failure}}</script></body></html>`;
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  body { margin: 0; }
+  body > div { position: fixed; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; }
+  canvas, video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  canvas { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  video { pointer-events: none; }
+  /* Pinned so focus never scrolls; 16px keeps iOS from zooming on focus. */
+  textarea {
+    position: fixed; left: 0; top: 0; width: 1px; height: 1px;
+    padding: 0; margin: -1px; border: 0; overflow: hidden;
+    clip: rect(0, 0, 0, 0); white-space: nowrap; font-size: 16px;
+  }
+</style></head><body><script>window.addEventListener("error",function(){${failure}});window.addEventListener("unhandledrejection",function(){${failure}});\n${safeScript}\ntry{T3PreviewStream.start(${safeConfiguration});}catch{${failure}}</script></body></html>`;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
-
 export function previewStreamMessage(data: string): PreviewStreamMessage | null {
-  let message: unknown;
   try {
-    message = JSON.parse(data);
+    // Only our bundled viewer runs in this WebView; the remote page never does.
+    return JSON.parse(data) as PreviewStreamMessage;
   } catch {
-    // Ignore messages that are not part of the stream bridge.
     return null;
-  }
-  if (!isRecord(message)) return null;
-  const detail = typeof message.detail === "string" ? message.detail : undefined;
-  switch (message.type) {
-    case "unauthorized":
-    case "gone":
-      return { type: message.type };
-    case "status":
-      return message.status === "connecting" ||
-        message.status === "streaming" ||
-        message.status === "error"
-        ? { type: "status", status: message.status, ...(detail ? { detail } : {}) }
-        : null;
-    case "viewport":
-      return typeof message.width === "number" && typeof message.height === "number"
-        ? { type: "viewport", width: message.width, height: message.height }
-        : null;
-    case "pictureInPicture":
-      return typeof message.supported === "boolean" && typeof message.active === "boolean"
-        ? {
-            type: "pictureInPicture",
-            supported: message.supported,
-            active: message.active,
-            ...(detail ? { detail } : {}),
-          }
-        : null;
-    default:
-      return null;
   }
 }

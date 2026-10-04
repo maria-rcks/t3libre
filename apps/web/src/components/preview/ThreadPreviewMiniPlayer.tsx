@@ -127,7 +127,6 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
   const fittedSourceContent = useBrowserSurfaceStore(
     (state) => state.byTabId[runtimeTabId]?.fittedSourceContent ?? null,
   );
-  // A server tab floats as its streamed page, scaled rather than resized.
   const serverTab = snapshot?.runtime === "server";
   const [streamViewport, setStreamViewport] = useState<PreviewStreamViewport | null>(null);
   const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
@@ -147,37 +146,29 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
     useRightPanelStore.getState().openBrowser(threadRef, tabId);
   };
 
-  const toggleNativePictureInPicture = () => {
-    if (serverTab) {
-      if (serverPictureInPicture) {
-        closeServerPictureInPicture();
-        return;
+  const toggleNativePictureInPicture = async () => {
+    try {
+      if (serverTab) {
+        if (serverPictureInPicture) closeServerPictureInPicture();
+        else
+          await openServerPictureInPicture({
+            ...threadRef,
+            tabId,
+            seed: serverSurfaceRef.current?.canvas() ?? null,
+          });
+      } else if (previewBridge) {
+        const operation = desktopOverlay?.pictureInPicture
+          ? previewBridge.pictureInPicture.close
+          : previewBridge.pictureInPicture.open;
+        await operation(runtimeTabId);
       }
-      void openServerPictureInPicture({
-        environmentId: threadRef.environmentId,
-        threadId: threadRef.threadId,
-        tabId,
-        seed: serverSurfaceRef.current?.canvas() ?? null,
-      }).catch((error) => {
-        toastManager.add({
-          type: "error",
-          title: "Unable to pop out preview",
-          description: error instanceof Error ? error.message : "An error occurred.",
-        });
-      });
-      return;
-    }
-    if (!previewBridge) return;
-    const operation = desktopOverlay?.pictureInPicture
-      ? previewBridge.pictureInPicture.close
-      : previewBridge.pictureInPicture.open;
-    void operation(runtimeTabId).catch((error) => {
+    } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Unable to update popped-out preview",
+        title: serverTab ? "Unable to pop out preview" : "Unable to update popped-out preview",
         description: error instanceof Error ? error.message : "An error occurred.",
       });
-    });
+    }
   };
 
   if (!snapshot) return null;

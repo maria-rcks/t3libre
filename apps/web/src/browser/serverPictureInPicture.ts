@@ -8,33 +8,17 @@ import { useSyncExternalStore } from "react";
 
 import { readPreviewStreamAccess } from "~/state/previewStream";
 
-/**
- * System picture in picture for a server tab, so a phone keeps watching the
- * agent's browser over other apps. The tab streams into a detached canvas,
- * which plays as a muted video the browser floats. It is view-only and owns
- * its own socket, so it outlives the panel and floating player that opened it.
- * One at a time, like the browser's own picture in picture.
- */
-
-/** Frames cap for the floating window, in device px. */
-const STREAM_CAP_PX = 1280;
-const PLACEHOLDER = { width: 640, height: 400 };
-// Refused upgrades retry with backoff; past the limit the window closes.
-const UNAUTHORIZED_RETRY_BASE_MS = 1_000;
-const UNAUTHORIZED_RETRY_LIMIT = 5;
-
 interface WebKitVideo {
-  webkitSupportsPresentationMode?: (mode: string) => boolean;
   webkitSetPresentationMode?: (mode: string) => void;
   webkitPresentationMode?: string;
 }
 
 interface ActivePictureInPicture {
   readonly key: string;
-  readonly video: HTMLVideoElement;
   readonly stop: () => void;
 }
 
+// Owns its stream outside React so the floating window survives panel unmounts.
 let active: ActivePictureInPicture | null = null;
 const listeners = new Set<() => void>();
 
@@ -61,7 +45,6 @@ export function supportsServerPictureInPicture(): boolean {
   );
 }
 
-/** The key of the floating server tab, or null. */
 export function useServerPictureInPictureKey(): string | null {
   return useSyncExternalStore(
     subscribe,
@@ -77,11 +60,7 @@ export function closeServerPictureInPicture(): void {
   emit();
 }
 
-/**
- * Must run inside the click that asked for it: browsers only float a video
- * during user activation. `seed` is the tab's visible canvas, copied so the
- * window opens on the current frame instead of a blank one.
- */
+/** Open during user activation, seeding the video with the currently visible frame. */
 export async function openServerPictureInPicture(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: string;
@@ -92,8 +71,8 @@ export async function openServerPictureInPicture(input: {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
   const seed = input.seed && input.seed.width > 0 && input.seed.height > 0 ? input.seed : null;
-  canvas.width = seed?.width ?? PLACEHOLDER.width;
-  canvas.height = seed?.height ?? PLACEHOLDER.height;
+  canvas.width = seed?.width ?? 640;
+  canvas.height = seed?.height ?? 400;
   // The capture emits a frame per draw, so the seed is drawn after it starts.
   const stream = canvas.captureStream();
   if (seed) context?.drawImage(seed, 0, 0);
@@ -103,15 +82,8 @@ export async function openServerPictureInPicture(input: {
   video.playsInline = true;
   video.srcObject = stream;
   // Safari only floats a video that is in the document.
-  Object.assign(video.style, {
-    position: "fixed",
-    right: "0",
-    bottom: "0",
-    width: "1px",
-    height: "1px",
-    opacity: "0",
-    pointerEvents: "none",
-  });
+  video.style.cssText =
+    "position:fixed;right:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none";
   document.body.append(video);
 
   const painter = createPreviewFramePainter(canvas);
@@ -119,6 +91,9 @@ export async function openServerPictureInPicture(input: {
   let stopped = false;
   let refusals = 0;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const onLeave = () => {
+    if (active === current) closeServerPictureInPicture();
+  };
   const connect = async (refresh: boolean) => {
     const access = await readPreviewStreamAccess(input.environmentId, refresh);
     if (stopped) return;
@@ -131,8 +106,8 @@ export async function openServerPictureInPicture(input: {
         access,
         threadId: input.threadId,
         tabId: input.tabId,
-        maxWidth: STREAM_CAP_PX,
-        maxHeight: STREAM_CAP_PX,
+        maxWidth: 1280,
+        maxHeight: 1280,
       },
       {
         onFrame: (jpeg) => {
@@ -143,33 +118,22 @@ export async function openServerPictureInPicture(input: {
         onConnectedChange: () => undefined,
         onUnauthorized: () => {
           if (stopped) return;
-          if (refusals >= UNAUTHORIZED_RETRY_LIMIT) {
-            if (active?.video === video) closeServerPictureInPicture();
+          if (refusals >= 5) {
+            onLeave();
             return;
           }
-          const delay = UNAUTHORIZED_RETRY_BASE_MS * 2 ** refusals;
-          refusals += 1;
-          retryTimer = setTimeout(() => {
-            retryTimer = null;
-            void connect(true);
-          }, delay);
+          retryTimer = setTimeout(() => void connect(true), 1_000 * 2 ** refusals++);
         },
-        onGone: () => {
-          if (active?.video === video) closeServerPictureInPicture();
-        },
+        onGone: onLeave,
       },
     );
   };
 
-  const onLeave = () => {
-    if (active?.video === video) closeServerPictureInPicture();
-  };
   const onPresentationMode = () => {
     if (video.webkitPresentationMode !== "picture-in-picture") onLeave();
   };
   const current: ActivePictureInPicture = {
     key: serverPictureInPictureKey(input.threadId, input.tabId),
-    video,
     stop: () => {
       stopped = true;
       if (retryTimer !== null) clearTimeout(retryTimer);
@@ -205,7 +169,7 @@ export async function openServerPictureInPicture(input: {
       video.webkitSetPresentationMode?.("picture-in-picture");
     }
   } catch (error) {
-    if (active === current) closeServerPictureInPicture();
+    onLeave();
     throw error;
   }
   if (active === current) void connect(false);

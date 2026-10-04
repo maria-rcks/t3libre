@@ -1,17 +1,4 @@
 // @effect-diagnostics globalTimers:off - This browser and WebView transport runs without an Effect runtime.
-/**
- * Viewer socket for a server-hosted preview tab (`runtime: "server"`).
- *
- * The environment runs the page in headless Chromium and streams it over
- * `/api/preview-stream/ws`. Binary messages are complete JPEG frames; text
- * messages report the page viewport in CSS px. Input goes back as JSON in page
- * CSS px. The client acknowledges every frame and the server keeps only a few
- * unacknowledged, so a slow viewer gets fewer frames instead of a growing
- * buffer.
- *
- * The socket reconnects with backoff while the owner keeps it running. A
- * refused upgrade stops it and asks the owner for fresh credentials.
- */
 import { type DeviceHubAccess, withDeviceHubQuery } from "../device/hubAccess.ts";
 
 export const PREVIEW_STREAM_BASE_PATH = "/api/preview-stream";
@@ -70,9 +57,6 @@ export interface PreviewStreamProbe {
   readonly editable: boolean;
 }
 
-/** Close code for a tab that no longer exists. The client stops instead of retrying. */
-const PREVIEW_STREAM_TAB_GONE_CODE = 4404;
-
 /** CDP modifier bitmask: Alt 1, Ctrl 2, Meta 4, Shift 8. */
 export const previewStreamModifiers = (event: {
   readonly altKey: boolean;
@@ -114,20 +98,6 @@ export interface PreviewStreamClient {
 }
 
 const ACK_MESSAGE = JSON.stringify({ type: "ack" });
-const RETRY_BASE_MS = 500;
-const RETRY_MAX_MS = 10_000;
-
-const readMessage = (data: string): Record<string, unknown> | null => {
-  try {
-    const message: unknown = JSON.parse(data);
-    return typeof message === "object" && message !== null
-      ? (message as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-};
-
 export function createPreviewStreamClient(
   target: PreviewStreamTarget,
   events: PreviewStreamEvents,
@@ -164,8 +134,14 @@ export function createPreviewStreamClient(
         return;
       }
       if (typeof event.data !== "string") return;
-      const message = readMessage(event.data);
-      const { type, x, y, width, height, editable } = message ?? {};
+      let message: unknown;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (typeof message !== "object" || message === null) return;
+      const { type, x, y, width, height, editable } = message as Record<string, unknown>;
       if (type === "viewport" && typeof width === "number" && typeof height === "number") {
         failures = 0;
         events.onViewport({ width, height });
@@ -183,7 +159,7 @@ export function createPreviewStreamClient(
       socket = null;
       if (opened) events.onConnectedChange(false);
       if (stopped) return;
-      if (event.code === PREVIEW_STREAM_TAB_GONE_CODE) {
+      if (event.code === 4404) {
         stopped = true;
         events.onGone?.();
         return;
@@ -194,12 +170,7 @@ export function createPreviewStreamClient(
         events.onUnauthorized();
         return;
       }
-      const delay = Math.min(RETRY_BASE_MS * 2 ** failures, RETRY_MAX_MS);
-      failures += 1;
-      retryTimer = setTimeout(() => {
-        retryTimer = null;
-        connect();
-      }, delay);
+      retryTimer = setTimeout(connect, Math.min(500 * 2 ** failures++, 10_000));
     });
     ws.addEventListener("error", () => ws.close());
   };
@@ -215,7 +186,6 @@ export function createPreviewStreamClient(
     stop: () => {
       stopped = true;
       if (retryTimer !== null) clearTimeout(retryTimer);
-      retryTimer = null;
       const ws = socket;
       socket = null;
       ws?.close();
@@ -228,11 +198,7 @@ export interface PreviewFramePainter {
   readonly stop: () => void;
 }
 
-/**
- * Draws stream frames into a canvas sized to each frame. One decode runs at a
- * time; a frame that lands mid-decode replaces the waiting one, so a slow
- * device skips frames instead of queueing them.
- */
+/** One decode at a time, keeping only the latest waiting frame for slow viewers. */
 export function createPreviewFramePainter(
   canvas: HTMLCanvasElement,
   onPainted?: () => void,

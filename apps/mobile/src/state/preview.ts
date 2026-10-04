@@ -16,14 +16,12 @@ import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useMemo } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
-import { appAtomRegistry } from "./atom-registry";
 import { useEnvironmentQuery } from "./query";
 import { environmentSession, usePreparedConnection } from "./session";
 
 export const previewEnvironment = createPreviewEnvironmentAtoms(connectionAtomRuntime);
 
 interface ThreadPreviewTabs {
-  /** Null until the first list result or event arrives. */
   readonly serverEpoch: string | null;
   readonly revision: number;
   readonly sessions: ReadonlyArray<PreviewSessionSnapshot>;
@@ -39,61 +37,36 @@ const EMPTY_TABS: ThreadPreviewTabs = {
 };
 const emptyTabsAtom = Atom.make(EMPTY_TABS).pipe(Atom.withLabel("mobile-preview-tabs:empty"));
 
-// Events kept for replay onto a list that lands after them. Only a list older
-// than this many of the thread's events would miss one.
 const MAX_REPLAY_EVENTS = 200;
-
-const listTabs = (result: PreviewListResult): ThreadPreviewTabs => ({
-  serverEpoch: result.serverEpoch,
-  revision: result.revision,
-  sessions: result.sessions,
-  listed: true,
-});
 
 function applyEvent(current: ThreadPreviewTabs, event: PreviewEvent): ThreadPreviewTabs {
   if (event.revision <= current.revision) return current;
-  const others = current.sessions.filter((session) => session.tabId !== event.tabId);
-  const existing = current.sessions.find((session) => session.tabId === event.tabId);
-  const sessions = (() => {
-    switch (event.type) {
-      case "opened":
-      case "navigated":
-      case "resized":
-        // Keep a tab's place so the picker order is stable.
-        return existing
-          ? current.sessions.map((session) =>
-              session.tabId === event.tabId ? event.snapshot : session,
-            )
-          : [...others, event.snapshot];
-      case "failed":
-        return existing
-          ? current.sessions.map((session) =>
-              session.tabId === event.tabId
-                ? {
-                    ...session,
-                    navStatus: {
-                      _tag: "LoadFailed" as const,
-                      url: event.url,
-                      title: event.title,
-                      code: event.code,
-                      description: event.description,
-                    },
-                    updatedAt: event.createdAt,
-                  }
-                : session,
-            )
-          : current.sessions;
-      case "closed":
-        return others;
+  const index = current.sessions.findIndex((session) => session.tabId === event.tabId);
+  const sessions = [...current.sessions];
+  if (event.type === "closed") {
+    if (index !== -1) sessions.splice(index, 1);
+  } else if (event.type === "failed") {
+    const existing = sessions[index];
+    if (existing) {
+      sessions[index] = {
+        ...existing,
+        navStatus: {
+          _tag: "LoadFailed",
+          url: event.url,
+          title: event.title,
+          code: event.code,
+          description: event.description,
+        },
+        updatedAt: event.createdAt,
+      };
     }
-  })();
+  } else {
+    // Keep a tab's place so the picker order is stable.
+    sessions[index === -1 ? sessions.length : index] = event.snapshot;
+  }
   return { ...current, serverEpoch: event.serverEpoch, revision: event.revision, sessions };
 }
 
-/**
- * One thread's preview tabs: the `preview.list` result kept current by
- * environment preview events, the same pairing web's preview session sync uses.
- */
 const threadPreviewTabsAtom = Atom.family((threadKey: string) => {
   const ref = parseScopedThreadKey(threadKey);
   if (ref === null) return emptyTabsAtom;
@@ -105,9 +78,7 @@ const threadPreviewTabsAtom = Atom.family((threadKey: string) => {
   return Atom.make((get) => {
     let disposed = false;
     let state = EMPTY_TABS;
-    // The newest list applied, and this thread's events newer than it. A list
-    // can land after events it predates (the first one, or a stale cached one
-    // then its refresh), so each list is the base and newer events replay on top.
+    // Lists can land after events they predate; replay newer events on each list.
     let list: PreviewListResult | null = null;
     let events: ReadonlyArray<PreviewEvent> = [];
     const publish = (next: ThreadPreviewTabs) => {
@@ -121,7 +92,7 @@ const threadPreviewTabsAtom = Atom.family((threadKey: string) => {
       events = events.filter(
         (event) => event.serverEpoch === result.serverEpoch && event.revision > result.revision,
       );
-      return events.reduce(applyEvent, listTabs(result));
+      return events.reduce<ThreadPreviewTabs>(applyEvent, { ...result, listed: true });
     };
     get.addFinalizer(() => {
       disposed = true;
@@ -155,7 +126,6 @@ const threadPreviewTabsAtom = Atom.family((threadKey: string) => {
   }).pipe(Atom.setIdleTTL(1_000), Atom.withLabel(`mobile-preview-tabs:${threadKey}`));
 });
 
-/** The thread's server-hosted browser tabs. `loaded` turns true once the tab list has arrived. */
 export function useThreadServerBrowserTabs(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
@@ -188,12 +158,6 @@ const previewStreamAccessAtom = Atom.family((environmentId: EnvironmentId) =>
     .pipe(Atom.setIdleTTL(60_000), Atom.withLabel(`mobile-preview-stream-access:${environmentId}`)),
 );
 
-/** Fetches a fresh stream ticket; a refused socket calls this before reconnecting. */
-export function refreshPreviewStreamAccess(environmentId: EnvironmentId) {
-  appAtomRegistry.refresh(previewStreamAccessAtom(environmentId));
-}
-
-/** Stream credentials for server tabs, with the same ticket flow as the device hub. */
 export function usePreviewStreamAccess(environmentId: EnvironmentId) {
   const prepared = usePreparedConnection(environmentId);
   const query = useEnvironmentQuery(previewStreamAccessAtom(environmentId));

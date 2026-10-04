@@ -63,12 +63,6 @@ export function pictureInPicture() {
   void activeViewer?.togglePictureInPicture();
 }
 
-/**
- * Bundled into a native WebView without React or Expo's web runtime. Draws a
- * server tab's JPEG frames into a letterboxed canvas. Interactive viewers turn
- * taps into clicks, drags into wheel scrolls, and soft keyboard input into key
- * and text messages, and resize fill-mode tabs to the view.
- */
 export function start(configuration: PreviewStreamConfiguration) {
   stop();
   const post = (message: PreviewStreamMessage) => {
@@ -76,59 +70,18 @@ export function start(configuration: PreviewStreamConfiguration) {
     window.ReactNativeWebView.postMessage(JSON.stringify(message));
   };
   const { interactive } = configuration;
-  Object.assign(document.documentElement.style, { height: "100%", overflow: "hidden" });
-  Object.assign(document.body.style, {
-    margin: "0",
-    height: "100%",
-    overflow: "hidden",
-    background: configuration.background,
-  });
+  document.body.style.background = configuration.background;
   const container = document.createElement("div");
-  Object.assign(container.style, {
-    position: "fixed",
-    left: "0",
-    top: "0",
-    width: "100%",
-    height: "100%",
-    overflow: "hidden",
-  });
   const canvas = document.createElement("canvas");
   canvas.setAttribute("role", "img");
   canvas.setAttribute("aria-label", "Browser page");
-  Object.assign(canvas.style, {
-    position: "absolute",
-    inset: "0",
-    width: "100%",
-    height: "100%",
-    objectFit: "contain",
-    touchAction: "none",
-    userSelect: "none",
-    webkitUserSelect: "none",
-    webkitTouchCallout: "none",
-  });
   container.append(canvas);
-  // Focus target for page keyboard input, visually hidden like `sr-only`. Pinned
-  // top-left so focusing it never scrolls; 16px keeps iOS from zooming on focus.
   const input = document.createElement("textarea");
   input.setAttribute("aria-label", "Browser page input");
   input.autocapitalize = "off";
   input.autocomplete = "off";
   input.spellcheck = false;
   input.setAttribute("autocorrect", "off");
-  Object.assign(input.style, {
-    position: "fixed",
-    left: "0",
-    top: "0",
-    width: "1px",
-    height: "1px",
-    padding: "0",
-    margin: "-1px",
-    border: "0",
-    overflow: "hidden",
-    clip: "rect(0, 0, 0, 0)",
-    whiteSpace: "nowrap",
-    fontSize: "16px",
-  });
   document.body.replaceChildren(container, ...(interactive ? [input] : []));
 
   let stopped = false;
@@ -165,11 +118,8 @@ export function start(configuration: PreviewStreamConfiguration) {
   // A keydown already sent this key; its `input` must not send it again.
   let keySent = false;
   let touch: {
-    pointerId: number;
-    startX: number;
-    startY: number;
-    lastX: number;
-    lastY: number;
+    start: PointerEvent;
+    last: PointerEvent;
     panning: boolean;
   } | null = null;
   let lastTap: {
@@ -340,6 +290,23 @@ export function start(configuration: PreviewStreamConfiguration) {
     lastTap = { time: event.timeStamp, x: event.clientX, y: event.clientY, count, button };
     return count;
   };
+  const mouseInput = (
+    event: PointerEvent,
+    point: { x: number; y: number },
+    action: MouseInput["action"],
+    button: MouseInput["button"],
+    buttons = event.buttons,
+    clickCount = mouseClicks[button],
+  ): MouseInput => ({
+    type: "mouse",
+    action,
+    x: point.x,
+    y: point.y,
+    button,
+    buttons,
+    clickCount,
+    modifiers: previewStreamModifiers(event),
+  });
   const onPointerDown = (event: PointerEvent) => {
     if (!event.isPrimary) return;
     event.preventDefault();
@@ -352,28 +319,11 @@ export function start(configuration: PreviewStreamConfiguration) {
       flushWheel();
       mouseButtons = event.buttons & 7;
       const button = mouseButton(event.button);
-      const clickCount = countClick(event, button);
-      mouseClicks[button] = clickCount;
-      send({
-        type: "mouse",
-        action: "down",
-        x: point.x,
-        y: point.y,
-        button,
-        buttons: event.buttons,
-        clickCount,
-        modifiers: previewStreamModifiers(event),
-      });
+      mouseClicks[button] = countClick(event, button);
+      send(mouseInput(event, point, "down", button));
       return;
     }
-    touch = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      lastX: event.clientX,
-      lastY: event.clientY,
-      panning: false,
-    };
+    touch = { start: event, last: event, panning: false };
     const point = pagePoint(event.clientX, event.clientY, false);
     if (!point) {
       probe = null;
@@ -410,42 +360,26 @@ export function start(configuration: PreviewStreamConfiguration) {
           const down = (event.buttons & bit) !== 0;
           mouseButtons ^= bit;
           if (down) mouseClicks[button] = countClick(event, button);
-          send({
-            type: "mouse",
-            action: down ? "down" : "up",
-            x: point.x,
-            y: point.y,
-            button,
-            buttons: mouseButtons,
-            clickCount: mouseClicks[button],
-            modifiers: previewStreamModifiers(event),
-          });
+          send(mouseInput(event, point, down ? "down" : "up", button, mouseButtons));
         }
       }
-      pendingMouse = {
-        type: "mouse",
-        action: "move",
-        x: point.x,
-        y: point.y,
-        button:
-          mouseButtons & 1
-            ? "left"
-            : mouseButtons & 2
-              ? "right"
-              : mouseButtons & 4
-                ? "middle"
-                : "none",
-        buttons: event.buttons,
-        clickCount: 0,
-        modifiers: previewStreamModifiers(event),
-      };
+      const button =
+        mouseButtons & 1
+          ? "left"
+          : mouseButtons & 2
+            ? "right"
+            : mouseButtons & 4
+              ? "middle"
+              : "none";
+      pendingMouse = mouseInput(event, point, "move", button, event.buttons, 0);
       mouseFrame ??= requestAnimationFrame(flushMouse);
       return;
     }
-    if (!touch || touch.pointerId !== event.pointerId) return;
+    if (!touch || touch.start.pointerId !== event.pointerId) return;
     if (
       !touch.panning &&
-      Math.hypot(event.clientX - touch.startX, event.clientY - touch.startY) < TAP_SLOP_PX
+      Math.hypot(event.clientX - touch.start.clientX, event.clientY - touch.start.clientY) <
+        TAP_SLOP_PX
     ) {
       return;
     }
@@ -455,12 +389,11 @@ export function start(configuration: PreviewStreamConfiguration) {
     if (point) {
       queueWheel(
         point,
-        (touch.lastX - event.clientX) * point.scale,
-        (touch.lastY - event.clientY) * point.scale,
+        (touch.last.clientX - event.clientX) * point.scale,
+        (touch.last.clientY - event.clientY) * point.scale,
       );
     }
-    touch.lastX = event.clientX;
-    touch.lastY = event.clientY;
+    touch.last = event;
   };
   const releaseMouse = (event: PointerEvent, cancelled: boolean) => {
     let buttons = mouseButtons;
@@ -474,28 +407,20 @@ export function start(configuration: PreviewStreamConfiguration) {
       if (!(buttons & bit) || (mouseButtons & bit) !== 0) continue;
       buttons &= ~bit;
       const button = bit === 1 ? "left" : bit === 2 ? "right" : "middle";
-      send({
-        type: "mouse",
-        action: "up",
-        x: point.x,
-        y: point.y,
-        button,
-        buttons,
-        clickCount: mouseClicks[button],
-        modifiers: previewStreamModifiers(event),
-      });
+      send(mouseInput(event, point, "up", button, buttons));
     }
   };
-  const onPointerUp = (event: PointerEvent) => {
+  const onPointerEnd = (event: PointerEvent) => {
+    const cancelled = event.type === "pointercancel";
     if (event.pointerType !== "touch") {
-      releaseMouse(event, false);
+      releaseMouse(event, cancelled);
       return;
     }
     const ended = touch;
-    if (!ended || ended.pointerId !== event.pointerId) return;
+    if (!ended || ended.start.pointerId !== event.pointerId) return;
     touch = null;
     const answered = probe;
-    if (ended.panning) {
+    if (cancelled || ended.panning) {
       if (answered) answered.end = "panned";
       return;
     }
@@ -511,15 +436,6 @@ export function start(configuration: PreviewStreamConfiguration) {
     send({ type: "mouse", action: "move", ...at, button: "none", buttons: 0, clickCount: 0 });
     send({ type: "mouse", action: "down", ...at, button: "left", buttons: 1, clickCount });
     send({ type: "mouse", action: "up", ...at, button: "left", buttons: 0, clickCount });
-  };
-  const onPointerCancel = (event: PointerEvent) => {
-    if (event.pointerType !== "touch") {
-      releaseMouse(event, true);
-      return;
-    }
-    if (touch?.pointerId !== event.pointerId) return;
-    touch = null;
-    if (probe) probe.end = "panned";
   };
   // Trackpads and mice on tablets scroll with wheel events.
   const onWheel = (event: WheelEvent) => {
@@ -578,8 +494,6 @@ export function start(configuration: PreviewStreamConfiguration) {
       (text !== undefined || event.key === "Backspace" || event.key === "Delete");
     if (!shortcut) event.preventDefault();
   };
-  const onKeyDown = (event: KeyboardEvent) => onKey("down", event);
-  const onKeyUp = (event: KeyboardEvent) => onKey("up", event);
   const resetInput = () => {
     input.value = SENTINEL;
     input.setSelectionRange(SENTINEL.length, SENTINEL.length);
@@ -611,13 +525,13 @@ export function start(configuration: PreviewStreamConfiguration) {
   if (interactive) {
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerup", onPointerUp);
-    canvas.addEventListener("pointercancel", onPointerCancel);
+    canvas.addEventListener("pointerup", onPointerEnd);
+    canvas.addEventListener("pointercancel", onPointerEnd);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("mousedown", preventDefault);
     canvas.addEventListener("contextmenu", preventDefault);
-    input.addEventListener("keydown", onKeyDown);
-    input.addEventListener("keyup", onKeyUp);
+    input.addEventListener("keydown", (event) => onKey("down", event));
+    input.addEventListener("keyup", (event) => onKey("up", event));
     input.addEventListener("input", onInput);
     input.addEventListener("compositionend", onCompositionEnd);
     input.addEventListener("focus", resetInput);
@@ -627,10 +541,7 @@ export function start(configuration: PreviewStreamConfiguration) {
     resetInput();
   }
 
-  // Picture in picture plays the canvas as a muted video. It is created on first
-  // use so a viewer that never pops out pays nothing for it.
-  // Checks the API, not an element: WebKit reports no support for a video
-  // that has not loaded yet.
+  // WebKit reports no support on a video that has not loaded yet; check the prototype.
   const videoPrototype: PresentationVideo = HTMLVideoElement.prototype;
   const pictureInPictureSupported =
     interactive &&
@@ -656,16 +567,7 @@ export function start(configuration: PreviewStreamConfiguration) {
     element.muted = true;
     element.playsInline = true;
     element.autoplay = true;
-    element.setAttribute("playsinline", "");
     // Under the canvas at full size: WebKit pauses muted video it considers off screen.
-    Object.assign(element.style, {
-      position: "absolute",
-      inset: "0",
-      width: "100%",
-      height: "100%",
-      objectFit: "contain",
-      pointerEvents: "none",
-    });
     element.srcObject = canvas.captureStream();
     // A static page sends no new frames; repaint once so the stream has one.
     if (canvas.width > 0 && canvas.height > 0) canvas.getContext("2d")?.drawImage(canvas, 0, 0);
@@ -675,7 +577,6 @@ export function start(configuration: PreviewStreamConfiguration) {
       "webkitpresentationmodechanged",
     ]) {
       element.addEventListener(name, () => {
-        // The hidden inline copy stops decoding once the window closes.
         if (!pictureInPictureActive()) element.pause();
         reportPictureInPicture();
       });
@@ -703,7 +604,7 @@ export function start(configuration: PreviewStreamConfiguration) {
     }
   };
 
-  const viewer: Viewer = {
+  activeViewer = {
     stop: () => {
       stopped = true;
       observer.disconnect();
@@ -729,7 +630,6 @@ export function start(configuration: PreviewStreamConfiguration) {
     },
     togglePictureInPicture,
   };
-  activeViewer = viewer;
   window.addEventListener("pagehide", stop, { once: true });
   reportStatus("connecting");
   if (interactive) reportPictureInPicture();

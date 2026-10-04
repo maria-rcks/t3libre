@@ -1,13 +1,3 @@
-/**
- * `/api/preview-stream/ws`: one server preview tab over a WebSocket.
- *
- * Frames go out as binary JPEG messages, viewport changes as JSON text, and
- * viewer input comes back as JSON text. The viewer acknowledges each frame and
- * Chromium's acknowledgement waits for it, so a slow link (phone over T3
- * Connect) gets fewer frames instead of a growing buffer. Authentication
- * matches the device hub proxy; the socket drives the page, so it needs
- * operate scope.
- */
 import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequest";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -119,18 +109,10 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
                   Effect.andThen(Effect.sync(() => unacknowledged.push(output.ack))),
                 );
               case "viewport":
-                return write(
-                  JSON.stringify({ type: "viewport", width: output.width, height: output.height }),
-                );
-              case "probe":
-                return write(
-                  JSON.stringify({
-                    type: "probe",
-                    x: output.x,
-                    y: output.y,
-                    editable: output.editable,
-                  }),
-                );
+              case "probe": {
+                const { _tag: type, ...data } = output;
+                return write(JSON.stringify({ type, ...data }));
+              }
               case "gone":
                 return gone.pipe(Effect.andThen(Effect.interrupt));
             }
@@ -146,7 +128,6 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
         const receiveInput = reader.pull.pipe(
           Effect.flatMap((chunks) => Effect.forEach(chunks, receive, { discard: true })),
         );
-        // Whichever side ends first closes the other through scope teardown.
         return yield* Effect.raceFirst(Effect.forever(sendOutput), Effect.forever(receiveInput));
       }),
     ).pipe(
@@ -160,8 +141,7 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
     );
   });
 
-// Route handlers only see request-scoped services, so the browser is captured
-// when the route is registered.
+// Capture the browser because handlers only see request-scoped services.
 export const routeLayer = HttpRouter.use((router) =>
   Effect.flatMap(ServerBrowser.ServerBrowser, (browser) =>
     router.add("GET", `${PREVIEW_STREAM_ROUTE_PREFIX}/*`, makeHandler(browser)),

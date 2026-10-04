@@ -11,8 +11,6 @@ import {
 } from "@t3tools/client-runtime/preview/server-browser-stream";
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
-  type ClipboardEvent,
-  type CompositionEvent,
   type FormEvent,
   type KeyboardEvent,
   type PointerEvent,
@@ -34,7 +32,6 @@ export interface ServerBrowserHandle {
   readonly navigate: (url: string) => void;
   readonly history: (delta: -1 | 1) => void;
   readonly reload: () => void;
-  /** The canvas showing the latest frame. */
   readonly canvas: () => HTMLCanvasElement | null;
 }
 
@@ -91,13 +88,6 @@ const buttonOf = (button: number): PreviewStreamMouseButton =>
 const pressedButtonOf = (buttons: number): PreviewStreamMouseButton =>
   buttons & 1 ? "left" : buttons & 2 ? "right" : buttons & 4 ? "middle" : "none";
 
-/**
- * A server-hosted preview tab: JPEG frames from the environment's headless
- * Chromium drawn into a canvas, with pointer, wheel, and keyboard input sent
- * back in page coordinates. Touch taps click and touch drags scroll; the soft
- * keyboard opens only for taps the server reports as landing on a text field.
- * `visible=false` closes the stream so a hidden panel decodes nothing.
- */
 export function ServerBrowserSurface(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: string;
@@ -122,7 +112,6 @@ export function ServerBrowserSurface(props: {
     ref,
   } = props;
   const access = usePreviewStreamAccess(environmentId);
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const keySentRef = useRef(false);
@@ -171,11 +160,10 @@ export function ServerBrowserSurface(props: {
     if (wheel) send(wheel);
   }, [send]);
 
-  // Moves and wheel deltas coalesce to one message each per animation frame.
-  // `flushInput` only closes over refs and `send`, so it never changes.
+  // Coalesce moves and wheel deltas to one message each per animation frame.
   const scheduleFlush = useCallback(() => {
     inputFrameRef.current ??= requestAnimationFrame(flushInput);
-  }, []);
+  }, [flushInput]);
 
   const queueWheel = useCallback(
     (point: PagePoint, deltaX: number, deltaY: number, modifiers: number) => {
@@ -247,7 +235,7 @@ export function ServerBrowserSurface(props: {
   }, []);
 
   useEffect(() => {
-    const element = containerRef.current;
+    const element = canvasRef.current?.parentElement;
     if (!element) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const measure = () => {
@@ -381,199 +369,140 @@ export function ServerBrowserSurface(props: {
     [],
   );
 
-  const handlePointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
-    if (event.pointerType === "touch") {
-      if (!event.isPrimary) return;
-      touchRef.current = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        lastX: event.clientX,
-        lastY: event.clientY,
-        panning: false,
-      };
-      const point = pagePoint(event.clientX, event.clientY, false);
-      const last = lastProbeRef.current;
-      const reusable =
-        point !== null &&
-        last !== null &&
-        performance.now() - last.at < PROBE_REUSE_MS &&
-        Math.hypot(point.x - last.x, point.y - last.y) < PROBE_REUSE_PX;
-      probeRef.current = point
-        ? {
-            x: point.x,
-            y: point.y,
-            editable: reusable ? last.editable : null,
-            answered: false,
-            tapped: false,
-          }
-        : null;
-      if (point) send({ type: "probe", x: point.x, y: point.y });
+  const handlePointer = (event: PointerEvent<HTMLCanvasElement>) => {
+    const { type, pointerId, clientX, clientY } = event;
+    const cancelled = type === "pointercancel";
+    const touch = touchRef.current;
+    if (cancelled && touch?.pointerId === pointerId) {
+      touchRef.current = probeRef.current = null;
       return;
     }
-    const point = pagePoint(event.clientX, event.clientY, false);
-    if (!point) return;
-    focusInput();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    flushInput();
-    mouseButtonsRef.current = event.buttons & 7;
-    const button = buttonOf(event.button);
-    const clickCount = countClick(button, event.clientX, event.clientY, event.timeStamp);
-    mouseClicksRef.current[button] = clickCount;
-    send({
-      type: "mouse",
-      action: "down",
-      x: point.x,
-      y: point.y,
-      button,
-      buttons: event.buttons,
-      clickCount,
-      modifiers: previewStreamModifiers(event),
-    });
-  };
-
-  const handlePointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
-    if (event.pointerType === "touch") {
-      const touch = touchRef.current;
-      if (!touch || touch.pointerId !== event.pointerId) return;
-      if (
-        !touch.panning &&
-        Math.hypot(event.clientX - touch.startX, event.clientY - touch.startY) < TAP_SLOP_PX
-      ) {
+    if (event.pointerType === "touch" && !cancelled) {
+      const point = pagePoint(clientX, clientY, type === "pointermove");
+      if (type === "pointerdown") {
+        if (!event.isPrimary) return;
+        touchRef.current = {
+          pointerId,
+          startX: clientX,
+          startY: clientY,
+          lastX: clientX,
+          lastY: clientY,
+          panning: false,
+        };
+        const last = lastProbeRef.current;
+        const reusable =
+          point &&
+          last &&
+          performance.now() - last.at < PROBE_REUSE_MS &&
+          Math.hypot(point.x - last.x, point.y - last.y) < PROBE_REUSE_PX;
+        probeRef.current = point
+          ? {
+              x: point.x,
+              y: point.y,
+              editable: reusable ? last.editable : null,
+              answered: false,
+              tapped: false,
+            }
+          : null;
+        if (point) send({ type: "probe", x: point.x, y: point.y });
         return;
       }
-      touch.panning = true;
-      const point = pagePoint(event.clientX, event.clientY, true);
-      // Dragging the page up scrolls it down, following the finger.
-      if (point) {
-        queueWheel(
-          point,
-          (touch.lastX - event.clientX) * point.scale,
-          (touch.lastY - event.clientY) * point.scale,
-          0,
-        );
-      }
-      touch.lastX = event.clientX;
-      touch.lastY = event.clientY;
-      return;
-    }
-    const point = pagePoint(
-      event.clientX,
-      event.clientY,
-      mouseButtonsRef.current !== 0 || event.buttons !== 0,
-    );
-    if (!point) return;
-    // Chorded presses and releases arrive as pointermove while another button is held.
-    const changed = mouseButtonsRef.current ^ (event.buttons & 7);
-    if (mouseButtonsRef.current !== 0 && changed !== 0) {
-      flushInput();
-      for (const bit of [1, 2, 4]) {
-        if (!(changed & bit)) continue;
-        const button = pressedButtonOf(bit);
-        const down = (event.buttons & bit) !== 0;
-        mouseButtonsRef.current ^= bit;
-        if (down) {
-          mouseClicksRef.current[button] = countClick(
-            button,
-            event.clientX,
-            event.clientY,
-            event.timeStamp,
+      if (!touch || touch.pointerId !== pointerId) return;
+      if (type === "pointermove") {
+        if (
+          !touch.panning &&
+          Math.hypot(clientX - touch.startX, clientY - touch.startY) < TAP_SLOP_PX
+        )
+          return;
+        touch.panning = true;
+        if (point)
+          queueWheel(
+            point,
+            (touch.lastX - clientX) * point.scale,
+            (touch.lastY - clientY) * point.scale,
+            0,
           );
-        }
-        send({
-          type: "mouse",
-          action: down ? "down" : "up",
-          x: point.x,
-          y: point.y,
-          button,
-          buttons: mouseButtonsRef.current,
-          clickCount: mouseClicksRef.current[button],
-          modifiers: previewStreamModifiers(event),
-        });
+        touch.lastX = clientX;
+        touch.lastY = clientY;
+        return;
       }
-    }
-    pendingMoveRef.current = {
-      type: "mouse",
-      action: "move",
-      x: point.x,
-      y: point.y,
-      button: pressedButtonOf(event.buttons),
-      buttons: event.buttons,
-      clickCount: 0,
-      modifiers: previewStreamModifiers(event),
-    };
-    scheduleFlush();
-  };
-
-  const handlePointerUp = (event: PointerEvent<HTMLCanvasElement>) => {
-    if (event.pointerType === "touch") {
-      const touch = touchRef.current;
-      if (!touch || touch.pointerId !== event.pointerId) return;
       touchRef.current = null;
       const probe = probeRef.current;
       if (touch.panning) {
         probeRef.current = null;
         return;
       }
-      const point = pagePoint(event.clientX, event.clientY, false);
       if (!point) return;
-      // Focusing inside the tap's user activation is what lets iOS raise the keyboard.
+      // iOS requires focus during the tap; late probe replies only raise Android's keyboard.
       if (probe?.editable === true) focusInput();
       else if (probe?.editable === false) inputRef.current?.blur();
       if (probe && !probe.answered) probe.tapped = true;
       else probeRef.current = null;
       flushInput();
-      const clickCount = countClick("left", event.clientX, event.clientY, event.timeStamp);
+      const clickCount = countClick("left", clientX, clientY, event.timeStamp);
       const at = { x: point.x, y: point.y, modifiers: 0 };
       send({ type: "mouse", action: "move", ...at, button: "none", buttons: 0, clickCount: 0 });
       send({ type: "mouse", action: "down", ...at, button: "left", buttons: 1, clickCount });
       send({ type: "mouse", action: "up", ...at, button: "left", buttons: 0, clickCount });
       return;
     }
-    if (mouseButtonsRef.current === 0) return;
-    mouseButtonsRef.current = event.buttons & 7;
-    const point = pagePoint(event.clientX, event.clientY, true);
+    const previous = mouseButtonsRef.current;
+    if ((cancelled || type === "pointerup") && previous === 0) return;
+    if (cancelled || type === "pointerup")
+      mouseButtonsRef.current = cancelled ? 0 : event.buttons & 7;
+    const point = pagePoint(
+      clientX,
+      clientY,
+      type !== "pointerdown" &&
+        (cancelled || type === "pointerup" || previous !== 0 || event.buttons !== 0),
+    );
     if (!point) return;
-    flushInput();
-    send({
-      type: "mouse",
-      action: "up",
-      x: point.x,
-      y: point.y,
-      button: buttonOf(event.button),
-      buttons: event.buttons,
-      clickCount: mouseClicksRef.current[buttonOf(event.button)],
-      modifiers: previewStreamModifiers(event),
-    });
-  };
-
-  const handlePointerCancel = (event: PointerEvent<HTMLCanvasElement>) => {
-    if (touchRef.current?.pointerId === event.pointerId) {
-      touchRef.current = null;
-      probeRef.current = null;
-      return;
-    }
-    let buttons = mouseButtonsRef.current;
-    if (buttons === 0) return;
-    // A cancelled drag must release every button held in the page.
-    mouseButtonsRef.current = 0;
-    const point = pagePoint(event.clientX, event.clientY, true);
-    if (!point) return;
-    flushInput();
-    for (const bit of [1, 2, 4]) {
-      if (!(buttons & bit)) continue;
-      buttons &= ~bit;
-      const button = pressedButtonOf(bit);
+    const at = { x: point.x, y: point.y, modifiers: previewStreamModifiers(event) };
+    const mouse = (action: "down" | "up", button: PreviewStreamMouseButton, buttons: number) => {
+      if (action === "down")
+        mouseClicksRef.current[button] = countClick(button, clientX, clientY, event.timeStamp);
       send({
         type: "mouse",
-        action: "up",
-        x: point.x,
-        y: point.y,
+        action,
+        ...at,
         button,
         buttons,
         clickCount: mouseClicksRef.current[button],
-        modifiers: previewStreamModifiers(event),
       });
+    };
+    if (type === "pointerdown") {
+      focusInput();
+      event.currentTarget.setPointerCapture(pointerId);
+      flushInput();
+      mouseButtonsRef.current = event.buttons & 7;
+      mouse("down", buttonOf(event.button), event.buttons);
+    } else if (type === "pointerup") {
+      flushInput();
+      mouse("up", buttonOf(event.button), event.buttons);
+    } else {
+      // Chords arrive as pointermove. Cancellation releases every held button.
+      const next = cancelled ? 0 : event.buttons & 7;
+      const changed = previous ^ next;
+      if (previous !== 0 && changed !== 0) {
+        flushInput();
+        let buttons = previous;
+        for (const bit of [1, 2, 4]) {
+          if (!(changed & bit)) continue;
+          buttons ^= bit;
+          mouse(next & bit ? "down" : "up", pressedButtonOf(bit), buttons);
+        }
+        mouseButtonsRef.current = next;
+      }
+      if (cancelled) return;
+      pendingMoveRef.current = {
+        type: "mouse",
+        action: "move",
+        ...at,
+        button: pressedButtonOf(event.buttons),
+        buttons: event.buttons,
+        clickCount: 0,
+      };
+      scheduleFlush();
     }
   };
 
@@ -649,39 +578,21 @@ export function ServerBrowserSurface(props: {
     else if (inputType === "deleteContentBackward") sendKeyPress(BACKSPACE);
     else if (inputType === "deleteContentForward") sendKeyPress(DELETE);
     else {
-      const value = textarea.value;
-      const text = value.startsWith(INPUT_SENTINEL) ? value.slice(INPUT_SENTINEL.length) : value;
+      const text = textarea.value.replace(/^\u200b/, "");
       if (text) send({ type: "text", text });
     }
     resetInput(textarea);
   };
 
-  const handleCompositionEnd = (event: CompositionEvent<HTMLTextAreaElement>) => {
-    const data = event.data;
-    const text = data.startsWith(INPUT_SENTINEL) ? data.slice(INPUT_SENTINEL.length) : data;
-    if (text) send({ type: "text", text });
-    resetInput(event.currentTarget);
-  };
-
-  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    event.preventDefault();
-    const text = event.clipboardData.getData("text/plain");
-    if (text) send({ type: "text", text });
-  };
-
   return (
-    <div
-      ref={containerRef}
-      className={cn("relative overflow-hidden", className)}
-      data-server-browser-surface={tabId}
-    >
+    <div className={cn("relative overflow-hidden", className)} data-server-browser-surface={tabId}>
       <canvas
         ref={canvasRef}
         className="block size-full touch-none object-contain"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerCancel}
+        onPointerDown={handlePointer}
+        onPointerMove={handlePointer}
+        onPointerUp={handlePointer}
+        onPointerCancel={handlePointer}
         // Keeps focus in the page input below and stops native text selection.
         onMouseDown={(event) => event.preventDefault()}
         onContextMenu={(event) => event.preventDefault()}
@@ -703,11 +614,19 @@ export function ServerBrowserSurface(props: {
         onKeyDown={(event) => handleKey("down", event)}
         onKeyUp={(event) => handleKey("up", event)}
         onInput={handleInput}
-        onCompositionEnd={handleCompositionEnd}
+        onCompositionEnd={(event) => {
+          const text = event.data.replace(/^\u200b/, "");
+          if (text) send({ type: "text", text });
+          resetInput(event.currentTarget);
+        }}
         // Copying the input would put its sentinel on this device's clipboard.
         onCopy={(event) => event.preventDefault()}
         onCut={(event) => event.preventDefault()}
-        onPaste={handlePaste}
+        onPaste={(event) => {
+          event.preventDefault();
+          const text = event.clipboardData.getData("text/plain");
+          if (text) send({ type: "text", text });
+        }}
       />
       {visible && accessDenied ? (
         // The page can be invisible beneath an empty or unreachable state; reconnect must remain reachable.

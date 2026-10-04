@@ -1,5 +1,6 @@
 import previewStreamScript from "@t3tools/mobile-preview-stream";
 import type { PreviewStreamInput } from "@t3tools/client-runtime/preview/server-browser-stream";
+import type { EnvironmentId } from "@t3tools/contracts";
 import {
   useEffect,
   useEffectEvent,
@@ -14,6 +15,7 @@ import { ActivityIndicator, Platform, Pressable, View } from "react-native";
 import { WebView } from "react-native-webview";
 
 import { AppText } from "../../components/AppText";
+import { usePreviewStreamAccess } from "../../state/preview";
 
 import {
   previewStreamDocument,
@@ -50,8 +52,52 @@ type NativeStreamBridge = {
 // session without operate scope.
 const MAX_REFUSALS = 3;
 
-/** A server-hosted preview tab streamed into a WebView that runs the shared transport. */
-export function PreviewStreamWebView({
+export function PreviewStreamWebView(
+  props: Omit<PreviewStreamConfiguration, "access"> &
+    Omit<NativeStreamBridge, "onUnauthorized"> & {
+      readonly environmentId: EnvironmentId;
+      readonly paused?: boolean;
+    },
+) {
+  const { access, error, refresh } = usePreviewStreamAccess(props.environmentId);
+  if (access && !props.paused) {
+    return <AuthorizedPreviewStream {...props} access={access} onUnauthorized={refresh} />;
+  }
+  return (
+    <View
+      className={
+        props.compact
+          ? "flex-1 items-center justify-center"
+          : "flex-1 items-center justify-center gap-4 px-6"
+      }
+    >
+      {props.compact || !error ? <ActivityIndicator colorClassName="accent-icon" /> : null}
+      {!props.compact && (
+        <>
+          <AppText
+            selectable={!!error}
+            className={
+              error ? "text-center text-sm text-foreground-muted" : "text-sm text-foreground-muted"
+            }
+          >
+            {error || "Connecting to browser..."}
+          </AppText>
+          {error && (
+            <Pressable
+              accessibilityRole="button"
+              className="rounded-full border border-secondary-border bg-secondary px-6 py-3"
+              onPress={refresh}
+            >
+              <AppText className="text-secondary-foreground">Retry</AppText>
+            </Pressable>
+          )}
+        </>
+      )}
+    </View>
+  );
+}
+
+function AuthorizedPreviewStream({
   ref,
   ...props
 }: PreviewStreamConfiguration & NativeStreamBridge) {
@@ -81,14 +127,9 @@ export function PreviewStreamWebView({
   return (
     <PreviewStreamDocumentView
       key={`${attempt}:${configuration}`}
+      {...props}
       ref={ref}
       configuration={configuration}
-      background={props.background}
-      compact={props.compact ?? false}
-      onGone={props.onGone}
-      onViewport={props.onViewport}
-      onPictureInPicture={props.onPictureInPicture}
-      onStreamingChange={props.onStreamingChange}
       onUnauthorized={() => {
         // The client has stopped. Restart it with a fresh ticket, backing off between refusals.
         const refusals = ++unauthorized.current;
@@ -135,10 +176,9 @@ function PreviewStreamDocumentView({
   onRetry,
   onStreaming,
   onRecoverProcess,
-}: Omit<NativeStreamBridge, "compact" | "onUnauthorized"> & {
+}: Omit<NativeStreamBridge, "onUnauthorized"> & {
   readonly configuration: string;
   readonly background: string;
-  readonly compact: boolean;
   /** False when the view should stop retrying and fail. */
   readonly onUnauthorized: () => boolean;
   readonly onRetry: () => void;

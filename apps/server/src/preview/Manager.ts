@@ -21,11 +21,9 @@ import {
   type PreviewRefreshInput,
   type PreviewReportStatusInput,
   type PreviewResizeInput,
-  type PreviewRuntime,
   FILL_PREVIEW_VIEWPORT,
   PreviewSessionLookupError,
   type PreviewSessionSnapshot,
-  type PreviewViewportSetting,
 } from "@t3tools/contracts";
 import {
   isPreviewUrlNormalizationError,
@@ -123,50 +121,6 @@ const normalizeUrl = (rawUrl: string): Effect.Effect<string, PreviewInvalidUrlEr
 
 const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
-const buildLoadingSnapshot = (input: {
-  readonly threadId: string;
-  readonly tabId: string;
-  readonly url: string;
-  readonly title: string;
-  readonly viewport: PreviewViewportSetting;
-  readonly profileId?: string | undefined;
-  readonly runtime?: PreviewRuntime | undefined;
-  readonly reveal?: boolean | undefined;
-  readonly updatedAt: string;
-}): PreviewSessionSnapshot => ({
-  threadId: input.threadId,
-  tabId: input.tabId,
-  navStatus: { _tag: "Loading", url: input.url, title: input.title },
-  canGoBack: false,
-  canGoForward: false,
-  viewport: input.viewport,
-  ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
-  ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
-  ...(input.reveal === undefined ? {} : { reveal: input.reveal }),
-  updatedAt: input.updatedAt,
-});
-
-const buildIdleSnapshot = (input: {
-  readonly threadId: string;
-  readonly tabId: string;
-  readonly viewport: PreviewViewportSetting;
-  readonly profileId?: string | undefined;
-  readonly runtime?: PreviewRuntime | undefined;
-  readonly reveal?: boolean | undefined;
-  readonly updatedAt: string;
-}): PreviewSessionSnapshot => ({
-  threadId: input.threadId,
-  tabId: input.tabId,
-  navStatus: { _tag: "Idle" },
-  canGoBack: false,
-  canGoForward: false,
-  viewport: input.viewport,
-  ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
-  ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
-  ...(input.reveal === undefined ? {} : { reveal: input.reveal }),
-  updatedAt: input.updatedAt,
-});
-
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* PreviewManagerMake() {
   const config = yield* ServerConfig.ServerConfig;
@@ -243,31 +197,20 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       // Persisted client surfaces must not bind to a different tab after a server restart.
       const tabId = `${newPreviewTabId()}${runtime === "server" ? `_${serverEpoch}` : ""}`;
       const updatedAt = yield* currentIsoTimestamp;
-      // Clients with a configured default send the viewport up front so the
-      // session is born at the right size; older clients omit it and keep the
-      // historical fill-panel behaviour.
-      const viewport = input.viewport ?? FILL_PREVIEW_VIEWPORT;
-      const snapshot = input.url
-        ? buildLoadingSnapshot({
-            threadId: input.threadId,
-            tabId,
-            url: yield* normalizeUrl(input.url),
-            title: "",
-            viewport,
-            profileId: input.profileId,
-            runtime,
-            reveal: input.reveal,
-            updatedAt,
-          })
-        : buildIdleSnapshot({
-            threadId: input.threadId,
-            tabId,
-            viewport,
-            profileId: input.profileId,
-            runtime,
-            reveal: input.reveal,
-            updatedAt,
-          });
+      const snapshot: PreviewSessionSnapshot = {
+        threadId: input.threadId,
+        tabId,
+        navStatus: input.url
+          ? { _tag: "Loading", url: yield* normalizeUrl(input.url), title: "" }
+          : { _tag: "Idle" },
+        canGoBack: false,
+        canGoForward: false,
+        viewport: input.viewport ?? FILL_PREVIEW_VIEWPORT,
+        ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
+        ...(runtime === undefined ? {} : { runtime }),
+        ...(input.reveal === undefined ? {} : { reveal: input.reveal }),
+        updatedAt,
+      };
       yield* SynchronizedRef.modifyEffect(stateRef, (state) =>
         Effect.gen(function* () {
           const revision = state.revision + 1;
@@ -305,22 +248,9 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             session.snapshot.navStatus._tag === "Idle" ? "" : session.snapshot.navStatus.title;
           const resolvedTitle = input.resolvedTitle ?? previousTitle;
           const snapshot: PreviewSessionSnapshot = {
-            threadId: session.threadId,
-            tabId: session.tabId,
+            ...session.snapshot,
             navStatus: { _tag: "Success", url, title: resolvedTitle },
-            canGoBack: session.snapshot.canGoBack,
-            canGoForward: session.snapshot.canGoForward,
             viewport: session.snapshot.viewport ?? FILL_PREVIEW_VIEWPORT,
-            ...(session.snapshot.profileId === undefined
-              ? {}
-              : { profileId: session.snapshot.profileId }),
-            ...(session.snapshot.runtime === undefined
-              ? {}
-              : { runtime: session.snapshot.runtime }),
-            ...(session.snapshot.reveal === undefined ? {} : { reveal: session.snapshot.reveal }),
-            ...(session.snapshot.revealRequest === undefined
-              ? {}
-              : { revealRequest: session.snapshot.revealRequest }),
             updatedAt,
           };
           return {
@@ -348,20 +278,11 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       Effect.fn("PreviewManager.reportSessionStatus")(function* (session) {
         const updatedAt = yield* currentIsoTimestamp;
         const snapshot: PreviewSessionSnapshot = {
-          threadId: session.threadId,
-          tabId: session.tabId,
+          ...session.snapshot,
           navStatus: input.navStatus,
           canGoBack: input.canGoBack,
           canGoForward: input.canGoForward,
           viewport: session.snapshot.viewport ?? FILL_PREVIEW_VIEWPORT,
-          ...(session.snapshot.profileId === undefined
-            ? {}
-            : { profileId: session.snapshot.profileId }),
-          ...(session.snapshot.runtime === undefined ? {} : { runtime: session.snapshot.runtime }),
-          ...(session.snapshot.reveal === undefined ? {} : { reveal: session.snapshot.reveal }),
-          ...(session.snapshot.revealRequest === undefined
-            ? {}
-            : { revealRequest: session.snapshot.revealRequest }),
           updatedAt,
         };
         const emit: PreviewEventDraft =
