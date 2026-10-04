@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
 
 import {
+  dispatchFailure,
   newCommandId,
   readCaller,
   readMutationCaller,
@@ -45,7 +46,7 @@ const dispatch = Effect.fn("mcp.dispatchThreadCommand")(function* (
   const { threads, projection } = yield* readWritableThread(threadId);
   const result = yield* threads
     .dispatch(command({ commandId: yield* newCommandId(), threadId: projection.thread.id }))
-    .pipe(Effect.mapError(unavailable));
+    .pipe(Effect.mapError(dispatchFailure));
   return { sequence: result.sequence };
 });
 
@@ -129,7 +130,7 @@ export const ThreadToolkitHandlersLive = ThreadToolkit.toLayer({
           createdBy: "agent",
           creationSource: "mcp",
         })
-        .pipe(Effect.mapError(unavailable));
+        .pipe(Effect.mapError(dispatchFailure));
       return { sequence: result.sequence, targetThreadId };
     }),
   t3_thread_merge_back: (input) =>
@@ -145,7 +146,7 @@ export const ThreadToolkitHandlersLive = ThreadToolkit.toLayer({
           createdBy: "agent",
           creationSource: "mcp",
         })
-        .pipe(Effect.mapError(unavailable));
+        .pipe(Effect.mapError(dispatchFailure));
       return { sequence: result.sequence, targetThreadId: input.targetThreadId };
     }),
   t3_thread_transfers: (input) =>
@@ -188,7 +189,7 @@ export const ThreadToolkitHandlersLive = ThreadToolkit.toLayer({
           commandId: yield* newCommandId(),
           modelSelection: input.modelSelection,
         })
-        .pipe(Effect.mapError(unavailable));
+        .pipe(Effect.mapError(dispatchFailure));
       return { sequence: result.sequence };
     }),
   t3_pending_request_list: (input) =>
@@ -216,7 +217,7 @@ export const ThreadToolkitHandlersLive = ThreadToolkit.toLayer({
           requestId: input.requestId,
           answers: input.answers,
         })
-        .pipe(Effect.mapError(unavailable));
+        .pipe(Effect.mapError(dispatchFailure));
       return { sequence: result.sequence };
     }),
   t3_queue_list: (input) =>
@@ -297,7 +298,7 @@ export const ThreadToolkitHandlersLive = ThreadToolkit.toLayer({
         default:
           command = { ...common, type: `thread.${input.action}` };
       }
-      const result = yield* threads.dispatch(command).pipe(Effect.mapError(unavailable));
+      const result = yield* threads.dispatch(command).pipe(Effect.mapError(dispatchFailure));
       return { sequence: result.sequence };
     }),
 });

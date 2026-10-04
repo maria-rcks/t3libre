@@ -696,6 +696,18 @@ describe("orchestrator MCP toolkit", () => {
             const invoke = (name: string, args: Record<string, unknown>) =>
               invokeAs(invocation, name, args);
 
+            const refusedSettle = yield* invoke("t3_thread_organize", { action: "settle" });
+            expect(refusedSettle.structuredContent).toEqual({
+              _tag: "OrchestratorMcpFailure",
+              code: "orchestration_error",
+              message: `Thread ${parentThreadId} has active or blocked work and cannot be settled.`,
+            });
+            const afterRefusedSettle = yield* orchestrator.getThreadProjection(parentThreadId);
+            expect(afterRefusedSettle.thread.settledOverride).not.toBe("settled");
+            expect(afterRefusedSettle.runs.find((run) => run.id === parentRun?.id)?.status).toBe(
+              "running",
+            );
+
             const pinned = yield* invoke("t3_thread_organize", { action: "pin" });
             expect(pinned.structuredContent).toHaveProperty("sequence");
             expect((yield* orchestrator.getThreadShell(parentThreadId))?.pinnedAt).not.toBeNull();
@@ -705,6 +717,18 @@ describe("orchestrator MCP toolkit", () => {
             if (parentRun === undefined || parentRun.rootNodeId === null) {
               return yield* Effect.die(new Error("Parent run missing."));
             }
+            for (const name of ["t3_queue_edit", "t3_queue_cancel"]) {
+              const refusedQueueMutation = yield* invoke(name, {
+                queuedRunId: parentRun.id,
+                ...(name === "t3_queue_edit" ? { text: "Keep the active turn." } : {}),
+              });
+              expect(refusedQueueMutation.structuredContent).toEqual({
+                _tag: "OrchestratorMcpFailure",
+                code: "orchestration_error",
+                message: `Run ${parentRun.id} is not queued.`,
+              });
+            }
+
             let parentRootNodeId = parentRun.rootNodeId;
             const queueAutomaticCompletion = (suffix: string, taskText: string) =>
               Effect.gen(function* () {

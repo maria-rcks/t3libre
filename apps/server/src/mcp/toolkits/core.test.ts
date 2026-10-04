@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest";
 import {
   DEFAULT_SERVER_SETTINGS,
   ChatImageAttachment,
+  CommandId,
   EnvironmentId,
   ProviderInstanceId,
   ThreadId,
@@ -13,10 +14,15 @@ import * as Schema from "effect/Schema";
 import { McpAttachmentInput } from "./attachment/input.ts";
 import { McpSchema, McpServer, Tool } from "effect/unstable/ai";
 
-import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
+import {
+  OrchestratorCommandRejectedError,
+  OrchestratorDispatchError,
+  OrchestratorProjectionError,
+} from "../../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import * as McpHttpServer from "../McpHttpServer.ts";
 import * as McpInvocationContext from "../McpInvocationContext.ts";
+import { dispatchFailure } from "../threadAccess.ts";
 import { OrchestratorToolkit } from "./orchestrator/tools.ts";
 import { PreviewToolkit } from "./preview/tools.ts";
 import { PreviewControlsToolkit } from "./previewControls/tools.ts";
@@ -156,6 +162,42 @@ it.effect("returns a bounded public failure without serializing storage causes",
     ),
   ),
 );
+
+it("bounds public command rejections and redacts internal dispatch causes", () => {
+  const command = { commandId: CommandId.make("mcp-core-command"), commandType: "thread.settle" };
+  expect(
+    dispatchFailure(new OrchestratorDispatchError({ ...command, cause: "🙂".repeat(1001) }))
+      .message,
+  ).toBe("🙂".repeat(1000));
+  expect(
+    dispatchFailure(
+      new OrchestratorCommandRejectedError({ ...command, cause: "Run is not queued." }),
+    ).message,
+  ).toBe("Run is not queued.");
+  for (const cause of [
+    undefined,
+    "",
+    new Error("private-storage-path"),
+    { message: "private-storage-path" },
+  ]) {
+    expect(dispatchFailure(new OrchestratorDispatchError({ ...command, cause }))).toMatchObject({
+      code: "orchestration_error",
+      message: "The operation could not be completed.",
+    });
+    expect(
+      dispatchFailure(new OrchestratorCommandRejectedError({ ...command, cause })),
+    ).toMatchObject({
+      code: "orchestration_error",
+      message: "The operation could not be completed.",
+    });
+  }
+  expect(
+    dispatchFailure(new OrchestratorProjectionError({ threadId, cause: "private-storage-path" })),
+  ).toMatchObject({
+    code: "orchestration_error",
+    message: "The operation could not be completed.",
+  });
+});
 
 it("keeps MCP preference output allowlisted and Unicode-bounded", () => {
   const settings = {
