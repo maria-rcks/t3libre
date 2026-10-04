@@ -1,5 +1,7 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+import type { JsonSchemaType } from "@modelcontextprotocol/sdk/validation";
 import {
   DEFAULT_SERVER_SETTINGS,
   ChatImageAttachment,
@@ -111,6 +113,7 @@ it.effect("checks capability before accessing services through the production re
         Effect.provideService(McpSchema.McpServerClient, client),
       );
     expect(result.structuredContent).toMatchObject({ code: "capability_denied" });
+    expect(result.isError).toBe(true);
   }).pipe(
     Effect.provide(
       McpHttpServer.ThreadToolkitRegistrationLive.pipe(
@@ -136,6 +139,22 @@ it.effect("returns a bounded public failure without serializing storage causes",
       code: "orchestration_error",
       message: "The operation could not be completed.",
     });
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: '{"_tag":"OrchestratorMcpFailure","code":"orchestration_error","message":"The operation could not be completed."}',
+      },
+    ]);
+    const definition = server.tools.find(({ tool }) => tool.name === "t3_thread_organize");
+    expect(definition?.tool.outputSchema).toBeDefined();
+    const validate = new AjvJsonSchemaValidator().getValidator(
+      definition!.tool.outputSchema! as JsonSchemaType,
+    );
+    expect(validate(result.structuredContent).valid).toBe(true);
+    expect(validate({ sequence: 1 }).valid).toBe(true);
+    expect(validate({ code: "orchestration_error" }).valid).toBe(false);
+    expect(validate({ sequence: "invalid" }).valid).toBe(false);
   }).pipe(
     Effect.provide(
       McpHttpServer.ThreadToolkitRegistrationLive.pipe(
