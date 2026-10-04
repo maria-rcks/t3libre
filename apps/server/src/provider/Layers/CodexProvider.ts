@@ -476,7 +476,8 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
         cwds: [input.cwd],
       }),
       requestAllCodexModels(client),
-      client.request("config/read", { cwd: input.cwd, includeLayers: false }).pipe(
+      // The shared catalog must exclude config from the server's launch project.
+      client.request("config/read", { includeLayers: false }).pipe(
         Effect.map((response) => response.config.service_tier ?? undefined),
         Effect.timeoutOption(Duration.millis(CONFIG_PROBE_TIMEOUT_MS)),
         Effect.map(Option.getOrElse(() => null)),
