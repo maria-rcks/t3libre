@@ -34,6 +34,12 @@ variable. Use absolute paths or `~/` paths in the account's environment settings
 environment paths depend on each project's working directory and cannot be reliably discovered
 by Usage. Accounts sharing a history directory count once.
 
+The server saves its first hostname in `<T3 home>/usage-host-id` so container recreates keep
+the same usage identity. Persist T3 home alongside provider history. To assign a stable identity
+across containers or T3 homes that share history, set `T3CODE_HOST_ID` on each server. Use the
+same value for servers sharing history and different values for separate hosts. The override
+does not change the saved identity; removing it restores the saved value.
+
 When your app and server support different providers, usage totals may cover only the providers
 your app understands. Update the app to include newly supported providers.
 

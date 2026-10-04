@@ -8,13 +8,18 @@ import * as NodeSqlite from "node:sqlite";
 
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import {
+  HostProcessEnvironment,
+  HostProcessHostname,
+  HostProcessPlatform,
+} from "@t3tools/shared/hostProcess";
 import { mergeUsage } from "@t3tools/shared/usageMerge";
 import {
   EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
   UsageDay,
+  type UsageSummary,
   type UsageSummaryInput,
 } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
@@ -87,10 +92,13 @@ const serviceLayers = (input: {
   readonly ratesDocument?: unknown;
   readonly environment?: NodeJS.ProcessEnv;
   readonly platform?: NodeJS.Platform;
+  readonly hostname?: string;
+  readonly baseDir?: string;
 }) =>
-  ServerConfig.layerTest(process.cwd(), { prefix: input.prefix }).pipe(
+  ServerConfig.layerTest(process.cwd(), input.baseDir ?? { prefix: input.prefix }).pipe(
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(Layer.succeed(HostProcessPlatform, input.platform ?? "linux")),
+    Layer.provideMerge(Layer.succeed(HostProcessHostname, input.hostname ?? "usage-test-host")),
     Layer.provideMerge(ServerSettings.layerTest(input.settings)),
     Layer.provideMerge(
       Layer.succeed(
@@ -158,6 +166,132 @@ function totalOutputTokens(summary: { buckets: readonly { totals: { outputTokens
 }
 
 describe("UsageService", () => {
+  it.live("keeps usage host identity and shared-worktree totals across container recreates", () =>
+    Effect.gen(function* () {
+      const { transcript, settings, home } = yield* setup;
+      yield* Effect.promise(() => NodeFSP.writeFile(transcript, claudeLine(1, 5)));
+      const summaries: UsageSummary[] = [];
+      for (const [hostname, override, baseName, expected] of [
+        ["container-a", undefined, "t3", "container-a"],
+        ["container-b", undefined, "t3", "container-a"],
+        ["container-c", " physical-host ", "t3", "physical-host"],
+        ["container-d", "", "t3", "container-a"],
+        ["container-e", "   ", "t3", "container-a"],
+        ["container-f", undefined, "t3", "container-a"],
+        ["container-a", undefined, "sibling-worktree", "container-a"],
+        ["container-g", "physical-host", "override-first", "physical-host"],
+        ["container-h", undefined, "override-first", "container-h"],
+      ] as const) {
+        const baseDir = NodePath.join(home, baseName);
+        const summary = yield* Effect.gen(function* () {
+          const service = yield* UsageService.make;
+          return yield* service.readSummary(WINDOW);
+        }).pipe(
+          Effect.provide(
+            serviceLayers({
+              prefix: "usage-host-stability",
+              baseDir,
+              home,
+              settings,
+              hostname,
+              environment: override === undefined ? {} : { T3CODE_HOST_ID: override },
+            }),
+          ),
+        );
+        const source = summary.sources.find((source) => source.fingerprint.provider === "claude");
+        assert.strictEqual(source?.fingerprint.hostId, expected);
+        assert.strictEqual(totalOutputTokens(summary), 5);
+        if (hostname === "container-g") {
+          assert.isFalse(
+            yield* Effect.promise(() =>
+              NodeFSP.access(NodePath.join(baseDir, "usage-host-id")).then(
+                () => true,
+                () => false,
+              ),
+            ),
+          );
+        }
+        summaries.push(summary);
+      }
+      const merged = mergeUsage(
+        [0, 1, 6].map((index) => ({
+          environmentId: EnvironmentId.make(`container-peer-${index}`),
+          label: `peer-${index}`,
+          summary: summaries[index]!,
+        })),
+        summaries[0]!.contractVersion,
+      );
+      assert.strictEqual(merged.outputTokens, 5);
+      assert.strictEqual(merged.duplicateSources.length, 2);
+      const separateHosts = mergeUsage(
+        [0, 2].map((index) => ({
+          environmentId: EnvironmentId.make(`separate-host-${index}`),
+          label: `host-${index}`,
+          summary: summaries[index]!,
+        })),
+        summaries[0]!.contractVersion,
+      );
+      assert.strictEqual(separateHosts.outputTokens, 10);
+      assert.strictEqual(separateHosts.duplicateSources.length, 0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("concurrent usage initializers agree on the persisted host identity", () =>
+    Effect.gen(function* () {
+      const { transcript, settings, home } = yield* setup;
+      yield* Effect.promise(() => NodeFSP.writeFile(transcript, claudeLine(1, 5)));
+      const summaries = yield* Effect.forEach(
+        ["container-a", "container-b"],
+        (hostname) =>
+          Effect.gen(function* () {
+            const service = yield* UsageService.make;
+            return yield* service.readSummary(WINDOW);
+          }).pipe(
+            Effect.provide(
+              serviceLayers({
+                prefix: "usage-host-concurrent",
+                baseDir: NodePath.join(home, "t3"),
+                home,
+                settings,
+                hostname,
+              }),
+            ),
+          ),
+        { concurrency: "unbounded" },
+      );
+      const hosts = summaries.map((summary) => summary.sources[0]?.fingerprint.hostId);
+      assert.include(["container-a", "container-b"], hosts[0]);
+      assert.strictEqual(hosts[0], hosts[1]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("keeps usage available when host identity cannot be read or persisted", () =>
+    Effect.gen(function* () {
+      const { transcript, settings, home } = yield* setup;
+      const baseDir = NodePath.join(home, "t3");
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.join(baseDir, "usage-host-id"), { recursive: true });
+        await NodeFSP.writeFile(transcript, claudeLine(1, 5));
+      });
+      const summary = yield* Effect.gen(function* () {
+        const service = yield* UsageService.make;
+        return yield* service.readSummary(WINDOW);
+      }).pipe(
+        Effect.provide(
+          serviceLayers({
+            prefix: "usage-host-fallback",
+            baseDir,
+            home,
+            settings,
+            hostname: "fallback-host",
+          }),
+        ),
+      );
+      assert.strictEqual(summary.sources[0]?.fingerprint.hostId, "fallback-host");
+      assert.strictEqual(totalOutputTokens(summary), 5);
+    }).pipe(Effect.scoped),
+  );
+
   it.live.each([
     { explicitDefault: true, label: "explicit" },
     { explicitDefault: false, label: "legacy" },

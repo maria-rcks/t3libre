@@ -28,7 +28,11 @@ import {
   type UsageSummaryInput,
   UsageReadError,
 } from "@t3tools/contracts";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import {
+  HostProcessEnvironment,
+  HostProcessHostname,
+  HostProcessPlatform,
+} from "@t3tools/shared/hostProcess";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -192,6 +196,7 @@ export const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const hostEnvironment = yield* HostProcessEnvironment;
   const platform = yield* HostProcessPlatform;
+  const hostname = yield* HostProcessHostname;
 
   const fileCache: ScanCache = new Map();
   const sourceCache = new Map<string, typeof CachedSource.Type>();
@@ -204,6 +209,39 @@ export const make = Effect.gen(function* () {
   const ratesCachePath = path.join(config.stateDir, "usage-model-rates.json");
   const scanCachePath = path.join(config.stateDir, SCAN_CACHE_FILE_NAME);
   const legacyScanCachePath = path.join(config.stateDir, LEGACY_SCAN_CACHE_FILE_NAME);
+  const usageHostIdPath = path.join(config.baseDir, "usage-host-id");
+  const readPersistedHostId = fileSystem.readFileString(usageHostIdPath).pipe(
+    Effect.map((value) => value.trim() || null),
+    Effect.orElseSucceed(() => null),
+  );
+  const hostId = yield* Effect.gen(function* () {
+    const explicit = hostEnvironment["T3CODE_HOST_ID"]?.trim();
+    if (explicit) return explicit;
+
+    const persisted = yield* readPersistedHostId;
+    if (persisted) return persisted;
+
+    // Keep the first hostname for restarts without splitting sibling worktree sources.
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const tempPath = yield* fileSystem.makeTempFileScoped({
+          directory: config.baseDir,
+          prefix: ".usage-host-id-",
+        });
+        yield* fileSystem.writeFileString(tempPath, `${hostname}\n`);
+        // Publish a complete ID without replacing another initializer's winner.
+        yield* fileSystem.link(tempPath, usageHostIdPath).pipe(
+          Effect.catchIf(
+            (cause) => cause.reason._tag === "AlreadyExists",
+            () => Effect.void,
+          ),
+        );
+      }),
+    ).pipe(Effect.ignore);
+
+    // Identity persistence is advisory; unreadable or read-only homes still scan.
+    return (yield* readPersistedHostId) ?? hostname;
+  });
   let rates: RateTable = new Map();
   let ratesFetchedAtMs: number | null = null;
   let ratesStatus: UsagePricing["status"] = "unavailable";
@@ -792,7 +830,6 @@ export const make = Effect.gen(function* () {
     const startedAtMs = yield* Clock.currentTimeMillis;
     yield* ensureScanCacheLoaded;
 
-    const hostId = NodeOS.hostname();
     const windowStart = DateTime.make(`${input.sinceDay}T00:00:00Z`);
     if (Option.isNone(windowStart)) {
       return yield* new UsageReadError({
