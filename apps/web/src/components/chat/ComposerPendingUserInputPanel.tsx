@@ -80,6 +80,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     questionId: string;
     optionIndex: number;
   } | null>(null);
+  // Answer values can repeat, so retain the selected index per question.
+  const [selectedOptionIndices, setSelectedOptionIndices] = useState<Record<string, number>>({});
   // Collapsing hides everything but the header so a tall prompt stops covering
   // the thread the user is trying to read. Scoped to a single question: the card
   // is keyed by request id so the next prompt starts expanded, and storing the
@@ -130,6 +132,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const handleOptionSelection = useCallback(
     (questionId: string, optionValue: string, optionIndex: number) => {
       setFocusedOption({ questionId, optionIndex });
+      setSelectedOptionIndices((current) => ({ ...current, [questionId]: optionIndex }));
       if (activeQuestion?.multiSelect) {
         onToggleOption(questionId, optionValue);
         return;
@@ -184,6 +187,15 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   const customAnswerActive = progress.customAnswer.trim().length > 0;
   const selectedOptionValue = progress.selectedOptionValues.at(-1);
+  const matchingSelectedOptionIndices = activeQuestion.options.flatMap((option, index) =>
+    (option.value ?? option.label) === selectedOptionValue ? [index] : [],
+  );
+  const rememberedOptionIndex = selectedOptionIndices[activeQuestion.id];
+  const selectedOptionIndex = matchingSelectedOptionIndices.includes(rememberedOptionIndex ?? -1)
+    ? rememberedOptionIndex
+    : matchingSelectedOptionIndices.length === 1
+      ? matchingSelectedOptionIndices[0]
+      : -1;
   const previewOptionIndex =
     focusedOption?.questionId === activeQuestion.id
       ? focusedOption.optionIndex
@@ -191,9 +203,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         ? -1
         : selectedOptionValue === undefined
           ? 0
-          : activeQuestion.options.findIndex(
-              (option) => (option.value ?? option.label) === selectedOptionValue,
-            );
+          : (selectedOptionIndex ?? -1);
   const previewOption = activeQuestion.options[previewOptionIndex];
 
   return (

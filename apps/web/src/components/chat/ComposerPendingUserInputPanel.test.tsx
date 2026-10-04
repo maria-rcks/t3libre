@@ -112,13 +112,35 @@ describe("ComposerPendingUserInputPanel", () => {
       expect(onToggleOption).toHaveBeenLastCalledWith("question-1", "Empty preview");
       expect(onAdvance).not.toHaveBeenCalled();
       await act(() =>
-        root.render(<ComposerPendingUserInputPanel {...panelProps} questionIndex={1} />),
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "4", bubbles: true })),
+      );
+      const retainedAnswers = { "question-1": { selectedOptionValues: ["Incremental"] } };
+      await act(() =>
+        root.render(
+          <ComposerPendingUserInputPanel
+            {...panelProps}
+            answers={retainedAnswers}
+            questionIndex={1}
+          />,
+        ),
       );
       expect(container.querySelector("section")).toBeNull();
       await act(() =>
-        root.render(<ComposerPendingUserInputPanel {...panelProps} questionIndex={0} />),
+        root.render(<ComposerPendingUserInputPanel {...panelProps} answers={retainedAnswers} />),
       );
-      expect(container.querySelector("section")?.textContent).toContain("Safe rollout");
+      expect(container.querySelector("section strong")?.textContent).toBe("Second draft");
+      expect(onToggleOption).toHaveBeenLastCalledWith("question-1", "Incremental");
+      await act(() =>
+        root.render(
+          <ComposerPendingUserInputPanel
+            {...panelProps}
+            answers={{ "question-1": { customAnswer: "Use a custom draft" } }}
+          />,
+        ),
+      );
+      expect(container.querySelector("section")).toBeNull();
+      await act(() => root.render(<ComposerPendingUserInputPanel {...panelProps} />));
+      expect(container.querySelector("section strong")?.textContent).toBe("Safe rollout");
       await act(() => container.querySelectorAll<HTMLButtonElement>("button.group")[1]!.focus());
       expect(container.querySelector("section")).toBeNull();
       await act(() =>
@@ -135,6 +157,21 @@ describe("ComposerPendingUserInputPanel", () => {
         ),
       );
       expect(container.querySelector("section")?.textContent).toContain("Safe rollout");
+      await act(() =>
+        root.render(
+          <ComposerPendingUserInputPanel
+            {...panelProps}
+            answers={retainedAnswers}
+            pendingUserInputs={[
+              {
+                ...panelProps.pendingUserInputs[0]!,
+                requestId: RuntimeRequestId.make("request-2"),
+              },
+            ]}
+          />,
+        ),
+      );
+      expect(container.querySelector("section")).toBeNull();
     } finally {
       await act(() => root.unmount());
       container.remove();
