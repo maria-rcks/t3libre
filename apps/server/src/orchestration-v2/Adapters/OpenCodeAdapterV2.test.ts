@@ -470,6 +470,8 @@ describe("OpenCodeAdapterV2", () => {
     { name: "delayed catalog", limit: { context: 200 }, maxTokens: 200 },
     { name: "delayed interrupted catalog", limit: { context: 200 }, maxTokens: 200 },
     { name: "delayed reconciliation eof", limit: { context: 200 }, maxTokens: 200 },
+    { name: "cancelled admission finalizer", limit: { context: 200 }, maxTokens: 200 },
+    { name: "released admission finalizer", limit: { context: 200 }, maxTokens: null },
     { name: "catalog timeout", limit: { context: 200 }, maxTokens: null },
     { name: "interrupted", limit: { context: 200 }, maxTokens: 200 },
     { name: "native total", limit: { context: 200 }, maxTokens: 200 },
@@ -484,21 +486,28 @@ describe("OpenCodeAdapterV2", () => {
       const statusReleased = promiseGate<void>();
       const streamEnded = yield* Deferred.make<void>();
       const reconciliationEof = name === "delayed reconciliation eof";
-      const delayedCatalog = name.startsWith("delayed");
+      const releasedAdmission = name === "released admission finalizer";
+      const cancelledAdmission = name === "cancelled admission finalizer" || releasedAdmission;
+      const runtimeScope = yield* releasedAdmission
+        ? Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
+        : Effect.scope;
+      const delayedCatalog = name.startsWith("delayed") || cancelledAdmission;
       const retryCatalog = delayedCatalog || name === "catalog timeout";
       let catalogCalls = 0;
       let promptId = "";
       let promptCalls = 0;
+      let catalogSignal: AbortSignal | undefined;
       const harness = yield* makeOpenCodeRuntimeHarness(
         `context-${name.replaceAll(" ", "-")}`,
         "root",
         {
           event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
           provider: {
-            list: async () => {
+            list: async (_input: unknown, options: { signal: AbortSignal }) => {
               if (name === "unavailable catalog") throw new Error("catalog unavailable");
               if (retryCatalog && catalogCalls++ === 0) return { data: { all: [] } };
               if (retryCatalog) {
+                catalogSignal = options.signal;
                 catalogRetryStarted.resolve();
                 await catalogReleased.promise;
               }
@@ -522,7 +531,10 @@ describe("OpenCodeAdapterV2", () => {
               promptCalls += 1;
               promptId = input.messageID;
               promptStarted.resolve();
-              if (reconciliationEof) await promptReleased.promise;
+              if (reconciliationEof || (cancelledAdmission && promptCalls === 1)) {
+                await promptReleased.promise;
+                if (cancelledAdmission) throw new Error("prompt admission failed");
+              }
               return { data: true };
             },
             status: async () => {
@@ -536,7 +548,7 @@ describe("OpenCodeAdapterV2", () => {
             messages: async () => ({ data: [] }),
           },
         },
-      );
+      ).pipe(Effect.provideService(Scope.Scope, runtimeScope));
       const start = yield* harness.startTurn().pipe(Effect.forkScoped);
       yield* Effect.promise(() => promptStarted.promise);
       if (reconciliationEof) {
@@ -548,7 +560,7 @@ describe("OpenCodeAdapterV2", () => {
         );
         promptReleased.resolve();
       }
-      yield* Fiber.join(start);
+      if (!cancelledAdmission) yield* Fiber.join(start);
       const received = yield* harness.runtime.events.pipe(
         Stream.tap((event) =>
           event.type === "provider_session.updated" && event.providerSession.status === "error"
@@ -623,8 +635,9 @@ describe("OpenCodeAdapterV2", () => {
           providerTurnId: snapshot.providerTurns.at(-1)!.id,
         });
       }
+      if (cancelledAdmission) promptReleased.resolve();
       const idle = yield* (
-        reconciliationEof
+        reconciliationEof || cancelledAdmission
           ? Effect.void
           : Effect.promise(() =>
               nativeEvents.push({
@@ -635,27 +648,41 @@ describe("OpenCodeAdapterV2", () => {
       ).pipe(Effect.forkScoped);
       if (retryCatalog) {
         yield* Effect.promise(() => catalogRetryStarted.promise);
-        if (name === "delayed catalog") {
-          const snapshot = yield* harness.runtime.readThreadSnapshot({
+        const snapshot = yield* harness.runtime.readThreadSnapshot({
+          providerThread: harness.providerThread,
+        });
+        const steer = yield* Effect.exit(
+          harness.runtime.steerTurn({
+            threadId: harness.threadId,
+            runId: harness.runId,
             providerThread: harness.providerThread,
-          });
-          const steer = yield* Effect.exit(
-            harness.runtime.steerTurn({
-              threadId: harness.threadId,
-              runId: harness.runId,
-              providerThread: harness.providerThread,
-              providerTurnId: snapshot.providerTurns.at(-1)!.id,
-              message: {
-                messageId: MessageId.make("steer-while-finalizing"),
-                text: "must not be accepted while closing",
-                attachments: [],
-                createdBy: "user",
-                creationSource: "web",
-              },
-            }),
-          );
-          assert.isTrue(Exit.isFailure(steer));
+            providerTurnId: snapshot.providerTurns.at(-1)!.id,
+            message: {
+              messageId: MessageId.make("steer-while-finalizing"),
+              text: "must not be accepted while closing",
+              attachments: [],
+              createdBy: "user",
+              creationSource: "web",
+            },
+          }),
+        ).pipe(Effect.forkScoped);
+        yield* TestClock.adjust("0 millis");
+        assert.isUndefined(steer.pollUnsafe());
+        assert.equal(promptCalls, 1);
+        if (cancelledAdmission) {
+          yield* Fiber.interrupt(start);
+          yield* TestClock.adjust("0 millis");
+          assert.isUndefined(steer.pollUnsafe());
+        }
+        if (releasedAdmission) {
+          assert.isFalse(catalogSignal?.aborted);
+          yield* Scope.close(runtimeScope, Exit.void);
+          assert.isTrue(catalogSignal?.aborted);
+          assert.isTrue(Exit.isFailure(yield* Fiber.join(steer)));
           assert.equal(promptCalls, 1);
+          yield* Fiber.interrupt(received);
+          catalogReleased.resolve();
+          return;
         }
         if (reconciliationEof) {
           nativeEvents.close();
@@ -663,10 +690,20 @@ describe("OpenCodeAdapterV2", () => {
         }
         if (name === "catalog timeout") yield* TestClock.adjust("2 seconds");
         else catalogReleased.resolve();
+        assert.isTrue(Exit.isFailure(yield* Fiber.join(steer)));
+        assert.equal(promptCalls, 1);
       }
       yield* Fiber.join(idle);
       const events = yield* Fiber.join(received);
       const completed = events.findLast((event) => event.type === "provider_turn.updated");
+      if (cancelledAdmission) {
+        const terminals = events.filter((event) => event.type === "turn.terminal");
+        assert.lengthOf(terminals, 1);
+        assert.equal(terminals[0]?.status, "failed");
+        assert.equal(completed?.providerTurn.status, "failed");
+        yield* harness.startTurn("follow-up after cancelled finalization caller");
+        assert.equal(promptCalls, 2);
+      }
       if (reconciliationEof) {
         const terminals = events.filter((event) => event.type === "turn.terminal");
         assert.lengthOf(terminals, 1);

@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
   MessageId,
@@ -17,11 +18,18 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
+import { makeOpenCodeAdapterV2, OpenCodeAdapterV2Driver } from "./Adapters/OpenCodeAdapterV2.ts";
+import type { OpenCodeRuntimeShape } from "../provider/opencodeRuntime.ts";
+import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as EventSink from "./EventSink.ts";
+import * as IdAllocator from "./IdAllocator.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import {
   ProviderAdapterSteerRunError,
@@ -30,7 +38,10 @@ import {
   type ProviderAdapterV2TurnInput,
 } from "./ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
-import { makeOrchestratorV2ReplayLayerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
+import {
+  makeOrchestratorV2ReplayLayerWithRegistry,
+  makeReplayServerConfig,
+} from "./testkit/ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "./testkit/ReplayFixtureWorkspace.ts";
 
 const driver = ProviderDriverKind.make("codex");
@@ -48,6 +59,8 @@ it.effect.each(
           "after delivery",
           "without native steering",
           "settled only",
+          "during catalog retry",
+          "during catalog timeout",
         ] as const
       ).map((timing) => ({
         mailbox,
@@ -55,9 +68,10 @@ it.effect.each(
         label: mailbox ? "mailbox notification" : "steering",
       })),
     )
-    .filter(
-      ({ mailbox, timing }) =>
-        mailbox || (timing !== "without native steering" && timing !== "settled only"),
+    .filter(({ mailbox, timing }) =>
+      mailbox
+        ? !timing.startsWith("during catalog")
+        : timing !== "without native steering" && timing !== "settled only",
     ),
 )("delivers $label when completion wins $timing", ({ mailbox, timing }) =>
   Effect.scoped(
@@ -67,6 +81,16 @@ it.effect.each(
       const started: ProviderAdapterV2TurnInput[] = [];
       const steerEntered = yield* Deferred.make<void>();
       const rejectSteer = yield* Deferred.make<void>();
+      const catalogWait = timing.startsWith("during catalog");
+      const selection = catalogWait
+        ? { instanceId, model: "openrouter/poolside/laguna-s-2.1:free" }
+        : modelSelection;
+      const nativeEvents = yield* Queue.unbounded<unknown>();
+      const nativeStream = yield* Stream.toAsyncIterableEffect(Stream.fromQueue(nativeEvents));
+      const catalogStarted = Promise.withResolvers<void>();
+      const catalogReleased = Promise.withResolvers<void>();
+      const nativePromptIds: string[] = [];
+      let catalogCalls = 0;
       let steerCalls = 0;
       const capabilities = {
         ...CodexProviderCapabilitiesV2,
@@ -75,7 +99,7 @@ it.effect.each(
           supportsActiveSteering: timing !== "without native steering",
         },
       };
-      const adapter: ProviderAdapterV2Shape = {
+      let adapter: ProviderAdapterV2Shape = {
         instanceId,
         driver,
         getCapabilities: () => Effect.succeed(capabilities),
@@ -163,9 +187,78 @@ it.effect.each(
             };
           }),
       };
+      if (catalogWait) {
+        const openCode = makeOpenCodeAdapterV2({
+          instanceId,
+          settings: {
+            ...OpenCodeAdapterV2Driver.defaultConfig(),
+            serverUrl: "http://test.invalid",
+          },
+          environment: {},
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          serverConfig: yield* makeReplayServerConfig(`steering-catalog-${timing}`).pipe(
+            Effect.provide(NodeServices.layer),
+          ),
+          runtime: {
+            connectToOpenCodeServer: () =>
+              Effect.succeed({ url: "http://test.invalid", external: true }),
+            createOpenCodeSdkClient: () => ({
+              event: { subscribe: async () => ({ stream: nativeStream }) },
+              provider: {
+                list: async () => {
+                  if (catalogCalls++ === 0) return { data: { all: [] } };
+                  catalogStarted.resolve();
+                  await catalogReleased.promise;
+                  return {
+                    data: {
+                      all: [
+                        {
+                          id: "openrouter",
+                          models: { "poolside/laguna-s-2.1:free": { limit: { context: 200 } } },
+                        },
+                      ],
+                    },
+                  };
+                },
+              },
+              session: {
+                create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+                get: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+                messages: async () => ({ data: [] }),
+                children: async () => ({ data: [] }),
+                abort: async () => ({ data: true }),
+                promptAsync: async (input: { messageID: string }) => {
+                  nativePromptIds.push(input.messageID);
+                  return { data: true };
+                },
+              },
+            }),
+          } as unknown as OpenCodeRuntimeShape,
+        });
+        adapter = {
+          ...openCode,
+          openSession: (input) =>
+            openCode.openSession(input).pipe(
+              Effect.map((runtime) => ({
+                ...runtime,
+                startTurn: (turn) =>
+                  Effect.sync(() => started.push(turn)).pipe(
+                    Effect.andThen(runtime.startTurn(turn)),
+                  ),
+                steerTurn: (turn) =>
+                  Effect.gen(function* () {
+                    steerCalls += 1;
+                    yield* Deferred.succeed(steerEntered, undefined);
+                    yield* runtime.steerTurn(turn);
+                  }),
+              })),
+            ),
+        };
+      }
       yield* Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const outbox = yield* EffectOutbox.EffectOutboxV2;
         const threadId = ThreadId.make("thread:steering-completion");
         const watch = (predicate: (event: OrchestrationV2DomainEvent) => boolean) =>
           orchestrator.streamDomainEvents.pipe(
@@ -180,7 +273,7 @@ it.effect.each(
           threadId,
           projectId: ProjectId.make("project:steering-completion"),
           title: "Steering race",
-          modelSelection,
+          modelSelection: selection,
           runtimeMode: "full-access",
           interactionMode: "default",
           branch: null,
@@ -263,6 +356,34 @@ it.effect.each(
             ],
           });
         }
+        if (catalogWait) {
+          const reported = yield* watch(
+            (event) =>
+              event.type === "provider-turn.updated" && event.payload.tokenUsage?.usedTokens === 22,
+          );
+          yield* Queue.offer(nativeEvents, {
+            type: "message.updated",
+            properties: {
+              sessionID: "root",
+              info: {
+                id: "assistant",
+                sessionID: "root",
+                parentID: nativePromptIds[0],
+                role: "assistant",
+                time: { created: 1, completed: 2 },
+                providerID: "openrouter",
+                modelID: "poolside/laguna-s-2.1:free",
+                tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 3, write: 4 } },
+              },
+            },
+          });
+          yield* Fiber.join(reported);
+          yield* Queue.offer(nativeEvents, {
+            type: "session.status",
+            properties: { sessionID: "root", status: { type: "idle" } },
+          });
+          yield* Effect.promise(() => catalogStarted.promise);
+        }
         const dispatchSteer = orchestrator.dispatch({
           type: "message.dispatch",
           commandId: CommandId.make("steer"),
@@ -296,7 +417,9 @@ it.effect.each(
         if (timing !== "before dispatch") yield* dispatchSteer;
         if (timing === "after delivery") yield* worker.drain();
         const delivery =
-          timing === "during delivery" ? yield* worker.runOnce.pipe(Effect.forkScoped) : null;
+          timing === "during delivery" || catalogWait
+            ? yield* worker.runOnce.pipe(Effect.forkScoped)
+            : null;
         if (delivery !== null) yield* Deferred.await(steerEntered);
         const completed = yield* watch(
           (event) =>
@@ -304,28 +427,48 @@ it.effect.each(
             event.payload.id === first.runId &&
             event.payload.status === "waiting",
         );
-        const projection = yield* orchestrator.getThreadProjection(threadId);
-        const turn = projection.providerTurns[0]!;
-        yield* Queue.offer(events, {
-          type: "provider_turn.updated",
-          driver,
-          providerTurn: { ...turn, status: "completed", completedAt: yield* DateTime.now },
-        });
-        yield* Queue.offer(events, {
-          type: "turn.terminal",
-          driver,
-          providerThreadId: turn.providerThreadId,
-          providerTurnId: turn.id,
-          runOrdinal: first.runOrdinal,
-          status: "completed",
-          failure: null,
-          threadDisposition: "reusable",
-        });
+        if (catalogWait) {
+          yield* TestClock.adjust("0 millis");
+          for (const delay of [100, 200, 400, 800]) {
+            yield* TestClock.adjust(`${delay} millis`);
+            yield* worker.drain();
+          }
+          assert.lengthOf(nativePromptIds, 1);
+        }
+        const [steeringAtRetryLimit] = catalogWait
+          ? yield* outbox.listByCommandId(CommandId.make("steer"))
+          : [];
+        if (catalogWait) {
+          const saved = yield* orchestrator.getThreadProjection(threadId);
+          assert.equal(saved.messages.filter((message) => message.id === messageId).length, 1);
+          assert.equal(saved.providerTurns[0]?.status, "running");
+          yield* TestClock.adjust(timing === "during catalog retry" ? "400 millis" : "500 millis");
+          if (timing === "during catalog retry") catalogReleased.resolve();
+        } else {
+          const projection = yield* orchestrator.getThreadProjection(threadId);
+          const turn = projection.providerTurns[0]!;
+          yield* Queue.offer(events, {
+            type: "provider_turn.updated",
+            driver,
+            providerTurn: { ...turn, status: "completed", completedAt: yield* DateTime.now },
+          });
+          yield* Queue.offer(events, {
+            type: "turn.terminal",
+            driver,
+            providerThreadId: turn.providerThreadId,
+            providerTurnId: turn.id,
+            runOrdinal: first.runOrdinal,
+            status: "completed",
+            failure: null,
+            threadDisposition: "reusable",
+          });
+        }
         yield* Fiber.join(completed);
         if (delivery !== null) {
           yield* Deferred.succeed(rejectSteer, undefined);
           yield* Fiber.join(delivery);
         }
+        if (catalogWait) yield* TestClock.adjust("100 millis");
         if (timing === "before dispatch") yield* dispatchSteer;
         yield* worker.drain();
         yield* orchestrator.resumeQueuedRuns;
@@ -362,7 +505,13 @@ it.effect.each(
           }
           return;
         }
-        assert.equal(started.length, 2);
+        assert.equal(
+          started.length,
+          2,
+          catalogWait
+            ? `saved steering at 1500ms: ${steeringAtRetryLimit?.status}, ${steeringAtRetryLimit?.attemptCount} attempts; native prompts after completion: ${nativePromptIds.length}`
+            : undefined,
+        );
         assert.equal(started[1]?.message.messageId, messageId);
         if (mailbox) assert.include(started[1]?.message.text ?? "", String(taskId));
         else assert.equal(started[1]?.message.text, "fix the popover");
@@ -375,7 +524,15 @@ it.effect.each(
             sizeBytes: 10,
           },
         ]);
-        assert.equal(steerCalls, timing === "during delivery" ? 1 : 0);
+        assert.equal(steerCalls, timing === "during delivery" || catalogWait ? 1 : 0);
+        if (catalogWait) {
+          assert.equal(steeringAtRetryLimit?.status, "running");
+          assert.equal(steeringAtRetryLimit?.attemptCount, 1);
+          const [steering] = yield* outbox.listByCommandId(CommandId.make("steer"));
+          assert.equal(steering?.status, "succeeded");
+          assert.isAtMost(steering!.attemptCount, 2);
+          assert.lengthOf(nativePromptIds, 2);
+        }
         const final = yield* orchestrator.getThreadProjection(threadId);
         assert.equal(final.messages.filter((message) => message.id === messageId).length, 1);
         assert.equal(
@@ -394,15 +551,18 @@ it.effect.each(
         assert.equal(started.length, 2);
       }).pipe(
         Effect.provide(
-          makeOrchestratorV2ReplayLayerWithRegistry(
-            { name: `steering-completion-${timing}` },
-            ProviderAdapterRegistry.makeSingleLayer(adapter),
-            { runEffectWorker: false },
+          Layer.merge(
+            makeOrchestratorV2ReplayLayerWithRegistry(
+              { name: `steering-completion-${timing}` },
+              ProviderAdapterRegistry.makeSingleLayer(adapter),
+              { runEffectWorker: false },
+            ),
+            EffectOutbox.layer.pipe(Layer.provide(SqlitePersistenceMemory)),
           ),
         ),
       );
     }),
-  ),
+  ).pipe(Effect.provide(IdAllocator.layer)),
 );
 
 // Claude and Pi steer live but cannot interrupt-and-restart, so a changed

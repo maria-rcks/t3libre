@@ -2195,13 +2195,18 @@ export function makeOpenCodeAdapterV2(
             );
           },
           (effect, _state, turn) =>
-            Effect.suspend(() => {
-              if (turn.finalized) return Deferred.await(turn.finalizationSettled);
-              turn.finalized = true;
-              return effect.pipe(
-                Effect.ensuring(Deferred.succeed(turn.finalizationSettled, undefined)),
-              );
-            }),
+            Effect.uninterruptibleMask((restore) =>
+              Effect.suspend(() => {
+                if (turn.finalized) return restore(Deferred.await(turn.finalizationSettled));
+                turn.finalized = true;
+                // Closing belongs to the session even if its first caller is cancelled.
+                return effect.pipe(
+                  Effect.ensuring(Deferred.succeed(turn.finalizationSettled, undefined)),
+                  Effect.forkIn(scope),
+                  Effect.flatMap((fiber) => restore(Fiber.join(fiber))),
+                );
+              }),
+            ),
         );
 
         const promptAdmissionIsCurrent = (
@@ -3051,6 +3056,7 @@ export function makeOpenCodeAdapterV2(
                 Effect.orElseSucceed(() => []),
               )).find((entry) => entry.name === match[1])
             : undefined;
+          if (turn.finalized) yield* Deferred.await(turn.finalizationSettled);
           if (turn.finalized || state.activeTurn !== turn) {
             return yield* protocolError(`OpenCode turn ${turn.providerTurnId} is not active`);
           }
@@ -3426,6 +3432,11 @@ export function makeOpenCodeAdapterV2(
               const sessionId = nativeThreadId(steerInput.providerThread);
               const state = threads.get(sessionId);
               const turn = state?.activeTurn;
+              // Let terminal events precede rejection so durable steering can
+              // recover as a follow-up without exhausting its retry budget.
+              if (turn?.providerTurnId === steerInput.providerTurnId && turn.finalized) {
+                yield* Deferred.await(turn.finalizationSettled);
+              }
               if (
                 state === undefined ||
                 turn === undefined ||
