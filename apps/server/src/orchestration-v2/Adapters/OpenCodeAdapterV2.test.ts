@@ -245,6 +245,18 @@ describe("OpenCodeAdapterV2", () => {
         let promptId = "";
         const harness = yield* makeOpenCodeRuntimeHarness(`usage-${ending}`, "root", {
           event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+          provider: {
+            list: async () => ({
+              data: {
+                all: [
+                  {
+                    id: "openrouter",
+                    models: { "z-ai/glm-5.3-flash": { limit: { context: 200, input: 150 } } },
+                  },
+                ],
+              },
+            }),
+          },
           session: {
             create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
             promptAsync: async (input: { messageID: string }) => {
@@ -296,12 +308,56 @@ describe("OpenCodeAdapterV2", () => {
                   role: "assistant",
                   time: { created: 1 },
                   parentID: promptId,
+                  providerID: "openrouter",
+                  modelID: "z-ai/glm-5.3-flash",
+                  tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 3, write: 4 } },
                 },
               },
             }),
           );
           yield* Effect.promise(() => nativeEvents.push(step("one")));
           yield* Effect.promise(() => nativeEvents.push(step("two")));
+          for (const tokens of [
+            { input: 1, output: 4, reasoning: 2, cache: { read: 2, write: 3 } },
+            { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            { input: Number.NaN, output: 4, reasoning: 2, cache: { read: 2, write: 3 } },
+            { input: 1, output: 4, reasoning: 2, cache: { read: 2, write: 3 } },
+          ]) {
+            yield* Effect.promise(() =>
+              nativeEvents.push({
+                type: "message.updated",
+                properties: {
+                  sessionID: "root",
+                  info: {
+                    id: "assistant-next",
+                    role: "assistant",
+                    time: { created: 2 },
+                    parentID: promptId,
+                    providerID: "openrouter",
+                    modelID: "z-ai/glm-5.3-flash",
+                    tokens,
+                  },
+                },
+              }),
+            );
+          }
+          yield* Effect.promise(() =>
+            nativeEvents.push({
+              type: "message.updated",
+              properties: {
+                sessionID: "root",
+                info: {
+                  id: "assistant",
+                  role: "assistant",
+                  time: { created: 1 },
+                  parentID: promptId,
+                  providerID: "openrouter",
+                  modelID: "z-ai/glm-5.3-flash",
+                  tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 3, write: 4 } },
+                },
+              },
+            }),
+          );
           yield* Effect.promise(() =>
             nativeEvents.push({
               type: "message.part.removed",
@@ -318,6 +374,9 @@ describe("OpenCodeAdapterV2", () => {
                   role: "assistant",
                   time: { created: 1 },
                   parentID: "old-prompt",
+                  providerID: "openrouter",
+                  modelID: "z-ai/glm-5.3-flash",
+                  tokens: { input: 999, output: 5, reasoning: 2, cache: { read: 3, write: 4 } },
                 },
               },
             }),
@@ -360,6 +419,29 @@ describe("OpenCodeAdapterV2", () => {
         }
         const events = yield* Fiber.join(received);
         const completed = events.findLast((event) => event.type === "provider_turn.updated");
+        if (ending === "unavailable") {
+          assert.isUndefined(completed?.providerTurn.tokenUsage);
+        } else {
+          assert.deepEqual(
+            events.flatMap((event) =>
+              event.type === "provider_turn.updated" &&
+              event.providerTurn.status === "running" &&
+              event.providerTurn.tokenUsage !== undefined
+                ? [event.providerTurn.tokenUsage.usedTokens]
+                : [],
+            ),
+            [22, 10],
+          );
+          assert.deepEqual(completed?.providerTurn.tokenUsage, {
+            usedTokens: 10,
+            maxTokens: 150,
+            inputTokens: 6,
+            cachedInputTokens: 2,
+            outputTokens: 4,
+            reasoningOutputTokens: 2,
+            updatedAt: completed!.providerTurn.tokenUsage!.updatedAt,
+          });
+        }
         assert.deepEqual(
           completed?.providerTurn.turnTokenUsage,
           ending === "unavailable"
@@ -376,6 +458,110 @@ describe("OpenCodeAdapterV2", () => {
               },
         );
       }).pipe(Effect.provide(IdAllocator.layer), Effect.scoped),
+  );
+
+  it.effect.each([
+    { name: "context fallback", limit: { context: 200 }, maxTokens: 200 },
+    { name: "zero input", limit: { input: 0, context: 200 }, maxTokens: 200 },
+    { name: "fractional input", limit: { input: 150.5, context: 200 }, maxTokens: 200 },
+    { name: "infinite input", limit: { input: Infinity, context: 200 }, maxTokens: 200 },
+    { name: "invalid context", limit: { context: -1 }, maxTokens: null },
+    { name: "missing limit", limit: {}, maxTokens: null },
+    { name: "unavailable catalog", limit: { context: 200 }, maxTokens: null },
+    { name: "interrupted", limit: { context: 200 }, maxTokens: 200 },
+    { name: "native total", limit: { context: 200 }, maxTokens: 200 },
+  ])("reports context usage with $name", ({ name, limit, maxTokens }) =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      let promptId = "";
+      const harness = yield* makeOpenCodeRuntimeHarness(
+        `context-${name.replaceAll(" ", "-")}`,
+        "root",
+        {
+          event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+          provider: {
+            list: async () => {
+              if (name === "unavailable catalog") throw new Error("catalog unavailable");
+              return {
+                data: {
+                  all: [
+                    {
+                      id: "openrouter",
+                      models: {
+                        "poolside/laguna-s-2.1:free": { limit },
+                      },
+                    },
+                  ],
+                },
+              };
+            },
+          },
+          session: {
+            create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+            promptAsync: async (input: { messageID: string }) => {
+              promptId = input.messageID;
+              return { data: true };
+            },
+            abort: async () => ({ data: true }),
+            children: async () => ({ data: [] }),
+            get: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+            messages: async () => ({ data: [] }),
+          },
+        },
+      );
+      yield* harness.startTurn();
+      const received = yield* harness.runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "root",
+            info: {
+              id: "assistant",
+              sessionID: "root",
+              role: "assistant",
+              parentID: promptId,
+              time: { created: 1, completed: 2 },
+              providerID: "openrouter",
+              modelID: "poolside/laguna-s-2.1:free",
+              tokens: {
+                input: 10,
+                output: 5,
+                reasoning: 2,
+                cache: { read: 3, write: 4 },
+                ...(name === "native total" ? { total: 73 } : {}),
+              },
+            },
+          },
+        }),
+      );
+      if (name === "interrupted") {
+        const snapshot = yield* harness.runtime.readThreadSnapshot({
+          providerThread: harness.providerThread,
+        });
+        yield* harness.runtime.interruptTurn({
+          providerThread: harness.providerThread,
+          providerTurnId: snapshot.providerTurns.at(-1)!.id,
+        });
+      }
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "session.status",
+          properties: { sessionID: "root", status: { type: "idle" } },
+        }),
+      );
+      const events = yield* Fiber.join(received);
+      const completed = events.findLast((event) => event.type === "provider_turn.updated");
+      assert.strictEqual(
+        completed?.providerTurn.tokenUsage?.usedTokens,
+        name === "native total" ? 73 : 22,
+      );
+      assert.strictEqual(completed?.providerTurn.tokenUsage?.maxTokens, maxTokens);
+    }).pipe(Effect.provide(IdAllocator.layer), Effect.scoped),
   );
 
   it.effect.each(["permission", "question"] as const)(

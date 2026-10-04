@@ -230,6 +230,7 @@ interface OpenCodeTurnTokenUsageAccumulator {
   readonly assistantOwnershipByMessageId: Map<string, "owned" | "other" | "unknown">;
   // Native removal does not undo usage. Keep unresolved counts until this turn settles.
   readonly unresolvedStepsByMessageId: Map<string, Map<string, OpenCodeStepUsage>>;
+  contextMessage: Extract<OpenCodeMessage, { role: "assistant" }> | null;
   inputTokens: number;
   cachedInputTokens: number;
   cacheCreationTokens: number;
@@ -245,6 +246,7 @@ function makeOpenCodeTurnTokenUsageAccumulator(): OpenCodeTurnTokenUsageAccumula
     promptMessageIds: new Set(),
     assistantOwnershipByMessageId: new Map(),
     unresolvedStepsByMessageId: new Map(),
+    contextMessage: null,
     inputTokens: 0,
     cachedInputTokens: 0,
     cacheCreationTokens: 0,
@@ -266,6 +268,41 @@ function accumulateOpenCodeStepUsage(
   accumulator.cacheCreationTokens += part.tokens.cache.write;
   accumulator.outputTokens += part.tokens.output + part.tokens.reasoning;
   accumulator.reasoningTokens += part.tokens.reasoning;
+}
+
+function openCodeContextUsage(
+  message: Extract<OpenCodeMessage, { role: "assistant" }>,
+  maxTokens: number | undefined,
+  updatedAt: DateTime.Utc,
+): OrchestrationV2ProviderTurn["tokenUsage"] {
+  const tokens = message.tokens;
+  if (tokens === undefined || tokens.cache === undefined) return;
+  const inputTokens = tokens.input + tokens.cache.read + tokens.cache.write;
+  // Match OpenCode's overflow count, not the sum of billed steps in this turn.
+  const usedTokens = tokens.total || inputTokens + tokens.output;
+  if (
+    ![
+      tokens.input,
+      tokens.output,
+      tokens.reasoning,
+      tokens.cache.read,
+      tokens.cache.write,
+      tokens.total ?? 0,
+      inputTokens,
+      usedTokens,
+    ].every((value) => Number.isSafeInteger(value) && value >= 0) ||
+    usedTokens === 0
+  )
+    return;
+  return {
+    usedTokens,
+    maxTokens: maxTokens ?? null,
+    inputTokens,
+    cachedInputTokens: tokens.cache.read,
+    outputTokens: tokens.output,
+    reasoningOutputTokens: tokens.reasoning,
+    updatedAt: DateTime.formatIso(updatedAt),
+  };
 }
 
 interface ActiveOpenCodeTurn {
@@ -1061,6 +1098,39 @@ export function makeOpenCodeAdapterV2(
               }),
             ),
           );
+
+        const contextWindows = new Map<string, number>();
+        let readingContextWindows = false;
+        const readContextWindows = () =>
+          Effect.suspend(() => {
+            if (readingContextWindows) return Effect.void;
+            readingContextWindows = true;
+            return OpenCodeRuntime.runOpenCodeSdk("provider.list", (signal) =>
+              client.provider.list(undefined, { signal }),
+            ).pipe(
+              Effect.timeout("2 seconds"),
+              Effect.tap((response) =>
+                Effect.sync(() => {
+                  for (const provider of response.data?.all ?? []) {
+                    for (const [modelId, model] of Object.entries(provider.models)) {
+                      const limit = [model.limit?.input, model.limit?.context].find(
+                        (value) => value !== undefined && Number.isSafeInteger(value) && value > 0,
+                      );
+                      if (limit !== undefined)
+                        contextWindows.set(`${provider.id}/${modelId}`, limit);
+                    }
+                  }
+                }),
+              ),
+              Effect.ignore,
+              Effect.ensuring(
+                Effect.sync(() => {
+                  readingContextWindows = false;
+                }),
+              ),
+            );
+          });
+        yield* readContextWindows();
 
         const abortDescendants = (rootId: string) =>
           Effect.gen(function* () {
@@ -2035,6 +2105,15 @@ export function makeOpenCodeAdapterV2(
             }
           }
           yield* emitProviderTurn(state, turn, status, completedAt);
+          const contextMessage = turn.usage.contextMessage;
+          if (
+            contextMessage !== null &&
+            !contextWindows.has(`${contextMessage.providerID}/${contextMessage.modelID}`)
+          ) {
+            // A fresh server may list models lazily. Retry for the next turn
+            // without delaying this turn's terminal event or the SSE pump.
+            yield* Effect.forkIn(readContextWindows(), scope);
+          }
           const threadDisposition = terminal?.threadDisposition ?? "reusable";
           yield* updateProviderThread(state, {
             status: turn.isRoot ? "active" : threadDisposition === "broken" ? "error" : "idle",
@@ -2375,8 +2454,9 @@ export function makeOpenCodeAdapterV2(
           const message = event.properties.info;
           state.messageRoles.set(message.id, message.role);
           if (message.role === "assistant") {
-            const usage = state.activeTurn?.usage;
-            if (usage === undefined) return;
+            const turn = state.activeTurn;
+            if (turn === null || turn.finalized) return;
+            const usage = turn.usage;
             const prior = usage.assistantOwnershipByMessageId.get(message.id);
             const ownership =
               prior !== undefined && prior !== "unknown"
@@ -2395,6 +2475,36 @@ export function makeOpenCodeAdapterV2(
                 }
               }
               usage.unresolvedStepsByMessageId.delete(message.id);
+            }
+            if (ownership === "owned") {
+              const previous = usage.contextMessage;
+              if (
+                previous !== null &&
+                (message.time.created < previous.time.created ||
+                  (message.time.created === previous.time.created && message.id < previous.id))
+              )
+                return;
+              const tokenUsage = openCodeContextUsage(
+                message,
+                contextWindows.get(`${message.providerID}/${message.modelID}`),
+                yield* DateTime.now,
+              );
+              if (tokenUsage === undefined) return;
+              const previousUsage = turn.providerTurn.tokenUsage;
+              if (
+                previous?.id === message.id &&
+                previousUsage !== undefined &&
+                previousUsage.usedTokens === tokenUsage.usedTokens &&
+                previousUsage.maxTokens === tokenUsage.maxTokens &&
+                previousUsage.inputTokens === tokenUsage.inputTokens &&
+                previousUsage.cachedInputTokens === tokenUsage.cachedInputTokens &&
+                previousUsage.outputTokens === tokenUsage.outputTokens &&
+                previousUsage.reasoningOutputTokens === tokenUsage.reasoningOutputTokens
+              )
+                return;
+              usage.contextMessage = message;
+              Object.assign(turn.providerTurn, { tokenUsage });
+              yield* emitProviderTurn(state, turn, "running", null);
             }
             return;
           }
