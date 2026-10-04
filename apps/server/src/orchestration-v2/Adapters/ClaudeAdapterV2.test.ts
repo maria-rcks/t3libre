@@ -6128,6 +6128,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           );
           assert.isNull(running.completedAt);
           assert.isNull(running.result);
+          assert.equal(running.prompt, "");
           const clearedResult = Option.getOrThrow(
             yield* Stream.fromQueue(harness.messageReceipts).pipe(
               Stream.filter(
@@ -6149,6 +6150,26 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             originalResult?.type === "message.updated" && originalResult.message.id,
             clearedResult.id,
           );
+          const promptMessages = harness.events.flatMap((event) =>
+            event.type === "message.updated" &&
+            event.message.threadId === member?.childThreadId &&
+            event.message.role === "user"
+              ? [event.message]
+              : [],
+          );
+          assert.equal(promptMessages[0]?.text, "Review the code");
+          assert.equal(promptMessages.at(-1)?.id, promptMessages[0]?.id);
+          assert.equal(promptMessages.at(-1)?.text, "");
+          const promptItems = harness.events.flatMap((event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.type === "user_message" &&
+            event.turnItem.messageId === promptMessages[0]?.id
+              ? [event.turnItem]
+              : [],
+          );
+          assert.equal(promptItems[0]?.text, "Review the code");
+          assert.equal(promptItems.at(-1)?.id, promptItems[0]?.id);
+          assert.equal(promptItems.at(-1)?.text, "");
           yield* harness.offerAndWait(
             claudeSdkFrame({
               type: "system",
@@ -6164,6 +6185,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   state: "done",
                   attempt: 3,
                   durationMs: 900,
+                  promptPreview: " Review attempt three\n",
                   ...(outcome === "completed" ? {} : { resultPreview: "Final review" }),
                 },
                 { type: "workflow_agent", index: 2, label: "Late worker", state: "start" },
@@ -6232,6 +6254,25 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               finalMember.startedAt ?? null,
             );
             if (finalMember.index === 0) {
+              const finalPrompt = harness.events.findLast(
+                (event) =>
+                  event.type === "message.updated" && event.message.id === promptMessages[0]?.id,
+              );
+              assert.equal(
+                finalPrompt?.type === "message.updated" && finalPrompt.message.text,
+                " Review attempt three\n",
+              );
+              const finalPromptItem = harness.events.findLast(
+                (event) =>
+                  event.type === "turn_item.updated" && event.turnItem.id === promptItems[0]?.id,
+              );
+              assert.equal(
+                finalPromptItem?.type === "turn_item.updated" &&
+                  finalPromptItem.turnItem.type === "user_message" &&
+                  finalPromptItem.turnItem.text,
+                " Review attempt three\n",
+              );
+              assert.equal(task?.prompt, " Review attempt three\n");
               const expectedResult = outcome === "completed" ? "" : "Final review";
               const finalResult = harness.events.findLast(
                 (event) =>

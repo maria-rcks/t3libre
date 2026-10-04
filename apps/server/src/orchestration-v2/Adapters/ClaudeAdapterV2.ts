@@ -4153,8 +4153,12 @@ export function makeClaudeAdapterV2(
               subagent: task,
             });
             for (const [role, value, ordinal] of [
-              ["user", prompt.length === 0 || previous?.prompt === prompt ? null : prompt, 100],
-              // Empty updates clear the previous attempt's excerpt at the same artifact ids.
+              // Empty updates clear the previous attempt's excerpts at the same artifact ids.
+              [
+                "user",
+                previous?.prompt === prompt || (prompt.length === 0 && !restarted) ? null : prompt,
+                100,
+              ],
               [
                 "assistant",
                 previous?.result === result ? null : (result ?? (restarted ? "" : null)),
