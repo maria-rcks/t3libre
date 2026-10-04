@@ -733,11 +733,10 @@ const make = Effect.gen(function* () {
         Effect.andThen(orchestrator.getMessageCount(threadId)),
       ),
     getTurnItem: (input) =>
-      orchestrator
-        .getTurnItem(input)
-        .pipe(
-          Effect.map((item) => ({ item: item === null ? null : projectTurnItemForDetail(item) })),
-        ),
+      ensureProjectionTranscript(input.threadId).pipe(
+        Effect.andThen(orchestrator.getTurnItem(input)),
+        Effect.map((item) => ({ item: item === null ? null : projectTurnItemForDetail(item) })),
+      ),
     getThreadRecords: (threadId, fields, filter) =>
       ensureProjectionTranscript(threadId).pipe(
         Effect.andThen(orchestrator.getThreadRecords(threadId, fields, filter)),
