@@ -63,6 +63,7 @@ import {
 } from "./thread-feed-live-follow";
 import {
   resolveWorkEntryToolPresentation,
+  toolGroupAction,
   type ToolGroupSummaryKind,
   workEntryViewedImagePath,
 } from "@t3tools/client-runtime/work-log/presentation";
@@ -870,16 +871,18 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
   const canExpand = row.canExpand && notifiedSubagentThreadId === undefined;
   const reasoning = row.projectedItem.item.type === "reasoning" ? row.projectedItem.item : null;
   const fetchedItem = fetchedDetail.data?.item ?? null;
+  // Reads keep their path list; the fetched file contents show as output.
+  const isRead = toolGroupAction(row.workEntry) === "read";
   const fullDetail =
     expanded && !reasoning
-      ? fetchedItem
+      ? fetchedItem && !isRead
         ? formatItemFullDetail(row.projectedItem, fetchedItem)
         : row.getFullDetail()
       : null;
   const fetchedOutput = !expanded
     ? null
     : fetchedItem
-      ? turnItemOutputText(fetchedItem)
+      ? (turnItemOutputText(fetchedItem) ?? "No output.")
       : fetchedDetail.error
         ? `Couldn't load output: ${fetchedDetail.error}`
         : row.fetchesDetail

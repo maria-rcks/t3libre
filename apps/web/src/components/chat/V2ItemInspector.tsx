@@ -6,10 +6,10 @@ import type {
 } from "@t3tools/contracts";
 import {
   formatToolValue,
+  turnItemDetailRevision,
   turnItemNeedsDetailFetch,
   turnItemOutputText,
 } from "@t3tools/client-runtime/work-log/item-detail";
-import * as DateTime from "effect/DateTime";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
 import { memo, type ReactNode, Suspense, use, useMemo } from "react";
 
@@ -96,11 +96,50 @@ function SectionLabel({ children }: { readonly children: ReactNode }) {
   );
 }
 
+/**
+ * The item behind a projected row, with the output the timeline withheld
+ * fetched while the row is open.
+ */
+function useFetchedTurnItem(
+  projectedItem: OrchestrationV2ProjectedTurnItem,
+  environmentId: EnvironmentId,
+) {
+  const wireItem = projectedItem.item;
+  const fetches = turnItemNeedsDetailFetch(wireItem);
+  const detail = useTurnItemDetail(
+    fetches
+      ? {
+          environmentId,
+          threadId: projectedItem.sourceThreadId,
+          itemId: projectedItem.sourceItemId,
+          revision: turnItemDetailRevision(wireItem),
+        }
+      : null,
+  );
+  const fetchedItem = detail.data?.item;
+  const item = fetchedItem?.type === wireItem.type ? fetchedItem : wireItem;
+  return {
+    item,
+    output: {
+      text: turnItemOutputText(item),
+      pending: item === wireItem && detail.isPending,
+      error:
+        item !== wireItem
+          ? null
+          : detail.data?.item === null
+            ? "Output is no longer available."
+            : detail.error,
+      empty: fetches && item !== wireItem,
+    },
+  };
+}
+
 /** Output the timeline withheld, fetched while the row is open. */
 function ToolOutput(props: {
   readonly text: string | null;
   readonly pending: boolean;
   readonly error: string | null;
+  readonly empty: boolean;
 }) {
   const body = props.text ? (
     <StructuredValue value={props.text} />
@@ -108,6 +147,8 @@ function ToolOutput(props: {
     <p className="text-muted-foreground">Loading output…</p>
   ) : props.error ? (
     <p className="text-destructive">Couldn&apos;t load output: {props.error}</p>
+  ) : props.empty ? (
+    <p className="text-muted-foreground">No output.</p>
   ) : null;
   if (body === null) return null;
   return (
@@ -118,33 +159,23 @@ function ToolOutput(props: {
   );
 }
 
+/** Fetched output for rows that show their own plain text instead of the inspector. */
+export function FetchedToolOutput(props: {
+  readonly projectedItem: OrchestrationV2ProjectedTurnItem;
+  readonly environmentId: EnvironmentId;
+}) {
+  const { output } = useFetchedTurnItem(props.projectedItem, props.environmentId);
+  return (
+    <div className="mt-2 text-xs">
+      <ToolOutput {...output} />
+    </div>
+  );
+}
+
 export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspectorProps) {
-  const wireItem = props.projectedItem.item;
-  const detail = useTurnItemDetail(
-    turnItemNeedsDetailFetch(wireItem)
-      ? {
-          environmentId: props.environmentId,
-          threadId: props.projectedItem.sourceThreadId,
-          itemId: props.projectedItem.sourceItemId,
-          revision: DateTime.formatIso(wireItem.updatedAt),
-        }
-      : null,
-  );
-  const fetchedItem = detail.data?.item;
-  const item = fetchedItem?.type === wireItem.type ? fetchedItem : wireItem;
-  const output = (
-    <ToolOutput
-      text={turnItemOutputText(item)}
-      pending={item === wireItem && detail.isPending}
-      error={
-        item !== wireItem
-          ? null
-          : detail.data?.item === null
-            ? "Output is no longer available."
-            : detail.error
-      }
-    />
-  );
+  const fetched = useFetchedTurnItem(props.projectedItem, props.environmentId);
+  const item = fetched.item;
+  const output = <ToolOutput {...fetched.output} />;
   const support = useV2ItemSupport({
     environmentId: props.environmentId,
     sourceThreadId: props.projectedItem.sourceThreadId,

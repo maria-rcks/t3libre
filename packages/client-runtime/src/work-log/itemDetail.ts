@@ -1,4 +1,5 @@
 import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 
 const MAX_TEXT_BLOCK_DEPTH = 4;
 
@@ -27,12 +28,15 @@ function textFromBlocks(value: unknown, depth: number): string | null {
     if (typeof resource.text === "string") return resource.text;
     if (typeof resource.uri === "string") return resource.uri;
   }
-  const keys = Object.keys(value).filter(
-    (key) => key !== "isError" && key !== "is_error" && key !== "structuredContent",
-  );
-  // MCP results and provider tool results wrap their text in `content`;
-  // `structuredContent` repeats it as data.
+  const keys = Object.keys(value).filter((key) => key !== "isError" && key !== "is_error");
+  // MCP results and provider tool results wrap their text in `content`.
+  // `structuredContent` usually repeats it as data, so it only shows when the
+  // text is empty.
   if (keys.length === 1 && keys[0] === "content") return textFromBlocks(value.content, depth + 1);
+  if (keys.length === 2 && keys.includes("content") && keys.includes("structuredContent")) {
+    const text = textFromBlocks(value.content, depth + 1);
+    return text?.trim() ? text : null;
+  }
   return null;
 }
 
@@ -71,6 +75,21 @@ export function formatToolValue(value: unknown): string | null {
   return json;
 }
 
+const LIVE_TURN_ITEM_STATUSES: ReadonlySet<OrchestrationV2TurnItem["status"]> = new Set([
+  "idle",
+  "pending",
+  "running",
+  "waiting",
+]);
+
+/**
+ * Cache key for a fetched item. A running item keeps one key, so an open row
+ * fetches once while it streams and again when it finishes, not on every update.
+ */
+export function turnItemDetailRevision(item: OrchestrationV2TurnItem): string {
+  return LIVE_TURN_ITEM_STATUSES.has(item.status) ? "live" : DateTime.formatIso(item.updatedAt);
+}
+
 /** True when the timeline item withholds content that `getTurnItem` returns. */
 export function turnItemNeedsDetailFetch(item: OrchestrationV2TurnItem): boolean {
   switch (item.type) {
@@ -83,11 +102,18 @@ export function turnItemNeedsDetailFetch(item: OrchestrationV2TurnItem): boolean
   }
 }
 
-/** Older Claude bash rows stored the raw `{ stdout, stderr, ... }` result. */
+/** Older Claude bash rows stored the raw `{ stdout, stderr, interrupted, ... }` result. */
 function commandOutputText(output: string): string {
   if (!output.trimStart().startsWith('{"stdout"')) return output;
   const parsed = parseJson(output.trim());
-  if (!isRecord(parsed)) return output;
+  if (
+    !isRecord(parsed) ||
+    typeof parsed.stdout !== "string" ||
+    typeof parsed.stderr !== "string" ||
+    typeof parsed.interrupted !== "boolean"
+  ) {
+    return output;
+  }
   return [parsed.stdout, parsed.stderr]
     .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
     .join("\n");

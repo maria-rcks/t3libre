@@ -296,7 +296,7 @@ describe("buildThreadFeed", () => {
     ).toEqual([
       { canExpand: true, fetchesDetail: true },
       { canExpand: false, fetchesDetail: false },
-      { canExpand: true, fetchesDetail: false },
+      { canExpand: true, fetchesDetail: true },
     ]);
   });
 
