@@ -139,8 +139,18 @@ describe("t3 server command safety", () => {
     withTempDirectory("t3-cli-unknown-", (root) =>
       Effect.gen(function* () {
         const baseDir = NodePath.join(root, "home");
-        for (const word of ["account", "login", "clients", "conenct", "package.json"]) {
-          const error = yield* runCli([word, "--base-dir", baseDir]).pipe(Effect.flip);
+        for (const word of [
+          "account",
+          "login",
+          "clients",
+          "conenct",
+          "package.json",
+          "C:new-project",
+        ]) {
+          const error = yield* runCli([word, "--base-dir", baseDir]).pipe(
+            Effect.provideService(HostProcessPlatform, "linux"),
+            Effect.flip,
+          );
           expect(String(error)).toContain(`Unknown command "${word}"`);
           expect(yield* pathExists(word)).toBe(word === "package.json");
           expect(yield* pathExists(baseDir)).toBe(false);
@@ -177,6 +187,7 @@ describe("t3 server command safety", () => {
         yield* Effect.promise(() => NodeFSP.mkdir(stateDir, { recursive: true }));
         yield* Effect.promise(() => NodeFSP.writeFile(statePath, record));
         const newDirectory = NodePath.join(root, "new-project");
+        const platform = yield* HostProcessPlatform;
         for (const args of [
           [],
           ["start"],
@@ -186,7 +197,13 @@ describe("t3 server command safety", () => {
           [newDirectory],
           ["start", newDirectory],
         ]) {
-          const error = yield* runCli(args, { T3CODE_HOME: baseDir }).pipe(Effect.flip);
+          const error = yield* runCli(args, { T3CODE_HOME: baseDir }).pipe(
+            Effect.provideService(
+              HostProcessPlatform,
+              args[0] === "C:new-project" ? "win32" : platform,
+            ),
+            Effect.flip,
+          );
           expect(String(error)).toContain("A T3 Code server is already running");
           expect(yield* Effect.promise(() => NodeFSP.readFile(statePath, "utf8"))).toBe(record);
           expect(yield* pathExists(newDirectory)).toBe(false);
