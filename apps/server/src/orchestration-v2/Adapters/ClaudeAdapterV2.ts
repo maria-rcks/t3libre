@@ -1864,16 +1864,23 @@ function claudeNativeToolOutputText(output: ClaudeNativeToolOutput): string {
   return typeof value === "string" ? value : value === undefined ? "" : jsonStringifyForTool(value);
 }
 
-/** Bash results arrive as `{ stdout, stderr, interrupted, ... }`; keep only the text. */
+/**
+ * Bash results arrive as `{ stdout, stderr, interrupted, ... }`; keep only the
+ * text. A background run has empty streams, so keep its acknowledgement instead.
+ */
 function claudeCommandOutputText(output: ClaudeNativeToolOutput): string {
   const value = claudeNativeToolOutputValue(output);
   if (typeof value === "object" && value !== null) {
     const stdout = Reflect.get(value, "stdout");
     const stderr = Reflect.get(value, "stderr");
     if (typeof stdout === "string" || typeof stderr === "string") {
-      return [stdout, stderr]
+      const text = [stdout, stderr]
         .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
         .join("\n");
+      if (text.length > 0) return text;
+      return output.type === "structured_tool_use_result" && output.fallbackValue !== undefined
+        ? claudeSubagentResultText({ type: "content_block", value: output.fallbackValue })
+        : "";
     }
   }
   return claudeNativeToolOutputText(output);
