@@ -66,6 +66,7 @@ describe("sshEnvironment", () => {
           "Host staging",
           "  HostName staging.example.com",
           "Host *",
+          "  Port 22",
           "  ServerAliveInterval 30",
           "",
         ].join("\n"),

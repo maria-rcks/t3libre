@@ -160,6 +160,18 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
           directory,
           homeDir,
         );
+        if (/["'[\]]/u.test(includePattern) || /[*?]/u.test(path.dirname(resolvedPattern))) {
+          // Unexpanded includes may establish either value before later rules.
+          for (const directive of ["hostname", "port"] as const) {
+            targetRules.push({
+              guards: [...context.guards, context.patterns],
+              patterns: { values: null, caseInsensitive: false },
+              directive,
+              value: "",
+            });
+          }
+          continue;
+        }
         const includedPaths = yield* expandGlob(resolvedPattern);
         for (const includedPath of includedPaths) {
           const includedAliases = yield* collectSshConfigAliasesFromFile(
@@ -334,12 +346,13 @@ export const discoverSshHosts = Effect.fnUntraced(
           rule.guards.every((guard) => matchesHostPatterns(alias, guard)) &&
           matchesHostPatterns(alias, rule.patterns),
       );
+      // System config can set a port when the user config leaves it unset.
       const port = portRule
         ? portRule.patterns.values !== null &&
           !portRule.guards.some((guard) => guard.values === null)
           ? Number(portRule.value)
           : Number.NaN
-        : 22;
+        : Number.NaN;
       if (configuredHostname && Number.isInteger(port) && port > 0 && port <= 65_535) {
         configuredTargets.add(`${hostname.toLowerCase()}\u0000${port}`);
       }

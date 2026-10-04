@@ -115,6 +115,7 @@ describe("ssh config", () => {
           "Host work-box",
           '  HostName "work.example.com"',
           "Host *",
+          "  Port 22",
           "  HostName fallback.example.com",
           "",
         ].join("\n"),
@@ -144,6 +145,7 @@ describe("ssh config", () => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       for (const [configuredPort, knownTarget, suppressed] of [
+        [null, "work.example.com", false],
         [22, "work.example.com", true],
         [22, "[work.example.com]:2222", false],
         [2222, "[work.example.com]:2222", true],
@@ -155,7 +157,7 @@ describe("ssh config", () => {
         yield* fs.makeDirectory(sshDir);
         yield* fs.writeFileString(
           path.join(sshDir, "config"),
-          `Host work\n  HostName work.example.com\nHost *\n  Port ${configuredPort}\n`,
+          `Host work\n  HostName work.example.com\n${configuredPort === null ? "" : `Host *\n  Port ${configuredPort}\n`}`,
         );
         yield* fs.writeFileString(
           path.join(sshDir, "known_hosts"),
@@ -238,26 +240,66 @@ describe("ssh config", () => {
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
-  it.effect("keeps known targets when an earlier Match value cannot be resolved", () =>
+  it.effect("keeps known targets when earlier Match or Include values cannot be resolved", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      for (const uncertainDirective of [
-        "HostName dynamic.example.com",
-        "Port 2222",
-        "Include target.conf",
-      ]) {
+      for (const [config, hostname, keepKnownTarget] of [
+        [
+          "Match exec true\n  HostName dynamic.example.com\nHost work\n  HostName work.example.com\n  Port 22\n",
+          "work",
+          true,
+        ],
+        [
+          "Match exec true\n  Port 2222\nHost work\n  HostName work.example.com\n  Port 22\n",
+          "work.example.com",
+          true,
+        ],
+        [
+          "Match exec true\n  Include target.conf\nHost work\n  HostName work.example.com\n  Port 22\n",
+          "work",
+          true,
+        ],
+        [
+          "Host work\n  Include config.d/*/target.conf\n  HostName work.example.com\n  Port 22\n",
+          "work",
+          true,
+        ],
+        [
+          'Host work\n  Include config.d/"team hosts.conf"\n  HostName work.example.com\n  Port 22\n',
+          "work",
+          true,
+        ],
+        [
+          "Host work\n  Include config.d/[pt]rod/target.conf\n  HostName work.example.com\n  Port 22\n",
+          "work",
+          true,
+        ],
+        [
+          "Host skip*\n  Include config.d/*/target.conf\nHost work\n  HostName work.example.com\n  Port 22\n",
+          "work.example.com",
+          false,
+        ],
+        [
+          "Host work\n  HostName work.example.com\n  Port 22\n  Include config.d/*/target.conf\n",
+          "work.example.com",
+          false,
+        ],
+      ] as const) {
         const homeDir = yield* makeTempHomeDir();
         const sshDir = path.join(homeDir, ".ssh");
-        yield* fs.makeDirectory(sshDir);
-        yield* fs.writeFileString(
-          path.join(sshDir, "config"),
-          `Match exec true\n  ${uncertainDirective}\nHost work\n  HostName work.example.com\n`,
-        );
-        yield* fs.writeFileString(
-          path.join(sshDir, "target.conf"),
-          "Host *\n  HostName dynamic.example.com\n",
-        );
+        yield* fs.makeDirectory(path.join(sshDir, "config.d", "prod"), { recursive: true });
+        yield* fs.writeFileString(path.join(sshDir, "config"), config);
+        for (const name of [
+          "target.conf",
+          "config.d/prod/target.conf",
+          "config.d/team hosts.conf",
+        ]) {
+          yield* fs.writeFileString(
+            path.join(sshDir, name),
+            "Host *\n  HostName dynamic.example.com\n  Port 2222\n",
+          );
+        }
         yield* fs.writeFileString(
           path.join(sshDir, "known_hosts"),
           "work.example.com ssh-ed25519 AAAA\ndynamic.example.com ssh-ed25519 BBBB\n",
@@ -265,12 +307,11 @@ describe("ssh config", () => {
         const hosts = yield* discoverSshHosts({ homeDir });
         assert.deepEqual(
           hosts.map(({ alias }) => alias),
-          ["dynamic.example.com", "work", "work.example.com"],
+          keepKnownTarget
+            ? ["dynamic.example.com", "work", "work.example.com"]
+            : ["dynamic.example.com", "work"],
         );
-        assert.equal(
-          hosts.find(({ alias }) => alias === "work")?.hostname,
-          uncertainDirective === "Port 2222" ? "work.example.com" : "work",
-        );
+        assert.equal(hosts.find(({ alias }) => alias === "work")?.hostname, hostname);
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
@@ -316,7 +357,10 @@ describe("ssh config", () => {
         const homeDir = yield* makeTempHomeDir();
         const sshDir = path.join(homeDir, ".ssh");
         yield* fs.makeDirectory(sshDir);
-        yield* fs.writeFileString(path.join(sshDir, "config"), fixture.config);
+        yield* fs.writeFileString(
+          path.join(sshDir, "config"),
+          `${fixture.config}Host *\n  Port 22\n`,
+        );
         yield* fs.writeFileString(path.join(sshDir, "target.conf"), fixture.included);
         yield* fs.writeFileString(
           path.join(sshDir, "known_hosts"),
@@ -356,6 +400,8 @@ describe("ssh config", () => {
             "  HostName %h.internal",
             "Host tokenized",
             "  HostName wrong.example.com",
+            "Host *",
+            "  Port 22",
             "",
           ].join("\n"),
         );
@@ -389,7 +435,7 @@ describe("ssh config", () => {
       yield* fs.makeDirectory(sshDir);
       yield* fs.writeFileString(
         path.join(sshDir, "config"),
-        "Host Mixed\n  HostName %h.internal\nHost escaped\n  HostName zone%%en0\nHost unsupported\n  HostName %p.internal\n",
+        "Host Mixed\n  HostName %h.internal\nHost escaped\n  HostName zone%%en0\nHost unsupported\n  HostName %p.internal\nHost *\n  Port 22\n",
       );
       yield* fs.writeFileString(
         path.join(sshDir, "known_hosts"),
