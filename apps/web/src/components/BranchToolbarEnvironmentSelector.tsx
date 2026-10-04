@@ -147,7 +147,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             <SelectItem
               value="auto"
               onClick={() => {
-                if (autoEnvironmentLabel) onAutoEnvironment?.();
+                onAutoEnvironment?.();
               }}
             >
               <span className="inline-flex items-center gap-1.5">
