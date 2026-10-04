@@ -329,6 +329,76 @@ it.effect("memory recovery selection includes unfinished items from missing runs
 );
 
 it.layer(TestLayer)("ProjectionStoreV2", (it) => {
+  it.effect("recovers runless native workflow members without a subagent turn item", () =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = yield* addRolledBackRecoveryCandidate("runless-workflow-member");
+      const now = yield* DateTime.now;
+      const nodeId = NodeId.make("node:runless-workflow-member");
+      const rootNodeId = NodeId.make("node:runless-workflow-coordinator");
+      assert.notInclude(yield* store.getRecoveryThreadIds("runtime"), threadId);
+      yield* store.apply({
+        id: EventId.make("event:runless-workflow-member:node"),
+        type: "node.updated",
+        threadId,
+        occurredAt: now,
+        payload: {
+          id: nodeId,
+          threadId,
+          runId: null,
+          parentNodeId: rootNodeId,
+          rootNodeId,
+          kind: "subagent",
+          status: "running",
+          countsForRun: false,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          runtimeRequestId: null,
+          checkpointScopeId: null,
+          startedAt: now,
+          completedAt: null,
+        },
+      });
+      yield* store.apply({
+        id: EventId.make("event:runless-workflow-member:task"),
+        type: "subagent.updated",
+        threadId,
+        occurredAt: now,
+        payload: {
+          id: nodeId,
+          threadId,
+          runId: null,
+          parentNodeId: rootNodeId,
+          origin: "provider_native",
+          createdBy: "agent",
+          driver,
+          providerInstanceId,
+          providerThreadId: null,
+          childThreadId: null,
+          nativeTaskRef: null,
+          prompt: "Review",
+          title: "Reviewer",
+          model: null,
+          status: "running",
+          result: null,
+          startedAt: now,
+          completedAt: null,
+          updatedAt: now,
+        },
+      });
+      assert.include(yield* store.getRecoveryThreadIds("runtime"), threadId);
+      const projection = yield* store.getRuntimeRecoveryProjection(threadId);
+      assert.deepEqual(
+        projection.subagents.map((subagent) => subagent.id),
+        [nodeId],
+      );
+      assert.include(
+        projection.nodes.map((node) => node.id),
+        nodeId,
+      );
+    }),
+  );
   it.effect(
     "keeps restart-cancelled work through a stale run.updated",
     () => restartCancelledWorkSurvivesStaleRunUpdate,
