@@ -3815,29 +3815,42 @@ it.effect("probes macOS modifier pairs with the flags poller", () => {
   ).pipe(Effect.provide(testLayer("darwin")));
 });
 
-it.effect("registers macOS modifier pairs through the flags poller", () => {
-  spawnedPollers.length = 0;
-  shortcutProcesses.length = 0;
-  accessibilityTrustedMock.mockReturnValue(true);
-  mediaAccessStatusMock.mockReturnValue("granted");
-  const settings = {
-    ...DEFAULT_CLIENT_SETTINGS,
-    snapShotShortcut: { kind: "modifier-pair", modifier: "meta" },
-  } satisfies ClientSettings;
+it.effect.each([
+  { shortcut: { kind: "modifier-pair", modifier: "meta" }, flags: ["8", "16"] },
+  { shortcut: { kind: "both-shift-keys" }, flags: ["2", "4"] },
+] as const)(
+  "registers macOS $shortcut and releases the flags poller when disabled",
+  ({ shortcut, flags }) => {
+    spawnedPollers.length = 0;
+    shortcutProcesses.length = 0;
+    accessibilityTrustedMock.mockReturnValue(true);
+    mediaAccessStatusMock.mockReturnValue("granted");
+    const settings = {
+      ...DEFAULT_CLIENT_SETTINGS,
+      snapShotShortcut: shortcut,
+    } satisfies ClientSettings;
 
-  return Effect.scoped(
-    Effect.gen(function* () {
-      const service = yield* DesktopSnapShot.make;
-      yield* service.configure({ ...settings, snapShotEnabled: true });
-      const state = yield* service.state;
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* DesktopSnapShot.make;
+        yield* service.configure({ ...settings, snapShotEnabled: true });
+        const state = yield* service.state;
 
-      assert.lengthOf(shortcutProcesses, 0);
-      assert.lengthOf(spawnedPollers, 1);
-      assert.deepEqual(spawnedPollers[0]?.args.slice(-2), ["8", "16"]);
-      assert.isTrue(state.shortcutRegistered);
-    }),
-  ).pipe(Effect.provide(testLayer("darwin")));
-});
+        assert.lengthOf(shortcutProcesses, 0);
+        assert.lengthOf(spawnedPollers, 1);
+        assert.deepEqual(spawnedPollers[0]?.args.slice(-2), [...flags]);
+        assert.isTrue(state.shortcutRegistered);
+        const poller = spawnedPollers[0]!;
+        assert.lengthOf(poller.kill.mock.calls, 0);
+        yield* service.configure({ ...settings, snapShotEnabled: false });
+        assert.lengthOf(poller.kill.mock.calls, 1);
+        assert.isFalse((yield* service.state).shortcutRegistered);
+        const failure = yield* Effect.flip(service.capture);
+        assert.equal(failure.operation, "disabled");
+      }),
+    ).pipe(Effect.provide(testLayer("darwin")));
+  },
+);
 
 it.effect("waits to apply settings while permissions are pending", () => {
   accessibilityTrustedMock.mockReturnValue(true);

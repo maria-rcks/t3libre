@@ -1,14 +1,23 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   type DesktopPendingSnapShot,
+  type DesktopSnapShotEvent,
+  type ClientSettings,
+  DEFAULT_CLIENT_SETTINGS,
   EnvironmentId,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
+import { act, createElement } from "react";
+import { create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import type { DesktopSnapShotBridge } from "../../lib/desktopSnapShot";
+import * as settings from "../../hooks/useSettings";
+import * as newThread from "../../hooks/useHandleNewThread";
+import * as snapShotSound from "../../lib/snapShotSound";
+import { toastManager } from "../ui/toast";
 import {
   beginSnapShotAnimationWhenReady,
   deliverSnapShot,
@@ -16,6 +25,7 @@ import {
   resolveExistingSnapShotTarget,
   resolveSnapShotTargetOnce,
   resolveSnapShotDeliveryTarget,
+  SnapShotCoordinator,
 } from "./SnapShotCoordinator";
 import {
   beginSnapShotAnimation,
@@ -45,6 +55,10 @@ const environmentId = EnvironmentId.make("snap-shot-environment");
 const projectRef = scopeProjectRef(environmentId, ProjectId.make("snap-shot-project"));
 
 beforeEach(() => {
+  vi.spyOn(settings, "getClientSettings").mockReturnValue({
+    ...DEFAULT_CLIENT_SETTINGS,
+    snapShotEnabled: true,
+  });
   storage.clear();
   vi.stubGlobal("localStorage", storage);
   useComposerDraftStore.setState({
@@ -60,6 +74,7 @@ afterEach(() => {
   dismissAllSnapShotAnimations();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("window capture failures", () => {
@@ -92,7 +107,7 @@ describe("window capture failures", () => {
     expect(dismissSnapShotAnimation).toHaveBeenCalledExactlyOnceWith("older");
   });
 
-  it("does not resurrect a failed capture when its draft becomes ready later", async () => {
+  it.each(["failure", "disable"])("does not resurrect a capture after %s", async (reason) => {
     const target = DraftId.make("snap-shot-draft");
     let resolveTarget: ((target: DraftId) => void) | undefined;
     const targetReady = new Promise<DraftId>((resolve) => {
@@ -103,12 +118,13 @@ describe("window capture failures", () => {
     const olderStart = beginSnapShotAnimationWhenReady("older", targetReady, pendingStarts);
     await beginSnapShotAnimationWhenReady("newer", Promise.resolve(target), pendingStarts);
 
-    dismissFailedSnapShot("older", soundedIds, pendingStarts);
+    if (reason === "failure") dismissFailedSnapShot("older", soundedIds, pendingStarts);
+    else vi.mocked(settings.getClientSettings).mockReturnValue(DEFAULT_CLIENT_SETTINGS);
     resolveTarget?.(target);
     await olderStart;
 
     expect(getPendingSnapShotAnimations().map(({ id }) => id)).toEqual(["newer"]);
-    expect(soundedIds).toEqual(new Set(["newer"]));
+    expect(soundedIds).toEqual(new Set(reason === "failure" ? ["newer"] : ["older", "newer"]));
     expect(pendingStarts.size).toBe(0);
   });
 
@@ -130,6 +146,182 @@ describe("window capture failures", () => {
     expect(getPendingSnapShotAnimations()).toEqual([]);
     expect(soundedIds.size).toBe(0);
     expect(pendingStarts.size).toBe(0);
+  });
+});
+
+describe("snapshot enable setting", () => {
+  it.each(["disabled", "pending list", "pending read"])(
+    "retains a capture while off and delivers once after re-enable (%s)",
+    async (phase) => {
+      const target = scopeThreadRef(environmentId, ThreadId.make("enabled-thread"));
+      const capture = {
+        id: "12345678-1234-1234-1234-123456789abc",
+        name: "window.png",
+        mimeType: "image/png" as const,
+        sizeBytes: 3,
+        dataUrl: "data:image/png;base64,AQID",
+        source: {
+          kind: "snap-shot" as const,
+          capturedAt: "2026-09-01T00:00:00.000Z",
+          appName: "Editor",
+          windowTitle: "main.ts",
+        },
+      };
+      let finishList: (pending: Array<typeof capture>) => void = () => undefined;
+      let finishRead: (value: typeof capture) => void = () => undefined;
+      const bridge = {
+        requestSnapShotPermissions: vi.fn(),
+        getSnapShotState: vi.fn(),
+        checkSnapShotShortcut: vi.fn(),
+        setSnapShotShortcutSuppressed: vi.fn(),
+        onSnapShotEvent: vi.fn((_listener: (event: DesktopSnapShotEvent) => void) => vi.fn()),
+        listPendingSnapShots: vi.fn(async () => [capture]),
+        readSnapShot: vi.fn(async () => capture),
+        acknowledgeSnapShot: vi.fn(async () => undefined),
+      };
+      if (phase === "pending list") {
+        bridge.listPendingSnapShots.mockImplementationOnce(
+          () => new Promise((resolve) => (finishList = resolve)),
+        );
+      }
+      if (phase === "pending read") {
+        bridge.readSnapShot.mockImplementationOnce(
+          () => new Promise((resolve) => (finishRead = resolve)),
+        );
+      }
+      vi.spyOn(settings, "useClientSettings").mockImplementation(
+        <T = ClientSettings>(selector?: (value: ClientSettings) => T) =>
+          selector ? selector(settings.getClientSettings()) : (settings.getClientSettings() as T),
+      );
+      vi.spyOn(newThread, "useHandleNewThread").mockReturnValue({
+        activeDraftThread: null,
+        activeThread: null,
+        defaultProjectRef: projectRef,
+        handleNewThread: vi.fn(),
+        routeDraftId: null,
+        routeThreadRef: target,
+      });
+      const sound = vi
+        .spyOn(snapShotSound, "playSnapShotSound")
+        .mockImplementation(() => undefined);
+      const toast = vi.spyOn(toastManager, "add");
+      const browserWindow = Object.assign(new EventTarget(), {
+        desktopBridge: bridge,
+        localStorage: storage,
+      });
+      vi.stubGlobal("window", browserWindow);
+      vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      if (phase === "disabled") {
+        vi.mocked(settings.getClientSettings).mockReturnValue(DEFAULT_CLIENT_SETTINGS);
+      }
+      const renderer = await act(() => create(createElement(SnapShotCoordinator)));
+      try {
+        if (phase === "pending read") expect(bridge.readSnapShot).toHaveBeenCalledOnce();
+        vi.mocked(settings.getClientSettings).mockReturnValue(DEFAULT_CLIENT_SETTINGS);
+        sound.mockClear();
+        await act(async () => {
+          const staleListener = bridge.onSnapShotEvent.mock.calls[0]?.[0];
+          for (const type of ["requested", "started", "ready", "failed"] as const) {
+            staleListener?.({ type, id: capture.id });
+          }
+          renderer.update(createElement(SnapShotCoordinator));
+          finishList([capture]);
+          finishRead(capture);
+        });
+        const listsWhileOff = bridge.listPendingSnapShots.mock.calls.length;
+        await act(async () => {
+          renderer.update(createElement(SnapShotCoordinator));
+          browserWindow.dispatchEvent(new Event("focus"));
+          document.dispatchEvent(new Event("visibilitychange"));
+        });
+        expect(bridge.listPendingSnapShots).toHaveBeenCalledTimes(listsWhileOff);
+        expect(bridge.acknowledgeSnapShot).not.toHaveBeenCalled();
+        expect(useComposerDraftStore.getState().getComposerDraft(target)?.images ?? []).toEqual([]);
+        expect(sound).not.toHaveBeenCalled();
+        expect(toast).not.toHaveBeenCalled();
+        expect(bridge.getSnapShotState).not.toHaveBeenCalled();
+        expect(getPendingSnapShotAnimations()).toEqual([]);
+        if (phase === "disabled") expect(bridge.onSnapShotEvent).not.toHaveBeenCalled();
+        else expect(bridge.onSnapShotEvent.mock.results[0]?.value).toHaveBeenCalledOnce();
+
+        vi.mocked(settings.getClientSettings).mockReturnValue({
+          ...DEFAULT_CLIENT_SETTINGS,
+          snapShotEnabled: true,
+        });
+        await act(async () => renderer.update(createElement(SnapShotCoordinator)));
+        expect(toast.mock.calls).toEqual([]);
+        expect(bridge.acknowledgeSnapShot).toHaveBeenCalledExactlyOnceWith(capture.id);
+        expect(useComposerDraftStore.getState().getComposerDraft(target)?.images).toHaveLength(1);
+        expect(
+          useComposerDraftStore.getState().getComposerDraft(target)?.persistedAttachments,
+        ).toHaveLength(1);
+      } finally {
+        await act(async () => renderer.unmount());
+      }
+    },
+  );
+
+  it("reports a capture without a project once across focus and route changes", async () => {
+    const capture = {
+      id: "12345678-1234-1234-1234-123456789abc",
+      name: "window.png",
+      mimeType: "image/png" as const,
+      sizeBytes: 3,
+      source: {
+        kind: "snap-shot" as const,
+        capturedAt: "2026-09-01T00:00:00.000Z",
+        appName: "Editor",
+        windowTitle: "main.ts",
+      },
+    };
+    const bridge = {
+      requestSnapShotPermissions: vi.fn(),
+      getSnapShotState: vi.fn(),
+      checkSnapShotShortcut: vi.fn(),
+      setSnapShotShortcutSuppressed: vi.fn(),
+      onSnapShotEvent: vi.fn(() => vi.fn()),
+      listPendingSnapShots: vi.fn(async () => [capture]),
+      readSnapShot: vi.fn(),
+      acknowledgeSnapShot: vi.fn(),
+    };
+    vi.spyOn(settings, "useClientSettings").mockImplementation(
+      <T = ClientSettings>(selector?: (value: ClientSettings) => T) =>
+        selector ? selector(settings.getClientSettings()) : (settings.getClientSettings() as T),
+    );
+    vi.spyOn(settings, "getClientSettings").mockReturnValue({
+      ...DEFAULT_CLIENT_SETTINGS,
+      snapShotEnabled: true,
+      snapShotPlaySound: true,
+    });
+    vi.spyOn(newThread, "useHandleNewThread").mockImplementation(() => ({
+      activeDraftThread: null,
+      activeThread: null,
+      defaultProjectRef: null,
+      handleNewThread: vi.fn(),
+      routeDraftId: null,
+      routeThreadRef: null,
+    }));
+    const sound = vi.spyOn(snapShotSound, "playSnapShotSound").mockImplementation(() => undefined);
+    const toast = vi.spyOn(toastManager, "add").mockReturnValue("toast-id");
+    const browserWindow = Object.assign(new EventTarget(), { desktopBridge: bridge });
+    vi.stubGlobal("window", browserWindow);
+    vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const renderer = await act(() => create(createElement(SnapShotCoordinator)));
+    try {
+      await act(async () => browserWindow.dispatchEvent(new Event("focus")));
+      await act(async () => renderer.update(createElement(SnapShotCoordinator)));
+      expect(bridge.listPendingSnapShots.mock.calls.length).toBeGreaterThan(1);
+      expect(sound).toHaveBeenCalledOnce();
+      expect(toast).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ title: "Snapshot taken, but no project is available" }),
+      );
+      expect(bridge.readSnapShot).not.toHaveBeenCalled();
+      expect(bridge.acknowledgeSnapShot).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => renderer.unmount());
+    }
   });
 });
 
