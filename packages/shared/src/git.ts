@@ -72,8 +72,8 @@ export function sanitizeFeatureBranchName(raw: string): string {
 const AUTO_FEATURE_BRANCH_FALLBACK = "feature/update";
 
 /**
- * Resolve a unique generated refName that doesn't collide with
- * any existing refName. Appends a numeric suffix when needed.
+ * Resolve a unique generated refName, suffixing only the path component
+ * blocked by an existing ref or, for the final component, its descendants.
  */
 export function resolveAutoFeatureBranchName(
   existingBranchNames: readonly string[],
@@ -83,18 +83,27 @@ export function resolveAutoFeatureBranchName(
   const resolvedBase = sanitizeFeatureBranchName(
     preferred && preferred.length > 0 ? preferred : AUTO_FEATURE_BRANCH_FALLBACK,
   );
-  const existingNames = new Set(existingBranchNames.map((refName) => refName.toLowerCase()));
+  const existingNames = existingBranchNames.map((refName) => refName.toLowerCase());
+  const existingRefs = new Set(existingNames);
+  const parts = resolvedBase.split("/");
+  let resolved = "";
 
-  if (!existingNames.has(resolvedBase)) {
-    return resolvedBase;
+  for (const [index, part] of parts.entries()) {
+    const base = resolved ? `${resolved}/${part}` : part;
+    let candidate = base;
+    let suffix = 2;
+    while (
+      existingRefs.has(candidate) ||
+      (index === parts.length - 1 &&
+        existingNames.some((refName) => refName.startsWith(`${candidate}/`)))
+    ) {
+      candidate = `${base}-${suffix}`;
+      suffix += 1;
+    }
+    resolved = candidate;
   }
 
-  let suffix = 2;
-  while (existingNames.has(`${resolvedBase}-${suffix}`)) {
-    suffix += 1;
-  }
-
-  return `${resolvedBase}-${suffix}`;
+  return resolved;
 }
 
 /**

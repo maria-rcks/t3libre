@@ -3247,6 +3247,65 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect.each([
+    {
+      branch: "fix/name",
+      existingBranches: ["fix"],
+      expected: "fix-2/name",
+    },
+    {
+      branch: "team/jules/fix/name",
+      existingBranches: [
+        "team/jules",
+        "team/jules-2/fix",
+        "team/jules-2/fix-2/name",
+        "team/jules-2/fix-2/name-2/child",
+      ],
+      expected: "team/jules-2/fix-2/name-3",
+    },
+    {
+      branch: "fix/name",
+      existingBranches: ["fix/name/child", "fix/name-2/child"],
+      expected: "fix/name-3",
+    },
+  ])("commits on $expected when $branch has ref namespace collisions", (scenario) =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const mainSha = (yield* runGit(repoDir, ["rev-parse", "main"])).stdout.trim();
+      for (const branch of scenario.existingBranches) {
+        yield* runGit(repoDir, ["branch", branch]);
+      }
+      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nnamespace-collision\n");
+
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitMessage: () =>
+            Effect.succeed({
+              subject: "Fix namespace collision",
+              body: "",
+              branch: scenario.branch,
+            }),
+        },
+      });
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        featureBranch: true,
+      });
+
+      expect(result.branch).toEqual({ status: "created", name: scenario.expected });
+      expect(result.commit.status).toBe("created");
+      expect((yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim()).toBe(
+        scenario.expected,
+      );
+      expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout.trim()).toBe("");
+      for (const branch of ["main", ...scenario.existingBranches]) {
+        expect((yield* runGit(repoDir, ["rev-parse", branch])).stdout.trim()).toBe(mainSha);
+      }
+    }),
+  );
+
   it.effect("featureBranch uses custom commit message and derives branch name", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
