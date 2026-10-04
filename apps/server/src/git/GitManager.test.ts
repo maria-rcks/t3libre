@@ -3492,7 +3492,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("create_pr pushes a clean branch before creating the PR when needed", () =>
+  it.effect("create_pr pushes committed changes while preserving a dirty worktree", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -3502,6 +3502,10 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       NodeFS.writeFileSync(NodePath.join(repoDir, "create-pr-only.txt"), "create pr\n");
       yield* runGit(repoDir, ["add", "create-pr-only.txt"]);
       yield* runGit(repoDir, ["commit", "-m", "Create PR only branch"]);
+      const headBefore = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout.trim();
+      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "uncommitted readme\n");
+      NodeFS.writeFileSync(NodePath.join(repoDir, "untracked.txt"), "untracked work\n");
+      const statusBefore = (yield* runGit(repoDir, ["status", "--porcelain"])).stdout;
 
       const { manager, ghCalls } = yield* makeManager({
         ghScenario: {
@@ -3531,6 +3535,16 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.push.setUpstream).toBe(true);
       expect(result.pr.status).toBe("created");
       expect(result.pr.number).toBe(303);
+      expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout).toBe(statusBefore);
+      expect(
+        (yield* runGit(remoteDir, ["rev-parse", "feature/create-pr-only"])).stdout.trim(),
+      ).toBe(headBefore);
+      expect(NodeFS.readFileSync(NodePath.join(repoDir, "README.md"), "utf8")).toBe(
+        "uncommitted readme\n",
+      );
+      expect(NodeFS.readFileSync(NodePath.join(repoDir, "untracked.txt"), "utf8")).toBe(
+        "untracked work\n",
+      );
       expect(
         ghCalls.some((call) =>
           call.includes("pr create --base main --head feature/create-pr-only"),
@@ -5971,7 +5985,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("create_pr emits only the PR phase when the branch is already pushed", () =>
+  it.effect("create_pr preserves dirty work on an already pushed branch", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -5982,8 +5996,22 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       yield* runGit(repoDir, ["add", "pr-only.txt"]);
       yield* runGit(repoDir, ["commit", "-m", "PR only branch"]);
       yield* runGit(repoDir, ["push", "-u", "origin", "feature/pr-only-follow-up"]);
+      const headBefore = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout;
+      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "staged readme\n");
+      yield* runGit(repoDir, ["add", "README.md"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "pr-only.txt"), "unstaged feature work\n");
+      NodeFS.writeFileSync(NodePath.join(repoDir, "untracked.txt"), "untracked work\n");
+      const statusBefore = (yield* runGit(repoDir, ["status", "--porcelain"])).stdout;
+      const stagedBefore = (yield* runGit(repoDir, ["diff", "--cached"])).stdout;
+      let generatedContent: TextGeneration.PrContentGenerationInput | undefined;
 
       const { manager } = yield* makeManager({
+        textGeneration: {
+          generatePrContent: (input) => {
+            generatedContent = input;
+            return Effect.succeed({ title: "PR only branch", body: "Committed feature work" });
+          },
+        },
         ghScenario: {
           prListSequence: [
             // @effect-diagnostics-next-line preferSchemaOverJson:off
@@ -6025,6 +6053,26 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.commit.status).toBe("skipped_not_requested");
       expect(result.push.status).toBe("skipped_not_requested");
       expect(result.pr.status).toBe("created");
+      expect(generatedContent?.commitSummary).toContain("PR only branch");
+      expect(generatedContent?.diffSummary).toContain("pr-only.txt");
+      expect(generatedContent?.diffSummary).not.toContain("README.md");
+      expect(generatedContent?.diffSummary).not.toContain("untracked.txt");
+      expect(generatedContent?.diffPatch).toContain("+pr only");
+      expect(generatedContent?.diffPatch).not.toContain("staged readme");
+      expect(generatedContent?.diffPatch).not.toContain("unstaged feature work");
+      expect(generatedContent?.diffPatch).not.toContain("untracked work");
+      expect((yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout).toBe(headBefore);
+      expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout).toBe(statusBefore);
+      expect((yield* runGit(repoDir, ["diff", "--cached"])).stdout).toBe(stagedBefore);
+      expect(NodeFS.readFileSync(NodePath.join(repoDir, "README.md"), "utf8")).toBe(
+        "staged readme\n",
+      );
+      expect(NodeFS.readFileSync(NodePath.join(repoDir, "pr-only.txt"), "utf8")).toBe(
+        "unstaged feature work\n",
+      );
+      expect(NodeFS.readFileSync(NodePath.join(repoDir, "untracked.txt"), "utf8")).toBe(
+        "untracked work\n",
+      );
       expect(
         events.filter(
           (event): event is Extract<GitActionProgressEvent, { kind: "phase_started" }> =>
