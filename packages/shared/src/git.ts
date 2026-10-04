@@ -61,21 +61,18 @@ export function formatGeneratedBranchName(raw: string, naming?: BranchNamingOpti
 }
 
 /**
- * Sanitize a string into a `feature/…` refName name.
- * Preserves an existing `feature/` prefix or slash-separated namespace.
+ * Sanitize a generated branch name, preserving any slash-separated namespace.
+ * Unprefixed fragments use the `feature/` namespace.
  */
 export function sanitizeFeatureBranchName(raw: string): string {
   const sanitized = sanitizeBranchFragment(raw);
-  if (sanitized.includes("/")) {
-    return sanitized.startsWith("feature/") ? sanitized : `feature/${sanitized}`;
-  }
-  return `feature/${sanitized}`;
+  return sanitized.includes("/") ? sanitized : `feature/${sanitized}`;
 }
 
 const AUTO_FEATURE_BRANCH_FALLBACK = "feature/update";
 
 /**
- * Resolve a unique `feature/…` refName name that doesn't collide with
+ * Resolve a unique generated refName that doesn't collide with
  * any existing refName. Appends a numeric suffix when needed.
  */
 export function resolveAutoFeatureBranchName(
