@@ -3474,14 +3474,14 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("pushes to the requested remote instead of the primary remote", () =>
+    it.effect.each(["main", "origin/main"])("publishes $0 to the requested remote", (branch) =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
         const originRemote = yield* makeTmpDir("git-origin-remote-");
         const publishRemote = yield* makeTmpDir("git-publish-remote-");
         yield* initRepoWithCommit(cwd);
         const driver = yield* GitVcsDriver.GitVcsDriver;
-        yield* git(cwd, ["branch", "-M", "main"]);
+        yield* git(cwd, ["branch", "-M", branch]);
         yield* git(originRemote, ["init", "--bare"]);
         yield* git(publishRemote, ["init", "--bare"]);
         yield* git(cwd, ["remote", "add", "origin", originRemote]);
@@ -3491,12 +3491,12 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
         assert.deepInclude(pushed, {
           status: "pushed",
-          branch: "main",
-          upstreamBranch: "origin-1/main",
+          branch,
+          upstreamBranch: `origin-1/${branch}`,
           setUpstream: true,
         });
         assert.equal(
-          yield* git(publishRemote, ["log", "-1", "--pretty=%s", "main"]),
+          yield* git(publishRemote, ["log", "-1", "--pretty=%s", `refs/heads/${branch}`]),
           "initial commit",
         );
         const originMain = yield* driver.execute({

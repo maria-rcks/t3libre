@@ -3247,11 +3247,55 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect.each(["origin/main", "origin/team/fix"])("publishes local namespace $0", (branch) =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      const mainSha = (yield* runGit(remoteDir, ["rev-parse", "refs/heads/main"])).stdout.trim();
+      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\npublication\n");
+
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitMessage: () =>
+            Effect.succeed({ subject: "Fix branch publication", body: "", branch }),
+        },
+      });
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit_push",
+        featureBranch: true,
+      });
+
+      expect(result.branch).toEqual({ status: "created", name: branch });
+      expect(result.commit.status).toBe("created");
+      expect(result.push.status).toBe("pushed");
+      expect((yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim()).toBe(branch);
+      expect((yield* runGit(remoteDir, ["rev-parse", "refs/heads/main"])).stdout.trim()).toBe(
+        mainSha,
+      );
+      const headSha = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout.trim();
+      expect((yield* runGit(remoteDir, ["rev-parse", `refs/heads/${branch}`])).stdout.trim()).toBe(
+        headSha,
+      );
+      expect((yield* runGit(repoDir, ["config", `branch.${branch}.merge`])).stdout.trim()).toBe(
+        `refs/heads/${branch}`,
+      );
+    }),
+  );
+
   it.effect.each([
     {
       branch: "fix/name",
       existingBranches: ["fix"],
       expected: "fix-2/name",
+    },
+    {
+      branch: "heads/fix/name",
+      existingBranches: ["heads/fix"],
+      expected: "heads/fix-2/name",
     },
     {
       branch: "team/jules/fix/name",
@@ -3275,6 +3319,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       const mainSha = (yield* runGit(repoDir, ["rev-parse", "main"])).stdout.trim();
       for (const branch of scenario.existingBranches) {
         yield* runGit(repoDir, ["branch", branch]);
+        yield* runGit(repoDir, ["tag", branch]);
       }
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nnamespace-collision\n");
 
@@ -3301,7 +3346,14 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       );
       expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout.trim()).toBe("");
       for (const branch of ["main", ...scenario.existingBranches]) {
-        expect((yield* runGit(repoDir, ["rev-parse", branch])).stdout.trim()).toBe(mainSha);
+        expect((yield* runGit(repoDir, ["rev-parse", `refs/heads/${branch}`])).stdout.trim()).toBe(
+          mainSha,
+        );
+      }
+      for (const tag of scenario.existingBranches) {
+        expect((yield* runGit(repoDir, ["rev-parse", `refs/tags/${tag}`])).stdout.trim()).toBe(
+          mainSha,
+        );
       }
     }),
   );

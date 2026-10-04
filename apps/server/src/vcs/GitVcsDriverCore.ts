@@ -1444,6 +1444,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     cwd: string,
     branchName: string,
   ) {
+    if (yield* branchExists(cwd, branchName)) {
+      return branchName;
+    }
     const remoteNames = yield* listRemoteNames(cwd).pipe(Effect.orElseSucceed(() => []));
     const parsedRemoteRef = parseRemoteRefWithRemoteNames(branchName, remoteNames);
     return parsedRemoteRef?.branchName ?? branchName;
@@ -3764,7 +3767,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       "branch",
       "--list",
       "--no-column",
-      "--format=%(refname:short)",
+      "--format=%(refname:lstrip=2)",
     ]).pipe(
       Effect.map((stdout) => {
         const branchNames: Array<string> = [];
