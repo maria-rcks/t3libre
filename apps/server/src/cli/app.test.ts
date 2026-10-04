@@ -139,10 +139,10 @@ describe("t3 server command safety", () => {
     withTempDirectory("t3-cli-unknown-", (root) =>
       Effect.gen(function* () {
         const baseDir = NodePath.join(root, "home");
-        for (const word of ["account", "login", "clients", "conenct"]) {
+        for (const word of ["account", "login", "clients", "conenct", "package.json"]) {
           const error = yield* runCli([word, "--base-dir", baseDir]).pipe(Effect.flip);
           expect(String(error)).toContain(`Unknown command "${word}"`);
-          expect(yield* pathExists(word)).toBe(false);
+          expect(yield* pathExists(word)).toBe(word === "package.json");
           expect(yield* pathExists(baseDir)).toBe(false);
         }
       }),

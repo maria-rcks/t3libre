@@ -35,7 +35,10 @@ export const runDefaultServerCommand = (flags: CliServerFlags) =>
       const cwd = flags.cwd.value.trim();
       const fs = yield* FileSystem.FileSystem;
       const explicitPath = cwd === "." || cwd === ".." || cwd === "~" || /[/\\]/.test(cwd);
-      if (!explicitPath && !(yield* fs.exists(cwd))) {
+      if (
+        !explicitPath &&
+        (!(yield* fs.exists(cwd)) || (yield* fs.stat(cwd)).type !== "Directory")
+      ) {
         return yield* new UnknownServerCommandError({ cause: cwd });
       }
     }
