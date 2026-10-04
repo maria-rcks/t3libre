@@ -796,7 +796,7 @@ export function ProviderInstanceCard({
         />
         <TooltipPopup side="top">{versionAdvisory.title}</TooltipPopup>
       </Tooltip>
-      <PopoverPopup side="bottom" align="end" width="md">
+      <PopoverPopup side="bottom" align="end" width="md" aria-label={versionAdvisory.title}>
         <div className="grid min-w-0 gap-3">
           <div className="grid gap-0.5">
             <p className="text-sm font-semibold leading-tight text-foreground">
