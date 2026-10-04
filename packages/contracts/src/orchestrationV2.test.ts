@@ -90,6 +90,49 @@ const decodeOrchestrationV2SubscribeThreadInput = Schema.decodeUnknownSync(
 );
 
 describe("orchestration V2 contracts", () => {
+  it("keeps optional option previews through turn item JSON encoding and decoding", () => {
+    const question = {
+      id: "review-draft",
+      header: "Draft",
+      question: "Post this draft?",
+      options: [
+        {
+          label: "Post",
+          description: "Use the draft",
+          preview: "  **Draft**\n\n    keep indentation\n",
+        },
+        { label: "Skip", description: "Do not post" },
+      ],
+    };
+    const item = {
+      id: "question-item",
+      type: "user_input_request",
+      threadId: "thread-1",
+      runId: null,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 1,
+      status: "completed",
+      title: null,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: DateTime.formatIso(now),
+      requestId: "request-1",
+      questions: [question],
+    };
+    const decoded = decodeOrchestrationV2TurnItemJson(item);
+    expect(encodeOrchestrationV2TurnItemJson(decoded)).toEqual(item);
+    expect(() =>
+      decodeOrchestrationV2TurnItemJson({
+        ...item,
+        questions: [{ ...question, options: [{ ...question.options[0], preview: 42 }] }],
+      }),
+    ).toThrow();
+  });
+
   it("carries command failure metadata through runtime and JSON schemas without output text", () => {
     const base = {
       id: "command-item",

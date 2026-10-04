@@ -239,7 +239,14 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
           {
             header: "Approach",
             question: "Which approach?",
-            options: [{ label: "Simple", description: "Use fewer moving parts" }],
+            options: [
+              {
+                label: "Simple",
+                description: "Use fewer moving parts",
+                preview: "  **Review this draft**\n\n```ts\nconst batch = 1;\n```\n",
+              },
+              { label: "Safe", description: "Keep the current setup" },
+            ],
             multiSelect: true,
           },
         ],
@@ -249,7 +256,14 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
           id: "Which approach?",
           header: "Approach",
           question: "Which approach?",
-          options: [{ label: "Simple", description: "Use fewer moving parts" }],
+          options: [
+            {
+              label: "Simple",
+              description: "Use fewer moving parts",
+              preview: "  **Review this draft**\n\n```ts\nconst batch = 1;\n```\n",
+            },
+            { label: "Safe", description: "Keep the current setup" },
+          ],
           multiSelect: true,
         },
       ],
@@ -1244,7 +1258,10 @@ describe("ClaudeAdapterV2 resume compaction", () => {
         });
         const longQuestion = `Choose a deployment target: ${"region ".repeat(80)}`;
         const questionRequestEvent = yield* runtime.events.pipe(
-          Stream.filter((event) => event.type === "runtime_request.updated"),
+          Stream.filter(
+            (event) =>
+              event.type === "turn_item.updated" && event.turnItem.type === "user_input_request",
+          ),
           Stream.runHead,
           Effect.forkScoped,
         );
@@ -1257,7 +1274,11 @@ describe("ClaudeAdapterV2 resume compaction", () => {
                   header: "Target",
                   question: longQuestion,
                   options: [
-                    { label: "Production", description: "Deploy to production." },
+                    {
+                      label: "Production",
+                      description: "Deploy to production.",
+                      preview: "# Production plan\n\nKeep indentation:\n\n    deploy --check\n",
+                    },
                     { label: "Staging", description: "Deploy to staging." },
                   ],
                   multiSelect: true,
@@ -1275,12 +1296,19 @@ describe("ClaudeAdapterV2 resume compaction", () => {
         assert.isTrue(Option.isSome(questionEvent));
         if (
           Option.isNone(questionEvent) ||
-          questionEvent.value.type !== "runtime_request.updated"
+          questionEvent.value.type !== "turn_item.updated" ||
+          questionEvent.value.turnItem.type !== "user_input_request"
         ) {
           return;
         }
+        const wireItem = questionEvent.value.turnItem;
+        assert.equal(
+          wireItem.questions[0]?.options[0]?.preview,
+          "# Production plan\n\nKeep indentation:\n\n    deploy --check\n",
+        );
+        assert.notProperty(wireItem.questions[0]?.options[1], "preview");
         yield* runtime.respondToRuntimeRequest({
-          requestId: questionEvent.value.runtimeRequest.id,
+          requestId: questionEvent.value.turnItem.requestId,
           answers: { [longQuestion]: ["Production", "Staging"] },
         });
         assert.deepEqual(yield* Fiber.join(questionResult), {
@@ -1291,7 +1319,11 @@ describe("ClaudeAdapterV2 resume compaction", () => {
                 header: "Target",
                 question: longQuestion,
                 options: [
-                  { label: "Production", description: "Deploy to production." },
+                  {
+                    label: "Production",
+                    description: "Deploy to production.",
+                    preview: "# Production plan\n\nKeep indentation:\n\n    deploy --check\n",
+                  },
                   { label: "Staging", description: "Deploy to staging." },
                 ],
                 multiSelect: true,

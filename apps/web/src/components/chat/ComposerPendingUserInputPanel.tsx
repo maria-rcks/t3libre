@@ -9,6 +9,7 @@ import { CheckIcon } from "lucide-react";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
+import ChatMarkdown from "../ChatMarkdown";
 
 interface PendingUserInputPanelProps {
   pendingUserInputs: PendingUserInput[];
@@ -68,10 +69,14 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const canRespond = prompt.responseCapability !== "not_resumable";
   const responseDisabled = isResponding || !canRespond;
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
-  const activeQuestion = progress.activeQuestion;
+  const activeQuestion = prompt.questions[progress.questionIndex];
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const onAdvanceRef = useRef(onAdvance);
   const [optimisticSingleSelect, setOptimisticSingleSelect] = useState<{
+    questionId: string;
+    optionValue: string;
+  } | null>(null);
+  const [focusedOption, setFocusedOption] = useState<{
     questionId: string;
     optionValue: string;
   } | null>(null);
@@ -83,6 +88,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   // sending from the composer advances the active question.
   const [collapsedQuestionId, setCollapsedQuestionId] = useState<string | null>(null);
   const isCollapsed = collapsedQuestionId !== null && collapsedQuestionId === activeQuestion?.id;
+
+  if (focusedOption && focusedOption.questionId !== activeQuestion?.id) {
+    setFocusedOption(null);
+  }
 
   useEffect(() => {
     onAdvanceRef.current = onAdvance;
@@ -120,6 +129,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   const handleOptionSelection = useCallback(
     (questionId: string, optionValue: string) => {
+      setFocusedOption({ questionId, optionValue });
       if (activeQuestion?.multiSelect) {
         onToggleOption(questionId, optionValue);
         return;
@@ -173,6 +183,17 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }
 
   const customAnswerActive = progress.customAnswer.trim().length > 0;
+  const previewOptionValue =
+    focusedOption?.questionId === activeQuestion.id
+      ? focusedOption.optionValue
+      : customAnswerActive
+        ? undefined
+        : (progress.selectedOptionValues.at(-1) ??
+          activeQuestion.options[0]?.value ??
+          activeQuestion.options[0]?.label);
+  const previewOption = activeQuestion.options.find(
+    (option) => (option.value ?? option.label) === previewOptionValue,
+  );
 
   return (
     <Collapsible
@@ -281,6 +302,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                     key={`${activeQuestion.id}:${optionValue}`}
                     type="button"
                     disabled={isResponding}
+                    onMouseEnter={() =>
+                      setFocusedOption({ questionId: activeQuestion.id, optionValue })
+                    }
+                    onFocus={() => setFocusedOption({ questionId: activeQuestion.id, optionValue })}
                     onClick={() => {
                       handleOptionSelection(activeQuestion.id, optionValue);
                     }}
@@ -291,6 +316,22 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 );
               })}
             </div>
+            {previewOption?.preview?.trim() ? (
+              <section
+                aria-label={`Preview: ${previewOption.label}`}
+                className="mt-2 min-w-0 rounded-md border border-border/60 bg-muted/25 p-2.5"
+              >
+                <p className="mb-1.5 text-3xs font-medium text-muted-foreground">
+                  Preview · {previewOption.label}
+                </p>
+                <ChatMarkdown
+                  key={`${activeQuestion.id}:${previewOptionValue}`}
+                  text={previewOption.preview}
+                  cwd={undefined}
+                  parseRawHtml={false}
+                />
+              </section>
+            ) : null}
           </ComposerBanner.Body>
         </ComposerBanner.Scroll>
       </CollapsiblePanel>
