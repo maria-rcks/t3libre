@@ -56,6 +56,12 @@ export function PreviewStreamWebView({
   ...props
 }: PreviewStreamConfiguration & NativeStreamBridge) {
   const [attempt, setAttempt] = useState(0);
+  const [previousAccess, setPreviousAccess] = useState(props.access);
+  // Wait for refreshed access, including cookie credentials with unchanged JSON.
+  if (props.access !== previousAccess) {
+    setPreviousAccess(props.access);
+    setAttempt((current) => current + 1);
+  }
   const processRetried = useRef(false);
   const unauthorized = useRef(0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,7 +97,6 @@ export function PreviewStreamWebView({
         refreshTimer.current = setTimeout(
           () => {
             refreshTimer.current = null;
-            setAttempt((current) => current + 1);
             props.onUnauthorized();
           },
           refusals === 1 ? 0 : 1_000 * 2 ** (refusals - 1),
@@ -101,7 +106,6 @@ export function PreviewStreamWebView({
       onRetry={() => {
         processRetried.current = false;
         unauthorized.current = 0;
-        setAttempt((current) => current + 1);
         props.onUnauthorized();
       }}
       onStreaming={() => {

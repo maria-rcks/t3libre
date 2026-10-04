@@ -188,12 +188,8 @@ export function createPreviewStreamClient(
         events.onGone?.();
         return;
       }
-      // A rejected upgrade surfaces as 1006 before open, including an expired ticket.
-      if (
-        event.code === 1008 ||
-        event.code === 4401 ||
-        (!opened && event.code === 1006 && target.access.query.wsTicket !== undefined)
-      ) {
+      // Rejected upgrades surface as 1006 before open for both cookies and tickets.
+      if (event.code === 1008 || event.code === 4401 || (!opened && event.code === 1006)) {
         stopped = true;
         events.onUnauthorized();
         return;

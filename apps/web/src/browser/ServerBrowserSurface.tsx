@@ -125,6 +125,7 @@ export function ServerBrowserSurface(props: {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const keySentRef = useRef(false);
   const clientRef = useRef<PreviewStreamClient | null>(null);
   const viewportRef = useRef<PreviewStreamViewport | null>(null);
   const sizeRef = useRef<{ width: number; height: number } | null>(null);
@@ -535,6 +536,7 @@ export function ServerBrowserSurface(props: {
   };
 
   const resetInput = (textarea: HTMLTextAreaElement) => {
+    keySentRef.current = false;
     textarea.value = INPUT_SENTINEL;
     textarea.setSelectionRange(INPUT_SENTINEL.length, INPUT_SENTINEL.length);
   };
@@ -545,6 +547,7 @@ export function ServerBrowserSurface(props: {
   };
 
   const handleKey = (action: "down" | "up", event: KeyboardEvent<HTMLTextAreaElement>) => {
+    keySentRef.current = false;
     // IME and soft keyboards deliver text through composition and input events.
     if (
       event.nativeEvent.isComposing ||
@@ -552,6 +555,13 @@ export function ServerBrowserSurface(props: {
       event.key === "Process" ||
       event.key === "Unidentified"
     ) {
+      return;
+    }
+    // Keep plain Escape and Tab in the page; Shift+Escape returns to the app.
+    if (event.key === "Escape" && event.shiftKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (action === "down") event.currentTarget.blur();
       return;
     }
     const shortcut = event.ctrlKey || event.metaKey;
@@ -574,6 +584,11 @@ export function ServerBrowserSurface(props: {
       ...(action === "down" && text !== undefined ? { text } : {}),
       modifiers: previewStreamModifiers(event),
     });
+    // Some Android keyboards edit the textarea even when keydown is prevented.
+    keySentRef.current =
+      action === "down" &&
+      !shortcut &&
+      (text !== undefined || event.key === "Backspace" || event.key === "Delete");
     // Shortcuts stay with the app (copy, paste, keybindings); other keys belong to the page.
     if (shortcut) return;
     event.preventDefault();
@@ -585,7 +600,8 @@ export function ServerBrowserSurface(props: {
     if (native instanceof InputEvent && native.isComposing) return;
     const textarea = event.currentTarget;
     const inputType = native instanceof InputEvent ? native.inputType : "";
-    if (inputType === "deleteContentBackward") sendKeyPress(BACKSPACE);
+    if (keySentRef.current) keySentRef.current = false;
+    else if (inputType === "deleteContentBackward") sendKeyPress(BACKSPACE);
     else if (inputType === "deleteContentForward") sendKeyPress(DELETE);
     else {
       const text = textarea.value.replaceAll(INPUT_SENTINEL, "");
@@ -627,6 +643,7 @@ export function ServerBrowserSurface(props: {
       <textarea
         ref={inputRef}
         aria-label="Browser page"
+        aria-description="Press Shift+Escape to leave the browser page."
         autoCapitalize="off"
         autoComplete="off"
         autoCorrect="off"
