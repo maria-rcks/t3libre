@@ -1,7 +1,8 @@
 /**
- * Lineage choices per Workflow, so a user's open card and phases survive thread
- * switches and reloads. Keyed by environment and coordinator subagent, which
- * the parent's row and the Workflow thread's own card share.
+ * Lineage choices per Workflow, so a user's open card, phases and completed-agent
+ * folds survive thread switches and reloads. Keyed by environment and
+ * coordinator subagent, which the parent's row and the Workflow thread's own
+ * card share.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { create } from "zustand";
@@ -14,6 +15,8 @@ export interface WorkflowLineageView {
   readonly open?: boolean;
   /** Keyed by phase index; -1 is "Other agents". */
   readonly phases?: Readonly<Record<number, boolean>>;
+  /** Phases whose completed agents the user revealed, by phase index. */
+  readonly completedShown?: Readonly<Record<number, boolean>>;
 }
 
 // Entries are tiny, but every Workflow a user touches adds one.

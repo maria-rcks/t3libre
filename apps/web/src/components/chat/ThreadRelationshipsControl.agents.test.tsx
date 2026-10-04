@@ -55,6 +55,7 @@ vi.mock("../ui/tooltip", () => ({
 }));
 
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
+import { WorkflowCard } from "./WorkflowCard";
 import { useWorkflowLineageViewStore } from "../../workflowLineageViewStore";
 
 let renderer: ReactTestRenderer;
@@ -338,12 +339,18 @@ it.each(["live", "retained"])(
     expect(text().indexOf("Inspect")).toBeLessThan(text().indexOf("Publish"));
     expect(text()).not.toContain("Code reviewer");
     await act(async () => buttonWithLabel("Inspect: 1/1").props.onClick());
+    expect(text()).not.toContain("Code reviewer");
+    await act(async () => buttonWithText("Show 1 completed").props.onClick());
     expect(text()).toContain("Code reviewer");
     await act(async () => buttonWithLabel("Open Code reviewer").props.onClick());
     expect(state.navigate).toHaveBeenLastCalledWith({
       to: "/$environmentId/$threadId",
       params: { environmentId: "test", threadId: "reviewer-child" },
     });
+    // A retained workflow has settled, so its writer is completed and folded too.
+    if (source === "retained") {
+      await act(async () => buttonWithText("Show 1 completed").props.onClick());
+    }
     await act(async () => buttonWithLabel("Open Release writer").props.onClick());
     expect(state.navigate).toHaveBeenLastCalledWith({
       to: "/$environmentId/$threadId",
@@ -382,7 +389,7 @@ it.each(["live", "retained"])(
       expect(buttonWithLabel("Open workflow: Release review").props.onClick).toBeUndefined();
     }
     await act(async () => buttonWithLabel("Expand workflow").props.onClick());
-    // Inspect stays open from before the workflow collapsed.
+    // Inspect and its completed agents stay open from before the workflow collapsed.
     expect(text()).toContain("Code reviewer");
     expect(buttonWithLabel("Open Code reviewer").props.disabled).toBe(true);
     expect(buttonWithLabel("Open Code reviewer").props.onClick).toBeUndefined();
@@ -979,4 +986,50 @@ it("remembers a workflow's open phases across thread switches, reloads and its o
   await showLineage("release-thread");
   expect(lineageButton("Expand workflow")).toBeDefined();
   expect(lineageText()).not.toContain("Plan");
+});
+
+it("folds a phase's completed agents and keeps that choice when the phase or its agents change", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const textButton = (value: string) =>
+    renderer.root
+      .findAllByType("button")
+      .find((button) => button.findAll((node) => node.children.includes(value)).length > 0)!;
+  await showLineage("parent");
+  await act(async () => lineageButton("Expand workflow").props.onClick());
+  expect(lineageText()).toContain("build form");
+  expect(lineageText()).not.toContain("build api");
+  expect(lineageText()).toContain("Show 1 completed");
+
+  await act(async () => textButton("Show 1 completed").props.onClick());
+  expect(lineageText()).toContain("build api");
+  // The heading opens and closes the phase; the fold keeps its own choice.
+  await act(async () => lineageButton("Build: ").props.onClick());
+  await act(async () => lineageButton("Build: ").props.onClick());
+  expect(lineageText()).toContain("build api");
+  expect(lineageText()).toContain("Hide completed");
+  await act(async () => textButton("Hide completed").props.onClick());
+  expect(lineageText()).not.toContain("build api");
+
+  // The phase's last live agent settles while the user holds the phase open.
+  await showLineage("parent", releaseCheck("completed"));
+  expect(phaseOpen("Build")).toBe(true);
+  expect(lineageText()).not.toContain("build form");
+  expect(lineageText()).toContain("Show 2 completed");
+  await act(async () => textButton("Show 2 completed").props.onClick());
+  await reloadLineageViews();
+  await showLineage("parent", releaseCheck("completed"));
+  expect(lineageText()).toContain("build api");
+  expect(lineageText()).toContain("build form");
+  expect(lineageText()).toContain("Hide completed");
+});
+
+it("keeps every completed agent listed in the chat card", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  await act(async () => {
+    renderer = create(
+      <WorkflowCard agent={releaseCheck() as never} onOpenThread={() => undefined} />,
+    );
+  });
+  expect(lineageText()).toContain("build api");
+  expect(lineageText()).not.toContain("completed");
 });

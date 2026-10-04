@@ -217,6 +217,13 @@ export function WorkflowCard({
                       phases: { ...current.phases, [phase.index]: open },
                     }))
                   }
+                  showCompleted={view.completedShown?.[phase.index] ?? false}
+                  onShowCompletedChange={(show) =>
+                    updateView((current) => ({
+                      ...current,
+                      completedShown: { ...current.completedShown, [phase.index]: show },
+                    }))
+                  }
                   panel={panel}
                   onOpenThread={onOpenThread}
                   isThreadUnavailable={isThreadUnavailable}
@@ -272,6 +279,8 @@ function WorkflowPhase({
   coordinatorStatus,
   expanded,
   onExpandedChange,
+  showCompleted,
+  onShowCompletedChange,
   panel,
   onOpenThread,
   isThreadUnavailable,
@@ -281,12 +290,20 @@ function WorkflowPhase({
   coordinatorStatus: WorkflowStatus;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  /** Lineage only: completed agents stay behind "Show N completed" until revealed. */
+  showCompleted: boolean;
+  onShowCompletedChange: (show: boolean) => void;
   panel: boolean;
   onOpenThread: (threadId: ThreadId) => void;
   isThreadUnavailable: ((threadId: ThreadId) => boolean) | undefined;
 }) {
   const membersId = useId();
   const completed = members.filter((member) => member.status === "completed").length;
+  const foldCompleted = panel && completed > 0;
+  const visibleMembers =
+    foldCompleted && !showCompleted
+      ? members.filter((member) => member.status !== "completed")
+      : members;
   const failed = members.some((member) => member.status === "failed");
   const active = members.some((member) => isActiveSubagentStatus(member.status));
   const summary =
@@ -326,7 +343,7 @@ function WorkflowPhase({
       </ComposerBanner.Row>
       {expanded ? (
         <ul id={membersId} aria-label={`${title} agents`} className="mb-1 ml-3 list-none">
-          {members.map((member) => (
+          {visibleMembers.map((member) => (
             <li key={member.id}>
               <WorkflowMember
                 agent={member}
@@ -339,6 +356,21 @@ function WorkflowPhase({
               />
             </li>
           ))}
+          {foldCompleted ? (
+            <li>
+              <ComposerBanner.Row
+                render={<button type="button" />}
+                aria-expanded={showCompleted}
+                onClick={() => onShowCompletedChange(!showCompleted)}
+                className="py-1 pe-2 text-2xs text-muted-foreground hover:bg-accent/30 hover:text-foreground"
+              >
+                <ComposerBanner.Icon />
+                <ComposerBanner.Content>
+                  {showCompleted ? "Hide completed" : `Show ${completed} completed`}
+                </ComposerBanner.Content>
+              </ComposerBanner.Row>
+            </li>
+          ) : null}
           {members.length === 0 ? (
             <li className="px-1 py-2 text-2xs text-muted-foreground">
               {isActiveSubagentStatus(coordinatorStatus)
