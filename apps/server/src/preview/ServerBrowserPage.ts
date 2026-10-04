@@ -454,7 +454,7 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
         // Flush an end frame so a static page retains its recording duration.
         paint();
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        recorder.stop();
+        if (recorder.state !== "inactive") recorder.stop();
       }
       await stopped;
       return { mimeType: recorder.mimeType, count: chunks.length, bytes: sizeBytes };
