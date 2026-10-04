@@ -1252,10 +1252,18 @@ export function makeCursorAdapterV2(
             case "readLints":
             case "semSearch": {
               const pattern = cursorToolSearchPattern(toolCall);
+              const searchPath =
+                toolCall.type === "grep"
+                  ? toolCall.args.path
+                  : toolCall.type === "glob"
+                    ? toolCall.args.targetDirectory
+                    : toolCall.type === "semSearch"
+                      ? toolCall.args.targetDirectories?.join(", ")
+                      : pattern;
               // A failed search keeps its error as one row under the searched path.
               const results =
                 toolCall.result?.status === "error" && outputText.trim().length > 0
-                  ? [{ fileName: pattern?.trim() || cursorToolName(toolCall), preview: outputText }]
+                  ? [{ fileName: searchPath?.trim() || ".", preview: outputText }]
                   : cursorToolSearchResults(toolCall, path);
               turnItem = {
                 ...base,
