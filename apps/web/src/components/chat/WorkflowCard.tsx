@@ -23,6 +23,10 @@ import { Dialog, DialogHeader, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { AgentElapsed } from "./AgentElapsed";
 import { ComposerBanner } from "./ComposerBanner";
+import {
+  useWorkflowLineageViewStore,
+  type WorkflowLineageView,
+} from "../../workflowLineageViewStore";
 
 type WorkflowStatus = RuntimeSubagent["status"];
 
@@ -93,15 +97,26 @@ export function WorkflowCard({
   inWorkflowThread = false,
   variant = "conversation",
   isThreadUnavailable,
+  lineageViewKey,
 }: {
   agent: OrchestrationV2Subagent;
   onOpenThread: (threadId: ThreadId) => void;
   inWorkflowThread?: boolean;
   variant?: "conversation" | "panel";
   isThreadUnavailable?: (threadId: ThreadId) => boolean;
+  /** Remembers open and closed choices across remounts and reloads; without it they stay local. */
+  lineageViewKey?: string;
 }) {
   const panel = variant === "panel";
-  const [expanded, setExpanded] = useState(!panel);
+  const [localView, setLocalView] = useState<WorkflowLineageView>({});
+  const storedView = useWorkflowLineageViewStore((state) =>
+    lineageViewKey === undefined ? undefined : state.byKey[lineageViewKey],
+  );
+  const remember = useWorkflowLineageViewStore((state) => state.remember);
+  const view = lineageViewKey === undefined ? localView : (storedView ?? {});
+  const updateView = (change: (current: WorkflowLineageView) => WorkflowLineageView) =>
+    lineageViewKey === undefined ? setLocalView(change) : remember(lineageViewKey, change);
+  const expanded = view.open ?? !panel;
   const [scriptOpen, setScriptOpen] = useState(false);
   const detailsId = useId();
   const { childThreadId } = agent;
@@ -180,7 +195,7 @@ export function WorkflowCard({
               aria-label={expanded ? "Collapse workflow" : "Expand workflow"}
               aria-expanded={expanded}
               aria-controls={detailsId}
-              onClick={() => setExpanded(!expanded)}
+              onClick={() => updateView((current) => ({ ...current, open: !expanded }))}
             >
               <ChevronDownIcon aria-hidden className={cn("size-3.5", !expanded && "rotate-180")} />
             </Button>
@@ -195,7 +210,13 @@ export function WorkflowCard({
                   title={phase.title}
                   members={members.filter((member) => (member.phaseIndex ?? -1) === phase.index)}
                   coordinatorStatus={coordinator.status}
-                  defaultExpanded={phase.index === currentPhase}
+                  expanded={view.phases?.[phase.index] ?? phase.index === currentPhase}
+                  onExpandedChange={(open) =>
+                    updateView((current) => ({
+                      ...current,
+                      phases: { ...current.phases, [phase.index]: open },
+                    }))
+                  }
                   panel={panel}
                   onOpenThread={onOpenThread}
                   isThreadUnavailable={isThreadUnavailable}
@@ -249,7 +270,8 @@ function WorkflowPhase({
   title,
   members,
   coordinatorStatus,
-  defaultExpanded,
+  expanded,
+  onExpandedChange,
   panel,
   onOpenThread,
   isThreadUnavailable,
@@ -257,13 +279,12 @@ function WorkflowPhase({
   title: string;
   members: RuntimeSubagent[];
   coordinatorStatus: WorkflowStatus;
-  defaultExpanded: boolean;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
   panel: boolean;
   onOpenThread: (threadId: ThreadId) => void;
   isThreadUnavailable: ((threadId: ThreadId) => boolean) | undefined;
 }) {
-  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
-  const expanded = userExpanded ?? defaultExpanded;
   const membersId = useId();
   const completed = members.filter((member) => member.status === "completed").length;
   const failed = members.some((member) => member.status === "failed");
@@ -281,7 +302,7 @@ function WorkflowPhase({
         aria-label={`${title}: ${summary}`}
         aria-expanded={expanded}
         aria-controls={membersId}
-        onClick={() => setUserExpanded(!expanded)}
+        onClick={() => onExpandedChange(!expanded)}
         className="py-1 pe-2 hover:bg-accent/30"
       >
         <ComposerBanner.Icon>

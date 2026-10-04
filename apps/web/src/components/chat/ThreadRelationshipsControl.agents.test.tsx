@@ -55,6 +55,7 @@ vi.mock("../ui/tooltip", () => ({
 }));
 
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
+import { useWorkflowLineageViewStore } from "../../workflowLineageViewStore";
 
 let renderer: ReactTestRenderer;
 
@@ -70,6 +71,7 @@ afterEach(async () => {
   state.projects = [];
   state.configs.clear();
   state.showTooltips = false;
+  useWorkflowLineageViewStore.setState({ byKey: {} });
 });
 
 it("shows the matching child agent details and refreshes them when the agent settles", async () => {
@@ -380,7 +382,7 @@ it.each(["live", "retained"])(
       expect(buttonWithLabel("Open workflow: Release review").props.onClick).toBeUndefined();
     }
     await act(async () => buttonWithLabel("Expand workflow").props.onClick());
-    await act(async () => buttonWithLabel("Inspect: 1/1").props.onClick());
+    // Inspect stays open from before the workflow collapsed.
     expect(text()).toContain("Code reviewer");
     expect(buttonWithLabel("Open Code reviewer").props.disabled).toBe(true);
     expect(buttonWithLabel("Open Code reviewer").props.onClick).toBeUndefined();
@@ -868,3 +870,113 @@ it.each(["source", "target"])(
     }
   },
 );
+
+function releaseCheck(buildForm: "running" | "completed" = "running") {
+  return {
+    id: "release-node",
+    driver: "claudeAgent",
+    providerInstanceId: "claude",
+    childThreadId: "release-thread",
+    title: "Native workflow",
+    prompt: "await workflow.run();",
+    model: "claude-opus-4-6",
+    status: "running",
+    result: null,
+    startedAt: DateTime.makeUnsafe("2026-09-16T12:00:00Z"),
+    completedAt: null,
+    updatedAt: DateTime.makeUnsafe("2026-09-16T12:00:00Z"),
+    workflow: {
+      name: "release-check",
+      phases: [
+        { index: 1, title: "Plan" },
+        { index: 2, title: "Build" },
+        { index: 3, title: "Review" },
+      ],
+      agents: [
+        { index: 0, label: "plan api", state: "completed", phaseIndex: 1, childThreadId: "plan" },
+        { index: 1, label: "build api", state: "completed", phaseIndex: 2, childThreadId: "api" },
+        { index: 2, label: "build form", state: buildForm, phaseIndex: 2, childThreadId: "form" },
+        { index: 3, label: "review api", state: "queued", phaseIndex: 3, childThreadId: "review" },
+      ],
+    },
+  };
+}
+
+/** Renders Lineage for the conversation that launched the Workflow, or the Workflow's own thread. */
+async function showLineage(threadId: "parent" | "release-thread", agent = releaseCheck()) {
+  const parent = { id: "parent", title: "Parent conversation", lineage: {} };
+  const workflowThread = {
+    id: "release-thread",
+    title: "release-check",
+    status: "running",
+    lineage: { parentThreadId: "parent", relationshipToParent: "subagent" },
+    forkedFrom: { type: "node", nodeId: agent.id },
+  };
+  const empty = { runs: [], providerThreads: [], providerSessions: [], contextTransfers: [] };
+  state.shells = [parent, workflowThread].map((source) => ({ environmentId: "test", source }));
+  state.projections.set("parent", { ...empty, thread: parent, subagents: [agent] });
+  state.projection =
+    threadId === "parent"
+      ? state.projections.get("parent")
+      : { ...empty, thread: workflowThread, subagents: [] };
+  await act(async () => renderer?.unmount());
+  await act(async () => {
+    renderer = create(
+      <ThreadRelationshipsPanel
+        environmentId={EnvironmentId.make("test")}
+        threadId={ThreadId.make(threadId)}
+      />,
+    );
+  });
+}
+
+const lineageText = () =>
+  renderer.root
+    .findAll((node) => typeof node.type === "string")
+    .flatMap((node) => node.children.filter((child) => typeof child === "string"))
+    .join(" ");
+const lineageButton = (label: string) =>
+  renderer.root
+    .findAllByType("button")
+    .find((button) => String(button.props["aria-label"]).startsWith(label))!;
+const phaseOpen = (title: string) => lineageButton(`${title}: `).props["aria-expanded"];
+
+/** A reload: in-memory choices are gone and only what was written to storage remains. */
+async function reloadLineageViews() {
+  const { name, storage } = useWorkflowLineageViewStore.persist.getOptions();
+  const saved = await storage!.getItem(name!);
+  useWorkflowLineageViewStore.setState({ byKey: {} });
+  await storage!.setItem(name!, saved!);
+  await useWorkflowLineageViewStore.persist.rehydrate();
+}
+
+it("remembers a workflow's open phases across thread switches, reloads and its own thread", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  await showLineage("parent");
+  expect(lineageText()).not.toContain("Build");
+  await act(async () => lineageButton("Expand workflow").props.onClick());
+  expect(phaseOpen("Build")).toBe(true);
+  await act(async () => lineageButton("Plan: ").props.onClick());
+  await act(async () => lineageButton("Build: ").props.onClick());
+  const remembered = () => {
+    expect(lineageButton("Collapse workflow")).toBeDefined();
+    expect(phaseOpen("Plan")).toBe(true);
+    expect(phaseOpen("Build")).toBe(false);
+    expect(phaseOpen("Review")).toBe(false);
+  };
+  remembered();
+
+  await showLineage("release-thread");
+  remembered();
+  await showLineage("parent");
+  remembered();
+  await reloadLineageViews();
+  await showLineage("parent");
+  remembered();
+
+  await act(async () => lineageButton("Collapse workflow").props.onClick());
+  await reloadLineageViews();
+  await showLineage("release-thread");
+  expect(lineageButton("Expand workflow")).toBeDefined();
+  expect(lineageText()).not.toContain("Plan");
+});

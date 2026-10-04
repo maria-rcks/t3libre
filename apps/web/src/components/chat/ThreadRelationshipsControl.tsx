@@ -56,6 +56,7 @@ import {
 } from "../../state/entities";
 import { threadEnvironment, useOwningSubagent } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { workflowLineageViewKey } from "../../workflowLineageViewStore";
 import { AgentElapsed } from "./AgentElapsed";
 import { WorkflowCard } from "./WorkflowCard";
 import { ThreadRelationshipIcon, threadRelationshipStatusLabel } from "./ThreadRelationshipIcon";
@@ -201,6 +202,7 @@ function liveSubagent<Agent extends RuntimeSubagent>(
 
 /** Only visible lineage rows resolve historical metadata outside the live projection window. */
 function ThreadLineageAgent(props: {
+  readonly environmentId: EnvironmentId;
   readonly ownerRef: ScopedThreadRef | null;
   readonly threadId: ThreadId;
   readonly childThread: OrchestrationV2ThreadShell | null | undefined;
@@ -223,6 +225,7 @@ function ThreadLineageAgent(props: {
         onOpenThread={props.onOpenThread}
         variant="panel"
         isThreadUnavailable={props.isThreadUnavailable}
+        lineageViewKey={workflowLineageViewKey(props.environmentId, agent.id)}
       />
     </li>
   ) : (
@@ -426,6 +429,7 @@ export function ThreadRelationshipsPanel(props: {
                   variant="panel"
                   isThreadUnavailable={isThreadUnavailable}
                   inWorkflowThread
+                  lineageViewKey={workflowLineageViewKey(props.environmentId, workflow.id)}
                 />
               </li>
             ) : null
@@ -439,6 +443,7 @@ export function ThreadRelationshipsPanel(props: {
               return (
                 <ThreadLineageAgent
                   key={threadId}
+                  environmentId={props.environmentId}
                   ownerRef={isChildAgent ? ref : null}
                   threadId={threadId}
                   childThread={node?.thread}
