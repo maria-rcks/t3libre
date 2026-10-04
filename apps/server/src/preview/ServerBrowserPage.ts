@@ -193,16 +193,40 @@ export const type = async (page: Page, input: PreviewAutomationTypeInput) => {
   const focused =
     (locator !== null || (await target.count()) > 0) &&
     (await target.evaluate(
-      // Source avoids duplicating DOM types in this server-only module.
-      `(element) => {
-        const nonText = ["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"];
-        const textControl = element.tagName === "TEXTAREA" ||
-          (element.tagName === "INPUT" && !nonText.includes(element.type ?? "text"));
-        if (!(textControl || element.isContentEditable) || element.disabled || element.readOnly) return false;
-        element.focus?.();
-        const active = element.getRootNode().activeElement;
+      (element) => {
+        // Like the desktop host: an enabled text control or contenteditable
+        // that actually takes focus. Anything else would swallow the text or
+        // send it to whichever field had focus before.
+        const control = element as unknown as {
+          readonly type?: string;
+          readonly disabled?: boolean;
+          readonly readOnly?: boolean;
+          readonly isContentEditable?: boolean;
+          readonly focus?: () => void;
+        };
+        const nonText = [
+          "button",
+          "checkbox",
+          "color",
+          "file",
+          "hidden",
+          "image",
+          "radio",
+          "range",
+          "reset",
+          "submit",
+        ];
+        const textControl =
+          element.tagName === "TEXTAREA" ||
+          (element.tagName === "INPUT" && !nonText.includes(control.type ?? "text"));
+        if (!(textControl || control.isContentEditable) || control.disabled || control.readOnly) {
+          return false;
+        }
+        control.focus?.();
+        const root = element.getRootNode() as { readonly activeElement?: typeof element | null };
+        const active = root.activeElement;
         return active != null && (active === element || element.contains(active));
-      }`,
+      },
       undefined,
       { timeout },
     ));
@@ -315,6 +339,7 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
   const context = canvas.getContext("2d");
   const chunks = [];
   let recorder = null;
+  let started = null;
   let stopped = null;
   let sizeBytes = 0;
   let tooLarge = false;
@@ -380,6 +405,10 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
         const mimeType = ["video/mp4;codecs=avc1.640033", "video/webm;codecs=vp9", "video/webm"].find((type) => MediaRecorder.isTypeSupported(type));
         const bitsPerSecond = Math.min(50e6, Math.max(2.5e6, bitmap.width * bitmap.height * 30 * 0.05));
         recorder = new MediaRecorder(canvas.captureStream(30), { mimeType, videoBitsPerSecond: bitsPerSecond });
+        started = new Promise((resolve, reject) => {
+          recorder.onstart = resolve;
+          recorder.onerror = (event) => reject(event.error);
+        });
         stopped = new Promise((resolve) => { recorder.onstop = resolve; });
         recorder.ondataavailable = (event) => {
           if (tooLarge || event.data.size === 0) return;
@@ -403,6 +432,7 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
       frame?.close();
       frame = bitmap;
       paint();
+      await started;
       return true;
     },
     cursor(x, y, click) {

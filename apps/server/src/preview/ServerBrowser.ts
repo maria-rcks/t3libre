@@ -605,6 +605,17 @@ const make = Effect.gen(function* () {
       let session: CDPSession | null = null;
       try {
         await encoder.evaluate(ServerBrowserPage.RECORDING_ENCODER_SCRIPT);
+        // Seed idle pages before returning so an immediate stop has a frame to encode.
+        const firstFrame = await ServerBrowserPage.captureViewport(tab.page, tab.cdp, {
+          format: "jpeg",
+          quality: RECORDING_SCREENCAST.quality,
+          scale: 1,
+        });
+        await encoder.evaluate(
+          ([data, width]) =>
+            (globalThis as unknown as EncoderWindow).__t3Recorder.frame(data, width),
+          [firstFrame, tab.page.viewportSize()?.width ?? UNATTACHED_FILL_VIEWPORT.width] as const,
+        );
         const opened = await tab.page.context().newCDPSession(tab.page);
         session = opened;
         const framesInFlight = new Set<Promise<void>>();
