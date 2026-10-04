@@ -50,7 +50,7 @@ const testLayer = Layer.mergeAll(
   ),
 );
 
-it.effect("establishes the read watermark on fresh dispatch and preserves it across retries", () =>
+it.effect("marks same-millisecond completions unread and preserves read state across retries", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -95,13 +95,9 @@ it.effect("establishes the read watermark on fresh dispatch and preserves it acr
       assert.isNull((yield* projections.getThreadShell(threadId))?.lastVisitedAt);
       const accepted = yield* orchestrator.dispatch(firstDispatch);
       const first = yield* projections.getThreadProjection(threadId);
-      assert.deepEqual(first.thread.lastVisitedAt, requestedAt);
-      assert.deepEqual((yield* projections.getThreadShell(threadId))?.lastVisitedAt, requestedAt);
-      yield* TestClock.adjust("1 second");
-      const retried = yield* orchestrator.dispatch(firstDispatch);
-      assert.equal(retried.sequence, accepted.sequence);
-      assert.deepEqual((yield* projections.getThread(threadId)).lastVisitedAt, requestedAt);
-      assert.lengthOf((yield* projections.getThreadProjection(threadId)).runs, 1);
+      const readWatermark = first.thread.lastVisitedAt;
+      assert.isNotNull(readWatermark);
+      assert.deepEqual((yield* projections.getThreadShell(threadId))?.lastVisitedAt, readWatermark);
 
       const runId = first.runs[0]!.id;
       if (outcome === "failed") {
@@ -122,10 +118,16 @@ it.effect("establishes the read watermark on fresh dispatch and preserves it acr
       }
       const ended = yield* projections.getThreadShell(threadId);
       assert.ok(ended?.latestRunCompletedAt);
+      assert.deepEqual(ended.latestRunCompletedAt, requestedAt);
       assert.isAbove(
         DateTime.toEpochMillis(ended.latestRunCompletedAt),
         DateTime.toEpochMillis(ended.lastVisitedAt!),
       );
+      yield* TestClock.adjust("1 second");
+      const retried = yield* orchestrator.dispatch(firstDispatch);
+      assert.equal(retried.sequence, accepted.sequence);
+      assert.deepEqual((yield* projections.getThread(threadId)).lastVisitedAt, readWatermark);
+      assert.lengthOf((yield* projections.getThreadProjection(threadId)).runs, 1);
       yield* orchestrator.dispatch({
         type: "thread.mark-unread",
         commandId: CommandId.make(`unread-completion-watermark-${outcome}`),

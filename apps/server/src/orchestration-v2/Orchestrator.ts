@@ -4411,6 +4411,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const now = yield* DateTime.now;
         // Null keeps imported history read. The first fresh dispatch establishes
         // a read watermark so its completion can be unread on every client.
+        // Offset it so a completion in the same millisecond is still unread.
         const event = yield* emit(
           events,
           command,
@@ -4419,7 +4420,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           threadId: command.threadId,
           providerInstanceId: projection.thread.providerInstanceId,
           occurredAt: now,
-          payload: { ...projection.thread, lastVisitedAt: now },
+          payload: {
+            ...projection.thread,
+            lastVisitedAt: DateTime.subtract(now, { milliseconds: 1 }),
+          },
         });
         projection = applyToProjection(projection, event);
       }
