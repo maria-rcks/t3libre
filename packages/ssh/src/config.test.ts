@@ -192,6 +192,36 @@ describe("ssh config", () => {
 
   it.effect.each([
     {
+      name: "reads Include files in byte order instead of display locale order",
+      config: "Host work\n  Include order/*.conf\n  HostName fallback.example.com\n",
+      included: "",
+      files: {
+        "order/a.conf": "HostName wrong.example.com\n",
+        "order/B.conf": "HostName actual.example.com\n",
+      },
+      hostname: "actual.example.com",
+      known: "wrong.example.com",
+    },
+    {
+      name: "reads Include files in UTF-8 byte order",
+      config: "Host work\n  Include order/*.conf\n  HostName fallback.example.com\n",
+      included: "",
+      files: {
+        "order/\u{e000}.conf": "HostName actual.example.com\n",
+        "order/\u{10000}.conf": "HostName wrong.example.com\n",
+      },
+      hostname: "actual.example.com",
+      known: "wrong.example.com",
+    },
+    {
+      name: "keeps a partly quoted first HostName uncertain instead of using a fallback",
+      config:
+        'Host work\n  HostName "act"ual.example.com\n  HostName fallback.example.com\n  Port 22\n',
+      included: "",
+      hostname: "work",
+      known: "actual.example.com",
+    },
+    {
       name: "keeps Host patterns case-sensitive",
       config: "Host WORK*\n  HostName upper.example.com\nHost work\n  HostName lower.example.com\n",
       included: "",
@@ -337,6 +367,41 @@ describe("ssh config", () => {
       known: "fallback.example.com",
     },
     {
+      name: "strips leading hash comments after an unspaced Include equals separator",
+      config: "Host work\n  Include=#blue.conf\n  HostName fallback.example.com\n",
+      included: "HostName actual.example.com\n",
+      hostname: "fallback.example.com",
+      known: "actual.example.com",
+    },
+    {
+      name: "strips leading hash comments after a spaced Include equals separator",
+      config: "Host work\n  Include =#blue.conf\n  HostName fallback.example.com\n",
+      included: "HostName actual.example.com\n",
+      hostname: "fallback.example.com",
+      known: "actual.example.com",
+    },
+    {
+      name: "preserves quoted leading hashes after an Include equals separator",
+      config: 'Host work\n  Include="#blue.conf" # comment\n  HostName fallback.example.com\n',
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+    {
+      name: "preserves embedded hashes after an Include equals separator",
+      config: "Host work\n  Include=target#blue.conf # comment\n  HostName fallback.example.com\n",
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+    {
+      name: "preserves unquoted literal equals paths after an Include equals separator",
+      config: "Host work\n  Include=target=prod.conf # comment\n  HostName fallback.example.com\n",
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+    {
       name: "keeps escaped-space Include paths uncertain",
       config: "Host work\n  Include target\\ with\\ spaces.conf\n  HostName fallback.example.com\n",
       included: "HostName actual.example.com\n",
@@ -407,10 +472,18 @@ describe("ssh config", () => {
         "target.conf",
         "target with spaces.conf",
         "target#blue.conf",
+        "#blue.conf",
         "target=prod.conf",
         "hidden/.disabled.conf",
       ]) {
         yield* fs.writeFileString(path.join(sshDir, name), fixture.included);
+      }
+      if ("files" in fixture && fixture.files) {
+        for (const [name, contents] of Object.entries(fixture.files)) {
+          const filePath = path.join(sshDir, name);
+          yield* fs.makeDirectory(path.dirname(filePath), { recursive: true });
+          yield* fs.writeFileString(filePath, contents);
+        }
       }
       yield* fs.writeFileString(
         path.join(sshDir, "known_hosts"),
@@ -430,6 +503,35 @@ describe("ssh config", () => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       for (const [config, hostname, keepKnownTarget] of [
+        ...(path.sep === "/"
+          ? ([
+              [
+                "Host work\n  Include target\\?.conf\n  HostName work.example.com\n  Port 22\n",
+                "work",
+                true,
+              ],
+              [
+                "Host work\n  Include target\\*.conf\n  HostName work.example.com\n  Port 22\n",
+                "work",
+                true,
+              ],
+              [
+                "Host work\n  Include target\\q.conf\n  HostName work.example.com\n  Port 22\n",
+                "work",
+                true,
+              ],
+              [
+                "Host skip*\n  Include target\\?.conf\nHost work\n  HostName work.example.com\n  Port 22\n",
+                "work.example.com",
+                false,
+              ],
+              [
+                "Host work\n  HostName work.example.com\n  Port 22\n  Include target\\?.conf\n",
+                "work.example.com",
+                false,
+              ],
+            ] as const)
+          : []),
         [
           "Match exec true\n  HostName dynamic.example.com\nHost work\n  HostName work.example.com\n  Port 22\n",
           "work",
@@ -577,6 +679,7 @@ describe("ssh config", () => {
           "target.conf",
           "config.d/prod/target.conf",
           "config.d/team hosts.conf",
+          ...(path.sep === "/" ? ["target?.conf", "target*.conf", "targetq.conf"] : []),
         ]) {
           yield* fs.writeFileString(
             path.join(sshDir, name),

@@ -1,3 +1,5 @@
+import * as NodeBuffer from "node:buffer";
+
 import type { DesktopDiscoveredSshHost } from "@t3tools/contracts";
 
 import * as Config from "effect/Config";
@@ -13,6 +15,7 @@ const NO_HOSTS: ReadonlyArray<string> = [] as const;
 
 function stripInlineComment(line: string): string {
   return line
+    .replace(/^(\s*[^\s=]+)\s*=/u, "$1 ")
     .replace(/"[^"]*"|'[^']*'|(?:^|\s)#.*/gu, (part) =>
       part.trimStart().startsWith("#") ? "" : part,
     )
@@ -20,7 +23,7 @@ function stripInlineComment(line: string): string {
 }
 
 function splitDirectiveArgs(value: string): ReadonlyArray<string> {
-  const args = value.replace(/^([^\s=]+)\s*=/u, "$1 ").match(/(?:"[^"]*"|'[^']*'|\S)+/gu) ?? [];
+  const args = value.match(/(?:"[^"]*"|'[^']*'|\S)+/gu) ?? [];
   return args.map((entry) => entry.replace(/^(["'])(.*)\1$/u, "$2"));
 }
 
@@ -80,7 +83,9 @@ const expandGlob = Effect.fnUntraced(function* (pattern: string) {
       matchedPaths.push(entryPath);
     }
   }
-  return matchedPaths.toSorted((left, right) => left.localeCompare(right));
+  return matchedPaths.toSorted((left, right) =>
+    NodeBuffer.Buffer.compare(NodeBuffer.Buffer.from(left), NodeBuffer.Buffer.from(right)),
+  );
 });
 
 interface SshHostPatterns {
@@ -96,6 +101,7 @@ interface SshTargetRule {
 }
 
 function expandConfiguredHostname(hostname: string, alias: string): string | null {
+  if (/["']/u.test(hostname)) return null;
   let supported = true;
   const expanded = hostname.replace(/%(.?)/gsu, (_, token: string) => {
     if (token === "h") return alias.toLowerCase();
@@ -182,6 +188,7 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
           /["'[\]]/u.test(includePattern) ||
           /%|\$\{/u.test(includePattern) ||
           /^~[^/\\]/u.test(includePattern) ||
+          (path.sep === "/" && includePattern.includes("\\")) ||
           /\\(?:\s|$)/u.test(includePattern) ||
           /[*?]/u.test(path.dirname(resolvedPattern))
         ) {
