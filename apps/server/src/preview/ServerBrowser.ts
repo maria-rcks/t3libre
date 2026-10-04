@@ -272,7 +272,13 @@ const make = Effect.gen(function* () {
           throw cause;
         }
       }
-      const userDataDir = NodePath.join(profilesDir, encodeURIComponent(profileId));
+      const encodedProfileId = encodeURIComponent(profileId);
+      const userDataDir = NodePath.join(
+        profilesDir,
+        profileId === "." || profileId === ".."
+          ? encodedProfileId.replaceAll(".", "%2E")
+          : encodedProfileId,
+      );
       await NodeFSP.mkdir(userDataDir, { recursive: true });
       return chromium.launchPersistentContext(userDataDir, { ...launchOptions, ...contextOptions });
     };
