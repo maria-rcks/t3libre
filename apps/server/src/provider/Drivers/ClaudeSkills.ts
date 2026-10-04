@@ -45,6 +45,7 @@ type SkillFrontmatter =
   | { readonly kind: "malformed" }
   | {
       readonly kind: "parsed";
+      readonly name?: string;
       readonly description?: string;
       readonly userInvocationOnly?: boolean;
       readonly userInvocable?: boolean;
@@ -113,9 +114,11 @@ function parseSkillFrontmatter(contents: string): SkillFrontmatter {
   }
 
   const record = parsed as Record<string, unknown>;
+  const name = typeof record.name === "string" ? record.name.trim() : "";
   const description = typeof record.description === "string" ? record.description.trim() : "";
   return {
     kind: "parsed",
+    ...(name ? { name } : {}),
     ...(description ? { description } : {}),
     ...(parseFrontmatterBoolean(record["disable-model-invocation"]) === true
       ? { userInvocationOnly: true }
@@ -317,6 +320,7 @@ const decodeInstalledPlugin = Schema.decodeUnknownOption(
 );
 const PluginManifest = Schema.fromJsonString(
   Schema.Struct({
+    name: Schema.optional(Schema.NonEmptyString),
     skills: Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
   }),
 );
@@ -326,11 +330,15 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
   configDirPath: string,
   cwd: string | undefined,
   enabledPlugins: ReadonlyMap<string, boolean>,
+  environment: NodeJS.ProcessEnv,
 ): Effect.fn.Return<ReadonlyArray<ClaudeSkillRoot>, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const pluginRoot = environment.CLAUDE_CODE_PLUGIN_CACHE_DIR
+    ? path.resolve(cwd ?? ".", environment.CLAUDE_CODE_PLUGIN_CACHE_DIR)
+    : path.join(configDirPath, "plugins");
   const installed = yield* fileSystem
-    .readFileString(path.join(configDirPath, "plugins", "installed_plugins.json"))
+    .readFileString(path.join(pluginRoot, "installed_plugins.json"))
     .pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(InstalledPlugins)),
       Effect.orElseSucceed(() => undefined),
@@ -341,8 +349,6 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
 
   for (const [key, entries] of Object.entries(installed?.plugins ?? {}).sort()) {
     if (enabledPlugins.get(key) !== true) continue;
-    const prefix = key.split("@")[0];
-    if (!prefix) continue;
     const install = entries
       .flatMap((entry) => {
         const record = Option.getOrUndefined(decodeInstalledPlugin(entry));
@@ -358,7 +364,6 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
       .sort((left, right) => scopePriority[right.scope] - scopePriority[left.scope])[0];
     if (!install) continue;
     const scope = install.scope === "user" ? "user" : "project";
-    roots.push({ directory: path.join(install.installPath, "skills"), scope, prefix });
 
     // Plugins such as mattpocock-skills declare individual nested folders;
     // a declared path can also be a directory containing several skills.
@@ -368,9 +373,41 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
         Effect.flatMap(Schema.decodeUnknownEffect(PluginManifest)),
         Effect.orElseSucceed(() => undefined),
       );
+    const prefix = manifest?.name ?? key.split("@")[0];
+    if (!prefix) continue;
+    const skillsDirectory = path.join(install.installPath, "skills");
+    roots.push({ directory: skillsDirectory, scope, prefix });
+    if (
+      !(yield* fileSystem.exists(skillsDirectory).pipe(Effect.orElseSucceed(() => false))) &&
+      (yield* fileSystem
+        .exists(path.join(install.installPath, "SKILL.md"))
+        .pipe(Effect.orElseSucceed(() => false)))
+    ) {
+      roots.push({ directory: install.installPath, scope, prefix, singleSkill: true });
+    }
+    const installRoot = path.resolve(install.installPath);
+    const canonicalInstallRoot = yield* fileSystem
+      .realPath(installRoot)
+      .pipe(Effect.orElseSucceed(() => undefined));
     const declared = manifest?.skills;
     for (const relative of typeof declared === "string" ? [declared] : (declared ?? [])) {
-      const directory = path.resolve(install.installPath, relative);
+      const directory = path.resolve(installRoot, relative);
+      const canonicalDirectory = yield* fileSystem
+        .realPath(directory)
+        .pipe(Effect.orElseSucceed(() => undefined));
+      if (!canonicalInstallRoot || !canonicalDirectory) continue;
+      if (
+        [
+          path.relative(installRoot, directory),
+          path.relative(canonicalInstallRoot, canonicalDirectory),
+        ].some(
+          (fromInstall) =>
+            fromInstall === ".." ||
+            fromInstall.startsWith(`..${path.sep}`) ||
+            path.isAbsolute(fromInstall),
+        )
+      )
+        continue;
       const singleSkill = yield* fileSystem
         .exists(path.join(directory, "SKILL.md"))
         .pipe(Effect.orElseSucceed(() => false));
@@ -435,7 +472,12 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
   const roots: ReadonlyArray<ClaudeSkillRoot> = [
     { directory: path.join(configDirPath, "skills"), scope: "user" },
     ...(cwd ? [{ directory: path.join(cwd, ".claude", "skills"), scope: "project" as const }] : []),
-    ...(yield* discoverPluginSkillRoots(configDirPath, cwd, enabledPlugins)),
+    ...(yield* discoverPluginSkillRoots(
+      configDirPath,
+      cwd,
+      enabledPlugins,
+      environment ?? process.env,
+    )),
   ];
 
   const skillsByName = new Map<string, ServerProviderSkill>();
@@ -465,7 +507,7 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         continue;
       }
 
-      // Claude Code identifies a skill by its directory, not by the
+      // Claude Code identifies a user/project skill by its directory, not by the
       // frontmatter `name`: verified against the CLI, a skill in `probe-alias/`
       // declaring `name: probe-alias-frontmatter` is published as
       // `probe-alias`, and only `skillOverrides["probe-alias"]` switches it
@@ -475,7 +517,12 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
       if (!directoryName) {
         continue;
       }
-      const name = root.prefix ? `${root.prefix}:${directoryName}` : directoryName;
+      // Plugin skills use their frontmatter name, with a sanitized directory fallback.
+      const pluginSkillName =
+        root.prefix && frontmatter.kind === "parsed" ? frontmatter.name : undefined;
+      const name = root.prefix
+        ? `${root.prefix}:${pluginSkillName ?? directoryName.replace(/[^a-zA-Z0-9_-]/g, "-")}`
+        : directoryName;
 
       // First root wins, so a later root never displaces a higher-precedence
       // skill of the same name.

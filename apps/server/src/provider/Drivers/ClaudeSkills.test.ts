@@ -20,64 +20,107 @@ const writeSkill = Effect.fn(function* (
 });
 
 it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
-  it.effect(
-    "discovers only enabled installed plugin skills with their namespace and metadata",
-    () =>
+  it.effect.each(["default", "alternate", "relative alternate", "root named", "root fallback"])(
+    "discovers enabled installed plugin skills with %s layout",
+    (layout) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
         const configDir = path.join(tempDir, "claude-home");
-        const plugin = path.join(configDir, "plugins", "cache", "shop", "plugin", "1.0.0");
-        yield* writeSkill(path.join(plugin, "skills"), "plain", "# Plain");
+        const workspace = path.join(tempDir, "workspace");
+        const pluginRoot = layout.includes("alternate")
+          ? path.join(workspace, "alternate")
+          : path.join(configDir, "plugins");
+        const environment = layout.includes("alternate")
+          ? { CLAUDE_CODE_PLUGIN_CACHE_DIR: layout === "alternate" ? pluginRoot : "alternate" }
+          : {};
+        const plugin = path.join(pluginRoot, "cache", "shop", "plugin", "1.0.0");
+        const rootSkill = layout.startsWith("root");
+        const skillsDirectory = rootSkill ? "custom" : "skills";
+        yield* writeSkill(path.join(plugin, skillsDirectory), "plain", "# Plain");
         yield* writeSkill(
-          path.join(plugin, "skills", "engineering"),
+          path.join(plugin, skillsDirectory, "engineering"),
           "review",
-          "---\nname: ignored-alias\ndescription: Review changes.\ndisable-model-invocation: yes\nuser-invocable: no\n---\n",
+          "---\nname: review-alias\ndescription: Review changes.\ndisable-model-invocation: yes\nuser-invocable: no\n---\n",
         );
         yield* writeSkill(path.join(plugin, "extra"), "deploy", "# Deploy");
+        yield* writeSkill(plugin, "..safe", "---\nname: safe.name alias_Upper\n---\n");
+        const outside = path.resolve(plugin, "../outside");
+        yield* writeSkill(path.dirname(outside), path.basename(outside), "# Outside");
+        if (path.sep !== "\\") yield* fs.symlink(outside, path.join(plugin, "linked"));
+        yield* fs.writeFileString(
+          path.join(plugin, "SKILL.md"),
+          layout === "root fallback" ? "# Root" : "---\nname: root-alias\n---\n",
+        );
         yield* fs.makeDirectory(path.join(plugin, ".claude-plugin"), { recursive: true });
         yield* fs.writeFileString(
           path.join(plugin, ".claude-plugin", "plugin.json"),
-          '{"skills":["./skills/engineering/review","./extra","./skills/plain"]}',
+          `{"name":"manifest-plugin","skills":[
+            "./${skillsDirectory}/engineering/review","./extra","./${skillsDirectory}/plain",
+            "./..safe","./../outside","${outside.replaceAll("\\", "/")}","./linked"
+          ]}`,
         );
         yield* fs.writeFileString(
-          path.join(configDir, "plugins", "installed_plugins.json"),
+          path.join(pluginRoot, "installed_plugins.json"),
           `{"version":2,"plugins":{
             "plugin@shop":[null,{"scope":"user","installPath":"${plugin.replaceAll("\\", "/")}"}],
             "disabled@shop":[{"scope":"user","installPath":"${plugin.replaceAll("\\", "/")}"}],
             "unmentioned@shop":[{"scope":"user","installPath":"${plugin.replaceAll("\\", "/")}"}]
           }}`,
         );
+        yield* fs.makeDirectory(configDir, { recursive: true });
         yield* fs.writeFileString(
           path.join(configDir, "settings.json"),
-          '{ "enabledPlugins": { "plugin@shop": true, "disabled@shop": false, "uninstalled@shop": true }, "skillOverrides": { "plugin:review": "off" } }',
+          '{ "enabledPlugins": { "plugin@shop": true, "disabled@shop": false, "uninstalled@shop": true }, "skillOverrides": { "manifest-plugin:review-alias": "off" } }',
         );
 
-        const skills = yield* discoverClaudeSkills({ homePath: configDir });
-        assert.deepEqual(skills, [
-          {
-            name: "plugin:deploy",
-            path: path.join(plugin, "extra", "deploy", "SKILL.md"),
-            enabled: true,
-            scope: "user",
-          },
-          {
-            name: "plugin:plain",
-            path: path.join(plugin, "skills", "plain", "SKILL.md"),
-            enabled: true,
-            scope: "user",
-          },
-          {
-            name: "plugin:review",
-            path: path.join(plugin, "skills", "engineering", "review", "SKILL.md"),
-            enabled: false,
-            scope: "user",
-            description: "Review changes.",
-            userInvocationOnly: true,
-            userInvocable: false,
-          },
-        ]);
+        const skills = yield* discoverClaudeSkills({ homePath: configDir }, workspace, environment);
+        assert.deepEqual(
+          skills,
+          [
+            ...(rootSkill
+              ? [
+                  {
+                    name:
+                      layout === "root fallback"
+                        ? "manifest-plugin:1-0-0"
+                        : "manifest-plugin:root-alias",
+                    path: path.join(plugin, "SKILL.md"),
+                    enabled: true,
+                    scope: "user",
+                  },
+                ]
+              : []),
+            {
+              name: "manifest-plugin:deploy",
+              path: path.join(plugin, "extra", "deploy", "SKILL.md"),
+              enabled: true,
+              scope: "user",
+            },
+            {
+              name: "manifest-plugin:plain",
+              path: path.join(plugin, skillsDirectory, "plain", "SKILL.md"),
+              enabled: true,
+              scope: "user",
+            },
+            {
+              name: "manifest-plugin:review-alias",
+              path: path.join(plugin, skillsDirectory, "engineering", "review", "SKILL.md"),
+              enabled: false,
+              scope: "user",
+              description: "Review changes.",
+              userInvocationOnly: true,
+              userInvocable: false,
+            },
+            {
+              name: "manifest-plugin:safe.name alias_Upper",
+              path: path.join(plugin, "..safe", "SKILL.md"),
+              enabled: true,
+              scope: "user",
+            },
+          ].sort((left, right) => left.name.localeCompare(right.name)),
+        );
       }),
   );
 
