@@ -21,6 +21,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as TestClock from "effect/testing/TestClock";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -47,6 +48,117 @@ const testLayer = Layer.mergeAll(
     ProviderAdapterRegistry.makeLayer([adapter]),
     { databaseLayer: database, runEffectWorker: false },
   ),
+);
+
+it.effect("establishes the read watermark on fresh dispatch and preserves it across retries", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    for (const outcome of ["failed", "interrupted"] as const) {
+      const threadId = ThreadId.make(`thread:completion-watermark:${outcome}`);
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`create-completion-watermark-${outcome}`),
+        threadId,
+        projectId: ProjectId.make("project:completion-watermark"),
+        title: "Background task",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* TestClock.adjust("1 second");
+      assert.isNull((yield* projections.getThreadShell(threadId))?.lastVisitedAt);
+      const requestedAt = yield* DateTime.now;
+      const firstDispatch = {
+        type: "message.dispatch" as const,
+        commandId: CommandId.make(`first-completion-watermark-${outcome}`),
+        threadId,
+        messageId: MessageId.make(`first-completion-watermark-${outcome}`),
+        text: "Run in the background",
+        attachments: [],
+        dispatchMode: { type: "defer_start" as const },
+        createdBy: "agent" as const,
+        creationSource: "mcp" as const,
+      };
+      const rejected = yield* Effect.exit(
+        orchestrator.dispatch({
+          ...firstDispatch,
+          commandId: CommandId.make(`rejected-completion-watermark-${outcome}`),
+          modelSelection: { ...modelSelection, instanceId: ProviderInstanceId.make("missing") },
+        }),
+      );
+      assert.equal(rejected._tag, "Failure");
+      assert.isNull((yield* projections.getThreadShell(threadId))?.lastVisitedAt);
+      const accepted = yield* orchestrator.dispatch(firstDispatch);
+      const first = yield* projections.getThreadProjection(threadId);
+      assert.deepEqual(first.thread.lastVisitedAt, requestedAt);
+      assert.deepEqual((yield* projections.getThreadShell(threadId))?.lastVisitedAt, requestedAt);
+      yield* TestClock.adjust("1 second");
+      const retried = yield* orchestrator.dispatch(firstDispatch);
+      assert.equal(retried.sequence, accepted.sequence);
+      assert.deepEqual((yield* projections.getThread(threadId)).lastVisitedAt, requestedAt);
+      assert.lengthOf((yield* projections.getThreadProjection(threadId)).runs, 1);
+
+      const runId = first.runs[0]!.id;
+      if (outcome === "failed") {
+        yield* orchestrator.dispatch({
+          type: "prepared-run.fail",
+          commandId: CommandId.make(`fail-completion-watermark-${outcome}`),
+          threadId,
+          runId,
+          failure: { class: "unknown", message: "Preparation failed", code: null, retryable: true },
+        });
+      } else {
+        yield* orchestrator.dispatch({
+          type: "run.interrupt",
+          commandId: CommandId.make(`interrupt-completion-watermark-${outcome}`),
+          threadId,
+          runId,
+        });
+      }
+      const ended = yield* projections.getThreadShell(threadId);
+      assert.ok(ended?.latestRunCompletedAt);
+      assert.isAbove(
+        DateTime.toEpochMillis(ended.latestRunCompletedAt),
+        DateTime.toEpochMillis(ended.lastVisitedAt!),
+      );
+      yield* orchestrator.dispatch({
+        type: "thread.mark-unread",
+        commandId: CommandId.make(`unread-completion-watermark-${outcome}`),
+        threadId,
+      });
+      const markedUnreadAt = (yield* projections.getThread(threadId)).lastVisitedAt;
+      yield* orchestrator.dispatch({
+        ...firstDispatch,
+        commandId: CommandId.make(`second-completion-watermark-${outcome}`),
+        messageId: MessageId.make(`second-completion-watermark-${outcome}`),
+      });
+      assert.deepEqual((yield* projections.getThread(threadId)).lastVisitedAt, markedUnreadAt);
+
+      const visitedAt = DateTime.formatIso(yield* DateTime.now);
+      yield* orchestrator.dispatch({
+        type: "thread.visit",
+        commandId: CommandId.make(`visit-completion-watermark-${outcome}`),
+        threadId,
+        visitedAt,
+      });
+      yield* TestClock.adjust("1 second");
+      yield* orchestrator.dispatch({
+        ...firstDispatch,
+        commandId: CommandId.make(`queued-completion-watermark-${outcome}`),
+        messageId: MessageId.make(`queued-completion-watermark-${outcome}`),
+        dispatchMode: { type: "queue_after_active" },
+      });
+      assert.equal(
+        DateTime.formatIso((yield* projections.getThread(threadId)).lastVisitedAt!),
+        visitedAt,
+      );
+    }
+  }).pipe(Effect.provide(testLayer)),
 );
 
 it.effect(
