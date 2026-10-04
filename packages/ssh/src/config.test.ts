@@ -116,7 +116,7 @@ describe("ssh config", () => {
           '  HostName "work.example.com"',
           "Host *",
           "  Port 22",
-          "  HostName fallback.example.com",
+          "  HostName %h",
           "",
         ].join("\n"),
       );
@@ -140,7 +140,7 @@ describe("ssh config", () => {
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
-  it.effect("only suppresses known targets with a proven hostname and configured port", () =>
+  it.effect("only suppresses proven equal picker targets regardless of historical ports", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -150,23 +150,30 @@ describe("ssh config", () => {
         suppressed,
         alias = "work",
         hostname = "work.example.com",
+        barePort = configuredPort,
+        bareHostname = hostname === null ? null : "%h",
       ] of [
         [null, "work.example.com", false],
         [22, "work", false, "Work", null],
         [22, "work", true, "Work", "work"],
         [22, "work#blue.example.com", true, "work", '"work#blue.example.com"'],
         [22, "work.example.com", true],
-        [22, "[work.example.com]:2222", false],
+        [22, "[work.example.com]:2222", true],
         [2222, "[work.example.com]:2222", true],
-        [2222, "work.example.com", false],
+        [2222, "work.example.com", true],
         [2222, "work.example.com:2222", true],
+        [2222, "[work.example.com]:2222", false, "work", "work.example.com", 22],
+        [22, "work.example.com", false, "work", "work.example.com", 2222],
+        [22, "work.example.com", false, "work", "work.example.com", null],
+        [22, "work.example.com", false, "work", "work.example.com", 22, null],
+        [22, "work.example.com", false, "work", "work.example.com", 22, "other.example.com"],
       ] as const) {
         const homeDir = yield* makeTempHomeDir();
         const sshDir = path.join(homeDir, ".ssh");
         yield* fs.makeDirectory(sshDir);
         yield* fs.writeFileString(
           path.join(sshDir, "config"),
-          `Host ${alias}\n${hostname === null ? "" : `  HostName ${hostname}\n`}${configuredPort === null ? "" : `Host *\n  Port ${configuredPort}\n`}`,
+          `Host ${alias}\n${hostname === null ? "" : `  HostName ${hostname}\n`}${configuredPort === null ? "" : `  Port ${configuredPort}\n`}Host *\n${bareHostname === null ? "" : `  HostName ${bareHostname}\n`}${barePort === null ? "" : `  Port ${barePort}\n`}`,
         );
         yield* fs.writeFileString(
           path.join(sshDir, "known_hosts"),
@@ -219,6 +226,38 @@ describe("ssh config", () => {
         'Host work\n  HostName shared.example.com\nMatch originalhost "wo""rk"\n  Port 2222\nHost *\n  Port 22\n',
       included: "",
       hostname: "shared.example.com",
+      known: "shared.example.com",
+    },
+    {
+      name: "keeps partly quoted Host patterns uncertain",
+      config:
+        'Host work\n  HostName shared.example.com\nHost "wo"*\n  Port 2222\nHost *\n  HostName %h\n  Port 22\n',
+      included: "",
+      hostname: "shared.example.com",
+      known: "shared.example.com",
+    },
+    {
+      name: "keeps suffix-quoted Host patterns uncertain",
+      config:
+        'Host work\n  HostName shared.example.com\nHost wo"*"\n  Port 2222\nHost *\n  HostName %h\n  Port 22\n',
+      included: "",
+      hostname: "shared.example.com",
+      known: "shared.example.com",
+    },
+    {
+      name: "keeps partly quoted Host Include guards uncertain",
+      config:
+        'Host "wo"*\n  Include target.conf\nHost work\n  HostName shared.example.com\n  Port 22\nHost *\n  HostName %h\n  Port 22\n',
+      included: "HostName actual.example.com\n  Port 2222\n",
+      hostname: "work",
+      known: "shared.example.com",
+    },
+    {
+      name: "keeps literal alias discovery separate from uncertain Host patterns",
+      config:
+        'Host work "wo"*\n  HostName shared.example.com\n  Port 22\nHost *\n  HostName %h\n  Port 22\n',
+      included: "",
+      hostname: "work",
       known: "shared.example.com",
     },
     {
@@ -351,7 +390,7 @@ describe("ssh config", () => {
           true,
         ],
         [
-          'Host work\n  HostName work.example.com\n  Port 22\nMatch originalhost "wo"rk\n  Port 2222\n',
+          'Host work\n  HostName work.example.com\n  Port 22\nHost *\n  HostName %h\n  Port 22\nMatch originalhost "wo"rk\n  Port 2222\n',
           "work.example.com",
           false,
         ],
@@ -444,7 +483,10 @@ describe("ssh config", () => {
         const homeDir = yield* makeTempHomeDir();
         const sshDir = path.join(homeDir, ".ssh");
         yield* fs.makeDirectory(path.join(sshDir, "config.d", "prod"), { recursive: true });
-        yield* fs.writeFileString(path.join(sshDir, "config"), config);
+        yield* fs.writeFileString(
+          path.join(sshDir, "config"),
+          `${config}Host *\n  HostName %h\n  Port 22\n`,
+        );
         for (const name of [
           "target.conf",
           "config.d/prod/target.conf",
@@ -502,6 +544,7 @@ describe("ssh config", () => {
             "Host * !work\n  HostName other.example.com\nHost work\n  HostName work.example.com\n",
           included: "",
           target: "work.example.com",
+          keepRaw: true,
         },
         {
           config: "Host skip*\n  Include target.conf\nHost work\n  Include target.conf\n",
@@ -514,7 +557,7 @@ describe("ssh config", () => {
         yield* fs.makeDirectory(sshDir);
         yield* fs.writeFileString(
           path.join(sshDir, "config"),
-          `${fixture.config}Host *\n  Port 22\n`,
+          `${fixture.config}Host *\n  HostName %h\n  Port 22\n`,
         );
         yield* fs.writeFileString(path.join(sshDir, "target.conf"), fixture.included);
         yield* fs.writeFileString(
@@ -523,15 +566,22 @@ describe("ssh config", () => {
         );
 
         const hosts = yield* discoverSshHosts({ homeDir });
-        assert.deepEqual(hosts, [
-          {
-            alias: "work",
-            hostname: fixture.target,
-            username: null,
-            port: null,
-            source: "ssh-config",
-          },
-        ]);
+        assert.deepEqual(
+          hosts.filter(({ source }) => source === "ssh-config"),
+          [
+            {
+              alias: "work",
+              hostname: fixture.target,
+              username: null,
+              port: null,
+              source: "ssh-config",
+            },
+          ],
+        );
+        assert.deepEqual(
+          hosts.filter(({ source }) => source === "known-hosts").map(({ alias }) => alias),
+          fixture.keepRaw ? [fixture.target] : [],
+        );
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
@@ -556,6 +606,7 @@ describe("ssh config", () => {
             "Host tokenized",
             "  HostName wrong.example.com",
             "Host *",
+            "  HostName %h",
             "  Port 22",
             "",
           ].join("\n"),
@@ -590,7 +641,7 @@ describe("ssh config", () => {
       yield* fs.makeDirectory(sshDir);
       yield* fs.writeFileString(
         path.join(sshDir, "config"),
-        "Host Mixed\n  HostName %h.internal\nHost escaped\n  HostName zone%%en0\nHost unsupported\n  HostName %p.internal\nHost *\n  Port 22\n",
+        "Host Mixed\n  HostName %h.internal\nHost escaped\n  HostName zone%%en0\nHost unsupported\n  HostName %p.internal\nHost *\n  HostName %h\n  Port 22\n",
       );
       yield* fs.writeFileString(
         path.join(sshDir, "known_hosts"),

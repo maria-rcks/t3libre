@@ -224,9 +224,12 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
       continue;
     }
 
-    context.patterns = { values: rawArgs, caseInsensitive: false };
+    context.patterns = {
+      values: rawArgs.some((arg) => /["']/u.test(arg)) ? null : rawArgs,
+      caseInsensitive: false,
+    };
     for (const alias of rawArgs) {
-      if (alias.length === 0 || hasSshPattern(alias)) {
+      if (alias.length === 0 || hasSshPattern(alias) || /["']/u.test(alias)) {
         continue;
       }
       if (context.guards.every((guard) => matchesHostPatterns(alias, guard))) {
@@ -254,10 +257,7 @@ function normalizeKnownHostsHostname(rawHost: string): string {
   return firstColonIndex === lastColonIndex ? rawHost.slice(0, lastColonIndex) : rawHost;
 }
 
-export function parseKnownHostsHostnames(
-  raw: string,
-  excludedTargets: ReadonlySet<string> = new Set(),
-): ReadonlyArray<string> {
+export function parseKnownHostsHostnames(raw: string): ReadonlyArray<string> {
   const hostnames = new Set<string>();
 
   for (const line of raw.split(/\r?\n/u)) {
@@ -279,12 +279,6 @@ export function parseKnownHostsHostnames(
       if (host.length === 0 || hasSshPattern(host)) {
         continue;
       }
-      const explicitPort =
-        /^\[[^\]]+\]:(\d+)$/u.exec(rawHost)?.[1] ?? /^[^:]+:(\d+)$/u.exec(rawHost)?.[1];
-      const port = explicitPort ? Number(explicitPort) : 22;
-      if (excludedTargets.has(`${host.toLowerCase()}\u0000${port}`)) {
-        continue;
-      }
       hostnames.add(host);
     }
   }
@@ -292,15 +286,12 @@ export function parseKnownHostsHostnames(
   return [...hostnames].toSorted((left, right) => left.localeCompare(right));
 }
 
-const readKnownHostsHostnames = Effect.fnUntraced(function* (
-  filePath: string,
-  excludedTargets: ReadonlySet<string>,
-) {
+const readKnownHostsHostnames = Effect.fnUntraced(function* (filePath: string) {
   const fs = yield* FileSystem.FileSystem;
   if (!(yield* fs.exists(filePath))) {
     return NO_HOSTS;
   }
-  return parseKnownHostsHostnames(yield* fs.readFileString(filePath), excludedTargets);
+  return parseKnownHostsHostnames(yield* fs.readFileString(filePath));
 });
 
 export const discoverSshHosts = Effect.fnUntraced(
@@ -328,10 +319,14 @@ export const discoverSshHosts = Effect.fnUntraced(
       { patterns: { values: ["*"], caseInsensitive: false }, guards: [] },
       targetRules,
     );
+    const configAliasSet = new Set(configAliases);
+    const knownHosts = yield* readKnownHostsHostnames(path.join(sshDirectory, "known_hosts"));
     const discovered = new Map<string, DesktopDiscoveredSshHost>();
     const configuredTargets = new Set<string>();
 
-    for (const alias of configAliases) {
+    for (const alias of [...configAliases, ...knownHosts]) {
+      if (discovered.has(alias)) continue;
+      const fromConfig = configAliasSet.has(alias);
       const hostnameRule = targetRules.find(
         (rule) =>
           rule.directive === "hostname" &&
@@ -358,32 +353,22 @@ export const discoverSshHosts = Effect.fnUntraced(
           ? Number(portRule.value)
           : Number.NaN
         : Number.NaN;
-      if (configuredHostname && Number.isInteger(port) && port > 0 && port <= 65_535) {
-        configuredTargets.add(`${hostname.toLowerCase()}\u0000${port}`);
+      const target =
+        configuredHostname && Number.isInteger(port) && port > 0 && port <= 65_535
+          ? `${hostname.toLowerCase()}\u0000${port}`
+          : null;
+      // The picker resolves bare inputs; known_hosts ports are historical.
+      if (fromConfig) {
+        if (target) configuredTargets.add(target);
+      } else if (target && configuredTargets.has(target)) {
+        continue;
       }
       discovered.set(alias, {
         alias,
-        hostname,
+        hostname: fromConfig ? hostname : alias,
         username: null,
         port: null,
-        source: "ssh-config",
-      });
-    }
-
-    const knownHosts = yield* readKnownHostsHostnames(
-      path.join(sshDirectory, "known_hosts"),
-      configuredTargets,
-    );
-    for (const hostname of knownHosts) {
-      if (discovered.has(hostname)) {
-        continue;
-      }
-      discovered.set(hostname, {
-        alias: hostname,
-        hostname,
-        username: null,
-        port: null,
-        source: "known-hosts",
+        source: fromConfig ? "ssh-config" : "known-hosts",
       });
     }
 
