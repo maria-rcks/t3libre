@@ -487,6 +487,7 @@ export function ThreadRelationshipsPanel(props: {
                         title={threadTitle}
                         model={agent.model}
                         provider={provider}
+                        providers={providers}
                         driver={providerDriver}
                         elapsed={<AgentElapsed agent={agent} />}
                         status={agent.status}
