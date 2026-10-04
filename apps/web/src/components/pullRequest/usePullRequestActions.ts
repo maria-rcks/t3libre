@@ -14,7 +14,7 @@ import type {
   PullRequestMergeMethod,
   PullRequestRef,
 } from "@t3tools/contracts";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useClientSettings, useEnvironmentSettings } from "~/hooks/useSettings";
 import {
@@ -36,8 +36,8 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { toastManager } from "../ui/toast";
 import { handoffPrompt, handoffReviewComments, readableFailure } from "./pullRequestDetail.logic";
 
-/** Both detail and quick actions honor the server setting and its older client-local fallback. */
-export function usePullRequestDefaultMergeMethod(
+/** Resolve on demand so hidden quick actions do not rebuild the legacy project grouping. */
+export function usePullRequestDefaultMergeMethodResolver(
   environmentId: EnvironmentId,
   projectId: ProjectId,
 ) {
@@ -49,8 +49,9 @@ export function usePullRequestDefaultMergeMethod(
   const grouping = useClientSettings(selectProjectGroupingSettings);
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  return useMemo(() => {
+  return useCallback(() => {
     if (projectDefault != null) return projectDefault;
+    if (Object.keys(legacyOverrides).length === 0) return undefined;
     const project = projects.find(
       (candidate) => candidate.environmentId === environmentId && candidate.id === projectId,
     );

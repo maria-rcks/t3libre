@@ -12,7 +12,7 @@ import { PullRequestGlyph } from "./pullRequestIcons";
 import type { EnvironmentPullRequestEntry } from "./pullRequestList.logic";
 import {
   usePullRequestActionRunner,
-  usePullRequestDefaultMergeMethod,
+  usePullRequestDefaultMergeMethodResolver,
 } from "./usePullRequestActions";
 
 export interface PullRequestSpeedActionResult {
@@ -30,7 +30,10 @@ export function PullRequestSpeedActions({
   visible: boolean;
   onActed: (result: PullRequestSpeedActionResult) => void;
 }) {
-  const projectDefault = usePullRequestDefaultMergeMethod(entry.environmentId, entry.projectId);
+  const resolveProjectDefault = usePullRequestDefaultMergeMethodResolver(
+    entry.environmentId,
+    entry.projectId,
+  );
   const reference = {
     projectId: entry.projectId,
     host: entry.host,
@@ -43,7 +46,10 @@ export function PullRequestSpeedActions({
     onSuccess: (action) => onActed({ entry, action }),
     resolveMergeMethod: async () => {
       const target = { environmentId: entry.environmentId, input: reference };
-      const detailAtom = pullRequestEnvironment.detail(target);
+      const detailAtom = pullRequestEnvironment.detail({
+        ...target,
+        input: { ...reference, allowStale: false },
+      });
       appAtomRegistry.refresh(detailAtom);
       const detail = await Effect.runPromise(
         AtomRegistry.getResult(appAtomRegistry, detailAtom, { suspendOnWaiting: true }),
@@ -72,7 +78,7 @@ export function PullRequestSpeedActions({
       return resolvePullRequestMergeMethod(
         allowed,
         null,
-        projectDefault ?? undefined,
+        resolveProjectDefault(),
         useUiStateStore.getState().pullRequestMergeMethod,
       );
     },
