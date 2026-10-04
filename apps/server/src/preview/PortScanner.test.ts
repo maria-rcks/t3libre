@@ -14,6 +14,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
@@ -56,11 +57,13 @@ const TestIntegrationNet = Layer.succeed(Net.NetService, {
 const makeProbeFailureLayer = (
   run: ProcessRunner.ProcessRunner["Service"]["run"],
   fetch: typeof globalThis.fetch = globalThis.fetch,
+  fileSystem: Partial<FileSystem.FileSystem> = {},
 ) =>
   PortScanner.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(ProcessRunner.ProcessRunner, { run }),
+        FileSystem.layerNoop(fileSystem),
         Layer.succeed(Net.NetService, {
           canListenOnHost: () => Effect.succeed(true),
           isPortAvailableOnLoopback: () => Effect.succeed(true),
@@ -79,6 +82,7 @@ const TestPortDiscoveryLive = PortScanner.layer.pipe(
     Layer.mergeAll(
       TestProcessRunner,
       TestIntegrationNet,
+      FileSystem.layerNoop({}),
       Layer.succeed(HostProcessPlatform, "win32"),
       FetchHttpClient.layer,
     ),
@@ -94,6 +98,7 @@ const makeLsofScannerLayer = (input: {
   PortScanner.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        FileSystem.layerNoop({}),
         Layer.succeed(ProcessRunner.ProcessRunner, {
           run: () =>
             Effect.succeed({
@@ -243,6 +248,156 @@ effectIt.layer(TestPortDiscoveryLive)("PortDiscovery integration (TCP probe fall
       expect(received).toContain(port);
     }),
   );
+});
+
+effectIt.effect("discovers linux proc listeners without lsof and retains unreadable owners", () => {
+  let spawnAttempts = 0;
+  const requests: string[] = [];
+  const fetchFn = ((input: Parameters<typeof globalThis.fetch>[0]) => {
+    requests.push(String(input));
+    return Promise.resolve(new Response("app", { headers: { "content-type": "text/html" } }));
+  }) as typeof globalThis.fetch;
+  const layer = makeProbeFailureLayer(
+    (input) => {
+      spawnAttempts += 1;
+      return processProbeFailure(input);
+    },
+    fetchFn,
+    {
+      readFileString: (path) =>
+        Effect.succeed(
+          path === "/proc/net/tcp"
+            ? "sl local_address rem_address st\n0: 00000000:1435 00000000:0000 0A 0 0 0 1000 0 0\n1: 0100007F:223D 00000000:0000 0A 0 0 0 1000 0 111\n2: 0200000A:223C 00000000:0000 0A 0 0 0 1000 0 444\n3: 0100007F:223F 00000000:0000 01 0 0 0 1000 0 555\ninvalid row"
+            : path === "/proc/net/tcp6"
+              ? "0: 00000000000000000000000001000000:223E 00000000000000000000000000000000:0000 0A 0 0 0 1000 0 222"
+              : "node\n",
+        ),
+      readDirectory: (path) =>
+        path === "/proc"
+          ? Effect.succeed(["111", "222", "self"])
+          : path === "/proc/111/fd"
+            ? Effect.succeed(["3"])
+            : Effect.fail(
+                PlatformError.systemError({
+                  _tag: "PermissionDenied",
+                  module: "FileSystem",
+                  method: "readDirectory",
+                }),
+              ),
+      readLink: () => Effect.succeed("socket:[111]"),
+    },
+  );
+  return Effect.gen(function* () {
+    const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.registerTerminalProcesses({
+      threadId: "proc-thread",
+      terminalId: "proc-terminal",
+      processIds: [111],
+    });
+    const servers = yield* scanner.scan();
+    expect(servers).toMatchObject([
+      { port: 5173, pid: null, terminal: null },
+      {
+        port: 8765,
+        pid: 111,
+        processName: "node",
+        terminal: { threadId: "proc-thread", terminalId: "proc-terminal" },
+      },
+      { port: 8766, pid: null, terminal: null },
+    ]);
+    expect(yield* scanner.scan()).toEqual(servers);
+    expect(spawnAttempts).toBe(1);
+    expect(requests.some((url) => url.includes(":8764") || url.includes(":8767"))).toBe(false);
+    yield* scanner.unregisterTerminal({ threadId: "proc-thread", terminalId: "proc-terminal" });
+    expect((yield* scanner.scan()).find((server) => server.port === 8765)?.terminal).toBeNull();
+  }).pipe(Effect.provide(layer));
+});
+
+effectIt.effect.each([1, 100])(
+  "bounds linux proc ownership work with %i fds per process",
+  (fdCount) => {
+    let fdReads = 0;
+    let pidReads = 0;
+    const fetchFn = (() =>
+      Promise.resolve(
+        new Response("app", { headers: { "content-type": "text/html" } }),
+      )) as typeof globalThis.fetch;
+    const layer = makeProbeFailureLayer(processProbeFailure, fetchFn, {
+      readFileString: (path) =>
+        Effect.succeed(
+          path === "/proc/net/tcp"
+            ? "0: 0100007F:223D 00000000:0000 0A 0 0 0 1000 0 111\n1: 0100007F:223E 00000000:0000 0A 0 0 0 1000 0 222"
+            : path === "/proc/net/tcp6"
+              ? ""
+              : "node",
+        ),
+      readDirectory: (path) => {
+        if (path === "/proc")
+          return Effect.succeed(Array.from({ length: 600 }, (_, i) => String(i + 1)));
+        pidReads += 1;
+        return Effect.succeed(Array.from({ length: fdCount }, (_, i) => String(i)));
+      },
+      readLink: (path) => {
+        fdReads += 1;
+        return Effect.succeed(
+          path === "/proc/99999/fd/0" ? "socket:[111]" : "anon_inode:[eventpoll]",
+        );
+      },
+    });
+    return Effect.gen(function* () {
+      const scanner = yield* PortScanner.PortDiscovery;
+      yield* scanner.registerTerminalProcesses({
+        threadId: "proc-thread",
+        terminalId: "proc-terminal",
+        processIds: [99999],
+      });
+      expect(yield* scanner.scan()).toMatchObject([
+        { port: 8765, pid: 99999, terminal: { terminalId: "proc-terminal" } },
+        { port: 8766, pid: null, terminal: null },
+      ]);
+      expect(fdReads).toBeLessThanOrEqual(4096);
+      expect(pidReads).toBeLessThanOrEqual(512);
+    }).pipe(Effect.provide(layer));
+  },
+);
+
+effectIt.effect("retries lsof after a transient spawn failure", () => {
+  let attempts = 0;
+  const fetchFn = (() =>
+    Promise.resolve(
+      new Response("app", { headers: { "content-type": "text/html" } }),
+    )) as typeof globalThis.fetch;
+  const layer = makeProbeFailureLayer((input) => {
+    attempts += 1;
+    return attempts === 1
+      ? Effect.fail(
+          new ProcessRunner.ProcessSpawnError({
+            command: input.command,
+            argumentCount: input.args.length,
+            cause: PlatformError.systemError({
+              _tag: "PermissionDenied",
+              module: "ChildProcess",
+              method: "spawn",
+            }),
+          }),
+        )
+      : Effect.succeed({
+          stdout: `p1234\ncnode\nn*:${LSOF_TEST_PORT}\n`,
+          stderr: "",
+          code: null,
+          timedOut: false,
+          stdoutTruncated: false,
+          stderrTruncated: false,
+          stdoutInvalidUtf8: false,
+          stderrInvalidUtf8: false,
+        });
+  }, fetchFn);
+  return Effect.gen(function* () {
+    const scanner = yield* PortScanner.PortDiscovery;
+    expect(yield* scanner.scan()).toEqual([]);
+    expect(yield* scanner.scan()).toMatchObject([{ port: LSOF_TEST_PORT, pid: 1234 }]);
+    expect(attempts).toBe(2);
+  }).pipe(Effect.provide(layer));
 });
 
 effectIt.effect("revalidates a successful HTML probe after its cache entry expires", () => {

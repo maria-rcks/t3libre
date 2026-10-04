@@ -5,8 +5,8 @@
  * stable line-prefixed field format; this is the only `lsof` flag set we rely
  * on).
  *
- * Windows / lsof missing: checks a curated list of common dev ports through
- * the shared Net service.
+ * Linux without lsof: reads TCP listeners and bounded process ownership from
+ * proc. Windows and unavailable discovery backends probe common dev ports.
  *
  * Listening ports are published only after a bounded HTTP(S) probe finds a
  * successful HTML document or a redirect to one.
@@ -16,6 +16,8 @@
  * Polling is reference-counted via scoped `retain`. A single layer-scoped fiber
  * polls forever, but each tick is a no-op when the retain count is zero.
  */
+import * as NodeOS from "node:os";
+
 import {
   CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
   PREVIEW_URL_MAX_LENGTH,
@@ -30,8 +32,10 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
@@ -73,6 +77,16 @@ export const COMMON_DEV_PORTS: ReadonlyArray<number> = Object.freeze([
 const POLL_INTERVAL = Duration.seconds(3);
 const LSOF_TIMEOUT_MS = 5_000;
 const WINDOWS_LISTENER_TIMEOUT_MS = 5_000;
+const PROC_PID_LIMIT = 512;
+const PROC_FD_LIMIT = 4096;
+const PROC_LOCAL_ADDRESSES = new Set([
+  "00000000",
+  NodeOS.endianness() === "LE" ? "0100007F" : "7F000001",
+  "00000000000000000000000000000000",
+  NodeOS.endianness() === "LE"
+    ? "00000000000000000000000001000000"
+    : "00000000000000000000000000000001",
+]);
 const WEB_PROBE_TIMEOUT = Duration.seconds(1);
 const WEB_PROBE_CACHE_TTL_MS = Duration.toMillis(Duration.seconds(15));
 const WEB_PROBE_CONCURRENCY = 16;
@@ -294,6 +308,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   const net = yield* Net.NetService;
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const hostPlatform = yield* HostProcessPlatform;
+  const fileSystem = yield* FileSystem.FileSystem;
   const httpClient = (yield* HttpClient.HttpClient).pipe(HttpClient.withScope);
   const stateRef = yield* Ref.make<ScannerState>({
     listeners: new Map(),
@@ -302,6 +317,93 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
   });
   const webProbeCacheRef = yield* Ref.make<ReadonlyMap<string, WebProbeCacheEntry>>(new Map());
   const scanSemaphore = yield* Semaphore.make(1);
+  const lsofUnavailableRef = yield* Ref.make(false);
+
+  const readLinuxListeners = Effect.fn("PortDiscovery.readLinuxListeners")(function* (
+    terminalByProcessId: ReadonlyMap<number, TerminalProcessOwner>,
+  ) {
+    const tables = yield* Effect.forEach(
+      ["/proc/net/tcp", "/proc/net/tcp6"],
+      (path) => fileSystem.readFileString(path).pipe(Effect.orElseSucceed(() => null)),
+      { concurrency: 2 },
+    );
+    if (tables.every((table) => table === null)) return null;
+    const candidates: Array<{ port: number; inode: string }> = [];
+    for (const table of tables) {
+      for (const line of table?.split("\n") ?? []) {
+        const fields = line.trim().split(/\s+/);
+        const [address, hexPort] = fields[1]?.split(":") ?? [];
+        const inode = fields[9];
+        if (
+          fields[3] !== "0A" ||
+          !PROC_LOCAL_ADDRESSES.has(address ?? "") ||
+          !/^[\da-f]{4}$/i.test(hexPort ?? "") ||
+          inode === undefined ||
+          !/^\d+$/.test(inode)
+        )
+          continue;
+        const port = Number.parseInt(hexPort!, 16);
+        if (port > 0 && port < 65536) candidates.push({ port, inode });
+      }
+    }
+    const unresolved = new Set(
+      candidates.map(({ inode }) => inode).filter((inode) => inode !== "0"),
+    );
+    const owners = new Map<string, { pid: number; processName: string | null }>();
+    const processNames = yield* fileSystem
+      .readDirectory("/proc")
+      .pipe(Effect.orElseSucceed(() => []));
+    // Registered terminal processes come first so unrelated fds cannot consume their budget.
+    const processIds = [
+      ...new Set([
+        ...terminalByProcessId.keys(),
+        ...processNames.filter((name) => /^\d+$/.test(name)).map(Number),
+      ]),
+    ].slice(0, PROC_PID_LIMIT);
+    let remainingFds = PROC_FD_LIMIT;
+    for (const pid of processIds) {
+      if (remainingFds === 0 || unresolved.size === 0) break;
+      const names = yield* fileSystem
+        .readDirectory(`/proc/${pid}/fd`)
+        .pipe(Effect.orElseSucceed(() => []));
+      const fds = names.slice(0, remainingFds);
+      remainingFds -= fds.length;
+      const links = yield* Effect.forEach(
+        fds,
+        (fd) => fileSystem.readLink(`/proc/${pid}/fd/${fd}`).pipe(Effect.orElseSucceed(() => null)),
+        { concurrency: 16 },
+      );
+      const inodes = links.flatMap((link) => {
+        const inode = link?.match(/^socket:\[(\d+)\]$/)?.[1];
+        return inode !== undefined && unresolved.has(inode) ? [inode] : [];
+      });
+      if (inodes.length === 0) continue;
+      const processName = yield* fileSystem.readFileString(`/proc/${pid}/comm`).pipe(
+        Effect.map((name) => name.trim() || null),
+        Effect.orElseSucceed(() => null),
+      );
+      for (const inode of inodes) {
+        owners.set(inode, { pid, processName });
+        unresolved.delete(inode);
+      }
+    }
+    const servers = new Map<number, DiscoveredLocalServer>();
+    for (const { port, inode } of candidates) {
+      const owner = owners.get(inode);
+      const terminal = owner === undefined ? null : (terminalByProcessId.get(owner.pid) ?? null);
+      const existing = servers.get(port);
+      if (existing !== undefined && (existing.terminal !== null || terminal === null)) continue;
+      servers.set(port, {
+        host: "localhost",
+        port,
+        url: `http://localhost:${port}`,
+        processName: owner?.processName ?? null,
+        pid: owner?.pid ?? null,
+        terminal,
+      });
+    }
+    return [...servers.values()].toSorted((left, right) => left.port - right.port);
+  });
 
   const probeCommonPorts = Effect.fn("PortDiscovery.probeCommonPorts")(function* () {
     const results = yield* Effect.forEach(
@@ -472,7 +574,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
 
   const recoverProcessProbeFailure =
     (probe: "lsof" | "windows-listeners") => (error: ProcessRunner.ProcessRunError) =>
-      Effect.logDebug("preview port process probe failed; falling back to common-port probes", {
+      Effect.logDebug("preview port process probe failed; using fallback discovery", {
         cause: error,
         probe,
         platform: hostPlatform,
@@ -514,25 +616,39 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
       return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
     }
     const recoverLsofProbeFailure = recoverProcessProbeFailure("lsof");
-    const lsofResult = yield* processRunner
-      .run({
-        command: "lsof",
-        args: ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"],
-        timeout: Duration.millis(LSOF_TIMEOUT_MS),
-        maxOutputBytes: 1024 * 1024,
-        outputMode: "truncate",
-      })
-      .pipe(
-        Effect.map((result) => parseLsofOutput(result.stdout, terminalByProcessId)),
-        Effect.catchTags({
-          ProcessSpawnError: recoverLsofProbeFailure,
-          ProcessStdinError: recoverLsofProbeFailure,
-          ProcessOutputLimitError: recoverLsofProbeFailure,
-          ProcessReadError: recoverLsofProbeFailure,
-          ProcessTimeoutError: recoverLsofProbeFailure,
-        }),
-      );
+    const lsofResult = (yield* Ref.get(lsofUnavailableRef))
+      ? null
+      : yield* processRunner
+          .run({
+            command: "lsof",
+            args: ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"],
+            timeout: Duration.millis(LSOF_TIMEOUT_MS),
+            maxOutputBytes: 1024 * 1024,
+            outputMode: "truncate",
+          })
+          .pipe(
+            Effect.map((result) => parseLsofOutput(result.stdout, terminalByProcessId)),
+            Effect.catchTags({
+              ProcessSpawnError: (error) =>
+                Effect.gen(function* () {
+                  if (
+                    error.cause instanceof PlatformError.PlatformError &&
+                    error.cause.reason._tag === "NotFound"
+                  )
+                    yield* Ref.set(lsofUnavailableRef, true);
+                  return yield* recoverLsofProbeFailure(error);
+                }),
+              ProcessStdinError: recoverLsofProbeFailure,
+              ProcessOutputLimitError: recoverLsofProbeFailure,
+              ProcessReadError: recoverLsofProbeFailure,
+              ProcessTimeoutError: recoverLsofProbeFailure,
+            }),
+          );
     if (lsofResult !== null) return yield* probeWebServers(lsofResult, configuredUrls);
+    if (hostPlatform === "linux") {
+      const listeners = yield* readLinuxListeners(terminalByProcessId);
+      if (listeners !== null) return yield* probeWebServers(listeners, configuredUrls);
+    }
     return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
   });
 
