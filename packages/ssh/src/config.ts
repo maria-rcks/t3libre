@@ -12,8 +12,7 @@ import { SshHostDiscoveryError } from "./errors.ts";
 const NO_HOSTS: ReadonlyArray<string> = [] as const;
 
 function stripInlineComment(line: string): string {
-  const hashIndex = line.indexOf("#");
-  return (hashIndex >= 0 ? line.slice(0, hashIndex) : line).trim();
+  return line.replace(/"[^"]*"|'[^']*'|#.*/gu, (part) => (part.startsWith("#") ? "" : part)).trim();
 }
 
 function splitDirectiveArgs(value: string): ReadonlyArray<string> {
@@ -160,7 +159,11 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
           directory,
           homeDir,
         );
-        if (/["'[\]]/u.test(includePattern) || /[*?]/u.test(path.dirname(resolvedPattern))) {
+        if (
+          /["'[\]]/u.test(includePattern) ||
+          /%|\$\{/u.test(includePattern) ||
+          /[*?]/u.test(path.dirname(resolvedPattern))
+        ) {
           // Unexpanded includes may establish either value before later rules.
           for (const directive of ["hostname", "port"] as const) {
             targetRules.push({

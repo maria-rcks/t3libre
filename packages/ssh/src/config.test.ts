@@ -154,6 +154,7 @@ describe("ssh config", () => {
         [null, "work.example.com", false],
         [22, "work", false, "Work", null],
         [22, "work", true, "Work", "work"],
+        [22, "work#blue.example.com", true, "work", '"work#blue.example.com"'],
         [22, "work.example.com", true],
         [22, "[work.example.com]:2222", false],
         [2222, "[work.example.com]:2222", true],
@@ -226,6 +227,30 @@ describe("ssh config", () => {
       hostname: "actual.example.com",
       known: "fallback.example.com",
     },
+    {
+      name: "preserves quoted hostname hashes and strips ordinary comments",
+      config:
+        'Host work # alias comment\n  HostName "work#blue.example.com" # hostname comment\n  Port 22 # port comment\n',
+      included: "",
+      hostname: "work#blue.example.com",
+      known: "other.example.com",
+    },
+    {
+      name: "strips ordinary comments after unquoted values",
+      config:
+        "Host work # alias comment\n  HostName work.example.com # hostname comment\n  Port 22 # port comment\n",
+      included: "",
+      hostname: "work.example.com",
+      known: "other.example.com",
+    },
+    {
+      name: "reads whole-quoted Include paths containing hashes",
+      config:
+        'Host work\n  Include "target#blue.conf" # path comment\n  HostName fallback.example.com\n',
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
   ])("$name", (fixture) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -234,7 +259,7 @@ describe("ssh config", () => {
       const sshDir = path.join(homeDir, ".ssh");
       yield* fs.makeDirectory(sshDir);
       yield* fs.writeFileString(path.join(sshDir, "config"), fixture.config);
-      for (const name of ["target.conf", "target with spaces.conf"]) {
+      for (const name of ["target.conf", "target with spaces.conf", "target#blue.conf"]) {
         yield* fs.writeFileString(path.join(sshDir, name), fixture.included);
       }
       yield* fs.writeFileString(
@@ -309,6 +334,36 @@ describe("ssh config", () => {
           "Host work\n  Include config.d/[pt]rod/target.conf\n  HostName work.example.com\n  Port 22\n",
           "work",
           true,
+        ],
+        [
+          "Host work\n  Include config-%h.conf\n  HostName work.example.com\n  Port 22\n",
+          "work",
+          true,
+        ],
+        [
+          "Host work\n  Include ${T3_SSH_INCLUDE_FILE}\n  HostName work.example.com\n  Port 22\n",
+          "work",
+          true,
+        ],
+        [
+          "Host skip*\n  Include config-%h.conf\nHost work\n  HostName work.example.com\n  Port 22\n",
+          "work.example.com",
+          false,
+        ],
+        [
+          "Host work\n  HostName work.example.com\n  Port 22\n  Include config-%h.conf\n",
+          "work.example.com",
+          false,
+        ],
+        [
+          "Host skip*\n  Include ${T3_SSH_INCLUDE_FILE}\nHost work\n  HostName work.example.com\n  Port 22\n",
+          "work.example.com",
+          false,
+        ],
+        [
+          "Host work\n  HostName work.example.com\n  Port 22\n  Include ${T3_SSH_INCLUDE_FILE}\n",
+          "work.example.com",
+          false,
         ],
         [
           "Host skip*\n  Include config.d/*/target.conf\nHost work\n  HostName work.example.com\n  Port 22\n",
