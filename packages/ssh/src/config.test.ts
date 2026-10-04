@@ -191,6 +191,30 @@ describe("ssh config", () => {
   );
 
   it.effect.each([
+    ...[
+      "target.conf/",
+      "target.conf/.",
+      "target.conf//.",
+      "target.conf/././",
+      "*.conf/",
+      "*.conf/.",
+      "hidden/",
+      "hidden/.",
+      ".",
+    ].map((operand) => ({
+      name: `keeps directory-only Include ${operand} uncertain`,
+      config: `Host work\n  Include ${operand}\n  HostName fallback.example.com\n  Port 22\nHost *\n  HostName %h\n  Port 22\n`,
+      included: "HostName wrong.example.com\n",
+      hostname: "work",
+      known: "wrong.example.com",
+    })),
+    {
+      name: "preserves leading dot segments in file Include operands",
+      config: "Host work\n  Include ./target.conf\n  HostName fallback.example.com\n  Port 22\n",
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
     ...["missing*/../target.conf", "missing/../target.conf", "config.d/*/../target.conf"].map(
       (operand) => ({
         name: `keeps parent-traversing Include ${operand} uncertain`,
@@ -684,6 +708,16 @@ describe("ssh config", () => {
         ],
         [
           "Host work\n  HostName work.example.com\n  Port 22\n  Include missing*/../target.conf\n",
+          "work.example.com",
+          false,
+        ],
+        [
+          "Host skip*\n  Include target.conf/.\nHost work\n  HostName work.example.com\n  Port 22\n",
+          "work.example.com",
+          false,
+        ],
+        [
+          "Host work\n  HostName work.example.com\n  Port 22\n  Include target.conf/\n",
           "work.example.com",
           false,
         ],

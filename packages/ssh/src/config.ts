@@ -189,6 +189,7 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
           /%|\$\{/u.test(includePattern) ||
           /^~[^/\\]/u.test(includePattern) ||
           /(?:^|[/\\])\.\.(?:[/\\]|$)/u.test(includePattern) ||
+          /(?:^|[/\\])\.?$/u.test(includePattern) ||
           (path.sep === "/" && includePattern.includes("\\")) ||
           /\\(?:\s|$)/u.test(includePattern) ||
           /[*?]/u.test(path.dirname(resolvedPattern))
