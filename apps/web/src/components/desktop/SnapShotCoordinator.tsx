@@ -137,8 +137,15 @@ export async function deliverSnapShot(
   bridge: DesktopSnapShotBridge,
   item: DesktopPendingSnapShot,
   target: CaptureTarget,
+  deliveredCaptureIds: Set<string>,
 ): Promise<boolean> {
   if (!snapShotsEnabled()) return false;
+  if (deliveredCaptureIds.has(item.id)) {
+    await bridge.acknowledgeSnapShot(item.id);
+    deliveredCaptureIds.delete(item.id);
+    if (snapShotsEnabled()) dispatchSnapShotComposerFocus();
+    return true;
+  }
   const store = useComposerDraftStore.getState();
   updateSnapShotAnimationSource(item.id, item.source);
   const capture = await bridge.readSnapShot(item.id);
@@ -184,10 +191,12 @@ export async function deliverSnapShot(
       .getComposerDraft(target)
       ?.persistedAttachments.filter((attachment) => attachment.id !== capture.id) ?? [];
   await store.syncPersistedAttachments(target, [...persistedAttachments, persisted]);
-  if (!snapShotsEnabled()) return false;
   if (!store.getComposerDraft(target)?.persistedAttachments.some(({ id }) => id === capture.id)) {
     throw new Error("The captured window could not be saved to the draft.");
   }
+  // Disabling can defer acknowledgement after the attachment has already been delivered.
+  deliveredCaptureIds.add(item.id);
+  if (!snapShotsEnabled()) return false;
 
   // Reveal the attachment under the flying capture before the desktop tears the overlay down,
   // otherwise the tile is missing for the frames between the landing and its first paint.
@@ -201,6 +210,7 @@ export async function deliverSnapShot(
   }
   if (!snapShotsEnabled()) return false;
   await bridge.acknowledgeSnapShot(capture.id);
+  deliveredCaptureIds.delete(item.id);
   if (snapShotsEnabled()) dispatchSnapShotComposerFocus();
   return true;
 }
@@ -220,6 +230,7 @@ export function SnapShotCoordinator() {
   const animateCaptures = useClientSettings((settings) => settings.snapShotAnimations);
   const enabled = useClientSettings((settings) => settings.snapShotEnabled);
   const captureTargetsRef = useRef(new Map<string, Promise<CaptureTarget | null>>());
+  const deliveredCaptureIdsRef = useRef(new Set<string>());
   const lastTargetRef = useRef<CaptureTarget | null>(null);
   const targetResolutionRef = useRef<Promise<CaptureTarget | null> | null>(null);
   const drainingRef = useRef<Promise<void> | null>(null);
@@ -301,7 +312,9 @@ export function SnapShotCoordinator() {
           );
           if (!snapShotsEnabled()) return;
           const target = capturedTarget
-            ? resolveExistingSnapShotTarget(capturedTarget, routeThreadRef)
+            ? deliveredCaptureIdsRef.current.has(item.id)
+              ? capturedTarget
+              : resolveExistingSnapShotTarget(capturedTarget, routeThreadRef)
             : null;
           if (!target) {
             await dismissSnapShotAnimation(item.id);
@@ -317,7 +330,8 @@ export function SnapShotCoordinator() {
           }
 
           try {
-            if (!(await deliverSnapShot(bridge, item, target))) return;
+            if (!(await deliverSnapShot(bridge, item, target, deliveredCaptureIdsRef.current)))
+              return;
             captureTargetsRef.current.delete(item.id);
             soundedCaptureIdsRef.current.delete(item.id);
             reportedCaptureIdsRef.current.delete(item.id);

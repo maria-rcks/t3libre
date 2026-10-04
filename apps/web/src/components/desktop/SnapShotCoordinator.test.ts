@@ -327,19 +327,41 @@ describe("snapshot enable setting", () => {
 
 describe("window capture delivery", () => {
   it.each([
-    { target: DraftId.make("snap-shot-draft"), accessibleText: undefined },
-    { target: DraftId.make("snap-shot-draft"), accessibleText: "const answer = 42;" },
+    {
+      target: DraftId.make("snap-shot-draft"),
+      accessibleText: undefined,
+      edit: undefined,
+      pause: undefined,
+    },
+    {
+      target: DraftId.make("snap-shot-draft"),
+      accessibleText: "const answer = 42;",
+      edit: undefined,
+      pause: undefined,
+    },
     {
       target: scopeThreadRef(environmentId, ThreadId.make("snap-shot-thread")),
       accessibleText: undefined,
+      edit: undefined,
+      pause: undefined,
     },
     {
       target: scopeThreadRef(environmentId, ThreadId.make("snap-shot-thread")),
       accessibleText: "const answer = 42;",
+      edit: undefined,
+      pause: undefined,
     },
+    ...(["remove", "send"] as const).flatMap((edit) =>
+      (["paint", "destination"] as const).map((pause) => ({
+        target: scopeThreadRef(environmentId, ThreadId.make("snap-shot-thread")),
+        accessibleText: undefined,
+        edit,
+        pause,
+      })),
+    ),
   ])(
-    "preserves capture contents for $target before a stalled animation finishes ($accessibleText)",
-    async ({ target, accessibleText }) => {
+    "preserves delivery for $target before a stalled animation finishes ($accessibleText, $edit, $pause)",
+    async ({ target, accessibleText, edit, pause }) => {
       vi.useFakeTimers();
       const never = new Promise<void>(() => undefined);
       const animationFrames: Array<FrameRequestCallback> = [];
@@ -349,7 +371,7 @@ describe("window capture delivery", () => {
         getSnapShotState: vi.fn(),
         checkSnapShotShortcut: vi.fn(),
         setSnapShotShortcutSuppressed: vi.fn(async () => undefined),
-        listPendingSnapShots: vi.fn(async () => []),
+        listPendingSnapShots: vi.fn(async () => (edit ? [item] : [])),
         readSnapShot: vi.fn(async () => ({
           id: "12345678-1234-1234-1234-123456789abc",
           name: "window.png",
@@ -382,7 +404,7 @@ describe("window capture delivery", () => {
           ...(accessibleText ? { accessibleText } : {}),
         },
       };
-      vi.stubGlobal("window", {
+      const browserWindow = Object.assign(new EventTarget(), {
         localStorage: storage,
         desktopBridge: bridge,
         setTimeout,
@@ -394,8 +416,8 @@ describe("window capture delivery", () => {
           borderTopLeftRadius: "8px",
           borderTopWidth: "1px",
         }),
-        dispatchEvent: vi.fn(),
       });
+      vi.stubGlobal("window", browserWindow);
       vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
         animationFrames.push(callback);
         return animationFrames.length;
@@ -416,14 +438,104 @@ describe("window capture delivery", () => {
         item.source,
       );
 
-      const delivery = deliverSnapShot(bridge, item, target);
+      let routeTarget = target;
+      let renderer: ReturnType<typeof create> | undefined;
+      if (edit) {
+        vi.spyOn(settings, "useClientSettings").mockImplementation(
+          <T = ClientSettings>(selector?: (value: ClientSettings) => T) =>
+            selector ? selector(settings.getClientSettings()) : (settings.getClientSettings() as T),
+        );
+        vi.spyOn(newThread, "useHandleNewThread").mockImplementation(() => ({
+          activeDraftThread: null,
+          activeThread: null,
+          defaultProjectRef: projectRef,
+          handleNewThread: vi.fn(),
+          routeDraftId: typeof routeTarget === "string" ? routeTarget : null,
+          routeThreadRef: typeof routeTarget === "string" ? null : routeTarget,
+        }));
+        vi.spyOn(toastManager, "add").mockReturnValue("toast-id");
+        vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
+        vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+        renderer = await act(() => create(createElement(SnapShotCoordinator)));
+      }
+      const delivery = edit ? undefined : deliverSnapShot(bridge, item, target, new Set());
       await vi.advanceTimersByTimeAsync(0);
 
       const draft = useComposerDraftStore.getState().getComposerDraft(target);
       expect(draft?.images).toHaveLength(1);
       expect(draft?.images[0]?.source).toEqual(item.source);
+      expect(draft?.persistedAttachments).toHaveLength(1);
       expect(getPendingSnapShotAnimations()).toHaveLength(1);
       expect(acknowledgeSnapShot).not.toHaveBeenCalled();
+
+      if (edit) {
+        try {
+          if (pause === "destination") {
+            animationFrames.shift()?.(0);
+            animationFrames.shift()?.(0);
+            await vi.advanceTimersByTimeAsync(0);
+          }
+          vi.mocked(settings.getClientSettings).mockReturnValue(DEFAULT_CLIENT_SETTINGS);
+          await act(async () => {
+            renderer?.update(createElement(SnapShotCoordinator));
+            animationFrames.shift()?.(0);
+            animationFrames.shift()?.(0);
+            await vi.advanceTimersByTimeAsync(2_000);
+          });
+          expect(acknowledgeSnapShot).not.toHaveBeenCalled();
+          expect(getPendingSnapShotAnimations()).toEqual([]);
+          const store = useComposerDraftStore.getState();
+          if (edit === "remove") store.removeImage(target, item.id);
+          else store.clearComposerContent(target);
+          expect(store.getComposerDraft(target)?.images ?? []).toEqual([]);
+          expect(store.getComposerDraft(target)?.persistedAttachments ?? []).toEqual([]);
+          acknowledgeSnapShot.mockRejectedValueOnce(new Error("Acknowledgement unavailable"));
+          vi.mocked(settings.getClientSettings).mockReturnValue({
+            ...DEFAULT_CLIENT_SETTINGS,
+            snapShotEnabled: true,
+          });
+          await act(async () => renderer?.update(createElement(SnapShotCoordinator)));
+          expect(acknowledgeSnapShot).toHaveBeenCalledExactlyOnceWith(item.id);
+          expect(store.getComposerDraft(target)?.images ?? []).toEqual([]);
+          expect(bridge.readSnapShot).toHaveBeenCalledOnce();
+
+          routeTarget = scopeThreadRef(
+            EnvironmentId.make("next-environment"),
+            ThreadId.make("next-thread"),
+          );
+          vi.mocked(settings.getClientSettings).mockReturnValue(DEFAULT_CLIENT_SETTINGS);
+          await act(async () => {
+            renderer?.update(createElement(SnapShotCoordinator));
+            browserWindow.dispatchEvent(new Event("focus"));
+          });
+          expect(acknowledgeSnapShot).toHaveBeenCalledOnce();
+          vi.mocked(settings.getClientSettings).mockReturnValue({
+            ...DEFAULT_CLIENT_SETTINGS,
+            snapShotEnabled: true,
+          });
+          await act(async () => renderer?.update(createElement(SnapShotCoordinator)));
+          expect(acknowledgeSnapShot).toHaveBeenCalledTimes(2);
+          expect(bridge.readSnapShot).toHaveBeenCalledOnce();
+          expect(store.getComposerDraft(target)?.images ?? []).toEqual([]);
+
+          const nextCapture = { ...item, id: "12345678-1234-1234-1234-123456789abd" };
+          vi.mocked(bridge.listPendingSnapShots).mockResolvedValue([nextCapture]);
+          vi.mocked(bridge.readSnapShot).mockResolvedValue({
+            ...nextCapture,
+            dataUrl: "data:image/png;base64,AQID",
+          });
+          await act(async () => browserWindow.dispatchEvent(new Event("focus")));
+          expect(bridge.readSnapShot).toHaveBeenCalledTimes(2);
+          expect(acknowledgeSnapShot).toHaveBeenNthCalledWith(3, nextCapture.id);
+          expect(store.getComposerDraft(routeTarget)?.images.map(({ id }) => id)).toEqual([
+            nextCapture.id,
+          ]);
+          expect(store.getComposerDraft(target)?.images ?? []).toEqual([]);
+        } finally {
+          await act(async () => renderer?.unmount());
+        }
+        return;
+      }
 
       expect(animationFrames).toHaveLength(1);
       animationFrames.shift()?.(0);
@@ -502,6 +614,7 @@ describe("durable snapshot delivery", () => {
         },
       };
       const acknowledgeSnapShot = vi.fn(async () => undefined);
+      const deliveredCaptureIds = new Set<string>();
       const bridge = {
         readSnapShot: async () => capture,
         acknowledgeSnapShot,
@@ -522,7 +635,7 @@ describe("durable snapshot delivery", () => {
           });
           void store.syncPersistedAttachments(target, [capture]);
         }
-        await expect(deliverSnapShot(bridge, capture, target)).rejects.toThrow(
+        await expect(deliverSnapShot(bridge, capture, target, deliveredCaptureIds)).rejects.toThrow(
           "could not be saved",
         );
         expect(acknowledgeSnapShot).not.toHaveBeenCalled();
@@ -530,7 +643,7 @@ describe("durable snapshot delivery", () => {
           useComposerDraftStore.getState().getComposerDraft(target)?.nonPersistedImageIds,
         ).toContain(capture.id);
         storage.setItem.mockImplementation(write);
-        await deliverSnapShot(bridge, capture, target);
+        await deliverSnapShot(bridge, capture, target, deliveredCaptureIds);
         expect(acknowledgeSnapShot).toHaveBeenCalledExactlyOnceWith(capture.id);
         expect(useComposerDraftStore.getState().getComposerDraft(target)?.images).toHaveLength(1);
         expect(
