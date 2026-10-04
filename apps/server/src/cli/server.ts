@@ -1,5 +1,8 @@
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import { Command, GlobalFlag } from "effect/unstable/cli";
+import * as CliError from "effect/unstable/cli/CliError";
 
 import * as ServerConfig from "../config.ts";
 import { runServer } from "../server.ts";
@@ -10,6 +13,7 @@ export const runServerCommand = (
   options?: {
     readonly startupPresentation?: ServerConfig.StartupPresentation;
     readonly forceAutoBootstrapProjectFromCwd?: boolean;
+    readonly rejectRunningServer?: boolean;
   },
 ) =>
   Effect.gen(function* () {
@@ -18,9 +22,29 @@ export const runServerCommand = (
     return yield* runServer.pipe(Effect.provideService(ServerConfig.ServerConfig, config));
   });
 
+class UnknownServerCommandError extends CliError.UserError {
+  override get message() {
+    return `Unknown command ${JSON.stringify(this.cause)}. Use "t3 --help" for commands or an explicit path such as "t3 ./my-project" for a new directory.`;
+  }
+}
+
+/** Bare words can name existing directories, but must not create typo projects. */
+export const runDefaultServerCommand = (flags: CliServerFlags) =>
+  Effect.gen(function* () {
+    if (Option.isSome(flags.cwd)) {
+      const cwd = flags.cwd.value.trim();
+      const fs = yield* FileSystem.FileSystem;
+      const explicitPath = cwd === "." || cwd === ".." || cwd === "~" || /[/\\]/.test(cwd);
+      if (!explicitPath && !(yield* fs.exists(cwd))) {
+        return yield* new UnknownServerCommandError({ cause: cwd });
+      }
+    }
+    return yield* runServerCommand(flags, { rejectRunningServer: true });
+  });
+
 export const startCommand = Command.make("start", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),
-  Command.withHandler((flags) => runServerCommand(flags)),
+  Command.withHandler((flags) => runServerCommand(flags, { rejectRunningServer: true })),
 );
 
 export const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe(
