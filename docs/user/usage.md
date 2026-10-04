@@ -20,8 +20,10 @@ history when it contains a separate count. Unreported thinking stays in **Output
 account history does not provide a separate count. Pi and generic ACP history are not currently
 included on Usage.
 
-Totals depend on the history available on each server. Grok turns without a saved completed-turn
-record are missing from the totals.
+Totals depend on the history available on each server. Recovering previously missed Claude Code
+usage can increase historical output and estimated costs. Deleted transcripts keep their saved
+usage, but missing counts cannot be recovered without the original history. Grok turns without a
+saved completed-turn record are missing from the totals.
 
 OpenCode reads its SQLite database and older JSON history. Antigravity reads local conversation
 databases, including T3-managed profiles. Set `OPENCODE_DATA_DIR` or `ANTIGRAVITY_DATA_DIR` on the

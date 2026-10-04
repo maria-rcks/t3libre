@@ -28,18 +28,20 @@ import type { CodexScanState, UsageRecord, UsageSpeed } from "./usageTranscripts
 // way, so v4 entries still load; see `decodeScanCache` for v4 Codex entries.
 // v6: Claude records capture thinking tokens. Retain old records for deleted
 // transcripts, but re-parse available Claude files to recover the breakdown.
-const USAGE_SCAN_CACHE_VERSION = 6 as const;
+// v7: retain Claude's fuller usage updates rather than its first content block.
+const USAGE_SCAN_CACHE_VERSION = 7 as const;
 const SPEED_COMPATIBLE_SINCE_VERSION = 4;
 
 /**
  * Each cache version writes its own file in the state directory. An older
  * server sharing that directory cannot read a newer cache and would replace
  * it, dropping saved usage for deleted transcripts. Separate files keep both.
- * A new server combines retained legacy entries when its own file is missing,
- * using each transcript's latest cached modification time to resolve overlap.
+ * A new server combines retained legacy entries using each transcript's latest
+ * cached modification time to resolve overlap, including after a downgrade.
  */
-export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v6.json";
+export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v7.json";
 export const LEGACY_SCAN_CACHE_FILE_NAMES = [
+  "usage-scan-cache-v6.json",
   "usage-scan-cache-v5.json",
   "usage-scan-cache.json",
 ] as const;
@@ -326,11 +328,11 @@ export function decodeScanCache(document: unknown): ScanCache {
     ) {
       continue;
     }
-    // Older Codex records lack service tiers; older Claude records lack thinking.
+    // Older Codex records lack service tiers; older Claude entries drop updates.
     // Keep them for deleted transcripts, but re-parse available files whole:
     // no file has size -1, and a zero position cannot resume.
     const legacyCodex = entry.p === "codex" && version < 5;
-    const needsReparse = legacyCodex || (entry.p === "claude" && version < 6);
+    const needsReparse = legacyCodex || (entry.p === "claude" && version < 7);
     const codexState = legacyCodex ? null : decodeCodexState(entry.cs);
     if (codexState === undefined) continue;
 
@@ -401,21 +403,57 @@ export function pruneScanCache(cache: ScanCache, retentionCutoffMs: number): num
 /**
  * Within-file de-duplication, applied before an entry is cached.
  *
- * Callers stitching an incremental parse together pass one `seen` set across
- * the line and tail record batches so the whole file stays deduplicated as a
- * unit; the set is mutated in place.
+ * Claude repeats cumulative message usage across content blocks. Keep the
+ * fullest recorded snapshot, not the sum, and retain the first attribution.
  */
-export function dedupeWithinFile(
-  records: readonly UsageRecord[],
-  seen: Set<string> = new Set(),
-): readonly UsageRecord[] {
+export function dedupeWithinFile(records: readonly UsageRecord[]): readonly UsageRecord[] {
   const kept: UsageRecord[] = [];
+  const indexes = new Map<string, number>();
   for (const record of records) {
     if (record.dedupeKey !== null) {
-      if (seen.has(record.dedupeKey)) continue;
-      seen.add(record.dedupeKey);
+      const index = indexes.get(record.dedupeKey);
+      if (index !== undefined) {
+        kept[index] = reconcileClaudeUsage(kept[index]!, record);
+        continue;
+      }
+      indexes.set(record.dedupeKey, kept.length);
     }
     kept.push(record);
   }
   return kept;
+}
+
+/** A stale fork copy must not replace a fuller snapshot of the same message. */
+export function reconcileClaudeUsage(previous: UsageRecord, next: UsageRecord): UsageRecord {
+  if (previous.provider !== "claude" || next.provider !== "claude") return previous;
+  const totals = { ...previous.totals };
+  let changed = false;
+  let billableChanged = false;
+  let matchesNext = true;
+  for (const key of Object.keys(totals) as (keyof typeof totals)[]) {
+    totals[key] = Math.max(totals[key], next.totals[key]);
+    changed ||= totals[key] !== previous.totals[key];
+    billableChanged ||= key !== "reasoningTokens" && totals[key] !== previous.totals[key];
+    matchesNext &&= totals[key] === next.totals[key];
+  }
+  if (!changed) return previous;
+  return {
+    ...previous,
+    totals,
+    // A partial snapshot's reported cost must not override corrected token pricing.
+    reportedCostUsd: billableChanged
+      ? matchesNext
+        ? next.reportedCostUsd
+        : null
+      : previous.reportedCostUsd,
+  };
+}
+
+/** The provisional tail can override a message without changing its resumable base. */
+export function cachedFileRecords(
+  entry: Pick<CachedFile, "records" | "tailRecords">,
+): readonly UsageRecord[] {
+  return entry.tailRecords.length === 0
+    ? entry.records
+    : dedupeWithinFile([...entry.records, ...entry.tailRecords]);
 }

@@ -105,8 +105,8 @@ describe("scan cache round trip", () => {
     expect(restored.get("/grok.jsonl")).toEqual(original.get("/grok.jsonl"));
     expect(restored.get("/codex.jsonl")).toEqual(original.get("/codex.jsonl"));
 
-    // The v6 migration must not reset providers whose parsing did not change.
-    const previous = decodeScanCache({ ...encodeScanCache(original), version: 5 });
+    // The v7 migration must not reset providers whose parsing did not change.
+    const previous = decodeScanCache({ ...encodeScanCache(original), version: 6 });
     expect(previous.get("/codex.jsonl")).toEqual(original.get("/codex.jsonl"));
     expect(previous.get("/grok.jsonl")).toEqual(original.get("/grok.jsonl"));
     for (const path of ["/a.jsonl", "/b.jsonl"]) {
@@ -262,15 +262,42 @@ describe("pruneScanCache", () => {
 });
 
 describe("dedupeWithinFile", () => {
-  it("keeps the first record per dedupe key", () => {
-    const kept = dedupeWithinFile([
-      record({ totals: { ...record().totals, outputTokens: 1 } }),
-      record({ totals: { ...record().totals, outputTokens: 999 } }),
-      record({ dedupeKey: "msg_2:" }),
-    ]);
+  it("reconciles cumulative Claude usage without changing the first attribution", () => {
+    const first = record({ reportedCostUsd: 1 });
+    const final = record({
+      timestampMs: first.timestampMs + 86_400_000,
+      sessionId: "fork",
+      totals: { ...first.totals, outputTokens: 999, reasoningTokens: 400 },
+    });
+    const kept = dedupeWithinFile([first, final, first, record({ dedupeKey: "msg_2:" })]);
 
     expect(kept).toHaveLength(2);
-    expect(kept[0]?.totals.outputTokens).toBe(1);
+    expect(kept[0]).toEqual({ ...first, totals: final.totals, reportedCostUsd: null });
+    expect(dedupeWithinFile([final, first])[0]).toEqual(final);
+    // Thinking alone changes presentation, not inclusive output or its bill.
+    expect(
+      dedupeWithinFile([first, record({ totals: { ...first.totals, reasoningTokens: 20 } })])[0],
+    ).toEqual({ ...first, totals: { ...first.totals, reasoningTokens: 20 } });
+  });
+
+  it("retains recorded thinking when a later snapshot omits it", () => {
+    const first = record({ totals: { ...record().totals, reasoningTokens: 30 } });
+    const next = record({ totals: { ...record().totals, outputTokens: 100 }, reportedCostUsd: 2 });
+    expect(dedupeWithinFile([first, next])[0]).toEqual({
+      ...first,
+      totals: { ...next.totals, reasoningTokens: 30 },
+      reportedCostUsd: null,
+    });
+  });
+
+  it("keeps the first duplicate for other providers", () => {
+    const first = record({ provider: "grok" });
+    expect(
+      dedupeWithinFile([
+        first,
+        record({ provider: "grok", totals: { ...first.totals, outputTokens: 999 } }),
+      ]),
+    ).toEqual([first]);
   });
 
   it("keeps every record that has no dedupe key", () => {

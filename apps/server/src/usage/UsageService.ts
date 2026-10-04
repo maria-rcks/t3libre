@@ -61,11 +61,13 @@ import {
   readTranscriptRecords,
 } from "./usageTranscriptReader.ts";
 import {
+  cachedFileRecords,
   decodeScanCache,
   dedupeWithinFile,
   LEGACY_SCAN_CACHE_FILE_NAMES,
   makeScanCacheWriter,
   pruneScanCache,
+  reconcileClaudeUsage,
   SCAN_CACHE_FILE_NAME,
   type CachedFile,
   type ScanCache,
@@ -406,25 +408,27 @@ export const make = Effect.gen(function* () {
         );
       const current = yield* readDocument(scanCachePath);
       const documents = current === null ? [] : [current];
-      if (current === null) {
-        for (const legacyScanCachePath of legacyScanCachePaths) {
-          const document = yield* readDocument(legacyScanCachePath);
-          if (document !== null) documents.push(document);
-        }
-        // Both older servers can retain history after an upgrade. Import each
-        // file's latest snapshot, preferring the newer format on equal mtimes.
-        cacheDirty = documents.length > 0;
+      // A downgraded server may have saved history after the current cache.
+      // Prefer the current format on ties, but recover newer legacy entries.
+      for (const legacyScanCachePath of legacyScanCachePaths) {
+        const document = yield* readDocument(legacyScanCachePath);
+        if (document !== null) documents.push(document);
       }
       for (const document of documents) {
         for (const [path, entry] of decodeScanCache(document)) {
           const previous = fileCache.get(path);
-          if (previous === undefined || entry.mtimeMs > previous.mtimeMs)
+          if (previous === undefined || entry.mtimeMs > previous.mtimeMs) {
             fileCache.set(path, entry);
+            if (document !== current) cacheDirty = true;
+          }
         }
         const sources = decodeCachedSources(document);
         if (Option.isSome(sources)) {
           for (const [key, source] of Object.entries(sources.value.sources)) {
-            if (!sourceCache.has(key)) sourceCache.set(key, source);
+            if (!sourceCache.has(key)) {
+              sourceCache.set(key, source);
+              if (document !== current) cacheDirty = true;
+            }
           }
         }
       }
@@ -490,10 +494,7 @@ export const make = Effect.gen(function* () {
         cached.provider === provider
       ) {
         return {
-          records:
-            cached.tailRecords.length === 0
-              ? cached.records
-              : [...cached.records, ...cached.tailRecords],
+          records: cachedFileRecords(cached),
         };
       }
 
@@ -511,20 +512,17 @@ export const make = Effect.gen(function* () {
       // (size, mtime) would silently drop the file's usage until it changes.
       if (parsed === null)
         return {
-          records: cached?.provider === provider ? [...cached.records, ...cached.tailRecords] : [],
+          records: cached?.provider === provider ? cachedFileRecords(cached) : [],
         };
 
-      // Stored already de-duplicated within the file, which is 99% of all
-      // duplicates. The aggregator still runs the cross-file dedupe pass. One
-      // seen set spans the cached base, the new lines, and the tail so a
-      // resumed parse dedupes exactly like a full one.
+      // Keep the provisional tail separate: resuming re-reads it and may find
+      // it changed or incomplete. Only complete lines update the cached base.
       const base = parsed.resumed && cached !== undefined ? cached.records : [];
-      const seen = new Set<string>();
-      const records = dedupeWithinFile([...base, ...parsed.records], seen);
-      const tailRecords = dedupeWithinFile(parsed.tailRecords, seen);
+      const records = dedupeWithinFile([...base, ...parsed.records]);
+      const tailRecords = dedupeWithinFile(parsed.tailRecords);
 
       return {
-        records: tailRecords.length === 0 ? records : [...records, ...tailRecords],
+        records: cachedFileRecords({ records, tailRecords }),
         update: {
           entry: { size, mtimeMs, provider, records, tailRecords, position: parsed.position },
           replaces: cached,
@@ -855,11 +853,27 @@ export const make = Effect.gen(function* () {
           !isWithinDirectory(filePath, dir)
         )
           continue;
-        retainedFiles.push({ path: filePath, records: [...entry.records, ...entry.tailRecords] });
+        retainedFiles.push({ path: filePath, records: cachedFileRecords(entry) });
       }
       return retainedFiles;
     });
     const sharedSessions = sharedCodexSessions(filesByDir.flat());
+    // Forks can hold an earlier snapshot than the original file. Select usage
+    // before aggregating so walk order cannot discard the fuller counts. The
+    // first copy still owns the timestamp, session and source attribution.
+    const claudeUsage = new Map<string, UsageRecord>();
+    for (const files of filesByDir) {
+      for (const file of files) {
+        for (const record of file.records) {
+          if (record.provider !== "claude" || record.dedupeKey === null) continue;
+          const previous = claudeUsage.get(record.dedupeKey);
+          claudeUsage.set(
+            record.dedupeKey,
+            previous === undefined ? record : reconcileClaudeUsage(previous, record),
+          );
+        }
+      }
+    }
 
     for (const [
       index,
@@ -879,7 +893,10 @@ export const make = Effect.gen(function* () {
         scannedFiles += 1;
         const codexEventOccurrences = new Map<string, number>();
         for (const record of file.records) {
-          let usageRecord = record;
+          let usageRecord =
+            record.provider === "claude" && record.dedupeKey !== null
+              ? (claudeUsage.get(record.dedupeKey) ?? record)
+              : record;
           if (record.provider === "codex" && sharedSessions.has(record.sessionId)) {
             // Match moved rollout copies without collapsing repeated equal events
             // within one rollout (timestamps can have only second precision).

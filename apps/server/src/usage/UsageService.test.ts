@@ -836,18 +836,151 @@ describe("UsageService", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.live("reconciles Claude usage through append, provisional tails, restart and cleanup", () =>
+    Effect.gen(function* () {
+      const { transcript, settings, home } = yield* setup;
+      const base = claudeLine(1, 10).replace('"message":', '"costUSD":1,"message":');
+      const tail = claudeLine(1, 30, "claude-fable-5", 12).trimEnd();
+      yield* Effect.promise(() => NodeFSP.writeFile(transcript, base));
+      yield* Effect.gen(function* () {
+        const { stateDir } = yield* ServerConfig.ServerConfig;
+        const check = Effect.fnUntraced(function* (
+          service: UsageService.UsageService["Service"],
+          output: number,
+          thinking: number,
+          cost = 2.5 + output * 0.5,
+        ) {
+          const summary = yield* service.readSummary(WINDOW);
+          assert.strictEqual(totalOutputTokens(summary), output);
+          assert.strictEqual(
+            summary.buckets.reduce((n, b) => n + b.totals.reasoningTokens, 0),
+            thinking,
+          );
+          assert.strictEqual(
+            summary.buckets.reduce((n, b) => n + b.totals.uncachedInputTokens, 0),
+            10,
+          );
+          assert.strictEqual(
+            summary.buckets.reduce((n, b) => n + b.records, 0),
+            1,
+          );
+          assert.strictEqual(
+            summary.buckets.reduce((n, b) => n + b.costUsd, 0),
+            cost,
+          );
+          assert.strictEqual(
+            summary.sources.reduce((n, s) => n + s.distinctSessions, 0),
+            1,
+          );
+        });
+        const service = yield* UsageService.make;
+        yield* check(service, 10, 0, 1);
+        yield* Effect.promise(() => NodeFSP.appendFile(transcript, tail));
+        yield* check(service, 30, 12);
+        yield* check(yield* UsageService.make, 30, 12);
+        // Replacing an unterminated tail must not bake its usage into the base.
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(transcript, base + '{"padding":"' + "x".repeat(1000)),
+        );
+        yield* check(service, 10, 0, 1);
+        yield* Effect.promise(() => NodeFSP.writeFile(transcript, base + tail));
+        yield* check(service, 30, 12);
+        yield* Effect.promise(() =>
+          NodeFSP.appendFile(transcript, "\n" + claudeLine(1, 60, "claude-fable-5", 24)),
+        );
+        yield* check(service, 60, 24);
+        yield* Effect.promise(() => NodeFSP.appendFile(transcript, base));
+        yield* check(service, 60, 24);
+        yield* check(yield* UsageService.make, 60, 24);
+        // A cold parse must agree with the incremental and persisted results.
+        yield* Effect.promise(() => NodeFSP.rm(NodePath.join(stateDir, SCAN_CACHE_FILE_NAME)));
+        yield* check(yield* UsageService.make, 60, 24);
+        yield* Effect.promise(() => NodeFSP.rm(transcript));
+        yield* check(yield* UsageService.make, 60, 24);
+      }).pipe(
+        Effect.provide(
+          serviceLayers({
+            prefix: "usage-service-claude-updates-test",
+            home,
+            settings,
+            ratesDocument: {
+              "claude-fable-5": { input_cost_per_token: 0.25, output_cost_per_token: 0.5 },
+            },
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live.each([false, true])(
+    "reconciles fuller Claude fork copies in either file order (%s)",
+    (fullerFirst) =>
+      Effect.gen(function* () {
+        const { transcript, settings, home } = yield* setup;
+        const fork = NodePath.join(NodePath.dirname(transcript), "fork.jsonl");
+        const early = claudeLine(1, 10);
+        const final = claudeLine(1, 30, "claude-fable-5", 12).replace("session-1", "session-fork");
+        yield* Effect.promise(async () => {
+          await NodeFSP.writeFile(transcript, fullerFirst ? final : early);
+          await NodeFSP.writeFile(fork, fullerFirst ? early : final);
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* UsageService.make;
+          const summary = yield* service.readSummary(WINDOW);
+          assert.strictEqual(totalOutputTokens(summary), 30);
+          assert.strictEqual(
+            summary.buckets.reduce((n, b) => n + b.totals.reasoningTokens, 0),
+            12,
+          );
+          assert.strictEqual(
+            summary.buckets.reduce((n, b) => n + b.records, 0),
+            1,
+          );
+          assert.strictEqual(
+            summary.buckets.reduce((n, b) => n + b.costUsd, 0),
+            17.5,
+          );
+          assert.strictEqual(
+            summary.sources.reduce((n, s) => n + s.distinctSessions, 0),
+            1,
+          );
+          yield* Effect.promise(() => NodeFSP.rm(fork));
+          assert.deepStrictEqual(
+            (yield* (yield* UsageService.make).readSummary(WINDOW)).buckets,
+            summary.buckets,
+          );
+        }).pipe(
+          Effect.provide(
+            serviceLayers({
+              prefix: `usage-service-claude-fork-${fullerFirst}-test`,
+              home,
+              settings,
+              ratesDocument: {
+                "claude-fable-5": { input_cost_per_token: 0.25, output_cost_per_token: 0.5 },
+              },
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
   it.live.each([
-    { version: 4, fileName: "usage-scan-cache.json" },
-    { version: 5, fileName: "usage-scan-cache-v5.json" },
+    { version: 4, fileName: "usage-scan-cache.json", keepCurrent: false },
+    { version: 5, fileName: "usage-scan-cache-v5.json", keepCurrent: false },
+    { version: 6, fileName: "usage-scan-cache-v6.json", keepCurrent: false },
+    { version: 5, fileName: "usage-scan-cache-v5.json", keepCurrent: true },
   ])(
-    "upgrades v$version Claude thinking without losing deleted history or changing cost",
-    ({ version, fileName }) =>
+    "recovers v$version Claude updates and deleted history (current cache: $keepCurrent)",
+    ({ version, fileName, keepCurrent }) =>
       Effect.gen(function* () {
         const { transcript, settings, home } = yield* setup;
         const deleted = NodePath.join(NodePath.dirname(transcript), "deleted.jsonl");
         const legacyOnly = NodePath.join(NodePath.dirname(transcript), "legacy-only.jsonl");
         yield* Effect.promise(async () => {
-          await NodeFSP.writeFile(transcript, claudeLine(1, 10, "claude-fable-5", 4));
+          await NodeFSP.writeFile(
+            transcript,
+            claudeLine(1, 10, "claude-fable-5", 4) + claudeLine(1, 15, "claude-fable-5", 6),
+          );
           await NodeFSP.writeFile(deleted, claudeLine(2, 30, "claude-fable-5", 12));
           await NodeFSP.writeFile(legacyOnly, claudeLine(4, 20, "claude-fable-5", 8));
         });
@@ -858,13 +991,18 @@ describe("UsageService", () => {
           const original = yield* (yield* UsageService.make).readSummary(WINDOW);
           const thinking = (summary: typeof original) =>
             summary.buckets.reduce((sum, bucket) => sum + bucket.totals.reasoningTokens, 0);
-          assert.strictEqual(thinking(original), 24);
+          assert.strictEqual(thinking(original), 26);
 
           const legacy = yield* Effect.promise(async () => {
             const document = decodeUnknownJsonString(await NodeFSP.readFile(cachePath, "utf8")) as {
               files: Record<string, { m: number; r: unknown[][]; t: unknown[][] }>;
             };
-            // Old parsers saved zero thinking but valid sizes and append positions.
+            const current = {
+              ...document,
+              files: { [transcript]: structuredClone(document.files[transcript]) },
+            };
+            // Old parsers kept only the first block despite valid append positions.
+            document.files[transcript]!.r[0]![6] = 10;
             for (const file of Object.values(document.files)) {
               for (const row of [...file.r, ...file.t]) row[7] = 0;
             }
@@ -875,7 +1013,7 @@ describe("UsageService", () => {
                 NodePath.join(stateDir, "usage-scan-cache.json"),
                 encodeUnknownJsonString({ ...document, version: 4, files: {} }),
               );
-            } else {
+            } else if (version === 4) {
               // A v4 server kept scanning after v5 first ran. Its retained
               // snapshot is newer, and includes a file absent from v5.
               const older = document.files[deleted]!;
@@ -894,7 +1032,8 @@ describe("UsageService", () => {
                 }),
               );
             }
-            await NodeFSP.rm(cachePath);
+            if (keepCurrent) await NodeFSP.writeFile(cachePath, encodeUnknownJsonString(current));
+            else await NodeFSP.rm(cachePath);
             await NodeFSP.rm(deleted);
             await NodeFSP.rm(legacyOnly);
             return text;
@@ -902,10 +1041,10 @@ describe("UsageService", () => {
 
           const service = yield* UsageService.make;
           const upgraded = yield* service.readSummary(WINDOW);
-          assert.strictEqual(totalOutputTokens(upgraded), 60);
+          assert.strictEqual(totalOutputTokens(upgraded), 65);
           // The unchanged live file must re-parse from byte zero. The deleted
           // file retains its tokens and cost, but its thinking is unrecoverable.
-          assert.strictEqual(thinking(upgraded), 4);
+          assert.strictEqual(thinking(upgraded), 6);
           assert.strictEqual(
             upgraded.buckets.reduce((sum, bucket) => sum + bucket.costUsd, 0),
             original.buckets.reduce((sum, bucket) => sum + bucket.costUsd, 0),
@@ -914,8 +1053,8 @@ describe("UsageService", () => {
             NodeFSP.appendFile(transcript, claudeLine(3, 7, "claude-fable-5", 3)),
           );
           const appended = yield* service.readSummary(WINDOW);
-          assert.strictEqual(totalOutputTokens(appended), 67);
-          assert.strictEqual(thinking(appended), 7);
+          assert.strictEqual(totalOutputTokens(appended), 72);
+          assert.strictEqual(thinking(appended), 9);
 
           yield* Effect.promise(() => NodeFSP.rm(transcript));
           const restored = yield* (yield* UsageService.make).readSummary(WINDOW);
@@ -927,7 +1066,7 @@ describe("UsageService", () => {
         }).pipe(
           Effect.provide(
             serviceLayers({
-              prefix: `usage-service-v${version}-claude-upgrade-test`,
+              prefix: `usage-service-v${version}-claude-upgrade-${keepCurrent}-test`,
               home,
               settings,
               ratesDocument: {

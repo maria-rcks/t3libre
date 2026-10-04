@@ -95,10 +95,9 @@ function grokCostTicksToUsd(ticks: unknown): number | null {
 /**
  * Parses one line of a Claude Code transcript.
  *
- * T3 Code writes one record per assistant *content block*, and every one of
- * those records repeats the same complete `usage` object for the parent
- * message. Summing them overcounts by roughly 2.4x on a real workload, so the
- * caller must drop repeats by `dedupeKey` and keep the first.
+ * Claude Code repeats cumulative message usage across assistant content
+ * blocks. Later blocks can contain fuller output and thinking counts. The
+ * caller must reconcile snapshots by `dedupeKey`, never sum the repeats.
  */
 export function parseClaudeLine(line: string): UsageRecord | null {
   let parsed: unknown;
