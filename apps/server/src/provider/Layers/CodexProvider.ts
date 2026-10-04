@@ -50,6 +50,7 @@ import {
 import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 const RATE_LIMITS_PROBE_TIMEOUT_MS = 3_000;
+const CONFIG_PROBE_TIMEOUT_MS = 3_000;
 
 type CodexRateLimitsProbe =
   | {
@@ -259,6 +260,37 @@ export function applyPreferredCodexDefaultModel(
   });
 }
 
+/** A null tier means config/read failed, so the catalog cannot establish the effective tier. */
+export function applyCodexServiceTierDefault(
+  models: ReadonlyArray<ServerProviderModel>,
+  serviceTier: string | null | undefined,
+): ReadonlyArray<ServerProviderModel> {
+  if (serviceTier === undefined) return models;
+
+  // Codex's service tier is global, including when T3 selects a different model.
+  return models.map((model) => {
+    if (!model.capabilities) return model;
+    return {
+      ...model,
+      capabilities: {
+        ...model.capabilities,
+        optionDescriptors: (model.capabilities.optionDescriptors ?? []).map((descriptor) => {
+          if (descriptor.id !== "serviceTier" || descriptor.type !== "select") return descriptor;
+          const value = descriptor.options.find((option) => option.id === serviceTier)?.id;
+          const { currentValue: _currentValue, ...rest } = descriptor;
+          return {
+            ...rest,
+            ...(value ? { currentValue: value } : {}),
+            options: descriptor.options.map(({ isDefault: _isDefault, ...option }) =>
+              option.id === value ? { ...option, isDefault: true } : option,
+            ),
+          };
+        }),
+      },
+    };
+  });
+}
+
 /**
  * Codex has no static default capability set, so a bare custom slug borrows
  * the first built-in's descriptors; an entry with its own capabilities keeps
@@ -438,12 +470,20 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     } satisfies CodexAppServerProviderSnapshot;
   }
 
-  const [skillsResponse, models, rateLimits] = yield* Effect.all(
+  const [skillsResponse, models, serviceTier, rateLimits] = yield* Effect.all(
     [
       client.request("skills/list", {
         cwds: [input.cwd],
       }),
       requestAllCodexModels(client),
+      client.request("config/read", { cwd: input.cwd, includeLayers: false }).pipe(
+        Effect.map((response) => response.config.service_tier ?? undefined),
+        Effect.timeoutOption(Duration.millis(CONFIG_PROBE_TIMEOUT_MS)),
+        Effect.map(Option.getOrElse(() => null)),
+        Effect.catch((error) =>
+          Effect.logDebug("Codex config read failed.", { cause: error }).pipe(Effect.as(null)),
+        ),
+      ),
       // Usage is an enrichment: a failure or a slow answer degrades to "no
       // usage this probe" rather than costing the account and models.
       input.skipNativeUsage
@@ -474,8 +514,9 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     account: accountResponse,
     ...(rateLimits ? { rateLimits } : {}),
     version,
-    models: applyPreferredCodexDefaultModel(
-      appendCustomCodexModels(models, input.customModels ?? []),
+    models: applyCodexServiceTierDefault(
+      applyPreferredCodexDefaultModel(appendCustomCodexModels(models, input.customModels ?? [])),
+      serviceTier,
     ),
     skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
   } satisfies CodexAppServerProviderSnapshot;

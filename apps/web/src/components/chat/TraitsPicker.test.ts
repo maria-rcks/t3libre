@@ -192,6 +192,20 @@ describe("buildTraitsTriggerDisplay", () => {
     expect(display([unresolved])).toEqual({ label: "", speedIcon: null });
   });
 
+  it("does not claim Standard when the effective Codex service tier is unknown", () => {
+    const unknownTier: ProviderOptionDescriptor = {
+      id: "serviceTier",
+      label: "Service Tier",
+      type: "select",
+      options: [
+        { id: "default", label: "Standard" },
+        { id: "priority", label: "Fast" },
+      ],
+    };
+    expect(display([unknownTier])).toEqual({ label: "", speedIcon: null });
+    expect(display([EFFORT, unknownTier])).toEqual({ label: "High", speedIcon: null });
+  });
+
   it("still renders the prompt-controlled ultrathink label alongside the bolt", () => {
     expect(
       buildTraitsTriggerDisplay({

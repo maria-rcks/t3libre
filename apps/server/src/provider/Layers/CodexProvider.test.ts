@@ -1,6 +1,12 @@
 import { assert, it } from "@effect/vitest";
 
-import { applyPreferredCodexDefaultModel, mapCodexModelCapabilities } from "./CodexProvider.ts";
+import { getProviderOptionCurrentLabel } from "@t3tools/shared/model";
+
+import {
+  applyCodexServiceTierDefault,
+  applyPreferredCodexDefaultModel,
+  mapCodexModelCapabilities,
+} from "./CodexProvider.ts";
 
 it("maps current Codex model capability fields", () => {
   const capabilities = mapCodexModelCapabilities({
@@ -111,6 +117,58 @@ it("uses standard routing when the catalog has no default service tier", () => {
       currentValue: "default",
     },
   ]);
+});
+
+it("displays the global Codex tier across models and leaves unreadable tiers unknown", () => {
+  const models = ["gpt-6-luna", "gpt-6-astra"].map((slug) => ({
+    slug,
+    name: slug,
+    isCustom: false,
+    isDefault: slug === "gpt-6-luna",
+    capabilities: mapCodexModelCapabilities({
+      additionalSpeedTiers: [],
+      defaultReasoningEffort: "low",
+      defaultServiceTier: null,
+      description: "Test model",
+      displayName: slug,
+      hidden: false,
+      id: slug,
+      isDefault: slug === "gpt-6-luna",
+      model: slug,
+      serviceTiers: [{ id: "priority", name: "Fast", description: "Lower latency" }],
+      supportedReasoningEfforts: [
+        { description: "Low", reasoningEffort: "low" },
+        { description: "Medium", reasoningEffort: "medium" },
+      ],
+    }),
+  }));
+
+  for (const [tier, label] of [
+    ["priority", "Fast"],
+    ["default", "Standard"],
+    [undefined, "Standard"],
+    [null, undefined],
+    ["unsupported", undefined],
+  ] as const) {
+    const result = applyCodexServiceTierDefault(models, tier);
+    for (const model of result) {
+      const descriptor = model.capabilities?.optionDescriptors?.find(
+        (candidate) => candidate.id === "serviceTier",
+      );
+      assert.equal(getProviderOptionCurrentLabel(descriptor), label);
+      if (descriptor?.type === "select") {
+        assert.equal(
+          descriptor.options.find((option) => option.isDefault)?.id,
+          label === undefined ? undefined : (tier ?? "default"),
+        );
+      }
+      assert.equal(model.isDefault, model.slug === "gpt-6-luna");
+      assert.equal(
+        model.capabilities?.optionDescriptors?.[0]?.currentValue,
+        model.slug === "gpt-6-astra" ? "medium" : "low",
+      );
+    }
+  }
 });
 
 it("marks the most preferred available model as default", () => {

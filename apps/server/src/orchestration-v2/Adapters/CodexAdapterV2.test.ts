@@ -31,6 +31,7 @@ import {
 import { assert, describe, it } from "@effect/vitest";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
+import { getProviderOptionCurrentLabel, getProviderOptionDescriptors } from "@t3tools/shared/model";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexReplay from "effect-codex-app-server/replay";
 import * as DateTime from "effect/DateTime";
@@ -53,6 +54,10 @@ import * as ServerConfig from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import type { EventNdjsonLogger } from "../../provider/Layers/EventNdjsonLogger.ts";
 import * as ProviderEventLoggers from "../../provider/Layers/ProviderEventLoggers.ts";
+import {
+  applyCodexServiceTierDefault,
+  mapCodexModelCapabilities,
+} from "../../provider/Layers/CodexProvider.ts";
 import * as IdAllocator from "../IdAllocator.ts";
 import * as EffectWorker from "../EffectWorker.ts";
 import * as Orchestrator from "../Orchestrator.ts";
@@ -607,6 +612,59 @@ describe("CodexAdapterV2 runtime policy", () => {
         omitServiceTier: true,
       });
       assert.equal(managed.serviceTier, undefined);
+    }),
+  );
+
+  it.effect("displays inherited Priority while an explicit Standard pick dispatches default", () =>
+    Effect.gen(function* () {
+      const [model] = applyCodexServiceTierDefault(
+        [
+          {
+            slug: "gpt-6-astra",
+            name: "Astra",
+            isCustom: false,
+            capabilities: mapCodexModelCapabilities({
+              additionalSpeedTiers: [],
+              defaultReasoningEffort: "medium",
+              defaultServiceTier: null,
+              description: "Test model",
+              displayName: "Astra",
+              hidden: false,
+              id: "gpt-6-astra",
+              isDefault: false,
+              model: "gpt-6-astra",
+              serviceTiers: [{ id: "priority", name: "Fast", description: "Lower latency" }],
+              supportedReasoningEfforts: [],
+            }),
+          },
+        ],
+        "priority",
+      );
+      assert.isNotNull(model?.capabilities);
+      for (const tier of [undefined, "default"] as const) {
+        const selection: ModelSelection = {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-6-astra",
+          ...(tier === undefined ? {} : { options: [{ id: "serviceTier", value: tier }] }),
+        };
+        const descriptors = getProviderOptionDescriptors({
+          caps: model!.capabilities!,
+          selections: selection.options,
+        });
+        assert.equal(
+          getProviderOptionCurrentLabel(
+            descriptors.find((descriptor) => descriptor.id === "serviceTier"),
+          ),
+          tier === undefined ? "Fast" : "Standard",
+        );
+        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+          nativeThreadId: "native-inherited-tier",
+          codexInput: [{ type: "text", text: "test" }],
+          runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: null },
+          modelSelection: selection,
+        });
+        assert.equal(params.serviceTier, tier);
+      }
     }),
   );
 });
