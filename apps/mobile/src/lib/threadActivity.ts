@@ -779,10 +779,10 @@ function toFeedActivity(
     canExpand:
       !(item.type === "error" && item.status === "failed") &&
       (readPaths
-        ? readPaths.length > 0
+        ? readPaths.length > 0 || turnItemNeedsDetailFetch(item)
         : turnItemHasDetail(item) || workEntry.questionAnswer !== undefined),
-    // Read rows deliberately show only their paths, never the file contents.
-    fetchesDetail: !readPaths && turnItemNeedsDetailFetch(item),
+    // Read rows show their paths, then the fetched file contents.
+    fetchesDetail: turnItemNeedsDetailFetch(item),
     getFullDetail,
     getCopyText,
     icon: workEntry.toolSurface ?? itemIcon(item),

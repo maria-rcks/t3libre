@@ -15,7 +15,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-search";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
-import * as DateTime from "effect/DateTime";
+import { turnItemDetailRevision } from "@t3tools/client-runtime/work-log/item-detail";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -369,7 +369,7 @@ export function useTurnItemDetail(
           input: {
             threadId: target.row.sourceThreadId,
             itemId: target.row.sourceItemId,
-            revision: DateTime.formatIso(target.row.item.updatedAt),
+            revision: turnItemDetailRevision(target.row.item),
           },
         }),
   );

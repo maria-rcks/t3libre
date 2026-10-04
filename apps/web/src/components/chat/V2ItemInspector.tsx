@@ -6,10 +6,10 @@ import type {
 } from "@t3tools/contracts";
 import {
   toolCallLines,
+  turnItemDetailRevision,
   turnItemNeedsDetailFetch,
   turnItemOutputText,
 } from "@t3tools/client-runtime/work-log/item-detail";
-import * as DateTime from "effect/DateTime";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
 import { memo, Suspense, use, useMemo } from "react";
 
@@ -93,17 +93,83 @@ function StructuredValue({
 }
 
 /**
- * A tool call's body: the call itself in the foreground, its result muted below.
- * The row title already shows short commands, so only long ones repeat here.
+ * The item behind a projected row, with the output the timeline withheld
+ * fetched while the row is open.
  */
-function ToolCallBody(props: {
-  readonly command?: string;
-  readonly args?: unknown;
+function useFetchedTurnItem(
+  projectedItem: OrchestrationV2ProjectedTurnItem,
+  environmentId: EnvironmentId,
+) {
+  const wireItem = projectedItem.item;
+  const fetches = turnItemNeedsDetailFetch(wireItem);
+  const detail = useTurnItemDetail(
+    fetches
+      ? {
+          environmentId,
+          threadId: projectedItem.sourceThreadId,
+          itemId: projectedItem.sourceItemId,
+          revision: turnItemDetailRevision(wireItem),
+        }
+      : null,
+  );
+  const fetchedItem = detail.data?.item;
+  const item = fetchedItem?.type === wireItem.type ? fetchedItem : wireItem;
+  return {
+    item,
+    output: {
+      output: turnItemOutputText(item),
+      pending: item === wireItem && detail.isPending,
+      error:
+        item !== wireItem
+          ? null
+          : detail.data?.item === null
+            ? "Output is no longer available."
+            : detail.error,
+      empty: fetches && item !== wireItem,
+    },
+  };
+}
+
+interface ToolOutputState {
   readonly output: string | null;
   readonly pending: boolean;
   readonly error: string | null;
-  readonly exitCode?: number | undefined;
+  readonly empty: boolean;
+}
+
+function ToolOutput(props: ToolOutputState) {
+  return props.output ? (
+    <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
+  ) : props.pending ? (
+    <div className="text-muted-foreground italic">Loading output…</div>
+  ) : props.error ? (
+    <div className="text-destructive">Couldn&apos;t load output: {props.error}</div>
+  ) : props.empty ? (
+    <div className="text-muted-foreground italic">No output.</div>
+  ) : null;
+}
+
+/** Fetched output for rows that show their own plain text instead of the inspector. */
+export function FetchedToolOutput(props: {
+  readonly projectedItem: OrchestrationV2ProjectedTurnItem;
+  readonly environmentId: EnvironmentId;
 }) {
+  const { output } = useFetchedTurnItem(props.projectedItem, props.environmentId);
+  return (
+    <div className={cn("mt-1.5", monoClassName)}>
+      <ToolOutput {...output} />
+    </div>
+  );
+}
+
+/** A tool call's body: the call itself in the foreground, its result muted below. */
+function ToolCallBody(
+  props: ToolOutputState & {
+    readonly command?: string;
+    readonly args?: unknown;
+    readonly exitCode?: number | undefined;
+  },
+) {
   const call = toolCallLines({ command: props.command, args: props.args });
   return (
     <div className={cn("space-y-1.5", monoClassName)}>
@@ -119,13 +185,7 @@ function ToolCallBody(props: {
         </div>
       ) : null}
       {call.argsText ? <StructuredValue value={call.argsText} highlightJson /> : null}
-      {props.output ? (
-        <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
-      ) : props.pending ? (
-        <div className="text-muted-foreground italic">Loading output…</div>
-      ) : props.error ? (
-        <div className="text-destructive">Couldn&apos;t load output: {props.error}</div>
-      ) : null}
+      <ToolOutput {...props} />
       {props.exitCode !== undefined && props.exitCode !== 0 ? (
         <div className="text-destructive">exit {props.exitCode}</div>
       ) : null}
@@ -134,29 +194,9 @@ function ToolCallBody(props: {
 }
 
 export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspectorProps) {
-  const wireItem = props.projectedItem.item;
-  const detail = useTurnItemDetail(
-    turnItemNeedsDetailFetch(wireItem)
-      ? {
-          environmentId: props.environmentId,
-          threadId: props.projectedItem.sourceThreadId,
-          itemId: props.projectedItem.sourceItemId,
-          revision: DateTime.formatIso(wireItem.updatedAt),
-        }
-      : null,
-  );
-  const fetchedItem = detail.data?.item;
-  const item = fetchedItem?.type === wireItem.type ? fetchedItem : wireItem;
-  const outputState = {
-    output: turnItemOutputText(item),
-    pending: item === wireItem && detail.isPending,
-    error:
-      item !== wireItem
-        ? null
-        : detail.data?.item === null
-          ? "Output is no longer available."
-          : detail.error,
-  };
+  const fetched = useFetchedTurnItem(props.projectedItem, props.environmentId);
+  const item = fetched.item;
+  const outputState = fetched.output;
   const support = useV2ItemSupport({
     environmentId: props.environmentId,
     sourceThreadId: props.projectedItem.sourceThreadId,
