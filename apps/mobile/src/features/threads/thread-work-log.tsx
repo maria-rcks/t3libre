@@ -1032,7 +1032,12 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
         </View>
       </WorkLogPressable>
 
-      {expanded && (reasoning || fullDetail || viewedImagePath || row.workEntry.questionAnswer) ? (
+      {expanded &&
+      (reasoning ||
+        fullDetail ||
+        fetchedOutput ||
+        viewedImagePath ||
+        row.workEntry.questionAnswer) ? (
         <Animated.View
           entering={WORK_LOG_DETAIL_ENTER_TRANSITION}
           exiting={WORK_LOG_DETAIL_EXIT_TRANSITION}
