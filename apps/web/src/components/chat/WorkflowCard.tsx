@@ -6,7 +6,6 @@ import {
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
   ArrowUpRightIcon,
-  BotIcon,
   CheckIcon,
   ChevronDownIcon,
   CodeIcon,
@@ -17,6 +16,7 @@ import {
 import { useId, useState } from "react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { Dialog, DialogHeader, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { AgentElapsed } from "./AgentElapsed";
@@ -45,44 +45,52 @@ function statusLabel(status: WorkflowStatus) {
 
 function StatusMark({ status }: { status: WorkflowStatus }) {
   const Icon = status === "completed" ? CheckIcon : status === "failed" ? XIcon : MinusIcon;
-  return isActiveSubagentStatus(status) ? (
+  return (
     <span
-      aria-hidden
-      className={cn(
-        "size-1.5 shrink-0 rounded-full",
-        status === "pending" ? "bg-muted-foreground/40" : "bg-info",
+      className="flex size-3.5 shrink-0 items-center justify-center"
+      aria-label={statusLabel(status)}
+    >
+      {isActiveSubagentStatus(status) ? (
+        <span
+          aria-hidden
+          className={cn(
+            "size-1.5 rounded-full",
+            status === "pending" ? "bg-muted-foreground/40" : "bg-info",
+          )}
+        />
+      ) : (
+        <Icon
+          aria-hidden
+          className={cn(
+            "size-3.5",
+            status === "failed" ? "text-destructive" : "text-muted-foreground",
+          )}
+        />
       )}
-    />
-  ) : (
-    <Icon
-      aria-hidden
-      className={cn(
-        "size-3 shrink-0",
-        status === "completed"
-          ? "text-success"
-          : status === "failed"
-            ? "text-destructive"
-            : "text-muted-foreground",
-      )}
-    />
+    </span>
   );
 }
 
-/** One workflow, with its parallel agents grouped by the provider's declared phases. */
+/** The same ordered phase tree in the conversation and workspace lineage. */
 export function WorkflowCard({
   agent,
   onOpenThread,
   inWorkflowThread = false,
+  variant = "conversation",
+  isThreadUnavailable,
 }: {
   agent: OrchestrationV2Subagent;
   onOpenThread: (threadId: ThreadId) => void;
   inWorkflowThread?: boolean;
+  variant?: "conversation" | "panel";
+  isThreadUnavailable?: (threadId: ThreadId) => boolean;
 }) {
-  const [expanded, setExpanded] = useState(true);
-  const [selectedPhase, setSelectedPhase] = useState<number | null>(null);
+  const panel = variant === "panel";
+  const [expanded, setExpanded] = useState(!panel);
   const [scriptOpen, setScriptOpen] = useState(false);
   const detailsId = useId();
   const { childThreadId } = agent;
+  const coordinatorUnavailable = childThreadId !== null && isThreadUnavailable?.(childThreadId);
   const runtime = projectedSubagentsToRuntime([agent]);
   const coordinator = runtime[0]!;
   const members = runtime.slice(1);
@@ -98,51 +106,50 @@ export function WorkflowCard({
   if (members.some((member) => member.phaseIndex === null)) {
     phases.push({ index: -1, title: "Other agents" });
   }
-  const activeMember = members.find((member) => isActiveSubagentStatus(member.status));
-  const activePhase = phases.some((phase) => phase.index === selectedPhase)
-    ? selectedPhase
-    : activeMember
-      ? (activeMember.phaseIndex ?? -1)
-      : phases[0]?.index;
-  const visibleMembers =
-    phases.length === 0
-      ? members
-      : members.filter((member) => (member.phaseIndex ?? -1) === activePhase);
   const completed = members.filter((member) => member.status === "completed").length;
-  const running = members.filter((member) => isActiveSubagentStatus(member.status)).length;
+  const activeMember = members.find((member) => isActiveSubagentStatus(member.status));
+  const currentPhase = activeMember
+    ? (activeMember.phaseIndex ?? -1)
+    : phases.findLast((phase) =>
+        members.some((member) => (member.phaseIndex ?? -1) === phase.index),
+      )?.index;
   const title = coordinator.workflowName ?? coordinator.title;
-  const selectedTitle = phases.find((phase) => phase.index === activePhase)?.title;
 
   return (
     <section
       aria-label={`Workflow: ${title}`}
       data-workflow-card
-      className="my-2 overflow-hidden rounded-xl border border-border/70 bg-card/30"
+      className={cn("min-w-0", !panel && "my-2 overflow-hidden rounded-lg border border-border/70")}
     >
-      <div className="flex items-start gap-3 px-4 py-3.5">
-        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-background/60 text-muted-foreground">
-          <GitBranchIcon aria-hidden className="size-4" />
-        </span>
-        <button
-          type="button"
-          aria-expanded={expanded}
-          aria-controls={detailsId}
-          onClick={() => setExpanded(!expanded)}
-          className="min-w-0 flex-1 cursor-pointer rounded-sm text-left focus-visible:outline-2 focus-visible:outline-ring"
-        >
-          <span className="flex items-center gap-2 text-2xs text-muted-foreground">
-            <span>Workflow</span>
-            <span aria-hidden>·</span>
-            <StatusMark status={coordinator.status} />
+      <div className={cn("flex items-start gap-2", panel ? "px-1.5 py-2" : "px-3 py-2.5")}>
+        <GitBranchIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          {panel && !inWorkflowThread && childThreadId !== null ? (
+            <button
+              type="button"
+              aria-label={`Open workflow: ${title}`}
+              disabled={coordinatorUnavailable}
+              onClick={coordinatorUnavailable ? undefined : () => onOpenThread(childThreadId)}
+              className="block max-w-full cursor-pointer truncate rounded-sm text-left text-xs font-medium hover:underline focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:text-muted-foreground disabled:no-underline"
+            >
+              {title}
+            </button>
+          ) : (
+            <span className="block break-words text-xs font-medium text-foreground">{title}</span>
+          )}
+          <span className="mt-1 flex flex-wrap items-center gap-x-1.5 text-2xs text-muted-foreground">
             <span>{statusLabel(coordinator.status)}</span>
+            {members.length > 0 ? (
+              <>
+                <span aria-hidden>·</span>
+                <span>
+                  {completed}/{members.length} agents
+                </span>
+              </>
+            ) : null}
+            <AgentElapsed agent={coordinator} />
           </span>
-          <span className="mt-1 block break-words text-sm font-medium text-foreground">
-            {title}
-          </span>
-        </button>
-        <span className="mt-0.5 shrink-0 text-2xs text-muted-foreground">
-          <AgentElapsed agent={coordinator} />
-        </span>
+        </div>
         <Button
           size="icon-xs"
           variant="ghost-muted"
@@ -151,115 +158,50 @@ export function WorkflowCard({
           aria-controls={detailsId}
           onClick={() => setExpanded(!expanded)}
         >
-          <ChevronDownIcon
-            aria-hidden
-            className={cn("size-3.5 transition-transform", !expanded && "-rotate-90")}
-          />
+          <ChevronDownIcon aria-hidden className={cn("size-3.5", !expanded && "-rotate-90")} />
         </Button>
       </div>
       {expanded ? (
-        <div id={detailsId}>
-          {phases.length > 0 ? (
-            <div
-              aria-label="Workflow phases"
-              className="flex flex-wrap gap-x-3 gap-y-2 border-y border-border/50 bg-muted/20 px-4 py-3"
-            >
-              {phases.map((phase, index) => {
-                const phaseMembers = members.filter(
-                  (member) => (member.phaseIndex ?? -1) === phase.index,
-                );
-                const settled = phaseMembers.filter(
-                  (member) => member.status === "completed",
-                ).length;
-                const failed = phaseMembers.some((member) => member.status === "failed");
-                const active = phaseMembers.some((member) => isActiveSubagentStatus(member.status));
-                const done = phaseMembers.length > 0 && settled === phaseMembers.length;
-                const selected = phase.index === activePhase;
-                return (
-                  <button
-                    key={phase.index}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => setSelectedPhase(phase.index)}
-                    className={cn(
-                      "group/phase min-w-24 flex-1 cursor-pointer rounded-sm text-left focus-visible:outline-2 focus-visible:outline-ring",
-                      selected ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <span
-                      aria-hidden
-                      className={cn(
-                        "mb-2 block h-0.5 rounded-full",
-                        failed
-                          ? "bg-destructive"
-                          : done
-                            ? "bg-success/70"
-                            : active
-                              ? "bg-info"
-                              : "bg-border",
-                        selected && "ring-1 ring-current/10",
-                      )}
-                    />
-                    <span className="flex items-center gap-1.5 text-xs font-medium">
-                      <span className="text-3xs font-normal tabular-nums text-muted-foreground/60">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                      {phase.title}
-                    </span>
-                    <span className="mt-1 block text-3xs text-muted-foreground">
-                      {phaseMembers.length > 0
-                        ? `${settled}/${phaseMembers.length} complete${failed ? " · failed" : active ? " · running" : ""}`
-                        : isActiveSubagentStatus(coordinator.status)
-                          ? "Upcoming"
-                          : "No agents"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-          <div
-            className="px-2 py-2"
-            aria-label={selectedTitle ? `${selectedTitle} agents` : "Workflow agents"}
-          >
-            {visibleMembers.length === 0 ? (
-              <p className="px-2 py-3 text-xs text-muted-foreground">
+        <div id={detailsId} className={cn(panel ? "ml-3.5" : "mx-3 mb-2")}>
+          <div aria-label="Workflow phases" className="border-l border-border/70 pl-2">
+            {phases.map((phase) => (
+              <WorkflowPhase
+                key={`${agent.id}:${phase.index}`}
+                title={phase.title}
+                members={members.filter((member) => (member.phaseIndex ?? -1) === phase.index)}
+                coordinatorStatus={coordinator.status}
+                defaultExpanded={phase.index === currentPhase}
+                panel={panel}
+                onOpenThread={onOpenThread}
+                isThreadUnavailable={isThreadUnavailable}
+              />
+            ))}
+            {phases.length === 0 ? (
+              <p className="px-1 py-2 text-2xs text-muted-foreground">
                 {isActiveSubagentStatus(coordinator.status)
-                  ? "Waiting for agents in this phase."
-                  : "No agents were reported for this phase."}
+                  ? "Waiting for agents…"
+                  : "No agents reported"}
               </p>
-            ) : (
-              <ul className="m-0 list-none p-0">
-                {visibleMembers.map((member) => (
-                  <li key={member.id}>
-                    <WorkflowMember agent={member} onOpenThread={onOpenThread} />
-                  </li>
-                ))}
-              </ul>
-            )}
+            ) : null}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/50 px-4 py-2">
-            <span className="text-3xs text-muted-foreground">
-              {members.length === 0
-                ? isActiveSubagentStatus(coordinator.status)
-                  ? "Agents will appear as they start"
-                  : "No agents reported"
-                : `${completed} of ${members.length} agents complete${running > 0 ? ` · ${running} active` : ""}`}
-            </span>
-            <div className="flex items-center gap-1">
-              {agent.prompt ? (
-                <Button size="xs" variant="ghost-muted" onClick={() => setScriptOpen(true)}>
-                  <CodeIcon aria-hidden className="size-3" />
-                  View script
-                </Button>
-              ) : null}
-              {!inWorkflowThread && childThreadId !== null ? (
-                <Button size="xs" variant="ghost-muted" onClick={() => onOpenThread(childThreadId)}>
-                  Open workflow
-                  <ArrowUpRightIcon aria-hidden className="size-3" />
-                </Button>
-              ) : null}
-            </div>
+          <div className="mt-2 flex flex-wrap items-center justify-end gap-1">
+            {agent.prompt ? (
+              <Button size="xs" variant="ghost-muted" onClick={() => setScriptOpen(true)}>
+                <CodeIcon aria-hidden className="size-3" />
+                View script
+              </Button>
+            ) : null}
+            {!panel && !inWorkflowThread && childThreadId !== null ? (
+              <Button
+                size="xs"
+                variant="ghost-muted"
+                disabled={coordinatorUnavailable}
+                onClick={coordinatorUnavailable ? undefined : () => onOpenThread(childThreadId)}
+              >
+                Open workflow
+                <ArrowUpRightIcon aria-hidden className="size-3" />
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -277,52 +219,154 @@ export function WorkflowCard({
   );
 }
 
+function WorkflowPhase({
+  title,
+  members,
+  coordinatorStatus,
+  defaultExpanded,
+  panel,
+  onOpenThread,
+  isThreadUnavailable,
+}: {
+  title: string;
+  members: RuntimeSubagent[];
+  coordinatorStatus: WorkflowStatus;
+  defaultExpanded: boolean;
+  panel: boolean;
+  onOpenThread: (threadId: ThreadId) => void;
+  isThreadUnavailable: ((threadId: ThreadId) => boolean) | undefined;
+}) {
+  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
+  const expanded = userExpanded ?? defaultExpanded;
+  const membersId = useId();
+  const completed = members.filter((member) => member.status === "completed").length;
+  const failed = members.some((member) => member.status === "failed");
+  const active = members.some((member) => isActiveSubagentStatus(member.status));
+  const summary =
+    members.length > 0
+      ? `${completed}/${members.length}${failed ? " · failed" : active ? " · active" : ""}`
+      : isActiveSubagentStatus(coordinatorStatus)
+        ? "Upcoming"
+        : "No agents";
+  return (
+    <div>
+      <button
+        type="button"
+        aria-label={`${title}: ${summary}`}
+        aria-expanded={expanded}
+        aria-controls={membersId}
+        onClick={() => setUserExpanded(!expanded)}
+        className="flex min-h-8 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1 text-left hover:bg-accent/30 focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        <ChevronDownIcon
+          aria-hidden
+          className={cn("size-3 shrink-0 text-muted-foreground", !expanded && "-rotate-90")}
+        />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">{title}</span>
+        <span
+          className={cn(
+            "shrink-0 text-2xs tabular-nums",
+            failed ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {summary}
+        </span>
+      </button>
+      {expanded ? (
+        <ul
+          id={membersId}
+          aria-label={`${title} agents`}
+          className="mb-1 ml-2.5 list-none border-l border-border/50 pl-2"
+        >
+          {members.map((member) => (
+            <li key={member.id}>
+              <WorkflowMember
+                agent={member}
+                panel={panel}
+                onOpenThread={onOpenThread}
+                unavailable={Boolean(
+                  member.childThreadId &&
+                  isThreadUnavailable?.(ThreadId.make(member.childThreadId)),
+                )}
+              />
+            </li>
+          ))}
+          {members.length === 0 ? (
+            <li className="px-1 py-2 text-2xs text-muted-foreground">
+              {isActiveSubagentStatus(coordinatorStatus)
+                ? "Waiting for agents in this phase."
+                : "No agents were reported for this phase."}
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function WorkflowMember({
   agent,
+  panel,
   onOpenThread,
+  unavailable,
 }: {
   agent: RuntimeSubagent;
+  panel: boolean;
   onOpenThread: (threadId: ThreadId) => void;
+  unavailable?: boolean;
 }) {
   const childThreadId = agent.childThreadId ? ThreadId.make(agent.childThreadId) : null;
   const content = (
     <>
-      <span className="relative flex size-7 shrink-0 items-center justify-center text-muted-foreground">
-        <BotIcon aria-hidden className="size-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-medium text-foreground">{agent.title}</span>
-        <span className="mt-0.5 block truncate text-2xs text-muted-foreground">
-          {agent.model ?? statusLabel(agent.status)}
-          {agent.attempt !== null && agent.attempt > 1 ? ` · attempt ${agent.attempt}` : ""}
-        </span>
-      </span>
-      <span className="flex shrink-0 items-center gap-1.5 text-3xs text-muted-foreground">
-        <StatusMark status={agent.status} />
-        <span>{statusLabel(agent.status)}</span>
-      </span>
-      <span className="min-w-8 shrink-0 text-right text-3xs tabular-nums text-muted-foreground">
+      <StatusMark status={agent.status} />
+      <span className="min-w-0 flex-1 truncate text-xs">{agent.title}</span>
+      {agent.attempt !== null && agent.attempt > 1 ? (
+        <span className="shrink-0 text-3xs text-muted-foreground">#{agent.attempt}</span>
+      ) : null}
+      {!panel && agent.model ? (
+        <span className="max-w-28 truncate text-3xs text-muted-foreground">{agent.model}</span>
+      ) : null}
+      <span className="shrink-0 text-3xs tabular-nums text-muted-foreground">
         <AgentElapsed agent={agent} />
       </span>
-      {agent.childThreadId ? (
+      {childThreadId ? (
         <ArrowUpRightIcon aria-hidden className="size-3 shrink-0 text-muted-foreground/60" />
       ) : null}
     </>
   );
-  const className = "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left";
-  return childThreadId ? (
-    <button
-      type="button"
-      aria-label={`Open ${agent.title}`}
-      onClick={() => onOpenThread(childThreadId)}
-      className={cn(
-        className,
-        "cursor-pointer hover:bg-accent/30 focus-visible:outline-2 focus-visible:outline-ring",
-      )}
-    >
-      {content}
-    </button>
-  ) : (
-    <div className={className}>{content}</div>
+  const className = "flex min-h-8 w-full min-w-0 items-center gap-1.5 rounded-sm px-1 text-left";
+  const description = [
+    statusLabel(agent.status),
+    agent.model,
+    agent.attempt && agent.attempt > 1 ? `Attempt ${agent.attempt}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          childThreadId ? (
+            <button
+              type="button"
+              aria-label={`Open ${agent.title}`}
+              disabled={unavailable}
+              onClick={unavailable ? undefined : () => onOpenThread(childThreadId)}
+              className={cn(
+                className,
+                "cursor-pointer hover:bg-accent/30 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-transparent",
+              )}
+            />
+          ) : (
+            <div className={className} tabIndex={0} />
+          )
+        }
+      >
+        {content}
+      </TooltipTrigger>
+      <TooltipPopup>
+        {agent.title} · {unavailable ? "This related thread is unavailable" : description}
+      </TooltipPopup>
+    </Tooltip>
   );
 }

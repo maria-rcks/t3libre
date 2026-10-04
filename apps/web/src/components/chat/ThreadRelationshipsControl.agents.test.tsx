@@ -1,11 +1,20 @@
 import { act, cloneElement, type ReactElement, type ReactNode } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
-import { EnvironmentId, ThreadId, type OrchestrationV2ContextTransfer } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ThreadId,
+  type NodeId,
+  type OrchestrationV2ContextTransfer,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { afterEach, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
   projection: null as unknown,
+  projections: new Map<string, unknown>(),
+  owningAgents: new Map<string, unknown>(),
+  lookupSubagent: vi.fn(),
   navigate: vi.fn(),
   shells: [] as unknown[],
   projects: [] as unknown[],
@@ -15,7 +24,13 @@ const state = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => state.navigate }));
 vi.mock("../../state/entities", () => ({
-  useThreadProjection: () => ({ projection: state.projection }),
+  useThreadProjection: (ref: ScopedThreadRef | null) => {
+    if (!ref) return null;
+    const current = state.projection as { thread: { id: string } } | null;
+    const projection =
+      current?.thread.id === ref.threadId ? state.projection : state.projections.get(ref.threadId);
+    return projection ? { projection } : null;
+  },
   useThreadShells: () => state.shells,
   useProjects: () => state.projects,
   useServerConfigs: () => state.configs,
@@ -24,6 +39,14 @@ vi.mock("../../lib/archivedThreadsState", () => ({
   useArchivedThreadSnapshots: () => ({ snapshots: [] }),
 }));
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
+vi.mock("../../state/threads", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../state/threads")>()),
+  useOwningSubagent: (ref: ScopedThreadRef | null, nodeId: NodeId | null) => {
+    if (!ref || !nodeId) return null;
+    state.lookupSubagent(ref, nodeId);
+    return state.owningAgents.get(`${ref.threadId}:${nodeId}`) ?? null;
+  },
+}));
 vi.mock("../ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => children,
   TooltipTrigger: ({ render, children }: { render: ReactElement; children: ReactNode }) =>
@@ -38,6 +61,11 @@ let renderer: ReactTestRenderer;
 afterEach(async () => {
   await act(async () => renderer?.unmount());
   vi.unstubAllGlobals();
+  state.projection = null;
+  state.projections.clear();
+  state.owningAgents.clear();
+  state.lookupSubagent.mockClear();
+  state.navigate.mockClear();
   state.shells = [];
   state.projects = [];
   state.configs.clear();
@@ -179,6 +207,317 @@ it("shows the matching child agent details and refreshes them when the agent set
   await act(async () => renderer.update(cloneElement(panel)));
   expect(text()).toContain("Lineage · 1 running");
 });
+
+it.each(["live", "retained"])(
+  "opens %s workflows and their phase members without changing ordinary agent navigation",
+  async (source) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const agent = {
+      id: "workflow-node",
+      driver: "claudeAgent",
+      providerInstanceId: "claude",
+      childThreadId: "workflow-child",
+      title: "Native workflow",
+      prompt: "await workflow.run();",
+      model: "claude-opus-4-6",
+      status: source === "live" ? "running" : "completed",
+      result: null,
+      startedAt: DateTime.makeUnsafe("2026-09-16T12:00:00Z"),
+      completedAt: null,
+      updatedAt: DateTime.makeUnsafe("2026-09-16T12:00:00Z"),
+      workflow: {
+        name: "Release review",
+        phases: [
+          { index: 2, title: "Publish" },
+          { index: 1, title: "Inspect" },
+        ],
+        agents: [
+          {
+            index: 1,
+            label: "Release writer",
+            state: "running",
+            phaseIndex: 2,
+            childThreadId: "writer-child",
+          },
+          {
+            index: 0,
+            label: "Code reviewer",
+            state: "completed",
+            phaseIndex: 1,
+            childThreadId: "reviewer-child",
+          },
+        ],
+      },
+    };
+    const ordinary = {
+      ...agent,
+      id: "ordinary-node",
+      childThreadId: "ordinary-child",
+      title: "Ordinary agent",
+      status: "running",
+      workflow: undefined,
+    };
+    state.projection = {
+      thread: {
+        id: "parent",
+        lineage: { parentThreadId: null, relationshipToParent: null },
+        activeProviderThreadId: null,
+      },
+      runs: [],
+      providerThreads: [],
+      providerSessions: [],
+      contextTransfers: [],
+      subagents: source === "live" ? [agent, ordinary] : [ordinary],
+    };
+    const shells = [
+      ...[agent, ordinary].map((entry) => ({
+        id: entry.childThreadId,
+        title: entry.title,
+        status: entry.status,
+        lineage: { parentThreadId: "parent", relationshipToParent: "subagent" },
+        forkedFrom: { type: "node", nodeId: entry.id },
+      })),
+      ...agent.workflow.agents.map((member) => ({
+        id: member.childThreadId,
+        title: member.label,
+        status: member.state,
+        lineage: { parentThreadId: "workflow-child", relationshipToParent: "subagent" },
+      })),
+    ].map((entry) => ({ environmentId: "test", source: entry }));
+    state.shells = shells;
+    state.owningAgents.set("parent:workflow-node", agent);
+    await act(async () => {
+      renderer = create(
+        <ThreadRelationshipsPanel
+          environmentId={EnvironmentId.make("test")}
+          threadId={ThreadId.make("parent")}
+        />,
+      );
+    });
+    const text = (root = renderer.root) =>
+      root
+        .findAll((node) => typeof node.type === "string")
+        .flatMap((node) => node.children.filter((child) => typeof child === "string"))
+        .join(" ");
+    const buttonWithText = (value: string) =>
+      renderer.root.findAllByType("button").find((button) => text(button).includes(value))!;
+    const buttonWithLabel = (label: string) =>
+      renderer.root.findAllByType("button").find((button) => button.props["aria-label"] === label)!;
+    expect(state.lookupSubagent).not.toHaveBeenCalled();
+    if (source === "retained") {
+      expect(text()).not.toContain("Release review");
+      await act(async () => buttonWithText("Previous agents").props.onClick());
+      expect(state.lookupSubagent).toHaveBeenCalledWith(
+        { environmentId: "test", threadId: "parent" },
+        "workflow-node",
+      );
+    }
+    expect(text()).toContain("Release review");
+    expect(text()).toContain("Ordinary agent");
+    expect(text()).not.toContain("Inspect");
+    expect(text()).not.toContain("Code reviewer");
+    await act(async () => buttonWithText("Release review").props.onClick());
+    expect(state.navigate).toHaveBeenLastCalledWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: "test", threadId: "workflow-child" },
+    });
+    expect(text()).not.toContain("Inspect");
+    state.navigate.mockClear();
+    await act(async () => buttonWithLabel("Expand workflow").props.onClick());
+    expect(state.navigate).not.toHaveBeenCalled();
+    expect(text()).toContain("Inspect");
+    expect(text()).toContain("Publish");
+    expect(text().indexOf("Inspect")).toBeLessThan(text().indexOf("Publish"));
+    expect(text()).not.toContain("Code reviewer");
+    await act(async () => buttonWithLabel("Inspect: 1/1").props.onClick());
+    expect(text()).toContain("Code reviewer");
+    await act(async () => buttonWithLabel("Open Code reviewer").props.onClick());
+    expect(state.navigate).toHaveBeenLastCalledWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: "test", threadId: "reviewer-child" },
+    });
+    await act(async () => buttonWithLabel("Open Release writer").props.onClick());
+    expect(state.navigate).toHaveBeenLastCalledWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: "test", threadId: "writer-child" },
+    });
+    await act(async () => buttonWithLabel("Collapse workflow").props.onClick());
+    expect(text()).not.toContain("Inspect");
+    expect(text()).not.toContain("Code reviewer");
+    expect(buttonWithText("Ordinary agent").props.disabled).toBe(false);
+    await act(async () => buttonWithText("Ordinary agent").props.onClick());
+    expect(state.navigate).toHaveBeenLastCalledWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: "test", threadId: "ordinary-child" },
+    });
+    if (source === "live") expect(state.lookupSubagent).not.toHaveBeenCalled();
+    else
+      expect(
+        state.lookupSubagent.mock.calls.every(([, nodeId]) => nodeId === "workflow-node"),
+      ).toBe(true);
+
+    state.shells = shells.filter(
+      ({ source: shell }) =>
+        shell.id !== "reviewer-child" && (source !== "live" || shell.id !== "workflow-child"),
+    );
+    await act(async () =>
+      renderer.update(
+        <ThreadRelationshipsPanel
+          environmentId={EnvironmentId.make("test")}
+          threadId={ThreadId.make("parent")}
+        />,
+      ),
+    );
+    state.navigate.mockClear();
+    if (source === "live") {
+      expect(buttonWithLabel("Open workflow: Release review").props.disabled).toBe(true);
+      expect(buttonWithLabel("Open workflow: Release review").props.onClick).toBeUndefined();
+    }
+    await act(async () => buttonWithLabel("Expand workflow").props.onClick());
+    await act(async () => buttonWithLabel("Inspect: 1/1").props.onClick());
+    expect(text()).toContain("Code reviewer");
+    expect(buttonWithLabel("Open Code reviewer").props.disabled).toBe(true);
+    expect(buttonWithLabel("Open Code reviewer").props.onClick).toBeUndefined();
+    expect(state.navigate).not.toHaveBeenCalled();
+    await act(async () => buttonWithLabel("Open Release writer").props.onClick());
+    expect(state.navigate).toHaveBeenLastCalledWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: "test", threadId: "writer-child" },
+    });
+  },
+);
+
+it.each(["live", "retained"])(
+  "shows the coordinator's %s workflow phases while keeping its parent and unrelated agents",
+  async (source) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const agent = {
+      id: "original-workflow-node",
+      driver: "claudeAgent",
+      providerInstanceId: "claude",
+      childThreadId: "coordinator",
+      title: "Native workflow",
+      prompt: "await workflow.run();",
+      model: "claude-opus-4-6",
+      status: "running",
+      result: null,
+      startedAt: DateTime.makeUnsafe("2026-09-16T12:00:00Z"),
+      completedAt: null,
+      updatedAt: DateTime.makeUnsafe("2026-09-16T12:00:00Z"),
+      workflow: {
+        name: "Release review",
+        phases: [{ index: 1, title: "Inspect" }],
+        agents: [
+          {
+            index: 0,
+            label: "Code reviewer",
+            state: "running",
+            phaseIndex: 1,
+            childThreadId: "member",
+          },
+        ],
+      },
+    };
+    const coordinator = {
+      id: "coordinator",
+      title: "Workflow thread",
+      lineage: { parentThreadId: "parent", relationshipToParent: "subagent" },
+      forkedFrom: { type: "node", nodeId: "original-workflow-node" },
+      activeProviderThreadId: null,
+    };
+    state.projection = {
+      thread: coordinator,
+      runs: [],
+      providerThreads: [],
+      providerSessions: [],
+      contextTransfers: [],
+      subagents: [
+        {
+          ...agent,
+          id: "member-node",
+          childThreadId: "member",
+          title: "Code reviewer",
+          workflow: undefined,
+        },
+        {
+          ...agent,
+          id: "ordinary-node",
+          childThreadId: "ordinary",
+          title: "Extra helper",
+          workflow: undefined,
+        },
+      ],
+    };
+    state.shells = [
+      coordinator,
+      {
+        id: "parent",
+        title: "Parent conversation",
+        lineage: { parentThreadId: null, relationshipToParent: null },
+      },
+      {
+        id: "member",
+        title: "Code reviewer",
+        status: "running",
+        lineage: { parentThreadId: "coordinator", relationshipToParent: "subagent" },
+      },
+      {
+        id: "ordinary",
+        title: "Extra helper",
+        status: "running",
+        lineage: { parentThreadId: "coordinator", relationshipToParent: "subagent" },
+      },
+    ].map((entry) => ({ environmentId: "test", source: entry }));
+    if (source === "live") state.projections.set("parent", { subagents: [agent] });
+    state.owningAgents.set("parent:original-workflow-node", agent);
+    await act(async () => {
+      renderer = create(
+        <ThreadRelationshipsPanel
+          environmentId={EnvironmentId.make("test")}
+          threadId={ThreadId.make("coordinator")}
+        />,
+      );
+    });
+    const text = (root = renderer.root) =>
+      root
+        .findAll((node) => typeof node.type === "string")
+        .flatMap((node) => node.children.filter((child) => typeof child === "string"))
+        .join(" ");
+    expect(text()).toContain("Parent conversation");
+    expect(text()).toContain("Release review");
+    expect(text()).toContain("Extra helper");
+    expect(text()).toContain("Lineage · 2 running");
+    expect(text()).not.toContain("Code reviewer");
+    const parentButton = renderer.root
+      .findAllByType("button")
+      .find((button) => text(button).includes("Parent conversation"))!;
+    await act(async () => parentButton.props.onClick());
+    expect(state.navigate).toHaveBeenLastCalledWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: "test", threadId: "parent" },
+    });
+    const expand = renderer.root
+      .findAllByType("button")
+      .find((button) => button.props["aria-label"] === "Expand workflow")!;
+    await act(async () => expand.props.onClick());
+    expect(text()).toContain("Inspect");
+    const members = renderer.root
+      .findAllByType("button")
+      .filter((button) => text(button).includes("Code reviewer"));
+    expect(members).toHaveLength(1);
+    await act(async () => members[0]!.props.onClick());
+    expect(state.navigate).toHaveBeenLastCalledWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: "test", threadId: "member" },
+    });
+    if (source === "live") expect(state.lookupSubagent).not.toHaveBeenCalled();
+    else
+      expect(state.lookupSubagent).toHaveBeenCalledWith(
+        { environmentId: "test", threadId: "parent" },
+        "original-workflow-node",
+      );
+  },
+);
 
 it("shows readable models and only differing workspace details in agent tooltips", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
