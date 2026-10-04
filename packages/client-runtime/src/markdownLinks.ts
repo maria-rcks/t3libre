@@ -271,7 +271,14 @@ export function isMarkdownFileLinkLabel(label: string, href: string): boolean {
   if (!destination) return false;
   const normalize = (path: string) =>
     path.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+$/, "");
-  let labelPath = normalize(splitFilePathPosition(label.trim()).path);
+  const labelPosition = splitFilePathPosition(label.trim());
+  if (
+    (labelPosition.line !== undefined && labelPosition.line !== destination.line) ||
+    (labelPosition.column !== undefined && labelPosition.column !== destination.column)
+  ) {
+    return false;
+  }
+  let labelPath = normalize(labelPosition.path);
   let destinationPath = normalize(destination.path);
   if (labelPath.length === 0) return true;
   if (isWindowsAbsolutePath(destination.path)) {

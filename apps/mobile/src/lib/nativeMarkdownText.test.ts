@@ -220,6 +220,8 @@ describe("nativeMarkdownTextRuns", () => {
     [{ type: "code_inline", content: "`details`" }, "`` `details` ``"],
     [{ type: "code_inline", content: " details " }, "`  details  `"],
     [{ type: "text", content: "[details] *literal*" }, "\\[details\\] \\*literal\\*"],
+    [{ type: "soft_break" }, "\n"],
+    [{ type: "line_break" }, "  \n"],
     [
       { type: "image", alt: "details", href: "https://example.com/icon.png" },
       "![details](<https://example.com/icon.png>)",
