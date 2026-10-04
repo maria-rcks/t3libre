@@ -99,7 +99,10 @@ export function openCodeToolTurnItem(
     case "file_change": {
       const oldStr = recordString(input, "oldString", "oldText");
       const newStr = recordString(input, "newString", "content", "newText");
-      const diffStr = recordString(tool.completedMetadata, "diff", "patch");
+      // A failed edit has no diff; keep its error where the diff would be.
+      const diffStr =
+        recordString(tool.completedMetadata, "diff", "patch") ??
+        (base.status === "failed" && output?.trim() ? output : undefined);
       return {
         ...base,
         type: "file_change",
