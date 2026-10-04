@@ -657,7 +657,9 @@ export function ServerBrowserSurface(props: {
   };
 
   const handleCompositionEnd = (event: CompositionEvent<HTMLTextAreaElement>) => {
-    if (event.data) send({ type: "text", text: event.data });
+    const data = event.data;
+    const text = data.startsWith(INPUT_SENTINEL) ? data.slice(INPUT_SENTINEL.length) : data;
+    if (text) send({ type: "text", text });
     resetInput(event.currentTarget);
   };
 
