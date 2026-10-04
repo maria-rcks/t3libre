@@ -5,7 +5,7 @@ const testState = vi.hoisted(() => {
   let completeProjectFileRead: (value: null) => void = () => undefined;
   let projectFileRead = Promise.resolve<null>(null);
   let targetSettings = {
-    defaultThreadEnvMode: "local" as "local" | "worktree",
+    defaultThreadEnvMode: "local" as "local" | "worktree" | null,
     newWorktreesStartFromOrigin: false,
     defaultModelSelection: null,
     defaultRuntimeMode: "full-access" as RuntimeMode,
@@ -37,6 +37,14 @@ const testState = vi.hoisted(() => {
   };
 
   return {
+    connectionPhase: "connected" as
+      | "connected"
+      | "connecting"
+      | "reconnecting"
+      | "disconnected"
+      | null,
+    toast: vi.fn(),
+    projectFileReads: vi.fn(),
     completeProjectFileRead: (value: null) => completeProjectFileRead(value),
     draftStore,
     get projectFileRead() {
@@ -144,7 +152,10 @@ vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
   resolveNewThreadModelSelectionOverride: () => null,
 }));
 vi.mock("../lib/t3ProjectFileDefaults", () => ({
-  readT3ProjectFile: () => testState.projectFileRead,
+  readT3ProjectFile: () => {
+    testState.projectFileReads();
+    return testState.projectFileRead;
+  },
 }));
 vi.mock("../lib/utils", () => ({
   newDraftId: () => "draft-delayed",
@@ -180,6 +191,25 @@ vi.mock("../uiStateStore", () => ({
 }));
 vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
 
+vi.mock("../rpc/atomRegistry", () => ({
+  appAtomRegistry: {
+    get: () =>
+      testState.connectionPhase === null
+        ? null
+        : {
+            connection: { phase: testState.connectionPhase },
+            entry: { target: { label: "Build box" } },
+          },
+  },
+}));
+vi.mock("../state/presentation", () => ({
+  environmentPresentations: { presentationAtom: () => "environment-presentation" },
+}));
+vi.mock("../components/ui/toast", () => ({
+  stackedThreadToast: <T>(input: T) => input,
+  toastManager: { add: testState.toast },
+}));
+
 import { useNewThreadHandler } from "./useHandleNewThread";
 
 describe.each([
@@ -194,6 +224,36 @@ describe.each([
     },
   ],
 ])("useNewThreadHandler with a %s draft", (_, draft) => {
+  it.each(["connecting", "reconnecting", "disconnected", null] as const)(
+    "reports an unavailable %s environment without reading defaults or changing the draft",
+    async (phase) => {
+      testState.reset(draft);
+      testState.toast.mockClear();
+      testState.projectFileReads.mockClear();
+      testState.targetSettings.defaultThreadEnvMode = null;
+      // Read connection state at invocation, including a disconnect after
+      // the picker rendered and captured its handler.
+      const openThread = useNewThreadHandler();
+      testState.connectionPhase = phase;
+      try {
+        const pendingOpen = openThread({
+          environmentId: "environment-ssh",
+          projectId: "project-remote",
+        } as never);
+
+        expect(testState.projectFileReads).not.toHaveBeenCalled();
+        expect(await pendingOpen).toBeNull();
+        expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+        expect(testState.router.navigate).not.toHaveBeenCalled();
+        expect(testState.toast).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "error", title: "Environment unavailable" }),
+        );
+      } finally {
+        testState.connectionPhase = "connected";
+      }
+    },
+  );
+
   it.each(["approval-required", "auto-accept-edits", "auto", "full-access"] as const)(
     "uses the target environment's %s permissions for new threads",
     async (runtimeMode) => {

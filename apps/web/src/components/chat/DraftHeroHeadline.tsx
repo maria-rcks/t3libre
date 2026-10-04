@@ -2,6 +2,7 @@ import type { DraftId } from "~/composerDraftStore";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { FolderPlusIcon, MessageSquareDashedIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
@@ -40,8 +41,11 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { environmentPresentations } from "~/state/presentation";
+import { stackedThreadToast, toastManager } from "../ui/toast";
 
-// Menu value for "No project"; real entries are keyed by logical project key.
+// Menu value for "No project"; real entries identify the chosen physical checkout.
 const NO_PROJECT_VALUE = "no-project";
 
 interface DraftHeroHeadlineProps {
@@ -125,11 +129,29 @@ export function DraftHeroHeadline({
       buildSidebarProjectPickerEntries({
         groups: projectGroups,
         preferredProjectRef: activeProjectRef,
+        expandCheckouts: true,
+        isEnvironmentReachable: (environmentId) =>
+          environments.some(
+            (environment) =>
+              environment.environmentId === environmentId &&
+              environment.connection.phase === "connected",
+          ),
       }),
-    [activeProjectRef, projectGroups],
+    [activeProjectRef, environments, projectGroups],
   );
   const projectEntryByKey = useMemo(
-    () => new Map(projectPickerEntries.map((entry) => [entry.group.projectKey, entry] as const)),
+    () =>
+      new Map(
+        projectPickerEntries.map(
+          (entry) =>
+            [
+              scopedProjectKey(
+                scopeProjectRef(entry.targetProject.environmentId, entry.targetProject.id),
+              ),
+              entry,
+            ] as const,
+        ),
+      ),
     [projectPickerEntries],
   );
   const activeProjectGroup =
@@ -140,7 +162,7 @@ export function DraftHeroHeadline({
             (projectRef) => scopedProjectKey(projectRef) === scopedProjectKey(activeProjectRef),
           ),
         ) ?? null);
-  const activeProjectKey = activeProjectGroup?.projectKey ?? "";
+  const activeProjectKey = activeProjectRef ? scopedProjectKey(activeProjectRef) : "";
   const activeProjectDisplayName = activeProjectGroup?.displayName ?? activeProjectTitle;
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
@@ -179,9 +201,22 @@ export function DraftHeroHeadline({
     if (!draftId) {
       return;
     }
+    const environment = appAtomRegistry.get(
+      environmentPresentations.presentationAtom(project.environmentId),
+    );
+    if (environment?.connection.phase !== "connected") {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Environment unavailable",
+          description: `${environment?.entry.target.label ?? "The selected environment"} is not connected.`,
+        }),
+      );
+      return;
+    }
     latestTargetRef.current = {
       draftId,
-      activeProjectKey: logicalProjectKey,
+      activeProjectKey: scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
       scratchTargetEnvironmentId: project.environmentId,
     };
     const currentDraft = getComposerDraft(draftId);
@@ -278,20 +313,42 @@ export function DraftHeroHeadline({
               </span>
             </MenuRadioItem>
           )}
-          {menuEntries.map(({ group }) => {
+          {menuEntries.map(({ group, targetProject }) => {
+            const projectKey = scopedProjectKey(
+              scopeProjectRef(targetProject.environmentId, targetProject.id),
+            );
+            const environment = environments.find(
+              (candidate) => candidate.environmentId === targetProject.environmentId,
+            );
+            const reachable = environment?.connection.phase === "connected";
+            const locationLabel =
+              targetProject.environmentId === primaryEnvironmentId
+                ? "Local"
+                : (targetProject.environmentLabel ?? "Remote");
             return (
-              <MenuRadioItem key={group.projectKey} value={group.projectKey} closeOnClick>
+              <MenuRadioItem key={projectKey} value={projectKey} disabled={!reachable} closeOnClick>
                 <span className="flex min-w-0 items-center gap-2">
                   <ProjectFavicon project={group} className="size-4 shrink-0" />
-                  <Tooltip>
-                    <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
-                      {group.displayName}
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">{group.displayName}</TooltipPopup>
-                  </Tooltip>
+                  <span className="flex min-w-0 flex-col">
+                    <Tooltip>
+                      <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
+                        {group.displayName}
+                      </TooltipTrigger>
+                      <TooltipPopup side="top">
+                        {group.displayName} · {locationLabel} · {targetProject.workspaceRoot}
+                      </TooltipPopup>
+                    </Tooltip>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {showProjectEnvironments ? `${locationLabel} · ` : ""}
+                      {targetProject.workspaceRoot}
+                      {reachable
+                        ? ""
+                        : ` · ${environment ? connectionStatusText(environment.connection) : "Unavailable"}`}
+                    </span>
+                  </span>
                   {showProjectEnvironments ? (
                     <ProjectEnvironmentBadge
-                      group={group}
+                      group={{ memberProjects: [targetProject] }}
                       primaryEnvironmentId={primaryEnvironmentId}
                       machineByEnvironmentId={environmentMachineById}
                     />

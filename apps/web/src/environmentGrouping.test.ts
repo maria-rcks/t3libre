@@ -64,7 +64,7 @@ describe("environment grouping", () => {
     expect(deriveLogicalProjectKey(remote)).toBe(repositoryIdentity.canonicalKey);
   });
 
-  it("counts cross-environment copies as one new-thread project choice", () => {
+  it("keeps cross-environment copies in one sidebar group", () => {
     const primary = makeProject({ repositoryIdentity });
     const remote = makeProject({
       id: ProjectId.make("project-remote"),
@@ -424,6 +424,107 @@ describe("environment grouping", () => {
       environmentId: primaryEnvironmentId,
       id: fallbackPrimary.id,
     });
+  });
+
+  it("offers every checkout while an offline remote is selected", () => {
+    const primary = makeProject({ repositoryIdentity });
+    const worktree = makeProject({
+      id: ProjectId.make("local-worktree"),
+      workspaceRoot: "/tmp/shared-repo-feature",
+      repositoryIdentity,
+    });
+    const remote = makeProject({
+      id: ProjectId.make("remote-copy"),
+      environmentId: remoteEnvironmentId,
+      repositoryIdentity,
+    });
+    const groups = buildSidebarProjectSnapshots({
+      projects: [remote, primary, worktree],
+      settings: defaultGroupingSettings,
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: () => null,
+    });
+    const entries = buildSidebarProjectPickerEntries({
+      groups,
+      preferredProjectRef: { environmentId: remoteEnvironmentId, projectId: remote.id },
+      expandCheckouts: true,
+      isEnvironmentReachable: (environmentId) => environmentId === primaryEnvironmentId,
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(entries.map(({ targetProject }) => targetProject.id)).toEqual([
+      primary.id,
+      worktree.id,
+      remote.id,
+    ]);
+    expect(entries[2]?.isPreferred).toBe(true);
+    expect(entries.map(({ group }) => group.projectKey)).toEqual([
+      repositoryIdentity.canonicalKey,
+      repositoryIdentity.canonicalKey,
+      repositoryIdentity.canonicalKey,
+    ]);
+  });
+
+  it("prefers the exact connected worktree while keeping other copies available", () => {
+    const primary = makeProject({ repositoryIdentity });
+    const worktree = makeProject({
+      id: ProjectId.make("local-worktree"),
+      workspaceRoot: "/tmp/shared-repo-feature",
+      repositoryIdentity,
+    });
+    const remote = makeProject({
+      id: ProjectId.make("remote-copy"),
+      environmentId: remoteEnvironmentId,
+      repositoryIdentity,
+    });
+    const groups = buildSidebarProjectSnapshots({
+      projects: [primary, worktree, remote],
+      settings: defaultGroupingSettings,
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: () => null,
+    });
+    const entries = buildSidebarProjectPickerEntries({
+      groups,
+      preferredProjectRef: { environmentId: primaryEnvironmentId, projectId: worktree.id },
+      expandCheckouts: true,
+      isEnvironmentReachable: () => true,
+    });
+
+    expect(entries.map(({ targetProject }) => targetProject.id)).toEqual([
+      worktree.id,
+      primary.id,
+      remote.id,
+    ]);
+    expect(
+      entries.filter((entry) => entry.isPreferred).map(({ targetProject }) => targetProject.id),
+    ).toEqual([worktree.id]);
+  });
+
+  it("keeps unavailable-only checkouts visible and deduplicates duplicate physical registrations", () => {
+    const stale = makeProject({
+      id: ProjectId.make("stale"),
+      repositoryIdentity,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const canonical = makeProject({
+      id: ProjectId.make("canonical"),
+      repositoryIdentity,
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+    const groups = buildSidebarProjectSnapshots({
+      projects: [stale, canonical],
+      settings: defaultGroupingSettings,
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: () => null,
+    });
+    const entries = buildSidebarProjectPickerEntries({
+      groups,
+      preferredProjectRef: null,
+      expandCheckouts: true,
+      isEnvironmentReachable: () => false,
+    });
+
+    expect(entries.map(({ targetProject }) => targetProject.id)).toEqual([canonical.id]);
   });
 
   it("keeps manual project order when building grouped sidebar entries", () => {
