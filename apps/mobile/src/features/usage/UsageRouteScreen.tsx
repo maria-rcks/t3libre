@@ -4,7 +4,7 @@ import { EnvironmentId, USAGE_CONTRACT_VERSION } from "@t3tools/contracts";
 import { type RouteProp, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import { cursorKeychainAccessEnvironments } from "@t3tools/client-runtime/state/usage";
 import {
-  isCompatibleUsageContractVersion,
+  getUsageContractMismatch,
   isModelCostUnknown,
   type DailyTotals,
   type MergedUsage,
@@ -846,16 +846,11 @@ function isUsageLoading(environment: EnvironmentUsageStatus) {
 }
 
 function usageEnvironmentStatus(environment: EnvironmentUsageStatus): string {
-  if (
-    environment.summary &&
-    !isCompatibleUsageContractVersion(environment.summary.contractVersion, USAGE_CONTRACT_VERSION)
-  ) {
-    return formatUsageContractMismatch(environment.label, {
-      direction:
-        environment.summary.contractVersion < USAGE_CONTRACT_VERSION
-          ? "serverBehind"
-          : "clientBehind",
-    });
+  const mismatch = environment.summary
+    ? getUsageContractMismatch(environment.summary, USAGE_CONTRACT_VERSION)
+    : null;
+  if (mismatch !== null) {
+    return formatUsageContractMismatch(environment.label, mismatch);
   }
   if (!environment.isConnected)
     return environment.summary ? "Disconnected · showing saved usage" : "Waiting for connection…";

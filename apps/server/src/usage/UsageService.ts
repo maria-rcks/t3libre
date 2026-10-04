@@ -113,7 +113,11 @@ const encodeRatesCache = Schema.encodeEffect(
 const ScanCacheJson = Schema.fromJsonString(Schema.Unknown as unknown as Schema.Codec<unknown>);
 const decodeScanCacheFile = Schema.decodeUnknownEffect(ScanCacheJson);
 const encodeUsageRecordKey = Schema.encodeSync(ScanCacheJson);
-const CachedSource = Schema.Struct({ dir: Schema.String, volumeId: Schema.String });
+const CachedSource = Schema.Struct({
+  dir: Schema.String,
+  volumeId: Schema.String,
+  transcriptDirs: Schema.optional(Schema.Array(Schema.String)),
+});
 
 /** Whether `a` read a later state of its file than `b`. Transcripts only grow. */
 function isLaterRead(a: CachedFile, b: CachedFile): boolean {
@@ -300,6 +304,7 @@ export const make = Effect.gen(function* () {
       provider: UsageProviderKind;
       dir: string;
       volumeId: string;
+      transcriptDirs?: readonly string[];
       fileName?: string;
     }> = [];
     const seen = new Set<string>();
@@ -347,48 +352,72 @@ export const make = Effect.gen(function* () {
             environment.GROK_HOME?.trim() || path.join(NodeOS.homedir(), ".grok"),
           );
         }
-        const directories =
+        // Active and archived rollouts belong to one Codex home. Its identity
+        // survives removal of the sessions directory, even for a fresh cache.
+        const directory = path.resolve(
+          home,
+          provider === "codex" ? "." : provider === "claude" ? "projects" : "sessions",
+        );
+        const sourceKey = provider + "\0" + directory;
+        const previous = sourceCache.get(sourceKey);
+        // Keep canonical paths and source fingerprints stable after root cleanup,
+        // including aliases and clients merging pre-cleanup environment summaries.
+        const dir = yield* fileSystem
+          .realPath(directory)
+          .pipe(Effect.orElseSucceed(() => previous?.dir ?? directory));
+        const transcriptDirs =
           provider === "codex"
-            ? ["sessions", "archived_sessions"]
-            : [provider === "claude" ? "projects" : "sessions"];
-        for (const name of directories) {
-          const directory = path.resolve(home, name);
-          const sourceKey = provider + "\0" + directory;
-          const previous = sourceCache.get(sourceKey);
-          // Keep canonical paths and source fingerprints stable after root cleanup,
-          // including aliases and clients merging pre-cleanup environment summaries.
-          const dir = yield* fileSystem
-            .realPath(directory)
-            .pipe(Effect.orElseSucceed(() => previous?.dir ?? directory));
-          const currentVolumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
-          const hasRetainedHistory = fileCache
-            .entries()
-            .some(
-              ([filePath, entry]) =>
-                entry.provider === provider &&
-                entry.mtimeMs >= retentionCutoffMs &&
-                entry.records.length + entry.tailRecords.length > 0 &&
-                isWithinDirectory(filePath, dir),
-            );
-          // A recreated directory still reports the retained history under its old identity.
-          const volumeId =
-            previous?.dir === dir && (hasRetainedHistory || !currentVolumeId)
-              ? previous.volumeId || currentVolumeId
-              : currentVolumeId;
-          if (previous?.dir !== dir || previous.volumeId !== volumeId) {
-            sourceCache.set(sourceKey, { dir, volumeId });
-            cacheDirty = true;
-          }
-          const key = `${provider}\0${dir}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          dirs.push({
-            provider,
+            ? yield* Effect.forEach(["sessions", "archived_sessions"], (name, index) => {
+                const root = path.resolve(home, name);
+                return fileSystem
+                  .realPath(root)
+                  .pipe(
+                    Effect.orElseSucceed(
+                      () =>
+                        previous?.transcriptDirs?.[index] ??
+                        sourceCache.get(provider + "\0" + root)?.dir ??
+                        path.join(dir, name),
+                    ),
+                  );
+              })
+            : undefined;
+        const currentVolumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
+        const hasRetainedHistory = fileCache
+          .entries()
+          .some(
+            ([filePath, entry]) =>
+              entry.provider === provider &&
+              entry.mtimeMs >= retentionCutoffMs &&
+              entry.records.length + entry.tailRecords.length > 0 &&
+              (transcriptDirs ?? [dir]).some((root) => isWithinDirectory(filePath, root)),
+          );
+        // A recreated directory still reports the retained history under its old identity.
+        const volumeId =
+          previous?.dir === dir && (hasRetainedHistory || !currentVolumeId)
+            ? previous.volumeId || currentVolumeId
+            : currentVolumeId;
+        if (
+          previous?.dir !== dir ||
+          previous.volumeId !== volumeId ||
+          transcriptDirs?.some((root, index) => root !== previous.transcriptDirs?.[index])
+        ) {
+          sourceCache.set(sourceKey, {
             dir,
             volumeId,
-            ...(provider === "grok" ? { fileName: "updates.jsonl" } : {}),
+            ...(transcriptDirs ? { transcriptDirs } : {}),
           });
+          cacheDirty = true;
         }
+        const key = `${provider}\0${dir}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        dirs.push({
+          provider,
+          dir,
+          volumeId,
+          ...(transcriptDirs ? { transcriptDirs } : {}),
+          ...(provider === "grok" ? { fileName: "updates.jsonl" } : {}),
+        });
       }
     }
     return dirs;
@@ -530,6 +559,7 @@ export const make = Effect.gen(function* () {
     readonly provider: UsageProviderKind;
     readonly dir: string;
     readonly volumeId: string;
+    readonly transcriptDirs?: readonly string[];
     readonly hostId?: string;
     readonly status?: UsageSource["status"];
     readonly message?: string;
@@ -551,17 +581,34 @@ export const make = Effect.gen(function* () {
       Effect.provideService(Path.Path, path),
     );
     const scanned: ScannedDir[] = [];
-    for (const { provider, dir, volumeId, fileName } of dirs) {
-      const exists = yield* fileSystem
-        .exists(dir)
-        .pipe(Effect.catchCause(() => Effect.succeed(false)));
-      if (!exists) {
-        scanned.push({ provider, dir, volumeId, files: null });
+    for (const { provider, dir, volumeId, transcriptDirs, fileName } of dirs) {
+      const filesByRoot = yield* Effect.forEach(new Set(transcriptDirs ?? [dir]), (root) =>
+        Effect.gen(function* () {
+          const exists = yield* fileSystem
+            .exists(root)
+            .pipe(Effect.catchCause(() => Effect.succeed(false)));
+          return exists
+            ? yield* Effect.promise(() =>
+                listTranscriptFiles(
+                  root,
+                  windowStartMs,
+                  fileName === undefined ? undefined : { fileName },
+                ),
+              )
+            : null;
+        }),
+      );
+      if (filesByRoot.every((files) => files === null)) {
+        scanned.push({
+          provider,
+          dir,
+          volumeId,
+          ...(transcriptDirs ? { transcriptDirs } : {}),
+          files: null,
+        });
         continue;
       }
-      const files = yield* Effect.promise(() =>
-        listTranscriptFiles(dir, windowStartMs, fileName === undefined ? undefined : { fileName }),
-      );
+      const files = filesByRoot.flatMap((files) => files ?? []);
       // A cold parse waits on disk reads, so a few files in flight read
       // close to twice as fast. Results keep walk order.
       const read = yield* Effect.forEach(
@@ -588,7 +635,13 @@ export const make = Effect.gen(function* () {
         }
         return { path, records };
       });
-      scanned.push({ provider, dir, volumeId, files: parsedFiles });
+      scanned.push({
+        provider,
+        dir,
+        volumeId,
+        ...(transcriptDirs ? { transcriptDirs } : {}),
+        files: parsedFiles,
+      });
     }
 
     const home = NodeOS.homedir();
@@ -837,7 +890,7 @@ export const make = Effect.gen(function* () {
     // path. Like the walk, skip files last written before the window: they
     // cannot hold records inside it.
     const retainedSinceMs = Math.max(windowStartMs, retentionCutoffMs);
-    const filesByDir = scannedDirs.map(({ provider, dir, files }) => {
+    const filesByDir = scannedDirs.map(({ provider, dir, transcriptDirs, files }) => {
       const retainedFiles = [...(files ?? [])];
       const livePaths = new Set(retainedFiles.map((file) => file.path));
       for (const [filePath, entry] of fileCache) {
@@ -845,7 +898,7 @@ export const make = Effect.gen(function* () {
           entry.provider !== provider ||
           entry.mtimeMs < retainedSinceMs ||
           livePaths.has(filePath) ||
-          !isWithinDirectory(filePath, dir)
+          !(transcriptDirs ?? [dir]).some((root) => isWithinDirectory(filePath, root))
         )
           continue;
         retainedFiles.push({ path: filePath, records: [...entry.records, ...entry.tailRecords] });

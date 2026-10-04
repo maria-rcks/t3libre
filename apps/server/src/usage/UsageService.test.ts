@@ -583,12 +583,10 @@ describe("UsageService", () => {
       );
       const summary = yield* service.readSummary(WINDOW);
       assert.strictEqual(totalOutputTokens(summary), 76);
-      const archivedDir = yield* Effect.promise(() =>
-        NodeFSP.realpath(NodePath.join(codexHome, "archived_sessions")),
-      );
-      const archivedBucket = summary.buckets.find((bucket) => bucket.sourcePath === archivedDir);
-      assert.strictEqual(archivedBucket?.totals.outputTokens, 17);
-      assert.strictEqual(archivedBucket?.costUsd, 17);
+      const canonicalHome = yield* Effect.promise(() => NodeFSP.realpath(codexHome));
+      const codexBucket = summary.buckets.find((bucket) => bucket.sourcePath === canonicalHome);
+      assert.strictEqual(codexBucket?.totals.outputTokens, 51);
+      assert.strictEqual(codexBucket?.costUsd, 51);
       yield* Effect.promise(() =>
         NodeFSP.rename(
           NodePath.join(codexHome, "sessions", "rollout.jsonl"),
@@ -612,16 +610,184 @@ describe("UsageService", () => {
       assert.deepStrictEqual(removed.buckets, summary.buckets);
 
       const sources = summary.sources.filter((source) => source.status === "ok");
-      assert.strictEqual(sources.length, 5);
+      assert.strictEqual(sources.length, 4);
       assert.strictEqual(
         sources.reduce((sum, source) => sum + source.scannedFiles, 0),
         6,
       );
       assert.strictEqual(
         sources.filter((source) => source.fingerprint.provider === "codex").length,
-        2,
+        1,
       );
     }).pipe(Effect.scoped),
+  );
+
+  it.live.each([
+    { removeSessionsRoot: false, label: "a rollout move" },
+    { removeSessionsRoot: true, label: "sessions root cleanup" },
+  ])(
+    "merges archived usage once across independent caches after $label",
+    ({ removeSessionsRoot }) =>
+      Effect.gen(function* () {
+        const { home, settings } = yield* setup;
+        const codexHome = NodePath.join(home, "codex");
+        const alias = NodePath.join(home, "codex-alias");
+        const sessions = NodePath.join(codexHome, "sessions");
+        const archives = NodePath.join(codexHome, "archived_sessions");
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(sessions, { recursive: true });
+          await NodeFSP.symlink(codexHome, alias, "junction");
+          await NodeFSP.writeFile(
+            NodePath.join(sessions, "rollout.jsonl"),
+            [
+              { type: "session_meta", payload: { id: "shared-archived-session" } },
+              { type: "turn_context", payload: { model: "gpt-5.6-sol" } },
+              {
+                type: "event_msg",
+                timestamp: "2026-08-01T10:00:00Z",
+                payload: {
+                  type: "token_count",
+                  info: { last_token_usage: { input_tokens: 10, output_tokens: 11 } },
+                },
+              },
+            ]
+              .map((line) => encodeUnknownJsonString(line))
+              .join("\n") + "\n",
+          );
+        });
+        const warm = yield* UsageService.make.pipe(
+          Effect.provide(
+            serviceLayers({
+              prefix: "usage-service-archive-warm-test",
+              home,
+              settings,
+              ratesDocument: {
+                "gpt-5.6-sol": { input_cost_per_token: 0, output_cost_per_token: 1 },
+              },
+            }),
+          ),
+        );
+        const active = yield* warm.readSummary(WINDOW);
+        assert.strictEqual(totalOutputTokens(active), 11);
+        const legacyVolume = yield* Effect.promise(() => NodeFSP.stat(sessions));
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(archives);
+          await NodeFSP.rename(
+            NodePath.join(sessions, "rollout.jsonl"),
+            NodePath.join(archives, "rollout.jsonl"),
+          );
+          if (removeSessionsRoot) await NodeFSP.rm(sessions, { recursive: true });
+        });
+        const fresh = yield* UsageService.make.pipe(
+          Effect.provide(
+            serviceLayers({
+              prefix: "usage-service-archive-fresh-test",
+              home,
+              settings: { providers: { ...settings.providers, codex: { homePath: alias } } },
+              ratesDocument: {
+                "gpt-5.6-sol": { input_cost_per_token: 0, output_cost_per_token: 1 },
+              },
+            }),
+          ),
+        );
+        const archived = yield* fresh.readSummary(WINDOW);
+        const retained = yield* warm.readSummary(WINDOW);
+        assert.strictEqual(totalOutputTokens(archived), 11);
+        assert.strictEqual(totalOutputTokens(retained), 11);
+        const activeSource = active.sources.find(
+          (source) => source.fingerprint.provider === "codex",
+        );
+        assert.deepStrictEqual(
+          archived.sources.find((source) => source.fingerprint.provider === "codex")?.fingerprint,
+          activeSource?.fingerprint,
+        );
+        assert.deepStrictEqual(
+          retained.sources.find((source) => source.fingerprint.provider === "codex")?.fingerprint,
+          activeSource?.fingerprint,
+        );
+        // A v6 environment keeps the active-root attribution in its cache even
+        // after archival and root cleanup. There is no old inode left to stat.
+        const legacy = {
+          ...active,
+          contractVersion: 6,
+          buckets: active.buckets.map((bucket) =>
+            bucket.provider === "codex" ? { ...bucket, sourcePath: sessions } : bucket,
+          ),
+          sources: active.sources.map((source) =>
+            source.fingerprint.provider === "codex"
+              ? {
+                  ...source,
+                  fingerprint: {
+                    ...source.fingerprint,
+                    resolvedHomePath: sessions,
+                    volumeId: `${legacyVolume.dev}:${legacyVolume.ino}`,
+                  },
+                }
+              : source,
+          ),
+        };
+        for (const freshIsNewer of [false, true]) {
+          const merged = mergeUsage(
+            [
+              {
+                environmentId: EnvironmentId.make("warm"),
+                label: "warm",
+                summary: {
+                  ...retained,
+                  readAt: freshIsNewer ? "2026-08-01T11:00:00Z" : "2026-08-01T12:00:00Z",
+                },
+              },
+              {
+                environmentId: EnvironmentId.make("fresh"),
+                label: "fresh",
+                summary: {
+                  ...archived,
+                  readAt: freshIsNewer ? "2026-08-01T12:00:00Z" : "2026-08-01T11:00:00Z",
+                },
+              },
+            ],
+            archived.contractVersion,
+          );
+          assert.strictEqual(merged.outputTokens, 11);
+          assert.strictEqual(merged.totalTokens, 21);
+          assert.strictEqual(merged.costUsd, 11);
+          assert.strictEqual(merged.records, 1);
+          assert.strictEqual(merged.sessions, 1);
+          const mixed = mergeUsage(
+            [
+              {
+                environmentId: EnvironmentId.make("legacy"),
+                label: "legacy",
+                summary: {
+                  ...legacy,
+                  readAt: freshIsNewer ? "2026-08-01T11:00:00Z" : "2026-08-01T12:00:00Z",
+                },
+              },
+              {
+                environmentId: EnvironmentId.make("fresh"),
+                label: "fresh",
+                summary: {
+                  ...archived,
+                  readAt: freshIsNewer ? "2026-08-01T12:00:00Z" : "2026-08-01T11:00:00Z",
+                },
+              },
+            ],
+            archived.contractVersion,
+          );
+          assert.strictEqual(mixed.outputTokens, 11);
+          assert.strictEqual(mixed.costUsd, 11);
+          assert.strictEqual(mixed.records, 1);
+          assert.strictEqual(mixed.sessions, 1);
+          assert.deepStrictEqual(mixed.contractMismatches, [
+            {
+              environmentId: EnvironmentId.make("legacy"),
+              direction: "serverBehind",
+              contractVersion: 6,
+              provider: "codex",
+            },
+          ]);
+        }
+      }).pipe(Effect.scoped),
   );
 
   it.live(
@@ -740,7 +906,7 @@ describe("UsageService", () => {
         assert.strictEqual(
           summary.sources.find((source) => source.fingerprint.provider === "codex")?.fingerprint
             .resolvedHomePath,
-          NodePath.join(home, "inherited-codex", "sessions"),
+          NodePath.join(home, "inherited-codex"),
         );
         assert.strictEqual(
           summary.sources.find((source) => source.fingerprint.provider === "grok")?.fingerprint

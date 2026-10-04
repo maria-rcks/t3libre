@@ -22,7 +22,7 @@ import {
 } from "@t3tools/client-runtime/state/usage";
 
 import {
-  isCompatibleUsageContractVersion,
+  getUsageContractMismatch,
   isModelCostUnknown,
   type DailyTotals,
   type HourlyTotals,
@@ -1156,10 +1156,7 @@ function UsageEnvironmentFilter({
             environment.error !== null
               ? "Unavailable"
               : environment.summary !== null &&
-                  !isCompatibleUsageContractVersion(
-                    environment.summary.contractVersion,
-                    USAGE_CONTRACT_VERSION,
-                  )
+                  getUsageContractMismatch(environment.summary, USAGE_CONTRACT_VERSION) !== null
                 ? "Update required"
                 : environment.summary === null
                   ? "Scanning…"

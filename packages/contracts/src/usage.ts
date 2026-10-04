@@ -14,22 +14,25 @@ import * as Schema from "effect/Schema";
 import { ForwardCompatibleArray, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
- * Bumped whenever the shape of {@link UsageSummary} changes incompatibly. The
- * client renders partial coverage when an environment reports an older version
+ * Bumped when the shape or source ownership of {@link UsageSummary} changes
+ * incompatibly. The client renders partial coverage for an older version
  * rather than failing the whole page.
  * Adding providers or other array-element variants is additive: unknown
  * entries are skipped on decode and do not require a version bump. So are
  * optional bucket fields, which older clients ignore.
  */
-export const USAGE_CONTRACT_VERSION = 6 as const;
+export const USAGE_CONTRACT_VERSION = 7 as const;
 
 /**
  * Oldest {@link UsageSummary} version a current client will still merge.
  *
- * v5/v6 add providers and optional source attribution; v4 Claude/Codex
- * buckets remain valid in mixed-version environments.
+ * v5/v6 add providers and optional source attribution. v7 identifies Codex
+ * active and archived rollouts by their shared home; earlier Codex sources
+ * cannot merge safely, while other providers retain v4 compatibility.
  */
 export const USAGE_MERGE_COMPATIBLE_SINCE = 4 as const;
+
+export const USAGE_CODEX_MERGE_COMPATIBLE_SINCE = 7 as const;
 
 export const UsageProviderKind = Schema.Literals([
   "claude",
@@ -152,7 +155,8 @@ export const UsageSourceFingerprint = Schema.Struct({
   provider: UsageProviderKind,
   resolvedHomePath: TrimmedNonEmptyString,
   /**
-   * Filesystem identity of the transcript directory, as `device:inode`.
+   * Filesystem identity of the source root, as `device:inode`. Codex uses the
+   * shared home containing active and archived transcript directories.
    *
    * Hostname and path alone are not enough: every Mac in a fleet resolves
    * `/Users/<user>/.claude`, so two machines that happen to share a hostname
