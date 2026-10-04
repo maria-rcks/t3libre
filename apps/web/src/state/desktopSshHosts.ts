@@ -9,13 +9,25 @@ type DesktopSshDiscoveryBridge = Pick<DesktopBridge, "discoverSshHosts">;
 export function filterDiscoveredSshHosts(
   hosts: ReadonlyArray<DesktopDiscoveredSshHost>,
   query: string,
+  saved?: {
+    readonly aliases: ReadonlySet<string>;
+    readonly addresses: ReadonlySet<string>;
+  },
 ): ReadonlyArray<DesktopDiscoveredSshHost> {
+  // Configured aliases can have different SSH options at the same hostname.
+  const unsavedHosts = saved
+    ? hosts.filter(
+        (host) =>
+          !saved.aliases.has(host.alias) &&
+          (host.source === "ssh-config" || !saved.addresses.has(host.hostname)),
+      )
+    : hosts;
   const normalizedQuery = query.trim().toLowerCase();
-  if (normalizedQuery.length === 0) return hosts;
+  if (normalizedQuery.length === 0) return unsavedHosts;
 
   const prefixMatches: Array<DesktopDiscoveredSshHost> = [];
   const substringMatches: Array<DesktopDiscoveredSshHost> = [];
-  for (const host of hosts) {
+  for (const host of unsavedHosts) {
     const alias = host.alias.toLowerCase();
     if (alias.startsWith(normalizedQuery)) {
       prefixMatches.push(host);

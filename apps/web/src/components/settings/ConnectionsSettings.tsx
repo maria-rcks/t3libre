@@ -1937,7 +1937,8 @@ export function ConnectionsSettings() {
     [primaryEnvironment, savedEnvironments],
   );
   const savedDesktopSshEnvironmentKeys = useMemo(() => {
-    const keys = new Set<string>();
+    const aliases = new Set<string>();
+    const addresses = new Set<string>();
     for (const environment of savedEnvironments) {
       const profile = environment.entry.profile;
       if (
@@ -1948,10 +1949,10 @@ export function ConnectionsSettings() {
         continue;
       }
       const target = profile.value.target;
-      keys.add(target.alias);
-      keys.add(formatDesktopSshTarget(target));
+      aliases.add(target.alias);
+      addresses.add(formatDesktopSshTarget(target));
     }
-    return keys;
+    return { aliases, addresses };
   }, [savedEnvironments]);
   const [desktopServerExposureMutationError, setDesktopServerExposureMutationError] = useState<
     string | null
@@ -2069,14 +2070,7 @@ export function ConnectionsSettings() {
   const isLoadingWslState = desktopWsl.isPending && desktopWsl.data === null;
   const discoveredSshHosts = desktopSshHosts.data ?? EMPTY_DISCOVERED_SSH_HOSTS;
   const unsavedDiscoveredSshHosts = useMemo(
-    () =>
-      discoveredSshHosts.filter((target) => {
-        const address = formatDesktopSshTarget(target);
-        return (
-          !savedDesktopSshEnvironmentKeys.has(target.alias) &&
-          !savedDesktopSshEnvironmentKeys.has(address)
-        );
-      }),
+    () => filterDiscoveredSshHosts(discoveredSshHosts, "", savedDesktopSshEnvironmentKeys),
     [discoveredSshHosts, savedDesktopSshEnvironmentKeys],
   );
   const filteredDiscoveredSshHosts = useMemo(

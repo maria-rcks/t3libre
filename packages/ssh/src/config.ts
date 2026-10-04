@@ -17,17 +17,8 @@ function stripInlineComment(line: string): string {
 }
 
 function splitDirectiveArgs(value: string): ReadonlyArray<string> {
-  const args: Array<string> = [];
-  for (const rawEntry of value
-    .replace(/=(?!=)/gu, " ")
-    .trim()
-    .split(/\s+/u)) {
-    const entry = rawEntry.trim();
-    if (entry.length > 0) {
-      args.push(entry);
-    }
-  }
-  return args;
+  const args = value.replace(/=(?!=)/gu, " ").match(/"[^"]*"|'[^']*'|[^\s]+/gu) ?? [];
+  return args.map((entry) => entry.replace(/^(["'])(.*)\1$/u, "$2"));
 }
 
 function expandHomePath(input: string, homeDir: string): string {
@@ -89,9 +80,14 @@ const expandGlob = Effect.fnUntraced(function* (pattern: string) {
   return matchedPaths.toSorted((left, right) => left.localeCompare(right));
 });
 
+interface SshHostPatterns {
+  readonly values: ReadonlyArray<string> | null;
+  readonly caseInsensitive: boolean;
+}
+
 interface SshTargetRule {
-  readonly guards: ReadonlyArray<ReadonlyArray<string> | null>;
-  readonly patterns: ReadonlyArray<string> | null;
+  readonly guards: ReadonlyArray<SshHostPatterns>;
+  readonly patterns: SshHostPatterns;
   readonly directive: "hostname" | "port";
   readonly value: string;
 }
@@ -107,14 +103,16 @@ function expandConfiguredHostname(hostname: string, alias: string): string | nul
   return supported ? expanded : null;
 }
 
-function matchesHostPatterns(alias: string, patterns: ReadonlyArray<string> | null): boolean {
+function matchesHostPatterns(alias: string, patterns: SshHostPatterns): boolean {
   // Unknown Match conditions may apply; do not let a later value override them.
-  if (patterns === null) return true;
+  if (patterns.values === null) return true;
   let matched = false;
-  for (const pattern of patterns) {
+  for (const pattern of patterns.values) {
     const negated = pattern.startsWith("!");
     const candidate = negated ? pattern.slice(1) : pattern;
-    if (!new RegExp(globToRegExp(candidate).source, "iu").test(alias)) continue;
+    const matcher = globToRegExp(candidate);
+    if (!(patterns.caseInsensitive ? new RegExp(matcher.source, "iu") : matcher).test(alias))
+      continue;
     if (negated) return false;
     matched = true;
   }
@@ -126,8 +124,8 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
   visited = new Set<string>(),
   homeDir: string,
   context: {
-    patterns: ReadonlyArray<string> | null;
-    guards: ReadonlyArray<ReadonlyArray<string> | null>;
+    patterns: SshHostPatterns;
+    guards: ReadonlyArray<SshHostPatterns>;
   },
   targetRules: Array<SshTargetRule>,
 ): Effect.fn.Return<
@@ -185,12 +183,15 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
     if (normalizedDirective !== "host") {
       if (normalizedDirective === "match") {
         const condition = rawArgs[0]?.toLowerCase();
-        context.patterns =
-          condition === "all" && rawArgs.length === 1
-            ? ["*"]
-            : condition === "originalhost" && rawArgs.length === 2
-              ? (rawArgs[1]?.split(",") ?? [])
-              : null;
+        context.patterns = {
+          values:
+            condition === "all" && rawArgs.length === 1
+              ? ["*"]
+              : condition === "originalhost" && rawArgs.length === 2
+                ? (rawArgs[1]?.split(",") ?? [])
+                : null,
+          caseInsensitive: condition === "originalhost",
+        };
       }
       if (normalizedDirective === "hostname" || normalizedDirective === "port") {
         const value = rawArgs[0]?.replace(/^(["'])(.*)\1$/u, "$2");
@@ -206,7 +207,7 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
       continue;
     }
 
-    context.patterns = rawArgs;
+    context.patterns = { values: rawArgs, caseInsensitive: false };
     for (const alias of rawArgs) {
       if (alias.length === 0 || hasSshPattern(alias)) {
         continue;
@@ -307,7 +308,7 @@ export const discoverSshHosts = Effect.fnUntraced(
       path.join(sshDirectory, "config"),
       new Set<string>(),
       homeDir,
-      { patterns: ["*"], guards: [] },
+      { patterns: { values: ["*"], caseInsensitive: false }, guards: [] },
       targetRules,
     );
     const discovered = new Map<string, DesktopDiscoveredSshHost>();
@@ -321,7 +322,8 @@ export const discoverSshHosts = Effect.fnUntraced(
           matchesHostPatterns(alias, rule.patterns),
       );
       const configuredHostname = hostnameRule
-        ? hostnameRule.patterns !== null && !hostnameRule.guards.includes(null)
+        ? hostnameRule.patterns.values !== null &&
+          !hostnameRule.guards.some((guard) => guard.values === null)
           ? expandConfiguredHostname(hostnameRule.value, alias)
           : null
         : alias;
@@ -333,7 +335,8 @@ export const discoverSshHosts = Effect.fnUntraced(
           matchesHostPatterns(alias, rule.patterns),
       );
       const port = portRule
-        ? portRule.patterns !== null && !portRule.guards.includes(null)
+        ? portRule.patterns.values !== null &&
+          !portRule.guards.some((guard) => guard.values === null)
           ? Number(portRule.value)
           : Number.NaN
         : 22;

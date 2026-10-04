@@ -170,6 +170,74 @@ describe("ssh config", () => {
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
+  it.effect.each([
+    {
+      name: "keeps Host patterns case-sensitive",
+      config: "Host WORK*\n  HostName upper.example.com\nHost work\n  HostName lower.example.com\n",
+      included: "",
+      hostname: "lower.example.com",
+      known: "upper.example.com",
+    },
+    {
+      name: "keeps Host Include guards case-sensitive",
+      config: "Host WORK*\n  Include target.conf\nHost work\n  HostName lower.example.com\n",
+      included: "Host work\n  HostName upper.example.com\n",
+      hostname: "lower.example.com",
+      known: "upper.example.com",
+    },
+    {
+      name: "matches quoted originalhost case-insensitively before inferring the port",
+      config: 'Host work\n  HostName shared.example.com\nMatch originalhost "WORK"\n  Port 2222\n',
+      included: "",
+      hostname: "shared.example.com",
+      known: "shared.example.com",
+    },
+    {
+      name: "keeps originalhost Include guards case-insensitive",
+      config:
+        'Match originalhost "WORK"\n  Include target.conf\nHost work\n  HostName fallback.example.com\n',
+      included: "Host work\n  HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+    {
+      name: "reads quoted Include paths before suppressing known hosts",
+      config: 'Host work\n  Include "target.conf"\n  HostName fallback.example.com\n',
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+    {
+      name: "reads quoted Include paths containing spaces",
+      config: 'Host work\n  Include "target with spaces.conf"\n  HostName fallback.example.com\n',
+      included: "HostName actual.example.com\n",
+      hostname: "actual.example.com",
+      known: "fallback.example.com",
+    },
+  ])("$name", (fixture) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homeDir = yield* makeTempHomeDir();
+      const sshDir = path.join(homeDir, ".ssh");
+      yield* fs.makeDirectory(sshDir);
+      yield* fs.writeFileString(path.join(sshDir, "config"), fixture.config);
+      for (const name of ["target.conf", "target with spaces.conf"]) {
+        yield* fs.writeFileString(path.join(sshDir, name), fixture.included);
+      }
+      yield* fs.writeFileString(
+        path.join(sshDir, "known_hosts"),
+        `${fixture.known} ssh-ed25519 AAAA\n`,
+      );
+      const hosts = yield* discoverSshHosts({ homeDir });
+      assert.equal(hosts.find(({ alias }) => alias === "work")?.hostname, fixture.hostname);
+      assert.deepEqual(
+        hosts.map(({ alias }) => alias).toSorted(),
+        ["work", fixture.known].toSorted(),
+      );
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
   it.effect("keeps known targets when an earlier Match value cannot be resolved", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

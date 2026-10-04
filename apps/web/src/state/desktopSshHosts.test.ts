@@ -102,6 +102,26 @@ describe("filterDiscoveredSshHosts", () => {
   it("returns an empty array when no hosts match", () => {
     expect(filterDiscoveredSshHosts(suggestions, "merlot")).toEqual([]);
   });
+
+  it("keeps distinct configured aliases when their hostname is already saved", () => {
+    const alias = { ...hosts[0]!, alias: "deploy", hostname: "shared.example.com" };
+    const otherAlias = { ...alias, alias: "deploy-other" };
+    const direct = { ...alias, alias: alias.hostname, source: "known-hosts" as const };
+    const saved = {
+      aliases: new Set(["shared.example.com", "deploy-other"]),
+      addresses: new Set(["shared.example.com", "alice@shared.example.com:22"]),
+    };
+    expect(filterDiscoveredSshHosts([alias, otherAlias, direct], "", saved)).toEqual([alias]);
+    expect(
+      filterDiscoveredSshHosts([alias, otherAlias, direct], "shared.example.com", saved),
+    ).toEqual([alias]);
+    expect(
+      filterDiscoveredSshHosts([alias, otherAlias, direct], "", {
+        aliases: new Set(["another-alias"]),
+        addresses: new Set(["deploy"]),
+      }),
+    ).toEqual([alias, otherAlias, direct]);
+  });
 });
 
 describe("desktopSshHostsState", () => {
