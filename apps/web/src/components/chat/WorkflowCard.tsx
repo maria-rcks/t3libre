@@ -1,4 +1,5 @@
-import { ThreadId, type OrchestrationV2Subagent } from "@t3tools/contracts";
+import { ThreadId, type OrchestrationV2Subagent, type ServerProvider } from "@t3tools/contracts";
+import { resolveSubagentMetadata } from "@t3tools/client-runtime/state/subagent-display";
 import {
   projectedSubagentsToRuntime,
   isActiveSubagentStatus,
@@ -98,6 +99,7 @@ export function WorkflowCard({
   variant = "conversation",
   isThreadUnavailable,
   lineageViewKey,
+  provider,
 }: {
   agent: OrchestrationV2Subagent;
   onOpenThread: (threadId: ThreadId) => void;
@@ -106,6 +108,8 @@ export function WorkflowCard({
   isThreadUnavailable?: (threadId: ThreadId) => boolean;
   /** Remembers open and closed choices across remounts and reloads; without it they stay local. */
   lineageViewKey?: string;
+  /** The coordinator's provider; Lineage names each agent's model from its catalog. */
+  provider?: Pick<ServerProvider, "driver" | "models"> | undefined;
 }) {
   const panel = variant === "panel";
   const [localView, setLocalView] = useState<WorkflowLineageView>({});
@@ -225,6 +229,7 @@ export function WorkflowCard({
                     }))
                   }
                   panel={panel}
+                  provider={provider}
                   onOpenThread={onOpenThread}
                   isThreadUnavailable={isThreadUnavailable}
                 />
@@ -282,6 +287,7 @@ function WorkflowPhase({
   showCompleted,
   onShowCompletedChange,
   panel,
+  provider,
   onOpenThread,
   isThreadUnavailable,
 }: {
@@ -294,6 +300,7 @@ function WorkflowPhase({
   showCompleted: boolean;
   onShowCompletedChange: (show: boolean) => void;
   panel: boolean;
+  provider: Pick<ServerProvider, "driver" | "models"> | undefined;
   onOpenThread: (threadId: ThreadId) => void;
   isThreadUnavailable: ((threadId: ThreadId) => boolean) | undefined;
 }) {
@@ -348,6 +355,7 @@ function WorkflowPhase({
               <WorkflowMember
                 agent={member}
                 panel={panel}
+                provider={provider}
                 onOpenThread={onOpenThread}
                 unavailable={Boolean(
                   member.childThreadId &&
@@ -387,30 +395,50 @@ function WorkflowPhase({
 function WorkflowMember({
   agent,
   panel,
+  provider,
   onOpenThread,
   unavailable,
 }: {
   agent: RuntimeSubagent;
   panel: boolean;
+  provider: Pick<ServerProvider, "driver" | "models"> | undefined;
   onOpenThread: (threadId: ThreadId) => void;
   unavailable?: boolean;
 }) {
   const childThreadId = agent.childThreadId ? ThreadId.make(agent.childThreadId) : null;
+  // Lineage has no room beside the label, so the model gets its own line.
+  const modelLabel =
+    panel && agent.model
+      ? resolveSubagentMetadata({ model: agent.model, provider }).modelLabel
+      : null;
   const content = (
     <>
       <ComposerBanner.Icon>
         <StatusMark status={agent.status} />
       </ComposerBanner.Icon>
-      <ComposerBanner.Content>
+      <ComposerBanner.Content className={modelLabel ? "block" : undefined}>
         <span
           className={cn(
-            "min-w-0 truncate",
+            "block min-w-0 truncate",
             agent.status === "completed" && "text-muted-foreground/55",
           )}
         >
           <span className="sr-only">{statusLabel(agent.status)}: </span>
           {agent.title}
         </span>
+        {modelLabel ? (
+          <span
+            className={cn(
+              "block truncate text-2xs",
+              // Never brighter than the label it sits under.
+              agent.status === "completed"
+                ? "text-muted-foreground/55"
+                : "text-muted-foreground/70",
+            )}
+          >
+            {modelLabel}
+          </span>
+        ) : null}
       </ComposerBanner.Content>
       <ComposerBanner.Actions>
         {agent.attempt !== null && agent.attempt > 1 ? (

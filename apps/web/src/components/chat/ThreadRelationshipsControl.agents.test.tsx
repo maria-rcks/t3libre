@@ -900,9 +900,30 @@ function releaseCheck(buildForm: "running" | "completed" = "running") {
         { index: 3, title: "Review" },
       ],
       agents: [
-        { index: 0, label: "plan api", state: "completed", phaseIndex: 1, childThreadId: "plan" },
-        { index: 1, label: "build api", state: "completed", phaseIndex: 2, childThreadId: "api" },
-        { index: 2, label: "build form", state: buildForm, phaseIndex: 2, childThreadId: "form" },
+        {
+          index: 0,
+          label: "plan api",
+          state: "completed",
+          phaseIndex: 1,
+          childThreadId: "plan",
+          model: "claude-opus-4-6",
+        },
+        {
+          index: 1,
+          label: "build api",
+          state: "completed",
+          phaseIndex: 2,
+          childThreadId: "api",
+          model: "claude-opus-4-6",
+        },
+        {
+          index: 2,
+          label: "build form",
+          state: buildForm,
+          phaseIndex: 2,
+          childThreadId: "form",
+          model: "claude-sonnet-4-6",
+        },
         { index: 3, label: "review api", state: "queued", phaseIndex: 3, childThreadId: "review" },
       ],
     },
@@ -937,8 +958,8 @@ async function showLineage(threadId: "parent" | "release-thread", agent = releas
   });
 }
 
-const lineageText = () =>
-  renderer.root
+const lineageText = (root = renderer.root) =>
+  root
     .findAll((node) => typeof node.type === "string")
     .flatMap((node) => node.children.filter((child) => typeof child === "string"))
     .join(" ");
@@ -1032,4 +1053,37 @@ it("keeps every completed agent listed in the chat card", async () => {
   });
   expect(lineageText()).toContain("build api");
   expect(lineageText()).not.toContain("completed");
+});
+
+it("names each workflow agent's reported model under its label in Lineage", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  state.configs.set("test", {
+    providers: [
+      {
+        instanceId: "claude",
+        driver: "claudeAgent",
+        models: [{ slug: "claude-opus-4-6", name: "Claude Opus 4.6", shortName: "Opus 4.6" }],
+      },
+    ],
+  });
+  await showLineage("parent");
+  await act(async () => lineageButton("Expand workflow").props.onClick());
+  await act(async () => lineageButton("Plan: ").props.onClick());
+  await act(async () => lineageButton("Review: ").props.onClick());
+  await act(async () =>
+    renderer.root
+      .findAllByType("button")
+      .find(
+        (button) => button.findAll((node) => node.children.includes("Show 1 completed")).length,
+      )!
+      .props.onClick(),
+  );
+  const row = (label: string) => lineageButton(`Open ${label}`);
+  // The catalog's name when the provider lists the model, else a readable slug.
+  expect(lineageText(row("plan api"))).toContain("Opus 4.6");
+  expect(lineageText(row("plan api"))).not.toContain("Claude");
+  expect(lineageText(row("build form"))).toContain("Claude Sonnet 4.6");
+  expect(lineageText(row("review api"))).toContain("review api");
+  expect(lineageText(row("review api"))).not.toMatch(/Claude|Opus|Sonnet/);
+  expect(lineageText()).not.toContain("claude-");
 });

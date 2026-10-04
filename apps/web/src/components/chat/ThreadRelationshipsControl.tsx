@@ -29,6 +29,7 @@ import type {
   OrchestrationV2Subagent,
   OrchestrationV2ThreadShell,
   ScopedThreadRef,
+  ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
 import { groupBy } from "effect/Array";
@@ -207,6 +208,7 @@ function ThreadLineageAgent(props: {
   readonly threadId: ThreadId;
   readonly childThread: OrchestrationV2ThreadShell | null | undefined;
   readonly liveAgent: OrchestrationV2Subagent | undefined;
+  readonly providers: ReadonlyArray<ServerProvider> | undefined;
   readonly isThreadUnavailable: (threadId: ThreadId) => boolean;
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly children: (agent: OrchestrationV2Subagent | undefined) => ReactNode;
@@ -226,6 +228,7 @@ function ThreadLineageAgent(props: {
         variant="panel"
         isThreadUnavailable={props.isThreadUnavailable}
         lineageViewKey={workflowLineageViewKey(props.environmentId, agent.id)}
+        provider={props.providers?.find((entry) => entry.instanceId === agent.providerInstanceId)}
       />
     </li>
   ) : (
@@ -430,6 +433,9 @@ export function ThreadRelationshipsPanel(props: {
                   isThreadUnavailable={isThreadUnavailable}
                   inWorkflowThread
                   lineageViewKey={workflowLineageViewKey(props.environmentId, workflow.id)}
+                  provider={providers?.find(
+                    (entry) => entry.instanceId === workflow.providerInstanceId,
+                  )}
                 />
               </li>
             ) : null
@@ -448,6 +454,7 @@ export function ThreadRelationshipsPanel(props: {
                   threadId={threadId}
                   childThread={node?.thread}
                   liveAgent={isChildAgent ? subagentsByThreadId.get(threadId) : undefined}
+                  providers={providers}
                   isThreadUnavailable={isThreadUnavailable}
                   onOpenThread={openThread}
                 >
