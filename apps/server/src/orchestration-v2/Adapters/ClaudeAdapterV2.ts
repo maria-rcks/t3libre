@@ -3824,6 +3824,7 @@ export function makeClaudeAdapterV2(
             output: input.output,
           });
           const webSearchResults = webSearchResultsFromClaudeOutput(input.output);
+          const webFetchUrl = firstStringInputField(input.toolInput, ["url"])?.trim();
           const outputValue = claudeNativeToolOutputValue(input.output);
           const outputText =
             itemType === "command_execution"
@@ -3853,15 +3854,14 @@ export function makeClaudeAdapterV2(
                         : { patterns: [...webSearchPatterns] }),
                       ...(webSearchResults.length > 0
                         ? { results: [...webSearchResults] }
-                        : outputText.trim().length > 0
+                        : input.classification.normalizedName === "webfetch" &&
+                            outputText.trim().length > 0
                           ? {
                               // WebFetch returns page text, not search hits. Keep a
                               // bounded preview so the row has something to show.
                               results: [
                                 {
-                                  ...(webSearchPatterns[0] === undefined
-                                    ? {}
-                                    : { url: webSearchPatterns[0].trim() }),
+                                  ...(webFetchUrl === undefined ? {} : { url: webFetchUrl }),
                                   snippet: outputText.slice(0, WEB_FETCH_SNIPPET_MAX_CHARS),
                                 },
                               ],

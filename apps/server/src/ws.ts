@@ -187,7 +187,6 @@ import { deletePendingAttachment, issueAttachmentUploadUrl } from "./assets/Atta
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
-import { readTurnItem } from "./orchestration-v2/turnItemQuery.ts";
 import { readWorkflowScript } from "./orchestration-v2/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -1846,8 +1845,7 @@ const makeWsRpcLayer = (
         [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_V2_WS_METHODS.getTurnItem,
-            readTurnItem(input).pipe(
-              Effect.provideService(SqlClient.SqlClient, sql),
+            threadManagement.getTurnItem(input).pipe(
               Effect.mapError(
                 (cause) =>
                   new OrchestrationV2GetThreadProjectionError({

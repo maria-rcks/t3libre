@@ -44,10 +44,7 @@ function parseJson(text: string): unknown {
   }
 }
 
-/**
- * MCP tools often return JSON as minified text, sometimes once per content
- * block with identical copies. Indent each document and drop the repeats.
- */
+/** MCP tools often return JSON as minified text, one document per line. Indent each. */
 function prettyJsonText(text: string): string {
   const trimmed = text.trim();
   if (!/^[[{]/.test(trimmed)) return text;
@@ -56,7 +53,7 @@ function prettyJsonText(text: string): string {
   const lines = trimmed.split("\n").filter((line) => line.trim());
   const documents = lines.map((line) => parseJson(line.trim()));
   if (documents.some((document) => document === undefined)) return text;
-  return [...new Set(documents.map((document) => JSON.stringify(document, null, 2)))].join("\n\n");
+  return documents.map((document) => JSON.stringify(document, null, 2)).join("\n\n");
 }
 
 /** Formats a tool input or output for display: text blocks as text, the rest as JSON. */
