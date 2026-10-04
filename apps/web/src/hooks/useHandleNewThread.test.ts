@@ -902,29 +902,49 @@ describe("archive draft recovery", () => {
     expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
   });
 
-  it("cancels a pending recovery retry as soon as undo starts", async () => {
-    testState.connectionPhase = "reconnecting";
-    await actions.archiveThread(target);
-    await act(async () => renderer.update(createElement(Route.options.component!)));
-    testState.connectionPhase = "connected";
-    testState.targetSettings.defaultThreadEnvMode = null;
-    await act(async () => renderer.root.findByType("button").props.onClick());
-    expect(testState.projectFileReads).toHaveBeenCalledOnce();
-    let resolveUnarchive!: (value: { _tag: "Success"; value: undefined }) => void;
-    const unarchiveDone = new Promise<{ _tag: "Success"; value: undefined }>((resolve) => {
-      resolveUnarchive = resolve;
-    });
-    testState.unarchive.mockReturnValueOnce(unarchiveDone);
-    const undo = testState.archiveNotice.mock.lastCall![0].undo();
-    await act(async () => renderer.update(createElement(Route.options.component!)));
-    expect(renderer.root.findByType("button").props.disabled).toBe(true);
-    await act(async () => testState.completeProjectFileRead(null));
-    expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
-    expect(testState.router.state.location.href).toBe("/");
-    resolveUnarchive({ _tag: "Success", value: undefined });
-    await undo;
-    expect(testState.router.state.location.href).toBe("/environment-ssh/archive-last");
-  });
+  it.each(["Success", "Failure"] as const)(
+    "cancels a pending recovery and lets a fresh retry supersede undo's %s result",
+    async (resultTag) => {
+      testState.connectionPhase = "reconnecting";
+      await actions.archiveThread(target);
+      await act(async () => renderer.update(createElement(Route.options.component!)));
+      testState.connectionPhase = "connected";
+      testState.targetSettings.defaultThreadEnvMode = null;
+      await act(async () => renderer.root.findByType("button").props.onClick());
+      expect(testState.projectFileReads).toHaveBeenCalledOnce();
+      let resolveUnarchive!: (
+        value: { _tag: "Success"; value: undefined } | { _tag: "Failure"; cause: unknown },
+      ) => void;
+      testState.unarchive.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveUnarchive = resolve;
+        }),
+      );
+      const undo = testState.archiveNotice.mock.lastCall![0].undo();
+      await act(async () => renderer.update(createElement(Route.options.component!)));
+      expect(renderer.root.findByType("button").props.disabled).toBe(false);
+      await act(async () => testState.completeProjectFileRead(null));
+      expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+      expect(testState.router.state.location.href).toBe("/");
+      await act(async () => {
+        renderer.root.findByType("button").props.onClick();
+        resolveUnarchive(
+          resultTag === "Success"
+            ? { _tag: "Success", value: undefined }
+            : { _tag: "Failure", cause: new Error("undo failed") },
+        );
+        await undo;
+        expect(testState.router.state.location.href).toBe("/");
+      });
+      expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledExactlyOnceWith(
+        "remote-project",
+        projectRef,
+        "draft-delayed",
+        expect.objectContaining({ envMode: "local" }),
+      );
+      expect(testState.router.state.location.href).toBe("/draft/draft-delayed");
+    },
+  );
 
   it("does not overwrite navigation after undo starts", async () => {
     testState.connectionPhase = "reconnecting";
@@ -941,6 +961,76 @@ describe("archive draft recovery", () => {
     expect(testState.router.state.location.href).toBe("/usage");
     expect(testState.router.state.location.state.archiveDraftRetry).toBeUndefined();
   });
+
+  it.each(["Success", "Failure"] as const)(
+    "can retry after navigating during undo, its %s result, and back",
+    async (resultTag) => {
+      testState.connectionPhase = "reconnecting";
+      await actions.archiveThread(target);
+      await act(async () => renderer.update(createElement(Route.options.component!)));
+      let resolveUnarchive!: (
+        value: { _tag: "Success"; value: undefined } | { _tag: "Failure"; cause: unknown },
+      ) => void;
+      testState.unarchive.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveUnarchive = resolve;
+        }),
+      );
+      const undo = testState.archiveNotice.mock.lastCall![0].undo();
+      await testState.router.navigate({ to: "/usage" });
+      await act(async () => renderer.update(createElement("div")));
+      resolveUnarchive(
+        resultTag === "Success"
+          ? { _tag: "Success", value: undefined }
+          : { _tag: "Failure", cause: new Error("undo failed") },
+      );
+      await undo;
+      expect(testState.router.state.location.href).toBe("/usage");
+      expect(testState.router.state.location.state.archiveDraftRetry).toBeUndefined();
+
+      testState.router.history.back();
+      testState.connectionPhase = "connected";
+      await act(async () => renderer.update(createElement(Route.options.component!)));
+      expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+      expect(renderer.root.findByType("button").props.disabled).toBe(false);
+      await act(async () => renderer.root.findByType("button").props.onClick());
+      expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledExactlyOnceWith(
+        "remote-project",
+        projectRef,
+        "draft-delayed",
+        expect.objectContaining({ envMode: "local" }),
+      );
+      expect(testState.router.state.location.href).toBe("/draft/draft-delayed");
+    },
+  );
+
+  it.each(["/usage", "/"])(
+    "ignores a stale recovery retry after navigating to %s",
+    async (href) => {
+      testState.connectionPhase = "reconnecting";
+      await actions.archiveThread(target);
+      await act(async () => renderer.update(createElement(Route.options.component!)));
+      let resolveUnarchive!: (value: { _tag: "Success"; value: undefined }) => void;
+      testState.unarchive.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveUnarchive = resolve;
+        }),
+      );
+      const undo = testState.archiveNotice.mock.lastCall![0].undo();
+      await act(async () => renderer.update(createElement(Route.options.component!)));
+      const retry = renderer.root.findByType("button").props.onClick;
+      const replacements = testState.router.history.replace.mock.calls.length;
+      await testState.router.navigate({ to: href });
+      await act(async () => renderer.update(createElement("div")));
+      await act(async () => retry());
+      expect(testState.router.state.location.href).toBe(href);
+      expect(testState.router.history.replace).toHaveBeenCalledTimes(replacements);
+      expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+      resolveUnarchive({ _tag: "Success", value: undefined });
+      await undo;
+      expect(testState.router.state.location.href).toBe(href);
+    },
+  );
 
   it("retries the same checkout after undo fails", async () => {
     testState.connectionPhase = "reconnecting";

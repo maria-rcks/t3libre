@@ -1,6 +1,6 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
+import { createFileRoute, Link, useLocation, useRouter } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -40,11 +40,14 @@ function ChatIndexRouteView() {
  * end. Falls back to an add-project hero when no project exists yet.
  */
 function IndexDraftLanding() {
+  const router = useRouter();
   const projects = useProjects();
   const threads = useThreadShells();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const handleNewThread = useNewThreadHandler();
   const archiveDraftRetry = useLocation({ select: (location) => location.state.archiveDraftRetry });
+  const retryRouteHref = router.state.location.href;
+  const retryHistoryKey = router.history.location.state.__TSR_key;
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
 
@@ -63,9 +66,9 @@ function IndexDraftLanding() {
         project.environmentId === archiveDraftRetry.projectRef.environmentId &&
         project.id === archiveDraftRetry.projectRef.projectId,
     );
+  const retryCancelled = archiveDraftRetry?.cancelled === true;
   const retryDisabled =
-    archiveDraftRetry !== undefined &&
-    (!bootstrapped || archiveDraftRetry.cancelled === true || recoveryProjectMissing);
+    archiveDraftRetry !== undefined && (!bootstrapped || recoveryProjectMissing);
 
   useEffect(() => {
     const projectRef =
@@ -73,7 +76,13 @@ function IndexDraftLanding() {
       (mostRecentProject
         ? scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id)
         : null);
-    if (projectRef === null || startingRef.current || retryDisabled || !bootstrapped) {
+    if (
+      projectRef === null ||
+      startingRef.current ||
+      retryCancelled ||
+      retryDisabled ||
+      !bootstrapped
+    ) {
       return;
     }
     startingRef.current = true;
@@ -95,6 +104,7 @@ function IndexDraftLanding() {
     bootstrapped,
     handleNewThread,
     mostRecentProject,
+    retryCancelled,
     retryDisabled,
     startState.retryRequest,
   ]);
@@ -103,11 +113,23 @@ function IndexDraftLanding() {
     return null;
   }
   if (archiveDraftRetry !== undefined || mostRecentProject !== null) {
-    return startState.failed || retryDisabled ? (
+    return startState.failed || retryCancelled || retryDisabled ? (
       <DraftStartError
         disabled={retryDisabled}
         projectMissing={recoveryProjectMissing}
         onRetry={() => {
+          if (
+            router.state.location.href !== retryRouteHref ||
+            router.history.location.state.__TSR_key !== retryHistoryKey
+          ) {
+            return;
+          }
+          if (archiveDraftRetry?.cancelled === true) {
+            router.history.replace(retryRouteHref, {
+              ...router.history.location.state,
+              archiveDraftRetry: { ...archiveDraftRetry, cancelled: undefined },
+            });
+          }
           startingRef.current = false;
           setStartState((state) => ({
             failed: false,
