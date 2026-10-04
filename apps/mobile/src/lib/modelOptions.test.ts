@@ -79,15 +79,34 @@ describe("mobile model options", () => {
         { id: "agent", value: "readonly" },
       ],
     };
-    const [local] = buildModelOptions(config, selection, undefined, "/work/readonly");
+    const localOptions = buildModelOptions(config, selection, undefined, "/work/readonly");
+    const [local] = localOptions;
     expect(local?.selection).toEqual(selection);
-    const [other] = buildModelOptions(config, selection, undefined, "/work/audit");
+    const otherOptions = buildModelOptions(config, selection, undefined, "/work/audit");
+    const [other] = otherOptions;
     expect(other?.selection.options).toEqual([
       { id: "variant", value: "high" },
       { id: "agent", value: "build" },
     ]);
     const [global] = buildModelOptions(config, selection);
     expect(global?.selection.options).toEqual(other?.selection.options);
+    for (const modelOptions of [localOptions, otherOptions]) {
+      for (const source of [
+        "draftSelection",
+        "projectDefaultSelection",
+        "stickySelection",
+      ] as const) {
+        expect(
+          resolveNewTaskModelSelection({
+            draftSelection: null,
+            projectDefaultSelection: null,
+            stickySelection: null,
+            [source]: selection,
+            modelOptions,
+          }),
+        ).toEqual(modelOptions[0]?.selection);
+      }
+    }
   });
   it("groups models by provider and flags legacy entries", () => {
     const config = {

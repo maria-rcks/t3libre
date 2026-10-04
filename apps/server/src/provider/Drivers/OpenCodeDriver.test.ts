@@ -177,6 +177,9 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
           app: {
             agents: async () => {
               directories.push(input.directory);
+              if (input.directory === "/unavailable") {
+                throw new Error("Agent discovery unavailable");
+              }
               return {
                 data: [
                   { name: "build", mode: "primary", hidden: false },
@@ -191,9 +194,9 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
               };
             },
           },
-          command: { list: async () => ({ data: [] }) },
+          command: { list: async () => ({ data: [{ name: "review", hints: [] }] }) },
         }),
-        loadOpenCodeSkills: () => Effect.succeed([]),
+        loadOpenCodeSkills: () => Effect.succeed([{ name: "review", location: "/work/SKILL.md" }]),
         loadOpenCodeInventory: () =>
           Effect.succeed({
             providerList: { all: [], connected: [], default: {} },
@@ -208,16 +211,26 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
       for (const [cwd, name] of [
         ["/work", "readonly"],
         ["/other", "audit"],
+        ["/unavailable", null],
+        ["/work", "readonly"],
       ] as const) {
         const workspace = yield* instance.snapshotForCwd!(cwd);
         const agent = workspace.optionDescriptors?.[0];
         assert.deepStrictEqual(
           agent?.type === "select" ? agent.options.map((option) => option.id) : [],
-          ["build", name],
+          name === null ? [] : ["build", name],
+        );
+        assert.deepStrictEqual(
+          workspace.skills.map((skill) => skill.name),
+          ["review"],
+        );
+        assert.deepStrictEqual(
+          workspace.slashCommands.map((command) => command.name),
+          ["compact", "review"],
         );
         assert.deepStrictEqual(workspace.models, (yield* instance.snapshot.getSnapshot).models);
       }
-      assert.deepStrictEqual(directories, ["/work", "/other"]);
+      assert.deepStrictEqual(directories, ["/work", "/other", "/unavailable", "/work"]);
     }).pipe(Effect.scoped),
   );
 

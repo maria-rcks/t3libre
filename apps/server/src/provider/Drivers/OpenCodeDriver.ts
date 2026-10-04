@@ -406,7 +406,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       ) =>
         Effect.all(
           {
-            agents: OpenCodeRuntime.loadOpenCodeAgents(client),
+            agents: OpenCodeRuntime.loadOpenCodeAgents(client).pipe(Effect.orElseSucceed(() => [])),
             skills: openCodeRuntime.loadOpenCodeSkills(client),
             commands: OpenCodeRuntime.loadOpenCodeCommands(client).pipe(
               Effect.timeout("10 seconds"),

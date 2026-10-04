@@ -1084,11 +1084,22 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       const text = draft.text.trim();
       // Use the displayed selection rules without substituting an unavailable
       // Antigravity model while the task is queued.
-      const draftModelSelection =
+      const currentModelSelection =
         resolveSelectableModelSelection(
           selectedEnvironmentServerConfig,
           draft.modelSelection ?? null,
         ) ?? selectedModel;
+      const draftModelSelection = resolveNewTaskModelSelection({
+        draftSelection: currentModelSelection,
+        projectDefaultSelection: null,
+        stickySelection: null,
+        modelOptions: buildModelOptions(
+          selectedEnvironmentServerConfig,
+          currentModelSelection,
+          undefined,
+          modelCwd,
+        ),
+      });
       if (text.length === 0 || !draftModelSelection) {
         return null;
       }
@@ -1158,6 +1169,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       defaultRuntimeMode,
       editingPendingProject,
       editingPendingTask,
+      modelCwd,
       selectedEnvironmentServerConfig,
       selectedModel,
       selectedProject,

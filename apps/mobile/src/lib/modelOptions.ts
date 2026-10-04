@@ -146,14 +146,22 @@ export function resolveNewTaskModelSelection(input: {
   readonly stickySelection: ModelSelection | null;
   readonly modelOptions: ReadonlyArray<ModelOption>;
 }): ModelSelection | null {
-  return (
+  const selection =
     input.draftSelection ??
     input.projectDefaultSelection ??
     input.stickySelection ??
     input.modelOptions.find((option) => option.isDefault && !option.isUnavailable)?.selection ??
     input.modelOptions.find((option) => !option.isUnavailable)?.selection ??
-    null
+    null;
+  if (!selection) return null;
+  const option = input.modelOptions.find(
+    (option) =>
+      option.selection.instanceId === selection.instanceId &&
+      option.selection.model === selection.model,
   );
+  return option && option.providerDriver !== "antigravity"
+    ? normalizeSelectionOptions(selection, option.capabilities)
+    : selection;
 }
 
 export function buildModelOptions(
