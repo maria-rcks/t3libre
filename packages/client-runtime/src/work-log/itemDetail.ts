@@ -96,9 +96,15 @@ export function toolCallLines(input: {
   if (isRecord(args) && !isSummarizedValue(args)) {
     const entries = Object.entries(args).flatMap(
       ([key, value]): Array<readonly [string, string]> => {
-        if (value === undefined || value === null || value === "") return [];
+        if (value === undefined) return [];
+        // An empty string or null can be the point of a call (a clear or reset), so show it.
         return [
-          [key, typeof value === "string" ? value : (JSON.stringify(value) ?? String(value))],
+          [
+            key,
+            typeof value === "string" && value !== ""
+              ? value
+              : (JSON.stringify(value) ?? String(value)),
+          ],
         ];
       },
     );
