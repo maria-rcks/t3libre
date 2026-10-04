@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   cacheHitRate,
   costPerMillionTokens,
+  modelShare,
   sortModelsByTokens,
   tokenTypeSegments,
 } from "./usageBreakdown";
@@ -29,6 +30,7 @@ const model = (
   unpricedRecords: 0,
   unpricedTokens: 0,
   costShare: 0,
+  tokenShare: 0,
   ...overrides,
 });
 
@@ -68,6 +70,26 @@ describe("token types", () => {
       expect(segments.reduce((sum, segment) => sum + segment.value, 0)).toBe(650);
     },
   );
+});
+
+describe("modelShare", () => {
+  it("follows the selected metric", () => {
+    const priced = model("priced", 100, 9, { costShare: 0.9, tokenShare: 0.25 });
+
+    expect(modelShare(priced, "cost")).toBe(0.9);
+    expect(modelShare(priced, "tokens")).toBe(0.25);
+  });
+
+  it("has no cost share for an unknown cost but keeps its token share", () => {
+    const unpriced = model("unpriced", 300, 0, {
+      unpricedRecords: 1,
+      unpricedTokens: 300,
+      tokenShare: 0.75,
+    });
+
+    expect(modelShare(unpriced, "cost")).toBeNull();
+    expect(modelShare(unpriced, "tokens")).toBe(0.75);
+  });
 });
 
 describe("model rates", () => {
