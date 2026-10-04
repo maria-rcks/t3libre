@@ -234,7 +234,8 @@ export const make = Effect.gen(function* PreviewManagerMake() {
 
   const open: PreviewManager["Service"]["open"] = Effect.fn("PreviewManager.open")(
     function* (input) {
-      const tabId = newPreviewTabId();
+      // Persisted client surfaces must not bind to a different tab after a server restart.
+      const tabId = `${newPreviewTabId()}${input.runtime === "server" ? `_${serverEpoch}` : ""}`;
       const updatedAt = yield* currentIsoTimestamp;
       // Clients with a configured default send the viewport up front so the
       // session is born at the right size; older clients omit it and keep the

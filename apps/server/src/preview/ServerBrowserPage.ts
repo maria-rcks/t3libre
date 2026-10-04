@@ -156,7 +156,7 @@ export const captureViewport = async (
  * the render scale, so this needs no image library on the server.
  */
 
-export const captureViewportPng = async (page: Page, cdp: CDPSession, renderScale: number) => {
+const captureViewportPng = async (page: Page, cdp: CDPSession, renderScale: number) => {
   const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
   const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * renderScale));
   const data = await captureViewport(page, cdp, { format: "png", scale });

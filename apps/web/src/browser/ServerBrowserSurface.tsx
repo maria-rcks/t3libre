@@ -136,7 +136,8 @@ export function ServerBrowserSurface(props: {
   const pendingMoveRef = useRef<MouseInput | null>(null);
   const pendingWheelRef = useRef<WheelInput | null>(null);
   const inputFrameRef = useRef<number | null>(null);
-  const mousePressedRef = useRef(false);
+  const mouseButtonsRef = useRef(0);
+  const mouseClicksRef = useRef({ left: 1, middle: 1, right: 1, none: 1 });
   const lastClickRef = useRef<{
     button: PreviewStreamMouseButton;
     time: number;
@@ -415,8 +416,10 @@ export function ServerBrowserSurface(props: {
     if (!point) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     flushInput();
-    mousePressedRef.current = true;
+    mouseButtonsRef.current = event.buttons & 7;
     const button = buttonOf(event.button);
+    const clickCount = countClick(button, event.clientX, event.clientY, event.timeStamp);
+    mouseClicksRef.current[button] = clickCount;
     send({
       type: "mouse",
       action: "down",
@@ -424,7 +427,7 @@ export function ServerBrowserSurface(props: {
       y: point.y,
       button,
       buttons: event.buttons,
-      clickCount: countClick(button, event.clientX, event.clientY, event.timeStamp),
+      clickCount,
       modifiers: previewStreamModifiers(event),
     });
   };
@@ -454,8 +457,41 @@ export function ServerBrowserSurface(props: {
       touch.lastY = event.clientY;
       return;
     }
-    const point = pagePoint(event.clientX, event.clientY, event.buttons !== 0);
+    const point = pagePoint(
+      event.clientX,
+      event.clientY,
+      mouseButtonsRef.current !== 0 || event.buttons !== 0,
+    );
     if (!point) return;
+    // Chorded presses and releases arrive as pointermove while another button is held.
+    const changed = mouseButtonsRef.current ^ (event.buttons & 7);
+    if (mouseButtonsRef.current !== 0 && changed !== 0) {
+      flushInput();
+      for (const bit of [1, 2, 4]) {
+        if (!(changed & bit)) continue;
+        const button = pressedButtonOf(bit);
+        const down = (event.buttons & bit) !== 0;
+        mouseButtonsRef.current ^= bit;
+        if (down) {
+          mouseClicksRef.current[button] = countClick(
+            button,
+            event.clientX,
+            event.clientY,
+            event.timeStamp,
+          );
+        }
+        send({
+          type: "mouse",
+          action: down ? "down" : "up",
+          x: point.x,
+          y: point.y,
+          button,
+          buttons: mouseButtonsRef.current,
+          clickCount: mouseClicksRef.current[button],
+          modifiers: previewStreamModifiers(event),
+        });
+      }
+    }
     pendingMoveRef.current = {
       type: "mouse",
       action: "move",
@@ -494,8 +530,8 @@ export function ServerBrowserSurface(props: {
       send({ type: "mouse", action: "up", ...at, button: "left", buttons: 0, clickCount });
       return;
     }
-    if (!mousePressedRef.current) return;
-    mousePressedRef.current = false;
+    if (mouseButtonsRef.current === 0) return;
+    mouseButtonsRef.current = event.buttons & 7;
     const point = pagePoint(event.clientX, event.clientY, true);
     if (!point) return;
     flushInput();
@@ -506,7 +542,7 @@ export function ServerBrowserSurface(props: {
       y: point.y,
       button: buttonOf(event.button),
       buttons: event.buttons,
-      clickCount: lastClickRef.current?.count ?? 1,
+      clickCount: mouseClicksRef.current[buttonOf(event.button)],
       modifiers: previewStreamModifiers(event),
     });
   };
@@ -517,22 +553,28 @@ export function ServerBrowserSurface(props: {
       probeRef.current = null;
       return;
     }
-    if (!mousePressedRef.current) return;
-    // A cancelled drag still has to release the page's pressed button.
-    mousePressedRef.current = false;
+    let buttons = mouseButtonsRef.current;
+    if (buttons === 0) return;
+    // A cancelled drag must release every button held in the page.
+    mouseButtonsRef.current = 0;
     const point = pagePoint(event.clientX, event.clientY, true);
     if (!point) return;
     flushInput();
-    send({
-      type: "mouse",
-      action: "up",
-      x: point.x,
-      y: point.y,
-      button: lastClickRef.current?.button ?? "left",
-      buttons: 0,
-      clickCount: lastClickRef.current?.count ?? 1,
-      modifiers: 0,
-    });
+    for (const bit of [1, 2, 4]) {
+      if (!(buttons & bit)) continue;
+      buttons &= ~bit;
+      const button = pressedButtonOf(bit);
+      send({
+        type: "mouse",
+        action: "up",
+        x: point.x,
+        y: point.y,
+        button,
+        buttons,
+        clickCount: mouseClicksRef.current[button],
+        modifiers: previewStreamModifiers(event),
+      });
+    }
   };
 
   const resetInput = (textarea: HTMLTextAreaElement) => {

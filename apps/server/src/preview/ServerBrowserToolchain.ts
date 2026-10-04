@@ -41,7 +41,7 @@ import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
 /** `@sparticuz/chromium` release; ships Chromium 153.0.8010.0. */
-export const SERVER_BROWSER_VERSION = "153.0.0";
+const SERVER_BROWSER_VERSION = "153.0.0";
 /** Bump when `FONTS` changes. */
 const FONTS_VERSION = "1";
 

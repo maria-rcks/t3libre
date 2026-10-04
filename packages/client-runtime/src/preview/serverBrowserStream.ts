@@ -71,7 +71,7 @@ export interface PreviewStreamProbe {
 }
 
 /** Close code for a tab that no longer exists. The client stops instead of retrying. */
-export const PREVIEW_STREAM_TAB_GONE_CODE = 4404;
+const PREVIEW_STREAM_TAB_GONE_CODE = 4404;
 
 /** CDP modifier bitmask: Alt 1, Ctrl 2, Meta 4, Shift 8. */
 export const previewStreamModifiers = (event: {
