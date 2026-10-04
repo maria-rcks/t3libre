@@ -603,7 +603,7 @@ export function start(configuration: PreviewStreamConfiguration) {
     resetInput();
   };
   const onCompositionEnd = (event: CompositionEvent) => {
-    const text = event.data.replaceAll(SENTINEL, "");
+    const text = event.data.startsWith(SENTINEL) ? event.data.slice(SENTINEL.length) : event.data;
     if (text) send({ type: "text", text });
     resetInput();
   };
