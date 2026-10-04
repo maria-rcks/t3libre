@@ -176,6 +176,72 @@ it.effect("returns a bounded public failure without serializing storage causes",
   ),
 );
 
+it.effect("returns schema-valid parameter failures through the production registration", () =>
+  Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const result = yield* server
+      .callTool({ name: "t3_thread_organize", arguments: { action: "invalid" } })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      _tag: "AiError",
+      reason: { _tag: "ToolParameterValidationError", toolName: "t3_thread_organize" },
+    });
+    expect(result.content).toEqual([
+      { type: "text", text: expect.stringContaining('"ToolParameterValidationError"') },
+    ]);
+    const definition = server.tools.find(({ tool }) => tool.name === "t3_thread_organize");
+    const validate = new AjvJsonSchemaValidator().getValidator(
+      definition!.tool.outputSchema! as JsonSchemaType,
+    );
+    expect(validate(result.structuredContent).valid).toBe(true);
+    for (const type of ["execution-denied", "execution-interrupted"]) {
+      expect(validate({ type, reason: "Tool execution stopped." }).valid).toBe(true);
+      expect(validate({ type, reason: 1 }).valid).toBe(false);
+    }
+  }).pipe(
+    Effect.provide(
+      McpHttpServer.ThreadToolkitRegistrationLive.pipe(
+        Layer.provideMerge(McpServer.McpServer.layer),
+        Layer.provide(NodeCrypto.layer),
+        Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
+      ),
+    ),
+  ),
+);
+
+it.effect("keeps unexpected handler defects private through the production registration", () =>
+  Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const result = yield* server
+      .callTool({ name: "t3_thread_organize", arguments: { action: "pin" } })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+    expect(result.content).toEqual([
+      { type: "text", text: "Tool execution failed due to an internal server error." },
+    ]);
+  }).pipe(
+    Effect.provide(
+      McpHttpServer.ThreadToolkitRegistrationLive.pipe(
+        Layer.provideMerge(McpServer.McpServer.layer),
+        Layer.provide(NodeCrypto.layer),
+        Layer.provide(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: () => Effect.die(new Error("private-storage-path")),
+          }),
+        ),
+      ),
+    ),
+  ),
+);
+
 it("keeps MCP preference output allowlisted and Unicode-bounded", () => {
   const settings = {
     ...DEFAULT_SERVER_SETTINGS,

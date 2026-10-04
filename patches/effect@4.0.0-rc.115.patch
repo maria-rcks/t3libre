@@ -44,7 +44,7 @@ index e8b9be4..9cffc5c 100644
      const outputJsonSchema = Tool.getJsonSchemaFromSchema(tool.successSchema);
 -    const outputSchema = outputJsonSchema.type === "object" ? yield* Schema.decodeUnknownEffect(ToolJsonSchema)(outputJsonSchema).pipe(Effect.orDie) : undefined;
 +    const outputSchema = outputJsonSchema.type === "object" ? yield* Schema.decodeUnknownEffect(ToolJsonSchema)(tool.failureMode === "return" ? {
-+      ...Tool.getJsonSchemaFromSchema(Schema.Union([tool.successSchema, tool.failureSchema])),
++      ...Tool.getJsonSchemaFromSchema(Schema.Union([tool.successSchema, Tool.failureResultSchema(tool)])),
 +      type: "object"
 +    } : outputJsonSchema).pipe(Effect.orDie) : undefined;
      const inputSchema = yield* Schema.decodeUnknownEffect(ToolJsonSchema)(Tool.getJsonSchema(tool)).pipe(Effect.orDie);
@@ -383,7 +383,7 @@ diff --git a/src/unstable/ai/McpServer.ts b/src/unstable/ai/McpServer.ts
 +      ? yield* Schema.decodeUnknownEffect(ToolJsonSchema)(
 +        tool.failureMode === "return"
 +          ? {
-+            ...Tool.getJsonSchemaFromSchema(Schema.Union([tool.successSchema, tool.failureSchema])),
++            ...Tool.getJsonSchemaFromSchema(Schema.Union([tool.successSchema, Tool.failureResultSchema(tool)])),
 +            type: "object"
 +          }
 +          : outputJsonSchema
