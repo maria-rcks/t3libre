@@ -94,7 +94,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
   const [focusedOption, setFocusedOption] = useState<{
     requestId: RuntimeRequestId;
     questionId: string;
-    optionValue: string;
+    optionIndex: number;
   } | null>(null);
   const questionCount = props.pendingUserInput.questions.length;
   // Message responses start a new run and remain available after the provider exits.
@@ -278,9 +278,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
           const previewOption =
             focusedOption?.requestId === props.pendingUserInput.requestId &&
             focusedOption.questionId === question.id
-              ? question.options.find(
-                  (option) => (option.value ?? option.label.trim()) === focusedOption.optionValue,
-                )
+              ? question.options[focusedOption.optionIndex]
               : undefined;
           return (
             <View key={question.id} className="gap-2 pt-1">
@@ -291,14 +289,14 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                 {question.question}
               </Text>
               <View className="gap-2">
-                {question.options.map((option) => {
+                {question.options.map((option, optionIndex) => {
                   const optionValue = option.value ?? option.label.trim();
                   const selected = isPendingUserInputOptionSelected(question, draft, optionValue);
                   const description =
                     option.description !== option.label ? option.description : undefined;
                   return (
                     <Pressable
-                      key={optionValue}
+                      key={`${optionValue}:${optionIndex}`}
                       accessibilityRole={question.multiSelect ? "checkbox" : "radio"}
                       accessibilityState={{ checked: selected, disabled: responseDisabled }}
                       disabled={responseDisabled}
@@ -310,7 +308,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                         setFocusedOption({
                           requestId: props.pendingUserInput.requestId,
                           questionId: question.id,
-                          optionValue,
+                          optionIndex,
                         });
                         props.onSelectOption(
                           props.pendingUserInput.requestId,

@@ -78,7 +78,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   } | null>(null);
   const [focusedOption, setFocusedOption] = useState<{
     questionId: string;
-    optionValue: string;
+    optionIndex: number;
   } | null>(null);
   // Collapsing hides everything but the header so a tall prompt stops covering
   // the thread the user is trying to read. Scoped to a single question: the card
@@ -128,8 +128,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }, []);
 
   const handleOptionSelection = useCallback(
-    (questionId: string, optionValue: string) => {
-      setFocusedOption({ questionId, optionValue });
+    (questionId: string, optionValue: string, optionIndex: number) => {
+      setFocusedOption({ questionId, optionIndex });
       if (activeQuestion?.multiSelect) {
         onToggleOption(questionId, optionValue);
         return;
@@ -172,7 +172,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       const option = activeQuestion.options[optionIndex];
       if (!option) return;
       event.preventDefault();
-      handleOptionSelection(activeQuestion.id, option.value ?? option.label);
+      handleOptionSelection(activeQuestion.id, option.value ?? option.label, optionIndex);
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -183,17 +183,18 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }
 
   const customAnswerActive = progress.customAnswer.trim().length > 0;
-  const previewOptionValue =
+  const selectedOptionValue = progress.selectedOptionValues.at(-1);
+  const previewOptionIndex =
     focusedOption?.questionId === activeQuestion.id
-      ? focusedOption.optionValue
+      ? focusedOption.optionIndex
       : customAnswerActive
-        ? undefined
-        : (progress.selectedOptionValues.at(-1) ??
-          activeQuestion.options[0]?.value ??
-          activeQuestion.options[0]?.label);
-  const previewOption = activeQuestion.options.find(
-    (option) => (option.value ?? option.label) === previewOptionValue,
-  );
+        ? -1
+        : selectedOptionValue === undefined
+          ? 0
+          : activeQuestion.options.findIndex(
+              (option) => (option.value ?? option.label) === selectedOptionValue,
+            );
+  const previewOption = activeQuestion.options[previewOptionIndex];
 
   return (
     <Collapsible
@@ -299,15 +300,17 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 );
                 return (
                   <button
-                    key={`${activeQuestion.id}:${optionValue}`}
+                    key={`${activeQuestion.id}:${optionValue}:${index}`}
                     type="button"
                     disabled={isResponding}
                     onMouseEnter={() =>
-                      setFocusedOption({ questionId: activeQuestion.id, optionValue })
+                      setFocusedOption({ questionId: activeQuestion.id, optionIndex: index })
                     }
-                    onFocus={() => setFocusedOption({ questionId: activeQuestion.id, optionValue })}
+                    onFocus={() =>
+                      setFocusedOption({ questionId: activeQuestion.id, optionIndex: index })
+                    }
                     onClick={() => {
-                      handleOptionSelection(activeQuestion.id, optionValue);
+                      handleOptionSelection(activeQuestion.id, optionValue, index);
                     }}
                     className={className}
                   >
@@ -325,7 +328,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   Preview · {previewOption.label}
                 </p>
                 <ChatMarkdown
-                  key={`${activeQuestion.id}:${previewOptionValue}`}
+                  key={`${activeQuestion.id}:${previewOptionIndex}`}
                   text={previewOption.preview}
                   cwd={undefined}
                   parseRawHtml={false}

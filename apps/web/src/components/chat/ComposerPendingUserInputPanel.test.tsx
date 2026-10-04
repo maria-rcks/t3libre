@@ -67,6 +67,7 @@ describe("ComposerPendingUserInputPanel", () => {
                 },
                 prompt.questions[0]!.options[1]!,
                 { label: "Empty preview", description: "No draft", preview: "  \n" },
+                { ...prompt.questions[0]!.options[0]!, preview: "**Second draft**" },
               ],
             },
             {
@@ -94,6 +95,18 @@ describe("ComposerPendingUserInputPanel", () => {
       await act(() => options[0]!.focus());
       expect(container.querySelector("section")?.textContent).toContain("Safe rollout");
       expect(onToggleOption).not.toHaveBeenCalled();
+      await act(() => options[3]!.focus());
+      expect(container.querySelector("section strong")?.textContent).toBe("Second draft");
+      await act(() => options[3]!.click());
+      expect(container.querySelector("section strong")?.textContent).toBe("Second draft");
+      expect(onToggleOption).toHaveBeenLastCalledWith("question-1", "Incremental");
+      await act(() => options[0]!.focus());
+      expect(container.querySelector("section strong")?.textContent).toBe("Safe rollout");
+      await act(() =>
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "4", bubbles: true })),
+      );
+      expect(container.querySelector("section strong")?.textContent).toBe("Second draft");
+      expect(onToggleOption).toHaveBeenLastCalledWith("question-1", "Incremental");
       await act(() => options[2]!.click());
       expect(container.querySelector("section")).toBeNull();
       expect(onToggleOption).toHaveBeenLastCalledWith("question-1", "Empty preview");
