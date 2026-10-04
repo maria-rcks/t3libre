@@ -218,8 +218,15 @@ describe("AssetAccess", () => {
             });
             const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
             const separator = suffix.indexOf("/");
-            const asset = yield* resolveAsset(suffix.slice(0, separator), suffix.slice(separator + 1));
-            expect(asset).toMatchObject({ kind: "file", path: canonicalFile, mimeType: "video/mp4" });
+            const asset = yield* resolveAsset(
+              suffix.slice(0, separator),
+              suffix.slice(separator + 1),
+            );
+            expect(asset).toMatchObject({
+              kind: "file",
+              path: canonicalFile,
+              mimeType: "video/mp4",
+            });
             if (asset?.kind !== "file") throw new Error("Expected a resolved home media file");
             const response = HttpServerResponse.toWeb(yield* assetFileResponse(asset));
             expect(yield* Effect.promise(() => response.text())).toBe("recording bytes");
