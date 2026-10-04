@@ -2679,6 +2679,7 @@ interface ActiveClaudeTurnContext {
     >;
   };
   readonly toolCalls: Map<string, ActiveClaudeToolCall>;
+  compaction: Extract<OrchestrationV2TurnItem, { type: "compaction" }> | null;
   readonly ignoredTaskIds: Set<string>;
   readonly announcedUsageLimits: Set<string>;
   authenticationFailureMessage: string | undefined;
@@ -4801,6 +4802,23 @@ export function makeClaudeAdapterV2(
           readonly result?: SDKResultMessage;
         }) {
           yield* reasoningDeltas.flushTurn(input.context.nativeTurnId);
+          if (input.context.compaction !== null) {
+            yield* emitProviderEvent({
+              type: "turn_item.updated",
+              driver: CLAUDE_PROVIDER,
+              turnItem: {
+                ...input.context.compaction,
+                status: input.status === "completed" ? "failed" : input.status,
+                title:
+                  input.status === "completed" || input.status === "failed"
+                    ? "Context compaction failed"
+                    : "Context compaction stopped",
+                completedAt: input.completedAt,
+                updatedAt: input.completedAt,
+              },
+            });
+            input.context.compaction = null;
+          }
           for (const toolCall of input.context.toolCalls.values()) {
             const artifacts = buildToolCallArtifacts({
               context: input.context,
@@ -5556,6 +5574,47 @@ export function makeClaudeAdapterV2(
             return;
           }
 
+          if (
+            message.type === "system" &&
+            message.subtype === "status" &&
+            message.status === "compacting"
+          ) {
+            if (context.compaction !== null) return;
+            const now = yield* DateTime.now;
+            const nativeItemId = message.uuid;
+            context.compaction = {
+              id: idAllocator.derive.turnItemFromProviderItem({
+                driver: CLAUDE_PROVIDER,
+                nativeItemId,
+              }),
+              threadId: context.input.threadId,
+              runId: context.input.runId,
+              nodeId: context.input.rootNodeId,
+              providerThreadId: context.input.providerThread.id,
+              providerTurnId: context.providerTurnId,
+              nativeItemRef: {
+                driver: CLAUDE_PROVIDER,
+                nativeId: nativeItemId,
+                strength: "strong",
+              },
+              parentItemId: null,
+              ordinal: yield* resolveItemOrdinal(context, nativeItemId),
+              type: "compaction",
+              driver: CLAUDE_PROVIDER,
+              status: "running",
+              title: "Compacting context",
+              startedAt: now,
+              completedAt: null,
+              updatedAt: now,
+            };
+            yield* emitProviderEvent({
+              type: "turn_item.updated",
+              driver: CLAUDE_PROVIDER,
+              turnItem: context.compaction,
+            });
+            return;
+          }
+
           // Subagent narration belongs to its child thread, never the parent log.
           if (message.type === "stream_event" && !message.parent_tool_use_id) {
             const event = message.event;
@@ -5642,7 +5701,7 @@ export function makeClaudeAdapterV2(
 
           if (message.type === "system" && message.subtype === "compact_boundary") {
             const now = yield* DateTime.now;
-            const nativeItemId = message.uuid;
+            const nativeItemId = context.compaction?.nativeItemRef?.nativeId ?? message.uuid;
             const postTokens = message.compact_metadata.post_tokens;
             const afterTokenCount =
               typeof postTokens === "number" && Number.isFinite(postTokens) && postTokens > 0
@@ -5699,7 +5758,7 @@ export function makeClaudeAdapterV2(
                 driver: CLAUDE_PROVIDER,
                 status: "completed",
                 title: "Context compacted",
-                startedAt: now,
+                startedAt: context.compaction?.startedAt ?? now,
                 completedAt: now,
                 updatedAt: now,
                 ...(message.compact_metadata.pre_tokens === undefined
@@ -5708,6 +5767,7 @@ export function makeClaudeAdapterV2(
                 ...(afterTokenCount === undefined ? {} : { afterTokenCount }),
               },
             });
+            context.compaction = null;
             return;
           }
 
@@ -7147,6 +7207,7 @@ export function makeClaudeAdapterV2(
                 blocks: new Map(),
               },
               toolCalls: new Map(),
+              compaction: null,
               ignoredTaskIds: new Set(),
               announcedUsageLimits: new Set(),
               authenticationFailureMessage: undefined,
