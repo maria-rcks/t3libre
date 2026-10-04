@@ -62,17 +62,19 @@ export const resolveServerInstallation = Effect.gen(function* () {
   const executablePath = yield* HostProcessExecutablePath;
   const platform = yield* HostProcessPlatform;
   const entry = yield* fs.realPath(executable ? executablePath : (args[1] ?? ""));
-  const runner = detectCliRunner(entry);
-  if (runner !== null) {
-    return { kind: runner === "pnpm dlx" ? "pnpm-dlx" : runner } satisfies ServerInstallation;
-  }
-  // Windows shims and other package managers need their own ownership proof.
-  if (platform === "win32") return null;
   const match =
     /^(.*)\/lib\/node_modules\/t3\/(?:dist\/bin\.mjs|bin\/t3\.js|node_modules\/@t3code\/t3-[^/]+\/t3)$/.exec(
       entry,
     );
-  if (!match) return null;
+  if (!match) {
+    const runner = detectCliRunner(entry);
+    return runner === null
+      ? null
+      : ({ kind: runner === "pnpm dlx" ? "pnpm-dlx" : runner } satisfies ServerInstallation);
+  }
+  // A global prefix can contain runner-like names; prove its ownership first.
+  // Windows shims and other package managers need their own ownership proof.
+  if (platform === "win32") return null;
   const prefix = match[1] || "/";
   if (
     prefix.includes("/node_modules/") ||
