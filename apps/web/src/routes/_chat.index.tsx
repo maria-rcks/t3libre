@@ -162,7 +162,9 @@ function DraftStartError({
           <EmptyDescription>
             {projectMissing
               ? "This checkout is no longer registered. Choose another checkout from New thread in..."
-              : "The project is still available. Try opening the draft again."}
+              : disabled
+                ? "Waiting for this checkout to become available."
+                : "Try opening the draft again when its environment is connected."}
           </EmptyDescription>
           <div className="mt-5 flex justify-center">
             <Button size="sm" onClick={onRetry} disabled={disabled}>
