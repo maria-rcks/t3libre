@@ -91,7 +91,7 @@ const targetLocator = (
 ): Locator | null => {
   const selector = input.locator ?? input.selector;
   if (selector === undefined) return null;
-  if (selector.includes("aria-ref=")) {
+  if (selector.startsWith("aria-ref=")) {
     const ref = /^aria-ref=(.+)$/.exec(selector)?.[1];
     const nativeRef = ref === undefined ? undefined : pageRefs.get(page)?.refs.get(ref);
     if (nativeRef === undefined) {

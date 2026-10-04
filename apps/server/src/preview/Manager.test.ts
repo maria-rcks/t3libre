@@ -118,6 +118,7 @@ it.layer(layer)("PreviewManager", (it) => {
       yield* manager.reportStatus({
         threadId,
         tabId: opened.tabId,
+        serverControlled: true,
         navStatus: { _tag: "Success", url: "http://localhost:5173/", title: "Dev" },
         canGoBack: false,
         canGoForward: false,
@@ -309,6 +310,46 @@ it.layer(layer)("PreviewManager", (it) => {
       );
       expect(error._tag).toBe("PreviewSessionLookupError");
     }),
+  );
+
+  it.effect(
+    "rejects client status reports for server tabs without changing state or emitting events",
+    () =>
+      Effect.gen(function* () {
+        const threadId = freshThreadId();
+        const manager = yield* PreviewManager.PreviewManager;
+        const opened = yield* manager.open({ threadId, runtime: "server", reveal: false });
+        const collector = yield* collectEvents;
+        const before = yield* manager.list({ threadId });
+        const input = {
+          threadId,
+          tabId: opened.tabId,
+          navStatus: {
+            _tag: "Success" as const,
+            url: "http://localhost:5173/changed",
+            title: "Changed",
+          },
+          canGoBack: true,
+          canGoForward: true,
+        };
+        const rejected = yield* manager.reportStatus(input).pipe(Effect.flip);
+        expect(rejected._tag).toBe("PreviewControlRequiredError");
+        expect(yield* manager.list({ threadId })).toEqual(before);
+        expect(yield* collector.drain).toEqual([]);
+
+        yield* manager.reportStatus({ ...input, serverControlled: true });
+        expect((yield* manager.list({ threadId })).sessions[0]).toMatchObject({
+          navStatus: input.navStatus,
+          canGoBack: true,
+          canGoForward: true,
+        });
+        const events = yield* collector.drain;
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({
+          type: "navigated",
+          snapshot: { navStatus: input.navStatus },
+        });
+      }),
   );
 
   it.effect("reportStatus emits failed for LoadFailed nav", () =>

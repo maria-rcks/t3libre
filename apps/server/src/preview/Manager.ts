@@ -52,7 +52,9 @@ export class PreviewManager extends Context.Service<
     readonly navigate: (
       input: PreviewNavigateInput,
     ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
-    readonly reportStatus: (input: PreviewReportStatusInput) => Effect.Effect<void, PreviewError>;
+    readonly reportStatus: (
+      input: PreviewReportStatusInput & { readonly serverControlled?: boolean },
+    ) => Effect.Effect<void, PreviewError>;
     readonly requestReveal: (
       input: PreviewCloseInput & { readonly tabId: string; readonly force: boolean },
     ) => Effect.Effect<void, PreviewError>;
@@ -284,6 +286,8 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       input.threadId,
       input.tabId,
       Effect.fn("PreviewManager.reportSessionStatus")(function* (session) {
+        if (session.snapshot.runtime === "server" && !input.serverControlled)
+          return yield* new PreviewControlRequiredError({ tabId: input.tabId });
         const updatedAt = yield* currentIsoTimestamp;
         const snapshot: PreviewSessionSnapshot = {
           ...session.snapshot,

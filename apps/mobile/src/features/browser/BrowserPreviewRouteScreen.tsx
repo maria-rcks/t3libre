@@ -83,7 +83,10 @@ function BrowserPreviewScreen({
   const tab = tabs.find((entry) => entry.tabId === selectedTabId) ?? latestBrowserTab(tabs);
   const tabId = tab?.tabId ?? null;
   // Pin the fallback so another tab's activity does not switch the view.
-  if (tabId !== null && tabId !== selectedTabId) setSelectedTabId(tabId);
+  if (tabId !== null && tabId !== selectedTabId) {
+    setPictureInPicture(NO_PICTURE_IN_PICTURE);
+    setSelectedTabId(tabId);
+  }
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) =>
       setForeground(state !== "background"),

@@ -326,6 +326,7 @@ const make = Effect.gen(function* () {
             .reportStatus({
               threadId: tab.threadId,
               tabId: tab.tabId,
+              serverControlled: true,
               navStatus,
               canGoBack: index > 0,
               canGoForward: index < count - 1,

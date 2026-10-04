@@ -147,4 +147,12 @@ describe("server browser element refs", () => {
       /stale/,
     );
   });
+
+  it("preserves CSS selectors containing an aria-ref attribute", async () => {
+    await page.setContent(
+      '<button aria-ref="save" onclick="this.textContent=\'saved\'">save</button>',
+    );
+    await ServerBrowserPage.click(page, { selector: 'button[aria-ref="save"]' });
+    expect(await page.locator("button").textContent()).toBe("saved");
+  });
 });
