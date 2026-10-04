@@ -989,8 +989,10 @@ export function makePiAdapterV2(
           const fileName = recordString(args, "path") ?? recordString(args, "file_path");
           if (fileName !== undefined) {
             // edit reports a unified patch in its result details; write only
-            // carries the new content in its args.
-            const diffStr = recordString(recordField(resultRecord, "details"), "patch");
+            // carries the new content in its args. A failed call keeps its error.
+            const diffStr =
+              recordString(recordField(resultRecord, "details"), "patch") ??
+              (isError && outputText.trim().length > 0 ? outputText : undefined);
             const newStr = toolName === "write" ? recordString(args, "content") : undefined;
             yield* emit({
               type: "turn_item.updated",

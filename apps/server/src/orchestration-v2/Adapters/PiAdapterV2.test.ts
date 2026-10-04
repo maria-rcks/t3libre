@@ -1222,6 +1222,32 @@ describe("PiAdapterV2", () => {
           write.turnItem.fileName === "b.ts" &&
           write.turnItem.newStr === "export {};\n",
       );
+
+      // A failed edit has no patch, so it keeps the error to show when expanded.
+      yield* fake.emit({
+        type: "tool_execution_start",
+        toolCallId: "call_edit_failed",
+        toolName: "edit",
+        args: { path: "c.ts", edits: [{ oldText: "missing", newText: "new" }] },
+      });
+      yield* fake.emit({
+        type: "tool_execution_end",
+        toolCallId: "call_edit_failed",
+        toolName: "edit",
+        isError: true,
+        result: { content: [{ type: "text", text: "Could not find the text in c.ts." }] },
+      });
+      const failedEdit = yield* takeEvent(
+        (event) =>
+          event.type === "turn_item.updated" &&
+          event.turnItem.type === "file_change" &&
+          event.turnItem.status === "failed",
+      );
+      assert.isTrue(
+        failedEdit.type === "turn_item.updated" &&
+          failedEdit.turnItem.type === "file_change" &&
+          failedEdit.turnItem.diffStr === "Could not find the text in c.ts.",
+      );
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
