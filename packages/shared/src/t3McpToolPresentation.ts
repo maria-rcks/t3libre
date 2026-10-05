@@ -180,6 +180,26 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "browser",
   ),
   preview_type: tool(["Type", "Typing", "Typed", "in the preview browser"], "browser", "browser"),
+  preview_hover: tool(
+    ["Hover", "Hovering", "Hovered", "in the preview browser"],
+    "browser",
+    "browser",
+  ),
+  preview_select: tool(
+    ["Choose", "Choosing", "Chose", "an option in the preview browser"],
+    "browser",
+    "browser",
+  ),
+  preview_drag: tool(
+    ["Drag", "Dragging", "Dragged", "in the preview browser"],
+    "browser",
+    "browser",
+  ),
+  preview_upload: tool(
+    ["Upload", "Uploading", "Uploaded", "files to the preview browser"],
+    "browser",
+    "browser",
+  ),
   preview_scroll: tool(
     ["Scroll", "Scrolling", "Scrolled", "the preview browser"],
     "browser",
