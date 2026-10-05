@@ -1274,11 +1274,19 @@ const make = Effect.gen(function* () {
     (tab: ServerTab): ServerBrowserPage.PointerReporter =>
     async ({ x, y }, phase) => {
       const encoder = tab.recording?.encoder;
-      if (tab.viewers.size === 0 && !encoder) return;
+      // A desktop-rendered tab is always on screen in the desktop app.
+      if (tab.viewers.size === 0 && !encoder && !tab.desktop) return;
       const show = (next: "move" | "click") => {
         const sequence = ++pointerSequence;
         for (const viewer of tab.viewers)
           viewer.push({ _tag: "pointer", phase: next, x, y, sequence });
+        if (tab.desktop)
+          runFork(
+            desktopChannel.pointer(
+              { threadId: tab.threadId, tabId: tab.tabId },
+              { phase: next, x, y },
+            ),
+          );
         void encoder
           ?.evaluate(
             ([px, py, click]) =>

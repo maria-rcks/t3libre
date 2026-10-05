@@ -50,6 +50,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
 import * as SynchronizedRef from "effect/SynchronizedRef";
@@ -69,6 +70,7 @@ import {
   RECORDING_CURSOR_CHANNEL,
   RECORDING_INPUT_CHANNEL,
   RECORDING_CONTROLLER_CHANNEL,
+  RECORDING_POINTER_CHANNEL,
   START_PICK_CHANNEL,
 } from "./GuestProtocol.ts";
 import { isPreviewAnnotationPayload } from "./PickedElementPayload.ts";
@@ -2314,6 +2316,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         return;
       }
       if (afterAttach.serverTab) {
+        yield* listenForAgentPointers;
         browserHost.attach(afterAttach.serverTab, { webContents: wc, debugger: control.debugger });
       }
       if (afterAttach.colorScheme !== "system") {
@@ -3201,6 +3204,58 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             "image/png": new Blob([Uint8Array.from(image.toPNG())], { type: "image/png" }),
           }),
         ]),
+    );
+  });
+
+  let pointerSequence = 0;
+  /**
+   * The server reports where an agent action is about to land on a tab it
+   * drives here. The live cursor and desktop recordings draw it like any agent.
+   */
+  const emitAgentPointer = Effect.fn("PreviewManager.emitAgentPointer")(function* (pointer: {
+    readonly key: { readonly threadId: string; readonly tabId: string };
+    readonly phase: "move" | "click";
+    readonly x: number;
+    readonly y: number;
+  }) {
+    const tab = [...(yield* SynchronizedRef.get(tabsRef)).values()].find(
+      (candidate) =>
+        candidate.serverTab?.threadId === pointer.key.threadId &&
+        candidate.serverTab.tabId === pointer.key.tabId,
+    );
+    if (!tab) return;
+    const event: DesktopPreviewPointerEvent = {
+      tabId: tab.tabId,
+      phase: pointer.phase,
+      x: pointer.x,
+      y: pointer.y,
+      sequence: ++pointerSequence,
+      createdAt: yield* currentIso,
+    };
+    const recording = (yield* SynchronizedRef.get(frameCaptureSessionsRef)).get(tab.tabId);
+    const webContentsId = tab.webContentsId;
+    if (recording?.consumers.has("recording") && webContentsId != null) {
+      yield* attempt({ operation: "recording.pointer", tabId: tab.tabId }, () => {
+        const contents = webContents.fromId(webContentsId);
+        if (contents && !contents.isDestroyed()) contents.send(RECORDING_POINTER_CHANNEL, event);
+      }).pipe(Effect.ignore);
+    }
+    const listeners = yield* Ref.get(pointerEventListenersRef);
+    yield* Effect.forEach(
+      listeners,
+      (listener) => deliverEvent("pointer-event", tab.tabId, () => listener(event)),
+      { discard: true },
+    );
+  });
+  // Listening starts with the first tab of the desktop's own server.
+  let pointersStarted = false;
+  const listenForAgentPointers = Effect.suspend(() => {
+    if (pointersStarted) return Effect.void;
+    pointersStarted = true;
+    return browserHost.pointers.pipe(
+      Stream.runForEach(emitAgentPointer),
+      Effect.forkIn(parentScope),
+      Effect.asVoid,
     );
   });
 

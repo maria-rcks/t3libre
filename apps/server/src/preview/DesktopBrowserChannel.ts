@@ -60,6 +60,11 @@ export class DesktopBrowserChannel extends Context.Service<
      * releases the tab on the desktop and stops the endpoint.
      */
     readonly endpoint: (key: DesktopTabKey) => Effect.Effect<string, never, Scope.Scope>;
+    /** Draws the agent's cursor over a tab the desktop renders. */
+    readonly pointer: (
+      key: DesktopTabKey,
+      pointer: { readonly phase: "move" | "click"; readonly x: number; readonly y: number },
+    ) => Effect.Effect<void>;
   }
 >()("t3/preview/DesktopBrowserChannel") {}
 
@@ -80,6 +85,7 @@ export const make = Effect.gen(function* () {
       detached: Stream.empty,
       isAttached: () => Effect.succeed(false),
       endpoint: () => Effect.die("No desktop app is attached to this server."),
+      pointer: () => Effect.void,
     });
   }
 
@@ -207,6 +213,7 @@ export const make = Effect.gen(function* () {
     ),
     isAttached: (key) => Effect.sync(() => attachedTabs.has(keyOf(key))),
     endpoint,
+    pointer: (key, pointer) => command({ type: "pointer", ...key, ...pointer }),
   });
 });
 
@@ -221,5 +228,6 @@ export const layerNone = Layer.succeed(
     detached: Stream.empty,
     isAttached: () => Effect.succeed(false),
     endpoint: () => Effect.die("No desktop app is attached to this server."),
+    pointer: () => Effect.void,
   }),
 );

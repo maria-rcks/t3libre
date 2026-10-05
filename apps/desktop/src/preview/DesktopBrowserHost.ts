@@ -65,11 +65,24 @@ export class DesktopBrowserHost extends Context.Service<
     readonly detach: (key: DesktopBrowserTabKey) => void;
     /** Re-announces attached tabs to a backend that just started. */
     readonly announceAll: Effect.Effect<void>;
+    /** The agent's cursor positions for attached tabs, keyed by their server tab. */
+    readonly pointers: Stream.Stream<{
+      readonly key: DesktopBrowserTabKey;
+      readonly phase: "move" | "click";
+      readonly x: number;
+      readonly y: number;
+    }>;
   }
 >()("@t3tools/desktop/preview/DesktopBrowserHost") {}
 
 export const make = Effect.gen(function* () {
   const outbox = yield* PubSub.unbounded<DesktopBrowserEventType>();
+  const pointers = yield* PubSub.sliding<{
+    readonly key: DesktopBrowserTabKey;
+    readonly phase: "move" | "click";
+    readonly x: number;
+    readonly y: number;
+  }>(16);
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const tabs = new Map<string, AttachedTab>();
   const emit = (event: DesktopBrowserEventType) => runFork(PubSub.publish(outbox, event));
@@ -126,6 +139,11 @@ export const make = Effect.gen(function* () {
       if (Option.isNone(command)) return;
       const tab = tabs.get(keyOf(command.value));
       if (!tab) return;
+      if (command.value.type === "pointer") {
+        const { threadId, tabId, phase, x, y } = command.value;
+        runFork(PubSub.publish(pointers, { key: { threadId, tabId }, phase, x, y }));
+        return;
+      }
       if (command.value.type === "release") {
         // A new server connection starts with a fresh relay and fresh sessions.
         tab.relay = null;
@@ -135,6 +153,7 @@ export const make = Effect.gen(function* () {
     });
 
   return DesktopBrowserHost.of({
+    pointers: Stream.fromPubSub(pointers),
     events: Stream.fromPubSub(outbox).pipe(
       Stream.map((event) => lineEncoder.encode(`${encodeEvent(event)}\n`)),
     ),
