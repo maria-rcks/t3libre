@@ -642,7 +642,9 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
           const publishEnrichment = (
             Option.isSome(runtimeCoordinator)
               ? runtimeCoordinator.value.runBackgroundProbe(
-                  effectiveConfig.source === "local" ? instanceId : effectiveConfig.agentId,
+                  effectiveConfig.source === "local"
+                    ? `local:${instanceId}`
+                    : effectiveConfig.agentId,
                   enrichProviderCached(snapshot),
                 )
               : enrichProviderCached(snapshot).pipe(Effect.map(Option.some))

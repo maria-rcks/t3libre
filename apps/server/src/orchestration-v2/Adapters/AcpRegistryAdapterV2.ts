@@ -184,7 +184,8 @@ function makeAcpRegistryRuntime(options: AcpRegistryAdapterV2Options) {
 export function makeAcpRegistryAdapterV2(options: AcpRegistryAdapterV2Options) {
   const runtimeCoordinator = options.runtimeCoordinator;
   const registryAgentId = options.settings.source === "local" ? "" : options.settings.agentId;
-  const startupKey = options.settings.source === "local" ? options.instanceId : registryAgentId;
+  const startupKey =
+    options.settings.source === "local" ? `local:${options.instanceId}` : registryAgentId;
   const isDevin = registryAgentId === "devin";
   const flavor: AcpAdapterV2Flavor = {
     driver: ACP_REGISTRY_PROVIDER,

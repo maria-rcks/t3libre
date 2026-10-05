@@ -46,7 +46,7 @@ export const makeAcpRegistryAuth = Effect.fn("makeAcpRegistryAuth")(function* (o
     AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator,
   );
   const agentKey =
-    options.settings.source === "local" ? options.instanceId : options.settings.agentId;
+    options.settings.source === "local" ? `local:${options.instanceId}` : options.settings.agentId;
   const failure = (operation: string, detail: string, cause?: unknown) =>
     new ProviderSetupError({ instanceId: options.instanceId, operation, detail, cause });
   const resolve = catalog
