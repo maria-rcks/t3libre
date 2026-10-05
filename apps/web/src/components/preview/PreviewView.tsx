@@ -794,7 +794,7 @@ export function PreviewView({
           ) : null
         }
         trailingActions={
-          previewBridge && !isServerTab ? (
+          isServerTab || previewBridge ? (
             <PreviewMoreMenu
               environmentId={threadRef.environmentId}
               profileId={activeProfileId}
@@ -807,6 +807,15 @@ export function PreviewView({
               onToggleDeviceToolbar={handleToggleDeviceToolbar}
               nativePictureInPicture={desktopOverlay?.pictureInPicture ?? false}
               onNativePictureInPicture={handleNativePictureInPicture}
+              {...(isServerTab
+                ? {
+                    server: {
+                      disabledReason: serverInputDisabled
+                        ? "Take control to change the viewport"
+                        : null,
+                    },
+                  }
+                : {})}
             />
           ) : null
         }

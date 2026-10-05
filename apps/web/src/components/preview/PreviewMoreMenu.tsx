@@ -63,12 +63,32 @@ interface Props {
   profileId: string;
   /** Profile display name, shown so the menu says which data is being cleared. */
   profileName: string | undefined;
+  /**
+   * Set for tabs in the environment's own browser. Only the viewport toggle
+   * applies there; it is disabled (with this reason) until the viewer has control.
+   */
+  server?: { readonly disabledReason: string | null };
 }
 
+const MenuTriggerButton = () => (
+  <Tooltip>
+    <TooltipTrigger
+      render={
+        <MenuTrigger
+          render={<Button variant="ghost" size="icon-xs" type="button" aria-label="Preview menu" />}
+        />
+      }
+    >
+      <MoreVertical />
+    </TooltipTrigger>
+    <TooltipPopup>More</TooltipPopup>
+  </Tooltip>
+);
+
 /**
- * Three-dot menu in the chrome row. Wires Hard reload, DevTools, zoom
- * controls, and storage-clearing actions. Only mounted by `PreviewView`
- * when the desktop bridge is present, so we can call it unconditionally.
+ * Three-dot menu in the chrome row. Desktop tabs get Hard reload, DevTools,
+ * zoom controls, and storage-clearing actions through the desktop bridge;
+ * server tabs only get the viewport toggle, so a fixed size can return to fill.
  */
 export function PreviewMoreMenu({
   tabId,
@@ -82,7 +102,24 @@ export function PreviewMoreMenu({
   environmentId,
   profileId,
   profileName,
+  server,
 }: Props) {
+  if (server) {
+    return (
+      <Menu>
+        <MenuTriggerButton />
+        <MenuPopup align="end" sideOffset={6}>
+          <MenuItem
+            onClick={onToggleDeviceToolbar}
+            disabled={!tabId || server.disabledReason !== null}
+          >
+            {deviceToolbarVisible ? "Fit viewport to panel" : "Use responsive viewport"}
+          </MenuItem>
+          {server.disabledReason ? <MenuItem disabled>{server.disabledReason}</MenuItem> : null}
+        </MenuPopup>
+      </Menu>
+    );
+  }
   if (!previewBridge) return null;
   const bridge = previewBridge;
   const tabDisabled = !tabId || !hasWebContents;
@@ -94,20 +131,7 @@ export function PreviewMoreMenu({
   const zoomLabel = `${Math.round(zoomFactor * 100)}%`;
   return (
     <Menu>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <MenuTrigger
-              render={
-                <Button variant="ghost" size="icon-xs" type="button" aria-label="Preview menu" />
-              }
-            />
-          }
-        >
-          <MoreVertical />
-        </TooltipTrigger>
-        <TooltipPopup>More</TooltipPopup>
-      </Tooltip>
+      <MenuTriggerButton />
       <MenuPopup align="end" sideOffset={6}>
         <MenuItem onClick={callTab(bridge.hardReload)} disabled={tabDisabled}>
           Hard reload

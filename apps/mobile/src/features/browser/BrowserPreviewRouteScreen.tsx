@@ -1,6 +1,11 @@
 import { useIsFocused, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { EnvironmentId, ThreadId, type PreviewSessionSnapshot } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  FILL_PREVIEW_VIEWPORT,
+  ThreadId,
+  type PreviewSessionSnapshot,
+} from "@t3tools/contracts";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, AppState, Platform, TextInput, View } from "react-native";
@@ -253,6 +258,15 @@ function BrowserAddressBar({
         disabled={!ready}
         onPress={() => onCommand({ type: "reload" })}
       />
+      {/* An agent or another viewer can fix the size; this returns the page to the screen. */}
+      {tab.viewport && tab.viewport._tag !== "fill" ? (
+        <ControlPill
+          icon="arrow.up.left.and.arrow.down.right"
+          accessibilityLabel="Fit page to screen"
+          disabled={!ready}
+          onPress={() => onCommand({ type: "viewport", setting: FILL_PREVIEW_VIEWPORT })}
+        />
+      ) : null}
     </View>
   );
 }
