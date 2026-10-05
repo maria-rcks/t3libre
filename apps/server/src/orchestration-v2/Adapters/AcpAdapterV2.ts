@@ -1157,6 +1157,18 @@ function elicitationOptions(
   });
 }
 
+/** Validate integrality before floating-point rounding can erase fractional digits. */
+function elicitationIntegerTextIsExact(value: string): boolean {
+  const [mantissa = "", exponent = "0"] = value.trim().split(/[eE]/);
+  const fractionLength = mantissa.split(".")[1]?.length ?? 0;
+  const digits = mantissa.replace(/[-.]/g, "");
+  const significantDigits = digits.replace(/0+$/, "");
+  return (
+    significantDigits.length === 0 ||
+    Number(exponent) >= fractionLength - (digits.length - significantDigits.length)
+  );
+}
+
 function elicitationContent(
   answers: ProviderUserInputAnswers,
   properties: Record<string, unknown>,
@@ -1219,7 +1231,9 @@ function elicitationContent(
               : Number.NaN;
         if (
           !Number.isFinite(number) ||
-          (record.type === "integer" && !Number.isSafeInteger(number)) ||
+          (record.type === "integer" &&
+            (!Number.isSafeInteger(number) ||
+              (typeof value === "string" && !elicitationIntegerTextIsExact(value)))) ||
           (typeof record.minimum === "number" && number < record.minimum) ||
           (typeof record.maximum === "number" && number > record.maximum)
         )

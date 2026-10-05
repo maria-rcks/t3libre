@@ -2127,7 +2127,8 @@ const makeWsRpcLayer = (
                       ) {
                         return false;
                       }
-                      return (instance.config as Record<string, unknown>).agentId === input.agentId;
+                      const config = instance.config as Record<string, unknown>;
+                      return config.source !== "local" && config.agentId === input.agentId;
                     }),
                   ),
                 ),

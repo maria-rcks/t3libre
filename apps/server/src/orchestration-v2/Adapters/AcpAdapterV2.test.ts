@@ -3922,6 +3922,40 @@ describe("AcpAdapterV2", () => {
     { name: "numbers outside the bounds", overrides: { ratio: "11" }, accept: false },
     { name: "fractional integers", overrides: { count: "1.5" }, accept: false },
     {
+      name: "fractions rounded to integers",
+      overrides: { count: "1.0000000000000001" },
+      accept: false,
+    },
+    {
+      name: "fractions rounded at the safe integer boundary",
+      overrides: { count: "9007199254740991.1" },
+      unboundedInteger: true,
+      accept: false,
+    },
+    {
+      name: "nonzero integers underflowed to zero",
+      overrides: { count: "1e-400" },
+      unboundedInteger: true,
+      accept: false,
+    },
+    {
+      name: "exact decimal integers",
+      overrides: { count: "3.000" },
+      accept: true,
+    },
+    {
+      name: "exact exponent integers",
+      overrides: { count: "300e-2" },
+      accept: true,
+    },
+    {
+      name: "zero with a negative exponent",
+      overrides: { count: "0e-400" },
+      unboundedInteger: true,
+      expectedCount: 0,
+      accept: true,
+    },
+    {
       name: "unsafe positive integers",
       overrides: { count: "9007199254740993" },
       unboundedInteger: true,
