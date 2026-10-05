@@ -4176,7 +4176,15 @@ describe("PreviewManager", () => {
             }
             if (method === "Input.dispatchMouseEvent" && params?.type === "mousePressed") {
               activity.push("mousePressed");
-              humanInput?.({}, { kind: "pointer", x: params.x, y: params.y, button: 0 });
+              humanInput?.(
+                {},
+                {
+                  kind: "pointer",
+                  x: params.x,
+                  y: params.y,
+                  button: { left: 0, middle: 1, right: 2 }[params.button as "left"],
+                },
+              );
             }
             return undefined;
           });
@@ -4221,6 +4229,12 @@ describe("PreviewManager", () => {
               activity.push(event.phase);
             }),
           );
+          const controllers: string[] = [];
+          yield* manager.subscribeStateChanges((_tabId, state) =>
+            Effect.sync(() => {
+              controllers.push(state.controller);
+            }),
+          );
           yield* manager.createTab("tab_1");
           yield* manager.registerWebview("tab_1", 42);
           yield* manager.startRecording("tab_1");
@@ -4259,6 +4273,25 @@ describe("PreviewManager", () => {
             button: "left",
             clickCount: 1,
           });
+
+          // A right double-click is the agent's own input, so it keeps control of the tab.
+          sendCommand.mockClear();
+          const doubleClick = yield* manager
+            .automationClick("tab_1", { x: 120, y: 80, button: "right", clickCount: 2 })
+            .pipe(Effect.forkChild({ startImmediately: true }));
+          yield* TestClock.adjust(200);
+          yield* Fiber.join(doubleClick);
+          expect(
+            sendCommand.mock.calls
+              .filter(([method]) => method === "Input.dispatchMouseEvent")
+              .map(([, params]) => [params?.type, params?.button, params?.clickCount]),
+          ).toEqual([
+            ["mousePressed", "right", 1],
+            ["mouseReleased", "right", 1],
+            ["mousePressed", "right", 2],
+            ["mouseReleased", "right", 2],
+          ]);
+          expect(controllers).not.toContain("human");
         }),
       ),
   );

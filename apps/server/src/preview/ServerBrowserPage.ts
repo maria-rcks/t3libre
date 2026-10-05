@@ -4,10 +4,14 @@ import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type PreviewAutomationClickInput,
   type PreviewAutomationConsoleEntry,
+  type PreviewAutomationDragInput,
   type PreviewAutomationEvaluateInput,
+  type PreviewAutomationHoverInput,
   type PreviewAutomationNetworkEntry,
   type PreviewAutomationPressInput,
   type PreviewAutomationScrollInput,
+  type PreviewAutomationSelectInput,
+  type PreviewAutomationSelectResult,
   type PreviewAutomationSnapshot,
   type PreviewAutomationTypeInput,
   type PreviewAutomationUploadInput,
@@ -216,8 +220,11 @@ export const click = async (
     const box = await locator.boundingBox({ timeout });
     if (box) point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   }
+  const options = { button: input.button ?? "left", clickCount: input.clickCount ?? 1 } as const;
   const clicked =
-    locator === null ? page.mouse.click(point.x, point.y) : locator.click({ timeout });
+    locator === null
+      ? page.mouse.click(point.x, point.y, options)
+      : locator.click({ ...options, timeout });
   let onDialog = constVoid;
   const dialogOpened = new Promise<"dialog">((resolve) => {
     onDialog = () => resolve("dialog");
@@ -291,6 +298,58 @@ export const type = async (page: Page, input: PreviewAutomationTypeInput) => {
     await page.keyboard.press("Delete");
   }
   await page.keyboard.insertText(input.text);
+};
+
+/** Hovering by locator moves the real mouse, so CSS :hover and pointer events both apply. */
+export const hover = async (page: Page, input: PreviewAutomationHoverInput) => {
+  const locator = targetLocator(page, input);
+  if (locator === null) {
+    await page.mouse.move(input.x ?? 0, input.y ?? 0);
+    return;
+  }
+  await locator.hover({ timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+};
+
+export const select = async (
+  page: Page,
+  input: PreviewAutomationSelectInput,
+): Promise<PreviewAutomationSelectResult> => {
+  const locator = targetLocator(page, input)!;
+  const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  // Each entry matches an option by value first, then by its visible label.
+  const options = await locator.evaluate(
+    (element) =>
+      element.tagName === "SELECT"
+        ? Array.from(
+            (element as unknown as { options: ArrayLike<{ value: string; label: string }> })
+              .options,
+            ({ value, label }) => ({ value, label: label.trim() }),
+          )
+        : null,
+    undefined,
+    { timeout },
+  );
+  const values =
+    options &&
+    input.values.map(
+      (entry) =>
+        (
+          options.find((option) => option.value === entry) ??
+          options.find((option) => option.label === entry.trim())
+        )?.value ?? entry,
+    );
+  if (values === null)
+    throw new ServerBrowserOperationError(
+      "PreviewAutomationTargetNotEditableError",
+      "This element is not a <select>. Click a custom dropdown, then click its option.",
+    );
+  return { selected: await locator.selectOption(values, { timeout }) };
+};
+
+export const drag = async (page: Page, input: PreviewAutomationDragInput) => {
+  const source = targetLocator(page, { locator: input.source })!;
+  const target = targetLocator(page, { locator: input.target })!;
+  await source.dragTo(target, { timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS });
 };
 
 /** Sets files on one file input; false when no locator or selector names one. */

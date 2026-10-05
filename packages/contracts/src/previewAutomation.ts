@@ -50,6 +50,9 @@ export const PREVIEW_AUTOMATION_SERVER_OPERATIONS = [
   "dialog",
   "close",
   "upload",
+  "hover",
+  "select",
+  "drag",
 ] as const;
 export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_SERVER_OPERATIONS);
 export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type;
@@ -349,7 +352,7 @@ const LegacySelector = TrimmedNonEmptyString.annotate({
     "Legacy CSS selector such as button[type='submit']. Prefer locator for resilient role/text targeting.",
 });
 
-export const PreviewAutomationClickInput = Schema.Struct({
+const PointerTargetFields = {
   ...PreviewAutomationTabTargetFields,
   selector: Schema.optional(LegacySelector).annotate({
     description:
@@ -370,23 +373,99 @@ export const PreviewAutomationClickInput = Schema.Struct({
     }),
   ),
   timeoutMs: OptionalTimeoutMs,
-})
-  .check(
-    Schema.makeFilter((input) => {
-      const selectorModes =
-        Number(input.selector !== undefined) + Number(input.locator !== undefined);
-      const hasX = input.x !== undefined;
-      const hasY = input.y !== undefined;
-      if (hasX !== hasY) return "Coordinates require both x and y.";
-      const coordinateModes = hasX && hasY ? 1 : 0;
-      return selectorModes + coordinateModes === 1 || "Provide exactly one click target.";
+};
+
+const singlePointerTarget = Schema.makeFilter(
+  (input: {
+    readonly selector?: string | undefined;
+    readonly locator?: string | undefined;
+    readonly x?: number | undefined;
+    readonly y?: number | undefined;
+  }) => {
+    const selectorModes =
+      Number(input.selector !== undefined) + Number(input.locator !== undefined);
+    const hasX = input.x !== undefined;
+    const hasY = input.y !== undefined;
+    if (hasX !== hasY) return "Coordinates require both x and y.";
+    const coordinateModes = hasX && hasY ? 1 : 0;
+    return selectorModes + coordinateModes === 1 || "Provide exactly one target.";
+  },
+);
+
+export const PreviewAutomationClickInput = Schema.Struct({
+  ...PointerTargetFields,
+  button: Schema.optional(
+    Schema.Literals(["left", "right", "middle"]).annotate({
+      description: "Mouse button. Defaults to left; right opens the page's context menu.",
     }),
-  )
+  ),
+  clickCount: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3 })).annotate({
+      description: "1 for a click, 2 for a double-click, 3 for a triple-click. Defaults to 1.",
+    }),
+  ),
+})
+  .check(singlePointerTarget)
   .annotate({
     description:
       "Clicks one target. Provide exactly one of locator, selector, or the x/y coordinate pair.",
   });
 export type PreviewAutomationClickInput = typeof PreviewAutomationClickInput.Type;
+
+export const PreviewAutomationHoverInput = Schema.Struct(PointerTargetFields)
+  .check(singlePointerTarget)
+  .annotate({
+    description:
+      "Moves the mouse over one target. Provide exactly one of locator, selector, or the x/y coordinate pair.",
+  });
+export type PreviewAutomationHoverInput = typeof PreviewAutomationHoverInput.Type;
+
+export const PreviewAutomationSelectInput = Schema.Struct({
+  ...PreviewAutomationTabTargetFields,
+  selector: Schema.optional(LegacySelector).annotate({
+    description: "Legacy CSS selector for a <select>. Prefer locator.",
+  }),
+  locator: Schema.optional(Locator).annotate({
+    description: "The <select> element, for example aria-ref=<ref> or role=combobox[name='Size'].",
+  }),
+  values: Schema.Array(Schema.String).check(Schema.isMaxLength(100)).annotate({
+    description:
+      "Option values or visible labels to select. Pass several for a multiple select, or an empty list to clear it.",
+  }),
+  timeoutMs: OptionalTimeoutMs,
+})
+  .check(
+    Schema.makeFilter(
+      (input) =>
+        Number(input.selector !== undefined) + Number(input.locator !== undefined) === 1 ||
+        "Provide exactly one of selector or locator.",
+    ),
+  )
+  .annotate({ description: "Chooses options in one native <select> element." });
+export type PreviewAutomationSelectInput = typeof PreviewAutomationSelectInput.Type;
+
+export const PreviewAutomationSelectResult = Schema.Struct({
+  selected: Schema.Array(Schema.String).annotate({
+    description: "The values of the options now selected.",
+  }),
+});
+export type PreviewAutomationSelectResult = typeof PreviewAutomationSelectResult.Type;
+
+/** A required locator field. Its JSON schema keeps only the description on its last check. */
+const DescribedLocator = (description: string) =>
+  Schema.String.check(Schema.isTrimmed())
+    .check(Schema.isNonEmpty({ description }))
+    .annotateKey({ description });
+
+export const PreviewAutomationDragInput = Schema.Struct({
+  ...PreviewAutomationTabTargetFields,
+  source: DescribedLocator(
+    "Locator of the element to drag, for example aria-ref=<ref> from the latest snapshot.",
+  ),
+  target: DescribedLocator("Locator of the element to drop onto, for example aria-ref=<ref>."),
+  timeoutMs: OptionalTimeoutMs,
+}).annotate({ description: "Drags one element and drops it onto another." });
+export type PreviewAutomationDragInput = typeof PreviewAutomationDragInput.Type;
 
 export const PreviewAutomationUploadInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,

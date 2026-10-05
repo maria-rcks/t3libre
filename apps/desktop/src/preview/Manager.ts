@@ -618,6 +618,9 @@ const isPreviewInputSignal = (value: unknown): value is PreviewInputSignal => {
   );
 };
 
+/** DOM `PointerEvent.button` for each CDP mouse button, matched against reported human input. */
+const POINTER_BUTTON_INDEX = { left: 0, middle: 1, right: 2 } as const;
+
 const inputSignalsMatch = (left: PreviewInputSignal, right: PreviewInputSignal): boolean => {
   if (left.kind !== right.kind) return false;
   if (left.kind === "pointer" && right.kind === "pointer") {
@@ -4027,19 +4030,27 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       createdAt: clickCreatedAt,
     });
     yield* Effect.sleep(AGENT_CURSOR_CLICK_LEAD_MS);
-    yield* expectAgentInput(tabId, { kind: "pointer", ...point, button: 0 });
-    yield* send("Input.dispatchMouseEvent", {
-      type: "mousePressed",
-      ...point,
-      button: "left",
-      clickCount: 1,
-    });
-    yield* send("Input.dispatchMouseEvent", {
-      type: "mouseReleased",
-      ...point,
-      button: "left",
-      clickCount: 1,
-    });
+    const button = input.button ?? "left";
+    // A double-click is two press/release pairs whose clickCount climbs, as Chromium sends them.
+    for (let clickCount = 1; clickCount <= (input.clickCount ?? 1); clickCount += 1) {
+      yield* expectAgentInput(tabId, {
+        kind: "pointer",
+        ...point,
+        button: POINTER_BUTTON_INDEX[button],
+      });
+      yield* send("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        ...point,
+        button,
+        clickCount,
+      });
+      yield* send("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        ...point,
+        button,
+        clickCount,
+      });
+    }
   });
 
   const automationClick = Effect.fn("PreviewManager.automationClick")(function* (

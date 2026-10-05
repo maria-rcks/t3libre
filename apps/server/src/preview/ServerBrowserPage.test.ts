@@ -179,4 +179,39 @@ describe("server browser element refs", () => {
     await ServerBrowserPage.click(page, { selector: 'button[data-example=" >> aria-ref=e1"]' });
     expect(await page.locator("button").textContent()).toBe("saved");
   });
+
+  it("right-clicks, double-clicks, hovers, selects, and drags like a pointer user", async () => {
+    await page.setContent(`
+      <style>#menu { position: absolute; display: none } #hover:hover + #menu { display: block }</style>
+      <button id="target">target</button>
+      <div id="hover">hover me</div><div id="menu">menu item</div>
+      <select id="size"><option value="s">Small</option><option value="l">Large</option></select>
+      <div id="card" draggable="true">card</div><div id="lane" style="height:40px">lane</div>
+      <p id="log"></p>
+      <script>
+        const log = (text) => (document.getElementById("log").textContent += text + ";");
+        const target = document.getElementById("target");
+        target.addEventListener("contextmenu", (event) => { event.preventDefault(); log("context"); });
+        target.addEventListener("dblclick", () => log("dblclick"));
+        document.getElementById("card").addEventListener("dragstart", (event) =>
+          event.dataTransfer.setData("text/plain", "card"),
+        );
+        for (const type of ["dragenter", "dragover"])
+          document.getElementById("lane").addEventListener(type, (event) => event.preventDefault());
+        document.getElementById("lane").addEventListener("drop", () => log("drop"));
+      </script>`);
+    await ServerBrowserPage.click(page, { locator: "#target", button: "right" });
+    await ServerBrowserPage.click(page, { locator: "#target", clickCount: 2 });
+    await ServerBrowserPage.hover(page, { locator: "#hover" });
+    expect(await page.isVisible("#menu")).toBe(true);
+    // A visible label selects the same option as its value.
+    expect(await ServerBrowserPage.select(page, { locator: "#size", values: ["Large"] })).toEqual({
+      selected: ["l"],
+    });
+    await ServerBrowserPage.drag(page, { source: "#card", target: "#lane" });
+    expect(await page.textContent("#log")).toBe("context;dblclick;drop;");
+    await expect(
+      ServerBrowserPage.select(page, { locator: "#target", values: ["s"] }),
+    ).rejects.toMatchObject({ tag: "PreviewAutomationTargetNotEditableError" });
+  });
 });

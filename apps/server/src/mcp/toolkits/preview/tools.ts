@@ -2,8 +2,10 @@ import {
   ToolActivityIcon,
   PreviewAutomationClickInput,
   PreviewAutomationDialogInput,
+  PreviewAutomationDragInput,
   PreviewAutomationError,
   PreviewAutomationEvaluateInput,
+  PreviewAutomationHoverInput,
   PreviewAutomationNavigateInput,
   PreviewAutomationOpenInput,
   PreviewAutomationPressInput,
@@ -12,6 +14,8 @@ import {
   PreviewAutomationResizeInput,
   PreviewAutomationResizeResult,
   PreviewAutomationScrollInput,
+  PreviewAutomationSelectInput,
+  PreviewAutomationSelectResult,
   PreviewAutomationSetColorSchemeInput,
   PreviewAutomationSetColorSchemeResult,
   PreviewAutomationSnapshot,
@@ -157,7 +161,7 @@ export const PreviewSnapshotTool = readonlyBrowserTool(
 const PreviewClickTool = browserTool(
   Tool.make("preview_click", {
     description:
-      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together.",
+      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together. Set button=right for a context menu or clickCount=2 for a double-click; server browser tabs only.",
     parameters: PreviewAutomationClickInput,
     success: PreviewActionResult,
     failure: PreviewAutomationError,
@@ -174,6 +178,42 @@ const PreviewTypeTool = browserTool(
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Type into preview page"),
+);
+
+const PreviewHoverTool = safeBrowserTool(
+  Tool.make("preview_hover", {
+    description:
+      "Move the mouse over exactly one target in the tab selected by tabId, or this agent session's current tab when omitted, to reveal hover menus and tooltips. Server browser tabs only.",
+    parameters: PreviewAutomationHoverInput,
+    success: PreviewActionResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Hover preview page"),
+);
+
+const PreviewSelectTool = browserTool(
+  Tool.make("preview_select", {
+    description:
+      "Choose options in one native <select> in the tab selected by tabId, or this agent session's current tab when omitted, by option value or visible label. Custom dropdowns are not <select>; click them open and click the option instead. Server browser tabs only.",
+    parameters: PreviewAutomationSelectInput,
+    success: Schema.Struct({
+      ...PreviewAutomationSelectResult.fields,
+      ...presentationFields,
+    }),
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Select preview option"),
+);
+
+const PreviewDragTool = browserTool(
+  Tool.make("preview_drag", {
+    description:
+      "Drag one element onto another in the tab selected by tabId, or this agent session's current tab when omitted. Server browser tabs only.",
+    parameters: PreviewAutomationDragInput,
+    success: PreviewActionResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Drag in preview page"),
 );
 
 const PreviewUploadTool = browserTool(
@@ -275,6 +315,9 @@ export const PreviewToolkit = Toolkit.make(
   PreviewSnapshotTool,
   PreviewClickTool,
   PreviewTypeTool,
+  PreviewHoverTool,
+  PreviewSelectTool,
+  PreviewDragTool,
   PreviewUploadTool,
   PreviewPressTool,
   PreviewScrollTool,
@@ -293,6 +336,9 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewSetAppearanceTool,
   PreviewClickTool,
   PreviewTypeTool,
+  PreviewHoverTool,
+  PreviewSelectTool,
+  PreviewDragTool,
   PreviewUploadTool,
   PreviewPressTool,
   PreviewScrollTool,

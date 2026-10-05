@@ -11,7 +11,9 @@ import {
   type PreviewAutomationClickInput,
   type PreviewAutomationDialogInput,
   type PreviewAutomationConsoleEntry,
+  type PreviewAutomationDragInput,
   type PreviewAutomationEvaluateInput,
+  type PreviewAutomationHoverInput,
   type PreviewAutomationNavigateInput,
   type PreviewAutomationNetworkEntry,
   type PreviewAutomationOpenInput,
@@ -19,6 +21,7 @@ import {
   type PreviewAutomationRequest,
   type PreviewAutomationResizeInput,
   type PreviewAutomationScrollInput,
+  type PreviewAutomationSelectInput,
   type PreviewAutomationSetColorSchemeInput,
   type PreviewAutomationStatus,
   type PreviewAutomationTypeInput,
@@ -1462,6 +1465,18 @@ const make = Effect.gen(function* () {
           .catch(constVoid);
         return undefined;
       }
+      case "hover":
+        return recordAction(tab, "hover", () =>
+          ServerBrowserPage.hover(tab.page, input as PreviewAutomationHoverInput),
+        );
+      case "select":
+        return recordAction(tab, "select", () =>
+          ServerBrowserPage.select(tab.page, input as PreviewAutomationSelectInput),
+        );
+      case "drag":
+        return recordAction(tab, "drag", () =>
+          ServerBrowserPage.drag(tab.page, input as PreviewAutomationDragInput),
+        );
       case "upload":
         return recordAction(tab, "upload", () =>
           uploadFiles(tab, input as PreviewAutomationUploadInput),
