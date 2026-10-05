@@ -1000,6 +1000,50 @@ it.effect.each(["closed", "draft", "permission", "stack", "method"] as const)(
     ),
 );
 
+it.effect("keeps a close batch ordered and continues after a refused close", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const calls: number[] = [];
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const client = {
+        [WS_METHODS.pullRequestsRunAction]: (input: { number: number; action: string }) =>
+          Effect.gen(function* () {
+            expect(input.action).toBe("close");
+            calls.push(input.number);
+            if (input.number === 6) {
+              yield* Deferred.succeed(started, undefined);
+              yield* Deferred.await(release);
+            }
+            if (input.number === 5)
+              return yield* new PullRequestOperationError({
+                operation: "runAction",
+                detail: "You cannot close this pull request.",
+              });
+          }),
+      } as unknown as WsRpcProtocolClient;
+      const { atoms, registry } = yield* makeTestRuntime(client);
+      const batch = [6, 5, 4].map((number) =>
+        atoms.runAction.run(registry, {
+          environmentId: TARGET.environmentId,
+          input: {
+            projectId: ProjectId.make("project-1"),
+            repository: "acme/web",
+            number,
+            action: "close",
+          },
+        }),
+      );
+      yield* Deferred.await(started);
+      expect(calls).toEqual([6]);
+      yield* Deferred.succeed(release, undefined);
+      const results = yield* Effect.promise(() => Promise.all(batch));
+      expect(results.map((result) => result._tag)).toEqual(["Success", "Failure", "Success"]);
+      expect(calls).toEqual([6, 5, 4]);
+    }),
+  ),
+);
+
 it.effect("keeps hover previews fresh after edits and turns", () =>
   Effect.scoped(
     Effect.gen(function* () {
