@@ -1624,7 +1624,9 @@ function PullRequestsRouteView() {
       candidate.entries.some((row) => pullRequestEntryKey(row) === originKey),
     );
     if (!group || closeSweepRef.current.closingKeys.has(originKey)) return;
-    const orderedKeys = group.entries.map(pullRequestEntryKey);
+    const orderedKeys = closeSweepRef.current.displayGroups.flatMap((candidate) =>
+      candidate.entries.map(pullRequestEntryKey),
+    );
     const canClose = (key: string) => {
       const row = closeSweepRef.current.closeSweepRows.get(key);
       return (
