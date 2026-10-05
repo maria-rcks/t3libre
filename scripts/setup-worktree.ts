@@ -34,6 +34,7 @@ for (const file of ENV_FILES) {
   const sourceStat = NodeFS.lstatSync(source, { throwIfNoEntry: false });
   if (!sourceStat) continue;
   if (!sourceStat.isFile()) {
+    // @effect-diagnostics-next-line globalConsole:off - setup runs before dependencies are installed.
     console.warn(`Skipping ${file}: ${source} is not a regular file.`);
     continue;
   }
