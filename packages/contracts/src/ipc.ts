@@ -1026,11 +1026,16 @@ export const DesktopPreviewCreateTabInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
   zoomFactor: Schema.optional(Schema.Number.check(Schema.isGreaterThan(0))),
   colorScheme: Schema.optional(DesktopPreviewColorSchemeSchema),
+  serverTab: Schema.optional(
+    Schema.Struct({ threadId: TrimmedNonEmptyString, tabId: TrimmedNonEmptyString }),
+  ),
 });
 
 export interface DesktopPreviewTabDefaults {
   readonly zoomFactor?: number | undefined;
   readonly colorScheme?: DesktopPreviewColorScheme | undefined;
+  /** A tab of the desktop's own server: the server drives it through the desktop browser channel. */
+  readonly serverTab?: { readonly threadId: string; readonly tabId: string } | undefined;
 }
 
 export const DesktopPreviewRegisterWebviewInputSchema = Schema.Struct({

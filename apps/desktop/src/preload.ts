@@ -303,6 +303,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.invoke(IpcChannels.PREVIEW_CREATE_TAB_CHANNEL, {
         tabId,
         zoomFactor: defaults?.zoomFactor,
+        serverTab: defaults?.serverTab,
         colorScheme: defaults?.colorScheme,
       }),
     closeTab: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_CLOSE_TAB_CHANNEL, { tabId }),

@@ -69,6 +69,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import { PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL } from "../ipc/channels.ts";
+import * as DesktopBrowserHost from "./DesktopBrowserHost.ts";
 import * as BrowserSession from "./BrowserSession.ts";
 import {
   ANNOTATION_CAPTURED_CHANNEL,
@@ -121,6 +122,8 @@ export interface PreviewTabState {
   audible: boolean;
   controller: "human" | "agent" | "none";
   favicon?: DesktopPreviewFavicon;
+  /** Set for a tab of the desktop's own server, which drives it over the browser channel. */
+  serverTab?: { readonly threadId: string; readonly tabId: string };
   updatedAt: string;
 }
 
@@ -648,6 +651,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
   const parentScope = yield* Scope.Scope;
+  const browserHost = yield* DesktopBrowserHost.DesktopBrowserHost;
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
   const resolvedArtifactDirectory = path.resolve(artifactDirectory);
@@ -1287,6 +1291,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       }),
     ]);
     if (control) {
+      // The server can only drive a tab while the desktop holds its debugger.
+      for (const tab of (yield* SynchronizedRef.get(tabsRef)).values()) {
+        if (tab.webContentsId === webContentsId && tab.serverTab) browserHost.detach(tab.serverTab);
+      }
       yield* Scope.close(control.scope, Exit.void).pipe(Effect.ignore);
       return;
     }
@@ -2217,6 +2225,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           zoomFactor: normalizeZoomFactor(defaults?.zoomFactor),
           pictureInPicture: false,
           colorScheme: defaults?.colorScheme ?? "system",
+          ...(defaults?.serverTab === undefined ? {} : { serverTab: defaults.serverTab }),
           audioMuted: false,
           audible: false,
           controller: "none",
@@ -2889,6 +2898,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       if (afterAttach?.webContentsId !== wc.id) {
         yield* detachControlSession(wc.id);
         return;
+      }
+      if (afterAttach.serverTab) {
+        browserHost.attach(afterAttach.serverTab, { webContents: wc, debugger: control.debugger });
       }
       if (afterAttach.colorScheme !== "system") {
         yield* attemptPromise({ operation: "applyColorScheme", tabId, webContentsId: wc.id }, () =>

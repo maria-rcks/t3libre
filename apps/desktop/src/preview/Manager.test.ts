@@ -26,6 +26,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as BrowserSession from "./BrowserSession.ts";
+import * as DesktopBrowserHost from "./DesktopBrowserHost.ts";
 import * as PreviewManager from "./Manager.ts";
 
 describe("fitPictureInPictureContentSize", () => {
@@ -276,6 +277,7 @@ const layer = PreviewManager.layer.pipe(
       shutdown: Effect.void,
     }),
   ),
+  Layer.provideMerge(DesktopBrowserHost.layer),
   Layer.provideMerge(layerBrowserSession),
   Layer.provideMerge(layerEnvironment),
   Layer.provideMerge(layerFileSystem),
