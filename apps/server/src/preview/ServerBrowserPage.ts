@@ -498,6 +498,7 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
   let frame = null;
   let cursor = null;
   let ring = null;
+  const AGENT_CURSOR_PATH = new Path2D("M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z");
   let ringTimer = null;
   let scale = 1;
   let offsetX = 0;
@@ -526,23 +527,22 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
       }
     }
     if (cursor) {
-      const x = offsetX + cursor.x * scale;
-      const y = offsetY + cursor.y * scale;
-      const s = scale;
-      context.beginPath();
-      context.moveTo(x, y);
-      context.lineTo(x, y + 18 * s);
-      context.lineTo(x + 4.5 * s, y + 14 * s);
-      context.lineTo(x + 8 * s, y + 21 * s);
-      context.lineTo(x + 11 * s, y + 19.5 * s);
-      context.lineTo(x + 7.5 * s, y + 12.5 * s);
-      context.lineTo(x + 13 * s, y + 12.5 * s);
-      context.closePath();
-      context.fillStyle = "#111";
-      context.strokeStyle = "#fff";
-      context.lineWidth = 1.5 * s;
-      context.fill();
-      context.stroke();
+      // The agent cursor (lucide MousePointer2, as in the live panel), never the human arrow.
+      const s = 20 / 24 * scale;
+      context.save();
+      context.translate(offsetX + cursor.x * scale - 2 * scale, offsetY + cursor.y * scale - 2 * scale);
+      context.scale(s, s);
+      context.lineWidth = 2;
+      context.lineJoin = "round";
+      context.lineCap = "round";
+      context.fillStyle = "#fff";
+      context.strokeStyle = "#2563eb";
+      context.shadowColor = "rgba(0,0,0,0.25)";
+      context.shadowBlur = 2;
+      context.fill(AGENT_CURSOR_PATH);
+      context.shadowColor = "transparent";
+      context.stroke(AGENT_CURSOR_PATH);
+      context.restore();
     }
   };
   window.__t3Recorder = {
