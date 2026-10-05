@@ -48,6 +48,7 @@ function statusLabel(status: WorkflowStatus) {
 
 function progressStatus(member: RuntimeSubagent) {
   if (member.status === "completed" || member.status === "failed") return member.status;
+  if (member.status === "cancelled" || member.status === "interrupted") return "failed";
   return member.status !== "pending" && isActiveSubagentStatus(member.status)
     ? "inProgress"
     : "pending";
