@@ -649,7 +649,11 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
           Effect.gen(function* () {
             // An unanswered request invalidates this connection. Do not replay
             // actions: the client may have applied them before becoming unreachable.
-            yield* disconnect(connection.clientId, connection.queue, true);
+            // A background metadata read has a short budget and changes nothing,
+            // so a slow one must not cut the host off from the agent's next call.
+            if (input.updateCurrentTab !== false) {
+              yield* disconnect(connection.clientId, connection.queue, true);
+            }
             return yield* new PreviewAutomationTimeoutError(requestContext);
           }),
         onSome: (value) => Effect.succeed(value as A),

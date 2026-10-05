@@ -1543,3 +1543,41 @@ it.effect("keeps a host that responds with an operation timeout", () =>
     }),
   ),
 );
+
+it.effect("keeps the host connected when a background status read times out", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(yield* broker.connect(makeHost()));
+      // A busy host answers its actions but not the metadata read behind them.
+      yield* Stream.runForEach(requests, (request) =>
+        request.operation === "status"
+          ? Effect.void
+          : broker.respond({
+              clientId: "client-1",
+              connectionId: request.connectionId,
+              requestId: request.requestId,
+              ok: true,
+              result: { operation: request.operation },
+            }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      const status = yield* broker
+        .invoke<void>({
+          scope,
+          operation: "status",
+          input: {},
+          timeoutMs: 500,
+          updateCurrentTab: false,
+        })
+        .pipe(Effect.flip, Effect.forkScoped);
+      yield* TestClock.adjust(500);
+      expect(yield* Fiber.join(status)).toMatchObject({ _tag: "PreviewAutomationTimeoutError" });
+
+      expect(yield* broker.invoke({ scope, operation: "snapshot", input: {} })).toEqual({
+        operation: "snapshot",
+      });
+    }),
+  ),
+);
