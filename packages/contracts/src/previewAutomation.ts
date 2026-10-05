@@ -854,9 +854,13 @@ export class PreviewAutomationInvalidSelectorError extends Schema.TaggedError<Pr
     ...PreviewAutomationRemoteDiagnosticFields,
     selectorKind: Schema.optional(Schema.Literals(["locator", "selector"])),
     selectorLength: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    /** The selector was an `aria-ref` from an older snapshot. */
+    staleRef: Schema.optional(Schema.Boolean),
   },
 ) {
   override get message(): string {
+    if (this.staleRef)
+      return "This element ref is stale. Navigation, dialogs, and new snapshots replace refs; take a fresh snapshot and use its refs.";
     if (this.selectorKind !== undefined && this.selectorLength !== undefined) {
       return `Preview automation ${this.operation} received an invalid ${this.selectorKind} (${this.selectorLength} characters).`;
     }

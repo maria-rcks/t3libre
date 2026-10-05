@@ -3,8 +3,7 @@
 import type { PreviewAnnotationPayload, ScopedThreadRef } from "@t3tools/contracts";
 
 import type { ComposerImageAttachment } from "~/composerDraftStore";
-import { isPreviewSupportedInRuntime } from "~/previewStateStore";
-import { useEnvironmentSupportsServerBrowser } from "~/state/entities";
+import { usePreviewAvailable } from "~/browser/previewRuntime";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./PreviewPanelShell";
 import { PreviewView } from "./PreviewView";
@@ -29,8 +28,7 @@ export function PreviewPanel({
   visible,
   onSendAnnotation,
 }: Props) {
-  const serverBrowser = useEnvironmentSupportsServerBrowser(threadRef.environmentId);
-  if (!isPreviewSupportedInRuntime() && !serverBrowser) {
+  if (!usePreviewAvailable(threadRef.environmentId)) {
     return (
       <PreviewPanelShell mode={mode}>
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">

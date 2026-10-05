@@ -12,6 +12,7 @@ import {
   type PreviewAutomationTypeInput,
   type PreviewAutomationWaitForInput,
 } from "@t3tools/contracts";
+import { constVoid } from "effect/Function";
 import type { CDPSession, Locator, Page } from "playwright-core";
 import * as NodeCrypto from "node:crypto";
 import { BrowserControlInterrupted } from "./SessionControl.ts";
@@ -103,6 +104,7 @@ const targetLocator = (
       throw new ServerBrowserOperationError(
         "PreviewAutomationInvalidSelectorError",
         "This element ref is stale or belongs to another tab. Take a fresh snapshot and use its locator.",
+        { staleRef: true },
       );
     }
     return page.locator(`aria-ref=${nativeRef}`);
@@ -197,20 +199,35 @@ export const snapshot = async (input: {
   };
 };
 
+/**
+ * A click whose handler opens a dialog does not finish until the dialog is
+ * resolved, so it returns as soon as the dialog opens; status then reports it.
+ */
 export const click = async (
   page: Page,
   input: PreviewAutomationClickInput,
 ): Promise<{ readonly x: number; readonly y: number }> => {
   const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const locator = targetLocator(page, input);
-  if (locator === null) {
-    await page.mouse.click(input.x!, input.y!);
-    return { x: input.x!, y: input.y! };
+  let point = { x: input.x ?? 0, y: input.y ?? 0 };
+  if (locator !== null) {
+    await locator.scrollIntoViewIfNeeded({ timeout });
+    const box = await locator.boundingBox({ timeout });
+    if (box) point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   }
-  await locator.scrollIntoViewIfNeeded({ timeout });
-  const box = await locator.boundingBox({ timeout });
-  await locator.click({ timeout });
-  return box ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : { x: 0, y: 0 };
+  const clicked =
+    locator === null ? page.mouse.click(point.x, point.y) : locator.click({ timeout });
+  let onDialog = constVoid;
+  const dialogOpened = new Promise<"dialog">((resolve) => {
+    onDialog = () => resolve("dialog");
+    page.once("dialog", onDialog);
+  });
+  try {
+    if ((await Promise.race([clicked, dialogOpened])) === "dialog") void clicked.catch(constVoid);
+  } finally {
+    page.off("dialog", onDialog);
+  }
+  return point;
 };
 
 export const type = async (page: Page, input: PreviewAutomationTypeInput) => {

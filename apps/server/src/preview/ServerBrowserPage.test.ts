@@ -72,6 +72,21 @@ describe("server browser element refs", () => {
     ]);
   });
 
+  it("returns from a click once it opens a dialog", async () => {
+    await page.setContent(
+      `<button onclick="document.body.dataset.answer = String(confirm('sure?'))">Confirm</button>`,
+    );
+    const dialog = new Promise<import("playwright-core").Dialog>((resolve) =>
+      page.once("dialog", resolve),
+    );
+    await ServerBrowserPage.click(page, {
+      locator: buttonLocator((await takeSnapshot()).accessibilityTree, "Confirm"),
+      timeoutMs: 1_000,
+    });
+    await (await dialog).accept();
+    await expect.poll(() => page.locator("body").getAttribute("data-answer")).toBe("true");
+  });
+
   it("rejects ambiguous CSS controls without clicking any row", async () => {
     await page.setContent(repeatedRows);
     await expect(

@@ -1,7 +1,8 @@
 import previewStreamScript from "@t3tools/mobile-preview-stream";
-import type {
-  PreviewStreamControl,
-  PreviewStreamInput,
+import {
+  previewStreamControlLabel,
+  type PreviewStreamControl,
+  type PreviewStreamInput,
 } from "@t3tools/client-runtime/preview/server-browser-stream";
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
@@ -254,17 +255,7 @@ function PreviewStreamDocumentView({
       {!compact ? (
         <View className="flex-row items-center justify-between gap-2 border-b border-secondary-border px-3 py-2">
           <AppText className="text-xs text-foreground-muted">
-            {!control
-              ? "Connecting..."
-              : !control.canOperate
-                ? "Read-only"
-                : control.controller === "you"
-                  ? "You have control"
-                  : control.controller === "agent"
-                    ? "Agent has control"
-                    : control.controller === "another-viewer"
-                      ? "Another viewer has control"
-                      : "Watching"}
+            {previewStreamControlLabel(control)}
           </AppText>
           {control?.canOperate ? (
             <Pressable

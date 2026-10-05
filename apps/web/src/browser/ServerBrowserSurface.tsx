@@ -3,6 +3,7 @@
 import {
   createPreviewFramePainter,
   createPreviewStreamClient,
+  previewStreamControlLabel,
   previewStreamModifiers,
   type PreviewStreamClient,
   type PreviewStreamControl,
@@ -246,18 +247,17 @@ export function ServerBrowserSurface(props: {
 
   const focusInput = () => inputRef.current?.focus({ preventScroll: true });
 
-  useImperativeHandle(ref, () => {
-    const command = (input: PreviewStreamInput) => {
-      clientRef.current?.send(input);
-    };
-    return {
-      navigate: (url) => command({ type: "navigate", url }),
-      history: (delta) => command({ type: "history", delta }),
-      reload: () => command({ type: "reload" }),
-      viewport: (setting) => command({ type: "viewport", setting }),
+  useImperativeHandle(
+    ref,
+    () => ({
+      navigate: (url) => send({ type: "navigate", url }),
+      history: (delta) => send({ type: "history", delta }),
+      reload: () => send({ type: "reload" }),
+      viewport: (setting) => send({ type: "viewport", setting }),
       canvas: () => (hasFrameRef.current ? canvasRef.current : null),
-    };
-  }, []);
+    }),
+    [send],
+  );
 
   useEffect(() => {
     const element = canvasRef.current?.parentElement;
@@ -644,17 +644,7 @@ export function ServerBrowserSurface(props: {
         )}
       >
         <span role="status" className="text-xs text-muted-foreground">
-          {!control
-            ? "Connecting..."
-            : !control.canOperate
-              ? "Read-only"
-              : control.controller === "you"
-                ? "You have control"
-                : control.controller === "agent"
-                  ? "Agent has control"
-                  : control.controller === "another-viewer"
-                    ? "Another viewer has control"
-                    : "Watching"}
+          {previewStreamControlLabel(control)}
         </span>
         {control?.canOperate ? (
           <Button
