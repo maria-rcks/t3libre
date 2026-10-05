@@ -252,6 +252,11 @@ export const PreviewCloseInput = Schema.Struct({
 });
 export type PreviewCloseInput = typeof PreviewCloseInput.Type;
 
+export const PreviewClearProfileInput = Schema.Struct({
+  profileId: BrowserProfileId,
+});
+export type PreviewClearProfileInput = typeof PreviewClearProfileInput.Type;
+
 export const PreviewListInput = Schema.Struct({
   threadId: ThreadId,
 });
@@ -376,6 +381,15 @@ export class PreviewControlRequiredError extends Schema.TaggedError<PreviewContr
 ) {
   override get message() {
     return "Take control of the server browser and use its viewer controls.";
+  }
+}
+
+export class PreviewClearProfileError extends Schema.TaggedError<PreviewClearProfileError>()(
+  "PreviewClearProfileError",
+  { profileId: Schema.String, cause: Schema.Defect() },
+) {
+  override get message() {
+    return "The environment could not delete this browser profile's data.";
   }
 }
 

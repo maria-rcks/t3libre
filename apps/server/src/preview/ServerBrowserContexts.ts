@@ -86,15 +86,32 @@ export class ServerBrowserContexts {
       const browser = await this.sharedBrowser();
       return browser.newContext(contextOptions);
     }
-    const encoded = encodeURIComponent(profileId);
-    const directory = NodePath.join(
-      this.options.profilesDir,
-      profileId === "." || profileId === ".." ? encoded.replaceAll(".", "%2E") : encoded,
-    );
+    const directory = this.profileDirectory(profileId);
     const options = await this.launchOptions();
     const { chromium } = await import("playwright-core");
     await NodeFSP.mkdir(directory, { recursive: true });
     return chromium.launchPersistentContext(directory, { ...options, ...contextOptions });
+  }
+
+  private profileDirectory(profileId: string) {
+    const encoded = encodeURIComponent(profileId);
+    return NodePath.join(
+      this.options.profilesDir,
+      profileId === "." || profileId === ".." ? encoded.replaceAll(".", "%2E") : encoded,
+    );
+  }
+
+  /** Closes a human profile's persistent context, ending its tabs, then deletes its storage. */
+  async clearProfile(profileId: string) {
+    if (profileId === INCOGNITO_BROWSER_PROFILE_ID) return;
+    const key = JSON.stringify([profileId, null]);
+    const pending = this.contexts.get(key);
+    if (pending) {
+      this.contexts.delete(key);
+      const context = await pending.catch(() => undefined);
+      await context?.close();
+    }
+    await NodeFSP.rm(this.profileDirectory(profileId), { recursive: true, force: true });
   }
 
   close() {

@@ -23,6 +23,7 @@ import {
   type PreviewAutomationStatus,
   type PreviewAutomationTypeInput,
   type PreviewAutomationWaitForInput,
+  PreviewClearProfileError,
   type PreviewEvent,
   type PreviewNavStatus,
   type PreviewSessionSnapshot,
@@ -159,6 +160,8 @@ export class ServerBrowser extends Context.Service<
       ServerBrowserTabNotFoundError | ServerBrowserLaunchError,
       Scope.Scope
     >;
+    /** Deletes a human profile's server-side storage, closing its open tabs first. */
+    readonly clearProfile: (profileId: string) => Effect.Effect<void, PreviewClearProfileError>;
   }
 >()("t3/preview/ServerBrowser") {}
 
@@ -1529,7 +1532,13 @@ const make = Effect.gen(function* () {
     );
   }
 
-  return ServerBrowser.of({ enabled, attachViewer });
+  const clearProfile = (profileId: string) =>
+    Effect.tryPromise({
+      try: () => contexts.clearProfile(profileId),
+      catch: (cause) => new PreviewClearProfileError({ profileId, cause }),
+    });
+
+  return ServerBrowser.of({ enabled, attachViewer, clearProfile });
 });
 
 export const layer = Layer.effect(ServerBrowser, make);

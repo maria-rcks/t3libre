@@ -83,6 +83,10 @@ export function createPreviewEnvironmentAtoms<R, E>(
       scheduler: lifecycleScheduler,
       concurrency: lifecycleConcurrency,
     }),
+    clearProfile: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:preview:clear-profile",
+      tag: WS_METHODS.previewClearProfile,
+    }),
     reportStatus: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:preview:report-status",
       tag: WS_METHODS.previewReportStatus,

@@ -664,13 +664,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
     DeviceHubProxy.layer,
-    ServerBrowserStream.routeLayer.pipe(
-      Layer.provide(
-        ServerBrowser.layer.pipe(
-          Layer.provide(ServerBrowserToolchain.layer.pipe(Layer.provide(ProcessRunner.layer))),
-        ),
-      ),
-    ),
+    ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
     Ws.layer,
   ),
@@ -686,6 +680,12 @@ const layerMakeRoutes = Layer.mergeAll(
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(layerPullRequestService),
+  // The stream route and the WebSocket RPCs share one browser.
+  Layer.provide(
+    ServerBrowser.layer.pipe(
+      Layer.provide(ServerBrowserToolchain.layer.pipe(Layer.provide(ProcessRunner.layer))),
+    ),
+  ),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate))),
   Layer.provide(layerCommandReadiness),

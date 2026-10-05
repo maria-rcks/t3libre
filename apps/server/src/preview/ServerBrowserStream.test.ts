@@ -77,6 +77,7 @@ it.effect.each([
     });
     const browser = ServerBrowser.ServerBrowser.of({
       enabled: true,
+      clearProfile: () => Effect.void,
       attachViewer: (input) =>
         Effect.sync(() => {
           attachments.push(input);
@@ -148,6 +149,7 @@ it.effect.each([
     let attachments = 0;
     const browser = ServerBrowser.ServerBrowser.of({
       enabled: true,
+      clearProfile: () => Effect.void,
       attachViewer: () => {
         attachments++;
         return Effect.die("unauthorized viewer must not attach");

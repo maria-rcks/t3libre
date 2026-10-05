@@ -10,11 +10,12 @@ const launches = vi.hoisted(() => ({
   launch: vi.fn<BrowserType["launch"]>(),
   persistent: vi.fn<BrowserType["launchPersistentContext"]>(),
   mkdir: vi.fn().mockResolvedValue(undefined),
+  rm: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("playwright-core", () => ({
   chromium: { launch: launches.launch, launchPersistentContext: launches.persistent },
 }));
-vi.mock("node:fs/promises", () => ({ mkdir: launches.mkdir }));
+vi.mock("node:fs/promises", () => ({ mkdir: launches.mkdir, rm: launches.rm }));
 
 const makeContext = () => {
   const events = new NodeEvents.EventEmitter();
@@ -59,6 +60,7 @@ beforeEach(() => {
   launches.launch.mockReset();
   launches.persistent.mockReset();
   launches.mkdir.mockClear();
+  launches.rm.mockClear();
 });
 
 describe("ServerBrowserContexts", () => {
@@ -104,6 +106,36 @@ describe("ServerBrowserContexts", () => {
     expect(launches.mkdir).toHaveBeenCalledWith("/test/profiles/work%2Fteam", { recursive: true });
     await pool.close();
     expect(human.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears a profile by closing its open context before deleting its storage", async () => {
+    const human = makeContext();
+    const browser = makeBrowser();
+    launches.persistent.mockResolvedValue(human as unknown as BrowserContext);
+    launches.launch.mockResolvedValue(browser as unknown as Browser);
+    const onContextClose = vi.fn();
+    const pool = new ServerBrowserContexts({ ...options(), onContextClose });
+    const persistent = await pool.contextFor("work/team");
+    const agent = await pool.contextFor("work/team", "agent");
+    launches.rm.mockImplementationOnce(async () => {
+      expect(human.close).toHaveBeenCalledTimes(1);
+    });
+    await pool.clearProfile("work/team");
+    expect(onContextClose).toHaveBeenCalledExactlyOnceWith(persistent);
+    expect(launches.rm).toHaveBeenCalledExactlyOnceWith("/test/profiles/work%2Fteam", {
+      recursive: true,
+      force: true,
+    });
+    expect(await pool.contextFor("work/team", "agent")).toBe(agent);
+    expect(browser.contexts[0]?.close).not.toHaveBeenCalled();
+    launches.persistent.mockResolvedValue(makeContext() as unknown as BrowserContext);
+    expect(await pool.contextFor("work/team")).not.toBe(persistent);
+    await pool.clearProfile("never-opened");
+    expect(launches.rm).toHaveBeenLastCalledWith("/test/profiles/never-opened", {
+      recursive: true,
+      force: true,
+    });
+    await pool.close();
   });
 
   it.each([undefined, "default"])(
