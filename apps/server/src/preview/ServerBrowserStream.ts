@@ -142,6 +142,10 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
               }
               case "gone":
                 return gone.pipe(Effect.andThen(Effect.interrupt));
+              case "reconnect":
+                return writer
+                  .write(new Socket.CloseEvent(1012, "reconnect"))
+                  .pipe(Effect.andThen(Effect.interrupt));
             }
           }),
         );

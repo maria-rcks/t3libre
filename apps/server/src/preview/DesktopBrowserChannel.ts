@@ -15,6 +15,7 @@ import {
   type DesktopBrowserCommand as DesktopBrowserCommandType,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -46,8 +47,13 @@ export class DesktopBrowserChannel extends Context.Service<
   {
     /** False when this server was not started by a desktop app. */
     readonly available: boolean;
-    /** Desktop tabs as they attach and detach. */
-    readonly changes: Stream.Stream<{ readonly key: DesktopTabKey; readonly attached: boolean }>;
+    /**
+     * Waits for a tab to be attached. Subscribes before it checks, so an
+     * attach landing in between is never missed. False after `timeout`.
+     */
+    readonly awaitAttached: (key: DesktopTabKey, timeout: Duration.Input) => Effect.Effect<boolean>;
+    /** Desktop tabs as they detach. */
+    readonly detached: Stream.Stream<DesktopTabKey>;
     readonly isAttached: (key: DesktopTabKey) => Effect.Effect<boolean>;
     /**
      * A one-connection CDP endpoint for an attached tab. Closing the scope
@@ -70,7 +76,8 @@ export const make = Effect.gen(function* () {
   if (inputFd === undefined || controlFd === undefined) {
     return DesktopBrowserChannel.of({
       available: false,
-      changes: Stream.empty,
+      awaitAttached: () => Effect.succeed(false),
+      detached: Stream.empty,
       isAttached: () => Effect.succeed(false),
       endpoint: () => Effect.die("No desktop app is attached to this server."),
     });
@@ -180,7 +187,24 @@ export const make = Effect.gen(function* () {
 
   return DesktopBrowserChannel.of({
     available: true,
-    changes: Stream.fromPubSub(changes),
+    awaitAttached: (key, timeout) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* PubSub.subscribe(changes);
+          if (attachedTabs.has(keyOf(key))) return true;
+          return yield* Stream.fromSubscription(subscription).pipe(
+            Stream.filter((change) => change.attached && keyOf(change.key) === keyOf(key)),
+            Stream.runHead,
+            Effect.map(Option.isSome),
+            Effect.timeoutOption(timeout),
+            Effect.map((result) => Option.getOrElse(result, () => false)),
+          );
+        }),
+      ),
+    detached: Stream.fromPubSub(changes).pipe(
+      Stream.filter((change) => !change.attached),
+      Stream.map((change) => change.key),
+    ),
     isAttached: (key) => Effect.sync(() => attachedTabs.has(keyOf(key))),
     endpoint,
   });
@@ -193,7 +217,8 @@ export const layerNone = Layer.succeed(
   DesktopBrowserChannel,
   DesktopBrowserChannel.of({
     available: false,
-    changes: Stream.empty,
+    awaitAttached: () => Effect.succeed(false),
+    detached: Stream.empty,
     isAttached: () => Effect.succeed(false),
     endpoint: () => Effect.die("No desktop app is attached to this server."),
   }),

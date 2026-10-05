@@ -64,6 +64,7 @@ import * as DeviceHubProxy from "./device/DeviceHubProxy.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
+import * as DesktopBrowserChannel from "./preview/DesktopBrowserChannel.ts";
 import * as ServerBrowserStream from "./preview/ServerBrowserStream.ts";
 import * as ServerBrowserToolchain from "./preview/ServerBrowserToolchain.ts";
 import * as ProcessRunner from "./processRunner.ts";
@@ -684,6 +685,7 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(
     ServerBrowser.layer.pipe(
       Layer.provide(ServerBrowserToolchain.layer.pipe(Layer.provide(ProcessRunner.layer))),
+      Layer.provide(DesktopBrowserChannel.layer),
     ),
   ),
   Layer.provide(PreviewAutomationBroker.layer),

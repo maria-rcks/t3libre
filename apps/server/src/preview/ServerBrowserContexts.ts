@@ -101,6 +101,30 @@ export class ServerBrowserContexts {
     );
   }
 
+  /** A throwaway page in the shared browser, for work that must not touch a tab's own storage. */
+  async scratchPage() {
+    if (this.closing) throw new Error("The preview browser is closed.");
+    const context = await (await this.sharedBrowser()).newContext();
+    const page = await context.newPage();
+    page.once("close", () => void context.close().catch(constVoid));
+    return page;
+  }
+
+  /**
+   * Drives a page the desktop app renders, through the CDP endpoint its relay
+   * serves. The page keeps the desktop's storage, size, and window.
+   */
+  async connectDesktopPage(endpoint: string) {
+    const { chromium } = await import("playwright-core");
+    const browser = await chromium.connectOverCDP(endpoint, { timeout: 15_000 });
+    const page = browser.contexts().flatMap((context) => context.pages())[0];
+    if (!page) {
+      await browser.close().catch(constVoid);
+      throw new Error("The desktop tab has no page.");
+    }
+    return { browser, page };
+  }
+
   /** Closes a human profile's persistent context, ending its tabs, then deletes its storage. */
   async clearProfile(profileId: string) {
     if (profileId === INCOGNITO_BROWSER_PROFILE_ID) return;

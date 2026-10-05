@@ -17,12 +17,14 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
 import type { BrowserContext, Page } from "playwright-core";
 import { beforeEach, expect, vi } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Broker from "../mcp/PreviewAutomationBroker.ts";
+import * as DesktopChannel from "./DesktopBrowserChannel.ts";
 import * as Manager from "./Manager.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
 import * as Toolchain from "./ServerBrowserToolchain.ts";
@@ -40,6 +42,14 @@ vi.mock("./ServerBrowserContexts.ts", () => ({
       const context = makeContext(this.onClose);
       contexts.push(context);
       return context as unknown as BrowserContext;
+    }
+    async scratchPage() {
+      return makeContext().page as unknown as Page;
+    }
+    async connectDesktopPage(endpoint: string) {
+      const context = makeContext();
+      desktopConnections.push({ endpoint, context });
+      return { browser: { close: async () => {} }, page: context.page as unknown as Page };
     }
     async close() {
       for (const context of contexts) await context.close();
@@ -140,6 +150,20 @@ let contextGate: PromiseWithResolvers<void> | null = null;
 type ClipboardBinding = (source: { page: unknown }, text: unknown) => void;
 let clipboardBinding: ClipboardBinding | null = null;
 let contextFailure: Error | null = null;
+/** Server tabs the fake desktop renders, and the endpoints the server connected to. */
+let desktopRendersNext = false;
+/** Pages the fake desktop takes back; the channel's detached stream emits them. */
+const desktopDetaches = new NodeEvents.EventEmitter();
+const desktopTabs = new Set<string>();
+const desktopRenders = (tabId: string) => {
+  if (desktopRendersNext) {
+    desktopRendersNext = false;
+    desktopTabs.add(tabId);
+  }
+  return desktopTabs.has(tabId);
+};
+const releasedDesktopTabs: Array<string> = [];
+const desktopConnections: Array<{ endpoint: string; context: ReturnType<typeof makeContext> }> = [];
 const scope = {
   environmentId: EnvironmentId.make("browser-test-environment"),
   threadId: ThreadId.make("browser-test-thread"),
@@ -157,6 +181,27 @@ const dependencies = Layer.mergeAll(
   }),
   Layer.succeed(Toolchain.ServerBrowserToolchain, {
     resolve: Effect.die("mock Chromium does not need an executable"),
+  }),
+  Layer.succeed(DesktopChannel.DesktopBrowserChannel, {
+    // Only tabs a test marks render on the desktop; the rest stay headless.
+    available: true,
+    awaitAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
+    detached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const onDetach = (key: { threadId: string; tabId: string }) =>
+            Queue.offerUnsafe(queue, key);
+          desktopDetaches.on("detach", onDetach);
+          return onDetach;
+        }),
+        (onDetach) => Effect.sync(() => desktopDetaches.off("detach", onDetach)),
+      ),
+    ),
+    isAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
+    endpoint: (key) =>
+      Effect.acquireRelease(Effect.succeed(`ws://desktop/${key.tabId}`), () =>
+        Effect.sync(() => releasedDesktopTabs.push(key.tabId)),
+      ),
   }),
 ).pipe(
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-server-browser-" })),
@@ -188,6 +233,10 @@ beforeEach(() => {
   contexts.length = 0;
   contextGate = null;
   contextFailure = null;
+  desktopTabs.clear();
+  desktopRendersNext = false;
+  releasedDesktopTabs.length = 0;
+  desktopConnections.length = 0;
 });
 
 it.live("readiness none responds immediately but takeover input waits for navigation commit", () =>
@@ -862,6 +911,71 @@ it.live("viewers see the agent's pointer move to its target and click there", ()
         expect.objectContaining({ phase: "click", x: 140, y: 50 }),
       ]);
       expect(click).toHaveBeenCalledOnce();
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("drives the desktop's own page for a tab the desktop renders", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const broker = yield* Broker.PreviewAutomationBroker;
+      const manager = yield* Manager.PreviewManager;
+      yield* Effect.yieldNow;
+      desktopRendersNext = true;
+      const opened = yield* manager.open({ threadId: scope.threadId, runtime: "server" });
+      const viewer = yield* browser.attachViewer(viewerInput(opened.tabId, true));
+      expect(desktopConnections.map((connection) => connection.endpoint)).toEqual([
+        `ws://desktop/${opened.tabId}`,
+      ]);
+      // No headless context was launched for it.
+      expect(contexts).toEqual([]);
+      const page = desktopConnections[0]!.context.page;
+      // The desktop panel sizes its page, so a viewer resize leaves it alone.
+      yield* viewer.input({ type: "takeControl" });
+      yield* viewer.input({ type: "resize", width: 390, height: 844 });
+      expect(page.setViewportSize).not.toHaveBeenCalled();
+      yield* viewer.input({ type: "releaseControl" });
+      // Agents reach it through the same engine as a headless tab.
+      const evaluated = yield* broker.invoke({
+        scope: { ...scope, providerSessionId: "agent-desktop" },
+        operation: "status",
+        input: {},
+        tabId: PreviewTabId.make(opened.tabId),
+      });
+      expect(evaluated).toMatchObject({ tabId: opened.tabId });
+      // Closing the session lets go of the desktop's page without closing it.
+      yield* manager.close({ threadId: scope.threadId, tabId: opened.tabId });
+      while (releasedDesktopTabs.length === 0) yield* Effect.yieldNow;
+      expect(releasedDesktopTabs).toEqual([opened.tabId]);
+      expect(page.close).not.toHaveBeenCalled();
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("a desktop page the desktop takes back reconnects instead of closing", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const manager = yield* Manager.PreviewManager;
+      yield* Effect.yieldNow;
+      desktopRendersNext = true;
+      const opened = yield* manager.open({ threadId: scope.threadId, runtime: "server" });
+      const viewer = yield* browser.attachViewer(viewerInput(opened.tabId, false));
+      // Devtools opened on the desktop, so it withdrew the page's debugger.
+      // The server's listener subscribes in its own fiber; detach once it is there.
+      while (desktopDetaches.listenerCount("detach") === 0) yield* Effect.yieldNow;
+      desktopDetaches.emit("detach", { threadId: scope.threadId, tabId: opened.tabId });
+      let end = yield* Queue.take(viewer.output);
+      while (end._tag !== "reconnect" && end._tag !== "gone")
+        end = yield* Queue.take(viewer.output);
+      expect(end._tag).toBe("reconnect");
+      expect(releasedDesktopTabs).toEqual([opened.tabId]);
+      // The session survives, and the next viewer reaches the page again.
+      const { sessions } = yield* manager.list({ threadId: scope.threadId });
+      expect(sessions.map((session) => session.tabId)).toContain(opened.tabId);
+      yield* browser.attachViewer(viewerInput(opened.tabId, false));
+      expect(desktopConnections).toHaveLength(2);
     }),
   ).pipe(Effect.provide(layer)),
 );
