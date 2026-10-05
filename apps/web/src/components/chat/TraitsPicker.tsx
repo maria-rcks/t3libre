@@ -541,6 +541,7 @@ export function buildTraitsTriggerDisplay(input: {
       // Custom models retain descriptor order, so the primary select can be context.
       if (
         reasoningLabelIndex === -1 &&
+        descriptor.type === "select" &&
         ["reasoningEffort", "reasoning", "effort", "variant", "thinking"].includes(descriptor.id)
       ) {
         reasoningLabelIndex = labels.length;

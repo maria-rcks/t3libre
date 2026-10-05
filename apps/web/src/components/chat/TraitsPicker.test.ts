@@ -125,6 +125,21 @@ describe("buildTraitsTriggerDisplay", () => {
     ).toEqual({ label: "High Fast · Thinking On" });
   });
 
+  it.each([true, false])("keeps boolean thinking %s independent of Fast", (currentValue) => {
+    const thinking = {
+      id: "thinking",
+      label: "Thinking",
+      type: "boolean" as const,
+      currentValue,
+    };
+    const label = `Thinking ${currentValue ? "On" : "Off"}`;
+    expect(display([thinking, fastModeDescriptor(true)])).toEqual({ label: `${label} · Fast` });
+    expect(display([thinking, { ...EFFORT, id: "reasoning" }, fastModeDescriptor(true)])).toEqual({
+      label: `${label} · High Fast`,
+    });
+    expect(display([thinking, fastModeDescriptor(false)])).toEqual({ label });
+  });
+
   it("keeps speed separate when there is no reasoning descriptor", () => {
     expect(display([CONTEXT_WINDOW, fastModeDescriptor(true)])).toEqual({ label: "1M · Fast" });
   });
