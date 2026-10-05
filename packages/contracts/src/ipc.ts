@@ -647,12 +647,6 @@ export const DesktopPreviewTabIdSchema = Schema.String.check(Schema.isTrimmed())
   Schema.isNonEmpty(),
 );
 
-export const DesktopPreviewAutomationStatusSchema = Schema.Struct({
-  ...PreviewAutomationStatus.fields,
-  tabId: Schema.NullOr(DesktopPreviewTabIdSchema),
-});
-export type DesktopPreviewAutomationStatus = typeof DesktopPreviewAutomationStatusSchema.Type;
-
 export interface DesktopPreviewPointerEvent {
   tabId: string;
   phase: "move" | "click";
@@ -1089,36 +1083,6 @@ export const DesktopPreviewRecordingSaveInputSchema = Schema.Struct({
   data: Schema.Uint8Array,
 });
 
-export const DesktopPreviewAutomationClickInputSchema = Schema.Struct({
-  tabId: DesktopPreviewTabIdSchema,
-  input: PreviewAutomationClickInput,
-});
-
-export const DesktopPreviewAutomationTypeInputSchema = Schema.Struct({
-  tabId: DesktopPreviewTabIdSchema,
-  input: PreviewAutomationTypeInput,
-});
-
-export const DesktopPreviewAutomationPressInputSchema = Schema.Struct({
-  tabId: DesktopPreviewTabIdSchema,
-  input: PreviewAutomationPressInput,
-});
-
-export const DesktopPreviewAutomationScrollInputSchema = Schema.Struct({
-  tabId: DesktopPreviewTabIdSchema,
-  input: PreviewAutomationScrollInput,
-});
-
-export const DesktopPreviewAutomationEvaluateInputSchema = Schema.Struct({
-  tabId: DesktopPreviewTabIdSchema,
-  input: PreviewAutomationEvaluateInput,
-});
-
-export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
-  tabId: DesktopPreviewTabIdSchema,
-  input: PreviewAutomationWaitForInput,
-});
-
 /**
  * A System Settings pane the app can deep-link to. The identifier crosses IPC
  * rather than a URL, so the renderer can only reach these known destinations.
@@ -1341,16 +1305,6 @@ export interface DesktopPreviewBridge {
       data: Uint8Array,
     ) => Promise<DesktopPreviewRecordingArtifact>;
     onFrame: (listener: (frame: DesktopPreviewRecordingFrame) => void) => () => void;
-  };
-  automation: {
-    status: (tabId: string) => Promise<DesktopPreviewAutomationStatus>;
-    snapshot: (tabId: string) => Promise<PreviewAutomationSnapshot>;
-    click: (tabId: string, input: PreviewAutomationClickInput) => Promise<void>;
-    type: (tabId: string, input: PreviewAutomationTypeInput) => Promise<void>;
-    press: (tabId: string, input: PreviewAutomationPressInput) => Promise<void>;
-    scroll: (tabId: string, input: PreviewAutomationScrollInput) => Promise<void>;
-    evaluate: (tabId: string, input: PreviewAutomationEvaluateInput) => Promise<unknown>;
-    waitFor: (tabId: string, input: PreviewAutomationWaitForInput) => Promise<void>;
   };
   onStateChange: (listener: (tabId: string, state: DesktopPreviewTabState) => void) => () => void;
   onPointerEvent: (listener: (event: DesktopPreviewPointerEvent) => void) => () => void;
