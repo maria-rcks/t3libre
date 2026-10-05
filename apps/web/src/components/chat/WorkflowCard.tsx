@@ -74,11 +74,11 @@ function StatusMark({ status }: { status: WorkflowStatus }) {
         className={cn(
           "size-3",
           status === "completed"
-            ? "text-success"
+            ? "text-muted-foreground"
             : status === "failed"
               ? "text-destructive"
               : status !== "pending" && isActiveSubagentStatus(status)
-                ? "text-primary"
+                ? "text-foreground/80"
                 : "text-muted-foreground/40",
         )}
       />
@@ -136,7 +136,7 @@ export function WorkflowCard({
       data-workflow-card
       className={cn("min-w-0", !panel && "my-2")}
     >
-      <ComposerBanner.Root placement="floating">
+      <ComposerBanner.Root placement={panel ? "inline" : "floating"}>
         <ComposerBanner.Row>
           <ComposerBanner.Icon>
             <GitBranchIcon />
@@ -165,12 +165,12 @@ export function WorkflowCard({
             {members.length > 0 ? (
               <ComposerBanner.Count
                 aria-label={`${completed} of ${members.length} agents completed`}
-                className={completed === members.length ? "text-success" : undefined}
               >
                 {completed}/{members.length}
               </ComposerBanner.Count>
             ) : null}
             <ComposerBanner.Segments
+              tone="neutral"
               className="@min-[560px]:w-20"
               statuses={members.map(progressStatus)}
             />
@@ -188,7 +188,10 @@ export function WorkflowCard({
         </ComposerBanner.Row>
         {expanded ? (
           <div id={detailsId}>
-            <ComposerBanner.Children aria-label="Workflow phases">
+            <ComposerBanner.Children
+              aria-label="Workflow phases"
+              className={panel ? "ml-3 border-l border-border/65 pl-1" : undefined}
+            >
               {phases.map((phase) => (
                 <WorkflowPhase
                   key={`${agent.id}:${phase.index}`}
@@ -291,16 +294,8 @@ function WorkflowPhase({
           <span className="min-w-0 truncate font-medium text-foreground/80">{title}</span>
         </ComposerBanner.Content>
         <ComposerBanner.Actions>
-          <ComposerBanner.Count
-            className={cn(
-              failed
-                ? "text-destructive"
-                : members.length > 0 && completed === members.length && "text-success",
-            )}
-          >
-            {summary}
-          </ComposerBanner.Count>
-          <ComposerBanner.Segments statuses={members.map(progressStatus)} />
+          <ComposerBanner.Count>{summary}</ComposerBanner.Count>
+          <ComposerBanner.Segments tone="neutral" statuses={members.map(progressStatus)} />
         </ComposerBanner.Actions>
       </ComposerBanner.Row>
       {expanded ? (

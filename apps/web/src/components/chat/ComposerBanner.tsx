@@ -154,25 +154,27 @@ function Root({
   ...props
 }: ComponentProps<"div"> & {
   density?: "default" | "comfortable" | "spacious";
-  placement?: "attached" | "floating";
+  placement?: "attached" | "floating" | "inline";
   variant?: ComposerBannerVariant;
   width?: "fill" | "content";
 }) {
-  return (
-    <Surface
-      className={cn(
-        "min-w-0 px-1 py-(--composer-banner-padding-block) after:block after:h-(--chat-composer-attachment-overlap) text-xs/4 [--composer-banner-icon-column:--spacing(7)] [--composer-banner-padding-block:--spacing(1)] sm:[--composer-banner-icon-column:--spacing(6)]",
-        density === "comfortable" && "[--composer-banner-padding-block:--spacing(1.25)]",
-        density === "spacious" && "px-3 [--composer-banner-padding-block:--spacing(3)]",
-        width === "content" ? "w-fit max-w-full flex-none" : "@container",
-        className,
-      )}
-      data-slot="composer-banner"
-      placement={placement}
-      data-composer-banner-width={width}
-      variant={variant}
-      {...props}
-    />
+  const contentProps = {
+    className: cn(
+      "min-w-0 px-1 py-(--composer-banner-padding-block) after:block after:h-(--chat-composer-attachment-overlap) text-xs/4 [--composer-banner-icon-column:--spacing(7)] [--composer-banner-padding-block:--spacing(1)] sm:[--composer-banner-icon-column:--spacing(6)]",
+      density === "comfortable" && "[--composer-banner-padding-block:--spacing(1.25)]",
+      density === "spacious" && "px-3 [--composer-banner-padding-block:--spacing(3)]",
+      width === "content" ? "w-fit max-w-full flex-none" : "@container",
+      className,
+    ),
+    "data-slot": "composer-banner",
+    "data-composer-banner-width": width,
+    ...props,
+  };
+  // Inline trees borrow the banner's columns, without introducing another surface.
+  return placement === "inline" ? (
+    <div {...contentProps} />
+  ) : (
+    <Surface placement={placement} variant={variant} {...contentProps} />
   );
 }
 
@@ -309,9 +311,11 @@ function Count({ className, ...props }: ComponentProps<"span">) {
 function Segments({
   statuses,
   className,
+  tone = "status",
 }: {
   statuses: readonly ("pending" | "inProgress" | "completed" | "failed")[];
   className?: string;
+  tone?: "status" | "neutral";
 }) {
   if (statuses.length <= 1 || statuses.length > 10) return null;
 
@@ -324,13 +328,19 @@ function Segments({
           key={index}
           className={cn(
             "h-[3px] min-w-0 flex-1 rounded-full",
-            status === "completed"
-              ? "bg-success"
-              : status === "inProgress"
-                ? "bg-primary"
-                : status === "failed"
-                  ? "bg-destructive"
-                  : "bg-muted-foreground/25",
+            tone === "neutral"
+              ? status === "pending"
+                ? "bg-muted-foreground/25"
+                : status === "inProgress"
+                  ? "bg-foreground/70"
+                  : "bg-muted-foreground/60"
+              : status === "completed"
+                ? "bg-success"
+                : status === "inProgress"
+                  ? "bg-primary"
+                  : status === "failed"
+                    ? "bg-destructive"
+                    : "bg-muted-foreground/25",
           )}
         />
       ))}
