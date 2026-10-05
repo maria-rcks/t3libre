@@ -795,6 +795,7 @@ function PullRequestsRouteView() {
   const baselineQuery = usePullRequestList(baselineTargets);
   const baselineEmpty =
     baselineQuery.data?.entries.length === 0 &&
+    baselineQuery.data.errors.length === 0 &&
     !baselineQuery.isPending &&
     baselineQuery.error === null;
   const facetTargets = useMemo(() => {
