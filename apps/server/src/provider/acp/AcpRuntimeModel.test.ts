@@ -909,7 +909,7 @@ describe("AcpRuntimeModel", () => {
       ).toEqual({ emit: true, skippedSinceEmit: 0 });
     });
 
-    it("emits immediately when the title changes, even with no growth", () => {
+    it("emits title and kind changes immediately without emitting duplicate metadata", () => {
       const decision = decideToolCallUpdateEmission({
         previous: { toolCallId: "tool-1", title: "Reading file", detail: "x", data: {} },
         next: { toolCallId: "tool-1", title: "Ran command", detail: "x", data: {} },
@@ -917,6 +917,46 @@ describe("AcpRuntimeModel", () => {
         skippedSinceEmit: 0,
       });
       expect(decision).toEqual({ emit: true, skippedSinceEmit: 0 });
+
+      const created = parseSessionUpdateEvent({
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "inspect-1",
+          title: "Inspect",
+          kind: "other",
+          status: "in_progress",
+        },
+      } satisfies EffectAcpSchema.SessionNotification).events[0];
+      const kindUpdate = parseSessionUpdateEvent({
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "inspect-1",
+          kind: "read",
+        },
+      } satisfies EffectAcpSchema.SessionNotification).events[0];
+      if (created?._tag !== "ToolCallUpdated" || kindUpdate?._tag !== "ToolCallUpdated") {
+        throw new Error("expected tool call updates");
+      }
+      const changed = mergeToolCallState(created.toolCall, kindUpdate.toolCall);
+      expect(changed).toMatchObject({ title: "Inspect", kind: "read", status: "inProgress" });
+      expect(
+        decideToolCallUpdateEmission({
+          previous: created.toolCall,
+          next: changed,
+          lastEmittedDetailLength: 0,
+          skippedSinceEmit: 0,
+        }),
+      ).toEqual({ emit: true, skippedSinceEmit: 0 });
+      expect(
+        decideToolCallUpdateEmission({
+          previous: changed,
+          next: mergeToolCallState(changed, kindUpdate.toolCall),
+          lastEmittedDetailLength: 0,
+          skippedSinceEmit: 0,
+        }),
+      ).toEqual({ emit: false, skippedSinceEmit: 0 });
     });
 
     it("coalesces small deltas but forces an emission after the coalesce limit", () => {

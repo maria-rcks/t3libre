@@ -1043,6 +1043,7 @@ export function decideToolCallUpdateEmission(
   if (
     previous === undefined ||
     previous.title !== next.title ||
+    previous.kind !== next.kind ||
     previous.status !== next.status ||
     !NodeUtil.isDeepStrictEqual(previous.data.locations, next.data.locations)
   ) {
