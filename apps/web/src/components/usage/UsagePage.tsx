@@ -136,6 +136,7 @@ export function UsagePage() {
   }));
   const metric = preferences.metric;
   const showingLimits = metric === "limits";
+  const selectedProvider = preferences.provider ?? null;
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [limitsNow, setLimitsNow] = useState(() => Date.now());
   const refreshingRef = useRef(false);
@@ -149,6 +150,7 @@ export function UsagePage() {
   const { merged, environments, selectedEnvironments, isPending, isPartial, refresh } = useUsage(
     window,
     selectedEnvironmentIds,
+    selectedProvider,
   );
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const cursorAccessEnvironments = cursorKeychainAccessEnvironments(selectedEnvironments);
@@ -157,6 +159,7 @@ export function UsagePage() {
       selectedEnvironments.flatMap(
         (environment) =>
           environment.summary?.sources.flatMap((source) =>
+            (selectedProvider === null || source.fingerprint.provider === selectedProvider) &&
             source.message &&
             !source.action &&
             (source.status === "partial" ||
@@ -214,13 +217,15 @@ export function UsagePage() {
   summaryRows.splice(
     cursorInsertAt,
     0,
-    ...cursorAccessEnvironments.map((environment) => ({ kind: "enable" as const, environment })),
+    ...(selectedProvider === null || selectedProvider === "cursor"
+      ? cursorAccessEnvironments.map((environment) => ({ kind: "enable" as const, environment }))
+      : []),
   );
   const timeValueColumnWidth = `${60 / (activeProviders.length + 2)}%`;
 
   const selectWindow = (days: number) => {
     if (!isUsageWindowDays(days)) return;
-    const nextPreferences = { metric, windowDays: days };
+    const nextPreferences = { ...preferences, metric, windowDays: days };
     setPreferences(nextPreferences);
     saveUsagePagePreferences(nextPreferences);
     setWindowSelection({
@@ -230,9 +235,15 @@ export function UsagePage() {
   };
   const selectMetric = (nextMetric: UsageMetric) => {
     if (nextMetric === "limits") setLimitsNow(Date.now());
-    const nextPreferences = { metric: nextMetric, windowDays };
+    const nextPreferences = { ...preferences, metric: nextMetric, windowDays };
     setPreferences(nextPreferences);
     saveUsagePagePreferences(nextPreferences);
+  };
+  const selectProvider = (provider: UsageProviderKind | null) => {
+    const nextPreferences = { ...preferences, provider: provider ?? undefined };
+    setPreferences(nextPreferences);
+    saveUsagePagePreferences(nextPreferences);
+    setSelectedModelKey(null);
   };
   const refreshLimits = async (automatic = false, afterPending = false) => {
     try {
@@ -348,6 +359,39 @@ export function UsagePage() {
             onOpenModelPrices={() => setPriceDialog({})}
           />
         </WorkspaceBreadcrumbItem>
+        {!showingLimits ? (
+          <>
+            <WorkspaceBreadcrumbSeparator />
+            <WorkspaceBreadcrumbItem>
+              <Menu>
+                <MenuTrigger render={<InlineButton />} aria-label="Filter usage by provider">
+                  {selectedProvider === null
+                    ? "All providers"
+                    : PROVIDER_PRESENTATION[selectedProvider].label}
+                  <ChevronDownIcon className="size-3.5" aria-hidden />
+                </MenuTrigger>
+                <MenuPopup align="start">
+                  <MenuCheckboxItem
+                    checked={selectedProvider === null}
+                    onCheckedChange={() => selectProvider(null)}
+                  >
+                    All providers
+                  </MenuCheckboxItem>
+                  <MenuSeparator />
+                  {PROVIDER_ORDER.map((provider) => (
+                    <MenuCheckboxItem
+                      key={provider}
+                      checked={selectedProvider === provider}
+                      onCheckedChange={() => selectProvider(provider)}
+                    >
+                      {PROVIDER_PRESENTATION[provider].label}
+                    </MenuCheckboxItem>
+                  ))}
+                </MenuPopup>
+              </Menu>
+            </WorkspaceBreadcrumbItem>
+          </>
+        ) : null}
       </WorkspaceBreadcrumb>
       {!showingLimits ? (
         <span className="hidden min-w-0 truncate text-xs text-muted-foreground 2xl:block">
@@ -542,7 +586,8 @@ export function UsagePage() {
                       </span>
                     </div>
 
-                    {[...presentations].some(
+                    {(selectedProvider === null || selectedProvider === "codex") &&
+                    [...presentations].some(
                       ([id, presentation]) =>
                         (selectedEnvironmentIds === null || selectedEnvironmentIds.has(id)) &&
                         presentation.serverConfig?.providers.some(usesChatGptSharing),

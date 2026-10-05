@@ -1,3 +1,4 @@
+import { UsageProviderKind } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 import { getLocalStorageItem, setLocalStorageItem } from "../../hooks/useLocalStorage";
@@ -6,6 +7,7 @@ const STORAGE_KEY = "t3code:usage-page-preferences:v1";
 const UsagePagePreferencesSchema = Schema.Struct({
   metric: Schema.Literals(["cost", "tokens", "limits"]),
   windowDays: Schema.Literals([1, 7, 30, 90]),
+  provider: Schema.optional(UsageProviderKind),
 });
 export type UsagePagePreferences = typeof UsagePagePreferencesSchema.Type;
 

@@ -1,4 +1,9 @@
-import { EnvironmentId, UsageDay, USAGE_CONTRACT_VERSION } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  UsageDay,
+  USAGE_CONTRACT_VERSION,
+  type UsageProviderKind,
+} from "@t3tools/contracts";
 import { act, useLayoutEffect } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -76,8 +81,14 @@ function environment(id: string, cost: number | null, hostId = id): EnvironmentU
 let renderer: ReactTestRenderer | undefined;
 let latest: UsageView;
 
-function Probe({ selected }: { selected: ReadonlySet<EnvironmentId> | null }) {
-  const usage = useUsage(input, selected);
+function Probe({
+  selected,
+  provider = null,
+}: {
+  selected: ReadonlySet<EnvironmentId> | null;
+  provider?: UsageProviderKind | null;
+}) {
+  const usage = useUsage(input, selected, provider);
   useLayoutEffect(() => {
     latest = usage;
   }, [usage]);
@@ -152,6 +163,74 @@ describe("usage environment selection", () => {
     await select("b");
     expect(latest.merged.costUsd).toBe(20);
     expect(latest.merged.duplicateSources).toEqual([]);
+  });
+
+  it("filters tokens, prices, sessions and charts without changing the original summaries", async () => {
+    const original = environment("mixed", 10);
+    const summary = original.summary!;
+    const opencode = {
+      ...summary.buckets[0]!,
+      provider: "opencode" as const,
+      model: "opencode-model",
+      hourStart: "2026-09-04T12:00:00Z",
+      totals: {
+        uncachedInputTokens: 20,
+        cachedInputTokens: 30,
+        cacheCreationTokens: 10,
+        outputTokens: 40,
+        reasoningTokens: 15,
+      },
+      categoryCostUsd: { input: 1, cacheRead: 0.5, cacheWrite: 0.5, output: 1 },
+      costUsd: 3,
+    };
+    testState.environments = [
+      {
+        ...original,
+        summary: {
+          ...summary,
+          buckets: [...summary.buckets, opencode],
+          sources: [
+            ...summary.sources,
+            {
+              ...summary.sources[0]!,
+              fingerprint: { ...summary.sources[0]!.fingerprint, provider: "opencode" },
+              distinctSessions: 8,
+            },
+          ],
+        },
+      },
+    ];
+    const before = structuredClone(testState.environments);
+    await act(() => renderer?.update(<Probe selected={null} provider="opencode" />));
+    expect(latest.merged.totalTokens).toBe(100);
+    expect(latest.merged.outputTokens).toBe(40);
+    expect(latest.merged.reasoningTokens).toBe(15);
+    expect(latest.merged.costUsd).toBe(3);
+    expect(latest.merged.categoryCost).toMatchObject({ input: 1, output: 1 });
+    expect(latest.merged.sessions).toBe(8);
+    expect(latest.merged.models.map((model) => model.model)).toEqual(["opencode-model"]);
+    expect(latest.merged.providers.map((provider) => provider.provider)).toEqual(["opencode"]);
+    for (const totals of [latest.merged.daily[0]!, latest.merged.hourly[0]!]) {
+      expect(totals).toMatchObject({ totalTokens: 100, costUsd: 3 });
+      expect([...totals.byProvider.keys()]).toEqual(["opencode"]);
+      expect(totals.byProvider.get("opencode")).toEqual({
+        totalTokens: 100,
+        costUsd: 3,
+        reasoningTokens: 15,
+      });
+    }
+    expect(testState.environments).toEqual(before);
+
+    await act(() => renderer?.update(<Probe selected={null} provider="claude" />));
+    expect(latest.merged.totalTokens).toBe(0);
+    expect(latest.merged.sessions).toBe(0);
+
+    await act(() => renderer?.update(<Probe selected={null} />));
+    expect(latest.merged.totalTokens).toBe(250);
+    expect(latest.merged.costUsd).toBe(13);
+    expect(latest.merged.sessions).toBe(9);
+    expect(latest.merged.models).toHaveLength(2);
+    expect(testState.environments).toEqual(before);
   });
 
   it("keeps selected cached results visible during a refresh", async () => {

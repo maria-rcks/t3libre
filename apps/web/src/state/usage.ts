@@ -11,6 +11,7 @@ import {
   USAGE_CONTRACT_VERSION,
   type EnvironmentId,
   type UsageBucket,
+  type UsageProviderKind,
   type UsageSummary,
   type UsageSummaryInput,
 } from "@t3tools/contracts";
@@ -83,12 +84,14 @@ export interface UsageView {
 /**
  * Merges every environment that has answered. `keepBucket` narrows the merge,
  * for example to one model; source ownership still applies, so the result
- * matches that slice of the full merge. Session counts are per directory and
- * are not narrowed.
+ * matches that slice of the full merge. `provider` narrows sources too, so its
+ * session count excludes hidden providers. A model-only filter cannot narrow
+ * the per-directory session counts.
  */
 export function mergeAnsweredUsage(
   environments: readonly EnvironmentUsageStatus[],
   keepBucket?: (bucket: UsageBucket) => boolean,
+  provider: UsageProviderKind | null = null,
 ): MergedUsage {
   const answered: EnvironmentUsage[] = environments.flatMap(({ environmentId, label, summary }) =>
     summary === null
@@ -98,9 +101,19 @@ export function mergeAnsweredUsage(
             environmentId,
             label,
             summary:
-              keepBucket === undefined
+              keepBucket === undefined && provider === null
                 ? summary
-                : { ...summary, buckets: summary.buckets.filter(keepBucket) },
+                : {
+                    ...summary,
+                    buckets: summary.buckets.filter(
+                      (bucket) =>
+                        (provider === null || bucket.provider === provider) &&
+                        (keepBucket === undefined || keepBucket(bucket)),
+                    ),
+                    sources: summary.sources.filter(
+                      (source) => provider === null || source.fingerprint.provider === provider,
+                    ),
+                  },
           },
         ],
   );
@@ -110,6 +123,7 @@ export function mergeAnsweredUsage(
 export function useUsage(
   input: UsageSummaryInput,
   selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null = null,
+  provider: UsageProviderKind | null = null,
 ): UsageView {
   const windowKey = useMemo(
     () =>
@@ -154,7 +168,10 @@ export function useUsage(
     [selectedEnvironments, windowKey],
   );
 
-  const merged = useMemo(() => mergeAnsweredUsage(selectedEnvironments), [selectedEnvironments]);
+  const merged = useMemo(
+    () => mergeAnsweredUsage(selectedEnvironments, undefined, provider),
+    [selectedEnvironments, provider],
+  );
 
   const answeredCount = selectedEnvironments.filter(
     (environment) => environment.summary !== null,

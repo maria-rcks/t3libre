@@ -35,6 +35,20 @@ describe("Usage page preferences", () => {
     }
   });
 
+  it("persists the display filter and can restore all providers", () => {
+    saveUsagePagePreferences({ metric: "tokens", windowDays: 7, provider: "opencode" });
+    expect(readUsagePagePreferences()).toEqual({
+      metric: "tokens",
+      windowDays: 7,
+      provider: "opencode",
+    });
+    saveUsagePagePreferences({ ...readUsagePagePreferences(), metric: "cost" });
+    expect(readUsagePagePreferences().provider).toBe("opencode");
+    saveUsagePagePreferences({ ...readUsagePagePreferences(), provider: undefined });
+    expect(readUsagePagePreferences().provider).toBeUndefined();
+    expect(readUsagePagePreferences().metric).toBe("cost");
+  });
+
   it.each([
     "not-json",
     '{"metric":"unknown","windowDays":7}',
