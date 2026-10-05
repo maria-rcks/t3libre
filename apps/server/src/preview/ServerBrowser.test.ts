@@ -682,14 +682,22 @@ it.live("a page download is saved, offered to the controller, and listed for the
       const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
       yield* viewer.input({ type: "takeControl" });
       yield* Queue.clear(viewer.output);
-      const fs = yield* FileSystem.FileSystem;
-      const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
+      // Stands in for Chromium, which writes the file itself.
+      const saved = yield* Queue.unbounded<string>();
+      const written = Promise.withResolvers<void>();
       page.emit("download", {
         failure: async () => null,
-        saveAs: (path: string) => runPromise(fs.writeFileString(path, "a,b")),
+        saveAs: (path: string) => {
+          Queue.offerUnsafe(saved, path);
+          return written.promise;
+        },
         suggestedFilename: () => "report.csv",
         url: () => "blob:http://localhost:5173/1",
       });
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Queue.take(saved);
+      yield* fs.writeFileString(path, "a,b");
+      written.resolve();
       let offered = yield* Queue.take(viewer.output);
       while (offered._tag !== "download") offered = yield* Queue.take(viewer.output);
       expect(offered).toMatchObject({ _tag: "download", fileName: "report.csv", sizeBytes: 3 });
