@@ -272,6 +272,7 @@ const layer = PreviewManager.layer.pipe(
     Layer.succeed(DesktopRendererHistory.DesktopRendererHistory, {
       register: () => Effect.void,
       recordMetrics: () => Effect.void,
+      shutdown: Effect.void,
     }),
   ),
   Layer.provideMerge(browserSessionLayer),

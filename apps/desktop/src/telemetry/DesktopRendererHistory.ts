@@ -3,6 +3,7 @@ import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
@@ -23,6 +24,7 @@ export class DesktopRendererHistory extends Context.Service<
       identity: RendererIdentity,
     ) => Effect.Effect<void>;
     readonly recordMetrics: (metrics: ReadonlyArray<Electron.ProcessMetric>) => Effect.Effect<void>;
+    readonly shutdown: Effect.Effect<void>;
   }
 >()("@t3tools/desktop/telemetry/DesktopRendererHistory") {}
 
@@ -63,6 +65,7 @@ interface TrackedRenderer {
   pid: number | null;
   creationTimeMs: number | null;
   memory: RendererMemory | null;
+  gone: boolean;
   readonly removeListeners: () => void;
 }
 
@@ -79,6 +82,7 @@ const make = Effect.fn("DesktopRendererHistory.make")(function* () {
   const mainSessionStartedAtUnixMs = clock.currentTimeMillisUnsafe();
   const records = yield* Queue.sliding<RendererRecord>(256);
   const active = new Map<number, TrackedRenderer>();
+  let accepting = true;
   const writer = yield* makeRotatingLogFileWriter({
     filePath: path.join(environment.logDir, "renderer-history.ndjson"),
     maxBytes: 256 * 1024,
@@ -93,7 +97,7 @@ const make = Effect.fn("DesktopRendererHistory.make")(function* () {
 
   const writeRecord = (record: RendererRecord) =>
     writer.writeText(`${JSON.stringify(record)}\n`).pipe(Effect.ignore);
-  yield* Effect.forever(
+  const writerFiber = yield* Effect.forever(
     Effect.uninterruptibleMask((restore) =>
       restore(Queue.take(records)).pipe(Effect.flatMap(writeRecord)),
     ).pipe(
@@ -116,7 +120,7 @@ const make = Effect.fn("DesktopRendererHistory.make")(function* () {
 
   const readPid = (renderer: TrackedRenderer): RendererRecord["rendererPidSource"] => {
     try {
-      if (!renderer.webContents.isDestroyed()) {
+      if (!renderer.gone && !renderer.webContents.isDestroyed()) {
         const pid = renderer.webContents.getOSProcessId();
         if (Number.isInteger(pid) && pid > 0) {
           if (pid !== renderer.pid) {
@@ -163,7 +167,7 @@ const make = Effect.fn("DesktopRendererHistory.make")(function* () {
 
   const register = (webContents: Electron.WebContents, identity: RendererIdentity) =>
     Effect.sync(() => {
-      if (webContents.isDestroyed()) return;
+      if (!accepting || webContents.isDestroyed()) return;
       const boundedIdentity: RendererIdentity = {
         surface: identity.surface,
         ...(identity.tabId === undefined ? {} : { tabId: identity.tabId.slice(0, 128) }),
@@ -179,7 +183,15 @@ const make = Effect.fn("DesktopRendererHistory.make")(function* () {
         }
         return;
       }
-      const onDomReady = () => record(renderer, "dom-ready");
+      const onDomReady = () => {
+        if (renderer.gone) {
+          renderer.pid = null;
+          renderer.creationTimeMs = null;
+          renderer.memory = null;
+          renderer.gone = false;
+        }
+        record(renderer, "dom-ready");
+      };
       const onDevToolsOpened = () => {
         const tools = webContents.devToolsWebContents;
         if (tools)
@@ -190,8 +202,11 @@ const make = Effect.fn("DesktopRendererHistory.make")(function* () {
             }),
           );
       };
-      const onGone = (_event: Electron.Event, details: Electron.RenderProcessGoneDetails) =>
+      const onGone = (_event: Electron.Event, details: Electron.RenderProcessGoneDetails) => {
+        readPid(renderer);
+        renderer.gone = true;
         record(renderer, "render-process-gone", details);
+      };
       const onDestroyed = () => {
         record(renderer, "destroyed");
         active.delete(webContents.id);
@@ -203,6 +218,7 @@ const make = Effect.fn("DesktopRendererHistory.make")(function* () {
         pid: null,
         creationTimeMs: null,
         memory: null,
+        gone: false,
         removeListeners: () => {
           webContents.removeListener("dom-ready", onDomReady);
           webContents.removeListener("devtools-opened", onDevToolsOpened);
@@ -226,10 +242,11 @@ const make = Effect.fn("DesktopRendererHistory.make")(function* () {
   let lastSampledAtUnixMs = -Infinity;
   const recordMetrics = (metrics: ReadonlyArray<Electron.ProcessMetric>) =>
     Effect.sync(() => {
-      const byPid = new Map(metrics.map((metric) => [metric.pid, metric]));
+      if (!accepting) return;
       const sampledAtUnixMs = clock.currentTimeMillisUnsafe();
       if (sampledAtUnixMs - lastSampledAtUnixMs < 30_000) return;
       lastSampledAtUnixMs = sampledAtUnixMs;
+      const byPid = new Map(metrics.map((metric) => [metric.pid, metric]));
       for (const renderer of active.values()) {
         const pidSource = readPid(renderer);
         // A last-known PID may already have been reused by another process.
@@ -253,14 +270,14 @@ const make = Effect.fn("DesktopRendererHistory.make")(function* () {
         () => Effect.void,
       ),
     );
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      for (const renderer of active.values()) renderer.removeListeners();
-      active.clear();
-    }),
-  );
+  const shutdown = Effect.sync(() => {
+    accepting = false;
+    for (const renderer of active.values()) renderer.removeListeners();
+    active.clear();
+  }).pipe(Effect.andThen(Fiber.interrupt(writerFiber)), Effect.asVoid);
+  yield* Effect.addFinalizer(() => shutdown);
 
-  return DesktopRendererHistory.of({ register, recordMetrics });
+  return DesktopRendererHistory.of({ register, recordMetrics, shutdown });
 });
 
 export const layer = Layer.effect(DesktopRendererHistory, make());

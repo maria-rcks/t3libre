@@ -27,6 +27,7 @@ import * as DesktopRendererHistory from "./DesktopRendererHistory.ts";
 const historyLayer = Layer.succeed(DesktopRendererHistory.DesktopRendererHistory, {
   register: () => Effect.void,
   recordMetrics: () => Effect.void,
+  shutdown: Effect.void,
 });
 
 function makeElectronAppLayer(
@@ -154,6 +155,7 @@ describe("DesktopTelemetryPublisher", () => {
             powerLayer,
             Layer.succeed(DesktopRendererHistory.DesktopRendererHistory, {
               register: () => Effect.void,
+              shutdown: Effect.void,
               recordMetrics: (sample) =>
                 Effect.sync(() => {
                   recordedMetrics.push(sample);
@@ -656,13 +658,23 @@ describe("DesktopRendererHistory", () => {
           assert.equal(crash.rendererPidSource, "last-known");
           assert.equal(crash.reason, "oom");
           assert.equal(crash.exitCode, -7);
+          // A restarted renderer can reuse the same numeric PID.
+          const restarted = yield* Deferred.make<Record>();
+          milestone = { matches: (row) => row.event === "dom-ready", written: restarted };
+          previewPid = 7_003;
+          preview.emit("dom-ready");
+          const restart = yield* Deferred.await(restarted);
+          assert.equal(restart.rendererPid, 7_003);
+          assert.equal(restart.rendererPidSource, "current");
+          assert.isNull(restart.rendererCreationTimeMs);
+          assert.isNull(restart.memory);
           const destroyed = yield* Deferred.make<Record>();
           milestone = { matches: (row) => row.event === "destroyed", written: destroyed };
           previewDestroyed = true;
           preview.emit("destroyed");
           const destruction = yield* Deferred.await(destroyed);
           assert.equal(destruction.rendererPid, 7_003);
-          assert.equal(destruction.rendererCreationTimeMs, 700_300);
+          assert.isNull(destruction.rendererCreationTimeMs);
           assert.equal(destruction.tabId, "preview-tab");
           assert.equal(preview.eventNames().length, 0);
           const afterDestroy = yield* Deferred.make<Record>();
@@ -672,8 +684,19 @@ describe("DesktopRendererHistory", () => {
           yield* history.recordMetrics(metrics);
           assert.equal((yield* Deferred.await(afterDestroy)).webContentsId, 1);
           assert.isFalse(persisted.slice(previousCount).some((row) => row.webContentsId === 2));
-          // Closing immediately still drains these accepted lifecycle records.
+          // The app quit handshake drains before the history layer closes.
           for (let index = 0; index < 12; index++) main.emit("dom-ready");
+          yield* history.shutdown;
+          assert.equal(
+            persisted.filter((row) => row.webContentsId === 1 && row.event === "dom-ready").length,
+            12,
+          );
+          const afterShutdown = persisted.length;
+          yield* history.register(main as unknown as Electron.WebContents, { surface: "main" });
+          yield* history.recordMetrics(metrics);
+          assert.equal(persisted.length, afterShutdown);
+          assert.equal(main.eventNames().length, 0);
+          yield* history.shutdown;
         }).pipe(Effect.provide(layer));
 
         assert.equal(main.eventNames().length, 0);
@@ -728,7 +751,6 @@ describe("DesktopRendererHistory", () => {
                 logDir: directory,
               } as DesktopEnvironment.DesktopEnvironment["Service"]),
             ),
-            makeElectronAppLayer([]),
             fileLayer,
           ),
         ),
