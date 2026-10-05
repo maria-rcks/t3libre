@@ -70,7 +70,7 @@ const nonnegative = (value: number): number | null =>
   Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
 
 /** Small restart-surviving PID history; never reads URLs or page content. */
-export const make = Effect.fn("DesktopRendererHistory.make")(function* () {
+const make = Effect.fn("DesktopRendererHistory.make")(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const path = yield* Path.Path;
   const clock = yield* Clock.Clock;
