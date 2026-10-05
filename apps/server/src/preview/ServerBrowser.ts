@@ -267,6 +267,8 @@ const make = Effect.gen(function* () {
 
   const tabs = new Map<string, ServerTab>();
   const pendingTabs = new Map<string, Promise<ServerTab>>();
+  /** Sessions closed while their tab was still opening; the open discards its page. */
+  const closedPendingTabs = new Set<string>();
   let hostConnectionId: string | null = null;
   let viewerResizeOrder = 0;
 
@@ -521,9 +523,16 @@ const make = Effect.gen(function* () {
         .catch(constVoid);
     });
     // Playwright cannot reload a crashed page, so it must leave the tab list.
+    const key = tabKey(tab.threadId, tab.tabId);
+    if (closedPendingTabs.delete(key)) {
+      await control.close().catch(constVoid);
+      await page.close().catch(constVoid);
+      if (isolatedContext) await context.close().catch(constVoid);
+      throw new ServerBrowserTabNotFoundError({ threadId: tab.threadId, tabId: tab.tabId });
+    }
     page.on("close", () => dropTab(tab, true));
     page.on("crash", () => dropTab(tab, true));
-    tabs.set(tabKey(tab.threadId, tab.tabId), tab);
+    tabs.set(key, tab);
     reportLiveTabs();
     if (snapshot.navStatus._tag === "Loading") {
       tab.initialNavigation = page
@@ -546,7 +555,10 @@ const make = Effect.gen(function* () {
         runFork(Effect.logWarning("server preview tab failed to start", { cause }));
         throw cause;
       })
-      .finally(() => pendingTabs.delete(key));
+      .finally(() => {
+        pendingTabs.delete(key);
+        closedPendingTabs.delete(key);
+      });
     pendingTabs.set(key, opening);
     return opening;
   };
@@ -562,7 +574,10 @@ const make = Effect.gen(function* () {
       if (!snapshot) return yield* new ServerBrowserTabNotFoundError({ threadId, tabId });
       return yield* Effect.tryPromise({
         try: () => ensureTab(snapshot),
-        catch: (cause) => new ServerBrowserLaunchError({ cause }),
+        catch: (cause) =>
+          Schema.is(ServerBrowserTabNotFoundError)(cause)
+            ? cause
+            : new ServerBrowserLaunchError({ cause }),
       });
     });
 
@@ -1131,7 +1146,9 @@ const make = Effect.gen(function* () {
         await ensureTab(event.snapshot).catch(constVoid);
         return;
       }
-      const tab = tabs.get(tabKey(event.threadId, event.tabId));
+      const key = tabKey(event.threadId, event.tabId);
+      const tab = tabs.get(key);
+      if (event.type === "closed" && !tab && pendingTabs.has(key)) closedPendingTabs.add(key);
       if (!tab) return;
       if (event.type === "closed") {
         dropTab(tab, false);

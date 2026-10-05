@@ -32,6 +32,8 @@ vi.mock("./ServerBrowserContexts.ts", () => ({
       this.onClose = options.onContextClose;
     }
     async contextFor() {
+      if (contextFailure) throw contextFailure;
+      await contextGate?.promise;
       const context = makeContext(this.onClose);
       contexts.push(context);
       return context as unknown as BrowserContext;
@@ -123,6 +125,8 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
 }
 
 const contexts: ReturnType<typeof makeContext>[] = [];
+let contextGate: PromiseWithResolvers<void> | null = null;
+let contextFailure: Error | null = null;
 const scope = {
   environmentId: EnvironmentId.make("browser-test-environment"),
   threadId: ThreadId.make("browser-test-thread"),
@@ -169,6 +173,8 @@ const viewerInput = (tabId: string, canOperate: boolean) => ({
 
 beforeEach(() => {
   contexts.length = 0;
+  contextGate = null;
+  contextFailure = null;
   vi.stubEnv("T3CODE_SERVER_BROWSER", "1");
 });
 afterEach(() => vi.unstubAllEnvs());
@@ -591,4 +597,30 @@ it.live.each([false, true])(
         else expect(page.goto).toHaveBeenCalledExactlyOnceWith("http://localhost:5173/popup");
       }),
     ).pipe(Effect.provide(layer)),
+);
+
+it.live("closing a tab while a viewer is still opening it does not leave its page behind", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const manager = yield* Manager.PreviewManager;
+      yield* Effect.yieldNow;
+      // The background open fails, so the tab exists only as a session.
+      contextFailure = new Error("first launch failed");
+      const snapshot = yield* manager.open({ threadId: scope.threadId, runtime: "server" });
+      yield* Effect.sleep("10 millis");
+      contextFailure = null;
+      contextGate = Promise.withResolvers<void>();
+      const attaching = yield* browser
+        .attachViewer(viewerInput(snapshot.tabId, false))
+        .pipe(Effect.flip, Effect.forkScoped);
+      yield* Effect.sleep("10 millis");
+      yield* manager.close({ threadId: scope.threadId, tabId: snapshot.tabId });
+      yield* Effect.sleep("10 millis");
+      contextGate.resolve();
+      expect((yield* Fiber.join(attaching))._tag).toBe("ServerBrowserTabNotFoundError");
+      expect(contexts).toHaveLength(1);
+      expect(contexts[0]!.page.close).toHaveBeenCalled();
+    }),
+  ).pipe(Effect.provide(layer)),
 );
