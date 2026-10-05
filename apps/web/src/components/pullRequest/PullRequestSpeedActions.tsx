@@ -66,10 +66,11 @@ export function PullRequestSpeedActions({
       : entry.isDraft
         ? (["close", "ready"] as const)
         : (["close", "merge"] as const);
+  const busy = actionPending || closing || sweeping;
   return (
     <div
-      className="relative shrink-0 items-center gap-1 pr-3"
-      style={{ display: visible || actionPending || closing || sweeping ? "flex" : "none" }}
+      className="shrink-0 items-center gap-1 pr-3"
+      style={{ display: visible || busy ? "flex" : "none" }}
       role="group"
       aria-label={`Quick actions for pull request #${entry.number}`}
       data-pull-request-action-pending={actionPending || closing}
@@ -84,9 +85,7 @@ export function PullRequestSpeedActions({
                 <Button
                   variant={action === "close" ? "destructive-outline" : "outline"}
                   size="xs"
-                  disabled={
-                    closing || actionPending || (action === "merge" && entry.stack !== undefined)
-                  }
+                  disabled={busy || (action === "merge" && entry.stack !== undefined)}
                   aria-label={`${label} #${entry.number}`}
                   onClick={() => void perform(action)}
                   onPointerDown={(event) => {
@@ -94,11 +93,10 @@ export function PullRequestSpeedActions({
                     event.stopPropagation();
                     onCloseSweepStart?.(entry, event.nativeEvent);
                   }}
-                  style={{ visibility: sweeping || closing ? "hidden" : undefined }}
                 />
               }
             >
-              {actionPending ? <Spinner size="xs" /> : <Icon aria-hidden className="size-3" />}
+              {busy ? <Spinner size="xs" /> : <Icon aria-hidden className="size-3" />}
               {label}
             </TooltipTrigger>
             <TooltipPopup>
@@ -111,15 +109,6 @@ export function PullRequestSpeedActions({
           </Tooltip>
         );
       })}
-      {sweeping || closing ? (
-        <span
-          role="status"
-          aria-label={closing ? "Closing pull request" : "Selected for closing"}
-          className="pointer-events-none absolute right-3 inline-flex items-center"
-        >
-          <Spinner size="xs" />
-        </span>
-      ) : null}
     </div>
   );
 }
