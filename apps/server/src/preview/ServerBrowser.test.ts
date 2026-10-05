@@ -12,7 +12,9 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import type { BrowserContext, Page } from "playwright-core";
 import { afterEach, beforeEach, expect, vi } from "vite-plus/test";
@@ -668,6 +670,49 @@ it.live("page copies reach only the controlling viewer right after its input", (
       clipboardBinding!({ page }, "copied");
       expect(yield* clipboard(viewer.output)).toEqual([{ _tag: "clipboard", text: "copied" }]);
       expect(yield* clipboard(watcher.output)).toEqual([]);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("a page download is saved, offered to the controller, and listed for the agent", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, broker, tabId } = yield* ready;
+      const page = contexts[0]!.page;
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      yield* viewer.input({ type: "takeControl" });
+      yield* Queue.clear(viewer.output);
+      const fs = yield* FileSystem.FileSystem;
+      const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
+      page.emit("download", {
+        failure: async () => null,
+        saveAs: (path: string) => runPromise(fs.writeFileString(path, "a,b")),
+        suggestedFilename: () => "report.csv",
+        url: () => "blob:http://localhost:5173/1",
+      });
+      let offered = yield* Queue.take(viewer.output);
+      while (offered._tag !== "download") offered = yield* Queue.take(viewer.output);
+      expect(offered).toMatchObject({ _tag: "download", fileName: "report.csv", sizeBytes: 3 });
+      const file = yield* browser.openDownload({
+        threadId: scope.threadId,
+        tabId,
+        downloadId: offered.id,
+      });
+      expect(Option.isSome(file) && file.value.fileName).toBe("report.csv");
+      const status = yield* broker.invoke<PreviewAutomationStatus>({
+        scope,
+        tabId,
+        operation: "status",
+        input: {},
+      });
+      expect(status.downloads).toEqual([
+        expect.objectContaining({ fileName: "report.csv", sizeBytes: 3 }),
+      ]);
+      expect(
+        Option.isNone(
+          yield* browser.openDownload({ threadId: scope.threadId, tabId, downloadId: "guess" }),
+        ),
+      ).toBe(true);
     }),
   ).pipe(Effect.provide(layer)),
 );

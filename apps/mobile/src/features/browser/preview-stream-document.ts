@@ -1,5 +1,8 @@
 import type { DeviceHubAccess } from "@t3tools/client-runtime/device/hub-access";
-import type { PreviewStreamControl } from "@t3tools/client-runtime/preview/server-browser-stream";
+import type {
+  PreviewStreamControl,
+  PreviewStreamDownload,
+} from "@t3tools/client-runtime/preview/server-browser-stream";
 
 export interface PreviewStreamConfiguration {
   readonly access: DeviceHubAccess;
@@ -22,6 +25,7 @@ export type PreviewStreamMessage =
   | { readonly type: "gone" }
   | { readonly type: "viewport"; readonly width: number; readonly height: number }
   | { readonly type: "clipboard"; readonly text: string }
+  | ({ readonly type: "download" } & PreviewStreamDownload)
   | {
       readonly type: "pictureInPicture";
       readonly supported: boolean;

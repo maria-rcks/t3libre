@@ -95,6 +95,18 @@ export const PreviewAutomationStatus = Schema.Struct({
   viewportSetting: Schema.optional(PreviewViewportSetting),
   /** Measured guest-page viewport in CSS pixels when a webview is ready. */
   viewport: Schema.optional(PreviewRenderedViewportSize),
+  /** Server hosts: files this tab downloaded, saved on the environment until the tab closes. */
+  downloads: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        fileName: Schema.String,
+        path: Schema.String,
+        sizeBytes: Schema.Number,
+        url: Schema.String,
+        completedAt: Schema.String,
+      }),
+    ),
+  ),
   /** Server hosts: every tab this agent session owns, including popups its pages opened. */
   tabs: Schema.optional(
     Schema.Array(

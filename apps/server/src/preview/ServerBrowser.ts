@@ -39,11 +39,12 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import { constVoid } from "effect/Function";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import type { BrowserContext, CDPSession, Dialog, Page } from "playwright-core";
+import type { BrowserContext, CDPSession, Dialog, Download, Page } from "playwright-core";
 
 import { PENDING_ATTACHMENT_THREAD_SEGMENT } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -140,6 +141,12 @@ export type ServerBrowserViewerOutput =
       readonly editable: boolean;
     }
   | { readonly _tag: "clipboard"; readonly text: string }
+  | {
+      readonly _tag: "download";
+      readonly id: string;
+      readonly fileName: string;
+      readonly sizeBytes: number;
+    }
   | { readonly _tag: "gone" };
 
 export interface ServerBrowserViewer {
@@ -163,6 +170,12 @@ export class ServerBrowser extends Context.Service<
       ServerBrowserTabNotFoundError | ServerBrowserLaunchError,
       Scope.Scope
     >;
+    /** A finished download of a live tab, for the authenticated download route. */
+    readonly openDownload: (input: {
+      readonly threadId: string;
+      readonly tabId: string;
+      readonly downloadId: string;
+    }) => Effect.Effect<Option.Option<{ readonly path: string; readonly fileName: string }>>;
     /** Deletes a human profile's server-side storage, closing its open tabs first. */
     readonly clearProfile: (profileId: string) => Effect.Effect<void, PreviewClearProfileError>;
   }
@@ -216,6 +229,8 @@ interface ServerTab {
   readonly profileId: string | undefined;
   /** Set when a page in another tab opened this one with `window.open` or a link. */
   readonly openerTabId: string | undefined;
+  /** Finished downloads, newest last; files live until the tab closes. */
+  readonly downloads: Array<ServerDownload>;
   dialog: Dialog | null;
   setting: PreviewViewportSetting;
   loading: boolean;
@@ -229,6 +244,18 @@ interface ServerTab {
   /** Scaled captures rendering now; screencasts stay stopped meanwhile. */
   capturing: number;
 }
+
+interface ServerDownload {
+  readonly id: string;
+  readonly fileName: string;
+  readonly path: string;
+  readonly sizeBytes: number;
+  readonly url: string;
+  readonly completedAt: string;
+}
+
+const DOWNLOAD_LIMIT = 20;
+const DOWNLOAD_MAX_BYTES = 1024 * 1024 * 1024;
 
 const tabKey = (threadId: string, tabId: string) => `${threadId}\u0000${tabId}`;
 
@@ -468,6 +495,7 @@ const make = Effect.gen(function* () {
     void tab.page.close().catch(constVoid);
     if (tab.isolatedContext) void tab.page.context().close().catch(constVoid);
     void tab.recording?.encoder.close().catch(constVoid);
+    void NodeFSP.rm(downloadDir(tab), { recursive: true, force: true }).catch(constVoid);
     reportLiveTabs();
     if (closeSession) {
       runFork(manager.close({ threadId: tab.threadId, tabId: tab.tabId }).pipe(Effect.ignore));
@@ -510,6 +538,7 @@ const make = Effect.gen(function* () {
       isolatedContext,
       profileId: snapshot.profileId,
       openerTabId: adopted?.openerTabId,
+      downloads: [],
       dialog: null,
       setting: snapshot.viewport ?? FILL_PREVIEW_VIEWPORT,
       loading: false,
@@ -577,6 +606,7 @@ const make = Effect.gen(function* () {
       tab.dialog = dialog;
       broadcastControl(tab);
     });
+    page.on("download", (download) => void saveDownload(tab, download));
     // Popups become tabs and keep `window.opener`, so sign-in popups can report back.
     page.on("popup", (popup) => void adoptPopup(tab, popup));
     // Playwright cannot reload a crashed page, so it must leave the tab list.
@@ -601,6 +631,62 @@ const make = Effect.gen(function* () {
     }
     return tab;
   };
+
+  const downloadsRoot = NodePath.join(config.stateDir, "server-browser", "downloads");
+  // Tab ids are opaque server strings; hashing keeps them out of the path.
+  const downloadDir = (tab: ServerTab) =>
+    NodePath.join(
+      downloadsRoot,
+      NodeCrypto.createHash("sha256").update(tabKey(tab.threadId, tab.tabId)).digest("hex"),
+    );
+
+  const saveDownload = async (tab: ServerTab, download: Download) => {
+    const id = NodeCrypto.randomUUID();
+    const path = NodePath.join(downloadDir(tab), id);
+    try {
+      if (await download.failure()) return;
+      await NodeFSP.mkdir(downloadDir(tab), { recursive: true });
+      await download.saveAs(path);
+      const { size } = await NodeFSP.stat(path);
+      if (tab.closing || size > DOWNLOAD_MAX_BYTES) {
+        await NodeFSP.rm(path, { force: true });
+        return;
+      }
+      const saved: ServerDownload = {
+        id,
+        fileName: download.suggestedFilename().slice(0, 255) || "download",
+        path,
+        sizeBytes: size,
+        url: download.url().slice(0, 2048),
+        completedAt: new Date().toISOString(),
+      };
+      tab.downloads.push(saved);
+      for (const evicted of tab.downloads.splice(0, tab.downloads.length - DOWNLOAD_LIMIT)) {
+        await NodeFSP.rm(evicted.path, { force: true }).catch(constVoid);
+      }
+      // Only the person driving the page gets the file offered; agents read it from status.
+      const controller = [...tab.viewers].find((viewer) => viewer.id === tab.control.controller);
+      controller?.push({
+        _tag: "download",
+        id,
+        fileName: saved.fileName,
+        sizeBytes: saved.sizeBytes,
+      });
+    } catch (cause) {
+      await NodeFSP.rm(path, { force: true }).catch(constVoid);
+      runFork(Effect.logWarning("server preview download failed", { cause }));
+    }
+  };
+
+  const openDownload: ServerBrowser["Service"]["openDownload"] = (input) =>
+    Effect.sync(() => {
+      const download = tabs
+        .get(tabKey(input.threadId, input.tabId))
+        ?.downloads.find((candidate) => candidate.id === input.downloadId);
+      return download === undefined
+        ? Option.none()
+        : Option.some({ path: download.path, fileName: download.fileName });
+    });
 
   const preparedContexts = new WeakSet<BrowserContext>();
   const prepareContext = async (context: BrowserContext) => {
@@ -731,6 +817,13 @@ const make = Effect.gen(function* () {
           url: candidate.page.url() === "about:blank" ? null : candidate.page.url(),
           ...(candidate.openerTabId === undefined ? {} : { openerTabId: candidate.openerTabId }),
         })),
+      downloads: tab.downloads.map(({ fileName, path, sizeBytes, url, completedAt }) => ({
+        fileName,
+        path,
+        sizeBytes,
+        url,
+        completedAt,
+      })),
     };
     if (status.url === null || tab.dialog) return status;
     return { ...status, title: (await tab.page.title().catch(() => "")) || null };
@@ -1666,7 +1759,7 @@ const make = Effect.gen(function* () {
       catch: (cause) => new PreviewClearProfileError({ profileId, cause }),
     });
 
-  return ServerBrowser.of({ enabled, attachViewer, clearProfile });
+  return ServerBrowser.of({ enabled, attachViewer, clearProfile, openDownload });
 });
 
 export const layer = Layer.effect(ServerBrowser, make);

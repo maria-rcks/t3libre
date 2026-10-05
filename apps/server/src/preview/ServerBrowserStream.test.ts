@@ -1,4 +1,6 @@
+import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
   AuthOrchestrationOperateScope,
@@ -8,13 +10,17 @@ import {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
 import { routeLayer } from "./ServerBrowserStream.ts";
+
+const platformLayer = NodeHttpPlatform.layer.pipe(Layer.provideMerge(NodeServices.layer));
 
 const makeAuth = (
   scopes: ReadonlyArray<AuthEnvironmentScope>,
@@ -78,6 +84,7 @@ it.effect.each([
     const browser = ServerBrowser.ServerBrowser.of({
       enabled: true,
       clearProfile: () => Effect.void,
+      openDownload: () => Effect.succeedNone,
       attachViewer: (input) =>
         Effect.sync(() => {
           attachments.push(input);
@@ -89,7 +96,10 @@ it.effect.each([
     });
     const services = yield* Layer.build(
       HttpRouter.serve(
-        routeLayer.pipe(Layer.provide(Layer.succeed(ServerBrowser.ServerBrowser, browser))),
+        routeLayer.pipe(
+          Layer.provide(Layer.succeed(ServerBrowser.ServerBrowser, browser)),
+          Layer.provide(platformLayer),
+        ),
         { disableListenLog: true },
       ).pipe(Layer.provideMerge(NodeHttpServer.layerTest), Layer.provide(auth.layer)),
     );
@@ -150,6 +160,7 @@ it.effect.each([
     const browser = ServerBrowser.ServerBrowser.of({
       enabled: true,
       clearProfile: () => Effect.void,
+      openDownload: () => Effect.succeedNone,
       attachViewer: () => {
         attachments++;
         return Effect.die("unauthorized viewer must not attach");
@@ -160,6 +171,7 @@ it.effect.each([
         HttpRouter.toWebHandler(
           routeLayer.pipe(
             Layer.provide(Layer.succeed(ServerBrowser.ServerBrowser, browser)),
+            Layer.provide(platformLayer),
             Layer.provideMerge(auth.layer),
           ),
           { disableLogger: true },
@@ -177,4 +189,54 @@ it.effect.each([
     expect(response.status).toBe(testCase.status);
     expect(attachments).toBe(0);
   }).pipe(Effect.scoped),
+);
+
+it.effect("serves a tab's download only to an authorized session", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = `${yield* fs.makeTempDirectoryScoped({ prefix: "t3-download-" })}/file`;
+    yield* fs.writeFileString(path, "report contents");
+    const requests: Array<unknown> = [];
+    const browser = ServerBrowser.ServerBrowser.of({
+      enabled: true,
+      clearProfile: () => Effect.void,
+      openDownload: (input) =>
+        Effect.sync(() => {
+          requests.push(input);
+          return input.downloadId === "download-1"
+            ? Option.some({ path, fileName: "Q3 report.csv" })
+            : Option.none();
+        }),
+      attachViewer: () => Effect.die("unused"),
+    });
+    const serve = (scopes: ReadonlyArray<AuthEnvironmentScope>, url: string) =>
+      Effect.gen(function* () {
+        const handler = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            HttpRouter.toWebHandler(
+              routeLayer.pipe(
+                Layer.provide(Layer.succeed(ServerBrowser.ServerBrowser, browser)),
+                Layer.provide(platformLayer),
+                Layer.provideMerge(makeAuth(scopes, undefined).layer),
+              ),
+              { disableLogger: true },
+            ),
+          ),
+          ({ dispose }) => Effect.promise(dispose),
+        );
+        return yield* Effect.promise(() => handler.handler(new Request(url)));
+      });
+    const base = "http://t3.test/api/preview-stream/download?threadId=thread&tabId=tab";
+    const denied = yield* serve([], `${base}&id=download-1`);
+    expect(denied.status).toBe(403);
+    expect(requests).toEqual([]);
+    const response = yield* serve([AuthOrchestrationReadScope], `${base}&id=download-1`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="Q3 report.csv"',
+    );
+    expect(yield* Effect.promise(() => response.text())).toBe("report contents");
+    const missing = yield* serve([AuthOrchestrationReadScope], `${base}&id=other`);
+    expect(missing.status).toBe(404);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

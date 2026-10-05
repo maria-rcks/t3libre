@@ -2,6 +2,7 @@ import previewStreamScript from "@t3tools/mobile-preview-stream";
 import {
   previewStreamControlLabel,
   type PreviewStreamControl,
+  type PreviewStreamDownload,
   type PreviewStreamInput,
 } from "@t3tools/client-runtime/preview/server-browser-stream";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -15,11 +16,12 @@ import {
   useState,
   type Ref,
 } from "react";
-import { ActivityIndicator, Platform, Pressable, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, TextInput, View } from "react-native";
 import { WebView } from "react-native-webview";
 import * as Clipboard from "expo-clipboard";
 
 import { AppText } from "../../components/AppText";
+import { downloadAndShareAttachment } from "../../lib/attachmentDownload";
 import { usePreviewStreamAccess } from "../../state/preview";
 
 import {
@@ -53,6 +55,27 @@ type NativeStreamBridge = {
   /** The floating player shows a spinner without text or a reconnect button. */
   readonly compact?: boolean;
 };
+
+/** The file is on the environment; saving it here goes through the share sheet. */
+function offerDownload(download: PreviewStreamDownload) {
+  Alert.alert(`Downloaded ${download.fileName}`, undefined, [
+    { text: "Not now", style: "cancel" },
+    {
+      text: "Save or share",
+      onPress: () =>
+        void downloadAndShareAttachment({
+          url: download.url,
+          attachment: { name: download.fileName, mimeType: "application/octet-stream" },
+          signal: new AbortController().signal,
+        }).catch((cause: unknown) =>
+          Alert.alert(
+            "Could not save the download",
+            cause instanceof Error ? cause.message : undefined,
+          ),
+        ),
+    },
+  ]);
+}
 
 // Consecutive refused tickets before the view stops and offers Reconnect, e.g. a
 // session without operate scope.
@@ -322,6 +345,9 @@ function PreviewStreamDocumentView({
               return;
             case "clipboard":
               void Clipboard.setStringAsync(message.text).catch(() => undefined);
+              return;
+            case "download":
+              offerDownload(message);
               return;
             case "pictureInPicture":
               onPictureInPicture?.(message, message.detail);

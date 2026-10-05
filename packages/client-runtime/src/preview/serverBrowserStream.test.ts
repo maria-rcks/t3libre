@@ -141,3 +141,33 @@ describe("preview stream control", () => {
     client.stop();
   });
 });
+
+describe("preview stream downloads", () => {
+  beforeEach(() => vi.stubGlobal("WebSocket", FakeSocket));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("offers a download at a URL carrying the stream's ticket", () => {
+    const onDownload = vi.fn();
+    createPreviewStreamClient(
+      {
+        ...target,
+        access: { ...target.access, query: { wsTicket: "ticket" }, credentials: false },
+      },
+      {
+        onFrame: vi.fn(),
+        onDownload,
+        onViewport: vi.fn(),
+        onConnectedChange: vi.fn(),
+        onUnauthorized: vi.fn(),
+      },
+    );
+    FakeSocket.current.message(
+      JSON.stringify({ type: "download", id: "d1", fileName: "a b.csv", sizeBytes: 3 }),
+    );
+    expect(onDownload).toHaveBeenCalledExactlyOnceWith({
+      fileName: "a b.csv",
+      sizeBytes: 3,
+      url: "http://preview.test/api/preview-stream/download?threadId=thread&tabId=tab&id=d1&wsTicket=ticket",
+    });
+  });
+});

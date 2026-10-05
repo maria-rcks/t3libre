@@ -7,6 +7,7 @@ import {
   previewStreamModifiers,
   type PreviewStreamClient,
   type PreviewStreamControl,
+  type PreviewStreamDownload,
   type PreviewStreamInput,
   type PreviewStreamMouseButton,
   type PreviewStreamViewport,
@@ -110,6 +111,24 @@ async function copyPageText(text: string) {
       },
     });
   }
+}
+
+/** The download happens on the environment; this hands the finished file to this device. */
+function offerDownload(download: PreviewStreamDownload) {
+  const id = toastManager.add({
+    type: "info",
+    title: `Downloaded ${download.fileName}`,
+    actionProps: {
+      children: "Save",
+      onClick: () => {
+        toastManager.close(id);
+        const anchor = document.createElement("a");
+        anchor.href = download.url;
+        anchor.download = download.fileName;
+        anchor.click();
+      },
+    },
+  });
 }
 
 export function ServerBrowserSurface(props: {
@@ -346,6 +365,7 @@ export function ServerBrowserSurface(props: {
           else inputRef.current?.blur();
         },
         onClipboard: (text) => void copyPageText(text),
+        onDownload: offerDownload,
         onViewport: (viewport) => {
           viewportRef.current = viewport;
           viewportChanged(viewport);

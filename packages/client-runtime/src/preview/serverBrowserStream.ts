@@ -90,6 +90,26 @@ export type PreviewStreamInput =
   /** Asks whether the page point takes text. Touch viewers send it on touch start. */
   | { readonly type: "probe"; readonly x: number; readonly y: number };
 
+export interface PreviewStreamDownload {
+  readonly fileName: string;
+  readonly sizeBytes: number;
+  /** Authenticated with the stream's own access; cookie sessions must send credentials. */
+  readonly url: string;
+}
+
+export const previewStreamDownloadUrl = (
+  target: Pick<PreviewStreamTarget, "access" | "threadId" | "tabId">,
+  id: string,
+): string =>
+  withDeviceHubQuery(
+    `${target.access.httpBase}/download?${new URLSearchParams({
+      threadId: target.threadId,
+      tabId: target.tabId,
+      id,
+    }).toString()}`,
+    target.access,
+  );
+
 /** Answer to a `probe`, echoing its point. */
 export interface PreviewStreamProbe {
   readonly x: number;
@@ -128,6 +148,8 @@ export interface PreviewStreamEvents {
   readonly onControl?: (control: PreviewStreamControl) => void;
   /** Text the page just copied or cut while this viewer had control. */
   readonly onClipboard?: (text: string) => void;
+  /** A file the page downloaded while this viewer had control. */
+  readonly onDownload?: (download: PreviewStreamDownload) => void;
   /** Input sent while disconnected is dropped. */
   readonly onConnectedChange: (connected: boolean) => void;
   /** The upgrade was refused; refresh access and start a new client. */
@@ -200,9 +222,23 @@ export function createPreviewStreamClient(
         generation,
         dialog,
         text,
+        id,
+        fileName,
+        sizeBytes,
       } = message as Record<string, unknown>;
       if (type === "clipboard" && typeof text === "string") {
         events.onClipboard?.(text);
+      } else if (
+        type === "download" &&
+        typeof id === "string" &&
+        typeof fileName === "string" &&
+        typeof sizeBytes === "number"
+      ) {
+        events.onDownload?.({
+          fileName,
+          sizeBytes,
+          url: previewStreamDownloadUrl(target, id),
+        });
       } else if (type === "viewport" && typeof width === "number" && typeof height === "number") {
         failures = 0;
         events.onViewport({ width, height });

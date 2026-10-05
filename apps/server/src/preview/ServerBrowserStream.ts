@@ -3,10 +3,16 @@ import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3to
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import {
+  HttpPlatform,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
 import * as Socket from "effect/unstable/socket/Socket";
 
 import { authenticateMediaRequest } from "../auth/http.ts";
+import { assetResponseHeaders } from "../http.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
 
 const PREVIEW_STREAM_ROUTE_PREFIX = "/api/preview-stream";
@@ -39,6 +45,9 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
     const request = yield* HttpServerRequest.HttpServerRequest;
     const url = HttpServerRequest.toURL(request);
     if (Option.isNone(url)) return HttpServerResponse.text("Bad Request", { status: 400 });
+    if (url.value.pathname === `${PREVIEW_STREAM_ROUTE_PREFIX}/download`) {
+      return yield* serveDownload(browser, url.value.searchParams);
+    }
     if (
       url.value.pathname !== `${PREVIEW_STREAM_ROUTE_PREFIX}/ws` ||
       request.headers.upgrade?.toLowerCase() !== "websocket"
@@ -115,6 +124,7 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
               case "viewport":
               case "control":
               case "clipboard":
+              case "download":
               case "probe": {
                 const { _tag: type, ...data } = output;
                 return write(JSON.stringify({ type, ...data }));
@@ -152,9 +162,33 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
     );
   });
 
+/** `GET /api/preview-stream/download?threadId&tabId&id`: a file a server tab downloaded. */
+const serveDownload = (browser: ServerBrowser.ServerBrowser["Service"], params: URLSearchParams) =>
+  Effect.gen(function* () {
+    yield* authenticateMediaRequest(AuthOrchestrationReadScope);
+    const download = yield* browser.openDownload({
+      threadId: params.get("threadId") ?? "",
+      tabId: params.get("tabId") ?? "",
+      downloadId: params.get("id") ?? "",
+    });
+    if (Option.isNone(download)) return HttpServerResponse.text("Not Found", { status: 404 });
+    return yield* HttpServerResponse.file(download.value.path, {
+      headers: assetResponseHeaders(download.value.path, {
+        download: true,
+        fileName: download.value.fileName,
+      }),
+    });
+  });
+
 // Capture the browser because handlers only see request-scoped services.
 export const routeLayer = HttpRouter.use((router) =>
-  Effect.flatMap(ServerBrowser.ServerBrowser, (browser) =>
-    router.add("GET", `${PREVIEW_STREAM_ROUTE_PREFIX}/*`, makeHandler(browser)),
-  ),
+  Effect.gen(function* () {
+    const browser = yield* ServerBrowser.ServerBrowser;
+    const platform = yield* Effect.context<HttpPlatform.HttpPlatform>();
+    yield* router.add(
+      "GET",
+      `${PREVIEW_STREAM_ROUTE_PREFIX}/*`,
+      makeHandler(browser).pipe(Effect.provideContext(platform)),
+    );
+  }),
 );
