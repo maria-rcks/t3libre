@@ -5,10 +5,14 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import type { Browser, BrowserContext } from "playwright-core";
 
+import { sandboxDisabled } from "./PreviewBrowserHost.ts";
+
 interface Options {
   readonly profilesDir: string;
   /** The shared headless browser's executable, installing it on first use. */
   readonly executable: () => Promise<string>;
+  /** Replaces a failed launch's error with the host setup it is missing, if any. */
+  readonly diagnose?: (executable: string, cause: unknown) => Promise<unknown>;
   readonly env?: NodeJS.ProcessEnv;
   readonly onContextClose?: (context: BrowserContext) => void;
 }
@@ -33,15 +37,23 @@ export class ServerBrowserContexts {
       args: ["--disable-gpu", "--force-device-scale-factor=2"],
       headless: true,
       // Only an explicit operator opt-out disables sandboxing. Launch errors never do.
-      chromiumSandbox: env.T3CODE_SERVER_BROWSER_SANDBOX !== "0",
+      chromiumSandbox: !sandboxDisabled(env),
     };
+  }
+
+  private async launch<A>(options: { readonly executablePath: string }, start: () => Promise<A>) {
+    try {
+      return await start();
+    } catch (cause) {
+      throw (await this.options.diagnose?.(options.executablePath, cause)) ?? cause;
+    }
   }
 
   private sharedBrowser() {
     if (!this.browser) {
       const launched = this.launchOptions().then(async (options) => {
         const { chromium } = await import("playwright-core");
-        const browser = await chromium.launch(options);
+        const browser = await this.launch(options, () => chromium.launch(options));
         browser.on("disconnected", () => {
           if (this.browser === launched) this.browser = undefined;
         });
@@ -89,7 +101,9 @@ export class ServerBrowserContexts {
     const options = await this.launchOptions();
     const { chromium } = await import("playwright-core");
     await NodeFSP.mkdir(directory, { recursive: true });
-    return chromium.launchPersistentContext(directory, { ...options, ...contextOptions });
+    return this.launch(options, () =>
+      chromium.launchPersistentContext(directory, { ...options, ...contextOptions }),
+    );
   }
 
   private profileDirectory(profileId: string) {

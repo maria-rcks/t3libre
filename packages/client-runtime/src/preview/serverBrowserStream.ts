@@ -1,6 +1,10 @@
 // @effect-diagnostics globalTimers:off globalFetch:off - This browser and WebView transport runs without an Effect runtime.
 import { type DeviceHubAccess, withDeviceHubQuery } from "../device/hubAccess.ts";
-import type { PreviewViewportSetting } from "@t3tools/contracts";
+import {
+  PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
+  type PreviewStreamHostSetup,
+  type PreviewViewportSetting,
+} from "@t3tools/contracts";
 
 export const PREVIEW_STREAM_BASE_PATH = "/api/preview-stream";
 
@@ -206,6 +210,8 @@ export interface PreviewStreamEvents {
   readonly onUnauthorized: () => void;
   /** The tab was closed on the server. The client has stopped. */
   readonly onGone?: () => void;
+  /** The server's browser cannot start until its host is set up. The client has stopped. */
+  readonly onHostSetup?: (setup: PreviewStreamHostSetup) => void;
 }
 
 export interface PreviewStreamClient {
@@ -360,6 +366,11 @@ export function createPreviewStreamClient(
         events.onGone?.();
         return;
       }
+      if (event.code === PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE) {
+        stopped = true;
+        events.onHostSetup?.(event.reason === "libraries" ? "libraries" : "sandbox");
+        return;
+      }
       // Rejected upgrades surface as 1006 before open for both cookies and tickets.
       if (event.code === 1008 || event.code === 4401 || (!opened && event.code === 1006)) {
         stopped = true;
@@ -443,3 +454,9 @@ export function createPreviewFramePainter(
     },
   };
 }
+
+/** What a viewer tells the person when the server's browser needs host setup. */
+export const previewStreamHostSetupMessage = (setup: PreviewStreamHostSetup) =>
+  setup === "sandbox"
+    ? "This server's browser needs Chrome's sandbox, which the host blocks. Its operator can allow it with the AppArmor profile in T3 Code's remote access guide, or set T3CODE_SERVER_BROWSER_SANDBOX=0."
+    : "This server's browser is missing system libraries. Its operator can install Chrome's libraries as described in T3 Code's remote access guide.";

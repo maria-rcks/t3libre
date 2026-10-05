@@ -1,8 +1,14 @@
 import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequest";
-import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
+  PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
+  type PreviewStreamHostSetup,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import {
@@ -16,6 +22,7 @@ import * as Socket from "effect/socket/Socket";
 
 import { authenticateMediaRequest } from "../auth/http.ts";
 import { assetResponseHeaders } from "../http.ts";
+import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
 
 const PREVIEW_STREAM_ROUTE_PREFIX = "/api/preview-stream";
@@ -84,8 +91,16 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
             quality: intParam(params, "quality", DEFAULT_QUALITY, 100),
           })
           .pipe(
-            Effect.map(Option.some),
-            Effect.catchTag("ServerBrowserTabNotFoundError", () => Effect.succeedNone),
+            Effect.map((viewer) => ({ _tag: "attached" as const, viewer })),
+            Effect.catchTag("ServerBrowserTabNotFoundError", () =>
+              Effect.succeed({ _tag: "gone" as const }),
+            ),
+            Effect.catchTag("ServerBrowserLaunchError", (error) => {
+              const setup = hostSetupReason(error.cause);
+              return setup === undefined
+                ? Effect.fail(error)
+                : Effect.succeed({ _tag: "hostSetup" as const, reason: setup });
+            }),
           );
         const incoming = NodeHttpServerRequest.toIncomingMessage(request);
         // JPEGs are already compressed. Disabling deflate also keeps all
@@ -99,11 +114,17 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
         // A refused upgrade reads as an auth failure to ticket clients, so a
         // missing tab is a close code they stop on.
         const gone = writer.write(new Socket.CloseEvent(TAB_GONE_CODE, "tab closed"));
-        if (Option.isNone(attached)) {
+        if (attached._tag === "gone") {
           yield* gone;
           return HttpServerResponse.empty();
         }
-        const viewer = attached.value;
+        if (attached._tag === "hostSetup") {
+          yield* writer.write(
+            new Socket.CloseEvent(PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE, attached.reason),
+          );
+          return HttpServerResponse.empty();
+        }
+        const viewer = attached.viewer;
         // `write` returns once the frame is queued, so Chromium's ack for each
         // frame waits for the viewer's `ack` message instead.
         const unacknowledged: Array<Effect.Effect<void>> = [];
@@ -176,6 +197,12 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
       Effect.catch(() => Effect.succeed(HttpServerResponse.empty())),
     );
   });
+
+/** Which host setup a launch failure is missing, as the stream's close reason. */
+const hostSetupReason = (cause: unknown): PreviewStreamHostSetup | undefined =>
+  isSandboxError(cause) ? "sandbox" : isLibrariesError(cause) ? "libraries" : undefined;
+const isSandboxError = Schema.is(PreviewBrowserHost.PreviewBrowserSandboxError);
+const isLibrariesError = Schema.is(PreviewBrowserHost.PreviewBrowserLibrariesError);
 
 /** `GET /api/preview-stream/download?threadId&tabId&id`: a file a server tab downloaded. */
 const serveDownload = (browser: ServerBrowser.ServerBrowser["Service"], params: URLSearchParams) =>

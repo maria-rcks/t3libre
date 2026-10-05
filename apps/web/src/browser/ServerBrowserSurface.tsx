@@ -14,8 +14,13 @@ import {
   type PreviewStreamMouseButton,
   type PreviewStreamPointer,
   type PreviewStreamViewport,
+  previewStreamHostSetupMessage,
 } from "@t3tools/client-runtime/preview/server-browser-stream";
-import type { EnvironmentId, PreviewViewportSetting } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  PreviewStreamHostSetup,
+  PreviewViewportSetting,
+} from "@t3tools/contracts";
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -191,6 +196,7 @@ export function ServerBrowserSurface(props: {
   };
   const unauthorizedRef = useRef(0);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [hostSetup, setHostSetup] = useState<PreviewStreamHostSetup | null>(null);
   const pendingMoveRef = useRef<MouseInput | null>(null);
   const pendingWheelRef = useRef<WheelInput | null>(null);
   const inputFrameRef = useRef<number | null>(null);
@@ -356,7 +362,7 @@ export function ServerBrowserSurface(props: {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!visible || accessDenied || !access || !cap || !canvas) return;
+    if (!visible || accessDenied || hostSetup || !access || !cap || !canvas) return;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     const painter = createPreviewFramePainter(canvas, () => {
       if (hasFrameRef.current) return;
@@ -419,6 +425,7 @@ export function ServerBrowserSurface(props: {
           controlChanged(null);
           clearInput();
         },
+        onHostSetup: setHostSetup,
         onUnauthorized: () => {
           // Fresh tickets re-run this effect. Repeated refusals need an explicit retry.
           const refusals = ++unauthorizedRef.current;
@@ -445,7 +452,18 @@ export function ServerBrowserSurface(props: {
       controlChanged(null);
       clearInput();
     };
-  }, [access, accessDenied, cap, clearInput, environmentId, followSize, tabId, threadId, visible]);
+  }, [
+    access,
+    accessDenied,
+    cap,
+    clearInput,
+    environmentId,
+    followSize,
+    hostSetup,
+    tabId,
+    threadId,
+    visible,
+  ]);
 
   useEffect(() => {
     if (!visible || accessDenied || access !== null) return;
@@ -849,6 +867,16 @@ export function ServerBrowserSurface(props: {
           </div>
         ) : null}
       </div>
+      {visible && hostSetup ? (
+        <div className="visible absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background p-3 text-center">
+          <p role="alert" className="max-w-sm text-xs text-muted-foreground">
+            {previewStreamHostSetupMessage(hostSetup)}
+          </p>
+          <Button variant="outline" size="sm" onClick={() => setHostSetup(null)}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
       {visible && accessDenied ? (
         // The page can be invisible beneath an empty or unreachable state; reconnect must remain reachable.
         <div className="visible absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background p-3 text-center">

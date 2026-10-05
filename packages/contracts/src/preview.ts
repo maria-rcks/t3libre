@@ -171,6 +171,15 @@ export type PreviewNavStatus = typeof PreviewNavStatus.Type;
 export const PreviewRuntime = Schema.Literals(["desktop", "server"]);
 export type PreviewRuntime = typeof PreviewRuntime.Type;
 
+/**
+ * Host setup the server's browser is missing, sent as the reason when the
+ * preview stream closes with code 4503. Fixing it needs the host's operator,
+ * so viewers stop retrying and say what to set up.
+ */
+export const PreviewStreamHostSetup = Schema.Literals(["sandbox", "libraries"]);
+export type PreviewStreamHostSetup = typeof PreviewStreamHostSetup.Type;
+export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
+
 export const PreviewSessionSnapshot = Schema.Struct({
   threadId: TrimmedNonEmptyString,
   tabId: PreviewTabId,

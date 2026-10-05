@@ -182,8 +182,8 @@ connected, and `localhost` addresses reach servers on the host.
 
 The first tab downloads a headless Chrome, about 120 MB, into the T3 home. It
 is the same browser [HTML renders](html-renders.md) use, so a host downloads it
-only once. On Linux, the host needs Chrome's system libraries (NSS, GLib, and
-X11 client libraries); desktop distributions have them.
+only once. Some Linux hosts need [setup](#browser-host-setup) before it can
+start.
 
 Agent tabs have separate storage and share a Chromium process. Take control before
 typing into an agent's tab, then release control when you want the agent to
@@ -195,13 +195,46 @@ picker, and a finished download is offered for you to save. Popups such as
 sign-in windows open as their own tabs. Downloads stay on the host until the
 tab closes. Audio does not play on your device.
 
-Chromium's sandbox is enabled by default. If your container cannot support it,
-configure the host sandbox or explicitly set `T3CODE_SERVER_BROWSER_SANDBOX=0`
-for that environment. A launch failure never disables the sandbox automatically.
-
 On a phone, tap the floating preview's corner dot to show its controls, then
 **Pop into separate window** to keep watching in picture-in-picture over other
 apps.
+
+### Browser host setup
+
+macOS, Windows, and Linux desktops run the browser as is. When a Linux host
+cannot start it, browser tabs and HTML previews say which of these it needs.
+
+**Chrome's sandbox.** The browser always runs in Chrome's sandbox. Ubuntu 23.10
+and later block the user namespace the sandbox needs unless an AppArmor profile
+allows the program. Allow T3 Code's browser once, as root:
+
+```sh
+sudo tee /etc/apparmor.d/t3-chrome-headless-shell >/dev/null <<'EOF'
+abi <abi/4.0>,
+include <tunables/global>
+
+profile t3-chrome-headless-shell /**/tools/chrome-headless-shell/*/*/chrome-headless-shell flags=(unconfined) {
+  userns,
+
+  include if exists <local/t3-chrome-headless-shell>
+}
+EOF
+sudo apparmor_parser -r /etc/apparmor.d/t3-chrome-headless-shell
+```
+
+The profile matches the browser in any T3 home and keeps working across
+browser updates. Where you cannot change the host, such as some containers,
+set `T3CODE_SERVER_BROWSER_SANDBOX=0` for the environment to run without the
+sandbox. T3 Code never turns the sandbox off on its own.
+
+**System libraries.** Minimal images and containers lack libraries Chrome
+loads. On Debian or Ubuntu:
+
+```sh
+sudo apt-get install libnss3 libglib2.0-0 libatk1.0-0 libatk-bridge2.0-0 \
+  libatspi2.0-0 libdbus-1-3 libx11-6 libxcb1 libxcomposite1 libxdamage1 \
+  libxext6 libxfixes3 libxrandr2 libxkbcommon0 libgbm1 libasound2 libexpat1
+```
 
 ## Manage or revoke access
 
