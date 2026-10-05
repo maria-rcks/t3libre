@@ -27,7 +27,7 @@ import * as Broker from "../mcp/PreviewAutomationBroker.ts";
 import * as DesktopChannel from "./DesktopBrowserChannel.ts";
 import * as Manager from "./Manager.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
-import * as Toolchain from "./ServerBrowserToolchain.ts";
+import * as PreviewBrowser from "./PreviewBrowser.ts";
 
 // Keep the manager, broker, ownership, refs, and viewer paths real; replace Chromium I/O only.
 vi.mock("./ServerBrowserContexts.ts", () => ({
@@ -189,8 +189,9 @@ const dependencies = Layer.mergeAll(
     getEnvironmentId: Effect.succeed(scope.environmentId),
     getDescriptor: Effect.die("unused descriptor"),
   }),
-  Layer.succeed(Toolchain.ServerBrowserToolchain, {
-    resolve: Effect.die("mock Chromium does not need an executable"),
+  Layer.succeed(PreviewBrowser.PreviewBrowser, {
+    executable: Effect.die("mock Chromium does not need an executable"),
+    installed: Effect.die("mock Chromium does not need an executable"),
   }),
   Layer.succeed(DesktopChannel.DesktopBrowserChannel, {
     // Only tabs a test marks render on the desktop; the rest stay headless.

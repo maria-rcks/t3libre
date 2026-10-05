@@ -52,7 +52,7 @@ const makeBrowser = () => {
 
 const options = () => ({
   profilesDir: "/test/profiles",
-  resolve: vi.fn(async () => ({ executablePath: "/test/chromium", env: { LIB_PATH: "browser" } })),
+  executable: vi.fn(async () => "/test/chromium"),
   env: {},
 });
 
@@ -70,7 +70,7 @@ describe("ServerBrowserContexts", () => {
     launches.launch.mockReturnValue(launch.promise);
     const configuration = options();
     const pool = new ServerBrowserContexts(configuration);
-    expect(configuration.resolve).not.toHaveBeenCalled();
+    expect(configuration.executable).not.toHaveBeenCalled();
     const first = pool.contextFor("default", "agent-a");
     const again = pool.contextFor("default", "agent-a");
     const second = pool.contextFor("default", "agent-b");

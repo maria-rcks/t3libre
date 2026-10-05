@@ -66,7 +66,7 @@ import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
 import * as DesktopBrowserChannel from "./DesktopBrowserChannel.ts";
 import * as PreviewManager from "./Manager.ts";
 import * as ServerBrowserPage from "./ServerBrowserPage.ts";
-import * as ServerBrowserToolchain from "./ServerBrowserToolchain.ts";
+import * as PreviewBrowser from "./PreviewBrowser.ts";
 import { ServerBrowserContexts } from "./ServerBrowserContexts.ts";
 import { BrowserControlInterrupted, SessionControl } from "./SessionControl.ts";
 
@@ -419,7 +419,7 @@ const make = Effect.gen(function* () {
   const manager = yield* PreviewManager.PreviewManager;
   const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
   const environment = yield* ServerEnvironment.ServerEnvironment;
-  const toolchain = yield* ServerBrowserToolchain.ServerBrowserToolchain;
+  const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
   const desktopChannel = yield* DesktopBrowserChannel.DesktopBrowserChannel;
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
 
@@ -436,7 +436,7 @@ const make = Effect.gen(function* () {
 
   const contexts = new ServerBrowserContexts({
     profilesDir: NodePath.join(config.stateDir, "server-browser", "profiles"),
-    resolve: () => Effect.runPromise(toolchain.resolve),
+    executable: () => Effect.runPromise(previewBrowser.executable),
     onContextClose: (context) => {
       for (const tab of tabs.values()) {
         if (tab.page.context() === context) dropTab(tab, true);

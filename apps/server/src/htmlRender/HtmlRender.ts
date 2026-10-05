@@ -31,7 +31,7 @@ import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
 import { createAttachmentId } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as HeadlessChrome from "./headlessChrome.ts";
-import * as PreviewBrowser from "./PreviewBrowser.ts";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 
 const MIB = 1024 * 1024;
 const MAX_IMAGE_BYTES = 10 * MIB;

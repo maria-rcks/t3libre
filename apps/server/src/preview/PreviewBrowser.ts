@@ -21,8 +21,9 @@ import * as NodeCrypto from "node:crypto";
 import * as ServerConfig from "../config.ts";
 import { openZipArchive } from "../zipArchive.ts";
 
-// HTML previews only ever run T3's own pinned Chrome for Testing headless
-// shell, never a browser the user installed. To bump the pin, pick a version
+// The one browser T3 installs on a host. HTML render previews and server
+// browser tabs both run this pinned Chrome for Testing headless shell, so a host
+// downloads it once; neither uses a browser the user installed. To bump the pin, pick a version
 // from https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json,
 // download each platform's chrome-headless-shell zip, and replace the version
 // and every byte count and SHA-256 below. Hosts drop the old build after the
@@ -100,7 +101,7 @@ export class PreviewBrowserInstallError extends Schema.TaggedError<PreviewBrowse
   { detail: Schema.String, cause: Schema.optional(Schema.Defect()) },
 ) {
   override get message(): string {
-    return `T3 could not install its HTML preview browser: ${this.detail} Call html_preview again to retry.`;
+    return `T3 could not install its headless browser: ${this.detail} Try again.`;
   }
 }
 const isInstallError = Schema.is(PreviewBrowserInstallError);
@@ -113,7 +114,7 @@ export class PreviewBrowserInstallingError extends Schema.TaggedError<PreviewBro
     const progress = this.unpacking
       ? "unpacking"
       : `${megabytes(this.downloadedBytes)} of ${megabytes(this.totalBytes)} MB downloaded`;
-    return `T3 is installing its HTML preview browser (${progress}). Call html_preview again in a minute.`;
+    return `T3 is installing its headless browser (${progress}). Try again in a minute.`;
   }
 }
 
@@ -122,7 +123,7 @@ export class PreviewBrowserUnsupportedError extends Schema.TaggedError<PreviewBr
   { platform: Schema.String, arch: Schema.String },
 ) {
   override get message(): string {
-    return `HTML previews are not available on ${this.platform}-${this.arch}: Chrome for Testing has no headless shell for it. html_render still works without a preview.`;
+    return `T3's headless browser is not available on ${this.platform}-${this.arch}: Chrome for Testing has no headless shell for it.`;
   }
 }
 
@@ -141,7 +142,7 @@ export class PreviewBrowser extends Context.Service<
     /** The installed headless shell, if any. Never starts or waits on an install. */
     readonly installed: Effect.Effect<Option.Option<string>>;
   }
->()("t3/htmlRender/PreviewBrowser") {}
+>()("t3/preview/PreviewBrowser") {}
 
 export interface PreviewBrowserOptions {
   readonly baseDir: string;

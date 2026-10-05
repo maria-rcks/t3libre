@@ -5,11 +5,10 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import type { Browser, BrowserContext } from "playwright-core";
 
-import type { ServerBrowserLaunch } from "./ServerBrowserToolchain.ts";
-
 interface Options {
   readonly profilesDir: string;
-  readonly resolve: () => Promise<ServerBrowserLaunch>;
+  /** The shared headless browser's executable, installing it on first use. */
+  readonly executable: () => Promise<string>;
   readonly env?: NodeJS.ProcessEnv;
   readonly onContextClose?: (context: BrowserContext) => void;
 }
@@ -26,10 +25,10 @@ export class ServerBrowserContexts {
   }
 
   private async launchOptions() {
-    const resolved = await this.options.resolve();
-    const env = { ...(this.options.env ?? process.env), ...resolved.env };
+    const executablePath = await this.options.executable();
+    const env = this.options.env ?? process.env;
     return {
-      executablePath: resolved.executablePath,
+      executablePath,
       env,
       args: ["--disable-gpu", "--force-device-scale-factor=2"],
       headless: true,

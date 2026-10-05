@@ -180,9 +180,10 @@ directly. Every other device, and the desktop app for other environments,
 streams them from the host. Agents keep using them while no device is
 connected, and `localhost` addresses reach servers on the host.
 
-The first tab downloads a headless Chromium and fonts, about 120 MB, into the
-T3 home. To use a browser already installed on the host, set
-`T3CODE_PREVIEW_BROWSER_PATH` to its executable.
+The first tab downloads a headless Chrome, about 120 MB, into the T3 home. It
+is the same browser [HTML renders](html-renders.md) use, so a host downloads it
+only once. On Linux, the host needs Chrome's system libraries (NSS, GLib, and
+X11 client libraries); desktop distributions have them.
 
 Agent tabs have separate storage and share a Chromium process. Take control before
 typing into an agent's tab, then release control when you want the agent to

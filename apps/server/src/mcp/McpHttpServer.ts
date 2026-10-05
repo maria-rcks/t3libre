@@ -19,7 +19,6 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
-import * as PreviewBrowser from "../htmlRender/PreviewBrowser.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
@@ -693,7 +692,7 @@ const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(funct
 export const layerHtmlToolkit = Layer.mergeAll(
   McpServer.toolkit(HtmlRenderToolkit).pipe(Layer.provide(HtmlHandlers.layerRender)),
   Layer.effectDiscard(registerHtmlPreview()).pipe(Layer.provide(HtmlHandlers.layerPreview)),
-).pipe(Layer.provide(HtmlRender.layer), Layer.provide(PreviewBrowser.layer));
+).pipe(Layer.provide(HtmlRender.layer));
 
 const layerPreviewStandardToolkitRegistration = McpServer.toolkit(PreviewStandardToolkit).pipe(
   Layer.provide(PreviewHandlers.layerStandard),
