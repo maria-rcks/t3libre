@@ -3921,9 +3921,55 @@ describe("AcpAdapterV2", () => {
     { name: "non-finite numbers", overrides: { ratio: Number.POSITIVE_INFINITY }, accept: false },
     { name: "numbers outside the bounds", overrides: { ratio: "11" }, accept: false },
     { name: "fractional integers", overrides: { count: "1.5" }, accept: false },
+    {
+      name: "unsafe positive integers",
+      overrides: { count: "9007199254740993" },
+      unboundedInteger: true,
+      accept: false,
+    },
+    {
+      name: "unsafe negative integers",
+      overrides: { count: "-9007199254740993" },
+      unboundedInteger: true,
+      accept: false,
+    },
+    {
+      name: "safe integer boundary",
+      overrides: { count: "9007199254740991" },
+      unboundedInteger: true,
+      expectedCount: Number.MAX_SAFE_INTEGER,
+      accept: true,
+    },
     { name: "non-string answers", overrides: { code: 1 }, accept: false },
     { name: "strings outside the length bounds", overrides: { code: "TOOLONG" }, accept: false },
-    { name: "strings outside the pattern", overrides: { code: "no" }, accept: false },
+    {
+      name: "unsupported pattern constraints",
+      overrides: {},
+      stringConstraint: { pattern: "^[A-Z]+$" },
+      unsupportedConstraint: true,
+      accept: false,
+    },
+    {
+      name: "catastrophic pattern constraints",
+      overrides: {},
+      stringConstraint: { pattern: "^(a+)+$" },
+      unsupportedConstraint: true,
+      accept: false,
+    },
+    {
+      name: "unsupported email format constraints",
+      overrides: {},
+      stringConstraint: { format: "email" },
+      unsupportedConstraint: true,
+      accept: false,
+    },
+    {
+      name: "unknown format constraints",
+      overrides: {},
+      stringConstraint: { format: "unknown" },
+      unsupportedConstraint: true,
+      accept: false,
+    },
     { name: "non-array multi-select answers", overrides: { scopes: "read" }, accept: false },
     {
       name: "unknown multi-select values",
@@ -3966,14 +4012,22 @@ describe("AcpAdapterV2", () => {
           },
           approved: { type: "boolean" },
           ratio: { type: "number", minimum: 0, maximum: 10 },
-          count: { type: "integer", minimum: 1, maximum: 4 },
+          count: {
+            type: "integer",
+            ...(testCase.unboundedInteger ? {} : { minimum: 1, maximum: 4 }),
+          },
           scopes: {
             type: "array",
             ...(testCase.omitMinimum ? {} : { minItems: 1 }),
             maxItems: 2,
             items: { type: "string", enum: ["read", " write "] },
           },
-          code: { type: "string", minLength: 2, maxLength: 4, pattern: "^[A-Z]+$" },
+          code: {
+            type: "string",
+            minLength: 2,
+            maxLength: 4,
+            ...testCase.stringConstraint,
+          },
           optional: { type: "string" },
         },
         required: ["choice", "legacy", "approved", "ratio", "count", "scopes", "code"],
@@ -4034,6 +4088,10 @@ describe("AcpAdapterV2", () => {
           now: yield* DateTime.now,
         }),
       );
+      if (testCase.unsupportedConstraint) {
+        assert.deepEqual(yield* Deferred.await(response), { action: "decline" });
+        return;
+      }
       const pending = Option.getOrThrow(
         yield* runtime.events.pipe(
           Stream.filter(
@@ -4139,7 +4197,7 @@ describe("AcpAdapterV2", () => {
                 legacy: "",
                 approved: testCase.expectedApproved ?? true,
                 ratio: 1.25,
-                count: 3,
+                count: testCase.expectedCount ?? 3,
                 scopes: testCase.expectedScopes ?? ["read", " write "],
                 code: "OK",
               },

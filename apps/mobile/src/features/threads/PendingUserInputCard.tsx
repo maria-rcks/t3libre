@@ -270,7 +270,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         ) : null}
         {props.pendingUserInput.questions.map((question) => {
           const draft = props.drafts[question.id];
-          const minSelections = question.minSelections ?? 1;
+          const minSelections = question.minSelections ?? (question.maxSelections === 0 ? 0 : 1);
           const maxSelections = question.maxSelections;
           const selectionHint =
             maxSelections === 0

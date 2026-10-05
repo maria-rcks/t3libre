@@ -375,7 +375,8 @@ function resolvePendingUserInputAnswer(
     )
       return null;
     if (
-      selectedOptionValues.length < (question.minSelections ?? 1) ||
+      selectedOptionValues.length <
+        (question.minSelections ?? (question.maxSelections === 0 ? 0 : 1)) ||
       (question.maxSelections !== undefined && selectedOptionValues.length > question.maxSelections)
     ) {
       return selectedOptionValues.length === 0 &&

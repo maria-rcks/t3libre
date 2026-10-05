@@ -173,7 +173,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }
 
   const customAnswerActive = progress.customAnswer.trim().length > 0;
-  const minSelections = activeQuestion.minSelections ?? 1;
+  const minSelections =
+    activeQuestion.minSelections ?? (activeQuestion.maxSelections === 0 ? 0 : 1);
   const maxSelections = activeQuestion.maxSelections;
   const selectionHint =
     activeQuestion.minSelections === undefined && maxSelections === undefined

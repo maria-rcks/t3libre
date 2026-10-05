@@ -242,26 +242,36 @@ describe("buildPendingUserInputAnswers", () => {
     });
   });
 
-  it("submits empty arrays when a required multi-select allows zero selections", () => {
-    const question = {
-      ...multiSelectQuestion,
-      allowCustomAnswer: false,
-      required: true,
-      minSelections: 0,
-      maxSelections: 0,
-    };
+  it.each([0, undefined])(
+    "submits empty arrays with a zero maximum and minimum %j",
+    (minSelections) => {
+      const question = {
+        ...multiSelectQuestion,
+        allowCustomAnswer: false,
+        required: true,
+        ...(minSelections === undefined ? {} : { minSelections }),
+        maxSelections: 0,
+      };
 
-    expect(resolvePendingUserInputAnswer(question, undefined)).toEqual([]);
-    expect(buildPendingUserInputAnswers([question], {})).toEqual({ areas: [] });
-    expect(derivePendingUserInputProgress([question], {}, 0)).toMatchObject({
-      resolvedAnswer: [],
-      canAdvance: true,
-      isComplete: true,
-    });
-    expect(
-      buildPendingUserInputAnswers([question], { areas: { selectedOptionValues: ["Server"] } }),
-    ).toBeNull();
-    expect(buildPendingUserInputAnswers([{ ...question, required: false }], {})).toEqual({});
+      expect(resolvePendingUserInputAnswer(question, undefined)).toEqual([]);
+      expect(buildPendingUserInputAnswers([question], {})).toEqual({ areas: [] });
+      expect(derivePendingUserInputProgress([question], {}, 0)).toMatchObject({
+        resolvedAnswer: [],
+        canAdvance: true,
+        isComplete: true,
+      });
+      expect(
+        buildPendingUserInputAnswers([question], { areas: { selectedOptionValues: ["Server"] } }),
+      ).toBeNull();
+      expect(buildPendingUserInputAnswers([{ ...question, required: false }], {})).toEqual({});
+    },
+  );
+
+  it("requires one selection when no zero maximum is declared", () => {
+    const question = { ...multiSelectQuestion, required: true, allowCustomAnswer: false };
+
+    expect(buildPendingUserInputAnswers([question], {})).toBeNull();
+    expect(buildPendingUserInputAnswers([{ ...question, maxSelections: 2 }], {})).toBeNull();
   });
 
   it("enforces multi-select limits and omits unanswered optional arrays", () => {

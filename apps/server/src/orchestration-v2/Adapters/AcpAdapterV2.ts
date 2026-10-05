@@ -1108,6 +1108,13 @@ function selectAutoApprovedPermissionOption(
 function elicitationOptions(
   property: Record<string, unknown>,
 ): OrchestrationV2UserInputQuestion["options"] | undefined {
+  // Decline unsupported constraints before opening a form. Agent-provided
+  // regular expressions must never run on the server's event loop.
+  if (
+    property.type === "string" &&
+    (typeof property.pattern === "string" || typeof property.format === "string")
+  )
+    return undefined;
   if (property.type === "boolean") {
     return [
       { label: "true", description: "Yes", value: "true" },
@@ -1192,13 +1199,6 @@ function elicitationContent(
           (typeof record.maxLength === "number" && length > record.maxLength)
         )
           return undefined;
-        if (typeof record.pattern === "string") {
-          try {
-            if (!new RegExp(record.pattern, "u").test(value)) return undefined;
-          } catch {
-            return undefined;
-          }
-        }
         content.push([id, value]);
         break;
       }
@@ -1219,7 +1219,7 @@ function elicitationContent(
               : Number.NaN;
         if (
           !Number.isFinite(number) ||
-          (record.type === "integer" && !Number.isInteger(number)) ||
+          (record.type === "integer" && !Number.isSafeInteger(number)) ||
           (typeof record.minimum === "number" && number < record.minimum) ||
           (typeof record.maximum === "number" && number > record.maximum)
         )

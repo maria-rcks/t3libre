@@ -2015,20 +2015,30 @@ describe("pending user input answers", () => {
     expect(buildPendingUserInputAnswers([question], { runtime: draft })).toBeNull();
   });
 
-  it("submits empty arrays when a required multi-select allows zero selections", () => {
-    const question = {
-      ...multiSelectQuestion,
-      allowCustomAnswer: false,
-      required: true,
-      minSelections: 0,
-      maxSelections: 0,
-    };
+  it.each([0, undefined])(
+    "submits empty arrays with a zero maximum and minimum %j",
+    (minSelections) => {
+      const question = {
+        ...multiSelectQuestion,
+        allowCustomAnswer: false,
+        required: true,
+        ...(minSelections === undefined ? {} : { minSelections }),
+        maxSelections: 0,
+      };
 
-    expect(buildPendingUserInputAnswers([question], {})).toEqual({ scope: [] });
-    expect(
-      buildPendingUserInputAnswers([question], { scope: { selectedOptionValues: ["Orders"] } }),
-    ).toBeNull();
-    expect(buildPendingUserInputAnswers([{ ...question, required: false }], {})).toEqual({});
+      expect(buildPendingUserInputAnswers([question], {})).toEqual({ scope: [] });
+      expect(
+        buildPendingUserInputAnswers([question], { scope: { selectedOptionValues: ["Orders"] } }),
+      ).toBeNull();
+      expect(buildPendingUserInputAnswers([{ ...question, required: false }], {})).toEqual({});
+    },
+  );
+
+  it("requires one selection when no zero maximum is declared", () => {
+    const question = { ...multiSelectQuestion, required: true, allowCustomAnswer: false };
+
+    expect(buildPendingUserInputAnswers([question], {})).toBeNull();
+    expect(buildPendingUserInputAnswers([{ ...question, maxSelections: 2 }], {})).toBeNull();
   });
 
   it("enforces multi-select limits and omits unanswered optional arrays", () => {
