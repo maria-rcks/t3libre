@@ -10,6 +10,7 @@ import {
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -757,6 +758,42 @@ it.live("a page's file picker goes to the controller and takes its uploaded file
       while (closed._tag !== "fileChooserClosed") closed = yield* Queue.take(viewer.output);
       expect(closed.id).toBe(offered.id);
       expect(yield* answer(offered.id)).toBe(false);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("an agent's tabs stop at the limit until an unwatched idle tab closes", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const open = broker.invoke<PreviewAutomationStatus>({
+        scope,
+        operation: "open",
+        input: { reuseExistingTab: false, show: false },
+      });
+      for (let count = 1; count < 8; count += 1) yield* open;
+      expect(yield* Effect.flip(open)).toMatchObject({
+        _tag: "PreviewAutomationControlInterruptedError",
+        reason: "tabLimit",
+      });
+      // Another agent session keeps its own budget.
+      yield* broker.invoke({
+        scope: { ...scope, providerSessionId: "agent-b" },
+        operation: "open",
+        input: { reuseExistingTab: false, show: false },
+      });
+      const later = (yield* Clock.currentTimeMillis) + 31 * 60 * 1000;
+      const clock = vi.spyOn(Date, "now").mockReturnValue(later);
+      yield* Effect.addFinalizer(() => Effect.sync(() => clock.mockRestore()));
+      // The first tab is watched, so it stays open while the agent's other idle tabs close.
+      const browser = yield* ServerBrowser.ServerBrowser;
+      yield* browser.attachViewer(viewerInput(tabId, false));
+      const reopened = yield* open;
+      const manager = yield* Manager.PreviewManager;
+      const { sessions } = yield* manager.list({ threadId: scope.threadId });
+      expect(sessions.map((session) => session.tabId).toSorted()).toEqual(
+        [tabId, reopened.tabId].toSorted(),
+      );
     }),
   ).pipe(Effect.provide(layer)),
 );

@@ -41,6 +41,7 @@ import { constVoid } from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -247,6 +248,8 @@ interface ServerTab {
   readonly page: Page;
   readonly cdp: CDPSession;
   readonly createdAt: number;
+  /** The agent's latest request on this tab; idle agent tabs close. */
+  usedAt: number;
   readonly viewers: Set<ViewerState>;
   readonly consoleEntries: Array<PreviewAutomationConsoleEntry>;
   readonly networkEntries: Array<PreviewAutomationNetworkEntry>;
@@ -287,6 +290,13 @@ interface ServerDownload {
   readonly url: string;
   readonly completedAt: string;
 }
+
+/** One agent session and the whole server; each tab holds a renderer process. */
+const AGENT_TAB_LIMIT = 8;
+const SERVER_TAB_LIMIT = 32;
+/** Agent tabs nobody watches close after this long without an agent request. */
+const AGENT_TAB_IDLE_MS = 30 * 60 * 1000;
+const IDLE_SWEEP_INTERVAL = "1 minute";
 
 const DOWNLOAD_LIMIT = 20;
 const DOWNLOAD_MAX_BYTES = 1024 * 1024 * 1024;
@@ -564,6 +574,7 @@ const make = Effect.gen(function* () {
       page,
       cdp,
       createdAt: Date.now(),
+      usedAt: Date.now(),
       viewers: new Set(),
       consoleEntries: [],
       networkEntries: [],
@@ -796,7 +807,9 @@ const make = Effect.gen(function* () {
   };
 
   const adoptPopup = async (opener: ServerTab, popup: Page) => {
-    if (opener.closing) {
+    const agentId = opener.control.agentId;
+    // A popup past an agent's limit closes; its page sees window.open return a closed window.
+    if (opener.closing || (agentId !== null && atTabLimit(agentId))) {
       await popup.close().catch(constVoid);
       return;
     }
@@ -855,6 +868,28 @@ const make = Effect.gen(function* () {
         catch: (cause) => (isTabNotFound(cause) ? cause : new ServerBrowserLaunchError({ cause })),
       });
     });
+
+  const atTabLimit = (agentSessionId: string) =>
+    tabs.size + pendingTabs.size >= SERVER_TAB_LIMIT ||
+    [...tabs.values()].filter((tab) => tab.control.agentId === agentSessionId).length >=
+      AGENT_TAB_LIMIT;
+
+  const assertTabCapacity = (agentSessionId: string) => {
+    if (atTabLimit(agentSessionId))
+      throw new BrowserControlInterrupted(
+        `Too many server browser tabs are open (${AGENT_TAB_LIMIT} per agent session, ${SERVER_TAB_LIMIT} per server). Close one with t3_preview_close or reuse one from preview_status tabs.`,
+        "tabLimit",
+      );
+  };
+
+  /** Closes agent tabs that no one watches and the agent stopped using. */
+  const closeIdleAgentTabs = () => {
+    const cutoff = Date.now() - AGENT_TAB_IDLE_MS;
+    for (const tab of tabs.values()) {
+      if (tab.control.agentId !== null && tab.viewers.size === 0 && tab.usedAt < cutoff)
+        dropTab(tab, true);
+    }
+  };
 
   const latestThreadTab = (threadId: string, agentSessionId?: string) =>
     [...tabs.values()]
@@ -1173,6 +1208,15 @@ const make = Effect.gen(function* () {
     return tab;
   };
 
+  /** Any request, even a failed one, keeps the agent's tabs on the thread from idling out. */
+  const markUsed = (request: PreviewAutomationRequest) => {
+    const now = Date.now();
+    for (const tab of tabs.values()) {
+      if (tab.threadId === request.threadId && tab.control.agentId === request.agentSessionId)
+        tab.usedAt = now;
+    }
+  };
+
   const runOperation = async (request: PreviewAutomationRequest): Promise<unknown> => {
     const input = request.input;
     switch (request.operation) {
@@ -1213,6 +1257,10 @@ const make = Effect.gen(function* () {
               )
             : undefined;
         const navigationTimeout = Math.min(request.timeoutMs, NAVIGATION_TIMEOUT_MS);
+        if (!existing) {
+          closeIdleAgentTabs();
+          assertTabCapacity(request.agentSessionId);
+        }
         const tab =
           existing ??
           (await ensureTab(
@@ -1407,7 +1455,7 @@ const make = Effect.gen(function* () {
 
   const handleRequest = (connectionId: string, request: PreviewAutomationRequest) =>
     Effect.tryPromise({
-      try: () => runOperation(request),
+      try: () => runOperation(request).finally(() => markUsed(request)),
       catch: ServerBrowserPage.toOperationError,
     }).pipe(
       Effect.match({
@@ -1805,6 +1853,10 @@ const make = Effect.gen(function* () {
 
   if (enabled) {
     yield* manager.events.pipe(Stream.runForEach(mirrorManagerEvent), Effect.forkScoped);
+    yield* Effect.sync(closeIdleAgentTabs).pipe(
+      Effect.repeat(Schedule.spaced(IDLE_SWEEP_INTERVAL)),
+      Effect.forkScoped,
+    );
     const environmentId = yield* environment.getEnvironmentId;
     const hostSession = broker
       .connect(
