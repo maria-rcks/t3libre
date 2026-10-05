@@ -1,3 +1,5 @@
+import * as NodeUtil from "node:util";
+
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -849,6 +851,7 @@ function makeToolCallState(
   },
   options?: {
     readonly fallbackStatus?: "pending" | "inProgress" | "completed" | "failed";
+    readonly partial?: boolean;
   },
 ): AcpToolCallState | undefined {
   const toolCallId = input.toolCallId.trim();
@@ -918,7 +921,10 @@ function makeToolCallState(
   return {
     toolCallId,
     ...(kind ? { kind } : {}),
-    ...(presentation?.summary ? { title: presentation.summary } : {}),
+    // Partial updates keep the existing title when only result content changes.
+    ...(presentation?.summary && (!options?.partial || title !== undefined)
+      ? { title: presentation.summary }
+      : {}),
     ...(status ? { status } : {}),
     ...(command ? { command } : {}),
     ...(presentation?.detail ? { detail: presentation.detail } : {}),
@@ -944,7 +950,7 @@ function parseTypedToolCallState(
       locations: event.locations,
       _meta: event._meta,
     },
-    options,
+    { ...options, partial: event.sessionUpdate === "tool_call_update" },
   );
 }
 
@@ -1034,7 +1040,12 @@ export function decideToolCallUpdateEmission(
   if (next.status === "completed" || next.status === "failed") {
     return { emit: true, skippedSinceEmit: 0 };
   }
-  if (previous === undefined || previous.title !== next.title || previous.status !== next.status) {
+  if (
+    previous === undefined ||
+    previous.title !== next.title ||
+    previous.status !== next.status ||
+    !NodeUtil.isDeepStrictEqual(previous.data.locations, next.data.locations)
+  ) {
     return { emit: true, skippedSinceEmit: 0 };
   }
   if (previous.detail === next.detail && toolCallOutputUnchanged(previous, next)) {

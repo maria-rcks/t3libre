@@ -304,6 +304,7 @@ describe("AcpRuntimeModel", () => {
         toolCallId: "tool-1",
         status: "completed",
         rawOutput: { exitCode: 0 },
+        content: [{ type: "content", content: { type: "text", text: "Checks passed" } }],
       },
     } satisfies EffectAcpSchema.SessionNotification);
 
@@ -314,9 +315,10 @@ describe("AcpRuntimeModel", () => {
     if (createdEvent?._tag === "ToolCallUpdated" && updatedEvent?._tag === "ToolCallUpdated") {
       expect(mergeToolCallState(createdEvent.toolCall, updatedEvent.toolCall)).toMatchObject({
         toolCallId: "tool-1",
+        kind: "execute",
         status: "completed",
         title: "Ran command",
-        detail: "bun run typecheck",
+        detail: "Checks passed",
         command: "bun run typecheck",
       });
     }
@@ -1416,8 +1418,7 @@ describe("extractMcpToolCallIdentity", () => {
   it("recovers T3 identity from server-namespaced titles across titleless updates", () => {
     // Captured verbatim from Kilo 7.4.22 2026-08-15: the initial tool_call
     // titles the MCP function "<server>_<tool>" with kind "other", and the
-    // completed update carries no title at all, so the merged presentation
-    // title regresses to "Tool" while data.title keeps the wire value.
+    // completed update carries result content without repeating the tool metadata.
     const created = toolCallFromUpdate({
       sessionUpdate: "tool_call",
       toolCallId: "chatcmpl-tool-b2a6142ee1a510a5",
@@ -1435,9 +1436,29 @@ describe("extractMcpToolCallIdentity", () => {
     });
     const merged = mergeToolCallState(created, completed);
 
+    expect(completed).not.toHaveProperty("title");
+    expect(completed).not.toHaveProperty("kind");
+    expect(merged).toMatchObject({
+      title: "t3-code_orchestrator_capabilities",
+      kind: "other",
+      status: "completed",
+      detail: '{"ok":true}',
+    });
     expect(extractMcpToolCallIdentity(merged)).toEqual({
       server: "t3-code",
       tool: "orchestrator_capabilities",
+    });
+
+    const renamed = toolCallFromUpdate({
+      sessionUpdate: "tool_call_update",
+      toolCallId: created.toolCallId,
+      title: "Finished capability lookup",
+      kind: "think",
+    });
+    expect(mergeToolCallState(merged, renamed)).toMatchObject({
+      title: "Finished capability lookup",
+      kind: "think",
+      status: "completed",
     });
   });
 
