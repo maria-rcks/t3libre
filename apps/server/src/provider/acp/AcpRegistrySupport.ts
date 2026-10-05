@@ -1858,7 +1858,11 @@ export const makeAcpRegistryCatalog = Effect.fn("AcpRegistryCatalog.make")(funct
               )
                 return false;
               const config = instance.config as Record<string, unknown>;
-              return config.source !== "local" && config.agentId === safeAgentId;
+              return (
+                config.source !== "local" &&
+                typeof config.agentId === "string" &&
+                config.agentId.trim() === safeAgentId
+              );
             });
             if (isReferenced) {
               yield* consumePreparedBinaryReservation(safeAgentId);

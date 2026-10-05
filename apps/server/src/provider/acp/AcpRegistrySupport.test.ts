@@ -1338,12 +1338,13 @@ describe("AcpRegistrySupport", () => {
   });
 
   it.effect.each([
-    { name: "legacy registry", source: undefined, referenced: true },
-    { name: "registry", source: "registry", referenced: true },
-    { name: "local command", source: "local", referenced: false },
+    { name: "legacy registry", source: undefined, agentId: "example-agent", referenced: true },
+    { name: "registry", source: "registry", agentId: "example-agent", referenced: true },
+    { name: "padded registry", source: "registry", agentId: " example-agent ", referenced: true },
+    { name: "local command", source: "local", agentId: "example-agent", referenced: false },
   ] as const)(
     "checks $name references before uninstalling only managed binaries",
-    ({ source, referenced }) => {
+    ({ source, agentId, referenced }) => {
       return Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const cacheDir = yield* fileSystem.makeTempDirectoryScoped({
@@ -1373,7 +1374,7 @@ describe("AcpRegistrySupport", () => {
             displayName: "Uninstall reference",
             enabled: true,
             config: {
-              agentId: "example-agent",
+              agentId,
               commandPath: "/local/agent",
               ...(source ? { source } : {}),
             },
