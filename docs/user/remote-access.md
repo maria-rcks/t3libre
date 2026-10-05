@@ -189,6 +189,12 @@ Agent tabs have separate storage and share a Chromium process. Take control befo
 typing into an agent's tab, then release control when you want the agent to
 continue. Read-only connections can watch without changing the page.
 
+While you have control, the tab works with your device: text the page copies or
+cuts goes to your clipboard, a file picker on the page opens your device's
+picker, and a finished download is offered for you to save. Popups such as
+sign-in windows open as their own tabs. Downloads stay on the host until the
+tab closes. Audio does not play on your device.
+
 Chromium's sandbox is enabled by default. If your container cannot support it,
 configure the host sandbox or explicitly set `T3CODE_SERVER_BROWSER_SANDBOX=0`
 for that environment. A launch failure never disables the sandbox automatically.
