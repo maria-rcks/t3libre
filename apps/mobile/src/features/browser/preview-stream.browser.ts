@@ -5,6 +5,7 @@ import {
   type PreviewStreamClient,
   type PreviewStreamControl,
   type PreviewStreamInput,
+  type PreviewStreamPointer,
   type PreviewStreamViewport,
 } from "@t3tools/client-runtime/preview/server-browser-stream";
 
@@ -41,6 +42,10 @@ const PROBE_REUSE_MS = 10_000;
 // Kept in the hidden textarea so a soft keyboard's backspace has something to
 // delete and fires `input`; Gboard's keydown carries keyCode 229 and no key.
 const SENTINEL = "\u200b";
+// The agent cursor stays bright while the agent acts, then dims like the web panel's.
+const AGENT_CURSOR_ACTIVE_MS = 700;
+const AGENT_CURSOR_SVG =
+  '<svg width="20" height="20" viewBox="0 0 24 24" fill="#fff" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"/></svg>';
 
 interface Viewer {
   readonly stop: () => void;
@@ -76,7 +81,11 @@ export function start(configuration: PreviewStreamConfiguration) {
   const canvas = document.createElement("canvas");
   canvas.setAttribute("role", "img");
   canvas.setAttribute("aria-label", "Browser page");
-  container.append(canvas);
+  const agentCursor = document.createElement("div");
+  agentCursor.className = "agent-cursor";
+  agentCursor.setAttribute("aria-hidden", "true");
+  agentCursor.innerHTML = AGENT_CURSOR_SVG;
+  container.append(canvas, agentCursor);
   const input = document.createElement("textarea");
   input.setAttribute("aria-label", "Browser page input");
   input.autocapitalize = "off";
@@ -170,6 +179,7 @@ export function start(configuration: PreviewStreamConfiguration) {
       },
       {
         onFrame: (jpeg) => painter.paint(jpeg),
+        onPointer: showAgentCursor,
         onClipboard: (text) => post({ type: "clipboard", text }),
         onDownload: (download) => post({ type: "download", ...download }),
         onFileChooser: (chooser) => post({ type: "fileChooser", chooser }),
@@ -204,6 +214,8 @@ export function start(configuration: PreviewStreamConfiguration) {
           const previous = control;
           control = nextControl;
           post({ type: "control", ...nextControl });
+          // Taking over hides the agent cursor; the person's own touch is the pointer now.
+          if (nextControl.controller === "you") agentCursor.style.opacity = "0";
           if (nextControl.controller !== "you") clearInput();
           else {
             input.disabled = !interactive;
@@ -262,6 +274,31 @@ export function start(configuration: PreviewStreamConfiguration) {
     visualViewport?.addEventListener("resize", followVisualViewport);
     visualViewport?.addEventListener("scroll", followVisualViewport);
   }
+
+  let agentCursorTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Mirrors the frame's letterbox so the cursor lands on the element the agent targets. */
+  const showAgentCursor = (pointer: PreviewStreamPointer) => {
+    if (!viewport || canvas.width === 0 || canvas.height === 0 || control?.controller === "you")
+      return;
+    const box = { width: canvas.clientWidth, height: canvas.clientHeight };
+    const fit = Math.min(box.width / canvas.width, box.height / canvas.height);
+    const width = canvas.width * fit;
+    const height = canvas.height * fit;
+    const left = (box.width - width) / 2 + (pointer.x * width) / viewport.width;
+    const top = (box.height - height) / 2 + (pointer.y * height) / viewport.height;
+    agentCursor.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+    agentCursor.style.opacity = "1";
+    if (pointer.phase === "click") {
+      agentCursor.querySelector(".ping")?.remove();
+      const ping = document.createElement("span");
+      ping.className = "ping";
+      agentCursor.prepend(ping);
+    }
+    if (agentCursorTimer !== null) clearTimeout(agentCursorTimer);
+    agentCursorTimer = setTimeout(() => {
+      agentCursor.style.opacity = control?.controller === "agent" ? "0.35" : "0";
+    }, AGENT_CURSOR_ACTIVE_MS);
+  };
 
   const pagePoint = (clientX: number, clientY: number, clamp: boolean) => {
     if (!viewport || canvas.width === 0 || canvas.height === 0 || control?.controller !== "you")
@@ -647,6 +684,7 @@ export function start(configuration: PreviewStreamConfiguration) {
       if (resizeTimer !== null) clearTimeout(resizeTimer);
       if (wheelFrame !== null) cancelAnimationFrame(wheelFrame);
       if (mouseFrame !== null) cancelAnimationFrame(mouseFrame);
+      if (agentCursorTimer !== null) clearTimeout(agentCursorTimer);
       painter.stop();
       client?.stop();
       client = null;

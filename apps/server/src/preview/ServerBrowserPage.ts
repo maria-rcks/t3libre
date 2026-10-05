@@ -118,6 +118,28 @@ const targetLocator = (
   return page.locator(selector);
 };
 
+/** Shows the agent's pointer to viewers before an action lands at that point. */
+export type PointerReporter = (
+  point: { readonly x: number; readonly y: number },
+  phase: "move" | "click",
+) => Promise<void>;
+const noPointer: PointerReporter = async () => {};
+
+/** The viewport point an action will hit: the target's center after scrolling it into view. */
+const targetPoint = async (
+  page: Page,
+  locator: Locator | null,
+  input: { readonly x?: number | undefined; readonly y?: number | undefined },
+  timeout: number,
+) => {
+  if (locator === null) return { x: input.x ?? 0, y: input.y ?? 0 };
+  await locator.scrollIntoViewIfNeeded({ timeout });
+  const box = await locator.boundingBox({ timeout });
+  if (box) return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const viewport = page.viewportSize();
+  return { x: (viewport?.width ?? 0) / 2, y: (viewport?.height ?? 0) / 2 };
+};
+
 const SNAPSHOT_SCRIPT = `(() => {
   return {
     url: location.href,
@@ -211,15 +233,12 @@ export const snapshot = async (input: {
 export const click = async (
   page: Page,
   input: PreviewAutomationClickInput,
+  pointer: PointerReporter = noPointer,
 ): Promise<{ readonly x: number; readonly y: number }> => {
   const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const locator = targetLocator(page, input);
-  let point = { x: input.x ?? 0, y: input.y ?? 0 };
-  if (locator !== null) {
-    await locator.scrollIntoViewIfNeeded({ timeout });
-    const box = await locator.boundingBox({ timeout });
-    if (box) point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  }
+  const point = await targetPoint(page, locator, input, timeout);
+  await pointer(point, "click");
   const options = { button: input.button ?? "left", clickCount: input.clickCount ?? 1 } as const;
   const clicked =
     locator === null
@@ -301,13 +320,19 @@ export const type = async (page: Page, input: PreviewAutomationTypeInput) => {
 };
 
 /** Hovering by locator moves the real mouse, so CSS :hover and pointer events both apply. */
-export const hover = async (page: Page, input: PreviewAutomationHoverInput) => {
+export const hover = async (
+  page: Page,
+  input: PreviewAutomationHoverInput,
+  pointer: PointerReporter = noPointer,
+) => {
+  const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const locator = targetLocator(page, input);
+  await pointer(await targetPoint(page, locator, input, timeout), "move");
   if (locator === null) {
     await page.mouse.move(input.x ?? 0, input.y ?? 0);
     return;
   }
-  await locator.hover({ timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+  await locator.hover({ timeout });
 };
 
 export const select = async (
@@ -346,10 +371,20 @@ export const select = async (
   return { selected: await locator.selectOption(values, { timeout }) };
 };
 
-export const drag = async (page: Page, input: PreviewAutomationDragInput) => {
+export const drag = async (
+  page: Page,
+  input: PreviewAutomationDragInput,
+  pointer: PointerReporter = noPointer,
+) => {
+  const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const source = targetLocator(page, { locator: input.source })!;
   const target = targetLocator(page, { locator: input.target })!;
-  await source.dragTo(target, { timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+  await pointer(await targetPoint(page, source, {}, timeout), "move");
+  // The cursor travels with the drag; the page sees one continuous gesture.
+  const dropped = source.dragTo(target, { timeout });
+  const end = await target.boundingBox({ timeout }).catch(() => null);
+  if (end) await pointer({ x: end.x + end.width / 2, y: end.y + end.height / 2 }, "move");
+  await dropped;
 };
 
 /** Sets files on one file input; false when no locator or selector names one. */

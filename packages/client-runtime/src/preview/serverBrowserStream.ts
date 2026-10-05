@@ -155,6 +155,14 @@ export interface PreviewStreamProbe {
   readonly editable: boolean;
 }
 
+/** Where an agent action is about to land, in page CSS pixels. */
+export interface PreviewStreamPointer {
+  readonly phase: "move" | "click";
+  readonly x: number;
+  readonly y: number;
+  readonly sequence: number;
+}
+
 /** CDP modifier bitmask: Alt 1, Ctrl 2, Meta 4, Shift 8. */
 export const previewStreamModifiers = (event: {
   readonly altKey: boolean;
@@ -183,6 +191,8 @@ export interface PreviewStreamEvents {
   readonly onFrame: (jpeg: ArrayBuffer) => void;
   readonly onViewport: (viewport: PreviewStreamViewport) => void;
   readonly onProbe?: (probe: PreviewStreamProbe) => void;
+  /** The agent's cursor moved to, or clicked at, a page point. */
+  readonly onPointer?: (pointer: PreviewStreamPointer) => void;
   readonly onControl?: (control: PreviewStreamControl) => void;
   /** Text the page just copied or cut while this viewer had control. */
   readonly onClipboard?: (text: string) => void;
@@ -268,6 +278,8 @@ export function createPreviewStreamClient(
         sizeBytes,
         multiple,
         accept,
+        phase,
+        sequence,
       } = message as Record<string, unknown>;
       if (
         type === "fileChooser" &&
@@ -286,6 +298,14 @@ export function createPreviewStreamClient(
         if (fileChooser !== id) return;
         fileChooser = null;
         events.onFileChooser?.(null);
+      } else if (
+        type === "pointer" &&
+        (phase === "move" || phase === "click") &&
+        typeof x === "number" &&
+        typeof y === "number" &&
+        typeof sequence === "number"
+      ) {
+        events.onPointer?.({ phase, x, y, sequence });
       } else if (type === "clipboard" && typeof text === "string") {
         events.onClipboard?.(text);
       } else if (

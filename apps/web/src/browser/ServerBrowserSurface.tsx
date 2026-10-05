@@ -12,6 +12,7 @@ import {
   uploadPreviewStreamFiles,
   type PreviewStreamInput,
   type PreviewStreamMouseButton,
+  type PreviewStreamPointer,
   type PreviewStreamViewport,
 } from "@t3tools/client-runtime/preview/server-browser-stream";
 import type { EnvironmentId, PreviewViewportSetting } from "@t3tools/contracts";
@@ -28,6 +29,7 @@ import {
   useState,
 } from "react";
 
+import { AgentCursorMark } from "~/components/preview/AgentBrowserCursor";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { toastManager } from "~/components/ui/toast";
@@ -173,6 +175,7 @@ export function ServerBrowserSurface(props: {
   const [control, setControl] = useState<PreviewStreamControl | null>(null);
   const [promptText, setPromptText] = useState("");
   const [fileChooser, setFileChooser] = useState<PreviewStreamFileChooser | null>(null);
+  const [agentCursor, setAgentCursor] = useState<AgentCursorPlacement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const answerFileChooser = (files: ReadonlyArray<File>) => {
     const chooser = fileChooser;
@@ -379,6 +382,10 @@ export function ServerBrowserSurface(props: {
           probeRef.current = null;
           if (result.editable) inputRef.current?.focus({ preventScroll: true });
           else inputRef.current?.blur();
+        },
+        onPointer: (pointer) => {
+          const placed = placeAgentCursor(pointer, canvasRef.current, viewportRef.current);
+          if (placed) setAgentCursor(placed);
         },
         onClipboard: (text) => void copyPageText(text),
         onDownload: offerDownload,
@@ -729,6 +736,12 @@ export function ServerBrowserSurface(props: {
           onMouseDown={(event) => event.preventDefault()}
           onContextMenu={(event) => event.preventDefault()}
         />
+        {agentCursor && control?.controller !== "you" ? (
+          <AgentCursorMark
+            {...agentCursor}
+            controller={control?.controller === "agent" ? "agent" : "none"}
+          />
+        ) : null}
         {/* Focus target for page keyboard input. Pinned top-left so focusing it never
           scrolls the surface; 16px keeps iOS from zooming the app on focus. */}
         <textarea
@@ -857,4 +870,30 @@ export function ServerBrowserSurface(props: {
       ) : null}
     </div>
   );
+}
+
+interface AgentCursorPlacement {
+  readonly phase: PreviewStreamPointer["phase"];
+  readonly sequence: number;
+  readonly left: number;
+  readonly top: number;
+}
+
+/** Places the agent cursor over the letterboxed frame, the inverse of the viewer's own pointer mapping. */
+function placeAgentCursor(
+  pointer: PreviewStreamPointer,
+  canvas: HTMLCanvasElement | null,
+  viewport: PreviewStreamViewport | null,
+): AgentCursorPlacement | null {
+  if (!canvas || !viewport || canvas.width < 1 || canvas.height < 1) return null;
+  const box = { width: canvas.clientWidth, height: canvas.clientHeight };
+  const fit = Math.min(box.width / canvas.width, box.height / canvas.height);
+  const width = canvas.width * fit;
+  const height = canvas.height * fit;
+  return {
+    phase: pointer.phase,
+    sequence: pointer.sequence,
+    left: (box.width - width) / 2 + (pointer.x * width) / viewport.width,
+    top: (box.height - height) / 2 + (pointer.y * height) / viewport.height,
+  };
 }

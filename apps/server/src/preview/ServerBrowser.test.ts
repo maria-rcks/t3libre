@@ -69,6 +69,8 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
   let contextClosed = false;
   const page = {
     on: (name: string, callback: (...args: unknown[]) => void) => events.on(name, callback),
+    once: (name: string, callback: (...args: unknown[]) => void) => events.once(name, callback),
+    off: (name: string, callback: (...args: unknown[]) => void) => events.off(name, callback),
     emit: (name: string, ...args: unknown[]) => events.emit(name, ...args),
     emitAsync: (name: string, ...args: unknown[]) =>
       Promise.all(events.listeners(name).map((listener) => listener(...args))),
@@ -837,6 +839,31 @@ it.live("an agent answers the page's file picker or sets files on a file input",
       yield* upload({ paths: ["/tmp/b.csv"], locator: "input[type=file]" });
       expect(page.locator).toHaveBeenLastCalledWith("input[type=file]");
       expect(setInputFiles).toHaveBeenCalledWith(["/tmp/b.csv"], expect.anything());
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("viewers see the agent's pointer move to its target and click there", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, broker, tabId } = yield* ready;
+      const page = contexts[0]!.page;
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, false));
+      const click = vi.fn(async () => {});
+      page.locator.mockReturnValue({
+        scrollIntoViewIfNeeded: async () => {},
+        boundingBox: async () => ({ x: 100, y: 40, width: 80, height: 20 }),
+        click,
+      } as never);
+      yield* broker.invoke({ scope, tabId, operation: "click", input: { locator: "#go" } });
+      const pointers = (yield* Queue.clear(viewer.output)).filter(
+        (item) => item._tag === "pointer",
+      );
+      expect(pointers).toEqual([
+        expect.objectContaining({ phase: "move", x: 140, y: 50 }),
+        expect.objectContaining({ phase: "click", x: 140, y: 50 }),
+      ]);
+      expect(click).toHaveBeenCalledOnce();
     }),
   ).pipe(Effect.provide(layer)),
 );

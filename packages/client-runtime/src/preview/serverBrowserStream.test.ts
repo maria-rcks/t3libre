@@ -171,3 +171,31 @@ describe("preview stream downloads", () => {
     });
   });
 });
+
+describe("preview stream agent pointer", () => {
+  beforeEach(() => vi.stubGlobal("WebSocket", FakeSocket));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reports where the agent moves and clicks, ignoring malformed points", () => {
+    const onPointer = vi.fn();
+    createPreviewStreamClient(target, {
+      onFrame: vi.fn(),
+      onPointer,
+      onViewport: vi.fn(),
+      onConnectedChange: vi.fn(),
+      onUnauthorized: vi.fn(),
+    });
+    FakeSocket.current.message(
+      JSON.stringify({ type: "pointer", phase: "drag", x: 1, y: 2, sequence: 1 }),
+    );
+    FakeSocket.current.message(
+      JSON.stringify({ type: "pointer", phase: "click", x: 140, y: 50, sequence: 2 }),
+    );
+    expect(onPointer).toHaveBeenCalledExactlyOnceWith({
+      phase: "click",
+      x: 140,
+      y: 50,
+      sequence: 2,
+    });
+  });
+});

@@ -82,6 +82,9 @@ const HOST_RECONNECT_DELAY = "1 second";
 const VIEWER_OUTPUT_LIMIT = 64;
 const RECORDING_SCREENCAST = { format: "jpeg", quality: 90, everyNthFrame: 1 } as const;
 const decodeViewportSetting = Schema.decodeUnknownSync(PreviewViewportSettingSchema);
+/** The agent cursor glides to its target, then pulses just before the press, like desktop tabs. */
+const AGENT_CURSOR_MOVE_MS = 160;
+const AGENT_CURSOR_CLICK_LEAD_MS = 40;
 
 const sleepUntil = (deadline: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, deadline - Date.now())));
@@ -153,6 +156,13 @@ export type ServerBrowserViewerOutput =
       readonly editable: boolean;
     }
   | { readonly _tag: "clipboard"; readonly text: string }
+  | {
+      readonly _tag: "pointer";
+      readonly phase: "move" | "click";
+      readonly x: number;
+      readonly y: number;
+      readonly sequence: number;
+    }
   | {
       readonly _tag: "fileChooser";
       readonly id: string;
@@ -1187,6 +1197,35 @@ const make = Effect.gen(function* () {
       };
     });
 
+  let pointerSequence = 0;
+  /**
+   * Shows viewers and recordings where the agent is about to act. Nobody is
+   * watching a headless agent tab, so it pays no glide delay.
+   */
+  const pointerFor =
+    (tab: ServerTab): ServerBrowserPage.PointerReporter =>
+    async ({ x, y }, phase) => {
+      const encoder = tab.recording?.encoder;
+      if (tab.viewers.size === 0 && !encoder) return;
+      const show = (next: "move" | "click") => {
+        const sequence = ++pointerSequence;
+        for (const viewer of tab.viewers)
+          viewer.push({ _tag: "pointer", phase: next, x, y, sequence });
+        void encoder
+          ?.evaluate(
+            ([px, py, click]) =>
+              (globalThis as unknown as EncoderWindow).__t3Recorder?.cursor(px, py, click),
+            [x, y, next === "click"] as const,
+          )
+          .catch(constVoid);
+      };
+      show("move");
+      await sleepUntil(Date.now() + AGENT_CURSOR_MOVE_MS);
+      if (phase !== "click") return;
+      show("click");
+      await sleepUntil(Date.now() + AGENT_CURSOR_CLICK_LEAD_MS);
+    };
+
   const recordAction = <A>(tab: ServerTab, action: string, run: () => Promise<A>): Promise<A> => {
     const event: {
       -readonly [K in keyof PreviewAutomationActionEvent]: PreviewAutomationActionEvent[K];
@@ -1454,20 +1493,14 @@ const make = Effect.gen(function* () {
       }
       case "click": {
         const clickInput = input as PreviewAutomationClickInput;
-        const point = await recordAction(tab, "click", () =>
-          ServerBrowserPage.click(tab.page, clickInput),
+        await recordAction(tab, "click", () =>
+          ServerBrowserPage.click(tab.page, clickInput, pointerFor(tab)),
         );
-        void tab.recording?.encoder
-          .evaluate(
-            ([x, y]) => (globalThis as unknown as EncoderWindow).__t3Recorder?.cursor(x, y, true),
-            [point.x, point.y] as const,
-          )
-          .catch(constVoid);
         return undefined;
       }
       case "hover":
         return recordAction(tab, "hover", () =>
-          ServerBrowserPage.hover(tab.page, input as PreviewAutomationHoverInput),
+          ServerBrowserPage.hover(tab.page, input as PreviewAutomationHoverInput, pointerFor(tab)),
         );
       case "select":
         return recordAction(tab, "select", () =>
@@ -1475,7 +1508,7 @@ const make = Effect.gen(function* () {
         );
       case "drag":
         return recordAction(tab, "drag", () =>
-          ServerBrowserPage.drag(tab.page, input as PreviewAutomationDragInput),
+          ServerBrowserPage.drag(tab.page, input as PreviewAutomationDragInput, pointerFor(tab)),
         );
       case "upload":
         return recordAction(tab, "upload", () =>

@@ -48,6 +48,21 @@ export function previewStreamDocument(configuration: string, script: string) {
   canvas, video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   canvas { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   video { pointer-events: none; }
+  /* The agent's pointer, positioned over the letterboxed frame by the viewer script. */
+  .agent-cursor {
+    position: absolute; left: 0; top: 0; width: 20px; height: 20px; pointer-events: none;
+    opacity: 0; transition: opacity 150ms ease-out, transform 150ms ease-out;
+  }
+  .agent-cursor svg { position: relative; display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
+  .agent-cursor .ping {
+    position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%;
+    background: rgba(59,130,246,.3); animation: agent-cursor-ping 600ms ease-out forwards;
+  }
+  @keyframes agent-cursor-ping { from { transform: scale(.6); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .agent-cursor { transition: none; }
+    .agent-cursor .ping { animation: none; opacity: 0; }
+  }
   /* Pinned so focus never scrolls; 16px keeps iOS from zooming on focus. */
   textarea {
     position: fixed; left: 0; top: 0; width: 1px; height: 1px;

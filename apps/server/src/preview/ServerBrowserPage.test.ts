@@ -214,4 +214,35 @@ describe("server browser element refs", () => {
       ServerBrowserPage.select(page, { locator: "#target", values: ["s"] }),
     ).rejects.toMatchObject({ tag: "PreviewAutomationTargetNotEditableError" });
   });
+
+  it("shows the agent's pointer at each target before the action reaches the page", async () => {
+    await page.setContent(`
+      <button id="go" style="position:absolute;left:100px;top:40px;width:80px;height:20px">go</button>
+      <div id="tip" style="position:absolute;left:300px;top:40px;width:60px;height:20px">tip</div>
+      <div id="card" draggable="true" style="position:absolute;left:20px;top:120px;width:40px;height:40px">card</div>
+      <div id="lane" style="position:absolute;left:220px;top:120px;width:100px;height:40px">lane</div>
+      <script>
+        window.seen = [];
+        go.onclick = () => seen.push("click");
+        tip.onmouseenter = () => seen.push("hover");
+        card.ondragstart = (event) => event.dataTransfer.setData("text/plain", "card");
+        lane.ondragover = (event) => event.preventDefault();
+        lane.ondrop = () => seen.push("drop");
+      </script>`);
+    const shown: Array<string> = [];
+    const pointer: ServerBrowserPage.PointerReporter = async ({ x, y }, phase) => {
+      const seen = await page.evaluate("window.seen.length");
+      shown.push(`${phase}@${Math.round(x)},${Math.round(y)} after ${seen}`);
+    };
+    await ServerBrowserPage.click(page, { locator: "#go" }, pointer);
+    await ServerBrowserPage.hover(page, { locator: "#tip" }, pointer);
+    await ServerBrowserPage.drag(page, { source: "#card", target: "#lane" }, pointer);
+    expect(shown).toEqual([
+      "click@140,50 after 0",
+      "move@330,50 after 1",
+      "move@40,140 after 2",
+      "move@270,140 after 2",
+    ]);
+    expect(await page.evaluate("window.seen")).toEqual(["click", "hover", "drop"]);
+  });
 });
