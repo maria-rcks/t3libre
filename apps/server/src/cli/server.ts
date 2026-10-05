@@ -2,12 +2,15 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { Command, GlobalFlag } from "effect/unstable/cli";
 import * as CliError from "effect/unstable/cli/CliError";
 
 import * as ServerConfig from "../config.ts";
 import { runServer } from "../server.ts";
 import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
+
+const encodeCommand = Schema.encodeEffect(Schema.fromJsonString(Schema.String));
 
 const runServerCommand = (
   flags: CliServerFlags,
@@ -22,12 +25,6 @@ const runServerCommand = (
     const config = yield* resolveServerConfig(flags, logLevel, options);
     return yield* runServer.pipe(Effect.provideService(ServerConfig.ServerConfig, config));
   });
-
-class UnknownServerCommandError extends CliError.UserError {
-  override get message() {
-    return `Unknown command ${JSON.stringify(this.cause)}. Use "t3 --help" for commands or an explicit path such as "t3 ./my-project" for a new directory.`;
-  }
-}
 
 /** Bare words can name existing directories, but must not create typo projects. */
 export const runDefaultServerCommand = (flags: CliServerFlags) =>
@@ -46,7 +43,10 @@ export const runDefaultServerCommand = (flags: CliServerFlags) =>
         !explicitPath &&
         (!(yield* fs.exists(cwd)) || (yield* fs.stat(cwd)).type !== "Directory")
       ) {
-        return yield* new UnknownServerCommandError({ cause: cwd });
+        return yield* new CliError.UserError({
+          cause: cwd,
+          userMessage: `Unknown command ${yield* encodeCommand(cwd)}. Use "t3 --help" for commands or an explicit path such as "t3 ./my-project" for a new directory.`,
+        });
       }
     }
     return yield* runServerCommand(flags, { rejectRunningServer: true });

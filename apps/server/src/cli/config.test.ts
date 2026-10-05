@@ -106,18 +106,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         const cwd = path.join(root, `${name}-project`);
         const config = yield* resolveServerConfig(
           {
+            ...minimalWebFlags(baseDir),
             mode: Option.some(mode),
             port: Option.some(8788),
-            host: Option.none(),
-            baseDir: Option.some(baseDir),
             cwd: Option.some(cwd),
-            devUrl: Option.none(),
-            noBrowser: Option.none(),
-            bootstrapFd: Option.none(),
-            autoBootstrapProjectFromCwd: Option.none(),
-            logWebSocketEvents: Option.none(),
-            tailscaleServeEnabled: Option.none(),
-            tailscaleServePort: Option.none(),
           },
           Option.none(),
           { rejectRunningServer },

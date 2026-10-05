@@ -250,12 +250,6 @@ const loadPersistedObservabilitySettings = Effect.fn(function* (settingsPath: st
   return parsePersistedServerObservabilitySettings(raw);
 });
 
-class ServerAlreadyRunningError extends CliError.UserError {
-  override get message() {
-    return String(this.cause);
-  }
-}
-
 export const resolveServerConfig = (
   flags: CliServerFlags,
   cliLogLevel: Option.Option<LogLevel.LogLevel>,
@@ -341,7 +335,7 @@ export const resolveServerConfig = (
     if (options?.rejectRunningServer && mode === "web") {
       const runtime = yield* readPersistedServerRuntimeState(derivedPaths.serverRuntimeStatePath);
       if (Option.isSome(runtime) && runtime.value.pid > 0 && isProcessAlive(runtime.value.pid)) {
-        return yield* new ServerAlreadyRunningError({
+        return yield* new CliError.UserError({
           cause: `A T3 Code server is already running for ${baseDir} (pid ${runtime.value.pid}, ${runtime.value.origin}). Connect to that server, stop it before starting another, or use a different --base-dir.`,
         });
       }
