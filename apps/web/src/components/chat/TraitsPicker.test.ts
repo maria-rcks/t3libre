@@ -81,6 +81,54 @@ describe("buildTraitsTriggerDisplay", () => {
     });
   });
 
+  it.each(["reasoningEffort", "reasoning", "effort", "variant", "thinking"])(
+    "pairs Fast with %s even when context is the primary select",
+    (id) => {
+      for (const speed of [fastModeDescriptor(true), serviceTierDescriptor("priority")]) {
+        expect(
+          buildTraitsTriggerDisplay({
+            provider: CODEX,
+            descriptors: [
+              selectDescriptor("profile", [{ id: "balanced", label: "Balanced" }], "balanced"),
+              CONTEXT_WINDOW,
+              { ...EFFORT, id },
+              speed,
+            ],
+            primarySelectDescriptorId: "profile",
+            ultrathinkPromptControlled: false,
+          }),
+        ).toEqual({ label: "Balanced · 1M · High Fast" });
+      }
+      expect(
+        buildTraitsTriggerDisplay({
+          provider: CODEX,
+          descriptors: [CONTEXT_WINDOW, { ...EFFORT, id }, serviceTierDescriptor("ultrafast")],
+          primarySelectDescriptorId: CONTEXT_WINDOW.id,
+          ultrathinkPromptControlled: false,
+        }),
+      ).toEqual({ label: "1M · High Ultrafast" });
+    },
+  );
+
+  it("pairs Cursor Fast with reasoning rather than the thinking toggle", () => {
+    expect(
+      buildTraitsTriggerDisplay({
+        provider: ProviderDriverKind.make("cursor"),
+        descriptors: [
+          { ...EFFORT, id: "reasoning" },
+          fastModeDescriptor(true),
+          { id: "thinking", label: "Thinking", type: "boolean", currentValue: true },
+        ],
+        primarySelectDescriptorId: "reasoning",
+        ultrathinkPromptControlled: false,
+      }),
+    ).toEqual({ label: "High Fast · Thinking On" });
+  });
+
+  it("keeps speed separate when there is no reasoning descriptor", () => {
+    expect(display([CONTEXT_WINDOW, fastModeDescriptor(true)])).toEqual({ label: "1M · Fast" });
+  });
+
   it.each(["Low", "Medium", "High", "Extra High", "Max", "Ultra"])(
     "preserves %s reasoning with Fast across harnesses",
     (label) => {

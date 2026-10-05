@@ -495,6 +495,7 @@ export function buildTraitsTriggerDisplay(input: {
 }): { label: string } {
   let fastModeFallbackLabel: string | null = null;
   let speedLabel: string | null = null;
+  let reasoningLabelIndex = -1;
   const labels: Array<string> = [];
   for (const descriptor of input.descriptors) {
     if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
@@ -537,6 +538,13 @@ export function buildTraitsTriggerDisplay(input: {
               input.reportedModelSelection,
             );
     if (typeof label === "string" && label.length > 0) {
+      // Custom models retain descriptor order, so the primary select can be context.
+      if (
+        reasoningLabelIndex === -1 &&
+        ["reasoningEffort", "reasoning", "effort", "variant", "thinking"].includes(descriptor.id)
+      ) {
+        reasoningLabelIndex = labels.length;
+      }
       labels.push(label);
     }
   }
@@ -547,8 +555,12 @@ export function buildTraitsTriggerDisplay(input: {
   if (labels.length === 0 && fastModeFallbackLabel !== null) {
     return { label: fastModeFallbackLabel };
   }
-  if (speedLabel && labels.length > 0) {
-    labels[0] = `${labels[0]} ${speedLabel}`;
+  if (speedLabel) {
+    if (reasoningLabelIndex >= 0) {
+      labels[reasoningLabelIndex] = `${labels[reasoningLabelIndex]} ${speedLabel}`;
+    } else {
+      labels.push(speedLabel);
+    }
   }
   return { label: labels.join(" · ") };
 }
