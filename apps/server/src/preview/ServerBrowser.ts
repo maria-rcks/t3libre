@@ -104,6 +104,8 @@ export class ServerBrowserTabNotFoundError extends Schema.TaggedError<ServerBrow
   }
 }
 
+const isTabNotFound = Schema.is(ServerBrowserTabNotFoundError);
+
 export class ServerBrowserLaunchError extends Schema.TaggedError<ServerBrowserLaunchError>()(
   "ServerBrowserLaunchError",
   { cause: Schema.Defect() },
@@ -575,7 +577,7 @@ const make = Effect.gen(function* () {
       return yield* Effect.tryPromise({
         try: () => ensureTab(snapshot),
         catch: (cause) =>
-          Schema.is(ServerBrowserTabNotFoundError)(cause)
+          isTabNotFound(cause)
             ? cause
             : new ServerBrowserLaunchError({ cause }),
       });
