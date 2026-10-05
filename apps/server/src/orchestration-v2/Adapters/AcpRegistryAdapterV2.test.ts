@@ -15,6 +15,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import * as ServerConfig from "../../config.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import type {
   AcpRegistryAvailableCommands,
   AcpRegistryLiveConfiguration,
@@ -87,6 +88,7 @@ const testLayer = Layer.mergeAll(
   IdAllocator.layer,
   serverConfigLayer,
   registryLayer,
+  ServerSettings.layerTest(),
 );
 
 describe("AcpRegistryAdapterV2", () => {

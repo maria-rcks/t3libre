@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { AcpRegistrySettings } from "@t3tools/contracts";
+import { AcpRegistrySettings, ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import {
   HostProcessArchitecture,
   HostProcessEnvironment,
@@ -13,8 +13,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import * as TestClock from "effect/testing/TestClock";
@@ -22,6 +20,7 @@ import * as NodeCrypto from "node:crypto";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 
 const registryUrl = "https://registry.test/registry.json";
 const archiveUrl = "https://registry.test/example-agent.bin";
@@ -57,6 +56,7 @@ function resolverLayer(
 ) {
   return Layer.mergeAll(
     NodeServices.layer,
+    ServerSettings.layerTest(),
     Layer.succeed(HostProcessPlatform, "linux"),
     Layer.succeed(HostProcessArchitecture, "x64"),
     Layer.succeed(HostProcessEnvironment, environment),
@@ -1336,42 +1336,71 @@ describe("AcpRegistrySupport", () => {
     );
   });
 
-  it.effect("uninstalls only the T3-managed binary tree and is idempotent", () => {
-    return Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const cacheDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-acp-registry-uninstall-",
-      });
-      const agentRoot = `${cacheDir}/tools/example-agent`;
-      const runnerCache = `${cacheDir}/external-npx-cache/example-agent/package.json`;
-      yield* fileSystem.makeDirectory(`${agentRoot}/1.2.3/linux-x86_64`, { recursive: true });
-      yield* fileSystem.writeFileString(`${agentRoot}/1.2.3/linux-x86_64/agent`, "binary");
-      yield* fileSystem.makeDirectory(`${cacheDir}/external-npx-cache/example-agent`, {
-        recursive: true,
-      });
-      yield* fileSystem.writeFileString(runnerCache, "{}");
+  it.effect.each([
+    { name: "legacy registry", source: undefined, referenced: true },
+    { name: "registry", source: "registry", referenced: true },
+    { name: "local command", source: "local", referenced: false },
+  ] as const)(
+    "checks $name references before uninstalling only managed binaries",
+    ({ source, referenced }) => {
+      return Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const cacheDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-acp-registry-uninstall-",
+        });
+        const agentRoot = `${cacheDir}/tools/example-agent`;
+        const runnerCache = `${cacheDir}/external-npx-cache/example-agent/package.json`;
+        yield* fileSystem.makeDirectory(`${agentRoot}/1.2.3/linux-x86_64`, { recursive: true });
+        yield* fileSystem.writeFileString(`${agentRoot}/1.2.3/linux-x86_64/agent`, "binary");
+        yield* fileSystem.makeDirectory(`${cacheDir}/external-npx-cache/example-agent`, {
+          recursive: true,
+        });
+        yield* fileSystem.writeFileString(runnerCache, "{}");
 
-      const resolver = yield* AcpRegistrySupport.makeAcpRegistryCatalog({
-        cacheDir,
-        toolsDir: `${cacheDir}/tools`,
-        registryUrl,
-      });
-      const first = yield* resolver.uninstallManagedBinary({ agentId: "example-agent" });
-      const second = yield* resolver.uninstallManagedBinary({ agentId: "example-agent" });
+        const resolver = yield* AcpRegistrySupport.makeAcpRegistryCatalog({
+          cacheDir,
+          toolsDir: `${cacheDir}/tools`,
+          registryUrl,
+        });
+        const serverSettings = yield* ServerSettings.ServerSettingsService;
+        const instanceId = ProviderInstanceId.make("uninstall-reference");
+        yield* serverSettings.updateProviderInstance({
+          operation: "upsert",
+          instanceId,
+          instance: {
+            driver: ProviderDriverKind.make("acpRegistry"),
+            displayName: "Uninstall reference",
+            enabled: true,
+            config: {
+              agentId: "example-agent",
+              commandPath: "/local/agent",
+              ...(source ? { source } : {}),
+            },
+          },
+        });
+        const first = yield* resolver.uninstallManagedBinary({ agentId: "example-agent" });
+        expect(first).toEqual({ agentId: "example-agent", removed: !referenced });
+        expect(yield* fileSystem.exists(agentRoot)).toBe(referenced);
+        yield* serverSettings.updateProviderInstance({ operation: "remove", instanceId });
+        const second = yield* resolver.uninstallManagedBinary({ agentId: "example-agent" });
 
-      expect(first).toEqual({ agentId: "example-agent", removed: true });
-      expect(second).toEqual({ agentId: "example-agent", removed: false });
-      expect(yield* fileSystem.exists(agentRoot)).toBe(false);
-      expect(yield* fileSystem.exists(runnerCache)).toBe(true);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        resolverLayer((request) =>
-          Effect.succeed(HttpClientResponse.fromWeb(request, new Response("unused"))),
+        expect(second).toEqual({ agentId: "example-agent", removed: referenced });
+        expect(yield* resolver.uninstallManagedBinary({ agentId: "example-agent" })).toEqual({
+          agentId: "example-agent",
+          removed: false,
+        });
+        expect(yield* fileSystem.exists(agentRoot)).toBe(false);
+        expect(yield* fileSystem.exists(runnerCache)).toBe(true);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          resolverLayer((request) =>
+            Effect.succeed(HttpClientResponse.fromWeb(request, new Response("unused"))),
+          ),
         ),
-      ),
-    );
-  });
+      );
+    },
+  );
 
   it.effect("keeps managed package installs when removing the same agent's binaries", () =>
     Effect.gen(function* () {
@@ -1420,8 +1449,6 @@ describe("AcpRegistrySupport", () => {
     return Effect.gen(function* () {
       const downloadStarted = yield* Deferred.make<void>();
       const releaseDownload = yield* Deferred.make<void>();
-      const referenceChecked = yield* Deferred.make<void>();
-      const isReferenced = yield* Ref.make(false);
       return yield* Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const cacheDir = yield* fileSystem.makeTempDirectoryScoped({
@@ -1438,16 +1465,10 @@ describe("AcpRegistrySupport", () => {
           .pipe(Effect.forkChild({ startImmediately: true }));
         yield* Deferred.await(downloadStarted);
         const uninstallFiber = yield* resolver
-          .uninstallManagedBinary(
-            { agentId: agent.id },
-            Deferred.succeed(referenceChecked, undefined).pipe(
-              Effect.andThen(Ref.get(isReferenced)),
-            ),
-          )
+          .uninstallManagedBinary({ agentId: agent.id })
           .pipe(Effect.forkChild({ startImmediately: true }));
 
-        expect(Option.isNone(yield* Deferred.poll(referenceChecked))).toBe(true);
-        yield* Ref.set(isReferenced, true);
+        expect(uninstallFiber.pollUnsafe()).toBeUndefined();
         yield* Deferred.succeed(releaseDownload, undefined);
 
         expect(yield* Fiber.join(prepareFiber)).toMatchObject({ prepared: true });
@@ -1458,13 +1479,31 @@ describe("AcpRegistrySupport", () => {
         const agentRoot = `${cacheDir}/tools/${agent.id}`;
         expect(yield* fileSystem.exists(agentRoot)).toBe(true);
 
-        yield* Ref.set(isReferenced, false);
-        expect(
-          yield* resolver.uninstallManagedBinary({ agentId: agent.id }, Ref.get(isReferenced)),
-        ).toEqual({ agentId: agent.id, removed: true });
-        expect(
-          yield* resolver.uninstallManagedBinary({ agentId: agent.id }, Ref.get(isReferenced)),
-        ).toEqual({ agentId: agent.id, removed: false });
+        const serverSettings = yield* ServerSettings.ServerSettingsService;
+        const instanceId = ProviderInstanceId.make("registry-reference");
+        yield* serverSettings.updateProviderInstance({
+          operation: "upsert",
+          instanceId,
+          instance: {
+            driver: ProviderDriverKind.make("acpRegistry"),
+            displayName: "Registry reference",
+            enabled: true,
+            config: { agentId: agent.id },
+          },
+        });
+        expect(yield* resolver.uninstallManagedBinary({ agentId: agent.id })).toEqual({
+          agentId: agent.id,
+          removed: false,
+        });
+        yield* serverSettings.updateProviderInstance({ operation: "remove", instanceId });
+        expect(yield* resolver.uninstallManagedBinary({ agentId: agent.id })).toEqual({
+          agentId: agent.id,
+          removed: true,
+        });
+        expect(yield* resolver.uninstallManagedBinary({ agentId: agent.id })).toEqual({
+          agentId: agent.id,
+          removed: false,
+        });
       }).pipe(
         Effect.scoped,
         Effect.provide(
