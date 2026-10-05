@@ -22,6 +22,7 @@ import {
   type PreviewAutomationSetColorSchemeInput,
   type PreviewAutomationStatus,
   type PreviewAutomationTypeInput,
+  type PreviewAutomationUploadInput,
   type PreviewAutomationWaitForInput,
   PreviewClearProfileError,
   type PreviewEvent,
@@ -776,6 +777,34 @@ const make = Effect.gen(function* () {
     if (tab.fileChooser === open) closeFileChooser(tab);
     return true;
   };
+  /** The agent's files go to a named file input, or else to the page's open picker. */
+  const uploadFiles = async (tab: ServerTab, input: PreviewAutomationUploadInput) => {
+    const relative = input.paths.find((path) => !NodePath.isAbsolute(path));
+    if (relative !== undefined)
+      throw new ServerBrowserPage.ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        `Upload paths must be absolute: ${relative}`,
+      );
+    if (await ServerBrowserPage.setInputFiles(tab.page, input)) return undefined;
+    const open = tab.fileChooser;
+    if (!open)
+      throw new ServerBrowserPage.ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        "No file picker is open. Click the page's upload control first, or pass the file input's locator.",
+      );
+    if (input.paths.length > 1 && !open.chooser.isMultiple())
+      throw new ServerBrowserPage.ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        "This file picker accepts one file.",
+      );
+    if (input.paths.length > 0)
+      await open.chooser.setFiles([...input.paths], {
+        timeout: input.timeoutMs ?? NAVIGATION_TIMEOUT_MS,
+      });
+    if (tab.fileChooser === open) closeFileChooser(tab);
+    return undefined;
+  };
+
   const answerFileChooser: ServerBrowser["Service"]["answerFileChooser"] = (input) =>
     Effect.promise(() => setChooserFiles(input).catch(() => false));
 
@@ -930,6 +959,9 @@ const make = Effect.gen(function* () {
         generation: tab.control.generation,
       },
       dialog: dialogStatus(tab),
+      fileChooser: tab.fileChooser
+        ? { multiple: tab.fileChooser.chooser.isMultiple(), accept: tab.fileChooser.accept }
+        : null,
       viewportSetting: tab.setting,
       ...(viewport ? { viewport } : {}),
       tabs: [...tabs.values()]
@@ -1430,6 +1462,10 @@ const make = Effect.gen(function* () {
           .catch(constVoid);
         return undefined;
       }
+      case "upload":
+        return recordAction(tab, "upload", () =>
+          uploadFiles(tab, input as PreviewAutomationUploadInput),
+        );
       case "type":
         return recordAction(tab, "type", () =>
           ServerBrowserPage.type(tab.page, input as PreviewAutomationTypeInput),

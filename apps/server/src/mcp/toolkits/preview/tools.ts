@@ -18,6 +18,7 @@ import {
   PreviewAutomationStatus,
   PreviewAutomationTabTargetInput,
   PreviewAutomationTypeInput,
+  PreviewAutomationUploadInput,
   PreviewAutomationWaitForInput,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -175,6 +176,17 @@ const PreviewTypeTool = browserTool(
   }).annotate(Tool.Title, "Type into preview page"),
 );
 
+const PreviewUploadTool = browserTool(
+  Tool.make("preview_upload", {
+    description:
+      "Give files on the environment to the page in the tab selected by tabId, or this agent session's current tab when omitted. After clicking an upload control, preview_status reports the open fileChooser; call this with absolute paths to answer it, or with an empty list to cancel. Pass a locator for an <input type=file> to set its files without a picker. Server browser tabs only.",
+    parameters: PreviewAutomationUploadInput,
+    success: PreviewActionResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Upload files to preview page"),
+);
+
 const PreviewPressTool = browserTool(
   Tool.make("preview_press", {
     description:
@@ -263,6 +275,7 @@ export const PreviewToolkit = Toolkit.make(
   PreviewSnapshotTool,
   PreviewClickTool,
   PreviewTypeTool,
+  PreviewUploadTool,
   PreviewPressTool,
   PreviewScrollTool,
   PreviewEvaluateTool,
@@ -280,6 +293,7 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewSetAppearanceTool,
   PreviewClickTool,
   PreviewTypeTool,
+  PreviewUploadTool,
   PreviewPressTool,
   PreviewScrollTool,
   PreviewEvaluateTool,

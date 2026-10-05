@@ -205,6 +205,7 @@ const handlers = {
   },
   preview_click: (input) => invokeTargeted<object>("click", input, input.timeoutMs),
   preview_type: (input) => invokeTargeted<object>("type", input, input.timeoutMs),
+  preview_upload: (input) => invokeTargeted<object>("upload", input, input.timeoutMs),
   preview_press: (input) => invokeTargeted<object>("press", input),
   preview_scroll: (input) => invokeTargeted<object>("scroll", input),
   preview_evaluate: ({ tabId, ...input }) =>

@@ -49,6 +49,7 @@ export const PREVIEW_AUTOMATION_SERVER_OPERATIONS = [
   ...PREVIEW_AUTOMATION_OPERATIONS,
   "dialog",
   "close",
+  "upload",
 ] as const;
 export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_SERVER_OPERATIONS);
 export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type;
@@ -95,6 +96,10 @@ export const PreviewAutomationStatus = Schema.Struct({
   viewportSetting: Schema.optional(PreviewViewportSetting),
   /** Measured guest-page viewport in CSS pixels when a webview is ready. */
   viewport: Schema.optional(PreviewRenderedViewportSize),
+  /** Server hosts: a file picker the page opened, answered with preview_upload. */
+  fileChooser: Schema.optional(
+    Schema.NullOr(Schema.Struct({ multiple: Schema.Boolean, accept: Schema.String })),
+  ),
   /** Server hosts: files this tab downloaded, saved on the environment until the tab closes. */
   downloads: Schema.optional(
     Schema.Array(
@@ -382,6 +387,34 @@ export const PreviewAutomationClickInput = Schema.Struct({
       "Clicks one target. Provide exactly one of locator, selector, or the x/y coordinate pair.",
   });
 export type PreviewAutomationClickInput = typeof PreviewAutomationClickInput.Type;
+
+export const PreviewAutomationUploadInput = Schema.Struct({
+  ...PreviewAutomationTabTargetFields,
+  paths: Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(20)).annotate({
+    description:
+      "Absolute paths of files on the environment to give the page. An empty list cancels the open file picker.",
+  }),
+  selector: Schema.optional(LegacySelector).annotate({
+    description: "Legacy CSS selector for an <input type=file>. Prefer locator.",
+  }),
+  locator: Schema.optional(Locator).annotate({
+    description:
+      "Set files directly on this <input type=file> instead of answering the open file picker.",
+  }),
+  timeoutMs: OptionalTimeoutMs,
+})
+  .check(
+    Schema.makeFilter(
+      (input) =>
+        !(input.selector !== undefined && input.locator !== undefined) ||
+        "Provide at most one of selector or locator.",
+    ),
+  )
+  .annotate({
+    description:
+      "Answers the page's open file picker, or sets files on a file input when locator/selector is given.",
+  });
+export type PreviewAutomationUploadInput = typeof PreviewAutomationUploadInput.Type;
 
 export const PreviewAutomationTypeInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,

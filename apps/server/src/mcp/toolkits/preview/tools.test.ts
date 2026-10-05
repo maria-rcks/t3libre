@@ -60,6 +60,7 @@ it("exports exact object result schemas for preview actions", () => {
   const actionNames = [
     "preview_click",
     "preview_type",
+    "preview_upload",
     "preview_press",
     "preview_scroll",
     "preview_wait_for",

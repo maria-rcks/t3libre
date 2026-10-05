@@ -797,3 +797,46 @@ it.live("an agent's tabs stop at the limit until an unwatched idle tab closes", 
     }),
   ).pipe(Effect.provide(layer)),
 );
+
+it.live("an agent answers the page's file picker or sets files on a file input", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const page = contexts[0]!.page;
+      const upload = (input: Record<string, unknown>) =>
+        broker.invoke<void>({ scope, tabId, operation: "upload", input });
+      expect(yield* Effect.flip(upload({ paths: ["/tmp/a.csv"] }))).toMatchObject({
+        _tag: "PreviewAutomationExecutionError",
+      });
+      const setFiles = vi.fn(async (_files: unknown) => {});
+      page.emit("filechooser", {
+        isMultiple: () => false,
+        element: () => ({ getAttribute: async () => ".csv" }),
+        setFiles,
+      });
+      const status = broker.invoke<PreviewAutomationStatus>({
+        scope,
+        tabId,
+        operation: "status",
+        input: {},
+      });
+      let opened = yield* status;
+      while (!opened.fileChooser) {
+        yield* Effect.sleep("5 millis");
+        opened = yield* status;
+      }
+      expect(opened.fileChooser).toEqual({ multiple: false, accept: ".csv" });
+      // A single-file picker rejects several files instead of dropping some.
+      yield* Effect.flip(upload({ paths: ["/tmp/a.csv", "/tmp/b.csv"] }));
+      yield* upload({ paths: ["/tmp/a.csv"] });
+      expect(setFiles).toHaveBeenCalledExactlyOnceWith(["/tmp/a.csv"], expect.anything());
+      expect((yield* status).fileChooser).toBeNull();
+
+      const setInputFiles = vi.fn(async () => {});
+      page.locator.mockReturnValue({ setInputFiles } as never);
+      yield* upload({ paths: ["/tmp/b.csv"], locator: "input[type=file]" });
+      expect(page.locator).toHaveBeenLastCalledWith("input[type=file]");
+      expect(setInputFiles).toHaveBeenCalledWith(["/tmp/b.csv"], expect.anything());
+    }),
+  ).pipe(Effect.provide(layer)),
+);

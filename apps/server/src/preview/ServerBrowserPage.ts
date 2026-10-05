@@ -10,6 +10,7 @@ import {
   type PreviewAutomationScrollInput,
   type PreviewAutomationSnapshot,
   type PreviewAutomationTypeInput,
+  type PreviewAutomationUploadInput,
   type PreviewAutomationWaitForInput,
 } from "@t3tools/contracts";
 import { constVoid } from "effect/Function";
@@ -290,6 +291,14 @@ export const type = async (page: Page, input: PreviewAutomationTypeInput) => {
     await page.keyboard.press("Delete");
   }
   await page.keyboard.insertText(input.text);
+};
+
+/** Sets files on one file input; false when no locator or selector names one. */
+export const setInputFiles = async (page: Page, input: PreviewAutomationUploadInput) => {
+  const locator = targetLocator(page, input);
+  if (locator === null) return false;
+  await locator.setInputFiles([...input.paths], { timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+  return true;
 };
 
 export const press = async (page: Page, input: PreviewAutomationPressInput) => {
