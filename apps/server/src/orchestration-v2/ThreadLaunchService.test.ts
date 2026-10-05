@@ -220,6 +220,7 @@ function makeHarness(options: HarnessOptions = {}) {
       launch,
       threadManagement,
       titleRegeneration,
+      receipts,
       outbox,
       database,
       externalServices,
@@ -1503,6 +1504,95 @@ it.effect.each(["worktree", "setup"] as const)(
         );
       }).pipe(Effect.provide(harness.layer));
     }),
+);
+
+it.effect.each(["live", "deleted"] as const)(
+  "persists rejected duplicate launches for %s threads without changing the original",
+  (state) => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
+      const original = launchInput({
+        command: `command:launch:duplicate-${state}:original`,
+        thread: `thread:launch:duplicate-${state}`,
+      });
+      yield* threads.dispatch({
+        type: "thread.create",
+        commandId: original.commandId,
+        threadId: original.threadId,
+        projectId,
+        title: original.title,
+        modelSelection,
+        runtimeMode: original.runtimeMode,
+        interactionMode: original.interactionMode,
+        branch: null,
+        worktreePath: null,
+        createdBy: original.createdBy,
+        creationSource: original.creationSource,
+      });
+      if (state === "deleted") {
+        yield* threads.dispatch({
+          type: "thread.delete",
+          commandId: CommandId.make(`${original.commandId}:delete`),
+          threadId: original.threadId,
+        });
+      }
+      const before = yield* encodeThreadProjection(
+        yield* threads.getThreadProjection(original.threadId),
+      );
+      assert.equal(before.thread.deletedAt !== null, state === "deleted");
+      const sequence = yield* threads.getThreadEventSequence(original.threadId);
+      const duplicate = {
+        ...original,
+        commandId: CommandId.make(`command:launch:duplicate-${state}:rejected`),
+        title: "Replacement title",
+      };
+
+      const failed = yield* launches.launch(duplicate).pipe(Effect.flip);
+      assert.equal(failed._tag, "ThreadLaunchError");
+      assert.equal(failed.operation, "create-thread");
+      assert.deepInclude(failed.cause, {
+        _tag: "OrchestratorDispatchError",
+        commandId: duplicate.commandId,
+        commandType: "thread.create",
+        cause: `Thread ${original.threadId} already exists.`,
+      });
+      const receipt = yield* receipts
+        .getByCommandId(duplicate.commandId)
+        .pipe(Effect.map(Option.getOrThrow));
+      assert.deepInclude(receipt, {
+        commandId: duplicate.commandId,
+        threadId: original.threadId,
+        commandType: "thread.create",
+        status: "rejected",
+      });
+      assert.propertyVal(failed.cause, "message", receipt.error);
+
+      const retry = yield* launches.launch(duplicate).pipe(Effect.flip);
+      assert.equal(retry.operation, "create-thread");
+      assert.deepInclude(retry.cause, {
+        _tag: "OrchestratorCommandPreviouslyRejectedError",
+        commandId: duplicate.commandId,
+        commandType: "thread.create",
+        detail: receipt.error,
+      });
+      assert.deepEqual(yield* receipts.getByCommandId(duplicate.commandId), Option.some(receipt));
+
+      const replay = yield* launches.launch(original);
+      assert.equal(replay.threadId, original.threadId);
+      assert.isTrue(replay.resumed);
+      assert.deepEqual(yield* encodeThreadProjection(replay.projection), before);
+      assert.equal(yield* threads.getThreadEventSequence(original.threadId), sequence);
+      const shells = yield* threads.listProjectThreads({ projectId, includeSubagents: true });
+      assert.deepEqual(
+        shells.map((shell) => shell.id),
+        state === "deleted" ? [] : [original.threadId],
+      );
+      assert.equal(harness.runSetup.mock.calls.length, 0);
+    }).pipe(Effect.provide(harness.layer));
+  },
 );
 
 it.effect("replays a server-allocated launch", () =>

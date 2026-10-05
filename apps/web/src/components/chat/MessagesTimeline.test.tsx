@@ -5,9 +5,13 @@ import {
   CheckpointRef,
   EnvironmentId,
   MessageId,
+  NodeId,
   ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
   RunId,
   ThreadId,
+  type OrchestrationV2Subagent,
 } from "@t3tools/contracts";
 import {
   act,
@@ -29,7 +33,22 @@ const activityTestState = vi.hoisted(() => ({
   expanded: false,
   expandedRuns: false,
   subagentTooltips: false,
+  subagentQuery: vi.fn(),
 }));
+
+vi.mock("@t3tools/client-runtime/state/threads", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@t3tools/client-runtime/state/threads")>();
+  return {
+    ...original,
+    createEnvironmentSubagentQuery(
+      ...args: Parameters<typeof original.createEnvironmentSubagentQuery>
+    ) {
+      const query = original.createEnvironmentSubagentQuery(...args);
+      return (target: Parameters<typeof query>[0]) =>
+        activityTestState.subagentQuery(target) ?? query(target);
+    },
+  };
+});
 
 // Expose tooltip contents in the renderer without requiring a browser portal.
 vi.mock("../ui/tooltip", async (importOriginal) => {
@@ -85,6 +104,7 @@ beforeEach(() => {
   activityTestState.subagentTooltips = false;
   activityTestState.expanded = false;
   activityTestState.expandedRuns = false;
+  activityTestState.subagentQuery.mockReset();
 });
 
 vi.mock("@legendapp/list/react", async () => {
@@ -2338,6 +2358,259 @@ describe("MessagesTimeline", () => {
         for (const spy of spies) spy.mockRestore();
         container.remove();
         vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it.each([1, 2])(
+    "recovers %i historical workflow cards from inherited rows and preserves ordinary navigation",
+    async (workflowCount) => {
+      vi.unstubAllGlobals();
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        },
+      );
+      activityTestState.expandedRuns = true;
+      const { RegistryContext } = await import("@effect/atom-react");
+      const { Atom, AtomRegistry, AsyncResult } = await import("effect/unstable/reactivity");
+      const DateTime = await import("effect/DateTime");
+      const entities = await import("../../state/entities");
+      const { environmentThreadDetails } = await import("../../state/threads");
+      const archivedThreads = await import("../../lib/archivedThreadsState");
+      const environmentId = EnvironmentId.make("environment-history");
+      const registry = AtomRegistry.make();
+      const agents = Array.from(
+        { length: workflowCount === 1 ? 1 : 4 },
+        (_, index): OrchestrationV2Subagent => ({
+          id: NodeId.make(`history-agent-${index}`),
+          threadId: ThreadId.make(`history-source-${index}`),
+          runId: RunId.make("run-1"),
+          parentNodeId: NodeId.make("parent-node"),
+          origin: "provider_native",
+          createdBy: "agent",
+          driver: ProviderDriverKind.make("claudeAgent"),
+          providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+          providerThreadId: null,
+          childThreadId: ThreadId.make(`history-child-${index}`),
+          nativeTaskRef: null,
+          title: `Task ${index}`,
+          prompt: "Inspect the package",
+          model: null,
+          status: "completed",
+          result: null,
+          startedAt: null,
+          completedAt: null,
+          updatedAt: DateTime.makeUnsafe(MESSAGE_CREATED_AT),
+          ...(index < workflowCount
+            ? {
+                workflow: {
+                  name: `Historical review ${index}`,
+                  phases: [{ index: 1, title: "Inspect" }],
+                  agents: [
+                    {
+                      index: 0,
+                      label: `Reviewer ${index}`,
+                      state: "completed",
+                      phaseIndex: 1,
+                      childThreadId: ThreadId.make(`reviewer-child-${index}`),
+                    },
+                  ],
+                },
+              }
+            : {}),
+        }),
+      );
+      const retained = agents.map((agent) => ({
+        agent,
+        queryAtom: Atom.make(AsyncResult.success<OrchestrationV2Subagent | null>(null)),
+        threadAtom: Atom.make({ projection: { subagents: [] as OrchestrationV2Subagent[] } }),
+      }));
+      const emptyQuery = Atom.make(AsyncResult.success(null));
+      const wrongSource = Atom.make({
+        projection: {
+          subagents: agents.map((agent) => ({
+            ...agent,
+            workflow: { ...agents[0]!.workflow!, name: "Wrong source workflow" },
+          })),
+        },
+      });
+      activityTestState.subagentQuery.mockImplementation(
+        (target: {
+          environmentId: EnvironmentId;
+          input: { threadId: ThreadId; requiredSubagentId: NodeId };
+        }) =>
+          (target.environmentId === environmentId
+            ? retained.find(
+                ({ agent }) =>
+                  agent.threadId === target.input.threadId &&
+                  agent.id === target.input.requiredSubagentId,
+              )?.queryAtom
+            : null) ?? emptyQuery,
+      );
+      const spies = [
+        vi
+          .spyOn(environmentThreadDetails, "threadAtom")
+          .mockImplementation(
+            (ref) =>
+              (ref.environmentId === environmentId
+                ? (retained.find(({ agent }) => agent.threadId === ref.threadId)?.threadAtom ??
+                  wrongSource)
+                : wrongSource) as never,
+          ),
+        vi.spyOn(entities, "useThreadShells").mockReturnValue(
+          agents.flatMap((agent, index) => [
+            { environmentId, source: { id: agent.childThreadId } },
+            { environmentId, source: { id: `reviewer-child-${index}` } },
+          ]) as never,
+        ),
+        vi.spyOn(archivedThreads, "useArchivedThreadSnapshots").mockReturnValue({
+          snapshots: [],
+          isLoading: false,
+          error: null,
+          refresh: vi.fn(),
+        }),
+      ];
+      const onOpenThread = vi.fn();
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      try {
+        await act(async () => {
+          root.render(
+            <RegistryContext.Provider value={registry}>
+              <MessagesTimeline
+                {...buildProps()}
+                activeThreadEnvironmentId={environmentId}
+                routeThreadKey={`${environmentId}:current-fork`}
+                onOpenThread={onOpenThread}
+                timelineEntries={agents.map((agent, index) => ({
+                  id: `history-event-${index}`,
+                  kind: "event",
+                  createdAt: MESSAGE_CREATED_AT,
+                  projectedItem: {
+                    position: index,
+                    visibility: "inherited",
+                    sourceThreadId: agent.threadId,
+                    sourceItemId: `history-event-${index}`,
+                    item: {
+                      id: `history-event-${index}`,
+                      threadId: agent.threadId,
+                      runId: agent.runId,
+                      nodeId: agent.id,
+                      providerThreadId: "provider-thread-1",
+                      providerTurnId: "provider-turn-1",
+                      nativeItemRef: null,
+                      parentItemId: null,
+                      ordinal: index,
+                      status: agent.status,
+                      title: agent.title,
+                      startedAt: null,
+                      completedAt: null,
+                      updatedAt: agent.updatedAt,
+                      type: "subagent",
+                      subagentId: agent.id,
+                      origin: agent.origin,
+                      driver: agent.driver,
+                      providerInstanceId: agent.providerInstanceId,
+                      childThreadId: agent.childThreadId,
+                      prompt: agent.prompt,
+                      result: null,
+                    },
+                  } as never,
+                }))}
+              />
+            </RegistryContext.Provider>,
+          );
+        });
+        expect(container.querySelectorAll("[data-workflow-card]")).toHaveLength(0);
+        expect(
+          container.querySelector(
+            workflowCount === 1 ? '[aria-label="Open Task 0"]' : '[aria-label="4 subagents"]',
+          ),
+        ).not.toBeNull();
+        await act(async () => {
+          for (const { agent, queryAtom } of retained) {
+            registry.set(queryAtom, AsyncResult.success(agent));
+          }
+        });
+        expect(container.querySelectorAll("[data-workflow-card]")).toHaveLength(workflowCount);
+        for (let index = 0; index < workflowCount; index++) {
+          const card = container.querySelector(
+            `[aria-label="Workflow: Historical review ${index}"]`,
+          )!;
+          expect(card).not.toBeNull();
+          const phase = card.querySelector<HTMLButtonElement>('button[aria-label="Inspect: 1/1"]')!;
+          await act(async () => phase.click());
+          expect(card.querySelector(`[aria-label="Open Reviewer ${index}"]`)).toBeNull();
+          await act(async () => phase.click());
+          const member = card.querySelector<HTMLButtonElement>(
+            `[aria-label="Open Reviewer ${index}"]`,
+          )!;
+          expect(member.disabled).toBe(false);
+          await act(async () => member.click());
+          expect(onOpenThread).toHaveBeenLastCalledWith(`reviewer-child-${index}`);
+          const coordinator = [...card.querySelectorAll("button")].find(
+            (button) => button.textContent === "Open workflow",
+          )!;
+          expect(coordinator.disabled).toBe(false);
+          await act(async () => coordinator.click());
+          expect(onOpenThread).toHaveBeenLastCalledWith(agents[index]!.childThreadId);
+          expect(container.querySelector(`[aria-label="Open Task ${index}"]`)).toBeNull();
+        }
+        if (workflowCount === 2) {
+          const group = container.querySelector<HTMLButtonElement>('[aria-label="2 subagents"]')!;
+          expect(group).not.toBeNull();
+          expect(container.querySelector('[aria-label="4 subagents"]')).toBeNull();
+          await act(async () => group.click());
+          for (const index of [2, 3]) {
+            const ordinary = container.querySelector<HTMLButtonElement>(
+              `[aria-label="Open Task ${index}"]`,
+            )!;
+            expect(ordinary).not.toBeNull();
+            await act(async () => ordinary.click());
+            expect(onOpenThread).toHaveBeenLastCalledWith(agents[index]!.childThreadId);
+          }
+          await act(async () => group.click());
+          expect(container.querySelector('[aria-label="Open Task 2"]')).toBeNull();
+          expect(container.querySelectorAll("[data-workflow-card]")).toHaveLength(2);
+        } else {
+          const { agent, threadAtom } = retained[0]!;
+          await act(async () => {
+            registry.set(threadAtom, {
+              projection: {
+                subagents: [{ ...agent, workflow: { ...agent.workflow!, name: "Live review" } }],
+              },
+            });
+          });
+          expect(container.querySelector('[aria-label="Workflow: Live review"]')).not.toBeNull();
+          expect(
+            container.querySelector('[aria-label="Workflow: Historical review 0"]'),
+          ).toBeNull();
+          await act(async () => {
+            registry.set(threadAtom, {
+              projection: { subagents: [{ ...agent, workflow: undefined }] },
+            });
+          });
+          expect(container.querySelectorAll("[data-workflow-card]")).toHaveLength(0);
+          const ordinary = container.querySelector<HTMLButtonElement>(
+            '[aria-label="Open Task 0"]',
+          )!;
+          expect(ordinary).not.toBeNull();
+          await act(async () => ordinary.click());
+          expect(onOpenThread).toHaveBeenLastCalledWith(agent.childThreadId);
+        }
+      } finally {
+        await act(async () => root.unmount());
+        registry.dispose();
+        for (const spy of spies) spy.mockRestore();
+        activityTestState.subagentQuery.mockReset();
+        container.remove();
         vi.unstubAllGlobals();
       }
     },

@@ -34,7 +34,11 @@ import {
 } from "@t3tools/contracts";
 import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
-import { environmentThreadDetails, useOwningSubagent } from "../../state/threads";
+import {
+  environmentThreadDetails,
+  useOwningSubagent,
+  useTimelineSubagents,
+} from "../../state/threads";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import { repairMarkdownFileLinks } from "@t3tools/client-runtime/repair-markdown-file-links";
 import { Link } from "@tanstack/react-router";
@@ -3076,22 +3080,17 @@ function subagentGroupTiming(
 
 function V2SubagentTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event" }> }) {
   const ctx = use(TimelineRowCtx);
-  const agents = useAtomValue(
-    environmentThreadDetails.threadAtom(
-      scopeThreadRef(ctx.activeThreadEnvironmentId, row.projectedItem.item.threadId),
+  const members = (row.subagents ?? [row.projectedItem]).filter(
+    ({ item }) => item.type === "subagent",
+  );
+  const agents = useTimelineSubagents(
+    ctx.activeThreadEnvironmentId,
+    members.flatMap(({ item, sourceThreadId }) =>
+      item.type === "subagent" ? [{ threadId: sourceThreadId, subagentId: item.subagentId }] : [],
     ),
-    (thread) => thread?.projection.subagents,
   );
-  const members = row.subagents ?? [row.projectedItem];
-  const workflows = members.flatMap(({ item }) => {
-    const agent =
-      item.type === "subagent" ? agents?.find((agent) => agent.id === item.subagentId) : undefined;
-    return agent?.workflow ? [agent] : [];
-  });
-  const ordinary = members.filter(
-    ({ item }) =>
-      item.type !== "subagent" || !workflows.some((agent) => agent.id === item.subagentId),
-  );
+  const workflows = agents.flatMap((agent) => (agent?.workflow ? [agent] : []));
+  const ordinary = members.filter((_, index) => !agents[index]?.workflow);
   const item = ordinary[0]?.item;
   return (
     <>

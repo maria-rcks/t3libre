@@ -17,6 +17,7 @@ import type {
   ScopedThreadRef,
   ThreadId,
 } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
@@ -50,6 +51,44 @@ export function useOwningSubagent(ref: ScopedThreadRef | null, nodeId: NodeId | 
       : EMPTY_SUBAGENT_QUERY,
   );
   return Option.getOrNull(AsyncResult.value(result));
+}
+
+type TimelineSubagentTarget = { readonly threadId: ThreadId; readonly subagentId: NodeId };
+
+// History pages carry items, not subagent metadata. Resolve every member of a
+// grouped row against its source thread, without expanding the history window.
+const timelineSubagentsAtom = Atom.family((key: string) =>
+  Atom.make((get) => {
+    const { environmentId, targets } = JSON.parse(key) as {
+      environmentId: EnvironmentId;
+      targets: ReadonlyArray<TimelineSubagentTarget>;
+    };
+    const agents = targets.map(({ threadId, subagentId }) => {
+      const live = get(
+        environmentThreadDetails.threadAtom(scopeThreadRef(environmentId, threadId)),
+      )?.projection.subagents.find((agent) => agent.id === subagentId);
+      if (live) return live;
+      return Option.getOrNull(
+        AsyncResult.value(
+          get(
+            owningSubagentQuery({
+              environmentId,
+              input: { threadId, requiredSubagentId: subagentId },
+            }),
+          ),
+        ),
+      );
+    });
+    const previous = Option.getOrUndefined(get.self<typeof agents>());
+    return previous && arrayElementsEqual(previous, agents) ? previous : agents;
+  }),
+);
+
+export function useTimelineSubagents(
+  environmentId: EnvironmentId,
+  targets: ReadonlyArray<TimelineSubagentTarget>,
+) {
+  return useAtomValue(timelineSubagentsAtom(JSON.stringify({ environmentId, targets })));
 }
 
 const EMPTY_THREAD_STATE_ATOM = Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE)).pipe(
