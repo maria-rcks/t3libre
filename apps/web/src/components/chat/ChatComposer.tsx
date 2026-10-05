@@ -1556,6 +1556,7 @@ export interface ChatComposerProps {
       id: string;
       multiSelect?: boolean | undefined;
       allowCustomAnswer?: boolean | undefined;
+      required?: boolean | undefined;
     } | null;
   } | null;
   activePendingResolvedAnswers: Record<string, unknown> | null;
@@ -6686,7 +6687,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       onDismiss={onDismissActivePendingUserInput}
                     />
                     {!isChoiceOnlyPendingQuestion ||
-                    activePendingProgress?.activeQuestion?.multiSelect ? (
+                    activePendingProgress?.activeQuestion?.multiSelect ||
+                    activePendingProgress?.activeQuestion?.required === false ? (
                       <ComposerBanner.Body>
                         <div
                           data-chat-composer-mobile-pending-compact="true"
@@ -6712,7 +6714,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               {activePendingProgress?.customAnswer || "Write custom answer"}
                             </button>
                           ) : null}
-                          {activePendingProgress?.activeQuestion?.multiSelect ? (
+                          {activePendingProgress?.activeQuestion?.multiSelect ||
+                          activePendingProgress?.activeQuestion?.required === false ? (
                             <ComposerPrimaryActions
                               compact
                               pendingAction={pendingPrimaryAction}
