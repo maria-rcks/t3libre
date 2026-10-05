@@ -47,7 +47,11 @@ export class PreviewManager extends Context.Service<
   PreviewManager,
   {
     readonly open: (
-      input: PreviewOpenInput & { readonly automationOwner?: string },
+      input: PreviewOpenInput & {
+        readonly automationOwner?: string;
+        /** Runs before the `opened` event publishes, so subscribers find state keyed by the tab. */
+        readonly beforePublish?: (snapshot: PreviewSessionSnapshot) => void;
+      },
     ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
     readonly navigate: (
       input: PreviewNavigateInput,
@@ -228,6 +232,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             tabId,
             snapshot,
           });
+          input.beforePublish?.(snapshot);
           yield* PubSub.publish(eventsPubSub, {
             type: "opened",
             threadId: input.threadId,

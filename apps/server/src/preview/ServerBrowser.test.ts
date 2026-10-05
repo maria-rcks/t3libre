@@ -98,6 +98,7 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
     locator: vi.fn(() => {
       throw new Error("Unexpected locator action");
     }),
+    isClosed: () => closed,
     close: vi.fn(async () => {
       if (!closed) {
         closed = true;
@@ -571,32 +572,43 @@ it.live("the owner can close a tab while an agent action waits on its dialog", (
   ).pipe(Effect.provide(layer)),
 );
 
-it.live.each([false, true])(
-  "popup navigation respects takeover before it becomes ready (%s)",
-  (takeover) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const { browser, tabId } = yield* ready;
-        const page = contexts[0]!.page;
-        const readyPopup = Promise.withResolvers<void>();
-        const popup = {
-          waitForURL: () => readyPopup.promise,
-          url: () => "http://localhost:5173/popup",
-          close: vi.fn(async () => {}),
-        };
-        const dispatched = page.emitAsync("popup", popup);
-        yield* Effect.addFinalizer(() => Effect.sync(() => readyPopup.resolve()));
-        if (takeover) {
-          const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
-          yield* viewer.input({ type: "takeControl" });
-        }
-        readyPopup.resolve();
-        yield* Effect.promise(() => dispatched);
-        expect(popup.close).toHaveBeenCalledTimes(1);
-        if (takeover) expect(page.goto).not.toHaveBeenCalled();
-        else expect(page.goto).toHaveBeenCalledExactlyOnceWith("http://localhost:5173/popup");
-      }),
-    ).pipe(Effect.provide(layer)),
+it.live("a popup becomes the agent's own tab and keeps its opener page", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const opener = contexts[0]!.page;
+      const popup = makeContext();
+      opener.emit("popup", popup.page);
+      const manager = yield* Manager.PreviewManager;
+      let sessions = (yield* manager.list({ threadId: scope.threadId })).sessions;
+      while (sessions.length < 2) {
+        yield* Effect.sleep("5 millis");
+        sessions = (yield* manager.list({ threadId: scope.threadId })).sessions;
+      }
+      const popupTab = sessions.find((session) => session.tabId !== tabId)!;
+      const opened = sessions.find((session) => session.tabId === tabId)!;
+      expect(popupTab).toMatchObject({ automationOwner: opened.automationOwner, reveal: false });
+      const status = yield* broker.invoke<PreviewAutomationStatus>({
+        scope,
+        tabId,
+        operation: "status",
+        input: {},
+      });
+      expect(status.tabs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ tabId }),
+          expect.objectContaining({ tabId: popupTab.tabId, openerTabId: tabId }),
+        ]),
+      );
+      expect(opener.goto).not.toHaveBeenCalled();
+      expect(opener.close).not.toHaveBeenCalled();
+      // The page the popup script holds is the tab, so closing it ends the tab.
+      yield* Effect.promise(() => popup.page.close());
+      while ((yield* manager.list({ threadId: scope.threadId })).sessions.length > 1) {
+        yield* Effect.sleep("5 millis");
+      }
+    }),
+  ).pipe(Effect.provide(layer)),
 );
 
 it.live("closing a tab while a viewer is still opening it does not leave its page behind", () =>

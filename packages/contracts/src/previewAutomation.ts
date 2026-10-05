@@ -95,6 +95,16 @@ export const PreviewAutomationStatus = Schema.Struct({
   viewportSetting: Schema.optional(PreviewViewportSetting),
   /** Measured guest-page viewport in CSS pixels when a webview is ready. */
   viewport: Schema.optional(PreviewRenderedViewportSize),
+  /** Server hosts: every tab this agent session owns, including popups its pages opened. */
+  tabs: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        tabId: PreviewTabId,
+        url: Schema.NullOr(Schema.String),
+        openerTabId: Schema.optional(PreviewTabId),
+      }),
+    ),
+  ),
 });
 export type PreviewAutomationStatus = typeof PreviewAutomationStatus.Type;
 
@@ -825,7 +835,7 @@ export class PreviewAutomationControlInterruptedError extends Schema.TaggedError
     if (this.reason === "humanControl")
       return "A human controls this browser tab. Wait until they release control.";
     if (this.reason === "tabRequired")
-      return "Multiple browser tabs belong to this session. Pass the explicit tabId returned by preview_open.";
+      return "Multiple browser tabs belong to this session. Pass a tabId from preview_open or from the tabs listed by preview_status.";
     if (this.reason === "dialogPending")
       return "A browser dialog is pending. Read preview_status and resolve it with preview_dialog.";
     if (this.reason === "closed") return "This browser tab is closed. Call preview_open.";

@@ -208,7 +208,11 @@ interface ServerTab {
   readonly networkEntries: Array<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: Array<PreviewAutomationActionEvent>;
   readonly control: SessionControl;
+  /** The tab's own storage context, closed with it. Popups share their opener's. */
   readonly isolatedContext: boolean;
+  readonly profileId: string | undefined;
+  /** Set when a page in another tab opened this one with `window.open` or a link. */
+  readonly openerTabId: string | undefined;
   dialog: Dialog | null;
   setting: PreviewViewportSetting;
   loading: boolean;
@@ -271,6 +275,8 @@ const make = Effect.gen(function* () {
   const pendingTabs = new Map<string, Promise<ServerTab>>();
   /** Sessions closed while their tab was still opening; the open discards its page. */
   const closedPendingTabs = new Set<string>();
+  /** Popup pages waiting for the tab their `opened` event creates. */
+  const adoptedPages = new Map<string, { readonly page: Page; readonly openerTabId: string }>();
   let hostConnectionId: string | null = null;
   let viewerResizeOrder = 0;
 
@@ -411,13 +417,20 @@ const make = Effect.gen(function* () {
   };
 
   const createTab = async (snapshot: PreviewSessionSnapshot): Promise<ServerTab> => {
+    const adopted = adoptedPages.get(tabKey(snapshot.threadId, snapshot.tabId));
+    adoptedPages.delete(tabKey(snapshot.threadId, snapshot.tabId));
     const isolatedContext =
-      snapshot.automationOwner !== undefined || snapshot.profileId === INCOGNITO_BROWSER_PROFILE_ID;
-    const context = await contexts.contextFor(
-      snapshot.profileId ?? "default",
-      isolatedContext ? tabKey(snapshot.threadId, snapshot.tabId) : undefined,
-    );
-    const page = await context.newPage();
+      adopted === undefined &&
+      (snapshot.automationOwner !== undefined ||
+        snapshot.profileId === INCOGNITO_BROWSER_PROFILE_ID);
+    const context =
+      adopted?.page.context() ??
+      (await contexts.contextFor(
+        snapshot.profileId ?? "default",
+        isolatedContext ? tabKey(snapshot.threadId, snapshot.tabId) : undefined,
+      ));
+    if (adopted?.page.isClosed()) throw new Error("The popup closed before it opened.");
+    const page = adopted?.page ?? (await context.newPage());
     const cdp = await context.newCDPSession(page);
     page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
@@ -436,6 +449,8 @@ const make = Effect.gen(function* () {
       actionTimeline: [],
       control,
       isolatedContext,
+      profileId: snapshot.profileId,
+      openerTabId: adopted?.openerTabId,
       dialog: null,
       setting: snapshot.viewport ?? FILL_PREVIEW_VIEWPORT,
       loading: false,
@@ -503,27 +518,8 @@ const make = Effect.gen(function* () {
       tab.dialog = dialog;
       broadcastControl(tab);
     });
-    // One page per tab: a popup becomes a navigation of its opener.
-    page.on("popup", (popup) => {
-      const generation = tab.control.generation;
-      const controller = tab.control.controller;
-      return popup
-        .waitForURL((url) => url.href !== "about:blank", {
-          timeout: NAVIGATION_TIMEOUT_MS,
-          waitUntil: "commit",
-        })
-        .catch(constVoid)
-        .then(async () => {
-          const url = popup.url();
-          await popup.close().catch(constVoid);
-          if (url === "about:blank" || tab.closing || generation !== tab.control.generation) return;
-          const navigate = () => page.goto(url);
-          if (controller !== null) await tab.control.human(controller, navigate);
-          else if (tab.control.agentId !== null)
-            await tab.control.agent(tab.control.agentId, navigate);
-        })
-        .catch(constVoid);
-    });
+    // Popups become tabs and keep `window.opener`, so sign-in popups can report back.
+    page.on("popup", (popup) => void adoptPopup(tab, popup));
     // Playwright cannot reload a crashed page, so it must leave the tab list.
     const key = tabKey(tab.threadId, tab.tabId);
     if (closedPendingTabs.delete(key)) {
@@ -536,7 +532,8 @@ const make = Effect.gen(function* () {
     page.on("crash", () => dropTab(tab, true));
     tabs.set(key, tab);
     reportLiveTabs();
-    if (snapshot.navStatus._tag === "Loading") {
+    // A popup is already loading its own URL.
+    if (!adopted && snapshot.navStatus._tag === "Loading") {
       tab.initialNavigation = page
         .goto(snapshot.navStatus.url, { waitUntil: "commit", timeout: NAVIGATION_TIMEOUT_MS })
         .then(constVoid);
@@ -544,6 +541,33 @@ const make = Effect.gen(function* () {
       void tab.initialNavigation.catch(constVoid);
     }
     return tab;
+  };
+
+  const adoptPopup = async (opener: ServerTab, popup: Page) => {
+    if (opener.closing) {
+      await popup.close().catch(constVoid);
+      return;
+    }
+    const url = popup.url();
+    await Effect.runPromise(
+      manager.open({
+        threadId: opener.threadId,
+        ...(/^https?:/i.test(url) ? { url } : {}),
+        runtime: "server",
+        ...(opener.profileId === undefined ? {} : { profileId: opener.profileId }),
+        // Agent popups stay with the agent and only float when it asks, like its own opens.
+        ...(opener.control.agentId === null
+          ? {}
+          : { automationOwner: opener.control.agentId, reveal: false }),
+        beforePublish: (snapshot) =>
+          adoptedPages.set(tabKey(snapshot.threadId, snapshot.tabId), {
+            page: popup,
+            openerTabId: opener.tabId,
+          }),
+      }),
+    ).catch(async () => {
+      await popup.close().catch(constVoid);
+    });
   };
 
   const ensureTab = (snapshot: PreviewSessionSnapshot): Promise<ServerTab> => {
@@ -576,10 +600,7 @@ const make = Effect.gen(function* () {
       if (!snapshot) return yield* new ServerBrowserTabNotFoundError({ threadId, tabId });
       return yield* Effect.tryPromise({
         try: () => ensureTab(snapshot),
-        catch: (cause) =>
-          isTabNotFound(cause)
-            ? cause
-            : new ServerBrowserLaunchError({ cause }),
+        catch: (cause) => (isTabNotFound(cause) ? cause : new ServerBrowserLaunchError({ cause })),
       });
     });
 
@@ -624,6 +645,16 @@ const make = Effect.gen(function* () {
       dialog: dialogStatus(tab),
       viewportSetting: tab.setting,
       ...(viewport ? { viewport } : {}),
+      tabs: [...tabs.values()]
+        .filter(
+          (candidate) =>
+            candidate.threadId === tab.threadId && candidate.control.agentId === agentSessionId,
+        )
+        .map((candidate) => ({
+          tabId: candidate.tabId,
+          url: candidate.page.url() === "about:blank" ? null : candidate.page.url(),
+          ...(candidate.openerTabId === undefined ? {} : { openerTabId: candidate.openerTabId }),
+        })),
     };
     if (status.url === null || tab.dialog) return status;
     return { ...status, title: (await tab.page.title().catch(() => "")) || null };
@@ -860,7 +891,7 @@ const make = Effect.gen(function* () {
     );
     if (!request.tabIdExplicit && owned.length > 1)
       throw new BrowserControlInterrupted(
-        "Multiple tabs belong to this agent session. Pass the explicit tabId returned by preview_open.",
+        "Multiple tabs belong to this agent session. Pass a tabId from preview_open or preview_status tabs.",
         "tabRequired",
       );
     const tab =
@@ -981,7 +1012,7 @@ const make = Effect.gen(function* () {
           ).length > 1
         )
           throw new BrowserControlInterrupted(
-            "Multiple tabs belong to this agent session. Pass the explicit tabId returned by preview_open.",
+            "Multiple tabs belong to this agent session. Pass a tabId from preview_open or preview_status tabs.",
             "tabRequired",
           );
         const recordings = [...tabs.values()].filter(
