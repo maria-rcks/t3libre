@@ -114,14 +114,10 @@ export function PullRequestSpeedActions({
       {sweeping || closing ? (
         <span
           role="status"
-          className="pointer-events-none absolute right-3 inline-flex h-5 items-center gap-1 rounded-sm border border-primary/40 bg-primary/10 px-1.5 text-2xs font-medium text-primary"
+          aria-label={closing ? "Closing pull request" : "Selected for closing"}
+          className="pointer-events-none absolute right-3 inline-flex items-center"
         >
-          {closing ? (
-            <Spinner size="xs" />
-          ) : (
-            <PullRequestGlyph.closed aria-hidden className="size-3" />
-          )}
-          {closing ? "Closing" : "Close"}
+          <Spinner size="xs" />
         </span>
       ) : null}
     </div>

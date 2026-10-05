@@ -126,7 +126,7 @@ function PullRequestRowImpl({
       className={cn(
         // Keep the action buttons inside the same skipped row, but outside its selection button.
         "flex items-center rounded-md [content-visibility:auto] [contain-intrinsic-block-size:56.5px]",
-        selected || sweeping || closing ? "bg-accent" : "hover:bg-accent/60",
+        selected ? "bg-accent" : "hover:bg-accent/60",
       )}
     >
       <button
