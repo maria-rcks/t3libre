@@ -59,6 +59,7 @@ import { revealInFileExplorerLabel } from "./fileExplorerLabel";
 import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
 import { Badge } from "~/components/ui/badge";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
+import { useRendersServerTabNatively } from "~/browser/previewRuntime";
 import { ServerBrowserSurface, type ServerBrowserHandle } from "~/browser/ServerBrowserSurface";
 import { cn } from "~/lib/utils";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
@@ -152,8 +153,10 @@ export function PreviewView({
         : findActiveBrowserRecordingRuntimeTabId(threadRef, tabId)
       : null;
   const snapshot = tabId ? (previewState.sessions[tabId] ?? null) : null;
-  // Server tabs run in the environment's own browser and stream to any client.
-  const isServerTab = snapshot?.runtime === "server";
+  // Server tabs run in the environment's browser and stream to any client, except the
+  // desktop app's own server's tabs, which render here natively while the server drives them.
+  const nativeServerTab = useRendersServerTabNatively(threadRef.environmentId, snapshot);
+  const isServerTab = snapshot?.runtime === "server" && !nativeServerTab;
   const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
   const [serverControlledTabId, setServerControlledTabId] = useState<string | null>(null);
   const serverInputDisabled = isServerTab && serverControlledTabId !== runtimeTabId;

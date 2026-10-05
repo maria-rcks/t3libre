@@ -36,7 +36,11 @@ export interface AcquiredDesktopTab {
   readonly release: () => void;
 }
 
-export function acquireDesktopTab(tabId: string): AcquiredDesktopTab {
+/** `serverTab` names the server tab this desktop tab renders, so the server can drive it. */
+export function acquireDesktopTab(
+  tabId: string,
+  serverTab?: { readonly threadId: string; readonly tabId: string },
+): AcquiredDesktopTab {
   const current =
     leases.get(tabId) ??
     ({
@@ -45,7 +49,10 @@ export function acquireDesktopTab(tabId: string): AcquiredDesktopTab {
       // Zoom/appearance defaults travel with creation so the guest never
       // paints a frame at 100%/system before the preference is applied.
       ready: enqueueDesktopTabOperation(tabId, async () =>
-        previewBridge?.createTab(tabId, browserDefaultTabState(await resolveBrowserDefaults())),
+        previewBridge?.createTab(tabId, {
+          ...browserDefaultTabState(await resolveBrowserDefaults()),
+          ...(serverTab === undefined ? {} : { serverTab }),
+        }),
       ),
     } satisfies DesktopTabLease);
   if (current.closeTimer !== null) window.clearTimeout(current.closeTimer);
