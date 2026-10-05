@@ -26,7 +26,7 @@ export const layer = PreviewControlsToolkit.toLayer({
   t3_preview_close: (input) =>
     Effect.gen(function* () {
       const { scope, manager } = yield* access;
-      const { sessions } = yield* manager.list({ threadId: scope.threadId });
+      const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
       if (
         sessions.some((session) => session.tabId === input.tabId && session.runtime === "server")
       ) {

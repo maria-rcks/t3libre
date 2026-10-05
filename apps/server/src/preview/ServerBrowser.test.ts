@@ -164,14 +164,24 @@ const desktopRenders = (tabId: string) => {
 };
 const releasedDesktopTabs: Array<string> = [];
 const desktopConnections: Array<{ endpoint: string; context: ReturnType<typeof makeContext> }> = [];
-const scope = {
-  environmentId: EnvironmentId.make("browser-test-environment"),
+const testThread = {
   threadId: ThreadId.make("browser-test-thread"),
   providerSessionId: "agent-a",
   providerInstanceId: ProviderInstanceId.make("codex"),
+};
+const scope = {
+  environmentId: EnvironmentId.make("browser-test-environment"),
+  thread: testThread,
+  client: undefined,
+  requestNamespace: "browser-test",
   capabilities: new Set(["preview"] as const),
   issuedAt: 1,
 };
+/** The same thread, as another of its agent sessions. */
+const asSession = (providerSessionId: string) => ({
+  ...scope,
+  thread: { ...testThread, providerSessionId },
+});
 const dependencies = Layer.mergeAll(
   Broker.layer,
   Manager.layer,
@@ -222,7 +232,7 @@ const ready = Effect.gen(function* () {
   return { browser, broker, tabId };
 });
 const viewerInput = (tabId: string, canOperate: boolean) => ({
-  threadId: scope.threadId,
+  threadId: scope.thread.threadId,
   tabId,
   canOperate,
   maxWidth: 1280,
@@ -344,7 +354,7 @@ it.live("enforces provider ownership and explicit targets when a session has mul
       const { broker, tabId } = yield* ready;
       const foreign = yield* broker
         .invoke<void>({
-          scope: { ...scope, providerSessionId: "agent-b" },
+          scope: asSession("agent-b"),
           tabId,
           operation: "evaluate",
           input: { expression: "foreign()" },
@@ -608,7 +618,7 @@ it.live("the owner can close a tab while an agent action waits on its dialog", (
       });
       const foreign = yield* broker
         .invoke<void>({
-          scope: { ...scope, providerSessionId: "agent-b" },
+          scope: asSession("agent-b"),
           tabId,
           operation: "close",
           input: {},
@@ -623,7 +633,7 @@ it.live("the owner can close a tab while an agent action waits on its dialog", (
       expect(yield* Fiber.join(running)).toBe("closed");
       expect(page.close).toHaveBeenCalled();
       const manager = yield* Manager.PreviewManager;
-      expect((yield* manager.list({ threadId: scope.threadId })).sessions).toHaveLength(0);
+      expect((yield* manager.list({ threadId: scope.thread.threadId })).sessions).toHaveLength(0);
       const afterClose = yield* broker
         .invoke<void>({ scope, tabId, operation: "evaluate", input: { expression: "late()" } })
         .pipe(Effect.flip);
@@ -640,10 +650,10 @@ it.live("a popup becomes the agent's own tab and keeps its opener page", () =>
       const popup = makeContext();
       opener.emit("popup", popup.page);
       const manager = yield* Manager.PreviewManager;
-      let sessions = (yield* manager.list({ threadId: scope.threadId })).sessions;
+      let sessions = (yield* manager.list({ threadId: scope.thread.threadId })).sessions;
       while (sessions.length < 2) {
         yield* Effect.sleep("5 millis");
-        sessions = (yield* manager.list({ threadId: scope.threadId })).sessions;
+        sessions = (yield* manager.list({ threadId: scope.thread.threadId })).sessions;
       }
       const popupTab = sessions.find((session) => session.tabId !== tabId)!;
       const opened = sessions.find((session) => session.tabId === tabId)!;
@@ -664,7 +674,7 @@ it.live("a popup becomes the agent's own tab and keeps its opener page", () =>
       expect(opener.close).not.toHaveBeenCalled();
       // The page the popup script holds is the tab, so closing it ends the tab.
       yield* Effect.promise(() => popup.page.close());
-      while ((yield* manager.list({ threadId: scope.threadId })).sessions.length > 1) {
+      while ((yield* manager.list({ threadId: scope.thread.threadId })).sessions.length > 1) {
         yield* Effect.sleep("5 millis");
       }
     }),
@@ -679,7 +689,7 @@ it.live("closing a tab while a viewer is still opening it does not leave its pag
       yield* Effect.yieldNow;
       // The background open fails, so the tab exists only as a session.
       contextFailure = new Error("first launch failed");
-      const snapshot = yield* manager.open({ threadId: scope.threadId, runtime: "server" });
+      const snapshot = yield* manager.open({ threadId: scope.thread.threadId, runtime: "server" });
       yield* Effect.sleep("10 millis");
       contextFailure = null;
       contextGate = Promise.withResolvers<void>();
@@ -687,7 +697,7 @@ it.live("closing a tab while a viewer is still opening it does not leave its pag
         .attachViewer(viewerInput(snapshot.tabId, false))
         .pipe(Effect.flip, Effect.forkScoped);
       yield* Effect.sleep("10 millis");
-      yield* manager.close({ threadId: scope.threadId, tabId: snapshot.tabId });
+      yield* manager.close({ threadId: scope.thread.threadId, tabId: snapshot.tabId });
       yield* Effect.sleep("10 millis");
       contextGate.resolve();
       expect((yield* Fiber.join(attaching))._tag).toBe("ServerBrowserTabNotFoundError");
@@ -753,7 +763,7 @@ it.live("a page download is saved, offered to the controller, and listed for the
       while (offered._tag !== "download") offered = yield* Queue.take(viewer.output);
       expect(offered).toMatchObject({ _tag: "download", fileName: "report.csv", sizeBytes: 3 });
       const file = yield* browser.openDownload({
-        threadId: scope.threadId,
+        threadId: scope.thread.threadId,
         tabId,
         downloadId: offered.id,
       });
@@ -769,7 +779,11 @@ it.live("a page download is saved, offered to the controller, and listed for the
       ]);
       expect(
         Option.isNone(
-          yield* browser.openDownload({ threadId: scope.threadId, tabId, downloadId: "guess" }),
+          yield* browser.openDownload({
+            threadId: scope.thread.threadId,
+            tabId,
+            downloadId: "guess",
+          }),
         ),
       ).toBe(true);
     }),
@@ -795,7 +809,7 @@ it.live("a page's file picker goes to the controller and takes its uploaded file
       const file = (name: string) => ({ name, mimeType: "text/csv", buffer: Buffer.from(name) });
       const answer = (chooserId: string) =>
         browser.answerFileChooser({
-          threadId: scope.threadId,
+          threadId: scope.thread.threadId,
           tabId,
           chooserId,
           files: [file("a.csv"), file("b.csv")],
@@ -828,7 +842,7 @@ it.live("an agent's tabs stop at the limit until an unwatched idle tab closes", 
       });
       // Another agent session keeps its own budget.
       yield* broker.invoke({
-        scope: { ...scope, providerSessionId: "agent-b" },
+        scope: asSession("agent-b"),
         operation: "open",
         input: { reuseExistingTab: false, show: false },
       });
@@ -840,7 +854,7 @@ it.live("an agent's tabs stop at the limit until an unwatched idle tab closes", 
       yield* browser.attachViewer(viewerInput(tabId, false));
       const reopened = yield* open;
       const manager = yield* Manager.PreviewManager;
-      const { sessions } = yield* manager.list({ threadId: scope.threadId });
+      const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
       expect(sessions.map((session) => session.tabId).toSorted()).toEqual(
         [tabId, reopened.tabId].toSorted(),
       );
@@ -924,7 +938,7 @@ it.live("drives the desktop's own page for a tab the desktop renders", () =>
       const manager = yield* Manager.PreviewManager;
       yield* Effect.yieldNow;
       desktopRendersNext = true;
-      const opened = yield* manager.open({ threadId: scope.threadId, runtime: "server" });
+      const opened = yield* manager.open({ threadId: scope.thread.threadId, runtime: "server" });
       const viewer = yield* browser.attachViewer(viewerInput(opened.tabId, true));
       expect(desktopConnections.map((connection) => connection.endpoint)).toEqual([
         `ws://desktop/${opened.tabId}`,
@@ -939,14 +953,14 @@ it.live("drives the desktop's own page for a tab the desktop renders", () =>
       yield* viewer.input({ type: "releaseControl" });
       // Agents reach it through the same engine as a headless tab.
       const evaluated = yield* broker.invoke({
-        scope: { ...scope, providerSessionId: "agent-desktop" },
+        scope: asSession("agent-desktop"),
         operation: "status",
         input: {},
         tabId: PreviewTabId.make(opened.tabId),
       });
       expect(evaluated).toMatchObject({ tabId: opened.tabId });
       // Closing the session lets go of the desktop's page without closing it.
-      yield* manager.close({ threadId: scope.threadId, tabId: opened.tabId });
+      yield* manager.close({ threadId: scope.thread.threadId, tabId: opened.tabId });
       while (releasedDesktopTabs.length === 0) yield* Effect.yieldNow;
       expect(releasedDesktopTabs).toEqual([opened.tabId]);
       expect(page.close).not.toHaveBeenCalled();
@@ -961,19 +975,19 @@ it.live("a desktop page the desktop takes back reconnects instead of closing", (
       const manager = yield* Manager.PreviewManager;
       yield* Effect.yieldNow;
       desktopRendersNext = true;
-      const opened = yield* manager.open({ threadId: scope.threadId, runtime: "server" });
+      const opened = yield* manager.open({ threadId: scope.thread.threadId, runtime: "server" });
       const viewer = yield* browser.attachViewer(viewerInput(opened.tabId, false));
       // Devtools opened on the desktop, so it withdrew the page's debugger.
       // The server's listener subscribes in its own fiber; detach once it is there.
       while (desktopDetaches.listenerCount("detach") === 0) yield* Effect.yieldNow;
-      desktopDetaches.emit("detach", { threadId: scope.threadId, tabId: opened.tabId });
+      desktopDetaches.emit("detach", { threadId: scope.thread.threadId, tabId: opened.tabId });
       let end = yield* Queue.take(viewer.output);
       while (end._tag !== "reconnect" && end._tag !== "gone")
         end = yield* Queue.take(viewer.output);
       expect(end._tag).toBe("reconnect");
       expect(releasedDesktopTabs).toEqual([opened.tabId]);
       // The session survives, and the next viewer reaches the page again.
-      const { sessions } = yield* manager.list({ threadId: scope.threadId });
+      const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
       expect(sessions.map((session) => session.tabId)).toContain(opened.tabId);
       yield* browser.attachViewer(viewerInput(opened.tabId, false));
       expect(desktopConnections).toHaveLength(2);
