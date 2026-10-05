@@ -69,7 +69,7 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
       params.get("interactive") !== "false";
     const threadId = params.get("threadId") ?? "";
     const tabId = params.get("tabId") ?? "";
-    if (!browser.enabled || threadId.length === 0 || tabId.length === 0) {
+    if (threadId.length === 0 || tabId.length === 0) {
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
     return yield* Effect.scoped(

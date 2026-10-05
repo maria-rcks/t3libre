@@ -18,7 +18,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import type { BrowserContext, Page } from "playwright-core";
-import { afterEach, beforeEach, expect, vi } from "vite-plus/test";
+import { beforeEach, expect, vi } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -188,9 +188,7 @@ beforeEach(() => {
   contexts.length = 0;
   contextGate = null;
   contextFailure = null;
-  vi.stubEnv("T3CODE_SERVER_BROWSER", "1");
 });
-afterEach(() => vi.unstubAllEnvs());
 
 it.live("readiness none responds immediately but takeover input waits for navigation commit", () =>
   Effect.scoped(

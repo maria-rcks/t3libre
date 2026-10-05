@@ -39,9 +39,7 @@ import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
-import * as ServerConfig from "../config.ts";
 import { PreviewControlRequiredError } from "@t3tools/contracts";
-import { isServerBrowserEnabled } from "./serverBrowserEnabled.ts";
 
 export class PreviewManager extends Context.Service<
   PreviewManager,
@@ -132,8 +130,6 @@ const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* PreviewManagerMake() {
-  const config = yield* ServerConfig.ServerConfig;
-  const serverBrowser = isServerBrowserEnabled(config.mode);
   const crypto = yield* Crypto.Crypto;
   const serverEpoch = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
   const stateRef = yield* SynchronizedRef.make<ManagerState>(initialState);
@@ -201,8 +197,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
 
   const open: PreviewManager["Service"]["open"] = Effect.fn("PreviewManager.open")(
     function* (input) {
-      // Without a server browser nothing renders server tabs, so the client renders it.
-      const runtime = input.runtime === "server" && !serverBrowser ? undefined : input.runtime;
+      const runtime = input.runtime;
       // Persisted client surfaces must not bind to a different tab after a server restart.
       const tabId = `${newPreviewTabId()}${runtime === "server" ? `_${serverEpoch}` : ""}`;
       const updatedAt = yield* currentIsoTimestamp;

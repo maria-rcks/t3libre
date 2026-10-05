@@ -177,13 +177,11 @@ For Antigravity's Google callback on a remote host, see
 On an environment started with `t3 serve` or `npx t3`, browser tabs run on the
 host instead of your device. You can watch and use them from a phone or any
 other browser. Agents keep using them while no device is connected, and
-`localhost` addresses reach servers on the host. The desktop app's own
-environment keeps using the desktop browser.
+`localhost` addresses reach servers on the host.
 
 The first tab downloads a headless Chromium and fonts, about 120 MB, into the
 T3 home. To use a browser already installed on the host, set
-`T3CODE_PREVIEW_BROWSER_PATH` to its executable. Set `T3CODE_SERVER_BROWSER=0`
-to turn host browser tabs off.
+`T3CODE_PREVIEW_BROWSER_PATH` to its executable.
 
 Agent tabs have separate storage and share a Chromium process. Take control before
 typing into an agent's tab, then release control when you want the agent to

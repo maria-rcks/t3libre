@@ -82,7 +82,6 @@ it.effect.each([
       ack: Effect.sync(() => acked.resolve()),
     });
     const browser = ServerBrowser.ServerBrowser.of({
-      enabled: true,
       clearProfile: () => Effect.void,
       openDownload: () => Effect.succeedNone,
       answerFileChooser: () => Effect.succeed(false),
@@ -159,7 +158,6 @@ it.effect.each([
     const auth = makeAuth(testCase.scopes, testCase.error);
     let attachments = 0;
     const browser = ServerBrowser.ServerBrowser.of({
-      enabled: true,
       clearProfile: () => Effect.void,
       openDownload: () => Effect.succeedNone,
       answerFileChooser: () => Effect.succeed(false),
@@ -200,7 +198,6 @@ it.effect("serves a tab's download only to an authorized session", () =>
     yield* fs.writeFileString(path, "report contents");
     const requests: Array<unknown> = [];
     const browser = ServerBrowser.ServerBrowser.of({
-      enabled: true,
       clearProfile: () => Effect.void,
       openDownload: (input) =>
         Effect.sync(() => {
@@ -248,7 +245,6 @@ it.effect("passes uploaded files to the page's open picker and needs operate sco
   Effect.gen(function* () {
     const answers: Array<{ chooserId: string; files: Array<{ name: string; text: string }> }> = [];
     const browser = ServerBrowser.ServerBrowser.of({
-      enabled: true,
       clearProfile: () => Effect.void,
       openDownload: () => Effect.succeedNone,
       answerFileChooser: (input) =>

@@ -67,7 +67,6 @@ import * as ServerBrowserPage from "./ServerBrowserPage.ts";
 import * as ServerBrowserToolchain from "./ServerBrowserToolchain.ts";
 import { ServerBrowserContexts } from "./ServerBrowserContexts.ts";
 import { BrowserControlInterrupted, SessionControl } from "./SessionControl.ts";
-import { isServerBrowserEnabled } from "./serverBrowserEnabled.ts";
 
 const SERVER_HOST_CLIENT_ID = "server-browser";
 const RENDER_SCALE = 2;
@@ -186,7 +185,6 @@ export interface ServerBrowserViewer {
 export class ServerBrowser extends Context.Service<
   ServerBrowser,
   {
-    readonly enabled: boolean;
     readonly attachViewer: (input: {
       readonly threadId: string;
       readonly tabId: string;
@@ -407,7 +405,6 @@ const CLIPBOARD_SCRIPT = `(() => {
 
 const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
-  const enabled = isServerBrowserEnabled(config.mode);
   const manager = yield* PreviewManager.PreviewManager;
   const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
   const environment = yield* ServerEnvironment.ServerEnvironment;
@@ -1935,51 +1932,49 @@ const make = Effect.gen(function* () {
       } satisfies ServerBrowserViewer;
     });
 
-  if (enabled) {
-    yield* manager.events.pipe(Stream.runForEach(mirrorManagerEvent), Effect.forkScoped);
-    yield* Effect.sync(closeIdleAgentTabs).pipe(
-      Effect.repeat(Schedule.spaced(IDLE_SWEEP_INTERVAL)),
-      Effect.forkScoped,
-    );
-    const environmentId = yield* environment.getEnvironmentId;
-    const hostSession = broker
-      .connect(
-        {
-          clientId: SERVER_HOST_CLIENT_ID,
-          environmentId,
-          supportedOperations: [...PREVIEW_AUTOMATION_SERVER_OPERATIONS],
-        },
-        { preferred: true },
-      )
-      .pipe(
-        Effect.flatMap((events) =>
-          events.pipe(
-            Stream.runForEach((event) => {
-              if (event.type === "connected") {
-                hostConnectionId = event.connectionId;
-                return Effect.sync(reportLiveTabs);
-              }
-              return handleRequest(event.connectionId, event.request).pipe(
-                Effect.forkScoped,
-                Effect.asVoid,
-              );
-            }),
-          ),
+  yield* manager.events.pipe(Stream.runForEach(mirrorManagerEvent), Effect.forkScoped);
+  yield* Effect.sync(closeIdleAgentTabs).pipe(
+    Effect.repeat(Schedule.spaced(IDLE_SWEEP_INTERVAL)),
+    Effect.forkScoped,
+  );
+  const environmentId = yield* environment.getEnvironmentId;
+  const hostSession = broker
+    .connect(
+      {
+        clientId: SERVER_HOST_CLIENT_ID,
+        environmentId,
+        supportedOperations: [...PREVIEW_AUTOMATION_SERVER_OPERATIONS],
+      },
+      { preferred: true },
+    )
+    .pipe(
+      Effect.flatMap((events) =>
+        events.pipe(
+          Stream.runForEach((event) => {
+            if (event.type === "connected") {
+              hostConnectionId = event.connectionId;
+              return Effect.sync(reportLiveTabs);
+            }
+            return handleRequest(event.connectionId, event.request).pipe(
+              Effect.forkScoped,
+              Effect.asVoid,
+            );
+          }),
         ),
-      );
-    // The broker disconnects timed-out hosts, including slow first installs. Reconnect.
-    yield* hostSession.pipe(
-      Effect.exit,
-      Effect.andThen(Effect.sleep(HOST_RECONNECT_DELAY)),
-      Effect.forever,
-      Effect.forkScoped,
+      ),
     );
-    yield* Effect.addFinalizer(() =>
-      Effect.promise(async () => {
-        await contexts.close();
-      }),
-    );
-  }
+  // The broker disconnects timed-out hosts, including slow first installs. Reconnect.
+  yield* hostSession.pipe(
+    Effect.exit,
+    Effect.andThen(Effect.sleep(HOST_RECONNECT_DELAY)),
+    Effect.forever,
+    Effect.forkScoped,
+  );
+  yield* Effect.addFinalizer(() =>
+    Effect.promise(async () => {
+      await contexts.close();
+    }),
+  );
 
   const clearProfile = (profileId: string) =>
     Effect.tryPromise({
@@ -1988,7 +1983,6 @@ const make = Effect.gen(function* () {
     });
 
   return ServerBrowser.of({
-    enabled,
     attachViewer,
     clearProfile,
     openDownload,
