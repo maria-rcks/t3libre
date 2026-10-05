@@ -767,8 +767,7 @@ describe("AcpRegistrySupport", () => {
       );
     }).pipe(
       Effect.scoped,
-      Effect.provide(NodeServices.layer),
-      Effect.provide(ServerSettings.layerTest()),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, ServerSettings.layerTest())),
       Effect.provideService(HostProcessPlatform, "linux"),
       Effect.provideService(HostProcessArchitecture, "x64"),
     );
