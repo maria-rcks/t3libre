@@ -793,6 +793,10 @@ function PullRequestsRouteView() {
     ],
   );
   const baselineQuery = usePullRequestList(baselineTargets);
+  const baselineEmpty =
+    baselineQuery.data?.entries.length === 0 &&
+    !baselineQuery.isPending &&
+    baselineQuery.error === null;
   const facetTargets = useMemo(() => {
     if (!filtersOpen) return NO_LIST_TARGETS;
     return environmentQueries.map(({ environmentId, projectIds }) => ({
@@ -961,8 +965,6 @@ function PullRequestsRouteView() {
   speedActionRef.current = ({ entry, action }) => {
     // Some hosts accept a merge before it completes. Let the next host read declare it merged.
     if (action !== "merge") overrideEntry(entry, action);
-    setDetailRefreshToken((token) => token + 1);
-    refreshListAndStats(undefined, entry.environmentId);
   };
   const onSpeedAction = useCallback((result: PullRequestSpeedActionResult) => {
     speedActionRef.current(result);
@@ -1005,13 +1007,15 @@ function PullRequestsRouteView() {
       // stay — hydrated or previously answered — rather than being dropped for a feed that
       // merely settled first.
       const partitions =
-        partitionsWanted && authoredQuery.data !== null && reviewingQuery.data !== null
-          ? { authored: authoredQuery.data.entries, reviewing: reviewingQuery.data.entries }
-          : current !== null &&
-              current.environmentKey === environmentKey &&
-              current.scope === scopeKey
-            ? current.partitions
-            : undefined;
+        partitionsWanted && baselineEmpty
+          ? { authored: [], reviewing: [] }
+          : partitionsWanted && authoredQuery.data !== null && reviewingQuery.data !== null
+            ? { authored: authoredQuery.data.entries, reviewing: reviewingQuery.data.entries }
+            : current !== null &&
+                current.environmentKey === environmentKey &&
+                current.scope === scopeKey
+              ? current.partitions
+              : undefined;
       // A search's answer is the search's, not the workspace's, so only unsearched lists
       // persist. Written here where the held partitions are in reach, so a feed settling
       // ahead of them cannot overwrite a stored snapshot that already had both groups.
@@ -1052,6 +1056,7 @@ function PullRequestsRouteView() {
     sentQuery,
     listQuery.data,
     listQuery.isPending,
+    baselineEmpty,
     partitionsWanted,
     authoredQuery.data,
     reviewingQuery.data,
@@ -1343,6 +1348,11 @@ function PullRequestsRouteView() {
    */
   const groups = useMemo(() => {
     if (search.involvement !== "all") return [{ key: "others" as const, label: "", entries }];
+    // An empty whole-list answer also empties the priority groups. Their old snapshot must
+    // not restore the last merged rows after the partition reads are no longer mounted.
+    if (baselineEmpty) {
+      return groupPullRequestsByInvolvement(entries, viewers);
+    }
     // Until both partitions have answered, the snapshot's stand in — they are yesterday's
     // groups, but whole ones, where grouping the feed's first page locally loses every
     // authored row older than it. Once the live reads land they take over; with neither,
@@ -1372,6 +1382,7 @@ function PullRequestsRouteView() {
     return partitionPullRequestsWithPriority(entries, authored, reviewing);
   }, [
     hasLocalFilters,
+    baselineEmpty,
     localFilters,
     authoredQuery.data?.entries,
     entries,

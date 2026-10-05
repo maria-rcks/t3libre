@@ -1,8 +1,4 @@
 import type { PullRequestAction } from "@t3tools/contracts";
-import { Effect } from "effect";
-import { AtomRegistry } from "effect/unstable/reactivity";
-import { appAtomRegistry } from "~/rpc/atomRegistry";
-import { pullRequestEnvironment, pullRequestStackAtom } from "~/state/pullRequests";
 import { useUiStateStore } from "~/uiStateStore";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
@@ -44,32 +40,7 @@ export function PullRequestSpeedActions({
     environmentId: entry.environmentId,
     reference,
     onSuccess: (action) => onActed({ entry, action }),
-    resolveMergeMethod: async () => {
-      const target = { environmentId: entry.environmentId, input: reference };
-      const detailAtom = pullRequestEnvironment.detail({
-        ...target,
-        input: { ...reference, allowStale: false },
-      });
-      appAtomRegistry.refresh(detailAtom);
-      const detail = await Effect.runPromise(
-        AtomRegistry.getResult(appAtomRegistry, detailAtom, { suspendOnWaiting: true }),
-      );
-      if (
-        detail.state !== "open" ||
-        detail.isDraft ||
-        !detail.capabilities.actions.includes("merge") ||
-        !detail.viewerPermissions.actions.includes("merge")
-      ) {
-        throw new Error("This pull request cannot be merged.");
-      }
-      if (detail.capabilities.stackActions) {
-        const stackAtom = pullRequestStackAtom(target);
-        appAtomRegistry.refresh(stackAtom);
-        const stack = await Effect.runPromise(
-          AtomRegistry.getResult(appAtomRegistry, stackAtom, { suspendOnWaiting: true }),
-        );
-        if (stack !== null) throw new Error("Open this pull request to merge its stack.");
-      }
+    resolveMergeMethod: (detail) => {
       const allowed = detail.capabilities.mergeMethods.filter(
         (method) => detail.mergeCapabilities[method],
       );

@@ -137,7 +137,7 @@ export function usePullRequestActionRunner({
   reference: PullRequestRef | null;
   onSuccess?: (action: PullRequestAction) => void;
   /** Small surfaces resolve repository settings on the click, not for every visible row. */
-  resolveMergeMethod?: () => Promise<PullRequestMergeMethod>;
+  resolveMergeMethod?: (detail: PullRequestDetail) => PullRequestMergeMethod;
 }) {
   const runAction = useAtomCommand(pullRequestEnvironment.runAction, { reportFailure: false });
   const [actionPending, setActionPending] = useState(false);
@@ -148,10 +148,13 @@ export function usePullRequestActionRunner({
     pendingRef.current = true;
     setActionPending(true);
     try {
-      const mergeMethod = method ?? (action === "merge" ? await resolveMergeMethod?.() : undefined);
       const result = await runAction({
         environmentId,
-        input: { ...reference, action, ...(mergeMethod ? { mergeMethod } : {}) },
+        input: {
+          ...reference,
+          action,
+          ...(method ? { mergeMethod: method } : resolveMergeMethod ? { resolveMergeMethod } : {}),
+        },
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       toastManager.add({ type: "success", title: ACTION_SUCCESS_LABELS[action] });
