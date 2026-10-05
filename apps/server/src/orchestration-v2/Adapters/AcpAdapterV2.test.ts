@@ -3897,6 +3897,13 @@ describe("AcpAdapterV2", () => {
       expectedApproved: false,
     },
     { name: "exponent numbers", overrides: { ratio: "1.25e0" }, accept: true },
+    {
+      name: "empty arrays without a minimum",
+      overrides: { scopes: [] },
+      accept: true,
+      omitMinimum: true,
+      expectedScopes: [],
+    },
     { name: "missing required answers", overrides: {}, missing: "choice", accept: false },
     {
       name: "choice labels instead of opaque values",
@@ -3962,7 +3969,7 @@ describe("AcpAdapterV2", () => {
           count: { type: "integer", minimum: 1, maximum: 4 },
           scopes: {
             type: "array",
-            minItems: 1,
+            ...(testCase.omitMinimum ? {} : { minItems: 1 }),
             maxItems: 2,
             items: { type: "string", enum: ["read", " write "] },
           },
@@ -4039,6 +4046,11 @@ describe("AcpAdapterV2", () => {
       if (pending.type !== "turn_item.updated" || pending.turnItem.type !== "user_input_request") {
         return yield* Effect.die("Expected a pending user-input form");
       }
+      const scopesQuestion = pending.turnItem.questions.find(
+        (question) => question.id === "scopes",
+      );
+      assert.equal(scopesQuestion?.minSelections, testCase.omitMinimum ? 0 : 1);
+      assert.equal(scopesQuestion?.maxSelections, 2);
       assert.deepEqual(
         pending.turnItem.questions.map(
           ({ id, options, multiSelect, allowCustomAnswer, required }) => ({
@@ -4128,7 +4140,7 @@ describe("AcpAdapterV2", () => {
                 approved: testCase.expectedApproved ?? true,
                 ratio: 1.25,
                 count: 3,
-                scopes: ["read", " write "],
+                scopes: testCase.expectedScopes ?? ["read", " write "],
                 code: "OK",
               },
             }

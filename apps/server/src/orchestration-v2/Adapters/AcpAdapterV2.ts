@@ -5966,6 +5966,14 @@ export function makeAcpAdapterV2(
                   multiSelect: record.type === "array",
                   allowCustomAnswer: options.length === 0,
                   required: required.has(id),
+                  ...(record.type === "array"
+                    ? {
+                        minSelections: typeof record.minItems === "number" ? record.minItems : 0,
+                        ...(typeof record.maxItems === "number"
+                          ? { maxSelections: record.maxItems }
+                          : {}),
+                      }
+                    : {}),
                 });
               }
               const userInput = yield* requestUserInputWithAdmission(

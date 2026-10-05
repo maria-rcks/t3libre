@@ -173,6 +173,22 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }
 
   const customAnswerActive = progress.customAnswer.trim().length > 0;
+  const minSelections = activeQuestion.minSelections ?? 1;
+  const maxSelections = activeQuestion.maxSelections;
+  const selectionHint =
+    activeQuestion.minSelections === undefined && maxSelections === undefined
+      ? "Select one or more options."
+      : maxSelections === 0
+        ? "Leave all options unselected."
+        : maxSelections === minSelections
+          ? `Select ${minSelections} option${minSelections === 1 ? "" : "s"}.`
+          : maxSelections !== undefined
+            ? minSelections === 0
+              ? `Select up to ${maxSelections} option${maxSelections === 1 ? "" : "s"}.`
+              : `Select ${minSelections} to ${maxSelections} options.`
+            : minSelections === 0
+              ? "Select any number of options."
+              : `Select at least ${minSelections} option${minSelections === 1 ? "" : "s"}.`;
 
   return (
     <Collapsible
@@ -234,8 +250,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         <ComposerBanner.Scroll>
           <ComposerBanner.Body className="pe-1 pb-1 wrap-anywhere">
             <p className="text-sm text-foreground/85">{activeQuestion.question}</p>
-            {activeQuestion.multiSelect ? (
-              <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
+            {activeQuestion.multiSelect || activeQuestion.required === false ? (
+              <p className="mt-1 text-secondary-label text-xs">
+                {activeQuestion.multiSelect ? selectionHint : null}
+                {activeQuestion.required === false
+                  ? `${activeQuestion.multiSelect ? " " : ""}You can skip this question.`
+                  : null}
+              </p>
             ) : null}
             <div className="mt-2 space-y-0.5">
               {activeQuestion.options.map((option, index) => {

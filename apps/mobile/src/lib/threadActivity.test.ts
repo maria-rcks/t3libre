@@ -1989,6 +1989,92 @@ describe("pending user input answers", () => {
     });
   });
 
+  it("omits unanswered optional questions while preserving required defaults", () => {
+    const question = { ...singleSelectQuestion, required: false };
+
+    expect(
+      buildPendingUserInputAnswers([question, multiSelectQuestion], {
+        scope: { selectedOptionValues: ["Orders"] },
+      }),
+    ).toEqual({ scope: ["Orders"] });
+    expect(buildPendingUserInputAnswers([question], { runtime: { customAnswer: "   " } })).toEqual(
+      {},
+    );
+    expect(buildPendingUserInputAnswers([singleSelectQuestion], {})).toBeNull();
+  });
+
+  it.each([
+    { attachmentsBlocked: true },
+    { attachmentCount: 1, attachmentsBlocked: true },
+    { attachmentCount: 1 },
+    { customAnswer: "Unlisted answer" },
+    { selectedOptionValues: ["unknown"] },
+  ])("keeps invalid optional drafts blocking submission: %j", (draft) => {
+    const question = { ...singleSelectQuestion, required: false, allowCustomAnswer: false };
+
+    expect(buildPendingUserInputAnswers([question], { runtime: draft })).toBeNull();
+  });
+
+  it("submits empty arrays when a required multi-select allows zero selections", () => {
+    const question = {
+      ...multiSelectQuestion,
+      allowCustomAnswer: false,
+      required: true,
+      minSelections: 0,
+      maxSelections: 0,
+    };
+
+    expect(buildPendingUserInputAnswers([question], {})).toEqual({ scope: [] });
+    expect(
+      buildPendingUserInputAnswers([question], { scope: { selectedOptionValues: ["Orders"] } }),
+    ).toBeNull();
+    expect(buildPendingUserInputAnswers([{ ...question, required: false }], {})).toEqual({});
+  });
+
+  it("enforces multi-select limits and omits unanswered optional arrays", () => {
+    const question = {
+      ...multiSelectQuestion,
+      options: [...multiSelectQuestion.options, { label: "Sales", description: "Sales" }],
+      allowCustomAnswer: false,
+      minSelections: 2,
+      maxSelections: 2,
+    };
+
+    expect(buildPendingUserInputAnswers([question], {})).toBeNull();
+    expect(
+      buildPendingUserInputAnswers([question], { scope: { selectedOptionValues: ["Orders"] } }),
+    ).toBeNull();
+    expect(
+      buildPendingUserInputAnswers([question], {
+        scope: { selectedOptionValues: ["Orders", "Listings"] },
+      }),
+    ).toEqual({ scope: ["Orders", "Listings"] });
+    expect(
+      buildPendingUserInputAnswers([question], {
+        scope: { selectedOptionValues: ["Orders", "Listings", "Sales"] },
+      }),
+    ).toBeNull();
+    expect(buildPendingUserInputAnswers([{ ...question, required: false }], {})).toEqual({});
+    expect(
+      buildPendingUserInputAnswers([{ ...question, required: false }], {
+        scope: { selectedOptionValues: ["Orders"] },
+      }),
+    ).toBeNull();
+    expect(
+      buildPendingUserInputAnswers([{ ...question, required: false }], {
+        scope: { selectedOptionValues: ["unknown"] },
+      }),
+    ).toBeNull();
+    expect(
+      buildPendingUserInputAnswers([{ ...question, required: false, minSelections: 0 }], {
+        scope: { selectedOptionValues: ["unknown"] },
+      }),
+    ).toBeNull();
+    expect(
+      buildPendingUserInputAnswers([multiSelectQuestion], { scope: { attachmentCount: 1 } }),
+    ).toEqual({ scope: "" });
+  });
+
   it("clears selected options while a custom answer is active", () => {
     expect(
       setPendingUserInputCustomAnswer(

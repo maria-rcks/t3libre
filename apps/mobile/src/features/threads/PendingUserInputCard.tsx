@@ -270,6 +270,23 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         ) : null}
         {props.pendingUserInput.questions.map((question) => {
           const draft = props.drafts[question.id];
+          const minSelections = question.minSelections ?? 1;
+          const maxSelections = question.maxSelections;
+          const selectionHint =
+            maxSelections === 0
+              ? "Leave all options unselected."
+              : maxSelections === minSelections
+                ? `Select ${minSelections} option${minSelections === 1 ? "" : "s"}.`
+                : maxSelections !== undefined
+                  ? minSelections === 0
+                    ? `Select up to ${maxSelections} option${maxSelections === 1 ? "" : "s"}.`
+                    : `Select ${minSelections} to ${maxSelections} options.`
+                  : minSelections === 0
+                    ? "Select any number of options."
+                    : `Select at least ${minSelections} option${minSelections === 1 ? "" : "s"}.`;
+          const showSelectionHint =
+            question.multiSelect &&
+            (question.minSelections !== undefined || maxSelections !== undefined);
           return (
             <View key={question.id} className="gap-2 pt-1">
               <Text className="font-t3-bold text-xs uppercase tracking-[1px] text-foreground-muted">
@@ -278,6 +295,14 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
               <Text className="font-sans text-base leading-snug text-foreground">
                 {question.question}
               </Text>
+              {showSelectionHint || question.required === false ? (
+                <Text className="font-sans text-sm leading-5 text-foreground-muted">
+                  {showSelectionHint ? selectionHint : null}
+                  {question.required === false
+                    ? `${showSelectionHint ? " " : ""}You can skip this question.`
+                    : null}
+                </Text>
+              ) : null}
               <View className="gap-2">
                 {question.options.map((option) => {
                   const optionValue = option.value ?? option.label.trim();

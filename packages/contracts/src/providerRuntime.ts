@@ -491,6 +491,9 @@ export const UserInputQuestion = Schema.Struct({
   question: TrimmedNonEmptyStringSchema,
   options: Schema.Array(UserInputQuestionOption),
   allowCustomAnswer: Schema.optional(Schema.Boolean),
+  required: Schema.optional(Schema.Boolean),
+  minSelections: Schema.optional(NonNegativeInt),
+  maxSelections: Schema.optional(NonNegativeInt),
   multiSelect: Schema.optional(Schema.Boolean).pipe(
     Schema.withConstructorDefault(Effect.succeed(false)),
   ),

@@ -203,6 +203,111 @@ describe("buildPendingUserInputAnswers", () => {
     expect(buildPendingUserInputAnswers([singleSelectQuestion], {})).toBeNull();
   });
 
+  it("omits unanswered optional questions and permits advancing past them", () => {
+    const optional = { ...singleSelectQuestion, required: false };
+    const drafts = { areas: { selectedOptionValues: ["Server"] } };
+
+    expect(buildPendingUserInputAnswers([optional, multiSelectQuestion], drafts)).toEqual({
+      areas: ["Server"],
+    });
+    expect(buildPendingUserInputAnswers([optional], { scope: { customAnswer: "   " } })).toEqual(
+      {},
+    );
+    expect(
+      derivePendingUserInputProgress([optional, multiSelectQuestion], drafts, 0),
+    ).toMatchObject({
+      resolvedAnswer: null,
+      canAdvance: true,
+      isComplete: true,
+    });
+    expect(
+      findFirstUnansweredPendingUserInputQuestionIndex([optional, multiSelectQuestion], {}),
+    ).toBe(1);
+  });
+
+  it.each([
+    { attachmentsBlocked: true },
+    { attachmentCount: 1, attachmentsBlocked: true },
+    { attachmentCount: 1 },
+    { customAnswer: "Unlisted answer" },
+    { selectedOptionValues: ["unknown"] },
+  ])("keeps invalid optional drafts blocking submission: %j", (draft) => {
+    const question = { ...nativeChoiceQuestion, required: false };
+    const drafts = { result: draft };
+
+    expect(buildPendingUserInputAnswers([question], drafts)).toBeNull();
+    expect(derivePendingUserInputProgress([question], drafts, 0)).toMatchObject({
+      canAdvance: false,
+      isComplete: false,
+    });
+  });
+
+  it("submits empty arrays when a required multi-select allows zero selections", () => {
+    const question = {
+      ...multiSelectQuestion,
+      allowCustomAnswer: false,
+      required: true,
+      minSelections: 0,
+      maxSelections: 0,
+    };
+
+    expect(resolvePendingUserInputAnswer(question, undefined)).toEqual([]);
+    expect(buildPendingUserInputAnswers([question], {})).toEqual({ areas: [] });
+    expect(derivePendingUserInputProgress([question], {}, 0)).toMatchObject({
+      resolvedAnswer: [],
+      canAdvance: true,
+      isComplete: true,
+    });
+    expect(
+      buildPendingUserInputAnswers([question], { areas: { selectedOptionValues: ["Server"] } }),
+    ).toBeNull();
+    expect(buildPendingUserInputAnswers([{ ...question, required: false }], {})).toEqual({});
+  });
+
+  it("enforces multi-select limits and omits unanswered optional arrays", () => {
+    const question = {
+      ...multiSelectQuestion,
+      options: [...multiSelectQuestion.options, { label: "Mobile", description: "Mobile" }],
+      allowCustomAnswer: false,
+      minSelections: 2,
+      maxSelections: 2,
+    };
+
+    expect(buildPendingUserInputAnswers([question], {})).toBeNull();
+    expect(
+      buildPendingUserInputAnswers([question], { areas: { selectedOptionValues: ["Server"] } }),
+    ).toBeNull();
+    expect(
+      buildPendingUserInputAnswers([question], {
+        areas: { selectedOptionValues: ["Server", "Web"] },
+      }),
+    ).toEqual({ areas: ["Server", "Web"] });
+    expect(
+      buildPendingUserInputAnswers([question], {
+        areas: { selectedOptionValues: ["Server", "Web", "Mobile"] },
+      }),
+    ).toBeNull();
+    expect(buildPendingUserInputAnswers([{ ...question, required: false }], {})).toEqual({});
+    expect(
+      buildPendingUserInputAnswers([{ ...question, required: false }], {
+        areas: { selectedOptionValues: ["Server"] },
+      }),
+    ).toBeNull();
+    expect(
+      buildPendingUserInputAnswers([{ ...question, required: false }], {
+        areas: { selectedOptionValues: ["unknown"] },
+      }),
+    ).toBeNull();
+    expect(
+      buildPendingUserInputAnswers([{ ...question, required: false, minSelections: 0 }], {
+        areas: { selectedOptionValues: ["unknown"] },
+      }),
+    ).toBeNull();
+    expect(
+      buildPendingUserInputAnswers([multiSelectQuestion], { areas: { attachmentCount: 1 } }),
+    ).toEqual({ areas: "" });
+  });
+
   it.each([" first\t", ""])("preserves the exact selected option value %j", (value) => {
     const question = {
       ...nativeChoiceQuestion,

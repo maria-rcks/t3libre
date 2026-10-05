@@ -367,11 +367,26 @@ function resolvePendingUserInputAnswer(
 
   const selectedOptionValues = normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
   if (question.multiSelect) {
-    return selectedOptionValues.length > 0
-      ? selectedOptionValues
-      : question.allowCustomAnswer !== false && (draft?.attachmentCount ?? 0) > 0
+    if (
+      selectedOptionValues.length === 0 &&
+      ((draft?.selectedOptionValues?.length ?? 0) > 0 ||
+        normalizeDraftAnswer(draft?.customAnswer) !== null ||
+        (question.allowCustomAnswer === false && (draft?.attachmentCount ?? 0) > 0))
+    )
+      return null;
+    if (
+      selectedOptionValues.length < (question.minSelections ?? 1) ||
+      (question.maxSelections !== undefined && selectedOptionValues.length > question.maxSelections)
+    ) {
+      return selectedOptionValues.length === 0 &&
+        question.minSelections === undefined &&
+        question.maxSelections === undefined &&
+        question.allowCustomAnswer !== false &&
+        (draft?.attachmentCount ?? 0) > 0
         ? ""
         : null;
+    }
+    return selectedOptionValues;
   }
   return (
     selectedOptionValues[0] ??
@@ -1632,7 +1647,16 @@ export function buildPendingUserInputAnswers(
   const answers: Record<string, string | ReadonlyArray<string>> = {};
 
   for (const question of questions) {
-    const answer = resolvePendingUserInputAnswer(question, draftAnswers[question.id]);
+    const draft = draftAnswers[question.id];
+    if (
+      question.required === false &&
+      !draft?.attachmentsBlocked &&
+      normalizeDraftAnswer(draft?.customAnswer) === null &&
+      (draft?.selectedOptionValues?.length ?? 0) === 0 &&
+      (draft?.attachmentCount ?? 0) === 0
+    )
+      continue;
+    const answer = resolvePendingUserInputAnswer(question, draft);
     if (answer === null) {
       return null;
     }
