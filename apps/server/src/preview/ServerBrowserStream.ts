@@ -114,6 +114,7 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
                 );
               case "viewport":
               case "control":
+              case "clipboard":
               case "probe": {
                 const { _tag: type, ...data } = output;
                 return write(JSON.stringify({ type, ...data }));

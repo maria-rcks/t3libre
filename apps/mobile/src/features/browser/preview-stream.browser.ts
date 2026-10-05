@@ -170,6 +170,7 @@ export function start(configuration: PreviewStreamConfiguration) {
       },
       {
         onFrame: (jpeg) => painter.paint(jpeg),
+        onClipboard: (text) => post({ type: "clipboard", text }),
         onViewport: (page) => {
           if (viewport?.width === page.width && viewport.height === page.height) return;
           viewport = page;
@@ -496,11 +497,10 @@ export function start(configuration: PreviewStreamConfiguration) {
       return;
     }
     const shortcut = event.ctrlKey || event.metaKey;
-    // Paste arrives as input text from this device's clipboard. Cut is not forwarded:
-    // the page's selection never reaches this clipboard, so it would be lost.
-    // Shift+Insert and Shift+Delete are the same paste and cut.
-    if (shortcut && ["v", "x"].includes(event.key.toLowerCase())) return;
-    if (event.shiftKey && ["Delete", "Insert"].includes(event.key)) return;
+    // Paste arrives as input text from this device's clipboard. Copy and cut run in
+    // the page, which sends the copied text back. Shift+Insert is the same paste.
+    if (shortcut && event.key.toLowerCase() === "v") return;
+    if (event.shiftKey && event.key === "Insert") return;
     // Enter carries "\r" like Puppeteer's key table, so forms submit and textareas break lines.
     const text = shortcut
       ? undefined

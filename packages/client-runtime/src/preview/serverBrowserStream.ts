@@ -126,6 +126,8 @@ export interface PreviewStreamEvents {
   readonly onViewport: (viewport: PreviewStreamViewport) => void;
   readonly onProbe?: (probe: PreviewStreamProbe) => void;
   readonly onControl?: (control: PreviewStreamControl) => void;
+  /** Text the page just copied or cut while this viewer had control. */
+  readonly onClipboard?: (text: string) => void;
   /** Input sent while disconnected is dropped. */
   readonly onConnectedChange: (connected: boolean) => void;
   /** The upgrade was refused; refresh access and start a new client. */
@@ -186,9 +188,22 @@ export function createPreviewStreamClient(
         return;
       }
       if (typeof message !== "object" || message === null) return;
-      const { type, x, y, width, height, editable, canOperate, controller, generation, dialog } =
-        message as Record<string, unknown>;
-      if (type === "viewport" && typeof width === "number" && typeof height === "number") {
+      const {
+        type,
+        x,
+        y,
+        width,
+        height,
+        editable,
+        canOperate,
+        controller,
+        generation,
+        dialog,
+        text,
+      } = message as Record<string, unknown>;
+      if (type === "clipboard" && typeof text === "string") {
+        events.onClipboard?.(text);
+      } else if (type === "viewport" && typeof width === "number" && typeof height === "number") {
         failures = 0;
         events.onViewport({ width, height });
       } else if (

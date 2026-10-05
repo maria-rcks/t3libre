@@ -21,6 +21,7 @@ export type PreviewStreamMessage =
   | { readonly type: "unauthorized" }
   | { readonly type: "gone" }
   | { readonly type: "viewport"; readonly width: number; readonly height: number }
+  | { readonly type: "clipboard"; readonly text: string }
   | {
       readonly type: "pictureInPicture";
       readonly supported: boolean;

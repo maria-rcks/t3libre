@@ -110,6 +110,11 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
     page,
     sessions,
     newPage: async () => page as unknown as Page,
+    grantPermissions: vi.fn(async () => {}),
+    exposeBinding: vi.fn(async (_name: string, binding: ClipboardBinding) => {
+      clipboardBinding = binding;
+    }),
+    addInitScript: vi.fn(async () => {}),
     newCDPSession: async () => {
       const session = makeSession();
       sessions.push(session);
@@ -127,6 +132,8 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
 
 const contexts: ReturnType<typeof makeContext>[] = [];
 let contextGate: PromiseWithResolvers<void> | null = null;
+type ClipboardBinding = (source: { page: unknown }, text: unknown) => void;
+let clipboardBinding: ClipboardBinding | null = null;
 let contextFailure: Error | null = null;
 const scope = {
   environmentId: EnvironmentId.make("browser-test-environment"),
@@ -633,6 +640,34 @@ it.live("closing a tab while a viewer is still opening it does not leave its pag
       expect((yield* Fiber.join(attaching))._tag).toBe("ServerBrowserTabNotFoundError");
       expect(contexts).toHaveLength(1);
       expect(contexts[0]!.page.close).toHaveBeenCalled();
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("page copies reach only the controlling viewer right after its input", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, tabId } = yield* ready;
+      const page = contexts[0]!.page;
+      const watcher = yield* browser.attachViewer(viewerInput(tabId, false));
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      yield* viewer.input({ type: "takeControl" });
+      const clipboard = (queue: typeof viewer.output) =>
+        Queue.clear(queue).pipe(
+          Effect.map((items) => items.filter((item) => item._tag === "clipboard")),
+        );
+      // A page writing on its own, without a recent gesture, stays on the server.
+      clipboardBinding!({ page }, "unprompted");
+      expect(yield* clipboard(viewer.output)).toEqual([]);
+      yield* viewer.input({ type: "key", action: "down", key: "c", code: "KeyC", modifiers: 4 });
+      const cdp = contexts[0]!.sessions.at(-1)!;
+      expect(cdp.send).toHaveBeenCalledWith(
+        "Input.dispatchKeyEvent",
+        expect.objectContaining({ key: "c", commands: ["copy"] }),
+      );
+      clipboardBinding!({ page }, "copied");
+      expect(yield* clipboard(viewer.output)).toEqual([{ _tag: "clipboard", text: "copied" }]);
+      expect(yield* clipboard(watcher.output)).toEqual([]);
     }),
   ).pipe(Effect.provide(layer)),
 );

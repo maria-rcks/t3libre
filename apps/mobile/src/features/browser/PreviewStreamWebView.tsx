@@ -17,6 +17,7 @@ import {
 } from "react";
 import { ActivityIndicator, Platform, Pressable, TextInput, View } from "react-native";
 import { WebView } from "react-native-webview";
+import * as Clipboard from "expo-clipboard";
 
 import { AppText } from "../../components/AppText";
 import { usePreviewStreamAccess } from "../../state/preview";
@@ -318,6 +319,9 @@ function PreviewStreamDocumentView({
               return;
             case "viewport":
               onViewport?.(message);
+              return;
+            case "clipboard":
+              void Clipboard.setStringAsync(message.text).catch(() => undefined);
               return;
             case "pictureInPicture":
               onPictureInPicture?.(message, message.detail);

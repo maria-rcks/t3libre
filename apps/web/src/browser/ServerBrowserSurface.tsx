@@ -27,6 +27,7 @@ import {
 
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { toastManager } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
 import { refreshPreviewStreamAccess, usePreviewStreamAccess } from "~/state/previewStream";
 
@@ -91,6 +92,25 @@ const buttonOf = (button: number): PreviewStreamMouseButton =>
 
 const pressedButtonOf = (buttons: number): PreviewStreamMouseButton =>
   buttons & 1 ? "left" : buttons & 2 ? "right" : buttons & 4 ? "middle" : "none";
+
+/** Browsers may refuse a write that arrives after the key press; a toast button is a fresh gesture. */
+async function copyPageText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const id = toastManager.add({
+      type: "info",
+      title: "The page copied text",
+      actionProps: {
+        children: "Copy",
+        onClick: () => {
+          toastManager.close(id);
+          void navigator.clipboard.writeText(text).catch(() => undefined);
+        },
+      },
+    });
+  }
+}
 
 export function ServerBrowserSurface(props: {
   readonly environmentId: EnvironmentId;
@@ -325,6 +345,7 @@ export function ServerBrowserSurface(props: {
           if (result.editable) inputRef.current?.focus({ preventScroll: true });
           else inputRef.current?.blur();
         },
+        onClipboard: (text) => void copyPageText(text),
         onViewport: (viewport) => {
           viewportRef.current = viewport;
           viewportChanged(viewport);
@@ -584,11 +605,10 @@ export function ServerBrowserSurface(props: {
       return;
     }
     const shortcut = event.ctrlKey || event.metaKey;
-    // Paste arrives as a paste event carrying this device's clipboard. Cut is not forwarded:
-    // the page's selection never reaches this clipboard, so it would be lost.
-    // Shift+Insert and Shift+Delete are the same paste and cut.
-    if (shortcut && ["v", "x"].includes(event.key.toLowerCase())) return;
-    if (event.shiftKey && ["Delete", "Insert"].includes(event.key)) return;
+    // Paste arrives as a paste event carrying this device's clipboard. Copy and cut run
+    // in the page, which sends the copied text back. Shift+Insert is the same paste.
+    if (shortcut && event.key.toLowerCase() === "v") return;
+    if (event.shiftKey && event.key === "Insert") return;
     // Enter carries "\r" like Puppeteer's key table, so forms submit and textareas break lines.
     const text = shortcut
       ? undefined

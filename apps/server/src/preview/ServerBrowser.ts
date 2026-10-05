@@ -43,7 +43,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import type { CDPSession, Dialog, Page } from "playwright-core";
+import type { BrowserContext, CDPSession, Dialog, Page } from "playwright-core";
 
 import { PENDING_ATTACHMENT_THREAD_SEGMENT } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -139,6 +139,7 @@ export type ServerBrowserViewerOutput =
       readonly y: number;
       readonly editable: boolean;
     }
+  | { readonly _tag: "clipboard"; readonly text: string }
   | { readonly _tag: "gone" };
 
 export interface ServerBrowserViewer {
@@ -176,6 +177,8 @@ interface ViewerState {
   readonly pause: () => Promise<void>;
   readonly resume: () => Promise<void>;
   scrolledAt: number;
+  /** Last input from this viewer; page copies reach its clipboard only right after. */
+  inputAt: number;
   /** Panel bounds, retained in fixed mode; passive viewers never request a size. */
   requestedSize: { width: number; height: number; order: number } | null;
 }
@@ -253,14 +256,69 @@ const modifiersOf = (message: Record<string, unknown>) => {
 };
 
 // Cmd shortcuts from Apple viewers are no editing shortcut for Linux or headless
-// Chromium, so they carry the command. Ctrl already works natively on Linux.
-const metaEditingCommand = (key: string, modifiers: number) => {
-  if ((modifiers & 0b0111) !== 4) return null;
+// Chromium, so they carry the command. Ctrl already works natively on Linux,
+// except copy and cut, which headless Chromium only runs as commands.
+const editingCommand = (key: string, modifiers: number) => {
+  const modifier = modifiers & 0b0111;
+  if (modifier !== 2 && modifier !== 4) return null;
   const lower = key.toLowerCase();
   const command =
-    lower === "a" ? "selectAll" : lower === "z" ? (modifiers & 8 ? "redo" : "undo") : null;
+    lower === "c"
+      ? "copy"
+      : lower === "x"
+        ? "cut"
+        : modifier !== 4
+          ? null
+          : lower === "a"
+            ? "selectAll"
+            : lower === "z"
+              ? modifiers & 8
+                ? "redo"
+                : "undo"
+              : null;
   return command ? { commands: [command] } : null;
 };
+
+const CLIPBOARD_TEXT_LIMIT = 1024 * 1024;
+/** Copies reach the viewer only this soon after it last touched the page. */
+const CLIPBOARD_GESTURE_MS = 5_000;
+const CLIPBOARD_BINDING = "__t3PreviewClipboard";
+// Headless Chromium shares one clipboard between every context, so pages
+// report their own copies instead of the clipboard being read back.
+const CLIPBOARD_SCRIPT = `(() => {
+  const send = (text) => {
+    if (typeof text !== "string" || text.length === 0) return;
+    try { globalThis.${CLIPBOARD_BINDING}?.(text.slice(0, ${CLIPBOARD_TEXT_LIMIT})); } catch {}
+  };
+  const selection = () => {
+    const field = document.activeElement;
+    if ((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) && field.selectionStart !== null)
+      return field.value.slice(field.selectionStart, field.selectionEnd ?? field.selectionStart);
+    return String(document.getSelection() ?? "");
+  };
+  // Bubbling to window runs after page handlers, before cut removes the selection.
+  const copied = (event) =>
+    send(event.defaultPrevented ? event.clipboardData?.getData("text/plain") : selection());
+  addEventListener("copy", copied);
+  addEventListener("cut", copied);
+  const proto = globalThis.Clipboard?.prototype;
+  if (!proto) return;
+  const writeText = proto.writeText;
+  proto.writeText = function (text) {
+    const result = writeText.call(this, text);
+    result.then(() => send(String(text)), () => {});
+    return result;
+  };
+  const write = proto.write;
+  proto.write = function (items) {
+    const result = write.call(this, items);
+    result.then(async () => {
+      const item = [...items].find((candidate) => candidate.types.includes("text/plain"));
+      if (item) send(await (await item.getType("text/plain")).text());
+    }, () => {});
+    return result;
+  };
+})();`;
 
 const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
@@ -430,6 +488,7 @@ const make = Effect.gen(function* () {
         isolatedContext ? tabKey(snapshot.threadId, snapshot.tabId) : undefined,
       ));
     if (adopted?.page.isClosed()) throw new Error("The popup closed before it opened.");
+    await prepareContext(context);
     const page = adopted?.page ?? (await context.newPage());
     const cdp = await context.newCDPSession(page);
     page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
@@ -541,6 +600,23 @@ const make = Effect.gen(function* () {
       void tab.initialNavigation.catch(constVoid);
     }
     return tab;
+  };
+
+  const preparedContexts = new WeakSet<BrowserContext>();
+  const prepareContext = async (context: BrowserContext) => {
+    if (preparedContexts.has(context)) return;
+    preparedContexts.add(context);
+    await context.grantPermissions(["clipboard-write"]);
+    await context.exposeBinding(CLIPBOARD_BINDING, ({ page }, text: unknown) => {
+      if (typeof text !== "string") return;
+      const tab = [...tabs.values()].find((candidate) => candidate.page === page);
+      const controller = tab
+        ? [...tab.viewers].find((viewer) => viewer.id === tab.control.controller)
+        : undefined;
+      if (!controller || Date.now() - controller.inputAt > CLIPBOARD_GESTURE_MS) return;
+      controller.push({ _tag: "clipboard", text: text.slice(0, CLIPBOARD_TEXT_LIMIT) });
+    });
+    await context.addInitScript(CLIPBOARD_SCRIPT);
   };
 
   const adoptPopup = async (opener: ServerTab, popup: Page) => {
@@ -1216,6 +1292,7 @@ const make = Effect.gen(function* () {
   ) => {
     const message = asRecord(raw);
     if (!message) return;
+    viewer.inputAt = Date.now();
     const modifiers = modifiersOf(message);
     switch (message.type) {
       case "mouse": {
@@ -1267,7 +1344,7 @@ const make = Effect.gen(function* () {
           code,
           modifiers,
           ...(text ? { text, unmodifiedText: text } : {}),
-          ...metaEditingCommand(key, modifiers),
+          ...editingCommand(key, modifiers),
           windowsVirtualKeyCode: num(
             message.keyCode,
             key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
@@ -1410,6 +1487,7 @@ const make = Effect.gen(function* () {
         },
         resume: () => startScreencast(screencastScale),
         scrolledAt: 0,
+        inputAt: 0,
         requestedSize: null,
       };
       yield* Effect.acquireRelease(
