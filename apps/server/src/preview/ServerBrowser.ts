@@ -44,7 +44,14 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import type { BrowserContext, CDPSession, Dialog, Download, Page } from "playwright-core";
+import type {
+  BrowserContext,
+  CDPSession,
+  Dialog,
+  Download,
+  FileChooser,
+  Page,
+} from "playwright-core";
 
 import { PENDING_ATTACHMENT_THREAD_SEGMENT } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -142,6 +149,13 @@ export type ServerBrowserViewerOutput =
     }
   | { readonly _tag: "clipboard"; readonly text: string }
   | {
+      readonly _tag: "fileChooser";
+      readonly id: string;
+      readonly multiple: boolean;
+      readonly accept: string;
+    }
+  | { readonly _tag: "fileChooserClosed"; readonly id: string }
+  | {
       readonly _tag: "download";
       readonly id: string;
       readonly fileName: string;
@@ -170,6 +184,20 @@ export class ServerBrowser extends Context.Service<
       ServerBrowserTabNotFoundError | ServerBrowserLaunchError,
       Scope.Scope
     >;
+    /**
+     * Gives a page's open file picker the files a viewer uploaded, by path, and
+     * closes it. No files cancels the pick. False when that picker is gone.
+     */
+    readonly answerFileChooser: (input: {
+      readonly threadId: string;
+      readonly tabId: string;
+      readonly chooserId: string;
+      readonly files: ReadonlyArray<{
+        readonly name: string;
+        readonly mimeType: string;
+        readonly buffer: Buffer;
+      }>;
+    }) => Effect.Effect<boolean>;
     /** A finished download of a live tab, for the authenticated download route. */
     readonly openDownload: (input: {
       readonly threadId: string;
@@ -231,6 +259,12 @@ interface ServerTab {
   readonly openerTabId: string | undefined;
   /** Finished downloads, newest last; files live until the tab closes. */
   readonly downloads: Array<ServerDownload>;
+  /** A page's open file picker, waiting for the controlling viewer's files. */
+  fileChooser: {
+    readonly id: string;
+    readonly chooser: FileChooser;
+    readonly accept: string;
+  } | null;
   dialog: Dialog | null;
   setting: PreviewViewportSetting;
   loading: boolean;
@@ -539,6 +573,7 @@ const make = Effect.gen(function* () {
       profileId: snapshot.profileId,
       openerTabId: adopted?.openerTabId,
       downloads: [],
+      fileChooser: null,
       dialog: null,
       setting: snapshot.viewport ?? FILL_PREVIEW_VIEWPORT,
       loading: false,
@@ -607,6 +642,7 @@ const make = Effect.gen(function* () {
       broadcastControl(tab);
     });
     page.on("download", (download) => void saveDownload(tab, download));
+    page.on("filechooser", (chooser) => void offerFileChooser(tab, chooser));
     // Popups become tabs and keep `window.opener`, so sign-in popups can report back.
     page.on("popup", (popup) => void adoptPopup(tab, popup));
     // Playwright cannot reload a crashed page, so it must leave the tab list.
@@ -677,6 +713,60 @@ const make = Effect.gen(function* () {
       runFork(Effect.logWarning("server preview download failed", { cause }));
     }
   };
+
+  const fileChooserMessage = (tab: ServerTab): ServerBrowserViewerOutput | null =>
+    tab.fileChooser
+      ? {
+          _tag: "fileChooser",
+          id: tab.fileChooser.id,
+          multiple: tab.fileChooser.chooser.isMultiple(),
+          accept: tab.fileChooser.accept,
+        }
+      : null;
+
+  const offerFileChooser = async (tab: ServerTab, chooser: FileChooser) => {
+    const previous = tab.fileChooser;
+    const accept =
+      (await chooser
+        .element()
+        .getAttribute("accept")
+        .catch(() => null)) ?? "";
+    // A newer picker replaces an unanswered one, as a real browser allows only one.
+    if (previous) closeFileChooser(tab);
+    tab.fileChooser = { id: NodeCrypto.randomUUID(), chooser, accept: accept.slice(0, 1024) };
+    pushFileChooser(tab);
+  };
+
+  const pushFileChooser = (tab: ServerTab) => {
+    const message = fileChooserMessage(tab);
+    const controller = [...tab.viewers].find((viewer) => viewer.id === tab.control.controller);
+    if (message) controller?.push(message);
+  };
+
+  const closeFileChooser = (tab: ServerTab) => {
+    const open = tab.fileChooser;
+    if (!open) return;
+    tab.fileChooser = null;
+    for (const viewer of tab.viewers) viewer.push({ _tag: "fileChooserClosed", id: open.id });
+  };
+
+  /** Hands uploaded files to the page's open picker; an empty list cancels it. */
+  const setChooserFiles = async (
+    input: Parameters<ServerBrowser["Service"]["answerFileChooser"]>[0],
+  ) => {
+    const tab = tabs.get(tabKey(input.threadId, input.tabId));
+    const open = tab?.fileChooser;
+    if (!tab || !open || open.id !== input.chooserId) return false;
+    if (input.files.length > 0) {
+      await open.chooser.setFiles(
+        open.chooser.isMultiple() ? [...input.files] : input.files.slice(0, 1),
+      );
+    }
+    if (tab.fileChooser === open) closeFileChooser(tab);
+    return true;
+  };
+  const answerFileChooser: ServerBrowser["Service"]["answerFileChooser"] = (input) =>
+    Effect.promise(() => setChooserFiles(input).catch(() => false));
 
   const openDownload: ServerBrowser["Service"]["openDownload"] = (input) =>
     Effect.sync(() => {
@@ -1600,6 +1690,7 @@ const make = Effect.gen(function* () {
         yield* Effect.promise(() => tab.control.take(viewer.id));
       }
       broadcastControl(tab);
+      pushFileChooser(tab);
       // Full scale: a scaled capture would flash in every other viewer.
       const pushStill = async () => {
         const data = await withCaptureLock(tab, () =>
@@ -1681,6 +1772,7 @@ const make = Effect.gen(function* () {
                 const taking = tab.control.take(viewer.id);
                 broadcastControl(tab);
                 await taking;
+                pushFileChooser(tab);
               } else if (message.type === "releaseControl") {
                 const releasing = tab.control.release(viewer.id, () =>
                   releaseViewerInput(viewer, session),
@@ -1759,7 +1851,13 @@ const make = Effect.gen(function* () {
       catch: (cause) => new PreviewClearProfileError({ profileId, cause }),
     });
 
-  return ServerBrowser.of({ enabled, attachViewer, clearProfile, openDownload });
+  return ServerBrowser.of({
+    enabled,
+    attachViewer,
+    clearProfile,
+    openDownload,
+    answerFileChooser,
+  });
 });
 
 export const layer = Layer.effect(ServerBrowser, make);

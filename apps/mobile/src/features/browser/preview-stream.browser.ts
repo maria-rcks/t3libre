@@ -172,6 +172,7 @@ export function start(configuration: PreviewStreamConfiguration) {
         onFrame: (jpeg) => painter.paint(jpeg),
         onClipboard: (text) => post({ type: "clipboard", text }),
         onDownload: (download) => post({ type: "download", ...download }),
+        onFileChooser: (chooser) => post({ type: "fileChooser", chooser }),
         onViewport: (page) => {
           if (viewport?.width === page.width && viewport.height === page.height) return;
           viewport = page;

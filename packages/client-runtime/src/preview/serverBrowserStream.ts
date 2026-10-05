@@ -1,4 +1,4 @@
-// @effect-diagnostics globalTimers:off - This browser and WebView transport runs without an Effect runtime.
+// @effect-diagnostics globalTimers:off globalFetch:off - This browser and WebView transport runs without an Effect runtime.
 import { type DeviceHubAccess, withDeviceHubQuery } from "../device/hubAccess.ts";
 import type { PreviewViewportSetting } from "@t3tools/contracts";
 
@@ -97,6 +97,44 @@ export interface PreviewStreamDownload {
   readonly url: string;
 }
 
+export interface PreviewStreamFileChooser {
+  readonly multiple: boolean;
+  /** The input's `accept` attribute, ready for a local `<input type=file>`. */
+  readonly accept: string;
+  /** POST multipart `file` parts here; an empty form cancels the page's picker. */
+  readonly uploadUrl: string;
+  /** Cookie sessions must send credentials with the upload. */
+  readonly credentials: boolean;
+}
+
+export const previewStreamUploadUrl = (
+  target: Pick<PreviewStreamTarget, "access" | "threadId" | "tabId">,
+  chooser: string,
+): string =>
+  withDeviceHubQuery(
+    `${target.access.httpBase}/upload?${new URLSearchParams({
+      threadId: target.threadId,
+      tabId: target.tabId,
+      chooser,
+    }).toString()}`,
+    target.access,
+  );
+
+/** Sends files to a page's open picker. Rejects when the server refuses them. */
+export async function uploadPreviewStreamFiles(
+  chooser: PreviewStreamFileChooser,
+  files: ReadonlyArray<Blob & { readonly name?: string }>,
+): Promise<void> {
+  const body = new FormData();
+  for (const file of files) body.append("file", file, file.name ?? "file");
+  const response = await fetch(chooser.uploadUrl, {
+    method: "POST",
+    body,
+    credentials: chooser.credentials ? "include" : "omit",
+  });
+  if (!response.ok) throw new Error((await response.text()) || "The upload was refused.");
+}
+
 export const previewStreamDownloadUrl = (
   target: Pick<PreviewStreamTarget, "access" | "threadId" | "tabId">,
   id: string,
@@ -150,6 +188,8 @@ export interface PreviewStreamEvents {
   readonly onClipboard?: (text: string) => void;
   /** A file the page downloaded while this viewer had control. */
   readonly onDownload?: (download: PreviewStreamDownload) => void;
+  /** The page opened a file picker (`null` once answered or replaced). */
+  readonly onFileChooser?: (chooser: PreviewStreamFileChooser | null) => void;
   /** Input sent while disconnected is dropped. */
   readonly onConnectedChange: (connected: boolean) => void;
   /** The upgrade was refused; refresh access and start a new client. */
@@ -182,6 +222,7 @@ export function createPreviewStreamClient(
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let failures = 0;
   let control: PreviewStreamControl | null = null;
+  let fileChooser: string | null = null;
 
   const connect = () => {
     if (stopped) return;
@@ -225,8 +266,27 @@ export function createPreviewStreamClient(
         id,
         fileName,
         sizeBytes,
+        multiple,
+        accept,
       } = message as Record<string, unknown>;
-      if (type === "clipboard" && typeof text === "string") {
+      if (
+        type === "fileChooser" &&
+        typeof id === "string" &&
+        typeof multiple === "boolean" &&
+        typeof accept === "string"
+      ) {
+        fileChooser = id;
+        events.onFileChooser?.({
+          multiple,
+          accept,
+          uploadUrl: previewStreamUploadUrl(target, id),
+          credentials: target.access.credentials,
+        });
+      } else if (type === "fileChooserClosed" && typeof id === "string") {
+        if (fileChooser !== id) return;
+        fileChooser = null;
+        events.onFileChooser?.(null);
+      } else if (type === "clipboard" && typeof text === "string") {
         events.onClipboard?.(text);
       } else if (
         type === "download" &&

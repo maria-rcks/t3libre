@@ -3,11 +3,14 @@ import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3to
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import {
   HttpPlatform,
   HttpRouter,
   HttpServerRequest,
   HttpServerResponse,
+  Multipart,
 } from "effect/unstable/http";
 import * as Socket from "effect/unstable/socket/Socket";
 
@@ -47,6 +50,11 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
     if (Option.isNone(url)) return HttpServerResponse.text("Bad Request", { status: 400 });
     if (url.value.pathname === `${PREVIEW_STREAM_ROUTE_PREFIX}/download`) {
       return yield* serveDownload(browser, url.value.searchParams);
+    }
+    if (url.value.pathname === `${PREVIEW_STREAM_ROUTE_PREFIX}/upload`) {
+      return request.method === "POST"
+        ? yield* receiveUpload(browser, url.value.searchParams)
+        : HttpServerResponse.text("Method Not Allowed", { status: 405 });
     }
     if (
       url.value.pathname !== `${PREVIEW_STREAM_ROUTE_PREFIX}/ws` ||
@@ -125,6 +133,8 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
               case "control":
               case "clipboard":
               case "download":
+              case "fileChooser":
+              case "fileChooserClosed":
               case "probe": {
                 const { _tag: type, ...data } = output;
                 return write(JSON.stringify({ type, ...data }));
@@ -180,15 +190,60 @@ const serveDownload = (browser: ServerBrowser.ServerBrowser["Service"], params: 
     });
   });
 
+const UPLOAD_MAX_FILE_BYTES = 100 * 1024 * 1024;
+const UPLOAD_MAX_FILES = 20;
+
+/**
+ * `POST /api/preview-stream/upload?threadId&tabId&chooser` with multipart `file`
+ * parts: answers the page's open file picker. No parts cancels it.
+ */
+const receiveUpload = (browser: ServerBrowser.ServerBrowser["Service"], params: URLSearchParams) =>
+  Effect.gen(function* () {
+    yield* authenticateMediaRequest(AuthOrchestrationOperateScope);
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const fs = yield* FileSystem.FileSystem;
+    const parts = yield* request.multipart.pipe(
+      Effect.provideContext(
+        Multipart.limitsServices({
+          maxParts: UPLOAD_MAX_FILES,
+          maxFileSize: UPLOAD_MAX_FILE_BYTES,
+          maxTotalSize: UPLOAD_MAX_FILE_BYTES,
+        }),
+      ),
+    );
+    const files = yield* Effect.forEach(
+      Object.values(parts).flatMap((value) =>
+        Array.isArray(value) ? value.filter(Multipart.isPersistedFile) : [],
+      ),
+      (file) =>
+        fs.readFile(file.path).pipe(
+          Effect.map((bytes) => ({
+            name: file.name,
+            mimeType: file.contentType,
+            buffer: Buffer.from(bytes),
+          })),
+        ),
+    );
+    const answered = yield* browser.answerFileChooser({
+      threadId: params.get("threadId") ?? "",
+      tabId: params.get("tabId") ?? "",
+      chooserId: params.get("chooser") ?? "",
+      files,
+    });
+    return answered
+      ? HttpServerResponse.empty({ status: 204 })
+      : HttpServerResponse.text("The page's file picker is no longer open.", { status: 409 });
+  }).pipe(Effect.scoped);
+
 // Capture the browser because handlers only see request-scoped services.
 export const routeLayer = HttpRouter.use((router) =>
   Effect.gen(function* () {
     const browser = yield* ServerBrowser.ServerBrowser;
-    const platform = yield* Effect.context<HttpPlatform.HttpPlatform>();
-    yield* router.add(
-      "GET",
-      `${PREVIEW_STREAM_ROUTE_PREFIX}/*`,
-      makeHandler(browser).pipe(Effect.provideContext(platform)),
-    );
+    const platform = yield* Effect.context<
+      HttpPlatform.HttpPlatform | FileSystem.FileSystem | Path.Path
+    >();
+    const handler = makeHandler(browser).pipe(Effect.provideContext(platform));
+    yield* router.add("GET", `${PREVIEW_STREAM_ROUTE_PREFIX}/*`, handler);
+    yield* router.add("POST", `${PREVIEW_STREAM_ROUTE_PREFIX}/upload`, handler);
   }),
 );

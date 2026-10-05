@@ -8,6 +8,8 @@ import {
   type PreviewStreamClient,
   type PreviewStreamControl,
   type PreviewStreamDownload,
+  type PreviewStreamFileChooser,
+  uploadPreviewStreamFiles,
   type PreviewStreamInput,
   type PreviewStreamMouseButton,
   type PreviewStreamViewport,
@@ -170,6 +172,20 @@ export function ServerBrowserSurface(props: {
   const controlRef = useRef<PreviewStreamControl | null>(null);
   const [control, setControl] = useState<PreviewStreamControl | null>(null);
   const [promptText, setPromptText] = useState("");
+  const [fileChooser, setFileChooser] = useState<PreviewStreamFileChooser | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const answerFileChooser = (files: ReadonlyArray<File>) => {
+    const chooser = fileChooser;
+    if (!chooser) return;
+    setFileChooser(null);
+    void uploadPreviewStreamFiles(chooser, files).catch((cause: unknown) =>
+      toastManager.add({
+        type: "error",
+        title: "Could not send the files to the page",
+        description: cause instanceof Error ? cause.message : undefined,
+      }),
+    );
+  };
   const unauthorizedRef = useRef(0);
   const [accessDenied, setAccessDenied] = useState(false);
   const pendingMoveRef = useRef<MouseInput | null>(null);
@@ -366,6 +382,7 @@ export function ServerBrowserSurface(props: {
         },
         onClipboard: (text) => void copyPageText(text),
         onDownload: offerDownload,
+        onFileChooser: setFileChooser,
         onViewport: (viewport) => {
           viewportRef.current = viewport;
           viewportChanged(viewport);
@@ -389,6 +406,7 @@ export function ServerBrowserSurface(props: {
         },
         onConnectedChange: (connected) => {
           if (connected) return;
+          setFileChooser(null);
           controlRef.current = null;
           setControl(null);
           controlChanged(null);
@@ -743,6 +761,37 @@ export function ServerBrowserSurface(props: {
             if (text) send({ type: "text", text });
           }}
         />
+        {fileChooser && control?.controller === "you" ? (
+          <div
+            className="absolute inset-x-2 top-2 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 shadow-lg"
+            role="dialog"
+            aria-label="Choose files for the page"
+          >
+            <p className="text-sm">
+              The page asks for {fileChooser.multiple ? "files" : "a file"}.
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              multiple={fileChooser.multiple}
+              accept={fileChooser.accept}
+              onChange={(event) => {
+                const files = [...(event.currentTarget.files ?? [])];
+                event.currentTarget.value = "";
+                if (files.length > 0) answerFileChooser(files);
+              }}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => answerFileChooser([])}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={() => fileInputRef.current?.click()}>
+                Choose {fileChooser.multiple ? "files" : "file"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {control?.dialog ? (
           <div
             className="absolute inset-x-2 top-2 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 shadow-lg"

@@ -3,6 +3,7 @@ import {
   previewStreamControlLabel,
   type PreviewStreamControl,
   type PreviewStreamDownload,
+  type PreviewStreamFileChooser,
   type PreviewStreamInput,
 } from "@t3tools/client-runtime/preview/server-browser-stream";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -22,6 +23,7 @@ import * as Clipboard from "expo-clipboard";
 
 import { AppText } from "../../components/AppText";
 import { downloadAndShareAttachment } from "../../lib/attachmentDownload";
+import { beginForegroundHandoff } from "../../lib/foreground-handoff";
 import { usePreviewStreamAccess } from "../../state/preview";
 
 import {
@@ -55,6 +57,35 @@ type NativeStreamBridge = {
   /** The floating player shows a spinner without text or a reconnect button. */
   readonly compact?: boolean;
 };
+
+/** Picks files on this device and sends them to the page's open picker; none cancels it. */
+async function sendFilesToPage(chooser: PreviewStreamFileChooser, pick: boolean) {
+  const body = new FormData();
+  if (pick) {
+    const { getDocumentAsync } = await import("expo-document-picker");
+    const endHandoff = beginForegroundHandoff();
+    let result: Awaited<ReturnType<typeof getDocumentAsync>>;
+    try {
+      result = await getDocumentAsync({ multiple: chooser.multiple, copyToCacheDirectory: true });
+    } finally {
+      endHandoff();
+    }
+    for (const asset of result.canceled ? [] : result.assets) {
+      // React Native's FormData uploads a file part from its URI.
+      body.append("file", {
+        uri: asset.uri,
+        name: asset.name,
+        type: asset.mimeType ?? "application/octet-stream",
+      } as unknown as Blob);
+    }
+  }
+  const response = await fetch(chooser.uploadUrl, {
+    method: "POST",
+    body,
+    credentials: chooser.credentials ? "include" : "omit",
+  });
+  if (!response.ok) throw new Error((await response.text()) || "The upload was refused.");
+}
 
 /** The file is on the environment; saving it here goes through the share sheet. */
 function offerDownload(download: PreviewStreamDownload) {
@@ -224,6 +255,18 @@ function PreviewStreamDocumentView({
   const [started, setStarted] = useState(false);
   const [control, setControl] = useState<PreviewStreamControl | null>(null);
   const [promptText, setPromptText] = useState("");
+  const [fileChooser, setFileChooser] = useState<PreviewStreamFileChooser | null>(null);
+  const answerFileChooser = (pick: boolean) => {
+    const chooser = fileChooser;
+    if (!chooser) return;
+    setFileChooser(null);
+    void sendFilesToPage(chooser, pick).catch((cause: unknown) =>
+      Alert.alert(
+        "Could not send the files to the page",
+        cause instanceof Error ? cause.message : undefined,
+      ),
+    );
+  };
   const controlChanged = useEffectEvent((next: PreviewStreamControl | null) => onControl?.(next));
   const command = (input: PreviewStreamInput) =>
     webView.current?.injectJavaScript(
@@ -235,6 +278,7 @@ function PreviewStreamDocumentView({
     webView.current?.injectJavaScript("window.T3PreviewStream?.stop(); true;");
     onStreamingChange?.(false);
     setControl(null);
+    setFileChooser(null);
     onControl?.(null);
     setError(message);
     setStatus("error");
@@ -349,6 +393,9 @@ function PreviewStreamDocumentView({
             case "download":
               offerDownload(message);
               return;
+            case "fileChooser":
+              setFileChooser(message.chooser);
+              return;
             case "pictureInPicture":
               onPictureInPicture?.(message, message.detail);
               return;
@@ -368,6 +415,31 @@ function PreviewStreamDocumentView({
           }
         }}
       />
+      {!compact && fileChooser && control?.controller === "you" ? (
+        <View className="absolute inset-x-3 top-16 gap-3 rounded-xl border border-secondary-border bg-secondary p-4">
+          <AppText className="text-sm text-secondary-foreground">
+            The page asks for {fileChooser.multiple ? "files" : "a file"}.
+          </AppText>
+          <View className="flex-row justify-end gap-3">
+            <Pressable
+              accessibilityRole="button"
+              className="px-3 py-2"
+              onPress={() => answerFileChooser(false)}
+            >
+              <AppText className="text-secondary-foreground">Cancel</AppText>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              className="px-3 py-2"
+              onPress={() => answerFileChooser(true)}
+            >
+              <AppText className="text-secondary-foreground">
+                Choose {fileChooser.multiple ? "files" : "file"}
+              </AppText>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
       {!compact && control?.dialog ? (
         <View className="absolute inset-x-3 top-16 gap-3 rounded-xl border border-secondary-border bg-secondary p-4">
           <AppText className="text-sm text-secondary-foreground">{control.dialog.message}</AppText>

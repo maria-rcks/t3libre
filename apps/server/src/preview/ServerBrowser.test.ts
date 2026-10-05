@@ -724,3 +724,39 @@ it.live("a page download is saved, offered to the controller, and listed for the
     }),
   ).pipe(Effect.provide(layer)),
 );
+
+it.live("a page's file picker goes to the controller and takes its uploaded files", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, tabId } = yield* ready;
+      const page = contexts[0]!.page;
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      yield* viewer.input({ type: "takeControl" });
+      const setFiles = vi.fn(async (_files: unknown) => {});
+      page.emit("filechooser", {
+        isMultiple: () => false,
+        element: () => ({ getAttribute: async () => ".csv" }),
+        setFiles,
+      });
+      let offered = yield* Queue.take(viewer.output);
+      while (offered._tag !== "fileChooser") offered = yield* Queue.take(viewer.output);
+      expect(offered).toMatchObject({ multiple: false, accept: ".csv" });
+      const file = (name: string) => ({ name, mimeType: "text/csv", buffer: Buffer.from(name) });
+      const answer = (chooserId: string) =>
+        browser.answerFileChooser({
+          threadId: scope.threadId,
+          tabId,
+          chooserId,
+          files: [file("a.csv"), file("b.csv")],
+        });
+      expect(yield* answer("other")).toBe(false);
+      expect(yield* answer(offered.id)).toBe(true);
+      // A single-file input only receives the first file.
+      expect(setFiles).toHaveBeenCalledExactlyOnceWith([file("a.csv")]);
+      let closed = yield* Queue.take(viewer.output);
+      while (closed._tag !== "fileChooserClosed") closed = yield* Queue.take(viewer.output);
+      expect(closed.id).toBe(offered.id);
+      expect(yield* answer(offered.id)).toBe(false);
+    }),
+  ).pipe(Effect.provide(layer)),
+);

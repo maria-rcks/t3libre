@@ -85,6 +85,7 @@ it.effect.each([
       enabled: true,
       clearProfile: () => Effect.void,
       openDownload: () => Effect.succeedNone,
+      answerFileChooser: () => Effect.succeed(false),
       attachViewer: (input) =>
         Effect.sync(() => {
           attachments.push(input);
@@ -161,6 +162,7 @@ it.effect.each([
       enabled: true,
       clearProfile: () => Effect.void,
       openDownload: () => Effect.succeedNone,
+      answerFileChooser: () => Effect.succeed(false),
       attachViewer: () => {
         attachments++;
         return Effect.die("unauthorized viewer must not attach");
@@ -207,6 +209,7 @@ it.effect("serves a tab's download only to an authorized session", () =>
             ? Option.some({ path, fileName: "Q3 report.csv" })
             : Option.none();
         }),
+      answerFileChooser: () => Effect.succeed(false),
       attachViewer: () => Effect.die("unused"),
     });
     const serve = (scopes: ReadonlyArray<AuthEnvironmentScope>, url: string) =>
@@ -239,4 +242,57 @@ it.effect("serves a tab's download only to an authorized session", () =>
     const missing = yield* serve([AuthOrchestrationReadScope], `${base}&id=other`);
     expect(missing.status).toBe(404);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("passes uploaded files to the page's open picker and needs operate scope", () =>
+  Effect.gen(function* () {
+    const answers: Array<{ chooserId: string; files: Array<{ name: string; text: string }> }> = [];
+    const browser = ServerBrowser.ServerBrowser.of({
+      enabled: true,
+      clearProfile: () => Effect.void,
+      openDownload: () => Effect.succeedNone,
+      answerFileChooser: (input) =>
+        Effect.sync(() => {
+          answers.push({
+            chooserId: input.chooserId,
+            files: input.files.map((file) => ({ name: file.name, text: file.buffer.toString() })),
+          });
+          return input.chooserId === "chooser-1";
+        }),
+      attachViewer: () => Effect.die("unused"),
+    });
+    const upload = (scopes: ReadonlyArray<AuthEnvironmentScope>, chooser: string) =>
+      Effect.gen(function* () {
+        const handler = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            HttpRouter.toWebHandler(
+              routeLayer.pipe(
+                Layer.provide(Layer.succeed(ServerBrowser.ServerBrowser, browser)),
+                Layer.provide(platformLayer),
+                Layer.provideMerge(makeAuth(scopes, undefined).layer),
+              ),
+              { disableLogger: true },
+            ),
+          ),
+          ({ dispose }) => Effect.promise(dispose),
+        );
+        const body = new FormData();
+        body.append("file", new File(["hello"], "notes.txt", { type: "text/plain" }));
+        return yield* Effect.promise(() =>
+          handler.handler(
+            new Request(
+              `http://t3.test/api/preview-stream/upload?threadId=thread&tabId=tab&chooser=${chooser}`,
+              { method: "POST", body },
+            ),
+          ),
+        );
+      });
+    expect((yield* upload([AuthOrchestrationReadScope], "chooser-1")).status).toBe(403);
+    expect(answers).toEqual([]);
+    expect((yield* upload([AuthOrchestrationOperateScope], "chooser-1")).status).toBe(204);
+    expect(answers).toEqual([
+      { chooserId: "chooser-1", files: [{ name: "notes.txt", text: "hello" }] },
+    ]);
+    expect((yield* upload([AuthOrchestrationOperateScope], "stale")).status).toBe(409);
+  }).pipe(Effect.scoped),
 );
