@@ -984,7 +984,8 @@ it.effect.each(["closed", "draft", "permission", "stack", "method"] as const)(
             ...target.input,
             action: "merge",
             resolveMergeMethod: () => {
-              throw new Error("No merge method is available.");
+              if (reason === "method") throw new Error("No merge method is available.");
+              return "squash";
             },
           },
         });
