@@ -1,4 +1,5 @@
-import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
+import type { AssetResource, OrchestrationV2TurnItem } from "@t3tools/contracts";
+import { readToolOutputImage, toolOutputImages } from "@t3tools/shared/toolOutput";
 import * as DateTime from "effect/DateTime";
 
 const MAX_TEXT_BLOCK_DEPTH = 4;
@@ -17,11 +18,14 @@ function textFromBlocks(value: unknown, depth: number): string | null {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
     const parts = value.map((block) => textFromBlocks(block, depth + 1));
-    return parts.every((part) => part !== null) ? parts.join("\n") : null;
+    return parts.every((part) => part !== null)
+      ? parts.filter((part) => part !== "").join("\n")
+      : null;
   }
   if (!isRecord(value)) return null;
   if (value.type === "text" && typeof value.text === "string") return value.text;
-  if (value.type === "image") return "[image]";
+  // Images clients can show render on their own (see turnItemOutputImages).
+  if (value.type === "image") return readToolOutputImage(value) ? "" : "[image]";
   if (value.type === "resource_link" && typeof value.uri === "string") return value.uri;
   if (value.type === "resource" && isRecord(value.resource)) {
     const resource = value.resource;
@@ -61,7 +65,7 @@ function prettyJsonText(text: string): string {
 }
 
 /** Formats a tool input or output for display: text blocks as text, the rest as JSON. */
-export function formatToolValue(value: unknown): string | null {
+function formatToolValue(value: unknown): string | null {
   if (value === undefined || value === null) return null;
   const text = textFromBlocks(value, 0);
   if (text !== null) return text.trim() ? prettyJsonText(text) : null;
@@ -73,6 +77,48 @@ export function formatToolValue(value: unknown): string | null {
   }
   if (json === undefined || json === "{}" || json === "[]") return null;
   return json;
+}
+
+/**
+ * The call a tool row's body shows above its result: the full command, the
+ * arguments as `key value` pairs, or formatted text when they are not flat.
+ */
+export function toolCallLines(input: {
+  readonly command?: string | undefined;
+  readonly args?: unknown;
+}): {
+  readonly command: string | null;
+  readonly args: ReadonlyArray<readonly [string, string]> | null;
+  readonly argsText: string | null;
+} {
+  if (input.command !== undefined) {
+    // The row title truncates to its width, so the body always has the full command.
+    const command = input.command.trim();
+    return { command: command || null, args: null, argsText: null };
+  }
+  const args = input.args;
+  if (isRecord(args) && !isSummarizedValue(args)) {
+    const entries = Object.entries(args).flatMap(
+      ([key, value]): Array<readonly [string, string]> => {
+        if (value === undefined) return [];
+        // An empty string or null can be the point of a call (a clear or reset), so show it.
+        return [
+          [
+            key,
+            typeof value === "string" && value !== ""
+              ? value
+              : (JSON.stringify(value) ?? String(value)),
+          ],
+        ];
+      },
+    );
+    return { command: null, args: entries.length > 0 ? entries : null, argsText: null };
+  }
+  return { command: null, args: null, argsText: formatToolValue(args) };
+}
+
+function toolCallHasLines(lines: ReturnType<typeof toolCallLines>): boolean {
+  return lines.command !== null || lines.args !== null || lines.argsText !== null;
 }
 
 const LIVE_TURN_ITEM_STATUSES: ReadonlySet<OrchestrationV2TurnItem["status"]> = new Set([
@@ -126,9 +172,52 @@ export function turnItemOutputText(item: OrchestrationV2TurnItem): string | null
       return item.output?.trim() ? commandOutputText(item.output) || null : null;
     case "dynamic_tool":
       return item.outputOmitted === true ? null : formatToolValue(item.output);
+    case "file_search":
+      return item.results?.length
+        ? item.results
+            .map((result) =>
+              [
+                `${result.fileName}${result.line === undefined ? "" : `:${result.line}`}`,
+                result.preview?.trim(),
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            )
+            .join("\n")
+        : null;
+    case "web_search":
+      return item.results?.length
+        ? item.results
+            .map((result) =>
+              [
+                result.title?.trim() || result.url,
+                result.title ? result.url : undefined,
+                result.snippet?.trim(),
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            )
+            .join("\n\n")
+        : null;
     default:
       return null;
   }
+}
+
+/**
+ * Images in a fetched item's tool output, as assets. The detail read leaves
+ * the bytes out, so each loads over HTTP by its index.
+ */
+export function turnItemOutputImages(
+  item: OrchestrationV2TurnItem,
+): ReadonlyArray<Extract<AssetResource, { readonly _tag: "tool-output-image" }>> {
+  if (item.type !== "dynamic_tool" || item.outputOmitted === true) return [];
+  return toolOutputImages(item.output).map((_, index) => ({
+    _tag: "tool-output-image",
+    threadId: item.threadId,
+    itemId: item.id,
+    index,
+  }));
 }
 
 /**
@@ -141,10 +230,10 @@ export function turnItemHasDetail(item: OrchestrationV2TurnItem): boolean {
       return item.text.trim().length > 0;
     case "command_execution":
       return (
-        item.input.trim().length > 0 ||
+        toolCallLines({ command: item.input }).command !== null ||
         item.outputOmitted === true ||
         Boolean(item.output?.trim()) ||
-        item.exitCode !== undefined
+        (item.exitCode !== undefined && item.exitCode !== 0)
       );
     case "file_change":
     case "checkpoint":
@@ -156,7 +245,7 @@ export function turnItemHasDetail(item: OrchestrationV2TurnItem): boolean {
     case "web_search":
       return (item.results?.length ?? 0) > 0 || (item.patterns?.length ?? 0) > 0;
     case "dynamic_tool":
-      return item.outputOmitted === true || formatToolValue(item.input) !== null;
+      return item.outputOmitted === true || toolCallHasLines(toolCallLines({ args: item.input }));
     case "approval_request":
       return Boolean(item.prompt?.trim());
     case "user_input_request":

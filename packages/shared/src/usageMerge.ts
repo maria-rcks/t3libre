@@ -430,15 +430,13 @@ export function mergeUsage(
       unpricedTokens: number;
     }
   >();
+  type ProviderTokenTotals = { costUsd: number; totalTokens: number; reasoningTokens: number };
   const dailyAccumulator = new Map<
     string,
     {
       costUsd: number;
       totalTokens: number;
-      byProvider: Map<
-        UsageProviderKind,
-        { costUsd: number; totalTokens: number; reasoningTokens: number }
-      >;
+      byProvider: Map<UsageProviderKind, ProviderTokenTotals>;
     }
   >();
   const hourlyAccumulator = new Map<
@@ -448,10 +446,7 @@ export function mergeUsage(
       hourStart: string;
       costUsd: number;
       totalTokens: number;
-      byProvider: Map<
-        UsageProviderKind,
-        { costUsd: number; totalTokens: number; reasoningTokens: number }
-      >;
+      byProvider: Map<UsageProviderKind, ProviderTokenTotals>;
     }
   >();
   const contributingEnvironments: EnvironmentId[] = [];
@@ -554,10 +549,7 @@ export function mergeUsage(
       const day = dailyAccumulator.get(bucket.day) ?? {
         costUsd: 0,
         totalTokens: 0,
-        byProvider: new Map<
-          UsageProviderKind,
-          { costUsd: number; totalTokens: number; reasoningTokens: number }
-        >(),
+        byProvider: new Map<UsageProviderKind, ProviderTokenTotals>(),
       };
       day.costUsd += bucket.costUsd;
       day.totalTokens += tokens;
@@ -578,10 +570,7 @@ export function mergeUsage(
           hourStart: bucket.hourStart,
           costUsd: 0,
           totalTokens: 0,
-          byProvider: new Map<
-            UsageProviderKind,
-            { costUsd: number; totalTokens: number; reasoningTokens: number }
-          >(),
+          byProvider: new Map<UsageProviderKind, ProviderTokenTotals>(),
         };
         hour.costUsd += bucket.costUsd;
         hour.totalTokens += tokens;

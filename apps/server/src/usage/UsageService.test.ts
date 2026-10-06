@@ -27,7 +27,7 @@ import * as Layer from "effect/Layer";
 import * as Scheduler from "effect/Scheduler";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -89,7 +89,7 @@ const setup = Effect.gen(function* () {
   };
 });
 
-const serviceLayers = (input: {
+const layerService = (input: {
   readonly prefix: string;
   readonly home: string;
   readonly settings: Parameters<typeof ServerSettings.layerTest>[0];
@@ -208,7 +208,7 @@ describe("UsageService", () => {
           return yield* service.readSummary(WINDOW);
         }).pipe(
           Effect.provide(
-            serviceLayers({
+            layerService({
               prefix: "usage-managed-accounts",
               home,
               settings: {
@@ -265,7 +265,7 @@ describe("UsageService", () => {
       for (const platform of ["linux", "win32", "darwin"] as const) {
         const service = yield* UsageService.make.pipe(
           Effect.provide(
-            serviceLayers({
+            layerService({
               prefix: `usage-service-cursor-no-login-${platform}`,
               home,
               settings,
@@ -290,7 +290,7 @@ describe("UsageService", () => {
       });
       const service = yield* UsageService.make.pipe(
         Effect.provide(
-          serviceLayers({ prefix: "usage-service-cursor-invalid-login", home, settings }),
+          layerService({ prefix: "usage-service-cursor-invalid-login", home, settings }),
         ),
       );
       const summary = yield* service.readSummary(WINDOW);
@@ -304,7 +304,7 @@ describe("UsageService", () => {
       const { settings, home } = yield* setup;
       const service = yield* UsageService.make.pipe(
         Effect.provide(
-          serviceLayers({
+          layerService({
             prefix: "usage-service-cursor-keychain-disabled",
             home,
             settings,
@@ -350,7 +350,7 @@ describe("UsageService", () => {
         });
         const service = yield* UsageService.make.pipe(
           Effect.provide(
-            serviceLayers({
+            layerService({
               prefix: `usage-service-cursor-store-${index}`,
               home,
               settings,
@@ -406,7 +406,7 @@ describe("UsageService", () => {
           }
         });
         const service = yield* UsageService.make.pipe(
-          Effect.provide(serviceLayers({ prefix: "usage-service-opencode", home, settings })),
+          Effect.provide(layerService({ prefix: "usage-service-opencode", home, settings })),
         );
         const summary = yield* service.readSummary(WINDOW);
         assert.strictEqual(summary.buckets[0]?.provider, "opencode");
@@ -452,7 +452,7 @@ describe("UsageService", () => {
       });
       const service = yield* UsageService.make.pipe(
         Effect.provide(
-          serviceLayers({
+          layerService({
             prefix: "usage-service-aliased-roots-test",
             home,
             settings,
@@ -532,7 +532,7 @@ describe("UsageService", () => {
       });
       const service = yield* UsageService.make.pipe(
         Effect.provide(
-          serviceLayers({
+          layerService({
             prefix: "usage-service-accounts-test",
             home,
             settings: {
@@ -654,7 +654,7 @@ describe("UsageService", () => {
           );
         }).pipe(
           Effect.provide(
-            serviceLayers({
+            layerService({
               prefix: "usage-service-home-refresh-test",
               home,
               environment: { CLAUDE_CONFIG_DIR: NodePath.join(home, "host-ignored") },
@@ -684,7 +684,7 @@ describe("UsageService", () => {
         yield* Effect.promise(() => NodeFSP.writeFile(transcript, claudeLine(1, 5)));
         const service = yield* UsageService.make.pipe(
           Effect.provide(
-            serviceLayers({
+            layerService({
               prefix: "usage-service-inherited-homes-test",
               home,
               environment: {
@@ -759,7 +759,7 @@ describe("UsageService", () => {
         assert.deepStrictEqual(restored.buckets, original.buckets);
       }).pipe(
         Effect.provide(
-          serviceLayers({ prefix: "usage-service-price-overrides-test", home, settings }),
+          layerService({ prefix: "usage-service-price-overrides-test", home, settings }),
         ),
       );
     }).pipe(Effect.scoped),
@@ -771,7 +771,7 @@ describe("UsageService", () => {
       yield* Effect.promise(() => NodeFSP.writeFile(transcript, claudeLine(1, 5)));
 
       const service = yield* UsageService.make.pipe(
-        Effect.provide(serviceLayers({ prefix: "usage-service-grow-test", home, settings })),
+        Effect.provide(layerService({ prefix: "usage-service-grow-test", home, settings })),
       );
 
       const first = yield* service.readSummary(WINDOW);
@@ -823,7 +823,7 @@ describe("UsageService", () => {
           );
         }).pipe(
           Effect.provide(
-            serviceLayers({
+            layerService({
               prefix: "usage-service-large-record-test",
               home,
               settings,
@@ -1160,7 +1160,7 @@ describe("UsageService", () => {
           );
         }).pipe(
           Effect.provide(
-            serviceLayers({
+            layerService({
               prefix: "usage-service-v4-upgrade-test",
               home,
               settings,
@@ -1256,7 +1256,7 @@ describe("UsageService", () => {
         assert.strictEqual(outsideWindow.sources[0]?.distinctSessions, 0);
       }).pipe(
         Effect.provide(
-          serviceLayers({
+          layerService({
             prefix: "usage-service-cleanup-test",
             home,
             settings: { providers: { ...settings.providers, claudeAgent: { homePath: alias } } },
@@ -1303,7 +1303,7 @@ describe("UsageService", () => {
         const restored = yield* (yield* UsageService.make).readSummary(WINDOW);
         assert.deepStrictEqual(restored.buckets, live.buckets);
       }).pipe(
-        Effect.provide(serviceLayers({ prefix: "usage-service-copy-order-test", home, settings })),
+        Effect.provide(layerService({ prefix: "usage-service-copy-order-test", home, settings })),
       );
     }).pipe(Effect.scoped),
   );
@@ -1334,9 +1334,7 @@ describe("UsageService", () => {
           );
           assert.strictEqual(totalOutputTokens(yield* service.readSummary(WINDOW)), 12);
         }).pipe(
-          Effect.provide(
-            serviceLayers({ prefix: "usage-service-stale-read-test", home, settings }),
-          ),
+          Effect.provide(layerService({ prefix: "usage-service-stale-read-test", home, settings })),
         );
       }).pipe(Effect.scoped),
   );
@@ -1380,7 +1378,7 @@ describe("UsageService", () => {
           );
           assert.strictEqual(totalOutputTokens(yield* service.readSummary(WINDOW)), 12);
         }).pipe(
-          Effect.provide(serviceLayers({ prefix: "usage-service-late-read-test", home, settings })),
+          Effect.provide(layerService({ prefix: "usage-service-late-read-test", home, settings })),
         );
       }).pipe(Effect.scoped),
   );
@@ -1394,9 +1392,7 @@ describe("UsageService", () => {
         await NodeFSP.utimes(transcript, lastWrite, lastWrite);
       });
       const service = yield* UsageService.make.pipe(
-        Effect.provide(
-          serviceLayers({ prefix: "usage-service-saved-window-test", home, settings }),
-        ),
+        Effect.provide(layerService({ prefix: "usage-service-saved-window-test", home, settings })),
       );
       const first = yield* service.readSummary(WINDOW);
       yield* Effect.promise(() =>
@@ -1476,7 +1472,7 @@ describe("UsageService", () => {
         assert.strictEqual(original.buckets[0]?.costUsd, 0);
         assert.closeTo(updated.buckets[0]?.costUsd ?? -1, 0.00006, 1e-12);
       }).pipe(
-        Effect.provide(serviceLayers({ prefix: "usage-service-price-race-test", home, settings })),
+        Effect.provide(layerService({ prefix: "usage-service-price-race-test", home, settings })),
       );
     }).pipe(Effect.scoped),
   );
@@ -1489,7 +1485,7 @@ describe("UsageService", () => {
       let ratesFetches = 0;
       const service = yield* UsageService.make.pipe(
         Effect.provide(
-          serviceLayers({
+          layerService({
             prefix: "usage-service-flight-test",
             home,
             settings,
@@ -1521,7 +1517,7 @@ describe("UsageService", () => {
       let ratesFetches = 0;
       const service = yield* UsageService.make.pipe(
         Effect.provide(
-          serviceLayers({
+          layerService({
             prefix: "usage-service-rates-refresh-test",
             home,
             settings,
@@ -1559,9 +1555,7 @@ describe("UsageService", () => {
     Effect.gen(function* () {
       const { settings, home } = yield* setup;
       const service = yield* UsageService.make.pipe(
-        Effect.provide(
-          serviceLayers({ prefix: "usage-service-interruption-test", home, settings }),
-        ),
+        Effect.provide(layerService({ prefix: "usage-service-interruption-test", home, settings })),
       );
 
       let orphanedAt: number | undefined;
