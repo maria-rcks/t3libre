@@ -201,40 +201,24 @@ apps.
 
 ### Browser host setup
 
-macOS, Windows, and Linux desktops run the browser as is. When a Linux host
-cannot start it, browser tabs and HTML previews say which of these it needs.
-
-**Chrome's sandbox.** The browser always runs in Chrome's sandbox. Ubuntu 23.10
-and later block the user namespace the sandbox needs unless an AppArmor profile
-allows the program. Allow T3 Code's browser once, as root:
-
-```sh
-sudo tee /etc/apparmor.d/t3-chrome-headless-shell >/dev/null <<'EOF'
-abi <abi/4.0>,
-include <tunables/global>
-
-profile t3-chrome-headless-shell /**/tools/chrome-headless-shell/*/*/chrome-headless-shell flags=(unconfined) {
-  userns,
-
-  include if exists <local/t3-chrome-headless-shell>
-}
-EOF
-sudo apparmor_parser -r /etc/apparmor.d/t3-chrome-headless-shell
-```
-
-The profile matches the browser in any T3 home and keeps working across
-browser updates. Where you cannot change the host, such as some containers,
-set `T3CODE_SERVER_BROWSER_SANDBOX=0` for the environment to run without the
-sandbox. T3 Code never turns the sandbox off on its own.
-
-**System libraries.** Minimal images and containers lack libraries Chrome
-loads. On Debian or Ubuntu:
+macOS, Windows, and Linux desktops run the browser as is. Some Linux hosts need
+one-time setup: Ubuntu 23.10 and later block the sandbox the browser runs in,
+and minimal images and containers lack libraries it loads. When that happens,
+the server says so at startup, and browser tabs and HTML previews show the
+command to run on the host:
 
 ```sh
-sudo apt-get install libnss3 libglib2.0-0 libatk1.0-0 libatk-bridge2.0-0 \
-  libatspi2.0-0 libdbus-1-3 libx11-6 libxcb1 libxcomposite1 libxdamage1 \
-  libxext6 libxfixes3 libxrandr2 libxkbcommon0 libgbm1 libasound2 libexpat1
+sudo t3 browser setup
 ```
+
+The server shows the exact line for how you started it, such as
+`sudo npx t3 browser setup`, and keeps your `PATH` when Node is installed only
+for your user. It allows Chrome's sandbox with an AppArmor profile and installs
+any missing libraries with apt. It is safe to run again. Without `sudo`, it
+only reports what it would change.
+
+The browser always runs in Chrome's sandbox. Where you cannot change the host,
+set `T3CODE_SERVER_BROWSER_SANDBOX=0` for the environment to run without it.
 
 ## Manage or revoke access
 
