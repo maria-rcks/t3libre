@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { enabledEnvironmentIds } from "@t3tools/client-runtime/state/connections";
 import { arrayElementsEqual } from "@t3tools/client-runtime/state/entities";
 import {
-  createEnvironmentSubagentQuery,
+  BoundedThreadSnapshotLoader,
   createEnvironmentThreadDetailAtoms,
   createEnvironmentThreadShellAtoms,
   createEnvironmentThreadStateAtoms,
@@ -38,7 +38,8 @@ export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   snapshotAtom: threadEnvironment.snapshotAtom,
 });
 
-const owningSubagentQuery = createEnvironmentSubagentQuery(connectionAtomRuntime);
+const owningSubagentQuery =
+  BoundedThreadSnapshotLoader.createEnvironmentSubagentQuery(connectionAtomRuntime);
 const EMPTY_SUBAGENT_QUERY = Atom.make(AsyncResult.success(null));
 
 export function useOwningSubagent(ref: ScopedThreadRef | null, nodeId: NodeId | null) {

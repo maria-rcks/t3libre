@@ -40,12 +40,17 @@ vi.mock("@t3tools/client-runtime/state/threads", async (importOriginal) => {
   const original = await importOriginal<typeof import("@t3tools/client-runtime/state/threads")>();
   return {
     ...original,
-    createEnvironmentSubagentQuery(
-      ...args: Parameters<typeof original.createEnvironmentSubagentQuery>
-    ) {
-      const query = original.createEnvironmentSubagentQuery(...args);
-      return (target: Parameters<typeof query>[0]) =>
-        activityTestState.subagentQuery(target) ?? query(target);
+    BoundedThreadSnapshotLoader: {
+      ...original.BoundedThreadSnapshotLoader,
+      createEnvironmentSubagentQuery(
+        ...args: Parameters<
+          typeof original.BoundedThreadSnapshotLoader.createEnvironmentSubagentQuery
+        >
+      ) {
+        const query = original.BoundedThreadSnapshotLoader.createEnvironmentSubagentQuery(...args);
+        return (target: Parameters<typeof query>[0]) =>
+          activityTestState.subagentQuery(target) ?? query(target);
+      },
     },
   };
 });
@@ -2173,7 +2178,7 @@ describe("MessagesTimeline", () => {
       );
       vi.useFakeTimers();
       activityTestState.expandedRuns = true;
-      const { Atom } = await import("effect/unstable/reactivity");
+      const { Atom } = await import("effect/reactivity");
       const DateTime = await import("effect/DateTime");
       const entities = await import("../../state/entities");
       const { environmentThreadDetails } = await import("../../state/threads");
@@ -2378,7 +2383,7 @@ describe("MessagesTimeline", () => {
       );
       activityTestState.expandedRuns = true;
       const { RegistryContext } = await import("@effect/atom-react");
-      const { Atom, AtomRegistry, AsyncResult } = await import("effect/unstable/reactivity");
+      const { Atom, AtomRegistry, AsyncResult } = await import("effect/reactivity");
       const DateTime = await import("effect/DateTime");
       const entities = await import("../../state/entities");
       const { environmentThreadDetails } = await import("../../state/threads");
