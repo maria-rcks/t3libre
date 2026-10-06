@@ -22,7 +22,7 @@ import {
 } from "./browserViewportLayout";
 import { BrowserDeviceToolbar } from "./BrowserDeviceToolbar";
 import { BrowserViewportResizeHandles } from "./BrowserViewportResizeHandles";
-import { acquireDesktopTab, type AcquiredDesktopTab } from "./desktopTabLifetime";
+import { acquireDesktopTab, type AcquiredDesktopTab, withDesktopTab } from "./desktopTabLifetime";
 import { resolveHostedBrowserWebviewWrapperStyle } from "./hostedBrowserWebviewStyle";
 import { usePreviewWebviewConfig } from "./previewWebviewConfigState";
 import { useBrowserViewportResize } from "./useBrowserViewportResize";
@@ -113,16 +113,6 @@ export function HostedBrowserWebview(props: {
 
   const serverColorScheme = serverRendering?.colorScheme;
   const serverZoomFactor = serverRendering?.zoomFactor;
-  useEffect(() => {
-    const bridge = window.desktopBridge?.preview;
-    if (!bridge || serverColorScheme === undefined) return;
-    void bridge.setColorScheme(runtimeTabId, serverColorScheme).catch(() => undefined);
-  }, [runtimeTabId, serverColorScheme]);
-  useEffect(() => {
-    const bridge = window.desktopBridge?.preview;
-    if (!bridge || serverZoomFactor === undefined) return;
-    void bridge.setZoomFactor(runtimeTabId, serverZoomFactor).catch(() => undefined);
-  }, [runtimeTabId, serverZoomFactor]);
 
   useEffect(() => {
     if (!clientSettingsHydrated) return;
@@ -137,6 +127,18 @@ export function HostedBrowserWebview(props: {
       lease.release();
     };
   }, [clientSettingsHydrated, runtimeTabId, serverDriven, tabId, threadRef.threadId]);
+
+  // A server tab looks the way its environment published, once the desktop tab exists.
+  useEffect(() => {
+    const bridge = window.desktopBridge?.preview;
+    if (!bridge || serverColorScheme === undefined) return;
+    withDesktopTab(runtimeTabId, () => bridge.setColorScheme(runtimeTabId, serverColorScheme));
+  }, [runtimeTabId, serverColorScheme]);
+  useEffect(() => {
+    const bridge = window.desktopBridge?.preview;
+    if (!bridge || serverZoomFactor === undefined) return;
+    withDesktopTab(runtimeTabId, () => bridge.setZoomFactor(runtimeTabId, serverZoomFactor));
+  }, [runtimeTabId, serverZoomFactor]);
 
   const [webviewGeneration, setWebviewGeneration] = useState(0);
   const [recoverySrc, setRecoverySrc] = useState(initialSrc);
