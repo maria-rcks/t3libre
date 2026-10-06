@@ -7,6 +7,7 @@ import {
   AuthOrchestrationReadScope,
   AuthSessionId,
   PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
+  PreviewStreamHostSetup,
   type AuthEnvironmentScope,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -15,6 +16,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServer } from "effect/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
@@ -295,13 +297,23 @@ it.effect("passes uploaded files to the page's open picker and needs operate sco
   }).pipe(Effect.scoped),
 );
 
+const decodeHostSetup = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviewStreamHostSetup));
+
 it.effect.each([
-  { error: new PreviewBrowserHost.PreviewBrowserSandboxError(), reason: "sandbox" },
   {
-    error: new PreviewBrowserHost.PreviewBrowserLibrariesError({ libraries: ["libnss3.so"] }),
-    reason: "libraries",
+    error: new PreviewBrowserHost.PreviewBrowserSandboxError({
+      setupCommand: "sudo t3 browser setup",
+    }),
+    need: "sandbox",
   },
-])("tells viewers which host setup the browser needs ($reason)", ({ error, reason }) =>
+  {
+    error: new PreviewBrowserHost.PreviewBrowserLibrariesError({
+      setupCommand: "sudo t3 browser setup",
+      libraries: ["libnss3.so"],
+    }),
+    need: "libraries",
+  },
+])("tells viewers the command that sets up the host ($need)", ({ error, need }) =>
   Effect.gen(function* () {
     const browser = ServerBrowser.ServerBrowser.of({
       clearProfile: () => Effect.void,
@@ -336,9 +348,13 @@ it.effect.each([
       }),
       (socket) => Effect.sync(() => socket.close()),
     );
-    expect(yield* Effect.promise(() => closed.promise)).toEqual({
-      code: PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
-      reason,
+    const { code, reason } = yield* Effect.promise(() => closed.promise);
+    expect(code).toBe(PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE);
+    expect(
+      yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PreviewStreamHostSetup))(reason),
+    ).toEqual({
+      need,
+      command: "sudo t3 browser setup",
     });
   }).pipe(Effect.scoped),
 );

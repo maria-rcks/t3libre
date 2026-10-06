@@ -34,6 +34,7 @@ import {
   type PreviewViewportSetting,
   ThreadId,
 } from "@t3tools/contracts";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { resolvePreviewViewport } from "@t3tools/shared/previewViewport";
 import * as NodeCrypto from "node:crypto";
@@ -62,6 +63,7 @@ import type {
 
 import { PENDING_ATTACHMENT_THREAD_SEGMENT } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
+import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
 import * as DesktopBrowserChannel from "./DesktopBrowserChannel.ts";
@@ -126,6 +128,12 @@ export class ServerBrowserTabNotFoundError extends Schema.TaggedError<ServerBrow
 }
 
 const isTabNotFound = Schema.is(ServerBrowserTabNotFoundError);
+const isHostSetupError = Schema.is(
+  Schema.Union([
+    PreviewBrowserHost.PreviewBrowserSandboxError,
+    PreviewBrowserHost.PreviewBrowserLibrariesError,
+  ]),
+);
 
 export class ServerBrowserLaunchError extends Schema.TaggedError<ServerBrowserLaunchError>()(
   "ServerBrowserLaunchError",
@@ -425,6 +433,8 @@ const make = Effect.gen(function* () {
   const desktopChannel = yield* DesktopBrowserChannel.DesktopBrowserChannel;
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const launchServices = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
+  // The fix every host error names, rendered for how this server was launched.
+  const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
 
   const tabs = new Map<string, ServerTab>();
   const pendingTabs = new Map<string, Promise<ServerTab>>();
@@ -445,6 +455,7 @@ const make = Effect.gen(function* () {
       Effect.runPromiseWith(launchServices)(
         PreviewBrowserHost.diagnoseLaunchFailure({
           executable,
+          setupCommand,
           output: /sandboxing failed/i.test(String(cause))
             ? PreviewBrowserHost.NO_SANDBOX_SIGNATURE
             : "",
@@ -966,7 +977,12 @@ const make = Effect.gen(function* () {
     if (existing) return Promise.resolve(existing);
     const opening = createTab(snapshot)
       .catch((cause: unknown) => {
-        runFork(Effect.logWarning("server preview tab failed to start", { cause }));
+        runFork(
+          Effect.logWarning(
+            isHostSetupError(cause) ? cause.message : "server preview tab failed to start",
+            { cause },
+          ),
+        );
         throw cause;
       })
       .finally(() => {
@@ -2027,6 +2043,15 @@ const make = Effect.gen(function* () {
     });
 
   yield* manager.events.pipe(Stream.runForEach(mirrorManagerEvent), Effect.forkScoped);
+  // Whoever runs the server learns the fix before anyone opens a tab.
+  if (
+    !PreviewBrowserHost.sandboxDisabled(yield* HostProcessEnvironment) &&
+    (yield* PreviewBrowserHost.sandboxBlocked)
+  ) {
+    yield* Effect.logWarning(
+      `This host blocks the sandbox T3's browser runs in, so browser tabs and HTML previews will not start. Run \`${setupCommand}\` once to allow it.`,
+    );
+  }
   // The desktop took its page back (closed, swapped, crashed, or devtools opened).
   // The session stays; the next viewer or agent reconnects when it re-attaches.
   yield* desktopChannel.detached.pipe(

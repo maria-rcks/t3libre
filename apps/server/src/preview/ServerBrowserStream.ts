@@ -3,7 +3,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
-  type PreviewStreamHostSetup,
+  PreviewStreamHostSetup,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -96,10 +96,10 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
               Effect.succeed({ _tag: "gone" as const }),
             ),
             Effect.catchTag("ServerBrowserLaunchError", (error) => {
-              const setup = hostSetupReason(error.cause);
+              const setup = hostSetup(error.cause);
               return setup === undefined
                 ? Effect.fail(error)
-                : Effect.succeed({ _tag: "hostSetup" as const, reason: setup });
+                : Effect.succeed({ _tag: "hostSetup" as const, reason: encodeHostSetup(setup) });
             }),
           );
         const incoming = NodeHttpServerRequest.toIncomingMessage(request);
@@ -198,11 +198,16 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
     );
   });
 
-/** Which host setup a launch failure is missing, as the stream's close reason. */
-const hostSetupReason = (cause: unknown): PreviewStreamHostSetup | undefined =>
-  isSandboxError(cause) ? "sandbox" : isLibrariesError(cause) ? "libraries" : undefined;
+/** Which host setup a launch failure is missing, and the command that fixes it. */
+const hostSetup = (cause: unknown): PreviewStreamHostSetup | undefined =>
+  isSandboxError(cause)
+    ? { need: "sandbox", command: cause.setupCommand }
+    : isLibrariesError(cause)
+      ? { need: "libraries", command: cause.setupCommand }
+      : undefined;
 const isSandboxError = Schema.is(PreviewBrowserHost.PreviewBrowserSandboxError);
 const isLibrariesError = Schema.is(PreviewBrowserHost.PreviewBrowserLibrariesError);
+const encodeHostSetup = Schema.encodeSync(Schema.fromJsonString(PreviewStreamHostSetup));
 
 /** `GET /api/preview-stream/download?threadId&tabId&id`: a file a server tab downloaded. */
 const serveDownload = (browser: ServerBrowser.ServerBrowser["Service"], params: URLSearchParams) =>

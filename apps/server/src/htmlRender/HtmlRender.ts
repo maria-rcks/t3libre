@@ -29,6 +29,7 @@ import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
 import { createAttachmentId } from "../attachmentStore.ts";
+import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as ServerConfig from "../config.ts";
 import * as HeadlessChrome from "./headlessChrome.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
@@ -341,6 +342,7 @@ const make = Effect.gen(function* () {
   // Chrome's sandbox stays on unless the operator explicitly turns it off.
   // Chrome also refuses it as root, where that opt-out is the only way to run.
   const noSandbox = PreviewBrowserHost.sandboxDisabled(yield* HostProcessEnvironment);
+  const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
 
   /** Runs one browser launch; a host that cannot start it gets setup steps instead. */
   const launching = <A>(
@@ -353,7 +355,11 @@ const make = Effect.gen(function* () {
           HtmlRenderBrowserError: (error) =>
             error.output === undefined
               ? Effect.fail(error)
-              : PreviewBrowserHost.diagnoseLaunchFailure({ executable, output: error.output }).pipe(
+              : PreviewBrowserHost.diagnoseLaunchFailure({
+                  executable,
+                  setupCommand,
+                  output: error.output,
+                }).pipe(
                   Effect.provideContext(services),
                   Effect.flatMap((hostError) => Effect.fail(hostError ?? error)),
                 ),

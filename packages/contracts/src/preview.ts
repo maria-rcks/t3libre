@@ -172,11 +172,16 @@ export const PreviewRuntime = Schema.Literals(["desktop", "server"]);
 export type PreviewRuntime = typeof PreviewRuntime.Type;
 
 /**
- * Host setup the server's browser is missing, sent as the reason when the
- * preview stream closes with code 4503. Fixing it needs the host's operator,
- * so viewers stop retrying and say what to set up.
+ * Host setup the server's browser is missing, sent as JSON in the reason when
+ * the preview stream closes with code 4503. Fixing it needs the host's
+ * operator, so viewers stop retrying and show `command`, the one line that
+ * fixes it. Close reasons are capped at 123 bytes, which this fits.
  */
-export const PreviewStreamHostSetup = Schema.Literals(["sandbox", "libraries"]);
+export const PreviewStreamHostSetup = Schema.Struct({
+  need: Schema.Literals(["sandbox", "libraries"]),
+  /** For example `sudo npx t3 browser setup`, matching how the server was launched. */
+  command: Schema.String,
+});
 export type PreviewStreamHostSetup = typeof PreviewStreamHostSetup.Type;
 export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
 
