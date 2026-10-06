@@ -531,7 +531,7 @@ export function ThreadRelationshipsPanel(props: {
                       </>
                     );
                     return (
-                      <li key={threadId} className="group flex h-8 items-center rounded-lg">
+                      <li className="group flex h-8 items-center rounded-lg">
                         {isMergeTarget ? (
                           <div className={THREAD_DETAILS_PANEL_LINK_SPLIT_GROUP_CLASS}>
                             <Tooltip>

@@ -4,8 +4,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { HttpClient } from "effect/unstable/http";
-import { Atom } from "effect/unstable/reactivity";
+import { HttpClient } from "effect/http";
+import { Atom } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
@@ -93,7 +93,7 @@ export function createEnvironmentSubagentQuery<R, E>(
  * endpoint still means missing. Transient failures report `unavailable` so the
  * socket path remains a last resort for connectivity issues.
  */
-export const boundedThreadSnapshotLoaderLayer: Layer.Layer<
+export const layer: Layer.Layer<
   ThreadSnapshotLoader.ThreadSnapshotLoader,
   never,
   HttpClient.HttpClient
