@@ -1026,6 +1026,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
 
   const detachControlSession = Effect.fn("PreviewManager.detachControlSession")(function* (
     webContentsId: number,
+    /** The server tab it rendered, when the caller already took the tab out of `tabsRef`. */
+    closedServerTab?: PreviewTabState["serverTab"],
   ) {
     const control = yield* SynchronizedRef.modify(controlSessionsRef, (sessions) => [
       sessions.get(webContentsId),
@@ -1035,6 +1037,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     ]);
     if (control) {
       // The server can only drive a tab while the desktop holds its debugger.
+      if (closedServerTab) browserHost.detach(closedServerTab);
       for (const tab of (yield* SynchronizedRef.get(tabsRef)).values()) {
         if (tab.webContentsId === webContentsId && tab.serverTab) browserHost.detach(tab.serverTab);
       }
@@ -1698,7 +1701,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const closedTab = tab.value;
     if (closedTab.webContentsId != null) {
       yield* Effect.all(
-        [detachControlSession(closedTab.webContentsId), detachListeners(closedTab.webContentsId)],
+        [
+          detachControlSession(closedTab.webContentsId, closedTab.serverTab),
+          detachListeners(closedTab.webContentsId),
+        ],
         { concurrency: 2, discard: true },
       );
     }
@@ -3561,6 +3567,18 @@ export class PreviewManager extends Context.Service<
 export const make = Effect.gen(function* PreviewManagerMake() {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const browserSession = yield* BrowserSession.BrowserSession;
+  const browserHost = yield* DesktopBrowserHost.DesktopBrowserHost;
+  const downloadSessions = new WeakSet<Electron.Session>();
+  // Server tabs save downloads where the server's engine reads them. Downloads
+  // the person starts in a tab the server is not driving keep Electron's dialog.
+  const placeServerDownloads = (session: Electron.Session) => {
+    if (downloadSessions.has(session)) return;
+    downloadSessions.add(session);
+    session.on("will-download", (_event, item, source) => {
+      browserHost.placeDownload(source, item);
+    });
+  };
+
   const operations = yield* makeNativeOperations(
     environment.browserArtifactsDir,
     environment.path.join(environment.dirname, "preview-pip-preload.cjs"),
@@ -3577,6 +3595,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
               (cause) => new PreviewOperationError({ operation: "getBrowserSession", cause }),
             ),
           );
+        placeServerDownloads(session);
         return session;
       },
     ),

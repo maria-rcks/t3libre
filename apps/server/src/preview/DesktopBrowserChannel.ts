@@ -147,6 +147,11 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.orDie);
       const queue = yield* Queue.unbounded<string>();
       inbound.set(id, queue);
+      // A detach before this registration shut down no queue, so check again.
+      if (!attachedTabs.has(id)) {
+        inbound.delete(id);
+        return yield* Effect.die("The desktop tab detached before the server connected.");
+      }
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           if (inbound.get(id) === queue) inbound.delete(id);

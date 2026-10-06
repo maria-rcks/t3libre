@@ -21,6 +21,12 @@ export interface CdpRelayTarget {
   readonly url: () => string;
   readonly title: () => string;
   readonly userAgent: () => string;
+  /**
+   * Where the server wants this tab's downloads, named by their CDP guid. The
+   * desktop app and the server it launched share a disk, so the server's
+   * Playwright reads the file where it asked for it.
+   */
+  readonly setDownloadDirectory: (directory: string | null) => void;
 }
 
 export interface CdpRelayConnection {
@@ -52,7 +58,6 @@ const PAGE_SESSION_ID = "t3-preview-page";
 /** Browser-level commands that only need acknowledging for a page the desktop owns. */
 const ACKNOWLEDGED = new Set([
   "Target.setDiscoverTargets",
-  "Browser.setDownloadBehavior",
   "Browser.grantPermissions",
   "Browser.resetPermissions",
   "Browser.cancelDownload",
@@ -89,6 +94,15 @@ export function createCdpRelayConnection(
   const browserCommand = async (command: CdpCommand): Promise<unknown> => {
     if (ACKNOWLEDGED.has(command.method)) return {};
     switch (command.method) {
+      case "Browser.setDownloadBehavior": {
+        // The tab's debugger reports downloads as Chromium does, so the server
+        // sees them as its own. Only the directory needs the desktop's help.
+        const directory = command.params?.["downloadPath"];
+        const allowed = command.params?.["behavior"] !== "deny" && typeof directory === "string";
+        target.setDownloadDirectory(allowed ? directory : null);
+        const { browserContextId: _ignored, ...params } = command.params ?? {};
+        return target.send("Browser.setDownloadBehavior", params, undefined);
+      }
       case "Browser.getVersion":
         return {
           protocolVersion: "1.3",
@@ -188,6 +202,11 @@ export function createCdpRelayConnection(
     },
     event: (method, params, sessionId) => {
       if (!attached) return;
+      // Download events are the browser's; Playwright listens on its root session.
+      if (method.startsWith("Browser.download")) {
+        send({ method, params });
+        return;
+      }
       // Electron reports the page's own events with an empty session id.
       if (sessionId) {
         send({ method, params, sessionId });

@@ -2,12 +2,16 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createCdpRelayConnection, type CdpRelayTarget } from "./CdpRelay.ts";
 
-const makeTarget = (send: CdpRelayTarget["send"]): CdpRelayTarget => ({
+const makeTarget = (
+  send: CdpRelayTarget["send"],
+  setDownloadDirectory: CdpRelayTarget["setDownloadDirectory"] = () => {},
+): CdpRelayTarget => ({
   send,
   targetId: async () => "GUEST-TARGET",
   url: () => "http://localhost:4719/",
   title: () => "Fixture",
   userAgent: () => "Electron",
+  setDownloadDirectory,
 });
 
 // Each relay reply resolves after a few microtasks; one macrotask lets them all land.
@@ -128,5 +132,43 @@ describe("CDP relay extra sessions", () => {
     written.length = 0;
     relay.event("Page.screencastFrame", { data: "x" }, undefined);
     expect(written.map((m) => m["sessionId"])).toEqual(["t3-preview-page", extra]);
+  });
+});
+
+describe("CDP relay downloads", () => {
+  it("applies the server's download directory and reports downloads on the root session", async () => {
+    const send = vi.fn(async () => ({}));
+    const directories: Array<string | null> = [];
+    const written: Array<Record<string, unknown>> = [];
+    const relay = createCdpRelayConnection(
+      makeTarget(send, (directory) => directories.push(directory)),
+      (raw) => written.push(JSON.parse(raw)),
+    );
+    relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+    relay.receive(
+      JSON.stringify({
+        id: 2,
+        method: "Browser.setDownloadBehavior",
+        params: {
+          behavior: "allowAndName",
+          browserContextId: "t3-preview",
+          downloadPath: "/srv/artifacts",
+          eventsEnabled: true,
+        },
+      }),
+    );
+    await settle();
+    expect(directories).toEqual(["/srv/artifacts"]);
+    // The tab's own debugger has no such context, so the id stays here.
+    expect(send).toHaveBeenCalledWith(
+      "Browser.setDownloadBehavior",
+      { behavior: "allowAndName", downloadPath: "/srv/artifacts", eventsEnabled: true },
+      undefined,
+    );
+    written.length = 0;
+    relay.event("Browser.downloadWillBegin", { guid: "g1", suggestedFilename: "r.csv" }, "");
+    expect(written).toEqual([
+      { method: "Browser.downloadWillBegin", params: { guid: "g1", suggestedFilename: "r.csv" } },
+    ]);
   });
 });

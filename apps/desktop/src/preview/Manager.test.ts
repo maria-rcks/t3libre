@@ -11,6 +11,8 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
@@ -2646,6 +2648,39 @@ describe("PreviewManager", () => {
         expect(host.session.setDisplayMediaRequestHandler).not.toHaveBeenCalled();
       }),
     ),
+  );
+
+  effectIt.effect("tells the server when a tab it renders natively closes", () =>
+    Effect.gen(function* () {
+      const host = yield* DesktopBrowserHost.DesktopBrowserHost;
+      const serverTab = { threadId: "thread-1", tabId: "server-tab-1" };
+      const lines = yield* Queue.unbounded<string>();
+      yield* host.events.pipe(
+        Stream.runForEach((line) => Queue.offer(lines, new TextDecoder().decode(line))),
+        Effect.forkScoped,
+      );
+      const nextType = Queue.take(lines).pipe(
+        Effect.map((line) => /"type":"(\w+)"/.exec(line)?.[1]),
+      );
+      const capturePage = vi.fn(async () => ({
+        toPNG: () => Buffer.from("png"),
+        toJPEG: () => Buffer.from("jpeg"),
+        getSize: () => ({ width: 100, height: 80 }),
+      }));
+      fromId.mockReturnValue(
+        Object.assign(makeTestPreviewWebContents(capturePage, 42), {
+          isDevToolsOpened: () => false,
+          getUserAgent: () => "Electron",
+        }),
+      );
+      const manager = yield* PreviewManager.PreviewManager;
+      yield* manager.createTab("tab_1", { serverTab });
+      yield* manager.registerWebview("tab_1", 42);
+      // The debugger attaches in the background; the server hears it here.
+      expect(yield* nextType).toBe("attached");
+      yield* manager.closeTab("tab_1");
+      expect(yield* nextType).toBe("detached");
+    }).pipe(Effect.provide(layer), Effect.scoped),
   );
 
   effectIt.effect("stops capture retries when the tab swaps during the retry delay", () =>
