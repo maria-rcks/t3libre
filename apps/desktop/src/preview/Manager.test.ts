@@ -2691,7 +2691,7 @@ describe("PreviewManager", () => {
   );
 
   effectIt.effect(
-    "blocks new debugger admission during teardown and restores preview after a drain timeout",
+    "blocks new debugger admission during teardown and restores preview after timeout or interruption",
     () =>
       Effect.gen(function* () {
         const host = yield* DesktopBrowserHost.DesktopBrowserHost;
@@ -2776,6 +2776,13 @@ describe("PreviewManager", () => {
         });
         expect(detach).not.toHaveBeenCalled();
         yield* manager.setColorScheme("drain", "dark");
+        expect(yield* manager.captureScreenshot("drain")).toMatchObject({ mimeType: "image/png" });
+        const interruptedTeardown = yield* manager.prepareForWindowTeardown.pipe(
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* manager.prepareWebview(attachingGuest as never);
+        expect(attachingGuest.debugger.attach).not.toHaveBeenCalled();
+        yield* Fiber.interrupt(interruptedTeardown);
         expect(yield* manager.captureScreenshot("drain")).toMatchObject({ mimeType: "image/png" });
         release();
         yield* manager.prepareForWindowTeardown;

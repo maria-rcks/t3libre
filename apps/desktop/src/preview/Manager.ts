@@ -3446,17 +3446,19 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         }
         yield* drainCaptures();
       }).pipe(
-        Effect.onError(() =>
-          Effect.gen(function* () {
-            frameCaptureWindowOpen =
-              wasOpen && (!currentMainWindow || !currentMainWindow.isDestroyed());
-            if (!frameCaptureWindowOpen) return;
-            for (const [tabId, tab] of yield* SynchronizedRef.get(tabsRef)) {
-              if (tab.webContentsId == null) continue;
-              const wc = webContents.fromId(tab.webContentsId);
-              if (wc && !wc.isDestroyed()) runFork(restoreControlSession(tabId, wc));
-            }
-          }),
+        Effect.onExit((exit) =>
+          Exit.isSuccess(exit)
+            ? Effect.void
+            : Effect.gen(function* () {
+                frameCaptureWindowOpen =
+                  wasOpen && (!currentMainWindow || !currentMainWindow.isDestroyed());
+                if (!frameCaptureWindowOpen) return;
+                for (const [tabId, tab] of yield* SynchronizedRef.get(tabsRef)) {
+                  if (tab.webContentsId == null) continue;
+                  const wc = webContents.fromId(tab.webContentsId);
+                  if (wc && !wc.isDestroyed()) runFork(restoreControlSession(tabId, wc));
+                }
+              }),
         ),
       );
     }),
