@@ -350,9 +350,7 @@ it.effect.each([
     );
     const { code, reason } = yield* Effect.promise(() => closed.promise);
     expect(code).toBe(PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE);
-    expect(
-      yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PreviewStreamHostSetup))(reason),
-    ).toEqual({
+    expect(yield* decodeHostSetup(reason)).toEqual({
       need,
       command: "sudo t3 browser setup",
     });
