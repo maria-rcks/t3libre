@@ -252,9 +252,7 @@ describe("DesktopLifecycle", () => {
         Layer.provideMerge(layerElectronApp(appListeners, quit)),
         Layer.provideMerge(layerElectronTheme),
         Layer.provideMerge(layerElectronWindow()),
-        Layer.provideMerge(
-          layerDesktopWindow({ preparePreviewTeardown: Effect.fail(failure) }),
-        ),
+        Layer.provideMerge(layerDesktopWindow({ preparePreviewTeardown: Effect.fail(failure) })),
         Layer.provideMerge(environmentLayer),
         Layer.provideMerge(DesktopShutdown.layer),
         Layer.provideMerge(DesktopState.layer),
@@ -312,9 +310,7 @@ describe("DesktopLifecycle", () => {
         Layer.provideMerge(layerElectronApp(appListeners)),
         Layer.provideMerge(layerElectronTheme),
         Layer.provideMerge(layerElectronWindow()),
-        Layer.provideMerge(
-          layerDesktopWindow({ preparePreviewTeardown: Effect.die(unsafeCause) }),
-        ),
+        Layer.provideMerge(layerDesktopWindow({ preparePreviewTeardown: Effect.die(unsafeCause) })),
         Layer.provideMerge(environmentLayer),
         Layer.provideMerge(DesktopShutdown.layer),
         Layer.provideMerge(DesktopState.layer),
@@ -374,9 +370,7 @@ describe("DesktopLifecycle", () => {
       const layer = DesktopLifecycle.layer.pipe(
         Layer.provideMerge(layerElectronApp(appListeners)),
         Layer.provideMerge(layerElectronTheme),
-        Layer.provideMerge(
-          layerDesktopWindow({ preparePreviewTeardown: Effect.fail(failure) }),
-        ),
+        Layer.provideMerge(layerDesktopWindow({ preparePreviewTeardown: Effect.fail(failure) })),
         Layer.provideMerge(environmentLayer),
         Layer.provideMerge(DesktopShutdown.layer),
         Layer.provideMerge(DesktopState.layer),
