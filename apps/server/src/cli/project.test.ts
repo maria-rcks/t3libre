@@ -27,19 +27,16 @@ import * as Layer from "effect/Layer";
 import * as References from "effect/References";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { Command } from "effect/unstable/cli";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import { Command } from "effect/cli";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 
 import { cli } from "../binCli.ts";
 import * as ServerConfig from "../config.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as EventStore from "../orchestration-v2/EventStore.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import {
-  OrchestrationV2EventSinkLayerLive,
-  ProjectServiceLayerLive,
-} from "../orchestration-v2/runtimeLayer.ts";
-import * as SqlitePersistence from "../persistence/Layers/Sqlite.ts";
+import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -53,9 +50,9 @@ import {
   projectCommandErrorFromLiveServerRequest,
 } from "./project.ts";
 
-const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
+const layerCliRuntime = Layer.mergeAll(NodeServices.layer, NetService.layer);
 const runCli = (args: ReadonlyArray<string>) =>
-  Command.runWith(cli, { version: "0.0.0" })(args).pipe(Effect.provide(CliRuntimeLayer));
+  Command.runWith(cli, { version: "0.0.0" })(args).pipe(Effect.provide(layerCliRuntime));
 
 const makeConfig = (baseDir: string) =>
   Effect.gen(function* () {
@@ -96,7 +93,7 @@ const makeConfig = (baseDir: string) =>
 const readProjects = (baseDir: string) =>
   Effect.gen(function* () {
     const config = yield* makeConfig(baseDir);
-    const layer = ProjectServiceLayerLive.pipe(
+    const layer = RuntimeLayer.layerProjectService.pipe(
       Layer.provideMerge(ProjectEnrichmentService.layer),
       Layer.provideMerge(RepositoryIdentityResolver.layer),
       Layer.provideMerge(ProjectFaviconResolver.layer),
@@ -177,7 +174,7 @@ const makeThreadPersistenceLayer = Effect.fn("ProjectCliTest.makeThreadPersisten
   function* (baseDir: string) {
     const config = yield* makeConfig(baseDir);
     return Layer.mergeAll(
-      OrchestrationV2EventSinkLayerLive,
+      RuntimeLayer.layerEventSink,
       ProjectionStore.layer,
       EventStore.layer,
     ).pipe(
