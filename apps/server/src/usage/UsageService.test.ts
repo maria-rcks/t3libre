@@ -899,7 +899,7 @@ describe("UsageService", () => {
         yield* check(yield* UsageService.make, 60, 24);
       }).pipe(
         Effect.provide(
-          serviceLayers({
+          layerService({
             prefix: "usage-service-claude-updates-test",
             home,
             settings,
@@ -951,7 +951,7 @@ describe("UsageService", () => {
           );
         }).pipe(
           Effect.provide(
-            serviceLayers({
+            layerService({
               prefix: `usage-service-claude-fork-${fullerFirst}-test`,
               home,
               settings,
@@ -1073,7 +1073,7 @@ describe("UsageService", () => {
           );
         }).pipe(
           Effect.provide(
-            serviceLayers({
+            layerService({
               prefix: `usage-service-v${version}-claude-upgrade-${keepCurrent}-test`,
               home,
               settings,
