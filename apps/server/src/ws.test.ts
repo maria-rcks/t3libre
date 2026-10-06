@@ -253,7 +253,7 @@ it.effect("returns a typed shell error for a malformed live buffer budget", () =
         ConfigProvider.layer(
           ConfigProvider.fromEnv({ env: { T3CODE_SHELL_LIVE_BUFFER_MIB: "not-an-integer" } }),
         ),
-        Layer.mock(SqlClient.SqlClient)({}),
+        Layer.succeed(SqlClient.SqlClient, {} as SqlClient.SqlClient),
         Layer.mock(ThreadManagementService.ThreadManagementService)({}),
         Layer.mock(OrchestrationEventStore.OrchestrationEventStore)({}),
         Layer.mock(ProjectStore.ProjectStoreV2)({}),
