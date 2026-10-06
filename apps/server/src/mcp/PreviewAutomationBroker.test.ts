@@ -16,6 +16,7 @@ import {
   type PreviewAutomationHost,
   type PreviewAutomationRequest,
   type PreviewAutomationStreamEvent,
+  SERVER_BROWSER_AUTOMATION_CLIENT_ID,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -515,6 +516,37 @@ it.effect.each([
       expect(error.cause).toBe(remoteError);
       expect(error.message).toContain("remains on the desktop");
       expect(error.message).not.toContain("remote recording details");
+    }),
+  ),
+);
+
+it.effect.each([
+  { clientId: SERVER_BROWSER_AUTOMATION_CLIENT_ID, shown: true },
+  { clientId: "client-1", shown: false },
+])("tells the agent why its own server browser failed ($clientId)", ({ clientId, shown }) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(yield* broker.connect(makeHost({ clientId })));
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId,
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: false,
+          error: {
+            _tag: "PreviewAutomationExecutionError",
+            message: "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:4719/",
+          },
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      const error = yield* broker
+        .invoke<void>({ scope, operation: "open", input: {} })
+        .pipe(Effect.flip);
+      expect(error._tag).toBe("PreviewAutomationExecutionError");
+      // A desktop or other remote host's text stays out of the agent's context.
+      expect(error.message.includes("ERR_CONNECTION_REFUSED")).toBe(shown);
     }),
   ),
 );

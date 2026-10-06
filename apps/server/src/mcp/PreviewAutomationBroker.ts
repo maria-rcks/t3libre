@@ -4,6 +4,7 @@ import {
   PreviewAutomationControlInterruptedError,
   PreviewAutomationControlReason,
   PreviewAutomationExecutionError,
+  SERVER_BROWSER_AUTOMATION_CLIENT_ID,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationMalformedResponseError,
   PreviewAutomationNoAvailableHostError,
@@ -207,6 +208,9 @@ function remoteDetailKind(detail: unknown): RemoteDetailKind {
   }
 }
 
+/** Enough for a browser's own error line, such as a refused connection and its URL. */
+const MAX_REASON_CHARS = 500;
+
 const classifyResponseError = (
   context: PreviewAutomationRequestErrorContext,
   error: NonNullable<PreviewAutomationResponse["error"]>,
@@ -334,6 +338,10 @@ const classifyResponseError = (
       return new PreviewAutomationExecutionError({
         ...context,
         ...remoteDiagnostics,
+        // The server's own browser writes these; other hosts' text stays out of the agent's context.
+        ...(context.clientId === SERVER_BROWSER_AUTOMATION_CLIENT_ID
+          ? { reason: error.message.slice(0, MAX_REASON_CHARS) }
+          : {}),
       });
   }
 };

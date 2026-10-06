@@ -852,6 +852,9 @@ const PreviewAutomationScopeErrorFields = {
   providerInstanceId: ProviderInstanceId,
 };
 
+/** The automation host id of an environment's own server browser. */
+export const SERVER_BROWSER_AUTOMATION_CLIENT_ID = "server-browser";
+
 const PreviewAutomationRequestErrorFields = {
   ...PreviewAutomationScopeErrorFields,
   clientId: TrimmedNonEmptyString,
@@ -977,10 +980,17 @@ export class PreviewAutomationExecutionError extends Schema.TaggedError<PreviewA
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
+    /**
+     * What went wrong, as the server's own browser reported it, such as a
+     * page that refused the connection. Absent for other hosts.
+     */
+    reason: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
-    return `Preview automation ${this.operation} failed on client ${this.clientId}.`;
+    return this.reason === undefined
+      ? `Preview automation ${this.operation} failed on client ${this.clientId}.`
+      : `Preview automation ${this.operation} failed: ${this.reason}`;
   }
 }
 

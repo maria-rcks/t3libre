@@ -33,6 +33,7 @@ import {
   type PreviewSessionSnapshot,
   type PreviewViewportSetting,
   ThreadId,
+  SERVER_BROWSER_AUTOMATION_CLIENT_ID,
 } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
@@ -74,7 +75,7 @@ import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
 import { ServerBrowserContexts } from "./ServerBrowserContexts.ts";
 import { BrowserControlInterrupted, SessionControl } from "./SessionControl.ts";
 
-const SERVER_HOST_CLIENT_ID = "server-browser";
+const SERVER_HOST_CLIENT_ID = SERVER_BROWSER_AUTOMATION_CLIENT_ID;
 const RENDER_SCALE = 2;
 // Chromium allows three unacked frames, so 100 ms pacing caps viewers near 30 fps.
 const SCREENCAST_ACK_PACE_MS = 100;
