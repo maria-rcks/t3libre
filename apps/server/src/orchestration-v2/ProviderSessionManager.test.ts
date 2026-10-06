@@ -1,4 +1,4 @@
-import * as NetAddress from "effect/unstable/net/NetAddress";
+import * as NetAddress from "effect/net/NetAddress";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -20,22 +20,24 @@ import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
-import { HttpServer } from "effect/unstable/http";
+import { HttpServer } from "effect/http";
 
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as EventSink from "./EventSink.ts";
@@ -52,16 +54,17 @@ import {
 } from "./ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
+import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 
-const TestDatabaseLayer = SqlitePersistenceMemory;
-const TestStoresLayer = Layer.merge(EventStore.layer, ProjectionStore.layer).pipe(
-  Layer.provide(TestDatabaseLayer),
+const layerTestDatabase = SqlitePersistence.layerMemory;
+const layerTestStores = Layer.merge(EventStore.layer, ProjectionStore.layer).pipe(
+  Layer.provide(layerTestDatabase),
 );
-const TestEventSinkLayer = EventSink.layer.pipe(
-  Layer.provide(Layer.mergeAll(TestStoresLayer, TestDatabaseLayer)),
+const layerTestEventSink = EventSink.layer.pipe(
+  Layer.provide(Layer.mergeAll(layerTestStores, layerTestDatabase)),
 );
-const FailingReleaseEventSinkLayer = Layer.effect(
+const layerFailingReleaseEventSink = Layer.effect(
   EventSink.EventSinkV2,
   Effect.gen(function* () {
     const delegate = yield* EventSink.EventSinkV2;
@@ -77,7 +80,53 @@ const FailingReleaseEventSinkLayer = Layer.effect(
           : delegate.write(input),
     });
   }),
-).pipe(Layer.provide(TestEventSinkLayer));
+).pipe(Layer.provide(layerTestEventSink));
+
+interface FlakyReleaseWrites {
+  /** Which release writes fail right now. */
+  readonly failing: Ref.Ref<"none" | "session" | "session-and-requests">;
+  /** Receives one item per failed write. */
+  readonly failures: Queue.Queue<void>;
+  /** Holds runtime request writes: completes `paused`, then waits for `resume`. */
+  readonly pauseRequestWrites?: {
+    readonly paused: Deferred.Deferred<void>;
+    readonly resume: Deferred.Deferred<void>;
+  };
+}
+
+// Fails release writes with a defect, the way a failed SQL commit surfaces.
+const layerFlakyReleaseEventSink = (flaky: FlakyReleaseWrites) =>
+  Layer.effect(
+    EventSink.EventSinkV2,
+    Effect.gen(function* () {
+      const delegate = yield* EventSink.EventSinkV2;
+      return EventSink.EventSinkV2.of({
+        ...delegate,
+        write: (input) =>
+          Effect.gen(function* () {
+            const failing = yield* Ref.get(flaky.failing);
+            const fails = input.events.some(
+              (event) =>
+                (failing !== "none" &&
+                  event.type === "provider-session.updated" &&
+                  (event.payload.status === "stopped" || event.payload.status === "error")) ||
+                (failing === "session-and-requests" && event.type === "runtime-request.updated"),
+            );
+            const pause = flaky.pauseRequestWrites;
+            if (
+              pause !== undefined &&
+              input.events.some((event) => event.type === "runtime-request.updated")
+            ) {
+              yield* Deferred.succeed(pause.paused, undefined);
+              yield* Deferred.await(pause.resume);
+            }
+            if (!fails) return yield* delegate.write(input);
+            yield* Queue.offer(flaky.failures, undefined);
+            return yield* Effect.die(new Error("simulated commit failure"));
+          }),
+      });
+    }),
+  ).pipe(Layer.provide(layerTestEventSink));
 
 const CodexCapabilities: OrchestrationV2ProviderCapabilities = CodexProviderCapabilitiesV2;
 const ExclusiveCapabilities: OrchestrationV2ProviderCapabilities = {
@@ -344,7 +393,7 @@ function makeProviderAdapter(
   };
 }
 
-function makeTestLayer(input: {
+function layerTest(input: {
   readonly state: Ref.Ref<TestProviderRuntimeState>;
   readonly idleTimeoutMs: number;
   readonly maxIdlePinMs?: number;
@@ -358,16 +407,20 @@ function makeTestLayer(input: {
     readonly initialProviderItemIdentityVersion?: 2;
   }) => Effect.Effect<void>;
   readonly failReleaseEventWrites?: boolean;
+  readonly flakyReleaseWrites?: FlakyReleaseWrites;
   readonly hasPendingBackgroundWork?: Effect.Effect<boolean>;
   readonly hangSessionScopeClose?: boolean;
   readonly beforeUnload?: Effect.Effect<void>;
   readonly serverSettingsLayer?: ReturnType<typeof ServerSettings.layerTest>;
   readonly projectServiceLayer?: Layer.Layer<ProjectService.ProjectService>;
 }) {
-  const configuredEventSinkLayer = input.failReleaseEventWrites
-    ? FailingReleaseEventSinkLayer
-    : TestEventSinkLayer;
-  const registryLayer = ProviderAdapterRegistry.makeSingleLayer(
+  const layerConfiguredEventSink =
+    input.flakyReleaseWrites !== undefined
+      ? layerFlakyReleaseEventSink(input.flakyReleaseWrites)
+      : input.failReleaseEventWrites
+        ? layerFailingReleaseEventSink
+        : layerTestEventSink;
+  const layerRegistry = ProviderAdapterRegistry.layerSingle(
     makeProviderAdapter(input.state, {
       failEventStream: input.failEventStream ?? false,
       ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
@@ -382,26 +435,33 @@ function makeTestLayer(input: {
       ...(input.beforeUnload === undefined ? {} : { beforeUnload: input.beforeUnload }),
     }),
   );
-  const providerEventIngestorTestLayer = ProviderEventIngestor.layer.pipe(
-    Layer.provide(Layer.mergeAll(configuredEventSinkLayer, IdAllocator.layer, TestStoresLayer)),
+  const layerProviderEventIngestorTest = ProviderEventIngestor.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        layerConfiguredEventSink,
+        IdAllocator.layer,
+        layerTestStores,
+        ThreadCommandExecutor.layer,
+      ),
+    ),
   );
   return Layer.mergeAll(
-    TestStoresLayer,
-    configuredEventSinkLayer,
+    layerTestStores,
+    layerConfiguredEventSink,
     IdAllocator.layer,
-    TestMcpRegistryLayer,
+    layerTestMcpRegistry,
     ProviderSessionManager.layerWithOptions({
       idleTimeoutMs: input.idleTimeoutMs,
       ...(input.maxIdlePinMs === undefined ? {} : { maxIdlePinMs: input.maxIdlePinMs }),
     }).pipe(
       Layer.provide(
         Layer.mergeAll(
-          registryLayer,
-          configuredEventSinkLayer,
+          layerRegistry,
+          layerConfiguredEventSink,
           IdAllocator.layer,
-          providerEventIngestorTestLayer,
-          TestMcpRegistryLayer,
-          TestStoresLayer,
+          layerProviderEventIngestorTest,
+          layerTestMcpRegistry,
+          layerTestStores,
           ...(input.serverSettingsLayer === undefined ? [] : [input.serverSettingsLayer]),
           ...(input.projectServiceLayer === undefined ? [] : [input.projectServiceLayer]),
         ),
@@ -420,7 +480,7 @@ const fakeEnvironment = ServerEnvironment.ServerEnvironment.of({
   getDescriptor: Effect.die("unused"),
 });
 
-const TestMcpRegistryLayer = Layer.effect(
+const layerTestMcpRegistry = Layer.effect(
   McpSessionRegistry.McpSessionRegistry,
   McpSessionRegistry.__testing.make(),
 ).pipe(
@@ -461,7 +521,7 @@ function runBrowserAccessScenario(input: {
     >([]);
     const projectId = ProjectId.make("project-provider-session-manager-browser-access");
     const threadId = ThreadId.make("thread-provider-session-manager-browser-access");
-    const projectServiceLayer = Layer.mock(ProjectService.ProjectService)({
+    const layerProjectService = Layer.mock(ProjectService.ProjectService)({
       getById: (requestedProjectId) =>
         Effect.succeed(
           input.projectExists === false
@@ -489,11 +549,11 @@ function runBrowserAccessScenario(input: {
         .pipe(Effect.ignore);
     }).pipe(
       Effect.provide(
-        makeTestLayer({
+        layerTest({
           state,
           idleTimeoutMs: 1_000,
           mcpConfigs,
-          projectServiceLayer,
+          projectServiceLayer: layerProjectService,
           serverSettingsLayer: ServerSettings.layerTest({
             enableAgentBrowserAccess: input.enableAgentBrowserAccess,
             projectSettingsOverrides: {
@@ -707,7 +767,7 @@ it.effect("ProviderSessionManagerV2 opens independent sessions concurrently", ()
 
     yield* effect.pipe(
       Effect.provide(
-        makeTestLayer({
+        layerTest({
           state,
           idleTimeoutMs: 60_000,
           beforeOpen,
@@ -764,11 +824,115 @@ it.effect("ProviderSessionManagerV2 closes every live session for a provider ins
 
     yield* effect.pipe(
       Effect.provide(
-        makeTestLayer({
+        layerTest({
           state,
           idleTimeoutMs: 60_000,
         }),
       ),
+    );
+  }),
+);
+
+it.effect("ProviderSessionManagerV2 records provider session and turn metrics", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const effect = Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread-provider-session-manager-metrics");
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      const providerThread = makeProviderThread({ idAllocator, threadId, providerSessionId, now });
+      const runId = idAllocator.derive.run({ threadId, ordinal: 1 });
+      yield* eventSink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+      });
+
+      const runtime = yield* manager.open({
+        threadId,
+        providerSessionId,
+        modelSelection,
+        runtimePolicy,
+      });
+      yield* runtime.startTurn({
+        appThread: (yield* projectionStore.getThreadProjection(threadId)).thread,
+        threadId,
+        runId,
+        runOrdinal: 1,
+        providerTurnOrdinal: 1,
+        attemptId: idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 }),
+        rootNodeId: idAllocator.derive.rootNode({ runId }),
+        providerThread,
+        message: {
+          createdBy: "user",
+          creationSource: "web",
+          messageId: yield* idAllocator.allocate.message({ threadId, ordinal: 1 }),
+          text: "hello",
+          attachments: [],
+        },
+        modelSelection,
+        runtimePolicy,
+      });
+      yield* runtime.interruptTurn({
+        providerThread,
+        providerTurnId: idAllocator.derive.providerTurn({
+          driver: CODEX_DRIVER,
+          nativeTurnId: "native-turn",
+        }),
+      });
+      yield* manager.close(providerSessionId);
+
+      const snapshots = yield* Metric.snapshot;
+      const has = (id: string, attributes: Readonly<Record<string, string>>) =>
+        snapshots.some(
+          (snapshot) =>
+            snapshot.id === id &&
+            Object.entries(attributes).every(
+              ([key, value]) => snapshot.attributes?.[key] === value,
+            ),
+        );
+      assert.isTrue(
+        has("t3_provider_sessions_total", {
+          provider: "codex",
+          operation: "open",
+          outcome: "success",
+        }),
+      );
+      assert.isTrue(
+        has("t3_provider_sessions_total", {
+          provider: "codex",
+          operation: "release",
+          reason: "manual_shutdown",
+          outcome: "success",
+        }),
+      );
+      assert.isTrue(
+        has("t3_provider_turns_total", {
+          provider: "codex",
+          operation: "send",
+          modelFamily: "gpt",
+          outcome: "success",
+        }),
+      );
+      assert.isTrue(has("t3_provider_turn_duration", { provider: "codex", operation: "send" }));
+      assert.isTrue(
+        has("t3_provider_turns_total", {
+          provider: "codex",
+          operation: "interrupt",
+          outcome: "success",
+        }),
+      );
+    });
+
+    yield* effect.pipe(
+      Effect.provide(layerTest({ state, idleTimeoutMs: 60_000 })),
+      // A private registry keeps other tests' provider metrics out of the assertions.
+      Effect.provideService(Metric.MetricRegistry, new Map()),
     );
   }),
 );
@@ -823,7 +987,7 @@ it.effect("ProviderSessionManagerV2 opens a duplicate session only once", () =>
 
     yield* effect.pipe(
       Effect.provide(
-        makeTestLayer({
+        layerTest({
           state,
           idleTimeoutMs: 60_000,
           beforeOpen,
@@ -864,7 +1028,7 @@ it.effect("ProviderSessionManagerV2 releases live sessions when its layer shuts 
 
     yield* effect.pipe(
       Effect.provide(
-        makeTestLayer({
+        layerTest({
           state,
           idleTimeoutMs: 60_000,
         }),
@@ -913,7 +1077,7 @@ it.effect("ProviderSessionManagerV2 closes event subscriptions normally on serve
       assert.isEmpty(yield* bufferedSubscription.events.pipe(Stream.runCollect));
     });
 
-    yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 60_000 })));
+    yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 60_000 })));
   }),
 );
 
@@ -981,7 +1145,7 @@ it.effect("ProviderSessionManagerV2 drains subscribers when the provider stops",
       assert.equal((yield* Ref.get(state)).closeCount, 1);
     });
 
-    yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 60_000 })));
+    yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 60_000 })));
   }),
 );
 
@@ -1023,7 +1187,7 @@ it.effect(
         const token = captured?.authorizationHeader.replace(/^Bearer\s+/, "");
         assert.isDefined(token);
         const resolved = yield* registry.resolve(token!);
-        assert.equal(resolved?.threadId, threadId);
+        assert.equal(resolved?.thread.threadId, threadId);
         assert.deepEqual(
           resolved?.capabilities,
           new Set(["preview", "orchestration", "worktree", "pull-requests"]),
@@ -1036,7 +1200,7 @@ it.effect(
 
       yield* effect.pipe(
         Effect.provide(
-          makeTestLayer({
+          layerTest({
             state,
             idleTimeoutMs: 1_000,
             mcpConfigs,
@@ -1091,7 +1255,7 @@ it.effect(
 
       yield* effect.pipe(
         Effect.provide(
-          makeTestLayer({
+          layerTest({
             state,
             idleTimeoutMs: 1_000,
             mcpConfigs,
@@ -1193,7 +1357,7 @@ it.effect("ProviderSessionManagerV2 revokes MCP credentials when release persist
 
     yield* effect.pipe(
       Effect.provide(
-        makeTestLayer({
+        layerTest({
           state,
           idleTimeoutMs: 1_000,
           mcpConfigs,
@@ -1258,12 +1422,12 @@ it.effect("ProviderSessionManagerV2 duplicate detach preserves replacement MCP c
         McpProviderSession.readMcpProviderSession(threadId)?.providerSessionId,
         replacement?.providerSessionId,
       );
-      assert.equal((yield* registry.resolve(replacementToken!))?.threadId, threadId);
+      assert.equal((yield* registry.resolve(replacementToken!))?.thread.threadId, threadId);
     });
 
     yield* effect.pipe(
       Effect.provide(
-        makeTestLayer({
+        layerTest({
           state,
           idleTimeoutMs: 1_000,
           capabilities: ExclusiveCapabilities,
@@ -1334,12 +1498,12 @@ it.effect(
           McpProviderSession.readMcpProviderSession(threadId)?.providerSessionId,
           replacement?.providerSessionId,
         );
-        assert.equal((yield* registry.resolve(replacementToken!))?.threadId, threadId);
+        assert.equal((yield* registry.resolve(replacementToken!))?.thread.threadId, threadId);
       });
 
       yield* effect.pipe(
         Effect.provide(
-          makeTestLayer({
+          layerTest({
             state,
             idleTimeoutMs: 1_000,
             capabilities: ExclusiveCapabilities,
@@ -1390,7 +1554,7 @@ it.effect(
         // process's MCP client keeps using the credential it was started with.
         yield* manager.detach({ providerSessionId, threadId, detail: "Workspace changed." });
         assert.equal(
-          (yield* registry.resolve(originalToken!))?.threadId,
+          (yield* registry.resolve(originalToken!))?.thread.threadId,
           threadId,
           "detach must not revoke the credential the live provider process still holds",
         );
@@ -1409,7 +1573,7 @@ it.effect(
           original?.providerSessionId,
           "re-attach must reuse the existing credential, not rotate it",
         );
-        assert.equal((yield* registry.resolve(originalToken!))?.threadId, threadId);
+        assert.equal((yield* registry.resolve(originalToken!))?.thread.threadId, threadId);
 
         // Releasing the session (provider process gone) still revokes.
         yield* manager.close(providerSessionId);
@@ -1418,7 +1582,7 @@ it.effect(
 
       yield* effect.pipe(
         Effect.provide(
-          makeTestLayer({
+          layerTest({
             state,
             idleTimeoutMs: 1_000,
             mcpConfigs,
@@ -1478,9 +1642,7 @@ it.effect(
         yield* manager.close(s1);
       });
 
-      yield* effect.pipe(
-        Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1_000, mcpConfigs })),
-      );
+      yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1_000, mcpConfigs })));
     }),
 );
 
@@ -1533,7 +1695,7 @@ it.effect(
           "the credential the adapter was configured with must remain current",
         );
         assert.equal(
-          (yield* registry.resolve(originalToken!))?.threadId,
+          (yield* registry.resolve(originalToken!))?.thread.threadId,
           threadId,
           "the predecessor release must not revoke a credential reserved by an in-flight open",
         );
@@ -1542,7 +1704,7 @@ it.effect(
 
       yield* effect.pipe(
         Effect.provide(
-          makeTestLayer({
+          layerTest({
             state,
             idleTimeoutMs: 1_000,
             mcpConfigs,
@@ -1597,7 +1759,7 @@ it.effect("ProviderSessionManagerV2 terminal detach revokes the thread's MCP cre
       assert.isUndefined(McpProviderSession.readMcpProviderSession(threadId));
     });
 
-    yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1_000, mcpConfigs })));
+    yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1_000, mcpConfigs })));
   }),
 );
 
@@ -1645,7 +1807,7 @@ it.effect("ProviderSessionManagerV2 releases idle sessions without sweeping all 
       assert.equal(projection.providerSessions.at(-1)?.status, "stopped");
     });
 
-    yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000 })));
+    yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000 })));
   }),
 );
 
@@ -1691,7 +1853,7 @@ it.effect("ProviderSessionManagerV2 persists release when session scope close ha
     });
 
     yield* effect.pipe(
-      Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000, hangSessionScopeClose: true })),
+      Effect.provide(layerTest({ state, idleTimeoutMs: 1000, hangSessionScopeClose: true })),
     );
   }),
 );
@@ -1740,7 +1902,7 @@ it.effect("ProviderSessionManagerV2 defers idle release while background work is
 
     yield* effect.pipe(
       Effect.provide(
-        makeTestLayer({
+        layerTest({
           state,
           idleTimeoutMs: 1000,
           hasPendingBackgroundWork: Ref.get(pendingWork),
@@ -1791,7 +1953,7 @@ it.effect("ProviderSessionManagerV2 releases pinned idle sessions once the pin c
 
     yield* effect.pipe(
       Effect.provide(
-        makeTestLayer({
+        layerTest({
           state,
           idleTimeoutMs: 1000,
           maxIdlePinMs: 3000,
@@ -1910,7 +2072,7 @@ it.effect(
 
       yield* effect.pipe(
         Effect.provide(
-          makeTestLayer({
+          layerTest({
             state,
             idleTimeoutMs: 1000,
             // Uninterruptible so the markBusy-triggered interrupt cannot land
@@ -2004,7 +2166,7 @@ it.effect("ProviderSessionManagerV2 does not apply a stale idle pin to a replace
 
     yield* effect.pipe(
       Effect.provide(
-        makeTestLayer({
+        layerTest({
           state,
           idleTimeoutMs: 1000,
           maxIdlePinMs: 60_000,
@@ -2117,7 +2279,7 @@ it.effect(
         assert.equal(projection.providerSessions.at(-1)?.status, "stopped");
       });
 
-      yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000 })));
+      yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000 })));
     }),
 );
 
@@ -2167,7 +2329,7 @@ it.effect("ProviderSessionManagerV2 uses the same release path for runtime failu
       assert.equal(projection.providerSessions.at(-1)?.lastError, "process exited");
     });
 
-    yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000 })));
+    yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000 })));
   }),
 );
 
@@ -2215,7 +2377,7 @@ it.effect("ProviderSessionManagerV2 releases sessions when provider event stream
 
     yield* effect.pipe(
       Effect.provide(
-        makeTestLayer({
+        layerTest({
           state,
           idleTimeoutMs: 1000,
           failEventStream: true,
@@ -2288,9 +2450,302 @@ it.effect("ProviderSessionManagerV2 marks pending runtime requests non-live on r
       assert.equal(requestTurnItem?.status, "failed");
     });
 
-    yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000 })));
+    yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000 })));
   }),
 );
+it.effect("ProviderSessionManagerV2 retries release records that failed to persist", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const flaky: FlakyReleaseWrites = {
+      failing: yield* Ref.make<"none" | "session" | "session-and-requests">("session"),
+      failures: yield* Queue.unbounded<void>(),
+    };
+    const effect = Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread-provider-session-manager-release-retry");
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      const providerThread = makeProviderThread({ idAllocator, threadId, providerSessionId, now });
+      yield* eventSink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+      });
+      const pendingRequest = yield* makePendingRuntimeRequestEvents({
+        idAllocator,
+        threadId,
+        providerSessionId,
+        providerThread,
+        now,
+      });
+      yield* eventSink.write({ events: pendingRequest.events });
+      yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(manager.close(providerSessionId))));
+      yield* Queue.take(flaky.failures);
+      // The failed session write does not keep the approval answerable.
+      const afterClose = yield* projectionStore.getThreadProjection(threadId);
+      assert.equal(afterClose.runtimeRequests.at(-1)?.responseCapability.type, "not_resumable");
+      assert.equal(afterClose.providerSessions.at(-1)?.status, "ready");
+
+      // The first retry fails as well, and the retries continue.
+      yield* TestClock.adjust("1 second");
+      yield* Queue.take(flaky.failures);
+      yield* Ref.set(flaky.failing, "none");
+      const stopped = yield* eventSink
+        .stream({
+          threadId,
+          afterSequence: yield* eventSink.latestSequence({ threadId }),
+          eventType: "provider-session.updated",
+        })
+        .pipe(Stream.runHead, Effect.forkScoped);
+      yield* TestClock.adjust("1 second");
+      yield* Fiber.join(stopped);
+
+      const afterRetry = yield* projectionStore.getThreadProjection(threadId);
+      assert.equal(afterRetry.providerSessions.at(-1)?.status, "stopped");
+    });
+
+    yield* effect.pipe(
+      Effect.provide(layerTest({ state, idleTimeoutMs: 60_000, flakyReleaseWrites: flaky })),
+    );
+  }),
+);
+
+it.effect("ProviderSessionManagerV2 release retries leave a replacement session alone", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const flaky: FlakyReleaseWrites = {
+      failing: yield* Ref.make<"none" | "session" | "session-and-requests">("none"),
+      failures: yield* Queue.unbounded<void>(),
+    };
+    const effect = Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make("thread-provider-session-manager-release-replacement");
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      const writePendingRequest = Effect.gen(function* () {
+        const now = yield* DateTime.now;
+        const request = yield* makePendingRuntimeRequestEvents({
+          idAllocator,
+          threadId,
+          providerSessionId,
+          providerThread: makeProviderThread({ idAllocator, threadId, providerSessionId, now }),
+          now,
+        });
+        yield* eventSink.write({ events: request.events });
+        return request.requestId;
+      });
+      yield* eventSink.write({
+        events: [
+          yield* makeThreadCreatedEvent({ idAllocator, threadId, now: yield* DateTime.now }),
+        ],
+      });
+      const oldRequestId = yield* writePendingRequest;
+      yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+      yield* Ref.set(flaky.failing, "session-and-requests");
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(manager.close(providerSessionId))));
+      yield* Queue.take(flaky.failures);
+      yield* Queue.take(flaky.failures);
+      yield* Ref.set(flaky.failing, "none");
+
+      // A replacement opens with the same id before the retry runs.
+      yield* TestClock.adjust("500 millis");
+      yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+      const newRequestId = yield* writePendingRequest;
+      const replacementStatus = (yield* projectionStore.getThreadProjection(
+        threadId,
+      )).providerSessions.at(-1)?.status;
+      const settled = yield* eventSink
+        .stream({
+          threadId,
+          afterSequence: yield* eventSink.latestSequence({ threadId }),
+          eventType: "runtime-request.updated",
+        })
+        .pipe(Stream.runHead, Effect.forkScoped);
+      yield* TestClock.adjust("500 millis");
+      yield* Fiber.join(settled);
+
+      const projection = yield* projectionStore.getThreadProjection(threadId);
+      const request = (id: typeof oldRequestId) =>
+        projection.runtimeRequests.find((candidate) => candidate.id === id);
+      assert.equal(request(oldRequestId)?.responseCapability.type, "not_resumable");
+      assert.equal(request(newRequestId)?.responseCapability.type, "live");
+      assert.equal(projection.providerSessions.at(-1)?.status, replacementStatus);
+    });
+
+    yield* effect.pipe(
+      Effect.provide(layerTest({ state, idleTimeoutMs: 60_000, flakyReleaseWrites: flaky })),
+    );
+  }),
+);
+
+it.effect("ProviderSessionManagerV2 keeps each failed release's cleanup", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const flaky: FlakyReleaseWrites = {
+      failing: yield* Ref.make<"none" | "session" | "session-and-requests">("none"),
+      failures: yield* Queue.unbounded<void>(),
+    };
+    const effect = Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const firstThreadId = ThreadId.make("thread-provider-session-manager-release-each-a");
+      const secondThreadId = ThreadId.make("thread-provider-session-manager-release-each-b");
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId: firstThreadId,
+      });
+      yield* eventSink.write({
+        events: [
+          yield* makeThreadCreatedEvent({ idAllocator, threadId: firstThreadId, now }),
+          yield* makeThreadCreatedEvent({ idAllocator, threadId: secondThreadId, now }),
+        ],
+      });
+      const secondThreadRequest = yield* makePendingRuntimeRequestEvents({
+        idAllocator,
+        threadId: secondThreadId,
+        providerSessionId,
+        providerThread: makeProviderThread({
+          idAllocator,
+          threadId: secondThreadId,
+          providerSessionId,
+          now,
+        }),
+        now,
+      });
+      yield* eventSink.write({ events: secondThreadRequest.events });
+      const failRelease = (failedWrites: number) =>
+        Effect.gen(function* () {
+          yield* Ref.set(flaky.failing, "session-and-requests");
+          assert.isTrue(Exit.isFailure(yield* Effect.exit(manager.close(providerSessionId))));
+          yield* Effect.repeat(Queue.take(flaky.failures), { times: failedWrites - 1 });
+          yield* Ref.set(flaky.failing, "none");
+        });
+
+      // The first session serves both threads. Its replacement serves one.
+      yield* manager.open({
+        threadId: firstThreadId,
+        providerSessionId,
+        modelSelection,
+        runtimePolicy,
+      });
+      yield* manager.open({
+        threadId: secondThreadId,
+        providerSessionId,
+        modelSelection,
+        runtimePolicy,
+      });
+      // Both the session write and the second thread's request write fail.
+      yield* failRelease(2);
+      yield* TestClock.adjust("500 millis");
+      yield* manager.open({
+        threadId: firstThreadId,
+        providerSessionId,
+        modelSelection,
+        runtimePolicy,
+      });
+      // Only the session write fails: the first thread has no requests.
+      yield* failRelease(1);
+
+      const settled = yield* eventSink
+        .stream({
+          threadId: secondThreadId,
+          afterSequence: yield* eventSink.latestSequence({ threadId: secondThreadId }),
+          eventType: "runtime-request.updated",
+        })
+        .pipe(Stream.runHead, Effect.forkScoped);
+      yield* TestClock.adjust("500 millis");
+      yield* Fiber.join(settled);
+
+      const projection = yield* projectionStore.getThreadProjection(secondThreadId);
+      assert.equal(projection.runtimeRequests.at(-1)?.responseCapability.type, "not_resumable");
+    });
+
+    yield* effect.pipe(
+      Effect.provide(layerTest({ state, idleTimeoutMs: 60_000, flakyReleaseWrites: flaky })),
+    );
+  }),
+);
+
+it.effect("ProviderSessionManagerV2 settles a request the event pump persists during release", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const flaky: FlakyReleaseWrites = {
+      failing: yield* Ref.make<"none" | "session" | "session-and-requests">("none"),
+      failures: yield* Queue.unbounded<void>(),
+      pauseRequestWrites: {
+        paused: yield* Deferred.make<void>(),
+        resume: yield* Deferred.make<void>(),
+      },
+    };
+    const pause = flaky.pauseRequestWrites!;
+    const effect = Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread-provider-session-manager-release-pump");
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      yield* eventSink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+      });
+      yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+      // The runtime creates the request a moment after the release starts.
+      const createdAt = DateTime.add(now, { seconds: 1 });
+      const pendingRequest = yield* makePendingRuntimeRequestEvents({
+        idAllocator,
+        threadId,
+        providerSessionId,
+        providerThread: makeProviderThread({
+          idAllocator,
+          threadId,
+          providerSessionId,
+          now: createdAt,
+        }),
+        now: createdAt,
+      });
+      const adapterEvents = (yield* Ref.get(state)).eventQueues.get(String(providerSessionId));
+      assert.isDefined(adapterEvents);
+      yield* Queue.offerAll(adapterEvents!, pendingRequest.providerEvents);
+      // The event pump holds the request permit while it persists the request.
+      yield* Deferred.await(pause.paused);
+      const closed = yield* manager
+        .close(providerSessionId)
+        .pipe(Effect.forkScoped({ startImmediately: true }));
+      yield* TestClock.adjust("1 second");
+      yield* Deferred.succeed(pause.resume, undefined);
+      yield* Fiber.join(closed);
+
+      const projection = yield* projectionStore.getThreadProjection(threadId);
+      const request = projection.runtimeRequests.find(
+        (candidate) => candidate.id === pendingRequest.requestId,
+      );
+      assert.equal(request?.responseCapability.type, "not_resumable");
+    });
+
+    yield* effect.pipe(
+      Effect.provide(layerTest({ state, idleTimeoutMs: 60_000, flakyReleaseWrites: flaky })),
+    );
+  }),
+);
+
 it.effect("ProviderSessionManagerV2 terminalizes a pending input transcript item on release", () =>
   Effect.gen(function* () {
     const state = yield* Ref.make(emptyState);
@@ -2360,7 +2815,7 @@ it.effect("ProviderSessionManagerV2 terminalizes a pending input transcript item
       assert.equal(requestTurnItem?.status, "failed");
     });
 
-    yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000 })));
+    yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000 })));
   }),
 );
 
@@ -2445,7 +2900,7 @@ it.effect("ProviderSessionManagerV2 persists session-scoped runtime requests wit
       assert.equal(turnItem?.status, "waiting");
     });
 
-    yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000 })));
+    yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000 })));
   }),
 );
 
@@ -2519,7 +2974,7 @@ it.effect(
 
       yield* effect.pipe(
         Effect.provide(
-          makeTestLayer({
+          layerTest({
             state,
             idleTimeoutMs: 1000,
             beforeOpen: (input) =>
@@ -2673,7 +3128,7 @@ it.effect(
         assert.equal((yield* Ref.get(state)).closeCount, 1);
       });
 
-      yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000 })));
+      yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000 })));
     }),
 );
 
@@ -2838,7 +3293,7 @@ it.effect(
         assert.equal((yield* Ref.get(state)).closeCount, 1);
       });
 
-      yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000 })));
+      yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000 })));
     }),
 );
 
@@ -2942,7 +3397,7 @@ it.effect(
       });
 
       yield* effect.pipe(
-        Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000, beforeUnload })),
+        Effect.provide(layerTest({ state, idleTimeoutMs: 1000, beforeUnload })),
         Effect.scoped,
       );
     }),
@@ -3001,14 +3456,15 @@ it.effect(
 
       yield* effect.pipe(
         Effect.provide(
-          makeTestLayer({ state, idleTimeoutMs: 1000, capabilities: ExclusiveCapabilities }),
+          layerTest({ state, idleTimeoutMs: 1000, capabilities: ExclusiveCapabilities }),
         ),
       );
     }),
 );
 
-for (const workspaceState of ["missing", "file"] as const) {
-  it.effect(`rejects a ${workspaceState} workspace before opening a provider session`, () =>
+it.effect.each(["missing", "file"] as const)(
+  "rejects a %s workspace before opening a provider session",
+  (workspaceState) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const root = yield* fileSystem.makeTempDirectoryScoped();
@@ -3051,10 +3507,9 @@ for (const workspaceState of ["missing", "file"] as const) {
           (yield* projectionStore.getThreadProjection(threadId)).providerSessions,
           [],
         );
-      }).pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 60_000 })));
+      }).pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 60_000 })));
     }).pipe(Effect.provide(NodeServices.layer)),
-  );
-}
+);
 
 it.effect(
   "rejects a deleted workspace before reusing a live session without changing its state",
@@ -3102,7 +3557,7 @@ it.effect(
           (yield* projectionStore.getThreadProjection(threadId)).providerSessions,
           before.providerSessions,
         );
-      }).pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 60_000 })));
+      }).pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 60_000 })));
     }).pipe(Effect.provide(NodeServices.layer)),
 );
 

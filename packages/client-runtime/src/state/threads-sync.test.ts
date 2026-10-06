@@ -23,7 +23,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
 
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
@@ -108,7 +108,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   readonly httpSnapshot?: ThreadSnapshotLoadResult;
   readonly completionMarker?: boolean;
   readonly resumeCache?: NonNullable<Parameters<typeof makeEnvironmentThreadState>[1]>;
-  readonly loadCached?: Effect.Effect<Option.Option<OrchestrationV2ThreadDetailSnapshot>>;
+  readonly loadCached?: ReturnType<Persistence.EnvironmentCacheStore["Service"]["loadThread"]>;
   readonly saveThread?: Persistence.EnvironmentCacheStore["Service"]["saveThread"];
   readonly historyPaging?: "enabled" | "no-http" | "no-controller";
   readonly historyHttpClient?: HttpClient.HttpClient;
@@ -315,8 +315,31 @@ const deleted = (sequence = 3): OrchestrationV2ThreadStreamItem => {
 };
 
 describe("EnvironmentThreads", () => {
-  for (const source of ["disk", "HTTP"] as const) {
-    it.effect(`does not rewrite an unchanged ${source} snapshot on navigation or warm return`, () =>
+  it.effect("loads the server thread when its local cache read fails", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness({
+        loadCached: Effect.fail(
+          new Persistence.ConnectionPersistenceError({
+            operation: "load-thread",
+            message: "The database connection is closing.",
+          }),
+        ),
+        httpSnapshot: {
+          _tag: "present",
+          snapshot: { snapshotSequence: 7, projection: BASE_PROJECTION },
+        },
+      });
+
+      const state = yield* awaitThreadState(h.observed, (value) => value.status === "live");
+      expect(Option.getOrThrow(state.data)).toEqual(BASE_PROJECTION);
+      expect(yield* Ref.get(h.loaderCalls)).toBe(1);
+      expect(yield* Ref.get(h.subscriptionCount)).toBe(1);
+    }),
+  );
+
+  it.effect.each(["disk", "HTTP"] as const)(
+    "does not rewrite an unchanged %s snapshot on navigation or warm return",
+    (source) =>
       Effect.gen(function* () {
         const resumeCache: NonNullable<Parameters<typeof makeEnvironmentThreadState>[1]> = {
           snapshot: undefined,
@@ -350,8 +373,7 @@ describe("EnvironmentThreads", () => {
         );
         expect(yield* Ref.get(nextSaved)).toEqual([]);
       }),
-    );
-  }
+  );
 
   it.effect("persists a complete bounded HTTP window only once", () =>
     Effect.gen(function* () {
@@ -1012,8 +1034,9 @@ describe("EnvironmentThreads", () => {
     }),
   );
 
-  for (const cacheKind of ["disk", "retained"] as const) {
-    it.effect(`retains paging support through a complete bounded ${cacheKind} cache`, () =>
+  it.effect.each(["disk", "retained"] as const)(
+    "retains paging support through a complete bounded %s cache",
+    (cacheKind) =>
       Effect.gen(function* () {
         const resumeCache: NonNullable<Parameters<typeof makeEnvironmentThreadState>[1]> = {
           snapshot: undefined,
@@ -1071,11 +1094,11 @@ describe("EnvironmentThreads", () => {
         expect(yield* Ref.get(warm.lastSubscribeAfterSequence)).toBe(5);
         expect(yield* Ref.get(warm.lastAcceptBoundedSnapshot)).toBe(true);
       }),
-    );
-  }
+  );
 
-  for (const historyPaging of ["no-http", "no-controller"] as const) {
-    it.effect(`does not negotiate bounded fallbacks with ${historyPaging}`, () =>
+  it.effect.each(["no-http", "no-controller"] as const)(
+    "does not negotiate bounded fallbacks with %s",
+    (historyPaging) =>
       Effect.gen(function* () {
         for (const source of ["cache", "http"] as const) {
           const history = {
@@ -1105,8 +1128,7 @@ describe("EnvironmentThreads", () => {
           expect(yield* Ref.get(harness.lastAcceptBoundedSnapshot)).toBeUndefined();
         }
       }),
-    );
-  }
+  );
 
   it.effect("socket snapshot clears progressive history meta left from a bounded window", () =>
     Effect.gen(function* () {
