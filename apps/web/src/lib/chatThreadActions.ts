@@ -129,15 +129,16 @@ export async function startNewLocalThreadFromContext(
   }
 
   const worktreePath = source.worktreePath ?? null;
+  // Preserve origin bootstrapping only for a draft awaiting its new worktree.
+  const startFromOrigin =
+    !thread && !worktreePath && draft?.envMode === "worktree" ? draft.startFromOrigin : false;
   await context.handleNewThread(projectRef, {
     branch: source.branch ?? null,
     worktreePath,
     // A draft still owns its env mode outright; a real thread only ever ran
     // in its own worktree or the local checkout.
     envMode: (thread ? undefined : draft?.envMode) ?? (worktreePath ? "worktree" : "local"),
-    // Preserve origin bootstrapping only for a draft awaiting its new worktree.
-    startFromOrigin:
-      !thread && !worktreePath && draft?.envMode === "worktree" ? draft.startFromOrigin : false,
+    ...(startFromOrigin !== undefined ? { startFromOrigin } : {}),
   });
   return true;
 }
