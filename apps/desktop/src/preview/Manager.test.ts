@@ -1647,7 +1647,7 @@ describe("PreviewManager", () => {
         expect(states.at(-1)?.colorScheme).toBe("dark");
 
         const replacement = makeWebContents(43);
-        fromId.mockReturnValue(replacement.wc);
+        fromId.mockImplementation((id) => (id === 42 ? first.wc : replacement.wc));
         yield* manager.registerWebview("tab_scheme", 43);
         yield* Effect.yieldNow;
 
@@ -2691,7 +2691,7 @@ describe("PreviewManager", () => {
   );
 
   effectIt.effect(
-    "keeps native cdp commands tracked after a drain timeout and retries teardown",
+    "blocks new debugger admission during teardown and restores preview after a drain timeout",
     () =>
       Effect.gen(function* () {
         const host = yield* DesktopBrowserHost.DesktopBrowserHost;
@@ -2704,6 +2704,7 @@ describe("PreviewManager", () => {
         });
         const guest = Object.assign(
           makeTestPreviewWebContents(async () => ({
+            toPNG: () => Buffer.from("png"),
             toJPEG: () => Buffer.from("jpeg"),
             getSize: () => ({ width: 100, height: 80 }),
           })),
@@ -2755,16 +2756,89 @@ describe("PreviewManager", () => {
           Effect.flip,
           Effect.forkChild({ startImmediately: true }),
         );
+        const attachingGuest = Object.assign(
+          makeTestPreviewWebContents(
+            async () => ({
+              toJPEG: () => Buffer.from("jpeg"),
+              getSize: () => ({ width: 100, height: 80 }),
+            }),
+            43,
+          ),
+          { isDevToolsOpened: () => false, once: vi.fn() },
+        );
+        yield* manager.prepareWebview(attachingGuest as never);
+        expect(attachingGuest.debugger.attach).not.toHaveBeenCalled();
+        expect(attachingGuest.debugger.sendCommand).not.toHaveBeenCalled();
         yield* TestClock.adjust("5 seconds");
         expect(yield* Fiber.join(teardown)).toMatchObject({
           _tag: "PreviewAutomationDebuggerDrainTimeoutError",
           pendingCommands: 1,
         });
         expect(detach).not.toHaveBeenCalled();
+        yield* manager.setColorScheme("drain", "dark");
+        expect(yield* manager.captureScreenshot("drain")).toMatchObject({ mimeType: "image/png" });
         release();
         yield* manager.prepareForWindowTeardown;
         expect(detach).toHaveBeenCalledOnce();
       }).pipe(Effect.provide(layer), Effect.scoped),
+  );
+
+  effectIt.effect("drains native capture without a debugger session before closing its tab", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const started = Deferred.makeUnsafe<void>();
+        let release = () => {};
+        const image = {
+          toPNG: () => Buffer.from("png"),
+          toJPEG: () => Buffer.from("jpeg"),
+          getSize: () => ({ width: 100, height: 80 }),
+        };
+        const capturePage = vi.fn(() => {
+          Deferred.doneUnsafe(started, Effect.void);
+          return new Promise<typeof image>((resolve) => {
+            release = () => resolve(image);
+          });
+        });
+        const guest = Object.assign(makeTestPreviewWebContents(capturePage), {
+          isDevToolsOpened: () => true,
+        });
+        fromId.mockReturnValue(guest);
+        yield* manager.createTab("capture-no-control");
+        yield* manager.registerWebview("capture-no-control", 42);
+        const capture = yield* manager
+          .captureScreenshot("capture-no-control")
+          .pipe(Effect.exit, Effect.forkChild({ startImmediately: true }));
+        yield* Deferred.await(started);
+        const close = yield* manager
+          .closeTab("capture-no-control")
+          .pipe(
+            Effect.catchTags({ PreviewAutomationCaptureDrainTimeoutError: Effect.succeed }),
+            Effect.forkChild({ startImmediately: true }),
+          );
+        yield* TestClock.adjust("4 seconds");
+        expect(
+          Exit.isFailure(yield* Effect.exit(manager.captureScreenshot("capture-no-control"))),
+        ).toBe(true);
+        expect(capturePage).toHaveBeenCalledOnce();
+        yield* TestClock.adjust("1 second");
+        expect(yield* Fiber.join(close)).toMatchObject({
+          _tag: "PreviewAutomationCaptureDrainTimeoutError",
+          pendingCaptures: 1,
+        });
+        expect(yield* manager.createTab("capture-no-control")).toMatchObject({ webContentsId: 42 });
+        expect(guest.debugger.attach).not.toHaveBeenCalled();
+        release();
+        yield* Fiber.await(capture);
+        yield* manager.closeTab("capture-no-control");
+        expect(
+          yield* manager
+            .refresh("capture-no-control")
+            .pipe(Effect.catchTags({ PreviewTabNotFoundError: Effect.succeed })),
+        ).toMatchObject({
+          _tag: "PreviewTabNotFoundError",
+        });
+      }),
+    ),
   );
 
   effectIt.effect("tells the server when a tab it renders natively closes", () =>
@@ -2841,7 +2915,9 @@ describe("PreviewManager", () => {
         };
         const pending = Promise.withResolvers<typeof image>();
         const capturePage = vi.fn(() => pending.promise);
-        fromId.mockReturnValue(makeTestPreviewWebContents(capturePage, 42));
+        const firstGuest = makeTestPreviewWebContents(capturePage, 42);
+        const replacementGuest = makeTestPreviewWebContents(capturePage, 43);
+        fromId.mockImplementation((id) => (id === 42 ? firstGuest : replacementGuest));
         yield* manager.createTab("tab_1");
         yield* manager.registerWebview("tab_1", 42);
 
@@ -2850,9 +2926,13 @@ describe("PreviewManager", () => {
         );
         yield* TestClock.adjust(0);
         expect(capturePage).toHaveBeenCalledOnce();
-        fromId.mockReturnValue(makeTestPreviewWebContents(capturePage, 43));
-        yield* manager.registerWebview("tab_1", 43);
+        const replacement = yield* manager
+          .registerWebview("tab_1", 43)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* TestClock.adjust(0);
+        expect(replacement.pollUnsafe()).toBeUndefined();
         pending.resolve(image);
+        yield* Fiber.join(replacement);
         const exit = yield* Fiber.join(fiber);
 
         expect(Exit.isFailure(exit)).toBe(true);
@@ -3917,6 +3997,7 @@ describe("PreviewManager", () => {
     withManager((manager) =>
       Effect.gen(function* () {
         let onPicked: ((event: unknown, ...args: unknown[]) => void) | undefined;
+        const nativeCapture = Promise.withResolvers<Electron.NativeImage>();
         fromId.mockReturnValue({
           id: 42,
           isDestroyed: () => false,
@@ -3932,8 +4013,8 @@ describe("PreviewManager", () => {
           on: vi.fn(),
           once: vi.fn(),
           off: vi.fn(),
-          // A wedged compositor leaves `capturePage` pending forever.
-          capturePage: vi.fn(() => new Promise(() => {})),
+          // The native promise stays pending after the caller's deadline.
+          capturePage: vi.fn(() => nativeCapture.promise),
           ipc: {
             on: vi.fn((channel: string, listener: typeof onPicked) => {
               if (channel === "preview:element-picked") onPicked = listener;
@@ -3987,6 +4068,7 @@ describe("PreviewManager", () => {
         expect(result?.screenshotFailed).toBe(true);
         expect(result?.submission).toBe("send");
         expect(webviewSend).toHaveBeenCalledWith("preview:annotation-captured");
+        nativeCapture.resolve({} as never);
       }),
     ),
   );
@@ -3995,6 +4077,8 @@ describe("PreviewManager", () => {
     withManager((manager) =>
       Effect.gen(function* () {
         let onPicked: ((event: unknown, ...args: unknown[]) => void) | undefined;
+        const firstCapture = Promise.withResolvers<Electron.NativeImage>();
+        const secondCapture = Promise.withResolvers<Electron.NativeImage>();
         fromId.mockReturnValue({
           id: 42,
           isDestroyed: () => false,
@@ -4010,7 +4094,10 @@ describe("PreviewManager", () => {
           on: vi.fn(),
           once: vi.fn(),
           off: vi.fn(),
-          capturePage: vi.fn(() => new Promise(() => {})),
+          capturePage: vi
+            .fn()
+            .mockImplementationOnce(() => firstCapture.promise)
+            .mockImplementationOnce(() => secondCapture.promise),
           ipc: {
             on: vi.fn((channel: string, listener: typeof onPicked) => {
               if (channel === "preview:element-picked") onPicked = listener;
@@ -4069,6 +4156,8 @@ describe("PreviewManager", () => {
         const result = yield* Fiber.join(secondPick);
         expect(result?.annotation.id).toBe("annotation_2");
         expect(result?.submission).toBe("attach");
+        firstCapture.resolve({} as never);
+        secondCapture.resolve({} as never);
       }),
     ),
   );

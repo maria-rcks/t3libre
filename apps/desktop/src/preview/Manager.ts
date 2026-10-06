@@ -590,6 +590,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   let pendingRecording: PendingRecording | null = null;
   const displayMediaHandlerSessions = new WeakSet<Session>();
   let frameCaptureWindowOpen = true;
+  const windowTeardownSemaphore = yield* Semaphore.make(1);
+  const nativeGuestBlocks = new Map<number, number>();
+  const retiredNativeGuests = new WeakSet<Electron.WebContents>();
   const nativeCaptures = new Map<number, Set<Promise<unknown>>>();
   const trackNative = <A>(pending: Set<Promise<unknown>>, start: () => Promise<A>): Promise<A> => {
     const promise = start();
@@ -601,7 +604,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     return promise;
   };
   const captureNative = (wc: Electron.WebContents, rect?: Electron.Rectangle) => {
-    if (!frameCaptureWindowOpen) return Promise.reject(new Error("Preview window is closing."));
+    if (!frameCaptureWindowOpen || nativeGuestBlocks.has(wc.id) || retiredNativeGuests.has(wc))
+      return Promise.reject(new Error("Preview window or guest is closing."));
     let pending = nativeCaptures.get(wc.id);
     if (!pending) nativeCaptures.set(wc.id, (pending = new Set()));
     const tracked = pending;
@@ -662,7 +666,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   ) {
     const requireCurrentGuest = Effect.gen(function* () {
       const tabs = yield* SynchronizedRef.get(tabsRef);
-      if (wc.isDestroyed() || tabs.get(tabId)?.webContentsId !== wc.id) {
+      if (
+        wc.isDestroyed() ||
+        tabs.get(tabId)?.webContentsId !== wc.id ||
+        !frameCaptureWindowOpen ||
+        nativeGuestBlocks.has(wc.id) ||
+        retiredNativeGuests.has(wc)
+      ) {
         return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId: wc.id });
       }
     });
@@ -1078,40 +1088,54 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     webContentsId: number,
     /** The server tab it rendered, when the caller already took the tab out of `tabsRef`. */
     closedServerTab?: PreviewTabState["serverTab"],
+    retireGuest = false,
   ) {
-    const control = (yield* SynchronizedRef.get(controlSessionsRef)).get(webContentsId);
-    if (control) {
-      control.closing = true;
-      if (closedServerTab) browserHost.detach(closedServerTab);
-      for (const tab of (yield* SynchronizedRef.get(tabsRef)).values()) {
-        if (tab.webContentsId === webContentsId && tab.serverTab) browserHost.detach(tab.serverTab);
-      }
+    nativeGuestBlocks.set(webContentsId, (nativeGuestBlocks.get(webContentsId) ?? 0) + 1);
+    const wc = webContents.fromId(webContentsId);
+    return yield* Effect.gen(function* () {
+      const control = (yield* SynchronizedRef.get(controlSessionsRef)).get(webContentsId);
       yield* drainCaptures(webContentsId);
-      yield* Effect.tryPromise({
-        try: (_signal) => Promise.allSettled([...control.inFlightCommands]),
-        catch: (cause) =>
-          new PreviewOperationError({ operation: "debugger-drain", webContentsId, cause }),
-      }).pipe(
-        Effect.timeoutOrElse({
-          duration: "5 seconds",
-          orElse: () =>
-            Effect.fail(
-              new PreviewAutomationDebuggerDrainTimeoutError({
-                webContentsId,
-                pendingCommands: control.inFlightCommands.size,
-                stage: "debugger-drain",
-                timeoutMs: 5000,
-              }),
-            ),
+      if (control) {
+        yield* Effect.tryPromise({
+          try: (_signal) => Promise.allSettled([...control.inFlightCommands]),
+          catch: (cause) =>
+            new PreviewOperationError({ operation: "debugger-drain", webContentsId, cause }),
+        }).pipe(
+          Effect.timeoutOrElse({
+            duration: "5 seconds",
+            orElse: () =>
+              Effect.fail(
+                new PreviewAutomationDebuggerDrainTimeoutError({
+                  webContentsId,
+                  pendingCommands: control.inFlightCommands.size,
+                  stage: "debugger-drain",
+                  timeoutMs: 5000,
+                }),
+              ),
+          }),
+        );
+        if (closedServerTab) browserHost.detach(closedServerTab);
+        for (const tab of (yield* SynchronizedRef.get(tabsRef)).values()) {
+          if (tab.webContentsId === webContentsId && tab.serverTab)
+            browserHost.detach(tab.serverTab);
+        }
+        yield* Scope.close(control.scope, Exit.void);
+        yield* SynchronizedRef.update(controlSessionsRef, (sessions) =>
+          sessions.get(webContentsId) === control
+            ? replaceMap(sessions, (copy) => copy.delete(webContentsId))
+            : sessions,
+        );
+      }
+    }).pipe(
+      Effect.onExit((exit) =>
+        Effect.sync(() => {
+          if (retireGuest && Exit.isSuccess(exit) && wc) retiredNativeGuests.add(wc);
+          const remaining = (nativeGuestBlocks.get(webContentsId) ?? 1) - 1;
+          if (remaining > 0) nativeGuestBlocks.set(webContentsId, remaining);
+          else nativeGuestBlocks.delete(webContentsId);
         }),
-      );
-      yield* Scope.close(control.scope, Exit.void);
-      yield* SynchronizedRef.update(controlSessionsRef, (sessions) =>
-        sessions.get(webContentsId) === control
-          ? replaceMap(sessions, (copy) => copy.delete(webContentsId))
-          : sessions,
-      );
-    }
+      ),
+    );
   });
 
   const ensureControlSession = Effect.fn("PreviewManager.ensureControlSession")(function* (
@@ -1125,6 +1149,19 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         readonly [BrowserControlSession, ReadonlyMap<number, BrowserControlSession>],
         PreviewManagerError
       > => {
+        if (
+          !frameCaptureWindowOpen ||
+          nativeGuestBlocks.has(wc.id) ||
+          retiredNativeGuests.has(wc)
+        ) {
+          return Effect.fail(
+            new PreviewOperationError({
+              operation: "ensureControlSession",
+              webContentsId: wc.id,
+              cause: new Error("Preview window or guest is closing."),
+            }),
+          );
+        }
         const existing = sessions.get(wc.id);
         if (existing) return Effect.succeed([existing, sessions] as const);
         // A guest can be destroyed while it waits for this lock, and its native
@@ -1161,7 +1198,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             get: (target, key) => {
               if (key === "sendCommand")
                 return (...args: Parameters<Electron.Debugger["sendCommand"]>) => {
-                  if (closing) return Promise.reject(new Error("Preview debugger is closing."));
+                  if (
+                    closing ||
+                    !frameCaptureWindowOpen ||
+                    nativeGuestBlocks.has(wc.id) ||
+                    retiredNativeGuests.has(wc)
+                  )
+                    return Promise.reject(new Error("Preview debugger is closing."));
                   return trackNative(inFlightCommands, () => target.sendCommand(...args));
                 };
               const value = Reflect.get(target, key);
@@ -1779,7 +1822,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
     const beforeClose = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
     if (beforeClose?.webContentsId != null) {
-      yield* detachControlSession(beforeClose.webContentsId, beforeClose.serverTab);
+      yield* detachControlSession(beforeClose.webContentsId, beforeClose.serverTab, true);
     }
     const tab = yield* SynchronizedRef.modify(tabsRef, (tabs) => {
       const current = tabs.get(tabId);
@@ -1794,12 +1837,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     if (Option.isNone(tab)) return;
     const closedTab = tab.value;
     if (closedTab.webContentsId != null) {
-      yield* Effect.all(
-        [
-          detachListeners(closedTab.webContentsId),
-        ],
-        { concurrency: 2, discard: true },
-      );
+      yield* Effect.all([detachListeners(closedTab.webContentsId)], {
+        concurrency: 2,
+        discard: true,
+      });
     }
     const updatedAt = yield* currentIso;
     const closed: PreviewTabState = {
@@ -1885,7 +1926,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       clearPendingRecording(tabId);
       yield* Effect.all(
         [
-          detachControlSession(replacedWebContentsId),
+          detachControlSession(replacedWebContentsId, undefined, true),
           detachListeners(replacedWebContentsId),
           cancelPickElement(tabId),
         ],
@@ -3389,21 +3430,37 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
-  const prepareForWindowTeardown = Effect.gen(function* () {
-    pendingRecording = null;
-    frameCaptureWindowOpen = false;
-    yield* Effect.all([closeAllPictureInPicture(), stopAllRecordings()], {
-      concurrency: 2,
-      discard: true,
-    });
-    const controls = yield* SynchronizedRef.get(controlSessionsRef);
-    for (const [id, control] of controls) {
-      control.closing = true;
-      yield* drainCaptures(id);
-      yield* detachControlSession(id);
-    }
-    yield* drainCaptures();
-  });
+  const prepareForWindowTeardown = windowTeardownSemaphore.withPermit(
+    Effect.gen(function* () {
+      const wasOpen = frameCaptureWindowOpen;
+      pendingRecording = null;
+      frameCaptureWindowOpen = false;
+      return yield* Effect.gen(function* () {
+        yield* Effect.all([closeAllPictureInPicture(), stopAllRecordings()], {
+          concurrency: 2,
+          discard: true,
+        });
+        const controls = yield* SynchronizedRef.get(controlSessionsRef);
+        for (const [id] of controls) {
+          yield* detachControlSession(id);
+        }
+        yield* drainCaptures();
+      }).pipe(
+        Effect.onError(() =>
+          Effect.gen(function* () {
+            frameCaptureWindowOpen =
+              wasOpen && (!currentMainWindow || !currentMainWindow.isDestroyed());
+            if (!frameCaptureWindowOpen) return;
+            for (const [tabId, tab] of yield* SynchronizedRef.get(tabsRef)) {
+              if (tab.webContentsId == null) continue;
+              const wc = webContents.fromId(tab.webContentsId);
+              if (wc && !wc.isDestroyed()) runFork(restoreControlSession(tabId, wc));
+            }
+          }),
+        ),
+      );
+    }),
+  );
   yield* Effect.addFinalizer(() => destroy().pipe(Effect.ignore));
 
   return {
