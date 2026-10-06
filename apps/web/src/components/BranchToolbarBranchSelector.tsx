@@ -508,6 +508,7 @@ export function BranchToolbarBranchSelector({
 
   useEffect(() => {
     if (
+      hasServerThread ||
       effectiveEnvMode !== "worktree" ||
       activeWorktreePath ||
       activeThreadBranch ||
@@ -520,6 +521,7 @@ export function BranchToolbarBranchSelector({
     activeThreadBranch,
     activeWorktreePath,
     effectiveEnvMode,
+    hasServerThread,
     setThreadBranch,
     worktreeBaseBranchCandidate,
   ]);
