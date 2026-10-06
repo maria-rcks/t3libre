@@ -18,15 +18,18 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import { OrchestratorProjectionError } from "../orchestration-v2/Orchestrator.ts";
 import type { ProviderAdapterV2Shape } from "../orchestration-v2/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
-import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { buildUnavailableProviderSnapshot } from "../provider/unavailableProviderSnapshot.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as SecretRequests from "../secrets/SecretRequests.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 
@@ -80,7 +83,7 @@ describe("OrchestratorMcpService", () => {
         providerThreads: [],
       } as unknown as OrchestrationV2ThreadProjection;
       let hasNestedWork = true;
-      const dependencies = Layer.mergeAll(
+      const layerDependencies = Layer.mergeAll(
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -122,13 +125,19 @@ describe("OrchestratorMcpService", () => {
         Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
           list: () => Effect.succeed([]),
         }),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
       );
       const scope: McpInvocationScope = {
         environmentId: EnvironmentId.make("environment:mcp-ack"),
-        threadId: parentThreadId,
-        providerSessionId: "provider-session:mcp-ack",
-        providerInstanceId: ProviderInstanceId.make("codex"),
+        requestNamespace: "provider-session:mcp-ack",
+        thread: {
+          threadId: parentThreadId,
+          providerSessionId: "provider-session:mcp-ack",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
         capabilities: new Set(["orchestration"]),
         issuedAt: 1,
       };
@@ -152,7 +161,7 @@ describe("OrchestratorMcpService", () => {
         const commandIds = yield* Ref.get(acknowledgementCommandIds);
         assert.equal(commandIds.length, 2);
         assert.notEqual(commandIds[0], commandIds[1]);
-      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
     }),
   );
 
@@ -191,7 +200,7 @@ describe("OrchestratorMcpService", () => {
         providerThreads: [],
         turnItems: [],
       } as unknown as OrchestrationV2ThreadProjection;
-      const dependencies = Layer.mergeAll(
+      const layerDependencies = Layer.mergeAll(
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -206,13 +215,19 @@ describe("OrchestratorMcpService", () => {
         Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
           list: () => Effect.succeed([]),
         }),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
       );
       const scope: McpInvocationScope = {
         environmentId: EnvironmentId.make("environment:mcp-restart"),
-        threadId: parentThreadId,
-        providerSessionId: "provider-session:mcp-restart",
-        providerInstanceId: ProviderInstanceId.make("codex"),
+        requestNamespace: "provider-session:mcp-restart",
+        thread: {
+          threadId: parentThreadId,
+          providerSessionId: "provider-session:mcp-restart",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
         capabilities: new Set(["orchestration"]),
         issuedAt: 1,
       };
@@ -233,7 +248,7 @@ describe("OrchestratorMcpService", () => {
         const settled = yield* service.taskStatus(scope, taskId);
         assert.equal(settled.status, "cancelled");
         assert.equal(yield* Ref.get(dispatched), 1);
-      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
     }),
   );
 
@@ -268,7 +283,7 @@ describe("OrchestratorMcpService", () => {
         subagents: [],
         providerThreads: [],
       } as unknown as OrchestrationV2ThreadProjection;
-      const dependencies = Layer.mergeAll(
+      const layerDependencies = Layer.mergeAll(
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -282,13 +297,19 @@ describe("OrchestratorMcpService", () => {
         Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
           list: () => Effect.succeed([]),
         }),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
       );
       const scope: McpInvocationScope = {
         environmentId: EnvironmentId.make("environment:mcp-cancel"),
-        threadId: parentThreadId,
-        providerSessionId: "provider-session:mcp-cancel",
-        providerInstanceId: ProviderInstanceId.make("codex"),
+        requestNamespace: "provider-session:mcp-cancel",
+        thread: {
+          threadId: parentThreadId,
+          providerSessionId: "provider-session:mcp-cancel",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
         capabilities: new Set(["orchestration"]),
         issuedAt: 1,
       };
@@ -300,11 +321,11 @@ describe("OrchestratorMcpService", () => {
           .pipe(Effect.flip);
         assert.equal(error.code, "task_not_cancellable");
         assert.deepEqual(yield* Ref.get(dispatched), []);
-      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
     }),
   );
 
-  it.effect("does not dispose delivery when the child interrupt fails", () =>
+  it.effect("does not dispose delivery when the child stop fails", () =>
     Effect.gen(function* () {
       const parentThreadId = ThreadId.make("thread:mcp-cancel-failed-parent");
       const childThreadId = ThreadId.make("thread:mcp-cancel-failed-child");
@@ -336,27 +357,33 @@ describe("OrchestratorMcpService", () => {
         subagents: [],
         providerThreads: [],
       } as unknown as OrchestrationV2ThreadProjection;
-      const dependencies = Layer.mergeAll(
+      const layerDependencies = Layer.mergeAll(
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
             Effect.succeed(threadId === parentThreadId ? parentProjection : childProjection),
           dispatch: (command) =>
             Ref.update(dispatched, (commands) => [...commands, command]).pipe(
-              Effect.andThen(Effect.fail(new Error("simulated interrupt failure") as never)),
+              Effect.andThen(Effect.fail(new Error("simulated stop failure") as never)),
             ),
         }),
         Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
         Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
           list: () => Effect.succeed([]),
         }),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
       );
       const scope: McpInvocationScope = {
         environmentId: EnvironmentId.make("environment:mcp-cancel-failed"),
-        threadId: parentThreadId,
-        providerSessionId: "provider-session:mcp-cancel-failed",
-        providerInstanceId: ProviderInstanceId.make("codex"),
+        requestNamespace: "provider-session:mcp-cancel-failed",
+        thread: {
+          threadId: parentThreadId,
+          providerSessionId: "provider-session:mcp-cancel-failed",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
         capabilities: new Set(["orchestration"]),
         issuedAt: 1,
       };
@@ -369,13 +396,13 @@ describe("OrchestratorMcpService", () => {
         assert.equal(error.code, "task_not_cancellable");
         assert.deepEqual(
           (yield* Ref.get(dispatched)).map((command) => (command as { type: string }).type),
-          ["run.interrupt"],
+          ["thread.stop"],
         );
-      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
     }),
   );
 
-  it.effect("returns cancel requested when post-interrupt disposal fails", () =>
+  it.effect("returns cancel requested when post-stop disposal fails", () =>
     Effect.gen(function* () {
       const parentThreadId = ThreadId.make("thread:mcp-cancel-dispose-failed-parent");
       const childThreadId = ThreadId.make("thread:mcp-cancel-dispose-failed-child");
@@ -407,7 +434,7 @@ describe("OrchestratorMcpService", () => {
         subagents: [],
         providerThreads: [],
       } as unknown as OrchestrationV2ThreadProjection;
-      const dependencies = Layer.mergeAll(
+      const layerDependencies = Layer.mergeAll(
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -420,18 +447,25 @@ describe("OrchestratorMcpService", () => {
                   : Effect.succeed({} as never),
               ),
             ),
+          stopDelegatedTasks: () => Effect.void,
         }),
         Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
         Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
           list: () => Effect.succeed([]),
         }),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
       );
       const scope: McpInvocationScope = {
         environmentId: EnvironmentId.make("environment:mcp-cancel-dispose-failed"),
-        threadId: parentThreadId,
-        providerSessionId: "provider-session:mcp-cancel-dispose-failed",
-        providerInstanceId: ProviderInstanceId.make("codex"),
+        requestNamespace: "provider-session:mcp-cancel-dispose-failed",
+        thread: {
+          threadId: parentThreadId,
+          providerSessionId: "provider-session:mcp-cancel-dispose-failed",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
         capabilities: new Set(["orchestration"]),
         issuedAt: 1,
       };
@@ -445,9 +479,9 @@ describe("OrchestratorMcpService", () => {
         assert.equal(result.status, "cancel_requested");
         assert.deepEqual(
           (yield* Ref.get(dispatched)).map((command) => (command as { type: string }).type),
-          ["run.interrupt", "delegated_task.completion-delivery.dispose"],
+          ["thread.stop", "delegated_task.completion-delivery.dispose"],
         );
-      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
     }),
   );
 });
@@ -464,9 +498,13 @@ describe("OrchestratorMcpService provider resolution", () => {
 
   const scope: McpInvocationScope = {
     environmentId: EnvironmentId.make("environment:mcp-providers"),
-    threadId: parentThreadId,
-    providerSessionId: "provider-session:mcp-providers",
-    providerInstanceId: codexInstanceId,
+    requestNamespace: "provider-session:mcp-providers",
+    thread: {
+      threadId: parentThreadId,
+      providerSessionId: "provider-session:mcp-providers",
+      providerInstanceId: codexInstanceId,
+    },
+    client: undefined,
     capabilities: new Set(["orchestration"]),
     issuedAt: 1,
   };
@@ -492,6 +530,13 @@ describe("OrchestratorMcpService provider resolution", () => {
     slashCommands: [],
     skills: [],
   });
+
+  /** A registry whose probes report the same snapshots it already holds. */
+  const providerRegistryLayer = (providers: ReadonlyArray<ServerProvider>) =>
+    Layer.mock(ProviderRegistry.ProviderRegistry)({
+      getProviders: Effect.succeed(providers),
+      refreshInstance: () => Effect.succeed(providers),
+    });
 
   const adapterRegistryLayer = (instanceIds: ReadonlyArray<ProviderInstanceId>) =>
     Layer.succeed(
@@ -601,7 +646,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           }),
           forkShadow,
         ];
-        const dependencies = Layer.mergeAll(
+        const layerDependencies = Layer.mergeAll(
           NodeServices.layer,
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             getThreadRecords: () => Effect.succeed(parentProjection([])),
@@ -617,6 +662,8 @@ describe("OrchestratorMcpService provider resolution", () => {
             antigravityInstanceId,
             disabledAntigravityInstanceId,
           ]),
+          Layer.mock(ProjectService.ProjectService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
           Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
         );
 
@@ -687,7 +734,9 @@ describe("OrchestratorMcpService provider resolution", () => {
           assert.isTrue(
             fork!.constraints.includes("Driver 'forkOnly' is not registered in this build."),
           );
-        }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+        }).pipe(
+          Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))),
+        );
       }),
   );
 
@@ -724,9 +773,11 @@ describe("OrchestratorMcpService provider resolution", () => {
           completedAt: null,
         };
         const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
-        const dependencies = Layer.mergeAll(
+        const layerDependencies = Layer.mergeAll(
           NodeServices.layer,
           Layer.mock(ThreadManagementService.ThreadManagementService)({
+            getThreadEventSequence: () => Effect.succeed(0),
+            streamStoredEventsFrom: () => Stream.never,
             getThreadRecords: (threadId) =>
               Effect.succeed(
                 threadId === parentThreadId
@@ -773,6 +824,8 @@ describe("OrchestratorMcpService provider resolution", () => {
             ]),
           }),
           adapterRegistryLayer([codexInstanceId, antigravityInstanceId]),
+          Layer.mock(ProjectService.ProjectService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
           Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
         );
 
@@ -822,7 +875,9 @@ describe("OrchestratorMcpService provider resolution", () => {
           assert.equal(request.type, "delegated_task.request");
           assert.equal(request.modelSelection.instanceId, antigravityInstanceId);
           assert.equal(request.modelSelection.model, "ant-model");
-        }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+        }).pipe(
+          Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))),
+        );
       }),
   );
 
@@ -850,7 +905,7 @@ describe("OrchestratorMcpService provider resolution", () => {
         completedAt: null,
       };
       let delegated = false;
-      const dependencies = Layer.mergeAll(
+      const layerDependencies = Layer.mergeAll(
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -893,6 +948,8 @@ describe("OrchestratorMcpService provider resolution", () => {
           ]),
         }),
         adapterRegistryLayer([codexInstanceId, antigravityInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
       );
 
@@ -912,7 +969,7 @@ describe("OrchestratorMcpService provider resolution", () => {
         };
         assert.equal(request.modelSelection.instanceId, antigravityInstanceId);
         assert.equal(request.modelSelection.model, "ant-model");
-      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
     }),
   );
 
@@ -925,22 +982,22 @@ describe("OrchestratorMcpService provider resolution", () => {
         reason: "Driver 'forkOnly' is not registered in this build.",
         checkedAt: "2026-09-13T00:00:00.000Z",
       });
-      const dependencies = Layer.mergeAll(
+      const layerDependencies = Layer.mergeAll(
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: () => Effect.succeed(parentProjection([])),
         }),
-        Layer.mock(ProviderRegistry.ProviderRegistry)({
-          getProviders: Effect.succeed([
-            providerSnapshot({
-              instanceId: codexInstanceId,
-              driver: ProviderDriverKind.make("codex"),
-              model: "gpt-5.4",
-            }),
-            forkShadow,
-          ]),
-        }),
+        providerRegistryLayer([
+          providerSnapshot({
+            instanceId: codexInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            model: "gpt-5.4",
+          }),
+          forkShadow,
+        ]),
         adapterRegistryLayer([codexInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
       );
 
@@ -969,7 +1026,109 @@ describe("OrchestratorMcpService provider resolution", () => {
         assert.isTrue(
           byDriver.message.includes("No V2 provider adapter is registered for driver forkOnly."),
         );
-      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
+    }),
+  );
+
+  it.effect("re-probes an unavailable target once before refusing it", () =>
+    Effect.gen(function* () {
+      const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
+      const claudeDriver = ProviderDriverKind.make("claudeAgent");
+      const task = {
+        id: taskId,
+        threadId: parentThreadId,
+        runId: parentRunId,
+        parentNodeId,
+        origin: "app_owned",
+        createdBy: "agent",
+        driver: claudeDriver,
+        providerInstanceId: claudeInstanceId,
+        providerThreadId: null,
+        childThreadId,
+        nativeTaskRef: null,
+        prompt: "Review the diff.",
+        title: null,
+        model: "claude-opus-5-5",
+        status: "running",
+        result: null,
+        startedAt: null,
+        completedAt: null,
+      };
+      const healthy = providerSnapshot({
+        instanceId: claudeInstanceId,
+        driver: claudeDriver,
+        model: "claude-opus-5-5",
+      });
+      const missingCli: ServerProvider = {
+        ...healthy,
+        installed: false,
+        status: "error",
+        message: "Claude Agent CLI (`claude`) was not found on PATH.",
+      };
+      const codex = providerSnapshot({
+        instanceId: codexInstanceId,
+        driver: ProviderDriverKind.make("codex"),
+        model: "gpt-5.4",
+      });
+      // The cache still says the CLI is missing; a probe reports `cliInstalled`.
+      let cliInstalled = false;
+      const probes = yield* Ref.make(0);
+      const dispatched = yield* Ref.make(0);
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: (threadId) =>
+            Effect.succeed(
+              threadId === parentThreadId ? parentProjection([task]) : childProjection,
+            ),
+          dispatch: () =>
+            Ref.update(dispatched, (count) => count + 1).pipe(
+              Effect.as({
+                sequence: 1,
+                storedEvents: [
+                  {
+                    sequence: 1,
+                    commandId: null,
+                    event: { type: "subagent.updated", payload: task },
+                  },
+                ],
+              } as never),
+            ),
+        }),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed([codex, missingCli]),
+          refreshInstance: () =>
+            Ref.update(probes, (count) => count + 1).pipe(
+              Effect.as([codex, cliInstalled ? healthy : missingCli]),
+            ),
+        }),
+        adapterRegistryLayer([codexInstanceId, claudeInstanceId]),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const delegate = (clientRequestId: string) =>
+          service.delegateTask(scope, {
+            task: "Review the diff.",
+            target: { providerInstanceId: claudeInstanceId, model: "claude-opus-5-5" },
+            mode: "async",
+            clientRequestId,
+          });
+
+        const error = yield* delegate("delegate-recheck-1").pipe(Effect.flip);
+        assert.equal(error.code, "provider_unavailable");
+        assert.equal(yield* Ref.get(probes), 1);
+        assert.equal(yield* Ref.get(dispatched), 0);
+
+        cliInstalled = true;
+        const result = yield* delegate("delegate-recheck-2");
+        assert.equal(result.providerInstanceId, claudeInstanceId);
+        assert.equal(yield* Ref.get(probes), 2);
+        assert.equal(yield* Ref.get(dispatched), 1);
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
     }),
   );
 
@@ -1059,7 +1218,7 @@ describe("OrchestratorMcpService provider resolution", () => {
         for (const testCase of cases) {
           const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
           let delegated = false;
-          const dependencies = Layer.mergeAll(
+          const layerDependencies = Layer.mergeAll(
             NodeServices.layer,
             Layer.mock(ThreadManagementService.ThreadManagementService)({
               getThreadRecords: (threadId) =>
@@ -1087,23 +1246,23 @@ describe("OrchestratorMcpService provider resolution", () => {
                   } as never),
                 ),
             }),
-            Layer.mock(ProviderRegistry.ProviderRegistry)({
-              getProviders: Effect.succeed([
-                providerSnapshot({
-                  instanceId: codexInstanceId,
-                  driver,
-                  model: "gpt-5.4",
-                  enabled: testCase.inheritedEnabled,
-                }),
-                providerSnapshot({
-                  instanceId: codexAltInstanceId,
-                  driver: testCase.candidateDriver,
-                  model: "codex-alt-model",
-                  enabled: testCase.peerEnabled,
-                }),
-              ]),
-            }),
+            providerRegistryLayer([
+              providerSnapshot({
+                instanceId: codexInstanceId,
+                driver,
+                model: "gpt-5.4",
+                enabled: testCase.inheritedEnabled,
+              }),
+              providerSnapshot({
+                instanceId: codexAltInstanceId,
+                driver: testCase.candidateDriver,
+                model: "codex-alt-model",
+                enabled: testCase.peerEnabled,
+              }),
+            ]),
             adapterRegistryLayer([codexInstanceId, codexAltInstanceId]),
+            Layer.mock(ProjectService.ProjectService)({}),
+            Layer.mock(SecretRequests.SecretRequests)({}),
             Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
           );
 
@@ -1176,7 +1335,9 @@ describe("OrchestratorMcpService provider resolution", () => {
             } else {
               assert.equal(request.modelSelection.model, "codex-alt-model", testCase.name);
             }
-          }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+          }).pipe(
+            Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))),
+          );
         }
       }),
   );
