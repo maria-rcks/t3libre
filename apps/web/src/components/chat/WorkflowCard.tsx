@@ -1,4 +1,5 @@
-import { ThreadId, type OrchestrationV2Subagent } from "@t3tools/contracts";
+import { ThreadId, type OrchestrationV2Subagent, type ServerProvider } from "@t3tools/contracts";
+import { resolveSubagentMetadata } from "@t3tools/client-runtime/state/subagent-display";
 import {
   projectedSubagentsToRuntime,
   isActiveSubagentStatus,
@@ -23,6 +24,10 @@ import { Dialog, DialogHeader, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { AgentElapsed } from "./AgentElapsed";
 import { ComposerBanner } from "./ComposerBanner";
+import {
+  useWorkflowLineageViewStore,
+  type WorkflowLineageView,
+} from "../../workflowLineageViewStore";
 
 type WorkflowStatus = RuntimeSubagent["status"];
 
@@ -94,15 +99,29 @@ export function WorkflowCard({
   inWorkflowThread = false,
   variant = "conversation",
   isThreadUnavailable,
+  lineageViewKey,
+  provider,
 }: {
   agent: OrchestrationV2Subagent;
   onOpenThread: (threadId: ThreadId) => void;
   inWorkflowThread?: boolean;
   variant?: "conversation" | "panel";
   isThreadUnavailable?: (threadId: ThreadId) => boolean;
+  /** Remembers open and closed choices across remounts and reloads; without it they stay local. */
+  lineageViewKey?: string;
+  /** The coordinator's provider; Lineage names each agent's model from its catalog. */
+  provider?: Pick<ServerProvider, "driver" | "models"> | undefined;
 }) {
   const panel = variant === "panel";
-  const [expanded, setExpanded] = useState(!panel);
+  const [localView, setLocalView] = useState<WorkflowLineageView>({});
+  const storedView = useWorkflowLineageViewStore((state) =>
+    lineageViewKey === undefined ? undefined : state.byKey[lineageViewKey],
+  );
+  const remember = useWorkflowLineageViewStore((state) => state.remember);
+  const view = lineageViewKey === undefined ? localView : (storedView ?? {});
+  const updateView = (change: (current: WorkflowLineageView) => WorkflowLineageView) =>
+    lineageViewKey === undefined ? setLocalView(change) : remember(lineageViewKey, change);
+  const expanded = view.open ?? !panel;
   const [scriptOpen, setScriptOpen] = useState(false);
   const detailsId = useId();
   const { childThreadId } = agent;
@@ -181,7 +200,7 @@ export function WorkflowCard({
               aria-label={expanded ? "Collapse workflow" : "Expand workflow"}
               aria-expanded={expanded}
               aria-controls={detailsId}
-              onClick={() => setExpanded(!expanded)}
+              onClick={() => updateView((current) => ({ ...current, open: !expanded }))}
             >
               <ChevronDownIcon aria-hidden className={cn("size-3.5", !expanded && "rotate-180")} />
             </Button>
@@ -199,8 +218,22 @@ export function WorkflowCard({
                   title={phase.title}
                   members={members.filter((member) => (member.phaseIndex ?? -1) === phase.index)}
                   coordinatorStatus={coordinator.status}
-                  defaultExpanded={phase.index === currentPhase}
+                  expanded={view.phases?.[phase.index] ?? phase.index === currentPhase}
+                  onExpandedChange={(open) =>
+                    updateView((current) => ({
+                      ...current,
+                      phases: { ...current.phases, [phase.index]: open },
+                    }))
+                  }
+                  showCompleted={view.completedShown?.[phase.index] ?? false}
+                  onShowCompletedChange={(show) =>
+                    updateView((current) => ({
+                      ...current,
+                      completedShown: { ...current.completedShown, [phase.index]: show },
+                    }))
+                  }
                   panel={panel}
+                  provider={provider}
                   onOpenThread={onOpenThread}
                   isThreadUnavailable={isThreadUnavailable}
                 />
@@ -253,23 +286,35 @@ function WorkflowPhase({
   title,
   members,
   coordinatorStatus,
-  defaultExpanded,
+  expanded,
+  onExpandedChange,
+  showCompleted,
+  onShowCompletedChange,
   panel,
+  provider,
   onOpenThread,
   isThreadUnavailable,
 }: {
   title: string;
   members: RuntimeSubagent[];
   coordinatorStatus: WorkflowStatus;
-  defaultExpanded: boolean;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  /** Lineage only: completed agents stay behind "Show N completed" until revealed. */
+  showCompleted: boolean;
+  onShowCompletedChange: (show: boolean) => void;
   panel: boolean;
+  provider: Pick<ServerProvider, "driver" | "models"> | undefined;
   onOpenThread: (threadId: ThreadId) => void;
   isThreadUnavailable: ((threadId: ThreadId) => boolean) | undefined;
 }) {
-  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
-  const expanded = userExpanded ?? defaultExpanded;
   const membersId = useId();
   const completed = members.filter((member) => member.status === "completed").length;
+  const foldCompleted = panel && completed > 0;
+  const visibleMembers =
+    foldCompleted && !showCompleted
+      ? members.filter((member) => member.status !== "completed")
+      : members;
   const failed = members.some((member) => member.status === "failed");
   const active = members.some((member) => isActiveSubagentStatus(member.status));
   const summary =
@@ -285,7 +330,7 @@ function WorkflowPhase({
         aria-label={`${title}: ${summary}`}
         aria-expanded={expanded}
         aria-controls={membersId}
-        onClick={() => setUserExpanded(!expanded)}
+        onClick={() => onExpandedChange(!expanded)}
         className="py-1 pe-2 hover:bg-accent/30"
       >
         <ComposerBanner.Icon>
@@ -301,11 +346,12 @@ function WorkflowPhase({
       </ComposerBanner.Row>
       {expanded ? (
         <ul id={membersId} aria-label={`${title} agents`} className="mb-1 ml-3 list-none">
-          {members.map((member) => (
+          {visibleMembers.map((member) => (
             <li key={member.id}>
               <WorkflowMember
                 agent={member}
                 panel={panel}
+                provider={provider}
                 onOpenThread={onOpenThread}
                 unavailable={Boolean(
                   member.childThreadId &&
@@ -314,6 +360,21 @@ function WorkflowPhase({
               />
             </li>
           ))}
+          {foldCompleted ? (
+            <li>
+              <ComposerBanner.Row
+                render={<button type="button" />}
+                aria-expanded={showCompleted}
+                onClick={() => onShowCompletedChange(!showCompleted)}
+                className="py-1 pe-2 text-2xs text-muted-foreground hover:bg-accent/30 hover:text-foreground"
+              >
+                <ComposerBanner.Icon />
+                <ComposerBanner.Content>
+                  {showCompleted ? "Hide completed" : `Show ${completed} completed`}
+                </ComposerBanner.Content>
+              </ComposerBanner.Row>
+            </li>
+          ) : null}
           {members.length === 0 ? (
             <li className="px-1 py-2 text-2xs text-muted-foreground">
               {isActiveSubagentStatus(coordinatorStatus)
@@ -330,30 +391,50 @@ function WorkflowPhase({
 function WorkflowMember({
   agent,
   panel,
+  provider,
   onOpenThread,
   unavailable,
 }: {
   agent: RuntimeSubagent;
   panel: boolean;
+  provider: Pick<ServerProvider, "driver" | "models"> | undefined;
   onOpenThread: (threadId: ThreadId) => void;
   unavailable?: boolean;
 }) {
   const childThreadId = agent.childThreadId ? ThreadId.make(agent.childThreadId) : null;
+  // Lineage has no room beside the label, so the model gets its own line.
+  const modelLabel =
+    panel && agent.model
+      ? resolveSubagentMetadata({ model: agent.model, provider }).modelLabel
+      : null;
   const content = (
     <>
       <ComposerBanner.Icon>
         <StatusMark status={agent.status} />
       </ComposerBanner.Icon>
-      <ComposerBanner.Content>
+      <ComposerBanner.Content className={modelLabel ? "block" : undefined}>
         <span
           className={cn(
-            "min-w-0 truncate",
+            "block min-w-0 truncate",
             agent.status === "completed" && "text-muted-foreground/55",
           )}
         >
           <span className="sr-only">{statusLabel(agent.status)}: </span>
           {agent.title}
         </span>
+        {modelLabel ? (
+          <span
+            className={cn(
+              "block truncate text-2xs",
+              // Never brighter than the label it sits under.
+              agent.status === "completed"
+                ? "text-muted-foreground/55"
+                : "text-muted-foreground/70",
+            )}
+          >
+            {modelLabel}
+          </span>
+        ) : null}
       </ComposerBanner.Content>
       <ComposerBanner.Actions>
         {agent.attempt !== null && agent.attempt > 1 ? (
