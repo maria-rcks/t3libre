@@ -76,6 +76,10 @@ export function useThreadShell(ref: ScopedThreadRef | null): EnvironmentThreadSh
   );
 }
 
+export function useChildThreadInputs(ref: ScopedThreadRef) {
+  return useAtomValue(environmentThreadShells.childThreadInputsAtom(ref));
+}
+
 export function useEnvironmentServerConfig(
   environmentId: EnvironmentId | null,
 ): ServerConfig | null {

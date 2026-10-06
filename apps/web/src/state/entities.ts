@@ -37,6 +37,9 @@ const EMPTY_THREAD_SHELLS_ATOM = Atom.make<ReadonlyArray<EnvironmentThreadShell>
 const EMPTY_THREAD_SHELL_ATOM = Atom.make<EnvironmentThreadShell | null>(null).pipe(
   Atom.withLabel("web-thread-shell:empty"),
 );
+const EMPTY_CHILD_THREAD_INPUTS_ATOM = Atom.make<
+  Atom.Type<ReturnType<typeof environmentThreadShells.childThreadInputsAtom>>
+>([]);
 const EMPTY_THREAD_PROJECTION_ATOM = Atom.make<EnvironmentThread | null>(null).pipe(
   Atom.withLabel("web-thread-projection:empty"),
 );
@@ -114,6 +117,14 @@ export function useProject(ref: ScopedProjectRef | null): EnvironmentProject | n
 export function useThreadShell(ref: ScopedThreadRef | null): EnvironmentThreadShell | null {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_SHELL_ATOM : environmentThreadShells.threadShellAtom(ref),
+  );
+}
+
+export function useChildThreadInputs(ref: ScopedThreadRef | null) {
+  return useAtomValue(
+    ref === null
+      ? EMPTY_CHILD_THREAD_INPUTS_ATOM
+      : environmentThreadShells.childThreadInputsAtom(ref),
   );
 }
 
