@@ -171,12 +171,11 @@ function FileHeader(props: {
 
 type FileViewMode = "preview" | "source";
 
+// A blank param (a hand-typed deep link) is treated as missing, since branded
+// IDs reject whitespace-only values.
 function firstRouteParam(value: string | string[] | undefined): string | null {
-  if (Array.isArray(value)) {
-    return value[0] ?? null;
-  }
-
-  return value ?? null;
+  const first = Array.isArray(value) ? value[0] : value;
+  return first === undefined || first.trim().length === 0 ? null : first;
 }
 
 function normalizeRoutePath(value: string | string[] | undefined): string | null {
@@ -417,7 +416,6 @@ export function ThreadFilesTreeScreen(props: ThreadFilesRouteScreenProps) {
   const { fileInspector, layout, showAuxiliaryPane } = useAdaptiveWorkspaceLayout();
   const [searchQuery, setSearchQuery] = useState("");
   const { themeAppearance: highlightTheme } = useAppearancePreferences();
-  const headerColor = useUniwindTheme()["--color-header"];
   const { cwd, environmentId, projectName, selectedThread, threadId } = useThreadFilesWorkspace(
     props.route.params,
   );
@@ -554,13 +552,7 @@ export function ThreadFilesTreeScreen(props: ThreadFilesRouteScreenProps) {
     </>
   );
 
-  return Platform.OS === "android" ? (
-    <View className="flex-1" style={{ backgroundColor: headerColor }}>
-      {content}
-    </View>
-  ) : (
-    content
-  );
+  return Platform.OS === "android" ? <View className="flex-1 bg-header">{content}</View> : content;
 }
 
 export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {

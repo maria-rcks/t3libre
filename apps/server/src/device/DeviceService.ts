@@ -56,7 +56,7 @@ import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import * as ServerSettings from "../serverSettings.ts";
 import { isLocalSshDeviceHost, remoteSshDeviceHosts } from "./localSshDeviceHost.ts";
@@ -906,13 +906,11 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
         lifecycleLock.withPermit(
           Effect.gen(function* () {
             if (!installTool)
-              return yield* Effect.fail(
-                new DeviceOperationError({
-                  operation: "update device tool",
-                  reason: "request_failed",
-                  cause: new Error("Tool installation is unavailable in this device service."),
-                }),
-              );
+              return yield* new DeviceOperationError({
+                operation: "update device tool",
+                reason: "request_failed",
+                cause: new Error("Tool installation is unavailable in this device service."),
+              });
             yield* installTool(tool);
             return yield* inspect;
           }),
