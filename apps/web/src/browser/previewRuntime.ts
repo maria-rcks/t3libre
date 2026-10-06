@@ -3,7 +3,6 @@ import type { EnvironmentId, PreviewRuntime, PreviewSessionSnapshot } from "@t3t
 
 import { isElectron } from "~/env";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
-import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
 import {
   readEnvironmentSupportsServerBrowser,
@@ -39,17 +38,6 @@ export function rendersServerTabNatively(
     snapshot?.runtime === "server" &&
     primaryEnvironmentId !== null &&
     environmentId === primaryEnvironmentId
-  );
-}
-
-export function readRendersServerTabNatively(
-  environmentId: EnvironmentId,
-  snapshot: Pick<PreviewSessionSnapshot, "runtime"> | null | undefined,
-): boolean {
-  return rendersServerTabNatively(
-    environmentId,
-    appAtomRegistry.get(primaryEnvironmentIdAtom),
-    snapshot,
   );
 }
 

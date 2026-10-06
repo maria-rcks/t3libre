@@ -68,7 +68,7 @@ export class DesktopBrowserChannel extends Context.Service<
   }
 >()("t3/preview/DesktopBrowserChannel") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const inputFd = config.desktopBrowserFd;
   const controlFd = config.desktopBrowserControlFd;
@@ -218,16 +218,3 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(DesktopBrowserChannel, make);
-
-/** A server without a desktop app. */
-export const layerNone = Layer.succeed(
-  DesktopBrowserChannel,
-  DesktopBrowserChannel.of({
-    available: false,
-    awaitAttached: () => Effect.succeed(false),
-    detached: Stream.empty,
-    isAttached: () => Effect.succeed(false),
-    endpoint: () => Effect.die("No desktop app is attached to this server."),
-    pointer: () => Effect.void,
-  }),
-);

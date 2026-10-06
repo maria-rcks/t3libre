@@ -75,7 +75,7 @@ export class DesktopBrowserHost extends Context.Service<
   }
 >()("@t3tools/desktop/preview/DesktopBrowserHost") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const outbox = yield* PubSub.unbounded<DesktopBrowserEventType>();
   const pointers = yield* PubSub.sliding<{
     readonly key: DesktopBrowserTabKey;

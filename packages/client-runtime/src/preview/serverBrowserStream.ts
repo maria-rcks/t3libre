@@ -111,7 +111,7 @@ export interface PreviewStreamFileChooser {
   readonly credentials: boolean;
 }
 
-export const previewStreamUploadUrl = (
+const previewStreamUploadUrl = (
   target: Pick<PreviewStreamTarget, "access" | "threadId" | "tabId">,
   chooser: string,
 ): string =>
@@ -139,7 +139,7 @@ export async function uploadPreviewStreamFiles(
   if (!response.ok) throw new Error((await response.text()) || "The upload was refused.");
 }
 
-export const previewStreamDownloadUrl = (
+const previewStreamDownloadUrl = (
   target: Pick<PreviewStreamTarget, "access" | "threadId" | "tabId">,
   id: string,
 ): string =>
