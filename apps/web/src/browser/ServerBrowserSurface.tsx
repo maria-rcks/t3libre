@@ -46,7 +46,7 @@ import { refreshPreviewStreamAccess, usePreviewStreamAccess } from "~/state/prev
 export interface ServerBrowserHandle {
   readonly navigate: (url: string) => void;
   readonly history: (delta: -1 | 1) => void;
-  readonly reload: () => void;
+  readonly reload: (options?: { readonly ignoreCache?: boolean }) => void;
   readonly viewport: (setting: PreviewViewportSetting) => void;
   readonly canvas: () => HTMLCanvasElement | null;
 }
@@ -317,7 +317,8 @@ export function ServerBrowserSurface(props: {
     () => ({
       navigate: (url) => send({ type: "navigate", url }),
       history: (delta) => send({ type: "history", delta }),
-      reload: () => send({ type: "reload" }),
+      reload: (options) =>
+        send({ type: "reload", ...(options?.ignoreCache ? { ignoreCache: true } : {}) }),
       viewport: (setting) => send({ type: "viewport", setting }),
       canvas: () => (hasFrameRef.current ? canvasRef.current : null),
     }),

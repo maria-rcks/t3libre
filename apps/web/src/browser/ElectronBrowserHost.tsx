@@ -108,6 +108,14 @@ export function ElectronBrowserHost() {
             profileId={snapshot.profileId}
             zoomFactor={zoomFactor}
             serverDriven={snapshot.runtime === "server"}
+            {...(snapshot.runtime === "server"
+              ? {
+                  serverRendering: {
+                    colorScheme: snapshot.colorScheme ?? "system",
+                    zoomFactor: snapshot.zoomFactor ?? 1,
+                  },
+                }
+              : {})}
           />
         );
       })}

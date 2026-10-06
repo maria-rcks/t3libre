@@ -34,6 +34,7 @@ import {
   type PreviewViewportSetting,
   ThreadId,
   SERVER_BROWSER_AUTOMATION_CLIENT_ID,
+  type PreviewAppearancePreference,
 } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
@@ -304,6 +305,8 @@ interface ServerTab {
   } | null;
   dialog: Dialog | null;
   setting: PreviewViewportSetting;
+  colorScheme: PreviewAppearancePreference;
+  zoomFactor: number;
   loading: boolean;
   closing: boolean;
   recording: Recording | null;
@@ -345,6 +348,11 @@ const pushBounded = <A>(
   buffer.push(entry);
   if (buffer.length > limit) buffer.splice(0, buffer.length - limit);
 };
+
+const viewportSettingsEqual = (left: PreviewViewportSetting, right: PreviewViewportSetting) =>
+  left._tag === right._tag &&
+  (left._tag === "fill" ||
+    (right._tag !== "fill" && left.width === right.width && left.height === right.height));
 
 const fixedViewportSize = (setting: PreviewViewportSetting) =>
   setting._tag === "fill" ? null : { width: setting.width, height: setting.height };
@@ -560,15 +568,48 @@ const make = Effect.gen(function* () {
     );
   };
 
-  const broadcastViewport = (tab: ServerTab) => {
+  /** The CSS size the page lays out in: the viewport shrunk by the tab's zoom, as Chrome zooms. */
+  const layoutSize = (tab: ServerTab) => {
     const size = tab.page.viewportSize();
+    if (!size || tab.desktop) return size;
+    return {
+      width: Math.max(1, Math.round(size.width / tab.zoomFactor)),
+      height: Math.max(1, Math.round(size.height / tab.zoomFactor)),
+    };
+  };
+
+  /**
+   * Zooms a headless page as Chrome's zoom does: it lays out in fewer CSS
+   * pixels and draws each one larger, so frames keep their size. The desktop
+   * zooms the pages it renders itself.
+   */
+  const applyZoom = async (tab: ServerTab) => {
+    if (tab.desktop) return;
+    const size = tab.page.viewportSize();
+    if (!size) return;
+    if (tab.zoomFactor === 1) {
+      // Playwright's own override carries the plain viewport.
+      await tab.page.setViewportSize(size);
+      return;
+    }
+    const layout = layoutSize(tab)!;
+    await tab.cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: layout.width,
+      height: layout.height,
+      deviceScaleFactor: RENDER_SCALE * tab.zoomFactor,
+      mobile: false,
+    });
+  };
+
+  const broadcastViewport = (tab: ServerTab) => {
+    const size = layoutSize(tab);
     if (!size) return;
     for (const viewer of tab.viewers) viewer.push({ _tag: "viewport", ...size });
   };
 
   const applySetting = async (tab: ServerTab, setting: PreviewViewportSetting) => {
     tab.setting = setting;
-    // The desktop panel sizes its own page.
+    // The desktop lays its webview out at the published setting itself.
     if (tab.desktop) return;
     const size =
       fixedViewportSize(setting) ??
@@ -578,7 +619,23 @@ const make = Effect.gen(function* () {
         .sort((left, right) => right.order - left.order)[0] ??
       UNATTACHED_FILL_VIEWPORT;
     await tab.page.setViewportSize({ width: size.width, height: size.height });
+    await applyZoom(tab);
     broadcastViewport(tab);
+  };
+
+  /** Applies a tab's published appearance and, for headless tabs, zoom. */
+  const applyRendering = async (tab: ServerTab, snapshot: PreviewSessionSnapshot) => {
+    const colorScheme = snapshot.colorScheme ?? "system";
+    if (colorScheme !== tab.colorScheme) {
+      tab.colorScheme = colorScheme;
+      await tab.page.emulateMedia({ colorScheme: colorScheme === "system" ? null : colorScheme });
+    }
+    const zoomFactor = snapshot.zoomFactor ?? 1;
+    if (zoomFactor !== tab.zoomFactor && !tab.desktop) {
+      tab.zoomFactor = zoomFactor;
+      await applyZoom(tab);
+      broadcastViewport(tab);
+    }
   };
 
   /** Whether the preview session for a tab still exists. */
@@ -691,6 +748,8 @@ const make = Effect.gen(function* () {
       fileChooser: null,
       dialog: null,
       setting: snapshot.viewport ?? FILL_PREVIEW_VIEWPORT,
+      colorScheme: "system",
+      zoomFactor: 1,
       loading: false,
       closing: false,
       recording: null,
@@ -702,6 +761,7 @@ const make = Effect.gen(function* () {
     if (!desktop) {
       await page.setViewportSize(fixedViewportSize(tab.setting) ?? UNATTACHED_FILL_VIEWPORT);
     }
+    await applyRendering(tab, snapshot);
     const isMainNavigation = (request: { isNavigationRequest(): boolean; frame(): unknown }) =>
       request.isNavigationRequest() && request.frame() === page.mainFrame();
     page.on("request", (request) => {
@@ -1573,12 +1633,7 @@ const make = Effect.gen(function* () {
       case "resize": {
         const setting = resolvePreviewViewport(input as PreviewAutomationResizeInput);
         await Effect.runPromise(
-          manager.resize({
-            threadId: tab.threadId,
-            tabId: tab.tabId,
-            viewport: setting,
-            serverControlled: true,
-          }),
+          manager.resize({ threadId: tab.threadId, tabId: tab.tabId, viewport: setting }),
         );
         await applySetting(tab, setting);
         return {
@@ -1589,7 +1644,10 @@ const make = Effect.gen(function* () {
       }
       case "setColorScheme": {
         const { colorScheme } = input as PreviewAutomationSetColorSchemeInput;
-        await tab.page.emulateMedia({ colorScheme: colorScheme === "system" ? null : colorScheme });
+        const snapshot = await Effect.runPromise(
+          manager.adjust({ threadId: tab.threadId, tabId: tab.tabId, colorScheme }),
+        );
+        await applyRendering(tab, snapshot);
         return { tabId: tab.tabId, colorScheme };
       }
       case "snapshot": {
@@ -1684,6 +1742,26 @@ const make = Effect.gen(function* () {
         closedSessions.add(key);
         dropTab(tab, false);
         closedSessions.delete(key);
+        return;
+      }
+      // Any client or agent may change these; the page follows what was published.
+      if (event.type === "resized") {
+        await tab.control
+          .system(async () => {
+            if (
+              !viewportSettingsEqual(event.snapshot.viewport ?? FILL_PREVIEW_VIEWPORT, tab.setting)
+            ) {
+              await applySetting(tab, event.snapshot.viewport ?? FILL_PREVIEW_VIEWPORT);
+            }
+            await applyRendering(tab, event.snapshot);
+            const request = event.request;
+            if (request?.clear === "cookies") await tab.cdp.send("Network.clearBrowserCookies");
+            if (request?.clear === "cache") await tab.cdp.send("Network.clearBrowserCache");
+            if (request?.hardReload) await tab.cdp.send("Page.reload", { ignoreCache: true });
+          })
+          .catch((cause: unknown) =>
+            runFork(Effect.logWarning("server preview could not apply a tab setting", { cause })),
+          );
       }
     });
 
@@ -1796,12 +1874,7 @@ const make = Effect.gen(function* () {
       case "viewport": {
         const setting = decodeViewportSetting(message.setting);
         await Effect.runPromise(
-          manager.resize({
-            threadId: tab.threadId,
-            tabId: tab.tabId,
-            viewport: setting,
-            serverControlled: true,
-          }),
+          manager.resize({ threadId: tab.threadId, tabId: tab.tabId, viewport: setting }),
         );
         await applySetting(tab, setting);
         return;
@@ -1818,6 +1891,11 @@ const make = Effect.gen(function* () {
           : tab.page.goForward(VIEWER_NAVIGATION_OPTIONS));
         return;
       case "reload":
+        // A hard reload fetches everything again, as Chrome's Shift+Reload does.
+        if (message.ignoreCache === true) {
+          await session.send("Page.reload", { ignoreCache: true });
+          return;
+        }
         await tab.page.reload(VIEWER_NAVIGATION_OPTIONS);
         return;
       case "probe": {

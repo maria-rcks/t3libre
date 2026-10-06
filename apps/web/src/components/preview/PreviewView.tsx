@@ -11,6 +11,9 @@ import {
   type PreviewAnnotationPayload,
   type PreviewViewportSetting,
   type ScopedThreadRef,
+  DEFAULT_PREVIEW_ZOOM_FACTOR,
+  PREVIEW_ZOOM_LEVELS,
+  type PreviewAdjustInput,
 } from "@t3tools/contracts";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -46,12 +49,14 @@ import { subscribePreviewAction } from "./previewActionBus";
 import { openPreviewSession } from "./openPreviewSession";
 import { PreviewChromeRow } from "./PreviewChromeRow";
 import { PreviewEmptyState } from "./PreviewEmptyState";
-import { PreviewMoreMenu } from "./PreviewMoreMenu";
+import { PreviewMoreMenu, type PreviewMoreMenuActions } from "./PreviewMoreMenu";
 import {
   commitBrowserViewportChange,
   subscribeBrowserViewportChange,
 } from "~/browser/browserViewportActions";
 import { browserResponsiveViewportForToggle, useBrowserDefaults } from "~/browser/browserDefaults";
+import { BrowserDeviceToolbar } from "~/browser/BrowserDeviceToolbar";
+import { BROWSER_DEVICE_TOOLBAR_HEIGHT } from "~/browser/browserViewportLayout";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { BrowserSettingsReadError } from "~/browser/openFileInPreview";
 import { PreviewUnreachable } from "./PreviewUnreachable";
@@ -132,6 +137,7 @@ export function PreviewView({
     : null;
   const open = useAtomCommand(previewEnvironment.open);
   const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");
+  const adjust = useAtomCommand(previewEnvironment.adjust, "preview appearance or zoom");
 
   usePreviewSession(threadRef);
 
@@ -157,7 +163,24 @@ export function PreviewView({
   // desktop app's own server's tabs, which render here natively while the server drives them.
   const nativeServerTab = useRendersServerTabNatively(threadRef.environmentId, snapshot);
   const isServerTab = snapshot?.runtime === "server" && !nativeServerTab;
+  /** The server owns this tab's appearance, zoom, and size, whoever renders it. */
+  const serverOwnsRendering = snapshot?.runtime === "server";
   const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
+  const [serverAspectRatioLocked, setServerAspectRatioLocked] = useState(false);
+  const serverBodyRef = useRef<HTMLDivElement | null>(null);
+  const [serverToolbarWidth, setServerToolbarWidth] = useState(0);
+  // The streamed tab's device toolbar spans the panel; only measured while it shows.
+  const serverToolbarShown =
+    snapshot?.runtime === "server" && (snapshot.viewport ?? FILL_PREVIEW_VIEWPORT)._tag !== "fill";
+  useEffect(() => {
+    const element = serverBodyRef.current;
+    if (!element || !serverToolbarShown) return;
+    const observer = new ResizeObserver(([entry]) =>
+      setServerToolbarWidth(Math.max(1, Math.round(entry?.contentRect.width ?? 0))),
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [serverToolbarShown]);
   const [serverControlledTabId, setServerControlledTabId] = useState<string | null>(null);
   const serverInputDisabled = isServerTab && serverControlledTabId !== runtimeTabId;
   const [serverFrameTabId, setServerFrameTabId] = useState<string | null>(null);
@@ -265,27 +288,64 @@ export function PreviewView({
     else if (previewBridge && runtimeTabId) void previewBridge.refresh(runtimeTabId);
   }, [isServerTab, runtimeTabId]);
 
+  /** Appearance and zoom of a server tab, through the server for every client. */
+  const adjustServerTab = useCallback(
+    async (change: Omit<PreviewAdjustInput, "threadId" | "tabId">) => {
+      if (!tabId) return;
+      const result = await adjust({
+        environmentId: threadRef.environmentId,
+        input: { threadId: threadRef.threadId, tabId, ...change },
+      });
+      if (result._tag === "Failure") {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add({
+          type: "error",
+          title: "Unable to change the browser tab",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+        return;
+      }
+      updatePreviewServerSnapshot(threadRef, result.value);
+    },
+    [adjust, tabId, threadRef],
+  );
+
+  const serverZoomFactor = snapshot?.zoomFactor ?? DEFAULT_PREVIEW_ZOOM_FACTOR;
+  const stepServerZoom = useCallback(
+    (direction: -1 | 0 | 1) => {
+      const index = PREVIEW_ZOOM_LEVELS.indexOf(serverZoomFactor);
+      const next =
+        direction === 0
+          ? DEFAULT_PREVIEW_ZOOM_FACTOR
+          : PREVIEW_ZOOM_LEVELS[
+              Math.min(
+                Math.max((index < 0 ? 7 : index) + direction, 0),
+                PREVIEW_ZOOM_LEVELS.length - 1,
+              )
+            ]!;
+      if (next !== serverZoomFactor) void adjustServerTab({ zoomFactor: next });
+    },
+    [adjustServerTab, serverZoomFactor],
+  );
+
   const handleZoomIn = useCallback(() => {
-    if (previewBridge && runtimeTabId && !isServerTab) void previewBridge.zoomIn(runtimeTabId);
-  }, [isServerTab, runtimeTabId]);
+    if (serverOwnsRendering) stepServerZoom(1);
+    else if (previewBridge && runtimeTabId) void previewBridge.zoomIn(runtimeTabId);
+  }, [runtimeTabId, serverOwnsRendering, stepServerZoom]);
 
   const handleZoomOut = useCallback(() => {
-    if (previewBridge && runtimeTabId && !isServerTab) void previewBridge.zoomOut(runtimeTabId);
-  }, [isServerTab, runtimeTabId]);
+    if (serverOwnsRendering) stepServerZoom(-1);
+    else if (previewBridge && runtimeTabId) void previewBridge.zoomOut(runtimeTabId);
+  }, [runtimeTabId, serverOwnsRendering, stepServerZoom]);
 
   const handleResetZoom = useCallback(() => {
-    if (previewBridge && runtimeTabId && !isServerTab) void previewBridge.resetZoom(runtimeTabId);
-  }, [isServerTab, runtimeTabId]);
+    if (serverOwnsRendering) stepServerZoom(0);
+    else if (previewBridge && runtimeTabId) void previewBridge.resetZoom(runtimeTabId);
+  }, [runtimeTabId, serverOwnsRendering, stepServerZoom]);
 
   const handleViewportChange = useCallback(
     async (nextViewport: PreviewViewportSetting) => {
       if (!tabId) return;
-      if (isServerTab) {
-        if (serverInputDisabled)
-          throw new Error("Take control before changing the browser viewport.");
-        serverSurfaceRef.current?.viewport(nextViewport);
-        return;
-      }
       const result = await resize({
         environmentId: threadRef.environmentId,
         input: {
@@ -305,7 +365,7 @@ export function PreviewView({
       }
       updatePreviewServerSnapshot(threadRef, result.value);
     },
-    [isServerTab, resize, serverInputDisabled, tabId, threadRef],
+    [resize, tabId, threadRef],
   );
 
   const handleToggleDeviceToolbar = () => {
@@ -320,7 +380,7 @@ export function PreviewView({
       browserResponsiveViewportForToggle({
         defaults: browserDefaults,
         panelRect,
-        zoomFactor: desktopOverlay?.zoomFactor,
+        zoomFactor: serverOwnsRendering ? serverZoomFactor : desktopOverlay?.zoomFactor,
       }),
     ).catch(() => undefined);
   };
@@ -354,6 +414,53 @@ export function PreviewView({
     usePreviewMiniPlayerStore.getState().open(threadRef, browserMiniPlayerSource(tabId));
     useRightPanelStore.getState().close(threadRef);
   }, [miniPlayerTabId, tabId, threadRef]);
+
+  /**
+   * The menu's actions. A server tab, streamed or rendered natively here, runs
+   * them through its environment, so every client and agent sees one state.
+   * Opening DevTools and a separate window need the desktop's own page.
+   */
+  const desktopCall = (op: ((tabId: string) => Promise<void>) | undefined) => () => {
+    if (op && runtimeTabId) void op(runtimeTabId).catch(() => undefined);
+  };
+  const moreMenuActions: PreviewMoreMenuActions | null = serverOwnsRendering
+    ? {
+        hardReload: () => void adjustServerTab({ hardReload: true }),
+        setColorScheme: (colorScheme) => void adjustServerTab({ colorScheme }),
+        zoomIn: handleZoomIn,
+        zoomOut: handleZoomOut,
+        resetZoom: handleResetZoom,
+        clearCookies: () => void adjustServerTab({ clear: "cookies" }),
+        clearCache: () => void adjustServerTab({ clear: "cache" }),
+        ...(nativeServerTab && previewBridge
+          ? {
+              openDevTools: desktopCall(previewBridge.openDevTools),
+              toggleNativePictureInPicture: () => handleNativePictureInPicture(),
+            }
+          : {}),
+      }
+    : previewBridge
+      ? {
+          hardReload: desktopCall(previewBridge.hardReload),
+          setColorScheme: (colorScheme) => {
+            if (runtimeTabId)
+              void previewBridge?.setColorScheme(runtimeTabId, colorScheme).catch(() => undefined);
+          },
+          zoomIn: handleZoomIn,
+          zoomOut: handleZoomOut,
+          resetZoom: handleResetZoom,
+          clearCookies: () =>
+            void previewBridge
+              ?.clearCookies(threadRef.environmentId, activeProfileId)
+              .catch(() => undefined),
+          clearCache: () =>
+            void previewBridge
+              ?.clearCache(threadRef.environmentId, activeProfileId)
+              .catch(() => undefined),
+          openDevTools: desktopCall(previewBridge.openDevTools),
+          toggleNativePictureInPicture: () => handleNativePictureInPicture(),
+        }
+      : null;
 
   const handleNativePictureInPicture = useCallback(() => {
     if (!previewBridge || !runtimeTabId) return;
@@ -797,52 +904,67 @@ export function PreviewView({
           ) : null
         }
         trailingActions={
-          isServerTab || previewBridge ? (
+          moreMenuActions ? (
             <PreviewMoreMenu
-              environmentId={threadRef.environmentId}
-              profileId={activeProfileId}
+              enabled={
+                runtimeTabId !== null &&
+                (serverOwnsRendering || (desktopOverlay?.hasWebContents ?? false))
+              }
+              actions={moreMenuActions}
               profileName={activeProfileName}
-              tabId={runtimeTabId}
-              hasWebContents={desktopOverlay?.hasWebContents ?? false}
-              zoomFactor={desktopOverlay?.zoomFactor ?? 1}
-              colorScheme={desktopOverlay?.colorScheme ?? "system"}
+              zoomFactor={
+                serverOwnsRendering ? serverZoomFactor : (desktopOverlay?.zoomFactor ?? 1)
+              }
+              colorScheme={
+                serverOwnsRendering
+                  ? (snapshot?.colorScheme ?? "system")
+                  : (desktopOverlay?.colorScheme ?? "system")
+              }
               deviceToolbarVisible={viewport._tag !== "fill"}
               onToggleDeviceToolbar={handleToggleDeviceToolbar}
               nativePictureInPicture={desktopOverlay?.pictureInPicture ?? false}
-              onNativePictureInPicture={handleNativePictureInPicture}
-              {...(isServerTab
-                ? {
-                    server: {
-                      disabledReason: serverInputDisabled
-                        ? "Take control to change the viewport"
-                        : null,
-                    },
-                  }
-                : {})}
             />
           ) : null
         }
       />
 
-      <div className="relative min-h-0 flex-1 overflow-hidden">
+      <div ref={serverBodyRef} className="relative min-h-0 flex-1 overflow-hidden">
         {runtimeTabId && snapshot && isServerTab ? (
-          <ServerBrowserSurface
-            key={runtimeTabId}
-            ref={serverSurfaceRef}
-            environmentId={threadRef.environmentId}
-            threadId={threadRef.threadId}
-            tabId={snapshot.tabId}
-            visible={visible}
-            onFirstFrame={() => setServerFrameTabId(runtimeTabId)}
-            onControl={(control) =>
-              setServerControlledTabId(control?.controller === "you" ? runtimeTabId : null)
-            }
-            // Stays connected under the empty state so a URL picked there reaches the page.
-            className={cn(
-              "absolute inset-0 h-full w-full",
-              (showEmptyState || isUnreachable) && "invisible",
-            )}
-          />
+          <>
+            {viewport._tag !== "fill" && !showEmptyState && !isUnreachable ? (
+              <div className="absolute inset-x-0 top-0 z-10">
+                <BrowserDeviceToolbar
+                  setting={viewport}
+                  width={serverToolbarWidth}
+                  aspectRatio={serverAspectRatioLocked ? viewport.width / viewport.height : null}
+                  onAspectRatioChange={(ratio) => setServerAspectRatioLocked(ratio !== null)}
+                  onChange={(setting) => commitBrowserViewportChange(runtimeTabId, setting)}
+                />
+              </div>
+            ) : null}
+            <div
+              className="absolute inset-x-0 bottom-0"
+              style={{ top: viewport._tag !== "fill" ? BROWSER_DEVICE_TOOLBAR_HEIGHT : 0 }}
+            >
+              <ServerBrowserSurface
+                key={runtimeTabId}
+                ref={serverSurfaceRef}
+                environmentId={threadRef.environmentId}
+                threadId={threadRef.threadId}
+                tabId={snapshot.tabId}
+                visible={visible}
+                onFirstFrame={() => setServerFrameTabId(runtimeTabId)}
+                onControl={(control) =>
+                  setServerControlledTabId(control?.controller === "you" ? runtimeTabId : null)
+                }
+                // Stays connected under the empty state so a URL picked there reaches the page.
+                className={cn(
+                  "absolute inset-0 h-full w-full",
+                  (showEmptyState || isUnreachable) && "invisible",
+                )}
+              />
+            </div>
+          </>
         ) : runtimeTabId && snapshot && !showEmptyState ? (
           previewBridge ? (
             <BrowserSurfaceSlot

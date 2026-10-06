@@ -90,7 +90,7 @@ export type PreviewStreamInput =
   | { readonly type: "resize"; readonly width: number; readonly height: number }
   | { readonly type: "navigate"; readonly url: string }
   | { readonly type: "history"; readonly delta: -1 | 1 }
-  | { readonly type: "reload" }
+  | { readonly type: "reload"; readonly ignoreCache?: boolean }
   /** Asks whether the page point takes text. Touch viewers send it on touch start. */
   | { readonly type: "probe"; readonly x: number; readonly y: number };
 

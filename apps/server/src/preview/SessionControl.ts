@@ -85,6 +85,18 @@ export class SessionControl {
     return this.action(() => this.agentId === agentId && this.owner === null, run);
   }
 
+  /**
+   * Work any client may ask for, such as a viewport or appearance change. It
+   * waits its turn behind running actions but needs no control.
+   */
+  system<A>(run: () => Promise<A>) {
+    this.assertOpen();
+    return this.enqueue(async () => {
+      this.assertOpen();
+      return run();
+    });
+  }
+
   human<A>(viewerId: string, run: () => Promise<A>) {
     return this.action(() => this.owner === viewerId, run);
   }

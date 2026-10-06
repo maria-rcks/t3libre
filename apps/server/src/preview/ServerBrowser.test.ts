@@ -101,6 +101,7 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
     goBack: vi.fn(async () => {}),
     goForward: vi.fn(async () => {}),
     reload: vi.fn(async () => {}),
+    emulateMedia: vi.fn(async () => {}),
     waitForLoadState: vi.fn(async () => {}),
     evaluate: vi.fn(async () => ({
       url,
@@ -442,6 +443,40 @@ it.live("streams to a read-only viewer without allowing takeover, input, or view
       });
       expect(page.setViewportSize).toHaveBeenCalledWith({ width: 390, height: 844 });
       yield* operator.input({ type: "releaseControl" });
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("applies any client's viewport, appearance, and zoom to a headless tab", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { tabId } = yield* ready;
+      const manager = yield* Manager.PreviewManager;
+      const page = contexts[0]!.page;
+      const session = contexts[0]!.sessions[0]!;
+      const target = { threadId: scope.thread.threadId, tabId };
+      // The agent owns this tab, and the client sends no takeover first.
+      yield* manager.resize({ ...target, viewport: { _tag: "freeform", width: 390, height: 844 } });
+      yield* manager.adjust({ ...target, colorScheme: "dark", zoomFactor: 1.25 });
+      // Settings apply in order, so the reload landing means the earlier ones did too.
+      const reloaded = Promise.withResolvers<void>();
+      const send = session.send.getMockImplementation()!;
+      session.send.mockImplementation(async (method, input) => {
+        if (method === "Page.reload") reloaded.resolve();
+        return send(method, input);
+      });
+      yield* manager.adjust({ ...target, hardReload: true });
+      yield* Effect.promise(() => reloaded.promise);
+      expect(session.send).toHaveBeenCalledWith("Page.reload", { ignoreCache: true });
+      expect(page.setViewportSize).toHaveBeenCalledWith({ width: 390, height: 844 });
+      expect(page.emulateMedia).toHaveBeenCalledWith({ colorScheme: "dark" });
+      // Zoom lays the page out in fewer CSS pixels and draws each one larger.
+      expect(session.send).toHaveBeenCalledWith("Emulation.setDeviceMetricsOverride", {
+        width: 312,
+        height: 675,
+        deviceScaleFactor: 2.5,
+        mobile: false,
+      });
     }),
   ).pipe(Effect.provide(layer)),
 );

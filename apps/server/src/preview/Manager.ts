@@ -21,6 +21,7 @@ import {
   type PreviewRefreshInput,
   type PreviewReportStatusInput,
   type PreviewResizeInput,
+  type PreviewAdjustInput,
   FILL_PREVIEW_VIEWPORT,
   PreviewSessionLookupError,
   type PreviewSessionSnapshot,
@@ -61,7 +62,15 @@ export class PreviewManager extends Context.Service<
       input: PreviewCloseInput & { readonly tabId: string; readonly force: boolean },
     ) => Effect.Effect<void, PreviewError>;
     readonly resize: (
-      input: PreviewResizeInput & { readonly serverControlled?: boolean },
+      input: PreviewResizeInput,
+    ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
+    /**
+     * Records a server tab's appearance or zoom and publishes it; the server's
+     * browser applies it to the page. Any client may send it, as it changes how
+     * the page renders, not what it does.
+     */
+    readonly adjust: (
+      input: PreviewAdjustInput,
     ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
     readonly refresh: (input: PreviewRefreshInput) => Effect.Effect<void, PreviewError>;
     readonly close: (input: PreviewCloseInput) => Effect.Effect<void, PreviewError>;
@@ -330,9 +339,9 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       return yield* mutateExistingSession(
         input.threadId,
         input.tabId,
+        // Any client may size a tab, as the desktop has always allowed; the
+        // server's browser follows the published setting for its own tabs.
         Effect.fn("PreviewManager.resizeSession")(function* (session) {
-          if (session.snapshot.runtime === "server" && !input.serverControlled)
-            return yield* new PreviewControlRequiredError({ tabId: input.tabId });
           const updatedAt = yield* currentIsoTimestamp;
           const snapshot: PreviewSessionSnapshot = {
             ...session.snapshot,
@@ -342,6 +351,46 @@ export const make = Effect.gen(function* PreviewManagerMake() {
           return {
             next: { ...session, snapshot },
             emit: {
+              type: "resized",
+              threadId: session.threadId,
+              tabId: session.tabId,
+              createdAt: snapshot.updatedAt,
+              snapshot,
+            },
+            result: snapshot,
+          };
+        }),
+      );
+    },
+  );
+
+  const adjust: PreviewManager["Service"]["adjust"] = Effect.fn("PreviewManager.adjust")(
+    function* (input) {
+      return yield* mutateExistingSession(
+        input.threadId,
+        input.tabId,
+        Effect.fn("PreviewManager.adjustSession")(function* (session) {
+          const updatedAt = yield* currentIsoTimestamp;
+          const snapshot: PreviewSessionSnapshot = {
+            ...session.snapshot,
+            ...(input.colorScheme === undefined ? {} : { colorScheme: input.colorScheme }),
+            ...(input.zoomFactor === undefined ? {} : { zoomFactor: input.zoomFactor }),
+            updatedAt,
+          };
+          // One-off requests ride on the event for the server's browser to act on.
+          const request =
+            input.hardReload || input.clear
+              ? {
+                  request: {
+                    ...(input.hardReload ? { hardReload: true } : {}),
+                    ...(input.clear ? { clear: input.clear } : {}),
+                  },
+                }
+              : {};
+          return {
+            next: { ...session, snapshot },
+            emit: {
+              ...request,
               type: "resized",
               threadId: session.threadId,
               tabId: session.tabId,
@@ -453,6 +502,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     navigate,
     reportStatus,
     resize,
+    adjust,
     refresh,
     close,
     list,

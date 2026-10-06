@@ -16,6 +16,7 @@ import { ScreenHeader } from "../../components/ScreenHeader";
 import { NativeHeaderToolbar } from "../../native/StackHeader";
 import { useThreadServerBrowserTabs } from "../../state/preview";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { BrowserTabMenu } from "./BrowserTabMenu";
 import { browserTabTitle, browserTabUrl, latestBrowserTab } from "./browserTabs";
 import {
   PreviewStreamWebView,
@@ -169,7 +170,9 @@ function BrowserPreviewScreen({
         <>
           <BrowserAddressBar
             key={tab.tabId}
+            environmentId={environmentId}
             tab={tab}
+            streaming={streaming}
             ready={streaming && canControl}
             onCommand={(input) => streamRef.current?.command(input)}
           />
@@ -202,12 +205,18 @@ function BrowserPreviewScreen({
 }
 
 function BrowserAddressBar({
+  environmentId,
   tab,
   ready,
+  streaming,
   onCommand,
 }: {
+  readonly environmentId: EnvironmentId;
   readonly tab: PreviewSessionSnapshot;
+  /** The viewer controls the page, so navigation and reload apply. */
   readonly ready: boolean;
+  /** The menu's changes need no control, only a live tab. */
+  readonly streaming: boolean;
   readonly onCommand: PreviewStreamRef["command"];
 }) {
   const url = browserTabUrl(tab);
@@ -258,15 +267,7 @@ function BrowserAddressBar({
         disabled={!ready}
         onPress={() => onCommand({ type: "reload" })}
       />
-      {/* An agent or another viewer can fix the size; this returns the page to the screen. */}
-      {tab.viewport && tab.viewport._tag !== "fill" ? (
-        <ControlPill
-          icon="arrow.up.left.and.arrow.down.right"
-          accessibilityLabel="Fit page to screen"
-          disabled={!ready}
-          onPress={() => onCommand({ type: "viewport", setting: FILL_PREVIEW_VIEWPORT })}
-        />
-      ) : null}
+      <BrowserTabMenu environmentId={environmentId} tab={tab} disabled={!streaming} />
     </View>
   );
 }

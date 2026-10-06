@@ -3491,6 +3491,10 @@ const layerWsRpc = (
           observeRpcEffect(WS_METHODS.previewResize, previewManager.resize(input), {
             "rpc.aggregate": "preview",
           }),
+        [WS_METHODS.previewAdjust]: (input) =>
+          observeRpcEffect(WS_METHODS.previewAdjust, previewManager.adjust(input), {
+            "rpc.aggregate": "preview",
+          }),
         [WS_METHODS.previewRefresh]: (input) =>
           observeRpcEffect(WS_METHODS.previewRefresh, previewManager.refresh(input), {
             "rpc.aggregate": "preview",

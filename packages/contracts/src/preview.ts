@@ -193,6 +193,10 @@ export const PreviewSessionSnapshot = Schema.Struct({
   canGoForward: Schema.Boolean,
   /** Missing snapshots from older servers are treated as fill-panel mode. */
   viewport: Schema.optional(PreviewViewportSetting),
+  /** Server tabs only; the desktop keeps its own tabs' appearance. Absent means `system`. */
+  colorScheme: Schema.optional(PreviewAppearancePreference),
+  /** Server tabs only. Absent means 1. */
+  zoomFactor: Schema.optional(PreviewZoomFactor),
   /**
    * Browser profile the tab's Chromium partition is derived from. Fixed at
    * open: Electron only honours a `<webview>`'s partition before attach, so
@@ -260,6 +264,22 @@ export const PreviewResizeInput = Schema.Struct({
 });
 export type PreviewResizeInput = typeof PreviewResizeInput.Type;
 
+/**
+ * Changes how a server tab renders, or clears its profile's site data, for any
+ * client. Unlike page input, these need no control of the tab.
+ */
+export const PreviewAdjustInput = Schema.Struct({
+  threadId: ThreadId,
+  tabId: PreviewTabId,
+  colorScheme: Schema.optional(PreviewAppearancePreference),
+  zoomFactor: Schema.optional(PreviewZoomFactor),
+  /** Reloads the page past its cache, as Chrome's Shift+Reload does. */
+  hardReload: Schema.optional(Schema.Boolean),
+  /** Clears the tab's profile's cookies or HTTP cache; its other storage stays. */
+  clear: Schema.optional(Schema.Literals(["cookies", "cache"])),
+});
+export type PreviewAdjustInput = typeof PreviewAdjustInput.Type;
+
 export const PreviewCloseInput = Schema.Struct({
   threadId: ThreadId,
   tabId: Schema.optional(PreviewTabId),
@@ -311,6 +331,13 @@ const PreviewResizedEvent = Schema.Struct({
   ...PreviewEventBaseSchema.fields,
   type: Schema.Literal("resized"),
   snapshot: PreviewSessionSnapshot,
+  /** A one-off action for the server's browser, such as a hard reload. */
+  request: Schema.optional(
+    Schema.Struct({
+      hardReload: Schema.optional(Schema.Boolean),
+      clear: Schema.optional(Schema.Literals(["cookies", "cache"])),
+    }),
+  ),
 });
 
 const PreviewFailedEvent = Schema.Struct({

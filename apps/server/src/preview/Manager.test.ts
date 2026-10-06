@@ -100,6 +100,37 @@ it.layer(layer)("PreviewManager", (it) => {
     }),
   );
 
+  it.effect("lets any client size, theme, and zoom a server tab", () =>
+    Effect.gen(function* () {
+      const threadId = freshThreadId();
+      const manager = yield* PreviewManager.PreviewManager;
+      const collector = yield* collectEvents;
+      const opened = yield* manager.open({ threadId, runtime: "server" });
+      const viewport = {
+        _tag: "preset",
+        presetId: "iphone-12-pro",
+        width: 390,
+        height: 844,
+      } as const;
+      yield* manager.resize({ threadId, tabId: opened.tabId, viewport });
+      const adjusted = yield* manager.adjust({
+        threadId,
+        tabId: opened.tabId,
+        colorScheme: "dark",
+        zoomFactor: 1.25,
+      });
+      expect(adjusted).toMatchObject({ viewport, colorScheme: "dark", zoomFactor: 1.25 });
+      // One-off requests go to the server's browser and leave the tab's state alone.
+      yield* manager.adjust({ threadId, tabId: opened.tabId, hardReload: true, clear: "cache" });
+      const events = (yield* collector.drain).filter((event) => event.type === "resized");
+      expect(events.at(-1)).toMatchObject({
+        request: { hardReload: true, clear: "cache" },
+        snapshot: { colorScheme: "dark", zoomFactor: 1.25 },
+      });
+      expect(events.at(-2)).not.toHaveProperty("request");
+    }),
+  );
+
   it.effect("reissues presentation requests without replaying them on navigation", () =>
     Effect.gen(function* () {
       const threadId = freshThreadId();
