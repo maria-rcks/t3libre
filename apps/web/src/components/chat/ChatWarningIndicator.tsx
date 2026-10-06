@@ -1,18 +1,31 @@
-import { type ContextMenuItem, type EnvironmentId, type ServerProvider } from "@t3tools/contracts";
+import {
+  type ContextMenuItem,
+  type EnvironmentId,
+  type OrchestrationV2ProviderFailureClass,
+  type ProviderInstanceId,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import { CircleAlertIcon } from "lucide-react";
-import { memo, useCallback, type MouseEvent as ReactMouseEvent } from "react";
+import { memo, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
 
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import { formatProviderDriverKindLabel } from "~/providerModels";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import {
+  getIncompatibleVersion,
+  getProviderStatusBannerKey,
+  getProviderStatusMessage,
+  hasProviderSetup,
+} from "./ProviderStatusBanner";
 
 export interface ChatWarning {
   readonly id: string;
   readonly title: string;
   readonly description: string;
   readonly severity: "warning" | "error";
+  readonly providerSetupInstanceId?: ProviderInstanceId;
 }
 
 type ContextMenuAction =
@@ -26,45 +39,40 @@ export function resolveProviderChatWarning(
   environmentId: EnvironmentId,
   status: ServerProvider | null,
 ): ChatWarning | null {
-  if (!status || status.status === "ready" || status.status === "disabled") return null;
-
+  const key = getProviderStatusBannerKey(status);
+  if (!status || key === null) return null;
   const providerName = status.displayName?.trim() || formatProviderDriverKindLabel(status.driver);
+  const incompatible = getIncompatibleVersion(status);
   const needsAuthentication = status.status === "error" && status.auth.status === "unauthenticated";
-  const title = needsAuthentication
-    ? `${providerName} needs authentication`
-    : status.status === "error"
-      ? `${providerName} is unavailable`
-      : `${providerName} has limited availability`;
-  const description = needsAuthentication
-    ? `${status.message ? `${status.message}\n\n` : ""}Sign in through the ${providerName} CLI to authenticate again.`
-    : (status.message ??
-      `${providerName} ${status.status === "error" ? "could not start" : "reported limited availability"}. Check its provider settings for details.`);
-
   return {
-    id: [
-      "provider",
-      environmentId,
-      status.instanceId,
-      status.status,
-      status.auth.status,
-      status.message ?? "",
-    ].join("\u0000"),
-    title,
-    description,
-    severity: status.status === "warning" ? "warning" : "error",
+    id: ["provider", environmentId, key].join("\u0000"),
+    title: needsAuthentication
+      ? `${providerName} needs authentication`
+      : incompatible
+        ? `${providerName} ${status.version ?? ""} is ${incompatible.status === "broken" ? "known to be broken" : "unsupported"}`
+        : status.status === "error"
+          ? `${providerName} is unavailable`
+          : `${providerName} has limited availability`,
+    description: incompatible?.message ?? getProviderStatusMessage(status),
+    severity:
+      incompatible?.status !== "broken" && (status.status === "warning" || incompatible !== null)
+        ? "warning"
+        : "error",
+    ...(hasProviderSetup(status) ? { providerSetupInstanceId: status.instanceId } : {}),
   };
 }
 
 export function resolveThreadErrorChatWarning(
   threadKey: string,
   error: string | null,
+  errorClass?: OrchestrationV2ProviderFailureClass | null,
 ): ChatWarning | null {
   return error
     ? {
         id: ["thread", threadKey, error].join("\u0000"),
         title: "Thread failed",
         description: error,
-        severity: "error",
+        severity: errorClass === "usage_limit" ? "warning" : "error",
       }
     : null;
 }
@@ -81,13 +89,11 @@ function contextMenuItems(
   ];
   if (warnings.length === 1) return actions(0);
   return [
-    ...warnings.map(
-      (warning, index): ContextMenuItem<ContextMenuAction> => ({
-        id: `warning:${index}`,
-        label: warning.title,
-        children: actions(index),
-      }),
-    ),
+    ...warnings.map((warning, index): ContextMenuItem<ContextMenuAction> => ({
+      id: `warning:${index}`,
+      label: warning.title,
+      children: actions(index),
+    })),
     ...(canDismissForNow
       ? ([{ id: "dismiss-all-now", label: "Dismiss all for now", separatorBefore: true }] as const)
       : []),
@@ -100,18 +106,36 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
   canDismissForNow,
   onDismissForNow,
   onDismissForever,
+  onOpenProviderSetup,
 }: {
   readonly warnings: ReadonlyArray<ChatWarning>;
   readonly canDismissForNow: boolean;
   readonly onDismissForNow: (warningIds: ReadonlyArray<string>) => void;
   readonly onDismissForever: (warningIds: ReadonlyArray<string>) => void;
+  readonly onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
 }) {
+  const menuRequest = useRef(0);
+  const menuOpen = useRef(false);
+  const warningKey = JSON.stringify(warnings);
+  useEffect(
+    () => () => {
+      menuRequest.current++;
+      if (menuOpen.current) {
+        menuOpen.current = false;
+        void readLocalApi()?.contextMenu.close();
+      }
+    },
+    [warningKey, canDismissForNow, onDismissForNow, onDismissForever],
+  );
+
   const handleContextMenu = useCallback(
     async (event: ReactMouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
       event.stopPropagation();
       const api = readLocalApi();
       if (!api) return;
+      const request = ++menuRequest.current;
+      menuOpen.current = true;
       let action: ContextMenuAction | null;
       try {
         action = await api.contextMenu.show(contextMenuItems(warnings, canDismissForNow), {
@@ -121,8 +145,10 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
       } catch {
         // The native menu can disappear when its window closes.
         return;
+      } finally {
+        if (request === menuRequest.current) menuOpen.current = false;
       }
-      if (action === null) return;
+      if (request !== menuRequest.current || action === null) return;
       if (action === "dismiss-all-now") return onDismissForNow(warnings.map(({ id }) => id));
       if (action === "dismiss-all-forever") {
         return onDismissForever(warnings.map(({ id }) => id));
@@ -144,9 +170,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
   const warningIds = warnings.map(({ id }) => id);
   const isSingle = warnings.length === 1;
   const isError = severity === "error";
-  const actionClassName = isError
-    ? "text-error-foreground [:hover,[data-pressed]]:bg-destructive/10"
-    : "text-warning-foreground [:hover,[data-pressed]]:bg-warning/10";
+  const actionVariant = isError ? "ghost-error" : "ghost-warning";
 
   return (
     <>
@@ -160,15 +184,9 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
           closeDelay={200}
           render={
             <Button
-              variant="ghost"
-              size="icon-xs"
+              variant={isError ? "ghost-error-icon" : "ghost-warning-icon"}
+              size="icon-circle-xs"
               aria-label={`${warnings.length} ${isSingle ? "warning" : "warnings"}. Right-click to dismiss.`}
-              className={cn(
-                "size-6 shrink-0 rounded-full [--control-icon-color:currentColor]",
-                isError
-                  ? "text-destructive [:hover,[data-pressed]]:bg-destructive/10"
-                  : "text-warning [:hover,[data-pressed]]:bg-warning/10",
-              )}
               onContextMenu={(event) => void handleContextMenu(event)}
             />
           }
@@ -182,13 +200,9 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
           tooltipStyle
           align="start"
           side="bottom"
-          viewportClassName="p-0"
-          className={cn(
-            "alert-glass w-64 max-w-[calc(100vw-1rem)] p-2.5 text-left",
-            isError
-              ? "border-destructive/40! text-error-foreground"
-              : "border-warning/40! text-warning-foreground",
-          )}
+          padding="none"
+          width="sm"
+          variant={severity}
           data-variant={severity}
         >
           <div className="space-y-2">
@@ -198,6 +212,16 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
                 <div className="mt-0.5 max-h-32 overflow-y-auto whitespace-pre-wrap text-xs leading-4 opacity-75">
                   {warning.description}
                 </div>
+                {warning.providerSetupInstanceId ? (
+                  <InlineButton
+                    onClick={() => {
+                      if (warning.providerSetupInstanceId)
+                        onOpenProviderSetup(warning.providerSetupInstanceId);
+                    }}
+                  >
+                    Open provider setup
+                  </InlineButton>
+                ) : null}
               </div>
             ))}
           </div>
@@ -205,8 +229,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
             {canDismissForNow ? (
               <Button
                 size="micro"
-                variant="ghost"
-                className={actionClassName}
+                variant={actionVariant}
                 onClick={() => onDismissForNow(warningIds)}
               >
                 {isSingle ? "Dismiss for now" : "Dismiss all for now"}
@@ -214,8 +237,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
             ) : null}
             <Button
               size="micro"
-              variant="ghost"
-              className={actionClassName}
+              variant={actionVariant}
               onClick={() => onDismissForever(warningIds)}
             >
               {isSingle ? "Don't show again" : "Don't show these again"}
