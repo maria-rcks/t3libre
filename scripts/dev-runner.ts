@@ -118,6 +118,15 @@ export class DevRunnerConfigurationError extends Schema.TaggedError<DevRunnerCon
   }
 }
 
+export class DevRunnerConnectShareUnsupportedError extends Schema.TaggedError<DevRunnerConnectShareUnsupportedError>()(
+  "DevRunnerConnectShareUnsupportedError",
+  { mode: Schema.String, reason: Schema.Literals(["mode", "dev-url", "host"]) },
+) {
+  override get message(): string {
+    return "T3 Connect sharing requires dev mode, no --dev-url override, and a loopback host (localhost or 127.0.0.1).";
+  }
+}
+
 export class DevRunnerInvalidPortOffsetError extends Schema.TaggedError<DevRunnerInvalidPortOffsetError>()(
   "DevRunnerInvalidPortOffsetError",
   {
@@ -705,9 +714,9 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         input.devUrl !== undefined ||
         (host !== undefined && !["localhost", "127.0.0.1"].includes(host)))
     ) {
-      return yield* new DevRunnerConfigurationError({
-        configKeys: ["--share", "--dev-url"],
-        cause: "Connect sharing requires the complete dev stack and its local Vite origin.",
+      return yield* new DevRunnerConnectShareUnsupportedError({
+        mode: input.mode,
+        reason: input.mode !== "dev" ? "mode" : input.devUrl !== undefined ? "dev-url" : "host",
       });
     }
     if (connectShare) {

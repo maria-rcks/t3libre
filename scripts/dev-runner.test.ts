@@ -1237,7 +1237,17 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             Effect.provideService(HostProcessPlatform, "linux"),
             Effect.flip,
           );
-          assert.equal(error._tag, "DevRunnerConfigurationError");
+          assert.equal(error._tag, "DevRunnerConnectShareUnsupportedError");
+          if (error._tag === "DevRunnerConnectShareUnsupportedError") {
+            assert.equal(error.mode, invalid.mode);
+            assert.equal(
+              error.reason,
+              invalid.mode !== "dev" ? "mode" : "devUrl" in invalid ? "dev-url" : "host",
+            );
+            assert.include(error.message, "dev mode");
+            assert.include(error.message, "--dev-url");
+            assert.include(error.message, "loopback host");
+          }
         }
         assert.equal(spawnCount, 0);
       });

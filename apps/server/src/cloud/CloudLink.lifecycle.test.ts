@@ -33,6 +33,7 @@ import * as CliTokenManager from "./CliTokenManager.ts";
 import { RelayManagedEndpointRecoveryRegistrationRequest } from "@t3tools/contracts/relay";
 import {
   CLOUD_ENDPOINT_CONFIRMED_ORIGIN,
+  CLOUD_ENDPOINT_HTTP_ORIGIN,
   CLOUD_ENDPOINT_RUNTIME_CONFIG,
   CLOUD_LINKED_USER_ID,
   decodeConfirmedOrigin,
@@ -356,6 +357,25 @@ describe("releaseManagedTunnelOnShutdown", () => {
     [RELAY_URL_SECRET, "https://relay.example.test"],
     [CLOUD_CLI_DESIRED_LINK_SECRET, "managed"],
   ] as const;
+
+  it.effect("clears the managed public HTTP origin when unlinking", () => {
+    const { store, values } = makeMemorySecretStore([
+      ...managedLinkSecrets,
+      [CLOUD_ENDPOINT_HTTP_ORIGIN, "https://environment.example.test"],
+    ]);
+    const applyConfigCalls: Array<unknown> = [];
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    return Effect.gen(function* () {
+      const link = yield* CloudLink.CloudLink;
+      expect(yield* link.unlink()).toMatchObject({
+        ok: true,
+        endpointRuntimeStatus: { status: "disabled" },
+      });
+      expect(values.has(CLOUD_ENDPOINT_HTTP_ORIGIN)).toBe(false);
+      expect(values.has(CLOUD_CLI_DESIRED_LINK_SECRET)).toBe(false);
+      expect(applyConfigCalls).toEqual([null]);
+    }).pipe(provideReleaseHarness({ store, applyConfigCalls, requests }));
+  });
 
   it.effect("does not recreate a link that was unlinked while startup registration retried", () => {
     const { store, values } = makeMemorySecretStore(managedLinkSecrets);

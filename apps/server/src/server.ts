@@ -872,18 +872,17 @@ const layerMakeServer = Layer.unwrap(
                 ? config.devUrl.origin
                 : `http://127.0.0.1:${address.port}`;
             if (config.connectDevShare) {
-              const secrets = yield* ServerSecretStore.ServerSecretStore;
-              if (config.connectAuthorizationHome) {
-                yield* secrets.set(
-                  CloudCliTokenManager.CLOUD_CLI_AUTHORIZATION_HOME_SECRET,
-                  new TextEncoder().encode(config.connectAuthorizationHome),
-                );
-              }
-              const relayClient = yield* RelayClient.RelayClient;
-              yield* relayClient.install;
-              yield* cloudLink
-                .reconcileDesiredLink(localOrigin)
-                .pipe(
+              yield* Effect.gen(function* () {
+                const secrets = yield* ServerSecretStore.ServerSecretStore;
+                if (config.connectAuthorizationHome) {
+                  yield* secrets.set(
+                    CloudCliTokenManager.CLOUD_CLI_AUTHORIZATION_HOME_SECRET,
+                    new TextEncoder().encode(config.connectAuthorizationHome),
+                  );
+                }
+                const relayClient = yield* RelayClient.RelayClient;
+                yield* relayClient.install;
+                yield* cloudLink.reconcileDesiredLink(localOrigin).pipe(
                   Effect.retry({
                     while: CloudLink.shouldRetryCloudLink,
                     schedule: Schedule.exponential("1 second").pipe(
@@ -891,27 +890,41 @@ const layerMakeServer = Layer.unwrap(
                     ),
                   }),
                 );
-              const storedOrigin = yield* secrets.get(CloudConfig.CLOUD_ENDPOINT_HTTP_ORIGIN);
-              if (Option.isNone(storedOrigin))
-                return yield* new ConnectDevShareError({ reason: "configuration" });
-              const publicOrigin = new TextDecoder().decode(storedOrigin.value);
-              const environment = yield* ServerEnvironment.ServerEnvironment;
-              const expected = yield* environment.getDescriptor;
-              const client = yield* HttpClient.HttpClient;
-              yield* client.get(new URL("/.well-known/t3/environment", publicOrigin)).pipe(
-                Effect.flatMap(HttpClientResponse.filterStatusOk),
-                Effect.flatMap(HttpClientResponse.schemaBodyJson(ExecutionEnvironmentDescriptor)),
-                Effect.filterOrFail(
-                  (actual) => actual.environmentId === expected.environmentId,
-                  () => new ConnectDevShareError({ reason: "environment-mismatch" }),
+                const storedOrigin = yield* secrets.get(CloudConfig.CLOUD_ENDPOINT_HTTP_ORIGIN);
+                if (Option.isNone(storedOrigin))
+                  return yield* new ConnectDevShareError({ reason: "configuration" });
+                const publicOrigin = new TextDecoder().decode(storedOrigin.value);
+                const environment = yield* ServerEnvironment.ServerEnvironment;
+                const expected = yield* environment.getDescriptor;
+                const client = yield* HttpClient.HttpClient;
+                yield* client.get(new URL("/.well-known/t3/environment", publicOrigin)).pipe(
+                  Effect.flatMap(HttpClientResponse.filterStatusOk),
+                  Effect.flatMap(HttpClientResponse.schemaBodyJson(ExecutionEnvironmentDescriptor)),
+                  Effect.filterOrFail(
+                    (actual) => actual.environmentId === expected.environmentId,
+                    () => new ConnectDevShareError({ reason: "environment-mismatch" }),
+                  ),
+                  Effect.timeout("5 seconds"),
+                  Effect.retry({
+                    schedule: Schedule.spaced("1 second"),
+                    while: (error) => !Schema.is(ConnectDevShareError)(error),
+                  }),
+                  Effect.timeout("2 minutes"),
+                );
+                const auth = yield* EnvironmentAuth.EnvironmentAuth;
+                const pairingUrl = yield* auth.issueStartupPairingUrl(publicOrigin);
+                yield* Effect.logInfo(`[dev-runner] pairingUrl: ${pairingUrl}`);
+              }).pipe(
+                Effect.tapError((error) =>
+                  Effect.logWarning(
+                    Schema.is(CloudLink.CloudLinkAuthorizationMissingError)(error) ||
+                      Schema.is(ConnectDevShareError)(error)
+                      ? `T3 Connect dev sharing failed. ${error.message}`
+                      : "T3 Connect dev sharing failed. Check the Connect configuration and retry.",
+                    { errorTag: error._tag },
+                  ),
                 ),
-                Effect.timeout("5 seconds"),
-                Effect.retry({ schedule: Schedule.spaced("1 second") }),
-                Effect.timeout("2 minutes"),
               );
-              const auth = yield* EnvironmentAuth.EnvironmentAuth;
-              const pairingUrl = yield* auth.issueStartupPairingUrl(publicOrigin);
-              yield* Effect.logInfo(`[dev-runner] pairingUrl: ${pairingUrl}`);
             }
             const endpointRuntime = yield* CloudManagedEndpointRuntime.CloudManagedEndpointRuntime;
             const recoveryLock = yield* Semaphore.make(1);
