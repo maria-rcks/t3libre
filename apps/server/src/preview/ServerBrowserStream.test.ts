@@ -6,6 +6,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSessionId,
+  PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
   type AuthEnvironmentScope,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -17,6 +18,7 @@ import * as Queue from "effect/Queue";
 import { HttpRouter, HttpServer } from "effect/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
 import { routeLayer } from "./ServerBrowserStream.ts";
 
@@ -290,5 +292,53 @@ it.effect("passes uploaded files to the page's open picker and needs operate sco
       { chooserId: "chooser-1", files: [{ name: "notes.txt", text: "hello" }] },
     ]);
     expect((yield* upload([AuthOrchestrationOperateScope], "stale")).status).toBe(409);
+  }).pipe(Effect.scoped),
+);
+
+it.effect.each([
+  { error: new PreviewBrowserHost.PreviewBrowserSandboxError(), reason: "sandbox" },
+  {
+    error: new PreviewBrowserHost.PreviewBrowserLibrariesError({ libraries: ["libnss3.so"] }),
+    reason: "libraries",
+  },
+])("tells viewers which host setup the browser needs ($reason)", ({ error, reason }) =>
+  Effect.gen(function* () {
+    const browser = ServerBrowser.ServerBrowser.of({
+      clearProfile: () => Effect.void,
+      openDownload: () => Effect.succeedNone,
+      answerFileChooser: () => Effect.succeed(false),
+      attachViewer: () => Effect.fail(new ServerBrowser.ServerBrowserLaunchError({ cause: error })),
+    });
+    const services = yield* Layer.build(
+      HttpRouter.serve(
+        routeLayer.pipe(
+          Layer.provide(Layer.succeed(ServerBrowser.ServerBrowser, browser)),
+          Layer.provide(platformLayer),
+        ),
+        { disableListenLog: true },
+      ).pipe(
+        Layer.provideMerge(NodeHttpServer.layerTest),
+        Layer.provide(makeAuth([AuthOrchestrationReadScope]).layer),
+      ),
+    );
+    const server = Context.get(services, HttpServer.HttpServer);
+    const origin = HttpServer.formatAddress(server.address).replace(/^http/, "ws");
+    const closed = Promise.withResolvers<{ code: number; reason: string }>();
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        const socket = new WebSocket(
+          `${origin}/api/preview-stream/ws?threadId=thread&tabId=tab&wsTicket=one-use-ticket`,
+        );
+        socket.addEventListener("close", (event) =>
+          closed.resolve({ code: event.code, reason: event.reason }),
+        );
+        return socket;
+      }),
+      (socket) => Effect.sync(() => socket.close()),
+    );
+    expect(yield* Effect.promise(() => closed.promise)).toEqual({
+      code: PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
+      reason,
+    });
   }).pipe(Effect.scoped),
 );
