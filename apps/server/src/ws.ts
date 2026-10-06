@@ -943,7 +943,13 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     const shellLiveBufferMiB = yield* Config.Int("T3CODE_SHELL_LIVE_BUFFER_MIB").pipe(
       Config.withDefault(8),
       Config.map((value) => Math.max(1, Math.min(64, value))),
-      Effect.orDie,
+      Effect.mapError(
+        (cause) =>
+          new OrchestrationV2GetShellSnapshotError({
+            message: "Failed to prepare the application shell stream",
+            cause,
+          }),
+      ),
     );
     const sql = yield* SqlClient.SqlClient;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
