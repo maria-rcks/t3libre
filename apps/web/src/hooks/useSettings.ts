@@ -14,6 +14,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_SERVER_SETTINGS,
   type EnvironmentId,
+  type ProviderInstanceMutation,
   ServerSettings,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
@@ -27,8 +28,6 @@ import {
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import {
   filterSharedServerPatch,
-  findSharedSettingsMismatches,
-  pickSharedServerSettings,
   splitSharedServerPatch,
   supportsSharedSettingsSync,
 } from "@t3tools/client-runtime/state/shared-settings";
@@ -390,6 +389,21 @@ export function useEnvironmentSettings<T = UnifiedSettings>(
   return useMergedSettings(serverSettings ?? DEFAULT_SERVER_SETTINGS, selector);
 }
 
+/** Atomically mutate one provider instance against the server's latest settings snapshot. */
+export function usePersistEnvironmentProviderInstanceMutation(environmentId: EnvironmentId) {
+  const mutateProviderInstance = useAtomCommand(serverEnvironment.mutateProviderInstance, {
+    reportFailure: false,
+  });
+  return useCallback(
+    (providerInstanceMutation: ProviderInstanceMutation, patch: ServerSettingsPatch = {}) =>
+      mutateProviderInstance({
+        environmentId,
+        input: { patch, providerInstanceMutation },
+      }),
+    [environmentId, mutateProviderInstance],
+  );
+}
+
 /** Primary-only settings access for the settings UI and other explicitly global surfaces. */
 export function usePrimarySettings<T = UnifiedSettings>(
   selector?: (settings: UnifiedSettings) => T,
@@ -491,73 +505,6 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
   );
 
   return updateSettings;
-}
-
-/**
- * Shared-settings sync targets whose values differ from the primary's,
- * plus an action that writes the primary's values to all of them. Drift
- * happens when an environment was offline during an edit or was changed by
- * an older client.
- */
-export function useSharedSettingsSync() {
-  const primaryEnvironment = usePrimaryEnvironment();
-  const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
-  const primaryCapabilities = primaryEnvironment?.serverConfig?.environment.capabilities;
-  // Read the loaded config, not `primaryServerSettingsAtom`: that atom falls
-  // back to defaults while the primary is disconnected, and "apply to all"
-  // must never push defaults over real values. Same for a primary too old to
-  // hold the shared keys: its decoded defaults are not a source of truth.
-  const primarySettings =
-    primaryEnvironment !== null && supportsSharedSettingsSync(primaryEnvironment)
-      ? (primaryEnvironment.serverConfig?.settings ?? null)
-      : null;
-  const { environments } = useEnvironments();
-  const persistServerSettings = useAtomCommand(
-    serverEnvironment.updateSettings,
-    "server settings update",
-  );
-
-  const mismatches = useMemo(
-    () =>
-      findSharedSettingsMismatches({
-        primaryEnvironmentId,
-        primarySettings,
-        primaryCapabilities,
-        environments: environments.map((environment) => ({
-          environmentId: environment.environmentId,
-          label: environment.label,
-          syncEligible: supportsSharedSettingsSync(environment),
-          settings: environment.serverConfig?.settings ?? null,
-          capabilities: environment.serverConfig?.environment.capabilities,
-        })),
-      }),
-    [environments, primaryEnvironmentId, primarySettings, primaryCapabilities],
-  );
-
-  const applyToAll = useCallback(() => {
-    if (primarySettings === null) {
-      return;
-    }
-    const patch = pickSharedServerSettings(primarySettings, primaryCapabilities);
-    for (const mismatch of mismatches) {
-      const target = environments.find(
-        (candidate) => candidate.environmentId === mismatch.environmentId,
-      );
-      void persistServerSettings({
-        environmentId: mismatch.environmentId,
-        input: {
-          patch: filterSharedServerPatch(
-            patch,
-            target?.serverConfig?.environment.capabilities,
-            target?.serverConfig?.settings,
-            primarySettings,
-          ),
-        },
-      });
-    }
-  }, [environments, mismatches, persistServerSettings, primarySettings, primaryCapabilities]);
-
-  return { mismatches, applyToAll };
 }
 
 export function useUpdateEnvironmentSettings(environmentId: EnvironmentId) {

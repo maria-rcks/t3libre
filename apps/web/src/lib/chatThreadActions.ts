@@ -110,11 +110,8 @@ export async function startNewThreadFromContext(
   return true;
 }
 
-// The `chat.newLocal` shortcut (mod+shift+n) is the keyboard twin of the
-// thread menu's "New thread on <branch>": it starts a thread in the checkout
-// the user is already looking at, so a quick parallel task lands in the same
-// worktree instead of the project's configured defaults. Falls back to plain
-// defaults when nothing is open and only the default project applies.
+// The new-local shortcut keeps the current checkout; without an open context,
+// it uses the default project and its new-thread defaults.
 export async function startNewLocalThreadFromContext(
   context: ChatThreadActionContext,
 ): Promise<boolean> {
@@ -131,16 +128,16 @@ export async function startNewLocalThreadFromContext(
     return true;
   }
 
-  const branch = source.branch ?? null;
   const worktreePath = source.worktreePath ?? null;
   await context.handleNewThread(projectRef, {
-    branch,
+    branch: source.branch ?? null,
     worktreePath,
     // A draft still owns its env mode outright; a real thread only ever ran
     // in its own worktree or the local checkout.
     envMode: (thread ? undefined : draft?.envMode) ?? (worktreePath ? "worktree" : "local"),
-    // Reusing an existing checkout must never re-bootstrap it from origin.
-    startFromOrigin: false,
+    // Preserve origin bootstrapping only for a draft awaiting its new worktree.
+    startFromOrigin:
+      !thread && !worktreePath && draft?.envMode === "worktree" ? draft.startFromOrigin : false,
   });
   return true;
 }
