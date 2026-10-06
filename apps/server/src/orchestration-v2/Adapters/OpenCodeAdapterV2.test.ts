@@ -488,9 +488,10 @@ describe("OpenCodeAdapterV2", () => {
       const reconciliationEof = name === "delayed reconciliation eof";
       const releasedAdmission = name === "released admission finalizer";
       const cancelledAdmission = name === "cancelled admission finalizer" || releasedAdmission;
-      const runtimeScope = yield* releasedAdmission
-        ? Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
-        : Effect.scope;
+      const releasableScope = releasedAdmission
+        ? yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
+        : undefined;
+      const runtimeScope = releasableScope ?? (yield* Effect.scope);
       const delayedCatalog = name.startsWith("delayed") || cancelledAdmission;
       const retryCatalog = delayedCatalog || name === "catalog timeout";
       let catalogCalls = 0;
@@ -674,9 +675,9 @@ describe("OpenCodeAdapterV2", () => {
           yield* TestClock.adjust("0 millis");
           assert.isUndefined(steer.pollUnsafe());
         }
-        if (releasedAdmission) {
+        if (releasableScope) {
           assert.isFalse(catalogSignal?.aborted);
-          yield* Scope.close(runtimeScope, Exit.void);
+          yield* Scope.close(releasableScope, Exit.void);
           assert.isTrue(catalogSignal?.aborted);
           assert.isTrue(Exit.isFailure(yield* Fiber.join(steer)));
           assert.equal(promptCalls, 1);
