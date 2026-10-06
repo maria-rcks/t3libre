@@ -25,7 +25,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import { makeOpenCodeAdapterV2, OpenCodeAdapterV2Driver } from "./Adapters/OpenCodeAdapterV2.ts";
 import type { OpenCodeRuntimeShape } from "../provider/opencodeRuntime.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as EventSink from "./EventSink.ts";
@@ -38,10 +38,7 @@ import {
   type ProviderAdapterV2TurnInput,
 } from "./ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
-import {
-  makeOrchestratorV2ReplayLayerWithRegistry,
-  makeReplayServerConfig,
-} from "./testkit/ProviderReplayHarness.ts";
+import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "./testkit/ReplayFixtureWorkspace.ts";
 
 const driver = ProviderDriverKind.make("codex");
@@ -58,6 +55,7 @@ it.effect.each(
           "before dispatch",
           "after delivery",
           "without native steering",
+          "with interrupting native steering",
           "settled only",
           "during catalog retry",
           "during catalog timeout",
@@ -71,7 +69,9 @@ it.effect.each(
     .filter(({ mailbox, timing }) =>
       mailbox
         ? !timing.startsWith("during catalog")
-        : timing !== "without native steering" && timing !== "settled only",
+        : timing !== "without native steering" &&
+          timing !== "with interrupting native steering" &&
+          timing !== "settled only",
     ),
 )("delivers $label when completion wins $timing", ({ mailbox, timing }) =>
   Effect.scoped(
@@ -97,6 +97,7 @@ it.effect.each(
         turns: {
           ...CodexProviderCapabilitiesV2.turns,
           supportsActiveSteering: timing !== "without native steering",
+          activeSteeringInterruptsTools: timing === "with interrupting native steering",
         },
       };
       let adapter: ProviderAdapterV2Shape = {
@@ -196,9 +197,9 @@ it.effect.each(
           },
           environment: {},
           idAllocator: yield* IdAllocator.IdAllocatorV2,
-          serverConfig: yield* makeReplayServerConfig(`steering-catalog-${timing}`).pipe(
-            Effect.provide(NodeServices.layer),
-          ),
+          serverConfig: yield* ProviderReplayHarness.makeReplayServerConfig(
+            `steering-catalog-${timing}`,
+          ).pipe(Effect.provide(NodeServices.layer)),
           runtime: {
             connectToOpenCodeServer: () =>
               Effect.succeed({ url: "http://test.invalid", external: true }),
@@ -552,12 +553,12 @@ it.effect.each(
       }).pipe(
         Effect.provide(
           Layer.merge(
-            makeOrchestratorV2ReplayLayerWithRegistry(
+            ProviderReplayHarness.layerWithRegistry(
               { name: `steering-completion-${timing}` },
-              ProviderAdapterRegistry.makeSingleLayer(adapter),
+              ProviderAdapterRegistry.layerSingle(adapter),
               { runEffectWorker: false },
             ),
-            EffectOutbox.layer.pipe(Layer.provide(SqlitePersistenceMemory)),
+            EffectOutbox.layer.pipe(Layer.provide(SqlitePersistence.layerMemory)),
           ),
         ),
       );
@@ -669,9 +670,9 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
         };
       }),
   };
-  const layer = makeOrchestratorV2ReplayLayerWithRegistry(
+  const layer = ProviderReplayHarness.layerWithRegistry(
     { name },
-    ProviderAdapterRegistry.makeSingleLayer(adapter),
+    ProviderAdapterRegistry.layerSingle(adapter),
     { runEffectWorker: false },
   );
   // Creates the thread and starts its first turn on `runSelection`.
