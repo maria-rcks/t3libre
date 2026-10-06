@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { afterEach, assert, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Clock from "effect/Clock";
@@ -6,7 +7,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -65,6 +66,7 @@ const layer = it.layer(
       }),
     ),
     Layer.provideMerge(GitHubGraphQlBudget.layer),
+    Layer.provide(NodeCrypto.layer),
   ),
 );
 
@@ -247,7 +249,7 @@ it.effect(
       );
       const cli = yield* GitHubPullRequestCli.make.pipe(
         Effect.provideService(GitHubCli.GitHubCli, github),
-        Effect.provide(GitHubGraphQlBudget.layer),
+        Effect.provide(Layer.merge(GitHubGraphQlBudget.layer, NodeCrypto.layer)),
       );
       const input = { cwd: "/repo", host: "github.com" };
       const first = yield* cli.withVerifiedCredential(input, (identity) =>
@@ -452,77 +454,184 @@ layer("GitHubPullRequestCli.layer", (it) => {
       }),
   );
 
-  it.effect("reads linked pull request status with the overview fields in one request", () =>
+  it.effect("reads linked pull requests on one host together, filed back by position", () =>
     Effect.gen(function* () {
+      const node = (number: number) => ({
+        number,
+        title: `Pull request ${number}`,
+        url: `https://github.com/acme/web/pull/${number}`,
+        author: { __typename: "User", login: "octocat", name: "Octo Cat", avatarUrl: null },
+        baseRefName: "main",
+        headRefName: `feat/${number}`,
+        state: "OPEN",
+        isDraft: false,
+        mergeable: "MERGEABLE",
+        reviewDecision: null,
+        latestReviews: { nodes: [{ state: "APPROVED", author: { login: "reviewer" } }] },
+        additions: 12,
+        deletions: 3,
+        changedFiles: 2,
+        updatedAt: "2026-08-24T12:34:56.000Z",
+        mergedAt: null,
+        closedAt: null,
+        commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+      });
       mockedExecute.mockReturnValueOnce(
         Effect.succeed(
           output(
             // @effect-diagnostics-next-line preferSchemaOverJson:off
             JSON.stringify({
-              number: 7,
-              title: "Reuse the summary",
-              url: "https://github.com/acme/web/pull/7",
-              author: { login: "octocat", name: "Octo Cat" },
-              baseRefName: "main",
-              headRefName: "feat/summary",
-              state: "OPEN",
-              isDraft: false,
-              mergeable: "MERGEABLE",
-              reviewDecision: "APPROVED",
-              additions: 12,
-              deletions: 3,
-              changedFiles: 2,
-              createdAt: "2026-08-20T00:00:00.000Z",
-              updatedAt: "2026-08-24T12:34:56.000Z",
-              reviewRequests: [],
-              labels: [],
-              statusCheckRollup: [
-                { __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS", name: "ci" },
-              ],
-              body: "",
+              data: { s0: { pullRequest: node(7) }, s1: { pullRequest: node(8) } },
             }),
           ),
         ),
       );
       const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
 
-      const summary = yield* cli.getPullRequestSummary({
-        cwd: "/w",
-        repository: "acme/web",
-        host: "github.com",
-        number: 7,
-      });
+      const reads = yield* Effect.forEach(
+        [7, 8],
+        (number) =>
+          cli.getPullRequestSummary({
+            cwd: "/w",
+            repository: "acme/web",
+            host: "github.com",
+            number,
+          }),
+        { concurrency: "unbounded" },
+      ).pipe(Effect.forkChild);
+      yield* TestClock.adjust("10 millis");
+      const [seven, eight] = yield* Fiber.join(reads);
 
       assert.deepStrictEqual(
         {
-          number: summary.number,
-          state: summary.state,
-          headBranch: summary.headBranch,
-          isDraft: summary.isDraft,
-          author: summary.author?.login,
-          additions: summary.additions,
-          deletions: summary.deletions,
-          changedFiles: summary.changedFiles,
-          reviewDecision: summary.reviewDecision,
-          checksState: summary.checksState,
-          mergeability: summary.mergeability,
+          number: seven?.number,
+          state: seven?.state,
+          headBranch: seven?.headBranch,
+          author: seven?.author?.login,
+          changedFiles: seven?.changedFiles,
+          reviewDecision: seven?.reviewDecision,
+          checksState: seven?.checksState,
+          mergeability: seven?.mergeability,
         },
         {
           number: 7,
           state: "open",
-          headBranch: "feat/summary",
-          isDraft: false,
+          headBranch: "feat/7",
           author: "octocat",
-          additions: 12,
-          deletions: 3,
           changedFiles: 2,
           reviewDecision: "approved",
           checksState: "passing",
           mergeability: "mergeable",
         },
       );
+      assert.strictEqual(eight?.headBranch, "feat/8");
       expect(mockedExecute).toHaveBeenCalledOnce();
-      expect(mockedExecute.mock.calls[0]?.[0]?.args).toEqual([
+      const document = callAt(0).args.at(-1) ?? "";
+      expect(document).toContain(
+        's0: repository(owner: "acme", name: "web") { pullRequest(number: 7)',
+      );
+      expect(document).toContain("pullRequest(number: 8)");
+    }),
+  );
+
+  it.effect("fingerprints watched pull requests on one host in one read", () =>
+    Effect.gen(function* () {
+      const node = (comments: number) => ({
+        state: "OPEN",
+        mergeable: "MERGEABLE",
+        headRefOid: "abc123",
+        comments: { totalCount: comments, nodes: [] },
+        reviews: { totalCount: 0, nodes: [] },
+        reviewThreads: { totalCount: 0 },
+        commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+      });
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify({
+              data: { w0: { pullRequest: node(1) }, w1: { pullRequest: null } },
+            }),
+          ),
+        ),
+      );
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const reads = yield* Effect.forEach(
+        [7, 8],
+        (number) =>
+          cli.getPullRequestWatchFingerprint({
+            cwd: "/w",
+            repository: "acme/web",
+            host: "github.com",
+            number,
+          }),
+        { concurrency: "unbounded" },
+      ).pipe(Effect.forkChild);
+      yield* TestClock.adjust("10 millis");
+      const [seven, eight] = yield* Fiber.join(reads);
+
+      expect(seven?.remarks.startsWith("1 ")).toBe(true);
+      // GitHub had no answer for #8, so its watch reads it in full.
+      expect(eight).toBeNull();
+      expect(mockedExecute).toHaveBeenCalledOnce();
+      expect(callAt(0).args.at(-1) ?? "").toContain(
+        'w1: repository(owner: "acme", name: "web") { pullRequest(number: 8)',
+      );
+    }),
+  );
+
+  it.effect("reads a pull request the batch said nothing about on its own", () =>
+    Effect.gen(function* () {
+      mockedExecute
+        .mockReturnValueOnce(Effect.succeed(output('{"data":{"s0":{"pullRequest":null}}}')))
+        .mockReturnValueOnce(
+          Effect.succeed(
+            output(
+              // @effect-diagnostics-next-line preferSchemaOverJson:off
+              JSON.stringify({
+                number: 7,
+                title: "Reuse the summary",
+                url: "https://github.com/acme/web/pull/7",
+                author: { login: "octocat", name: "Octo Cat" },
+                baseRefName: "main",
+                headRefName: "feat/summary",
+                state: "OPEN",
+                isDraft: false,
+                mergeable: "MERGEABLE",
+                reviewDecision: "APPROVED",
+                additions: 12,
+                deletions: 3,
+                changedFiles: 2,
+                createdAt: "2026-08-20T00:00:00.000Z",
+                updatedAt: "2026-08-24T12:34:56.000Z",
+                reviewRequests: [],
+                labels: [],
+                statusCheckRollup: [
+                  {
+                    __typename: "CheckRun",
+                    status: "COMPLETED",
+                    conclusion: "SUCCESS",
+                    name: "ci",
+                  },
+                ],
+                body: "",
+              }),
+            ),
+          ),
+        );
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const read = yield* cli
+        .getPullRequestSummary({ cwd: "/w", repository: "acme/web", host: "github.com", number: 7 })
+        .pipe(Effect.forkChild);
+      yield* TestClock.adjust("10 millis");
+      const summary = yield* Fiber.join(read);
+
+      assert.strictEqual(summary.headBranch, "feat/summary");
+      assert.strictEqual(summary.checksState, "passing");
+      assert.strictEqual(mockedExecute.mock.calls.length, 2);
+      expect(callAt(1).args).toEqual([
         "pr",
         "view",
         "7",
@@ -531,7 +640,6 @@ layer("GitHubPullRequestCli.layer", (it) => {
         "--json",
         expect.stringContaining("statusCheckRollup"),
       ]);
-      expect(mockedGetPullRequest).not.toHaveBeenCalled();
     }),
   );
 
@@ -1769,6 +1877,170 @@ layer("GitHubPullRequestCli.layer", (it) => {
         "github.com/acme/web",
         "--squash",
       ]);
+    }),
+  );
+
+  it.effect.each(["merge", "enable-auto-merge"] as const)(
+    "removes agent credits from the proposed message for %s",
+    (action) =>
+      Effect.gen(function* () {
+        mockedExecute
+          .mockReturnValueOnce(
+            Effect.succeed(
+              output(
+                encodeJson({
+                  data: {
+                    repository: {
+                      pullRequest: {
+                        isMergeQueueEnabled: false,
+                        headRefOid: "abc123",
+                        viewerMergeBodyText:
+                          "Details\n\nCo-authored-by: Alice <alice@example.com>\nCo-authored-by: Claude <noreply@anthropic.com>",
+                      },
+                    },
+                  },
+                }),
+              ),
+            ),
+          )
+          .mockReturnValueOnce(Effect.succeed(output("")));
+        const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+        yield* cli.runPullRequestAction({
+          cwd: "/w",
+          repository: "acme/web",
+          host: "github.com",
+          number: 7,
+          action,
+          mergeMethod: "squash",
+          removeAgentCreditsOnMerge: true,
+        });
+        expect(callAt(0).args).toContain("method=SQUASH");
+        expect(callAt(1).args.slice(-2)).toEqual(["--body-file", "-"]);
+        expect(callAt(1).args).toContain("--match-head-commit");
+        expect(callAt(1).args).toContain("abc123");
+        expect(callAt(1).stdin).toBe("Details\n\nCo-authored-by: Alice <alice@example.com>");
+        expect(callAt(1).args.join(" ")).not.toContain("alice@example.com");
+      }),
+  );
+
+  it.effect.each([
+    {
+      description: "an unchanged message",
+      body: "Details\n\nCo-authored-by: Alice <alice@example.com>",
+      queued: false,
+    },
+    {
+      description: "a merge queue",
+      body: "Co-authored-by: Claude <noreply@anthropic.com>",
+      queued: true,
+    },
+  ] as const)("keeps GitHub's default message for $description", ({ body, queued }) =>
+    Effect.gen(function* () {
+      mockedExecute
+        .mockReturnValueOnce(
+          Effect.succeed(
+            output(
+              encodeJson({
+                data: {
+                  repository: {
+                    pullRequest: {
+                      isMergeQueueEnabled: queued,
+                      headRefOid: "abc123",
+                      viewerMergeBodyText: body,
+                    },
+                  },
+                },
+              }),
+            ),
+          ),
+        )
+        .mockReturnValueOnce(Effect.succeed(output("")));
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+      yield* cli.runPullRequestAction({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+        action: "merge",
+        removeAgentCreditsOnMerge: true,
+      });
+      expect(callAt(0).args).toContain("method=MERGE");
+      expect(callAt(1).args).not.toContain("--body-file");
+      expect(callAt(1).stdin).toBeUndefined();
+    }),
+  );
+
+  it.effect("passes an explicitly empty body when the proposed message only credits an agent", () =>
+    Effect.gen(function* () {
+      mockedExecute
+        .mockReturnValueOnce(
+          Effect.succeed(
+            output(
+              encodeJson({
+                data: {
+                  repository: {
+                    pullRequest: {
+                      isMergeQueueEnabled: false,
+                      headRefOid: "abc123",
+                      viewerMergeBodyText: "Co-authored-by: Claude <noreply@anthropic.com>",
+                    },
+                  },
+                },
+              }),
+            ),
+          ),
+        )
+        .mockReturnValueOnce(Effect.succeed(output("")));
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+      yield* cli.runPullRequestAction({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+        action: "merge",
+        removeAgentCreditsOnMerge: true,
+      });
+      expect(callAt(1).stdin).toBe("");
+      expect(callAt(1).args).toContain("--body-file");
+    }),
+  );
+
+  it.effect("does not fetch a message for rebase merges", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValue(Effect.succeed(output("")));
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+      yield* cli.runPullRequestAction({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+        action: "merge",
+        mergeMethod: "rebase",
+        removeAgentCreditsOnMerge: true,
+      });
+      expect(mockedExecute).toHaveBeenCalledTimes(1);
+      expect(callAt(0).args).toContain("--rebase");
+    }),
+  );
+
+  it.effect("refuses to merge when the proposed message cannot be read", () =>
+    Effect.gen(function* () {
+      mockedExecute.mockReturnValue(
+        Effect.succeed(output('{"data":{"repository":{"pullRequest":null}}}')),
+      );
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+      const result = yield* Effect.result(
+        cli.runPullRequestAction({
+          cwd: "/w",
+          repository: "acme/web",
+          host: "github.com",
+          number: 7,
+          action: "merge",
+          removeAgentCreditsOnMerge: true,
+        }),
+      );
+      expect(result._tag).toBe("Failure");
+      expect(mockedExecute).toHaveBeenCalledTimes(1);
     }),
   );
 
@@ -3553,7 +3825,14 @@ layer("GitHubPullRequestCli.layer", (it) => {
     Effect.gen(function* () {
       // A host that never runs out of pages: the walk has to end itself.
       mockedExecute.mockReturnValue(
-        Effect.succeed(output(reviewThreadsPage([thread("PRRT_1", "c1")], "Y3Vyc29yOjE"))),
+        Effect.succeed(
+          output(
+            reviewThreadsPage(
+              [{ ...thread("PRRT_1", "c1"), comments: threadComments(["c1"], "Y3Vyc29yOjI", 3) }],
+              "Y3Vyc29yOjE",
+            ),
+          ),
+        ),
       );
       const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
 
@@ -3566,6 +3845,7 @@ layer("GitHubPullRequestCli.layer", (it) => {
 
       assert.strictEqual(mockedExecute.mock.calls.length, 10);
       assert.isTrue(conversation.truncated);
+      assert.isTrue(conversation.reviewThreadsTruncated);
     }),
   );
 
@@ -3597,6 +3877,7 @@ layer("GitHubPullRequestCli.layer", (it) => {
         nextCommentsCursor: "Y3Vyc29yOjI",
       });
       assert.isTrue(conversation.truncated);
+      assert.isFalse(conversation.reviewThreadsTruncated);
     }),
   );
 

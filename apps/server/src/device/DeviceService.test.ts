@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   DEFAULT_SERVER_SETTINGS,
   DeviceId,
+  DeviceOperationError,
   LOCAL_DEVICE_HOST_ID,
   ThreadId,
   type DeviceServiceState,
@@ -14,12 +15,12 @@ import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
-import { ServerSettingsService } from "../serverSettings.ts";
+import { HttpClient, HttpClientResponse } from "effect/http";
+import * as ServerSettings from "../serverSettings.ts";
 import * as DeviceHost from "./DeviceHost.ts";
 import { NodeRuntimeUnavailableError } from "@t3tools/shared/nodeRuntime";
 
-import { type DeviceService, makeWithHosts, stateStream } from "./DeviceService.ts";
+import * as DeviceService from "./DeviceService.ts";
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -40,16 +41,14 @@ describe("DeviceService.stateStream", () => {
     Effect.gen(function* () {
       const pubsub = yield* PubSub.unbounded<DeviceServiceState>();
       const current = yield* Ref.make(baseState);
-      const service: Pick<DeviceService["Service"], "state" | "subscribe"> = {
+      const service: Pick<DeviceService.DeviceService["Service"], "state" | "subscribe"> = {
         state: Ref.get(current),
         subscribe: PubSub.subscribe(pubsub),
       };
 
-      const collected = yield* stateStream(service as DeviceService["Service"]).pipe(
-        Stream.take(3),
-        Stream.runCollect,
-        Effect.forkChild,
-      );
+      const collected = yield* DeviceService.stateStream(
+        service as DeviceService.DeviceService["Service"],
+      ).pipe(Stream.take(3), Stream.runCollect, Effect.forkChild);
       yield* Effect.yieldNow;
       for (const revision of [1, 2]) {
         const next = { ...baseState, revision, hostStatus: "ready" as const };
@@ -68,6 +67,7 @@ const fixture = Effect.fn("fixture")(function* (
   failListAfterShutdown = false,
   runtimeFailure?: NodeRuntimeUnavailableError | DeviceHost.DeviceHostError,
   inspectError = false,
+  installTool?: Parameters<typeof DeviceService.makeWithHosts>[3],
 ) {
   const settings = yield* Ref.make(DEFAULT_SERVER_SETTINGS);
   const starts: string[] = [];
@@ -129,11 +129,18 @@ const fixture = Effect.fn("fixture")(function* (
       starts.push("stop");
     }),
   };
-  const service = yield* makeWithHosts(new Map([[host.id, host]])).pipe(
+  const service = yield* DeviceService.makeWithHosts(
+    new Map([[host.id, host]]),
+    undefined,
+    undefined,
+    installTool,
+  ).pipe(
     Effect.provideService(DeviceHost.DeviceHost, host),
     Effect.provideService(
-      ServerSettingsService,
-      ServerSettingsService.of({
+      ServerSettings.ServerSettingsService,
+      ServerSettings.ServerSettingsService.of({
+        updateProviderInstance: () => Effect.die("Unexpected provider mutation"),
+        withSettingsSnapshot: (use) => Effect.flatMap(Ref.get(settings), use),
         start: Effect.void,
         ready: Effect.void,
         getSettings: Ref.get(settings),
@@ -354,29 +361,39 @@ describe("device discovery after server restart", () => {
   );
 });
 
-for (const [diagnostic, reason, message] of [
-  ["Insufficient disk space at /private/user/path", "disk_space", "not enough free disk space"],
-  ["Timed out spawning /private/user/command", "timeout", "did not become ready in time"],
-  ["Unexpected failure: secret-token", "launch_failed", "could not start"],
-] as const) {
-  it.effect(`normalizes boot failure: ${reason}`, () =>
-    Effect.gen(function* () {
-      const { service } = yield* fixture(Effect.void, diagnostic);
-      yield* service.configure({ enabled: true });
-      const error = yield* service
-        .open({
-          threadId: ThreadId.make("boot-failure"),
-          deviceId: "Pixel_API_35",
-          platform: "android",
-        })
-        .pipe(Effect.flip);
-      expect(error._tag).toBe("DeviceBootError");
-      expect(error.message).toContain(message);
-      expect(error.message).not.toContain(diagnostic);
-      expect((yield* service.state).bootingDevices).toEqual([]);
-    }).pipe(Effect.scoped),
-  );
-}
+it.effect.each([
+  {
+    diagnostic: "Insufficient disk space at /private/user/path",
+    reason: "disk_space",
+    message: "not enough free disk space",
+  },
+  {
+    diagnostic: "Timed out spawning /private/user/command",
+    reason: "timeout",
+    message: "did not become ready in time",
+  },
+  {
+    diagnostic: "Unexpected failure: secret-token",
+    reason: "launch_failed",
+    message: "could not start",
+  },
+] as const)("normalizes boot failure: $reason", ({ diagnostic, message }) =>
+  Effect.gen(function* () {
+    const { service } = yield* fixture(Effect.void, diagnostic);
+    yield* service.configure({ enabled: true });
+    const error = yield* service
+      .open({
+        threadId: ThreadId.make("boot-failure"),
+        deviceId: "Pixel_API_35",
+        platform: "android",
+      })
+      .pipe(Effect.flip);
+    expect(error._tag).toBe("DeviceBootError");
+    expect(error.message).toContain(message);
+    expect(error.message).not.toContain(diagnostic);
+    expect((yield* service.state).bootingDevices).toEqual([]);
+  }).pipe(Effect.scoped),
+);
 
 it.effect("keeps shutdown successful when subsequent discovery fails", () =>
   Effect.gen(function* () {
@@ -464,7 +481,7 @@ it.effect.each(["shutdown", "close"] as const)(
           return HttpClientResponse.fromWeb(request, Response.json({ ok: true, id: deviceId }));
         }),
       );
-      const service = yield* makeWithHosts(new Map([[host.id, host]])).pipe(
+      const service = yield* DeviceService.makeWithHosts(new Map([[host.id, host]])).pipe(
         Effect.provideService(HttpClient.HttpClient, http),
       );
       const input = { threadId, deviceId, platform: "ios" as const };
@@ -477,10 +494,7 @@ it.effect.each(["shutdown", "close"] as const)(
       yield* service.open(input);
       expect(capture).toBe(2);
       expect((yield* service.state).sessions).toHaveLength(1);
-    }).pipe(
-      Effect.provide(ServerSettingsService.layerTest({ enableDeviceSupport: true })),
-      Effect.scoped,
-    ),
+    }).pipe(Effect.provide(ServerSettings.layerTest({ enableDeviceSupport: true })), Effect.scoped),
 );
 
 it.effect.each([
@@ -559,7 +573,7 @@ it.effect.each([
           throw new Error(`Unexpected hub path: ${path}`);
         }),
       );
-      const service = yield* makeWithHosts(new Map([[host.id, host]])).pipe(
+      const service = yield* DeviceService.makeWithHosts(new Map([[host.id, host]])).pipe(
         Effect.provideService(HttpClient.HttpClient, http),
       );
       yield* service.list;
@@ -578,10 +592,7 @@ it.effect.each([
           (yield* service.state).devices.find((device) => device.id === deviceId)?.booted,
         ).toBe(true);
       }
-    }).pipe(
-      Effect.provide(ServerSettingsService.layerTest({ enableDeviceSupport: true })),
-      Effect.scoped,
-    ),
+    }).pipe(Effect.provide(ServerSettings.layerTest({ enableDeviceSupport: true })), Effect.scoped),
 );
 
 it.effect("retry keeps device and agent consent unchanged", () =>
@@ -658,5 +669,69 @@ it.effect("failed read-only discovery preserves lifecycle status and installed i
     expect(state.hosts[0]?.hubInstalled).toBe(true);
     expect(state.hosts[0]?.toolInspectionError).toContain("Reconnect the host");
     expect(starts).toEqual([]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "manual updates install only the selected tool without enabling access or starting helpers",
+  () =>
+    Effect.gen(function* () {
+      const installed: string[] = [];
+      const { service, starts, agentStarts, requests } = yield* fixture(
+        Effect.void,
+        undefined,
+        false,
+        undefined,
+        false,
+        (tool) =>
+          Effect.sync(() => {
+            installed.push(tool);
+          }),
+      );
+      const before = yield* service.state;
+      const state = yield* service.updateTool("agent");
+      expect(installed).toEqual(["agent"]);
+      expect(state.supportsToolUpdate).toBe(true);
+      expect(state.hostStatus).toBe(before.hostStatus);
+      expect(state.agentAccessEnabled).toBe(before.agentAccessEnabled);
+      expect(state.revision).toBeGreaterThan(before.revision);
+      expect(starts).toEqual([]);
+      expect(agentStarts).toEqual([]);
+      expect(requests).toEqual([]);
+      yield* service.updateTool("hub");
+      expect(installed).toEqual(["agent", "hub"]);
+    }).pipe(Effect.scoped),
+);
+
+it.effect("failed manual installation leaves lifecycle state unchanged and can be retried", () =>
+  Effect.gen(function* () {
+    let attempts = 0;
+    const { service, starts, agentStarts } = yield* fixture(
+      Effect.void,
+      undefined,
+      false,
+      undefined,
+      false,
+      () =>
+        Effect.suspend(() =>
+          ++attempts === 1
+            ? Effect.fail(
+                new DeviceOperationError({
+                  operation: "update device tool",
+                  reason: "command_failed",
+                  cause: new Error("offline"),
+                }),
+              )
+            : Effect.void,
+        ),
+    );
+    const before = yield* service.state;
+    const result = yield* service.updateTool("agent").pipe(Effect.result);
+    expect(result._tag).toBe("Failure");
+    expect(yield* service.state).toEqual(before);
+    yield* service.updateTool("agent");
+    expect(attempts).toBe(2);
+    expect(starts).toEqual([]);
+    expect(agentStarts).toEqual([]);
   }).pipe(Effect.scoped),
 );
