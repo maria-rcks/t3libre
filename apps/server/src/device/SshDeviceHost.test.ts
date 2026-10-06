@@ -8,9 +8,9 @@ import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as ServerConfig from "../config.ts";
 import * as DeviceHost from "./DeviceHost.ts";
 import * as SshDeviceHost from "./SshDeviceHost.ts";
@@ -20,6 +20,7 @@ it.effect("preserves installed status after probes and cleans failed agent activ
     const fs = yield* FileSystem.FileSystem;
     const home = yield* fs.makeTempDirectoryScoped();
     const modes: string[] = [];
+    const owners: string[] = [];
     let forwards = 0;
     let failForward = true;
     let rejectConfig = true;
@@ -62,6 +63,7 @@ it.effect("preserves installed status after probes and cleans failed agent activ
           );
           const mode = /const mode = "([^"]+)"/.exec(script)?.[1] ?? "";
           modes.push(mode);
+          owners.push(/const owner = "([^"]+)"/.exec(script)?.[1] ?? "");
           output = JSON.stringify({
             nodePath: "/node",
             platforms: [{ platform: "ios", available: true }],
@@ -110,6 +112,12 @@ it.effect("preserves installed status after probes and cleans failed agent activ
       ),
     );
     yield* host.ensureReady(() => Effect.void);
+    yield* SshDeviceHost.probe({ id: "test", label: "Test", target: "test.example" }).pipe(
+      Effect.provide(ServerConfig.layerTest(home, home)),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    );
+    expect(new Set(owners).size).toBe(1);
+    expect(owners[0]).toMatch(/^[a-f0-9]{24}$/);
     expect(forwards).toBe(1);
     expect(modes.filter((mode) => mode === "start")).toHaveLength(2);
     yield* host.platformAvailability("ios");

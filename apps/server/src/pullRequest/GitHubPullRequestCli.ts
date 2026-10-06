@@ -1,13 +1,21 @@
+import { removeAgentCredits } from "./mergeMessage.ts";
+import { makeChecksRevalidator } from "./gitHubConditionalChecks.ts";
 import { runGitHubStackAction, type GitHubStackActionError } from "./githubStackActions.ts";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Clock from "effect/Clock";
-import * as NodeCrypto from "node:crypto";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
+import * as Request from "effect/Request";
+import * as RequestResolver from "effect/RequestResolver";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Hex from "effect/encoding/Hex";
 import {
   resolvePullRequestAuthorFilter,
   PositiveInt,
@@ -15,6 +23,7 @@ import {
   type PullRequestAction,
   type PullRequestStackHead,
   type PullRequestActor,
+  type PullRequestFileViewed,
   type PullRequestInvolvement,
   type PullRequestListFilters,
   type PullRequestListState,
@@ -29,6 +38,7 @@ import {
   type PullRequestLabelCandidateList,
   type PullRequestThreadCommentsResult,
   type PullRequestUpdateMethod,
+  type PullRequestPreview,
 } from "@t3tools/contracts";
 
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
@@ -39,18 +49,28 @@ import {
   ADD_REACTION_GRAPHQL_MUTATION,
   buildReviewSubmissionJson,
   buildReviewerRequestJson,
+  buildSetFilesViewedGraphQlMutation,
   decodeActorAvatarsJson,
   decodePullRequestActivityJson,
   decodePullRequestDetailJson,
+  decodePullRequestCoreJson,
+  pullRequestCoreGraphQlQuery,
+  type GitHubPullRequestCore,
+  type GitHubPullRequestSummary,
+  type GitHubPullRequestWatchFingerprint,
+  decodePullRequestPreviewJson,
+  PULL_REQUEST_PREVIEW_GRAPHQL_QUERY,
   decodePullRequestFilesJson,
+  decodePullRequestFilesViewedJson,
   decodePullRequestHeadsJson,
   decodePullRequestListJson,
   decodePullRequestNodeIdJson,
   decodePullRequestSearchJson,
   decodePullRequestStacksJson,
   decodePullRequestStatsJson,
+  decodePullRequestSummariesJson,
+  decodePullRequestWatchFingerprintsJson,
   decodeReactionSubjectScopeJson,
-  decodeRepositoryAccessJson,
   decodeReviewerCandidatesJson,
   decodeLabelCandidatesJson,
   buildLabelRequestJson,
@@ -59,6 +79,8 @@ import {
   decodeReviewThreadCommentsJson,
   decodeReviewThreadsJson,
   buildPullRequestStatsGraphQlQuery,
+  buildPullRequestSummariesGraphQlQuery,
+  buildPullRequestWatchFingerprintsGraphQlQuery,
   buildPullRequestStackMembershipsGraphQlQuery,
   decodePullRequestStackMembershipsJson,
   encodeGraphQlRequestJson,
@@ -69,12 +91,12 @@ import {
   decodeBaseComparisonJson,
   PULL_REQUEST_DETAIL_JSON_FIELDS,
   PULL_REQUEST_LIST_JSON_FIELDS,
+  PULL_REQUEST_FILES_VIEWED_GRAPHQL_QUERY,
   PULL_REQUEST_NODE_ID_GRAPHQL_QUERY,
   REACTION_SUBJECT_PULL_REQUEST_GRAPHQL_QUERY,
   REMOVE_REACTION_GRAPHQL_MUTATION,
   REVERT_PULL_REQUEST_GRAPHQL_MUTATION,
   gitHubReactionContent,
-  REPOSITORY_ACCESS_JSON_FIELDS,
   RESOLVE_REVIEW_THREAD_GRAPHQL_MUTATION,
   REVIEWER_CANDIDATES_GRAPHQL_QUERY,
   REVIEW_THREAD_COMMENTS_GRAPHQL_QUERY,
@@ -90,7 +112,6 @@ import {
   decodeViewerPermissionsJson,
   decodeWorkflowRunApprovalsJson,
   type GitHubBaseComparison,
-  type GitHubPullRequestDetail,
   type GitHubPullRequestActivity,
   type GitHubPullRequestHead,
   type GitHubPullRequestListItem,
@@ -371,6 +392,19 @@ const PULL_REQUEST_FALLBACK_MAX_ROWS = 1_000;
 
 /** What the files API serves at most in one response, which is what one slice is made of. */
 const DIFF_FILES_PAGE_SIZE = 100;
+/**
+ * How many hundred-file pages of viewed state one read will walk. A point of the hourly GraphQL
+ * budget per page, against a change request nobody reviews in one sitting past the first few
+ * hundred files: beyond this the read stops and says it was cut short.
+ */
+const FILES_VIEWED_MAX_PAGES = 5;
+
+/**
+ * How many pull requests' node ids are remembered at once. A long-lived server sees far more of
+ * them than a reader ever has open, and least recently used rather than first in: a listing
+ * walking cold pull requests must not evict the review being ticked through.
+ */
+export const NODE_ID_CACHE_CAPACITY = 128;
 
 /**
  * Pages of review threads to follow before the conversation is reported as truncated. GitHub
@@ -399,6 +433,34 @@ export interface GitHubPullRequestStat {
  */
 const STAT_ALIASES_PER_REQUEST = 25;
 const STAT_REQUEST_CONCURRENCY = 4;
+/**
+ * How long a summary read waits for company. The background sync asks for every linked pull
+ * request at once, and each read reaches the resolver after its own cache check, so a batch
+ * needs a moment longer than one scheduler tick to gather them.
+ */
+const SUMMARY_BATCH_WINDOW = "10 millis";
+
+class PullRequestSummaryRead extends Request.Class<
+  {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly host: string;
+    readonly number: number;
+  },
+  ProviderChangeRequestSummary,
+  GitHubPullRequestCliError
+> {}
+
+class PullRequestWatchFingerprintRead extends Request.Class<
+  {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly host: string;
+    readonly number: number;
+  },
+  GitHubPullRequestWatchFingerprint | null,
+  GitHubPullRequestCliError
+> {}
 
 export interface GitHubPullRequestSearchBatch {
   /** Rows across every repository asked for, newest update first, each naming its own. */
@@ -414,6 +476,12 @@ export interface GitHubPullRequestDiffSlice {
   readonly nextCursor: string | null;
   /** GitHub's own counts for the files whose hunks it withheld from this slice. */
   readonly omittedFileStats?: ReadonlyArray<PullRequestOmittedFileStat>;
+}
+
+export interface GitHubPullRequestFilesViewed {
+  readonly files: ReadonlyArray<PullRequestFileViewed>;
+  /** GitHub had more files than the page budget below would read. */
+  readonly truncated: boolean;
 }
 
 export class GitHubPullRequestCli extends Context.Service<
@@ -490,13 +558,35 @@ export class GitHubPullRequestCli extends Context.Service<
       readonly host: string;
       readonly number: number;
     }) => Effect.Effect<ProviderChangeRequestSummary, GitHubPullRequestCliError>;
+    /**
+     * What a watch compares between passes, batched like summaries. Null when GitHub gave no
+     * answer for this pull request, so the watch reads it in full instead.
+     */
+    readonly getPullRequestWatchFingerprint: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly host: string;
+      readonly number: number;
+    }) => Effect.Effect<GitHubPullRequestWatchFingerprint | null, GitHubPullRequestCliError>;
+
+    readonly revalidateChecks: Effect.Success<typeof makeChecksRevalidator>;
 
     readonly getPullRequestDetail: (input: {
       readonly cwd: string;
       readonly repository: string;
       readonly host: string;
       readonly number: number;
-    }) => Effect.Effect<GitHubPullRequestDetail, GitHubPullRequestCliError>;
+    }) => Effect.Effect<GitHubPullRequestCore, GitHubPullRequestCliError>;
+
+    readonly getPullRequestPreview: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly host: string;
+      readonly number: number;
+    }) => Effect.Effect<
+      Omit<PullRequestPreview, "projectId" | "repository">,
+      GitHubPullRequestCliError
+    >;
 
     readonly listWorkflowRunsRequiringApproval: (input: {
       readonly cwd: string;
@@ -569,6 +659,29 @@ export class GitHubPullRequestCli extends Context.Service<
       GitHubPullRequestCliError
     >;
 
+    /**
+     * Which files of the pull request the signed-in account has cleared, and which of those have
+     * been pushed to since. Read apart from the patch because GitHub only reports it over GraphQL.
+     */
+    readonly getPullRequestFilesViewed: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly host: string;
+      readonly number: number;
+    }) => Effect.Effect<GitHubPullRequestFilesViewed, GitHubPullRequestCliError>;
+
+    /**
+     * Clears files, or puts them back, as one request. GitHub takes a single path per mutation,
+     * so a burst is batched with aliases into one document rather than one subprocess per press.
+     */
+    readonly setPullRequestFilesViewed: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly host: string;
+      readonly number: number;
+      readonly files: ReadonlyArray<{ readonly path: string; readonly viewed: boolean }>;
+    }) => Effect.Effect<void, GitHubPullRequestCliError>;
+
     readonly listReviewThreadComments: (input: {
       readonly cwd: string;
       readonly repository: string;
@@ -593,13 +706,6 @@ export class GitHubPullRequestCli extends Context.Service<
       readonly cursor: string;
     }) => Effect.Effect<PullRequestThreadCommentsResult, GitHubPullRequestCliError>;
 
-    /** One `gh repo view`, which answers what the repository allows and where the viewer stands. */
-    readonly getRepositoryAccess: (input: {
-      readonly cwd: string;
-      readonly repository: string;
-      readonly host: string;
-    }) => Effect.Effect<GitHubRepositoryAccess, GitHubPullRequestCliError>;
-
     /** The viewer's standing on its own, for deciding a write without reading the whole detail. */
     readonly getViewerAccess: (input: {
       readonly cwd: string;
@@ -608,7 +714,7 @@ export class GitHubPullRequestCli extends Context.Service<
       readonly number: number;
       /** Manual action checks may use the quota held back from automatic reads. */
       readonly allowReserve?: boolean | undefined;
-    }) => Effect.Effect<GitHubViewerAccess, GitHubPullRequestCliError>;
+    }) => Effect.Effect<GitHubViewerAccess & GitHubRepositoryAccess, GitHubPullRequestCliError>;
 
     /** Who this pull request may be sent to, and who it has already been sent to. */
     readonly listReviewerCandidates: (input: {
@@ -657,6 +763,7 @@ export class GitHubPullRequestCli extends Context.Service<
       readonly action: PullRequestAction;
       readonly stackNumber?: number;
       readonly expectedStackHeads?: ReadonlyArray<PullRequestStackHead>;
+      readonly removeAgentCreditsOnMerge?: boolean;
       readonly mergeMethod?: PullRequestMergeMethod;
       readonly updateMethod?: PullRequestUpdateMethod;
     }) => Effect.Effect<void, GitHubPullRequestCliError>;
@@ -975,6 +1082,35 @@ function cursorVariable(cursor: string | null): readonly [string, string] {
   return cursor === null ? ["-F", "cursor=null"] : ["-f", `cursor=${cursor}`];
 }
 
+const MERGE_MESSAGE_GRAPHQL_QUERY = `
+query PullRequestMergeMessage($owner: String!, $name: String!, $number: Int!, $method: PullRequestMergeMethod!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      isMergeQueueEnabled
+      headRefOid
+      viewerMergeBodyText(mergeType: $method)
+    }
+  }
+}`;
+
+const decodeMergeMessageResponse = Schema.decodeUnknownResult(
+  Schema.fromJsonString(
+    Schema.Struct({
+      data: Schema.Struct({
+        repository: Schema.Struct({
+          pullRequest: Schema.Struct({
+            isMergeQueueEnabled: Schema.Boolean,
+            headRefOid: Schema.String,
+            viewerMergeBodyText: Schema.String,
+          }),
+        }),
+      }),
+    }),
+  ),
+);
+const decodeMergeMessage = (raw: string) =>
+  Result.map(decodeMergeMessageResponse(raw), (response) => response.data.repository.pullRequest);
+
 function actionArgs(
   action: PullRequestAction,
   mergeMethod: PullRequestMergeMethod | undefined,
@@ -1013,6 +1149,8 @@ function actionArgs(
 export const make = Effect.gen(function* () {
   const github = yield* GitHubCli.GitHubCli;
   const graphQlBudget = yield* GitHubGraphQlBudget.GitHubGraphQlBudget;
+  const crypto = yield* Crypto.Crypto;
+  const revalidateChecks = yield* makeChecksRevalidator;
   const routingIdentities = new Map<
     string,
     {
@@ -1048,7 +1186,10 @@ export const make = Effect.gen(function* () {
               })
               .pipe(Effect.mapError(unavailable))).stdout.trim();
       if (!token) return yield* unavailable();
-      const key = `${host}:${NodeCrypto.createHash("sha256").update(token).digest("hex")}`;
+      const tokenHash = yield* crypto
+        .digest("SHA-256", new TextEncoder().encode(token))
+        .pipe(Effect.map(Hex.encode), Effect.orDie);
+      const key = `${host}:${tokenHash}`;
       const credential = { host, token: Redacted.make(token), credentialFingerprint: key };
       // A cold page may ask several times. Wait per credential and check again after the
       // first verification; cancellation releases the next waiter without losing its request.
@@ -1106,6 +1247,7 @@ export const make = Effect.gen(function* () {
     captureVerifiedCredential(input).pipe(
       Effect.flatMap(({ host, token, accountId, viewer, credentialFingerprint }) =>
         use({ accountId, viewer, credentialFingerprint }).pipe(
+          Effect.provideService(SourceControlRateLimit.CredentialScope, credentialFingerprint),
           Effect.provideService(GitHubCli.PinnedGitHubCredential, {
             host,
             token,
@@ -1122,15 +1264,30 @@ export const make = Effect.gen(function* () {
   /**
    * The pull request's own node id, which is what a mutation against the pull request itself is
    * addressed by: a reaction on its description, or a rewrite of its words.
+   *
+   * A pull request keeps its node id for life, so it is remembered rather than re-read: a reader
+   * ticking files viewed would otherwise pay a GraphQL round trip per press.
    */
+  const nodeIds = new Map<string, string>();
+
   const pullRequestNodeId = (input: {
     readonly cwd: string;
     readonly repository: string;
     readonly host: string;
     readonly number: number;
     readonly operation: string;
-  }) => {
+  }): Effect.Effect<string, GitHubPullRequestCliError> => {
     const { owner, name } = parseRepositorySelector(input.repository);
+    const key = `${input.host} ${owner}/${name} ${input.number}`;
+    const held = nodeIds.get(key);
+    if (held !== undefined) {
+      // Put back at the end on every hit, so what falls out is the pull request nobody has looked
+      // at rather than the one being ticked through: a run of cold reads would otherwise evict the
+      // open review and make it pay a round trip per press.
+      nodeIds.delete(key);
+      nodeIds.set(key, held);
+      return Effect.succeed(held);
+    }
     return graphqlRead({
       cwd: input.cwd,
       host: input.host,
@@ -1143,7 +1300,17 @@ export const make = Effect.gen(function* () {
       ],
       query: PULL_REQUEST_NODE_ID_GRAPHQL_QUERY,
       decode: decodePullRequestNodeIdJson,
-    });
+    }).pipe(
+      Effect.tap((nodeId) =>
+        Effect.sync(() => {
+          if (nodeIds.size >= NODE_ID_CACHE_CAPACITY) {
+            const oldest = nodeIds.keys().next().value;
+            if (oldest !== undefined) nodeIds.delete(oldest);
+          }
+          nodeIds.set(key, nodeId);
+        }),
+      ),
+    );
   };
 
   /**
@@ -1442,7 +1609,9 @@ export const make = Effect.gen(function* () {
         return { oldContents, newContents };
       });
 
-  const getPullRequestDetail: GitHubPullRequestCli["Service"]["getPullRequestDetail"] = (input) =>
+  const readLegacyDetail = (
+    input: Parameters<GitHubPullRequestCli["Service"]["getPullRequestDetail"]>[0],
+  ) =>
     github
       .execute({
         cwd: input.cwd,
@@ -1471,6 +1640,52 @@ export const make = Effect.gen(function* () {
         }),
       );
 
+  const getPullRequestDetail: GitHubPullRequestCli["Service"]["getPullRequestDetail"] = (input) => {
+    const { owner, name } = parseRepositorySelector(input.repository);
+    return GitHubCli.AllowGitHubReserve.pipe(
+      Effect.flatMap((allowReserve) =>
+        graphqlRead({
+          allowReserve,
+          cwd: input.cwd,
+          host: input.host,
+          operation: "getPullRequestDetail",
+          variables: [
+            ["-f", `owner=${owner}`],
+            ["-f", `name=${name}`],
+            ["-F", `number=${input.number}`],
+            ["-f", `headRef=refs/pull/${input.number}/head`],
+          ],
+          query: pullRequestCoreGraphQlQuery(input.host),
+          decode: decodePullRequestCoreJson,
+        }),
+      ),
+      // gh already pages check contexts. Keep its complete, deduplicated result for
+      // large check suites instead of letting the first 100 checks imply success.
+      Effect.filterOrElse(
+        (core) => !core.checksTruncated,
+        (core) =>
+          readLegacyDetail(input).pipe(
+            Effect.filterOrFail(
+              (detail) => detail.headSha === core.headSha,
+              () =>
+                new GitHubPullRequestReadError({
+                  command: "gh",
+                  cwd: input.cwd,
+                  operation: "getPullRequestDetail",
+                  cause: new Error("Pull request head changed while reading checks."),
+                }),
+            ),
+            Effect.map((detail) => ({
+              ...core,
+              checks: detail.checks,
+              checksState: detail.checksState,
+              checksTruncated: false,
+            })),
+          ),
+      ),
+    );
+  };
+
   const workflowApprovalLimit = 1_000;
   const workflowApprovalProbeLimit = String(workflowApprovalLimit + 1);
   const workflowApprovalReadError = (cwd: string, cause: unknown) =>
@@ -1482,71 +1697,74 @@ export const make = Effect.gen(function* () {
     });
   const listWorkflowRunsRequiringApproval: GitHubPullRequestCli["Service"]["listWorkflowRunsRequiringApproval"] =
     (input) =>
-      github
-        .execute({
-          cwd: input.cwd,
-          args: [
-            "pr",
-            "list",
-            ...repositoryArgs(input),
-            "--state",
-            "open",
-            "--head",
-            input.headBranch,
-            "--limit",
-            workflowApprovalProbeLimit,
-            "--json",
-            "number,headRefOid,isCrossRepository,headRepositoryOwner",
-          ],
-        })
-        .pipe(
-          Effect.flatMap(
-            (
-              result,
-            ): Effect.Effect<
-              GitHubPullRequestHead,
-              GitHubPullRequestReadError | GitHubWorkflowApprovalRefusedError
-            > => {
-              const decoded = decodePullRequestHeadsJson(result.stdout.trim());
-              if (!Result.isSuccess(decoded)) {
-                return Effect.fail(workflowApprovalReadError(input.cwd, decoded.failure));
-              }
-              const exactHeads = decoded.success.filter(
-                (pullRequest) =>
-                  pullRequest.headSha === input.headSha &&
-                  pullRequest.isCrossRepository === true &&
-                  pullRequest.headRepositoryOwner?.toLowerCase() ===
-                    input.headRepositoryOwner.toLowerCase(),
-              );
-              if (decoded.success.length > workflowApprovalLimit) {
-                return Effect.fail(
-                  new GitHubWorkflowApprovalRefusedError({
-                    command: "gh",
-                    cwd: input.cwd,
-                    number: input.number,
-                    reason: "head-list-truncated",
-                    observedCount: decoded.success.length,
-                    limit: workflowApprovalLimit,
-                  }),
-                );
-              }
-              if (exactHeads.length !== 1 || exactHeads[0]?.number !== input.number) {
-                return Effect.fail(
-                  new GitHubWorkflowApprovalRefusedError({
-                    command: "gh",
-                    cwd: input.cwd,
-                    number: input.number,
-                    reason: "head-not-unique",
-                    observedCount: exactHeads.length,
-                    limit: workflowApprovalLimit,
-                  }),
-                );
-              }
-              return Effect.succeed(exactHeads[0]);
-            },
-          ),
-          Effect.flatMap(() =>
-            github.execute({
+      Effect.all(
+        [
+          github
+            .execute({
+              cwd: input.cwd,
+              args: [
+                "pr",
+                "list",
+                ...repositoryArgs(input),
+                "--state",
+                "open",
+                "--head",
+                input.headBranch,
+                "--limit",
+                workflowApprovalProbeLimit,
+                "--json",
+                "number,headRefOid,isCrossRepository,headRepositoryOwner",
+              ],
+            })
+            .pipe(
+              Effect.flatMap(
+                (
+                  result,
+                ): Effect.Effect<
+                  GitHubPullRequestHead,
+                  GitHubPullRequestReadError | GitHubWorkflowApprovalRefusedError
+                > => {
+                  const decoded = decodePullRequestHeadsJson(result.stdout.trim());
+                  if (!Result.isSuccess(decoded)) {
+                    return Effect.fail(workflowApprovalReadError(input.cwd, decoded.failure));
+                  }
+                  const exactHeads = decoded.success.filter(
+                    (pullRequest) =>
+                      pullRequest.headSha === input.headSha &&
+                      pullRequest.isCrossRepository === true &&
+                      pullRequest.headRepositoryOwner?.toLowerCase() ===
+                        input.headRepositoryOwner.toLowerCase(),
+                  );
+                  if (decoded.success.length > workflowApprovalLimit) {
+                    return Effect.fail(
+                      new GitHubWorkflowApprovalRefusedError({
+                        command: "gh",
+                        cwd: input.cwd,
+                        number: input.number,
+                        reason: "head-list-truncated",
+                        observedCount: decoded.success.length,
+                        limit: workflowApprovalLimit,
+                      }),
+                    );
+                  }
+                  if (exactHeads.length !== 1 || exactHeads[0]?.number !== input.number) {
+                    return Effect.fail(
+                      new GitHubWorkflowApprovalRefusedError({
+                        command: "gh",
+                        cwd: input.cwd,
+                        number: input.number,
+                        reason: "head-not-unique",
+                        observedCount: exactHeads.length,
+                        limit: workflowApprovalLimit,
+                      }),
+                    );
+                  }
+                  return Effect.succeed(exactHeads[0]);
+                },
+              ),
+            ),
+          github
+            .execute({
               cwd: input.cwd,
               args: [
                 "run",
@@ -1565,37 +1783,227 @@ export const make = Effect.gen(function* () {
                 "--json",
                 "databaseId,workflowName,url",
               ],
-            }),
-          ),
-          Effect.flatMap(
-            (
-              result,
-            ): Effect.Effect<
-              ReadonlyArray<GitHubWorkflowRunApproval>,
-              GitHubPullRequestReadError | GitHubWorkflowApprovalRefusedError
-            > => {
-              const decoded = decodeWorkflowRunApprovalsJson(result.stdout.trim());
-              if (!Result.isSuccess(decoded)) {
-                return Effect.fail(workflowApprovalReadError(input.cwd, decoded.failure));
-              }
-              return decoded.success.length > workflowApprovalLimit
-                ? Effect.fail(
-                    new GitHubWorkflowApprovalRefusedError({
-                      command: "gh",
-                      cwd: input.cwd,
-                      number: input.number,
-                      reason: "run-list-truncated",
-                      observedCount: decoded.success.length,
-                      limit: workflowApprovalLimit,
-                    }),
-                  )
-                : Effect.succeed(decoded.success);
-            },
-          ),
-        );
+            })
+            .pipe(
+              Effect.flatMap(
+                (
+                  result,
+                ): Effect.Effect<
+                  ReadonlyArray<GitHubWorkflowRunApproval>,
+                  GitHubPullRequestReadError | GitHubWorkflowApprovalRefusedError
+                > => {
+                  const decoded = decodeWorkflowRunApprovalsJson(result.stdout.trim());
+                  if (!Result.isSuccess(decoded)) {
+                    return Effect.fail(workflowApprovalReadError(input.cwd, decoded.failure));
+                  }
+                  return decoded.success.length > workflowApprovalLimit
+                    ? Effect.fail(
+                        new GitHubWorkflowApprovalRefusedError({
+                          command: "gh",
+                          cwd: input.cwd,
+                          number: input.number,
+                          reason: "run-list-truncated",
+                          observedCount: decoded.success.length,
+                          limit: workflowApprovalLimit,
+                        }),
+                      )
+                    : Effect.succeed(decoded.success);
+                },
+              ),
+            ),
+        ],
+        { concurrency: 2 },
+      ).pipe(Effect.map(([, runs]) => runs));
+
+  // One `gh pr view` either way; asking for the detail fields costs nothing extra and hands
+  // the thread overview its author, diff stat, review decision and checks in the same read.
+  const viewPullRequestSummary = (input: PullRequestSummaryRead) =>
+    github
+      .execute({
+        cwd: input.cwd,
+        args: [
+          "pr",
+          "view",
+          String(input.number),
+          ...repositoryArgs(input),
+          "--json",
+          PULL_REQUEST_DETAIL_JSON_FIELDS,
+        ],
+      })
+      .pipe(
+        Effect.flatMap((result) => {
+          const decoded = decodePullRequestDetailJson(result.stdout.trim());
+          if (!Result.isSuccess(decoded)) {
+            return Effect.fail(
+              new GitHubPullRequestReadError({
+                command: "gh",
+                cwd: input.cwd,
+                operation: "getPullRequestSummary",
+                cause: decoded.failure,
+              }),
+            );
+          }
+          const detail = decoded.success;
+          return Effect.succeed({
+            number: detail.number,
+            title: detail.title,
+            url: detail.url,
+            headBranch: detail.headBranch,
+            baseBranch: detail.baseBranch,
+            state: detail.state,
+            updatedAt: detail.updatedAt,
+            closedAt: detail.closedAt ?? null,
+            mergedAt: detail.mergedAt ?? null,
+            isDraft: detail.isDraft,
+            author: detail.author,
+            additions: detail.additions,
+            deletions: detail.deletions,
+            changedFiles: detail.changedFiles,
+            reviewDecision: detail.reviewDecision,
+            checksState: detail.checksState,
+            mergeability: detail.mergeability,
+          });
+        }),
+      );
+
+  /**
+   * Summaries asked for together, on one host under one credential, share aliased GraphQL reads
+   * of twenty-five: the background sync reads every linked pull request each minute, and one
+   * `gh pr view` apiece is most of what it spends. Whatever the batch cannot answer — a selector
+   * GraphQL cannot address, a pull request GitHub returned nothing for — is read on its own.
+   */
+  const summaryResolver = RequestResolver.makeGrouped<PullRequestSummaryRead, string>({
+    key: ({ request, context }) =>
+      JSON.stringify([
+        request.host.toLowerCase(),
+        Context.getOrElse(context, GitHubCli.PinnedGitHubCredential, () => null)
+          ?.credentialFingerprint ?? null,
+        Context.getOrElse(context, SourceControlRateLimit.CredentialScope, () => ""),
+      ]),
+    resolver: (entries) => {
+      const [first] = entries;
+      const batchable = entries.filter(
+        (entry) => buildPullRequestSummariesGraphQlQuery([entry.request]) !== null,
+      );
+      // Stack membership rides along where GitHub serves stacks, so the background sync can skip
+      // the REST stack read for pull requests that are in none.
+      const query = buildPullRequestSummariesGraphQlQuery(
+        batchable.map((entry) => entry.request),
+        first.request.host === "github.com",
+      );
+      const batched =
+        query === null
+          ? Effect.succeed(new Map<number, GitHubPullRequestSummary>())
+          : graphqlRead({
+              cwd: first.request.cwd,
+              host: first.request.host,
+              operation: "getPullRequestSummary",
+              query,
+              decode: decodePullRequestSummariesJson,
+            });
+      return batched.pipe(
+        // A GraphQL error anywhere fails the whole document — one repository gone or out of
+        // reach — so a batch that could not be read leaves every entry to its own read. A paused
+        // budget is the exception: reading one at a time would only spend what is being saved.
+        Effect.catchCauseIf(
+          (cause) =>
+            !Cause.hasInterruptsOnly(cause) &&
+            !Cause.findErrorOption(cause).pipe(
+              Option.exists((error) => error._tag === "SourceControlRateLimitPausedError"),
+            ),
+          (cause) =>
+            Effect.logDebug("batched pull request summary read failed", { cause }).pipe(
+              Effect.as(new Map<number, GitHubPullRequestSummary>()),
+            ),
+        ),
+        Effect.flatMap((summaries) => {
+          const unanswered = entries.filter((entry) => {
+            const summary = summaries.get(batchable.indexOf(entry));
+            if (summary === undefined) return true;
+            entry.completeUnsafe(Exit.succeed(summary));
+            return false;
+          });
+          return Effect.forEach(
+            unanswered,
+            (entry) =>
+              viewPullRequestSummary(entry.request).pipe(
+                Effect.exit,
+                Effect.map((exit) => entry.completeUnsafe(exit)),
+              ),
+            { concurrency: STAT_REQUEST_CONCURRENCY, discard: true },
+          );
+        }),
+        Effect.catchCause((cause) =>
+          Effect.sync(() => {
+            for (const entry of entries) entry.completeUnsafe(Exit.failCause(cause));
+          }),
+        ),
+      );
+    },
+  }).pipe(
+    RequestResolver.setDelay(SUMMARY_BATCH_WINDOW),
+    RequestResolver.batchN(STAT_ALIASES_PER_REQUEST),
+  );
+  const getPullRequestSummary: GitHubPullRequestCli["Service"]["getPullRequestSummary"] = (input) =>
+    Effect.request(new PullRequestSummaryRead(input), summaryResolver);
+
+  // Every watched pull request on a host in one read per pass. A pull request the batch has no
+  // answer for gets null, and its watch reads it in full; a failed batch fails every entry.
+  const watchFingerprintResolver = RequestResolver.makeGrouped<
+    PullRequestWatchFingerprintRead,
+    string
+  >({
+    key: ({ request, context }) =>
+      JSON.stringify([
+        request.host.toLowerCase(),
+        Context.getOrElse(context, GitHubCli.PinnedGitHubCredential, () => null)
+          ?.credentialFingerprint ?? null,
+        Context.getOrElse(context, SourceControlRateLimit.CredentialScope, () => ""),
+      ]),
+    resolver: (entries) => {
+      const [first] = entries;
+      const batchable = entries.filter(
+        (entry) => buildPullRequestWatchFingerprintsGraphQlQuery([entry.request]) !== null,
+      );
+      const query = buildPullRequestWatchFingerprintsGraphQlQuery(
+        batchable.map((entry) => entry.request),
+      );
+      const read =
+        query === null
+          ? Effect.succeed(new Map<number, GitHubPullRequestWatchFingerprint>())
+          : graphqlRead({
+              cwd: first.request.cwd,
+              host: first.request.host,
+              operation: "getPullRequestWatchFingerprint",
+              query,
+              decode: decodePullRequestWatchFingerprintsJson,
+            });
+      return read.pipe(
+        Effect.map((fingerprints) => {
+          for (const entry of entries) {
+            const index = batchable.indexOf(entry);
+            entry.completeUnsafe(
+              Exit.succeed(index === -1 ? null : (fingerprints.get(index) ?? null)),
+            );
+          }
+        }),
+        Effect.catchCause((cause) =>
+          Effect.sync(() => {
+            for (const entry of entries) entry.completeUnsafe(Exit.failCause(cause));
+          }),
+        ),
+      );
+    },
+  }).pipe(
+    RequestResolver.setDelay(SUMMARY_BATCH_WINDOW),
+    RequestResolver.batchN(STAT_ALIASES_PER_REQUEST),
+  );
+  const getPullRequestWatchFingerprint: GitHubPullRequestCli["Service"]["getPullRequestWatchFingerprint"] =
+    (input) => Effect.request(new PullRequestWatchFingerprintRead(input), watchFingerprintResolver);
 
   return GitHubPullRequestCli.of({
     withVerifiedCredential,
+    revalidateChecks,
     getRoutingIdentity,
     getViewerLogin: (input) =>
       getRoutingIdentity(input).pipe(Effect.map((identity) => identity.viewer)),
@@ -1682,10 +2090,9 @@ export const make = Effect.gen(function* () {
       // the fallback out: an empty answer under one is already the answer.
       const hasQuery = (input.query?.trim().length ?? 0) > 0;
       return read(true).pipe(
-        Effect.flatMap((batch) =>
-          batch.items.length === 0 && input.cursor === undefined && !hasQuery
-            ? read(false)
-            : Effect.succeed(batch),
+        Effect.filterOrElse(
+          (batch) => batch.items.length > 0 || input.cursor !== undefined || hasQuery,
+          () => read(false),
         ),
         Effect.flatMap((batch) => {
           // Match the search query's host support, and enrich only rows that survived paging.
@@ -1800,58 +2207,25 @@ export const make = Effect.gen(function* () {
       ).pipe(Effect.map((results) => results.flat()));
     },
 
-    // One `gh pr view` either way; asking for the detail fields costs nothing extra and hands
-    // the thread overview its author, diff stat, review decision and checks in the same read.
-    getPullRequestSummary: (input) =>
-      github
-        .execute({
-          cwd: input.cwd,
-          args: [
-            "pr",
-            "view",
-            String(input.number),
-            ...repositoryArgs(input),
-            "--json",
-            PULL_REQUEST_DETAIL_JSON_FIELDS,
-          ],
-        })
-        .pipe(
-          Effect.flatMap((result) => {
-            const decoded = decodePullRequestDetailJson(result.stdout.trim());
-            if (!Result.isSuccess(decoded)) {
-              return Effect.fail(
-                new GitHubPullRequestReadError({
-                  command: "gh",
-                  cwd: input.cwd,
-                  operation: "getPullRequestSummary",
-                  cause: decoded.failure,
-                }),
-              );
-            }
-            const detail = decoded.success;
-            return Effect.succeed({
-              number: detail.number,
-              title: detail.title,
-              url: detail.url,
-              headBranch: detail.headBranch,
-              baseBranch: detail.baseBranch,
-              state: detail.state,
-              updatedAt: detail.updatedAt,
-              closedAt: detail.closedAt ?? null,
-              mergedAt: detail.mergedAt ?? null,
-              isDraft: detail.isDraft,
-              author: detail.author,
-              additions: detail.additions,
-              deletions: detail.deletions,
-              changedFiles: detail.changedFiles,
-              reviewDecision: detail.reviewDecision,
-              checksState: detail.checksState,
-              mergeability: detail.mergeability,
-            });
-          }),
-        ),
+    getPullRequestSummary,
+    getPullRequestWatchFingerprint,
 
     getPullRequestDetail,
+    getPullRequestPreview: (input) => {
+      const { owner, name } = parseRepositorySelector(input.repository);
+      return graphqlRead({
+        cwd: input.cwd,
+        host: input.host,
+        operation: "getPullRequestPreview",
+        variables: [
+          ["-f", `owner=${owner}`],
+          ["-f", `name=${name}`],
+          ["-F", `number=${input.number}`],
+        ],
+        query: PULL_REQUEST_PREVIEW_GRAPHQL_QUERY,
+        decode: decodePullRequestPreviewJson,
+      });
+    },
     listWorkflowRunsRequiringApproval,
 
     getPullRequestStack: (input) => {
@@ -1880,6 +2254,7 @@ export const make = Effect.gen(function* () {
                   }),
                 );
           }),
+          // @effect-diagnostics-next-line flatMapConditionalToFilterOrFail:off - the fallback needs a non-null stack, which a predicate that also reads includeDetails cannot refine.
           Effect.flatMap((stack) => {
             if (!input.includeDetails || stack === null) return Effect.succeed(stack);
             return github
@@ -2070,6 +2445,7 @@ export const make = Effect.gen(function* () {
           });
         const entries: GitHubReviewThreadEntry[] = [];
         const avatarsByLogin = new Map<string, string>();
+        const botLogins = new Set<string>();
         const commitStats = new Map<
           string,
           { readonly additions: number; readonly deletions: number }
@@ -2077,6 +2453,7 @@ export const make = Effect.gen(function* () {
         let reviewers: ReadonlyArray<PullRequestActor> = [];
         let reactions: GitHubReviewThreadPage["reactions"] = [];
         const reactionsById = new Map<string, ReadonlyArray<PullRequestReaction>>();
+        const editedAtById = new Map<string, string>();
         let commits: GitHubReviewThreadPage["commits"] = [];
         let viewer: GitHubReviewThreadPage["viewer"] = { canUpdate: true, didAuthor: false };
         const dismissalsByReviewId = new Map<string, string>();
@@ -2086,6 +2463,7 @@ export const make = Effect.gen(function* () {
         do {
           const read: GitHubReviewThreadPage = yield* threadPage(cursor);
           entries.push(...read.threads);
+          for (const login of read.botLogins) botLogins.add(login);
           for (const [login, avatarUrl] of read.avatarsByLogin)
             avatarsByLogin.set(login, avatarUrl);
           // The roster, the commits and the viewer's standing travel with every page, and the
@@ -2094,6 +2472,7 @@ export const make = Effect.gen(function* () {
             reviewers = read.reviewers;
             reactions = read.reactions;
             for (const [id, entry] of read.reactionsById) reactionsById.set(id, entry);
+            for (const [id, editedAt] of read.editedAtById) editedAtById.set(id, editedAt);
             commits = read.commits;
             viewer = read.viewer;
             for (const [id, message] of read.dismissalsByReviewId)
@@ -2147,10 +2526,13 @@ export const make = Effect.gen(function* () {
           // where a bound kept some of the words on GitHub.
           commentCount: entries.reduce((total, entry) => total + entry.commentCount, 0),
           truncated: cursor !== null || entries.some((entry) => entry.nextCommentCursor !== null),
+          reviewThreadsTruncated: cursor !== null,
           reactions,
           reactionsById,
+          editedAtById,
           reviewers,
           avatarsByLogin,
+          botLogins,
           commitStats,
           commits,
           viewer,
@@ -2170,34 +2552,6 @@ export const make = Effect.gen(function* () {
         decode: decodeActorAvatarsJson,
       });
     },
-
-    getRepositoryAccess: (input) =>
-      github
-        .execute({
-          cwd: input.cwd,
-          args: [
-            "repo",
-            "view",
-            `${input.host}/${input.repository}`,
-            "--json",
-            REPOSITORY_ACCESS_JSON_FIELDS,
-          ],
-        })
-        .pipe(
-          Effect.flatMap((result) => {
-            const decoded = decodeRepositoryAccessJson(result.stdout.trim());
-            return Result.isSuccess(decoded)
-              ? Effect.succeed(decoded.success)
-              : Effect.fail(
-                  new GitHubPullRequestReadError({
-                    command: "gh",
-                    cwd: input.cwd,
-                    operation: "getRepositoryAccess",
-                    cause: decoded.failure,
-                  }),
-                );
-          }),
-        ),
 
     getViewerAccess: (input) => {
       const { owner, name } = parseRepositorySelector(input.repository);
@@ -2417,12 +2771,52 @@ export const make = Effect.gen(function* () {
         input.mergeMethod,
         input.updateMethod,
       );
-      return github
-        .execute({
+      return Effect.gen(function* () {
+        let body: string | undefined;
+        let expectedHead: string | undefined;
+        if (
+          input.removeAgentCreditsOnMerge === true &&
+          (input.action === "merge" || input.action === "enable-auto-merge") &&
+          input.mergeMethod !== "rebase"
+        ) {
+          const { owner, name } = parseRepositorySelector(input.repository);
+          const message = yield* graphqlRead({
+            cwd: input.cwd,
+            host: input.host,
+            operation: "runPullRequestAction",
+            allowReserve: true,
+            query: MERGE_MESSAGE_GRAPHQL_QUERY,
+            variables: [
+              ["-f", `owner=${owner}`],
+              ["-f", `name=${name}`],
+              ["-F", `number=${input.number}`],
+              ["-f", `method=${input.mergeMethod === "squash" ? "SQUASH" : "MERGE"}`],
+            ],
+            decode: decodeMergeMessage,
+          });
+          // GitHub's merge queue chooses its own message and ignores custom text.
+          if (!message.isMergeQueueEnabled) {
+            const cleaned = removeAgentCredits(message.viewerMergeBodyText);
+            if (cleaned !== message.viewerMergeBodyText) {
+              body = cleaned;
+              expectedHead = message.headRefOid;
+            }
+          }
+        }
+        yield* github.execute({
           cwd: input.cwd,
-          args: ["pr", subcommand!, String(input.number), ...repositoryArgs(input), ...flags],
-        })
-        .pipe(Effect.asVoid);
+          args: [
+            "pr",
+            subcommand!,
+            String(input.number),
+            ...repositoryArgs(input),
+            ...flags,
+            ...(expectedHead === undefined ? [] : ["--match-head-commit", expectedHead]),
+            ...(body === undefined ? [] : ["--body-file", "-"]),
+          ],
+          ...(body === undefined ? {} : { stdin: body }),
+        });
+      });
     },
 
     commentOnPullRequest: (input) =>
@@ -2477,6 +2871,56 @@ export const make = Effect.gen(function* () {
         query: REVIEW_THREAD_REPLY_GRAPHQL_MUTATION,
         variables: { threadId: input.threadId, body: input.body },
       }),
+
+    getPullRequestFilesViewed: (input) => {
+      const { owner, name } = parseRepositorySelector(input.repository);
+      const read = (
+        after: string | null,
+        collected: ReadonlyArray<PullRequestFileViewed>,
+        pagesLeft: number,
+      ): Effect.Effect<GitHubPullRequestFilesViewed, GitHubPullRequestCliError> =>
+        graphqlRead({
+          cwd: input.cwd,
+          host: input.host,
+          operation: "getPullRequestFilesViewed",
+          variables: [
+            ["-f", `owner=${owner}`],
+            ["-f", `name=${name}`],
+            ["-F", `number=${input.number}`],
+            ...(after === null
+              ? []
+              : ([["-f", `after=${after}`]] as ReadonlyArray<readonly [string, string]>)),
+          ],
+          query: PULL_REQUEST_FILES_VIEWED_GRAPHQL_QUERY,
+          decode: decodePullRequestFilesViewedJson,
+        }).pipe(
+          Effect.flatMap((page) => {
+            const files = [...collected, ...page.files];
+            if (page.nextCursor === null) {
+              return Effect.succeed({ files, truncated: false });
+            }
+            return pagesLeft <= 1
+              ? Effect.succeed({ files, truncated: true })
+              : read(page.nextCursor, files, pagesLeft - 1);
+          }),
+        );
+      return read(null, [], FILES_VIEWED_MAX_PAGES);
+    },
+
+    setPullRequestFilesViewed: (input) => {
+      const mutation = buildSetFilesViewedGraphQlMutation(input.files);
+      if (mutation === null) return Effect.void;
+      return pullRequestNodeId({ ...input, operation: "setPullRequestFilesViewed" }).pipe(
+        Effect.flatMap((pullRequestId) =>
+          graphql({
+            cwd: input.cwd,
+            host: input.host,
+            query: mutation.query,
+            variables: { pullRequestId, ...mutation.variables },
+          }),
+        ),
+      );
+    },
 
     setReviewThreadResolution: (input) =>
       graphql({
