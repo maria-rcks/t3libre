@@ -164,6 +164,8 @@ export function start(configuration: PreviewStreamConfiguration) {
   };
 
   const connect = () => {
+    // Stopping suppresses the old socket's disconnect report; native also drops its control.
+    if (client) reportStatus("connecting");
     client?.stop();
     control = null;
     clearInput();
