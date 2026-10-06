@@ -483,7 +483,7 @@ it.effect("returns server ARIA refs to agents in text and structured results", (
         ),
       ).toBe(true);
     }),
-  ).pipe(Effect.provide(TestLayer)),
+  ).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("bounds large ARIA trees without dropping every server locator", () =>
@@ -504,7 +504,7 @@ it.effect("bounds large ARIA trees without dropping every server locator", () =>
         McpHttpServer.MAX_SNAPSHOT_TEXT_BYTES,
       );
     }),
-  ).pipe(Effect.provide(TestLayer)),
+  ).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("keeps the snapshot text under the agent's output ceiling", () =>
