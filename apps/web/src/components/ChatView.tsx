@@ -2134,7 +2134,7 @@ export default function ChatView(props: ChatViewProps) {
         ...current,
         temporary: [
           ...new Set([...current.temporary, ...ids.map((id) => `${serverRunId}\u0000${id}`)]),
-        ].slice(-100),
+        ],
       }));
     },
     [serverRunId, setWarningDismissals],
