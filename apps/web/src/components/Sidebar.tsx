@@ -1792,7 +1792,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ref={rowRef}
                 role="button"
                 tabIndex={0}
-                aria-label={accessibility.label}
+                aria-label={
+                  isRemote
+                    ? `${accessibility.label}, ${props.environmentLabel ?? "Remote environment"}`
+                    : accessibility.label
+                }
                 aria-current={accessibility.current}
                 data-testid="sidebar-row-slim"
                 aria-busy={isRegeneratingTitle || undefined}
@@ -1957,7 +1961,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ref={rowRef}
               role="button"
               tabIndex={0}
-              aria-label={accessibility.label}
+              aria-label={
+                isRemote
+                  ? `${accessibility.label}, ${props.environmentLabel ?? "Remote environment"}`
+                  : accessibility.label
+              }
               aria-current={accessibility.current}
               data-testid="sidebar-row-card"
               aria-busy={isRegeneratingTitle || undefined}
