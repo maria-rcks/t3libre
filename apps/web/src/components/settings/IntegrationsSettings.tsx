@@ -940,6 +940,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     readonly environmentName: string;
   } | null>(null);
   const [profilePendingRemoval, setProfilePendingRemoval] = useState<BrowserProfile | null>(null);
+  const [profilePendingClear, setProfilePendingClear] = useState<BrowserProfile | null>(null);
   const [profileRemovalError, setProfileRemovalError] = useState<string | null>(null);
   const [profileRemovalInFlight, setProfileRemovalInFlight] = useState(false);
   const serverConfigs = useServerConfigs();
@@ -1352,7 +1353,12 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                   </MenuItem>
                   <MenuItem
                     disabled={!settingsHydrated || !removalAvailable}
-                    onClick={() => clearProfileData(profile.id, profile.name)}
+                    onClick={() => {
+                      // Clearing a server copy closes its open tabs, so it asks first.
+                      if (serverProfileData.environmentIds.length > 0) {
+                        setProfilePendingClear(profile);
+                      } else clearProfileData(profile.id, profile.name);
+                    }}
                   >
                     Clear cookies and cache
                   </MenuItem>
@@ -1427,6 +1433,36 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
               }}
             >
               {profileRemovalInFlight ? "Removing…" : "Remove profile"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+      <AlertDialog
+        open={profilePendingClear !== null}
+        onOpenChange={(open) => {
+          if (!open) setProfilePendingClear(null);
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Clear “{profilePendingClear?.name}”’s cookies and cache?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You are signed out of its sites. Server browser tabs open in this profile close now.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (profilePendingClear)
+                  clearProfileData(profilePendingClear.id, profilePendingClear.name);
+                setProfilePendingClear(null);
+              }}
+            >
+              Clear data
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>
