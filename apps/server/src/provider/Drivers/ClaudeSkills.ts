@@ -377,12 +377,7 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
     if (!prefix) continue;
     const skillsDirectory = path.join(install.installPath, "skills");
     roots.push({ directory: skillsDirectory, scope, prefix });
-    if (
-      !(yield* fileSystem.exists(skillsDirectory).pipe(Effect.orElseSucceed(() => false))) &&
-      (yield* fileSystem
-        .exists(path.join(install.installPath, "SKILL.md"))
-        .pipe(Effect.orElseSucceed(() => false)))
-    ) {
+    if (!(yield* fileSystem.exists(skillsDirectory).pipe(Effect.orElseSucceed(() => false)))) {
       roots.push({ directory: install.installPath, scope, prefix, singleSkill: true });
     }
     const installRoot = path.resolve(install.installPath);
