@@ -1,12 +1,13 @@
 import previewStreamScript from "@t3tools/mobile-preview-stream";
 import {
   previewStreamControlLabel,
+  previewStreamHostSetupMessage,
   type PreviewStreamControl,
   type PreviewStreamDownload,
   type PreviewStreamFileChooser,
   type PreviewStreamInput,
 } from "@t3tools/client-runtime/preview/server-browser-stream";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, PreviewStreamHostSetup } from "@t3tools/contracts";
 import {
   useEffect,
   useEffectEvent,
@@ -252,6 +253,7 @@ function PreviewStreamDocumentView({
   const [status, setStatus] = useState<"connecting" | "streaming" | "error">("connecting");
   const [error, setError] = useState<string | null>(null);
   const [gone, setGone] = useState(false);
+  const [hostSetup, setHostSetup] = useState<PreviewStreamHostSetup | null>(null);
   const [started, setStarted] = useState(false);
   const [control, setControl] = useState<PreviewStreamControl | null>(null);
   const [promptText, setPromptText] = useState("");
@@ -384,6 +386,10 @@ function PreviewStreamDocumentView({
               fail("This tab was closed.");
               onGone?.();
               return;
+            case "hostSetup":
+              setHostSetup({ need: message.need, command: message.command });
+              fail(previewStreamHostSetupMessage(message));
+              return;
             case "viewport":
               onViewport?.(message);
               return;
@@ -495,13 +501,30 @@ function PreviewStreamDocumentView({
               {status === "error" ? error : "Connecting to browser..."}
             </AppText>
           )}
+          {status === "error" && hostSetup && !compact ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Copy ${hostSetup.command}`}
+              className="w-full flex-row items-center gap-2 rounded-xl border border-secondary-border bg-secondary px-4 py-3"
+              onPress={() => {
+                void Clipboard.setStringAsync(hostSetup.command).catch(() => undefined);
+              }}
+            >
+              <AppText selectable className="flex-1 font-mono text-sm text-secondary-foreground">
+                {hostSetup.command}
+              </AppText>
+              <AppText className="text-xs text-foreground-muted">Copy</AppText>
+            </Pressable>
+          ) : null}
           {status === "error" && !gone && !compact ? (
             <Pressable
               accessibilityRole="button"
               className="rounded-full border border-secondary-border bg-secondary px-6 py-3"
               onPress={onRetry}
             >
-              <AppText className="text-secondary-foreground">Reconnect</AppText>
+              <AppText className="text-secondary-foreground">
+                {hostSetup ? "Try again" : "Reconnect"}
+              </AppText>
             </Pressable>
           ) : null}
         </View>

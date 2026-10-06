@@ -368,7 +368,7 @@ export function createPreviewStreamClient(
       }
       if (event.code === PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE) {
         stopped = true;
-        events.onHostSetup?.(event.reason === "libraries" ? "libraries" : "sandbox");
+        events.onHostSetup?.(decodeHostSetup(event.reason));
         return;
       }
       // Rejected upgrades surface as 1006 before open for both cookies and tickets.
@@ -455,8 +455,22 @@ export function createPreviewFramePainter(
   };
 }
 
-/** What a viewer tells the person when the server's browser needs host setup. */
+/** A malformed reason still stops the viewer and offers the usual command. */
+const decodeHostSetup = (reason: string): PreviewStreamHostSetup => {
+  try {
+    const value = JSON.parse(reason) as Partial<PreviewStreamHostSetup>;
+    if (
+      (value.need === "sandbox" || value.need === "libraries") &&
+      typeof value.command === "string"
+    ) {
+      return { need: value.need, command: value.command };
+    }
+  } catch {}
+  return { need: "sandbox", command: "sudo npx t3 browser setup" };
+};
+
+/** What a viewer tells the person; `command` is shown beside it, ready to copy. */
 export const previewStreamHostSetupMessage = (setup: PreviewStreamHostSetup) =>
-  setup === "sandbox"
-    ? "This server's browser needs Chrome's sandbox, which the host blocks. Its operator can allow it with the AppArmor profile in T3 Code's remote access guide, or set T3CODE_SERVER_BROWSER_SANDBOX=0."
-    : "This server's browser is missing system libraries. Its operator can install Chrome's libraries as described in T3 Code's remote access guide.";
+  setup.need === "sandbox"
+    ? "This server's host blocks the sandbox its browser runs in. Run this once on the host, then try again:"
+    : "This server's host is missing libraries its browser needs. Run this once on the host, then try again:";

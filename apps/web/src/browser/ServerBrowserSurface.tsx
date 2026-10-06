@@ -35,6 +35,7 @@ import {
 } from "react";
 
 import { AgentCursorMark } from "~/components/preview/AgentBrowserCursor";
+import { CommandBlock } from "~/components/CommandBlock";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { toastManager } from "~/components/ui/toast";
@@ -868,10 +869,11 @@ export function ServerBrowserSurface(props: {
         ) : null}
       </div>
       {visible && hostSetup ? (
-        <div className="visible absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background p-3 text-center">
-          <p role="alert" className="max-w-sm text-xs text-muted-foreground">
+        <div className="visible absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-background p-4 text-center">
+          <p role="alert" className="max-w-sm text-sm text-muted-foreground">
             {previewStreamHostSetupMessage(hostSetup)}
           </p>
+          <CommandBlock command={hostSetup.command} className="w-full max-w-md text-left" />
           <Button variant="outline" size="sm" onClick={() => setHostSetup(null)}>
             Try again
           </Button>

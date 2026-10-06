@@ -1,7 +1,6 @@
 import {
   createPreviewFramePainter,
   createPreviewStreamClient,
-  previewStreamHostSetupMessage,
   previewStreamModifiers,
   type PreviewStreamClient,
   type PreviewStreamControl,
@@ -234,8 +233,7 @@ export function start(configuration: PreviewStreamConfiguration) {
         },
         onUnauthorized: () => post({ type: "unauthorized" }),
         onGone: () => post({ type: "gone" }),
-        onHostSetup: (setup) =>
-          post({ type: "status", status: "error", detail: previewStreamHostSetupMessage(setup) }),
+        onHostSetup: (setup) => post({ type: "hostSetup", ...setup }),
       },
     );
     client = next;
