@@ -27,6 +27,7 @@ import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import { Button, InlineButton } from "../ui/button";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { MiddleTruncate } from "../ui/middle-truncate";
 import { PullRequestCopyableCode } from "./PullRequestCopyableCode";
 import {
   PullRequestActorLabel,
@@ -168,13 +169,9 @@ export function PullRequestDetailGhost({
                 <span className="min-w-0 truncate font-medium">{seed.repository}</span>
                 <InlineButton
                   onClick={() => void readLocalApi()?.shell.openExternal(seed.url)}
-                  className={cn(
-                    "font-medium underline-offset-2 hover:underline",
-                    statePresentation?.toneClassName,
-                  )}
                   aria-label={`Open pull request #${seed.number} on host`}
                 >
-                  #{seed.number}
+                  <span className={statePresentation?.toneClassName}>#{seed.number}</span>
                   <ExternalLinkIcon aria-hidden className="size-2.5" />
                 </InlineButton>
               </>
@@ -218,11 +215,7 @@ export function PullRequestDetailGhost({
               <div className="mt-2 flex min-h-5 min-w-0 items-center gap-2 text-xs text-muted-foreground">
                 {seed ? (
                   <PullRequestMetaLine className="min-w-0 whitespace-nowrap">
-                    <PullRequestActorLabel
-                      actor={seed.author ?? null}
-                      className="font-medium"
-                      tooltip={false}
-                    />
+                    <PullRequestActorLabel actor={seed.author ?? null} tooltip={false} />
                     <span>updated {formatRelativeTimeLabel(seed.updatedAt)}</span>
                   </PullRequestMetaLine>
                 ) : (
@@ -252,7 +245,9 @@ export function PullRequestDetailGhost({
                 <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-xs text-muted-foreground/70">
                   {seed ? (
                     <span className="inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1">
-                      <code className="min-w-0 truncate">{seed.baseBranch}</code>
+                      <code className="flex min-w-0">
+                        <MiddleTruncate value={seed.baseBranch} />
+                      </code>
                     </span>
                   ) : (
                     <span className="inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1">

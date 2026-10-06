@@ -282,127 +282,76 @@ export function TimelineBackgroundSettings() {
           </form>
         }
       />
-      <SettingsRow
+      <WallpaperSlider
         title="Opacity"
         description="How strongly the image shows through the chat."
-        aria-disabled={!image || undefined}
-        resetAction={
-          opacity !== DEFAULT_CLIENT_SETTINGS.timelineBackgroundOpacity ? (
-            <SettingResetButton
-              label="wallpaper opacity"
-              onClick={() =>
-                updateSettings({
-                  timelineBackgroundOpacity: DEFAULT_CLIENT_SETTINGS.timelineBackgroundOpacity,
-                })
-              }
-            />
-          ) : null
-        }
-        control={
-          <WallpaperSlider
-            id="timeline-background-opacity"
-            label="Background opacity"
-            value={previewOpacity}
-            max={100}
-            unit="%"
-            disabled={!image}
-            onDraft={setOpacityDraft}
-            onCommit={saveOpacity}
-          />
-        }
+        setting="timelineBackgroundOpacity"
+        resetLabel="wallpaper opacity"
+        id="timeline-background-opacity"
+        label="Background opacity"
+        value={previewOpacity}
+        savedValue={opacity}
+        max={100}
+        unit="%"
+        disabled={!image}
+        onDraft={setOpacityDraft}
+        onCommit={saveOpacity}
       />
-      <SettingsRow
+      <WallpaperSlider
         title="Blur"
         description="Softens the image behind messages."
-        aria-disabled={!image || undefined}
-        resetAction={
-          blur !== DEFAULT_CLIENT_SETTINGS.timelineBackgroundBlur ? (
-            <SettingResetButton
-              label="wallpaper blur"
-              onClick={() =>
-                updateSettings({
-                  timelineBackgroundBlur: DEFAULT_CLIENT_SETTINGS.timelineBackgroundBlur,
-                })
-              }
-            />
-          ) : null
-        }
-        control={
-          <WallpaperSlider
-            id="timeline-background-blur"
-            label="Background blur"
-            value={previewBlur}
-            max={MAX_BLUR}
-            unit="px"
-            disabled={!image}
-            onDraft={setBlurDraft}
-            onCommit={saveBlur}
-          />
-        }
+        setting="timelineBackgroundBlur"
+        resetLabel="wallpaper blur"
+        id="timeline-background-blur"
+        label="Background blur"
+        value={previewBlur}
+        savedValue={blur}
+        max={MAX_BLUR}
+        unit="px"
+        disabled={!image}
+        onDraft={setBlurDraft}
+        onCommit={saveBlur}
       />
-      <SettingsRow
+      <WallpaperSlider
         title="Text shadow"
         description="Strength behind message text and the new-thread heading. Set to 0% to turn it off."
-        aria-disabled={!image || undefined}
-        resetAction={
-          shadowOpacity !== DEFAULT_CLIENT_SETTINGS.timelineTextShadowOpacity ? (
-            <SettingResetButton
-              label="text shadow strength"
-              onClick={() =>
-                updateSettings({
-                  timelineTextShadowOpacity: DEFAULT_CLIENT_SETTINGS.timelineTextShadowOpacity,
-                })
-              }
-            />
-          ) : null
-        }
-        control={
-          <WallpaperSlider
-            id="timeline-text-shadow-opacity"
-            label="Text shadow strength"
-            value={previewShadowOpacity}
-            max={100}
-            unit="%"
-            disabled={!image}
-            onDraft={setShadowOpacityDraft}
-            onCommit={saveShadowOpacity}
-          />
-        }
+        setting="timelineTextShadowOpacity"
+        resetLabel="text shadow strength"
+        id="timeline-text-shadow-opacity"
+        label="Text shadow strength"
+        value={previewShadowOpacity}
+        savedValue={shadowOpacity}
+        max={100}
+        unit="%"
+        disabled={!image}
+        onDraft={setShadowOpacityDraft}
+        onCommit={saveShadowOpacity}
       />
-      <SettingsRow
+      <WallpaperSlider
         title="Shadow blur"
         description="Softens the text shadow."
-        aria-disabled={!image || undefined}
-        resetAction={
-          shadowBlur !== DEFAULT_CLIENT_SETTINGS.timelineTextShadowBlur ? (
-            <SettingResetButton
-              label="text shadow blur"
-              onClick={() =>
-                updateSettings({
-                  timelineTextShadowBlur: DEFAULT_CLIENT_SETTINGS.timelineTextShadowBlur,
-                })
-              }
-            />
-          ) : null
-        }
-        control={
-          <WallpaperSlider
-            id="timeline-text-shadow-blur"
-            label="Text shadow blur"
-            value={previewShadowBlur}
-            max={8}
-            unit="px"
-            disabled={!image}
-            onDraft={setShadowBlurDraft}
-            onCommit={saveShadowBlur}
-          />
-        }
+        setting="timelineTextShadowBlur"
+        resetLabel="text shadow blur"
+        id="timeline-text-shadow-blur"
+        label="Text shadow blur"
+        value={previewShadowBlur}
+        savedValue={shadowBlur}
+        max={8}
+        unit="px"
+        disabled={!image}
+        onDraft={setShadowBlurDraft}
+        onCommit={saveShadowBlur}
       />
     </SettingsSection>
   );
 }
 
 function WallpaperSlider({
+  title,
+  description,
+  setting,
+  resetLabel,
+  savedValue,
   id,
   label,
   value,
@@ -412,6 +361,15 @@ function WallpaperSlider({
   onDraft,
   onCommit,
 }: {
+  title: string;
+  description: string;
+  setting:
+    | "timelineBackgroundOpacity"
+    | "timelineBackgroundBlur"
+    | "timelineTextShadowOpacity"
+    | "timelineTextShadowBlur";
+  resetLabel: string;
+  savedValue: number;
   id: string;
   label: string;
   value: number;
@@ -422,37 +380,54 @@ function WallpaperSlider({
   onCommit: (value: number) => void;
 }) {
   const progress = value / max;
+  const updateSettings = useUpdatePrimarySettings();
+  const defaultValue = DEFAULT_CLIENT_SETTINGS[setting];
   return (
-    <div className="flex w-full items-center gap-3 sm:w-52">
-      <output
-        htmlFor={id}
-        className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
-      >
-        {value}
-        {unit}
-      </output>
-      <input
-        id={id}
-        aria-label={label}
-        type="range"
-        min={0}
-        max={max}
-        step={1}
-        value={value}
-        disabled={disabled}
-        className="settings-slider min-w-0 flex-1"
-        style={
-          {
-            "--settings-slider-progress": `${progress * 100}%`,
-            "--settings-slider-fill-offset": `${0.5 - progress}rem`,
-          } as CSSProperties
-        }
-        onChange={(event) => onDraft(Number(event.target.value))}
-        onPointerUp={(event) => onCommit(Number(event.currentTarget.value))}
-        onPointerCancel={() => onDraft(null)}
-        onKeyUp={(event) => onCommit(Number(event.currentTarget.value))}
-        onBlur={(event) => onCommit(Number(event.currentTarget.value))}
-      />
-    </div>
+    <SettingsRow
+      title={title}
+      description={description}
+      aria-disabled={disabled || undefined}
+      resetAction={
+        savedValue !== defaultValue ? (
+          <SettingResetButton
+            label={resetLabel}
+            onClick={() => updateSettings({ [setting]: defaultValue })}
+          />
+        ) : null
+      }
+      control={
+        <div className="flex w-full items-center gap-3 sm:w-52">
+          <output
+            htmlFor={id}
+            className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+          >
+            {value}
+            {unit}
+          </output>
+          <input
+            id={id}
+            aria-label={label}
+            type="range"
+            min={0}
+            max={max}
+            step={1}
+            value={value}
+            disabled={disabled}
+            className="settings-slider min-w-0 flex-1"
+            style={
+              {
+                "--settings-slider-progress": `${progress * 100}%`,
+                "--settings-slider-fill-offset": `${0.5 - progress}rem`,
+              } as CSSProperties
+            }
+            onChange={(event) => onDraft(Number(event.target.value))}
+            onPointerUp={(event) => onCommit(Number(event.currentTarget.value))}
+            onPointerCancel={() => onDraft(null)}
+            onKeyUp={(event) => onCommit(Number(event.currentTarget.value))}
+            onBlur={(event) => onCommit(Number(event.currentTarget.value))}
+          />
+        </div>
+      }
+    />
   );
 }

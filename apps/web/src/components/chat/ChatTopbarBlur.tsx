@@ -19,7 +19,7 @@ export function ChatTopbarBlur() {
       {BLUR_LAYERS.map((style) => (
         <div key={style.backdropFilter} className="absolute inset-0" style={style} />
       ))}
-      <div className="absolute inset-0 bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--background)_82%,transparent),color-mix(in_srgb,var(--background)_34%,transparent)_52%,transparent)] dark:bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--background)_50%,transparent),color-mix(in_srgb,var(--background)_12%,transparent)_52%,transparent)]" />
+      <div className="absolute inset-0 chat-topbar-tint" />
     </div>
   );
 }

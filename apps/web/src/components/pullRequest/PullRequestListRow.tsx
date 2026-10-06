@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import { cn } from "~/lib/utils";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
+import { MiddleTruncate } from "../ui/middle-truncate";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   PullRequestActorAvatar,
@@ -67,7 +68,7 @@ export function PullRequestRowGlyph({
           />
         </span>
       </span>
-      {below ? <span className="inline-flex text-[11px]">{below}</span> : null}
+      {below ? <span className="inline-flex text-2xs">{below}</span> : null}
     </span>
   );
 }
@@ -99,15 +100,15 @@ export function PullRequestRowLines({
         {number}
         <span className="min-w-0 truncate text-sm">{title}</span>
         {signals ? (
-          <span className="flex shrink-0 items-center gap-1 text-[11px]">{signals}</span>
+          <span className="flex shrink-0 items-center gap-1 text-2xs">{signals}</span>
         ) : null}
         {status ? (
-          <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px]">{status}</span>
+          <span className="ml-auto flex shrink-0 items-center gap-1.5 text-2xs">{status}</span>
         ) : null}
       </span>
       <span
         className={cn(
-          "flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground",
+          "flex min-w-0 items-center gap-1.5 overflow-hidden text-2xs text-muted-foreground",
           metaClassName,
         )}
       >
@@ -148,11 +149,17 @@ export function PullRequestRowAuthor({
   );
 }
 
-/** `head → base`, in the mono the branches are typed in. */
+/**
+ * `head → base`, in the mono the branches are typed in, each cut in the middle when the row is
+ * short of room. The base keeps its width up to a share of the line, so a long head cannot
+ * squeeze a short `main` out; the arrow stays readable so the two are not read as one name.
+ */
 export function PullRequestRowBranches({ head, base }: { head: string; base: string }) {
   return (
-    <span className="truncate font-mono">
-      {head} → {base}
+    <span className="flex min-w-0 items-center gap-1 font-mono">
+      <MiddleTruncate value={head} />
+      <span className="shrink-0">→</span>
+      <MiddleTruncate value={base} className="max-w-[45%] shrink-0" />
     </span>
   );
 }
