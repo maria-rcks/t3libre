@@ -648,7 +648,10 @@ export function useThreadActions() {
       )
       .toSorted((left, right) => Date.parse(right.settledAt!) - Date.parse(left.settledAt!))[0];
     if (!latest) return;
-    const result = await unsettleThread({ environmentId: latest.environmentId, threadId: latest.id });
+    const result = await unsettleThread({
+      environmentId: latest.environmentId,
+      threadId: latest.id,
+    });
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
       toastManager.add(
