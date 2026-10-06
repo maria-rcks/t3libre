@@ -345,6 +345,7 @@ export function SnapShotCoordinator() {
                   error instanceof Error ? error.message : "Try the capture again."
                 }`,
               }),
+              item.id,
             );
           }
         }
