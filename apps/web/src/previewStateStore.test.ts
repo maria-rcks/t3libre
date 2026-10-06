@@ -18,12 +18,11 @@ import {
   readThreadPreviewState,
   reconcilePreviewServerSessions,
   rememberPreviewUrl,
-  removePreviewThread,
   resetPreviewStateForTests,
-  subscribeThreadPreviewState,
   setActivePreviewTab,
   updatePreviewServerSnapshot,
 } from "./previewStateStore";
+import { appAtomRegistry } from "./rpc/atomRegistry";
 
 const environmentId = "env-1" as EnvironmentId;
 const ref = scopeThreadRef(environmentId, ThreadId.make("thread-1"));
@@ -353,7 +352,7 @@ describe("previewStateStore (single-tab)", () => {
       },
     };
     let updateCount = 0;
-    const unsubscribe = subscribeThreadPreviewState(ref, () => {
+    const unsubscribe = appAtomRegistry.subscribe(previewStateAtom(scopedThreadKey(ref)), () => {
       updateCount += 1;
     });
 
@@ -467,6 +466,19 @@ describe("previewStateStore (single-tab)", () => {
     reconcilePreviewServerSessions(ref, { sessions: [], serverEpoch, revision: 0 });
 
     expect(readThreadPreviewState(ref).sessions).toEqual({ [snapshot.tabId]: snapshot });
+    expect(readThreadPreviewState(ref).listLoaded).toBe(false);
+
+    const olderTab = makeSnapshot({ tabId: "tab_before_event" });
+    reconcilePreviewServerSessions(ref, {
+      sessions: [olderTab, snapshot],
+      serverEpoch,
+      revision: 2,
+    });
+    expect(readThreadPreviewState(ref).listLoaded).toBe(true);
+    expect(readThreadPreviewState(ref).sessions).toEqual({
+      [olderTab.tabId]: olderTab,
+      [snapshot.tabId]: snapshot,
+    });
   });
 
   it("does not resurrect a tab from an event older than its close", () => {
@@ -608,13 +620,5 @@ describe("previewStateStore (single-tab)", () => {
     expect(state.recentlySeenUrls[0]).toBe(
       `http://localhost:${5000 + __testing.RECENT_URL_LIMIT + 4}/`,
     );
-  });
-
-  it("removeThread strips the entry", () => {
-    const snapshot = makeSnapshot();
-    applyPreviewServerSnapshot(ref, snapshot);
-    removePreviewThread(ref);
-    const state = readThreadPreviewState(ref);
-    expect(state).toEqual(__testing.EMPTY_THREAD_PREVIEW_STATE);
   });
 });

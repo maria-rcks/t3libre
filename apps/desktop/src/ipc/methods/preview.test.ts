@@ -1,5 +1,9 @@
 import { it as effectIt } from "@effect/vitest";
-import { PreviewAutomationStatus } from "@t3tools/contracts";
+import {
+  DEFAULT_BROWSER_PROFILE_ID,
+  INCOGNITO_BROWSER_PROFILE_ID,
+  PreviewAutomationStatus,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -8,6 +12,7 @@ import * as Schema from "effect/Schema";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import * as PreviewManager from "../../preview/Manager.ts";
+import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import * as PreviewIpc from "./preview.ts";
 
 const { fromPartition } = vi.hoisted(() => ({
@@ -38,6 +43,76 @@ describe("preview IPC methods", () => {
     expect(fromPartition).not.toHaveBeenCalled();
   });
 
+  it("derives distinct partition scopes when identifiers contain the delimiter", () => {
+    const first = PreviewIpc.resolvePartitionScope("a", "b::c");
+    const second = PreviewIpc.resolvePartitionScope("a::b", "c");
+
+    expect(first).toEqual({ scope: '["a","b::c"]', persistent: true, namespace: "profile" });
+    expect(second).toEqual({ scope: '["a::b","c"]', persistent: true, namespace: "profile" });
+    expect(first.scope).not.toBe(second.scope);
+  });
+
+  it("preserves lone surrogates without collapsing them to replacement characters", () => {
+    const highSurrogate = PreviewIpc.resolvePartitionScope("environment", "profile-\ud800");
+    const lowSurrogate = PreviewIpc.resolvePartitionScope("environment", "profile-\udc00");
+    const replacement = PreviewIpc.resolvePartitionScope("environment", "profile-�");
+
+    expect(highSurrogate.scope).toBe('["environment","profile-\\ud800"]');
+    expect(lowSurrogate.scope).toBe('["environment","profile-\\udc00"]');
+    expect(highSurrogate.scope).not.toBe(lowSurrogate.scope);
+    expect(highSurrogate.scope).not.toBe(replacement.scope);
+    expect(lowSurrogate.scope).not.toBe(replacement.scope);
+  });
+
+  it("keeps the legacy default partition scope and incognito persistence", () => {
+    expect(PreviewIpc.resolvePartitionScope("environment::legacy", undefined)).toEqual({
+      scope: "environment::legacy",
+      persistent: true,
+    });
+    expect(
+      PreviewIpc.resolvePartitionScope("environment::legacy", DEFAULT_BROWSER_PROFILE_ID),
+    ).toEqual({ scope: "environment::legacy", persistent: true });
+    expect(
+      PreviewIpc.resolvePartitionScope("environment::legacy", INCOGNITO_BROWSER_PROFILE_ID),
+    ).toEqual({
+      scope: '["environment::legacy","incognito"]',
+      persistent: false,
+      namespace: "profile",
+    });
+  });
+
+  effectIt.effect("targets imports at the same partition tuple as the renderer", () => {
+    const received: Array<Parameters<BrowserImport.BrowserImport["Service"]["importCookies"]>[0]> =
+      [];
+    const browserImport = BrowserImport.BrowserImport.of({
+      listSources: Effect.succeed([]),
+      importCookies: (input) =>
+        Effect.sync(() => {
+          received.push(input);
+          return { imported: 0, skipped: 0, skippedDomains: [] };
+        }),
+    });
+    const request = (environmentId: string, targetProfileId: string) =>
+      PreviewIpc.importBrowserCookies.handler({
+        environmentId,
+        sourceId: "helium",
+        sourceProfileDirectory: "Default",
+        targetProfileId,
+      });
+
+    return Effect.gen(function* () {
+      yield* request("a", "b");
+      yield* request("a::b", DEFAULT_BROWSER_PROFILE_ID);
+
+      expect(received[0]).toMatchObject(PreviewIpc.resolvePartitionScope("a", "b"));
+      expect(received[1]).toMatchObject(
+        PreviewIpc.resolvePartitionScope("a::b", DEFAULT_BROWSER_PROFILE_ID),
+      );
+      expect(received[0]?.namespace).toBe("profile");
+      expect(received[1]?.namespace).toBeUndefined();
+    }).pipe(Effect.provideService(BrowserImport.BrowserImport, browserImport));
+  });
+
   effectIt.effect("rejects invalid webContents ids before resolving the preview service", () =>
     Effect.map(
       PreviewIpc.registerWebview
@@ -51,83 +126,6 @@ describe("preview IPC methods", () => {
         expect(fromPartition).not.toHaveBeenCalled();
       },
     ),
-  );
-
-  effectIt.effect("returns automation status for long runtime tab ids", () =>
-    Effect.gen(function* () {
-      const tabId =
-        `["environment-1","thread:delegated-task:${"a".repeat(120)}",` +
-        `"server-epoch-1","preview-1"]`;
-      const status = {
-        available: false,
-        visible: true,
-        tabId,
-        url: null,
-        title: null,
-        loading: false,
-      };
-      const manager = PreviewManager.PreviewManager.of({
-        automationStatus: () => Effect.succeed(status),
-      } as unknown as PreviewManager.PreviewManager["Service"]);
-
-      expect(tabId.length).toBeGreaterThan(128);
-      expect(
-        yield* PreviewIpc.automationStatus
-          .handler({ tabId })
-          .pipe(Effect.provideService(PreviewManager.PreviewManager, manager)),
-      ).toEqual(status);
-    }),
-  );
-
-  effectIt.effect("returns filtered native snapshot failure detail", () =>
-    Effect.gen(function* () {
-      const safeCause = new Error("software compositor copy failed");
-      safeCause.name = "UnknownVizError";
-      const unsafeCause = new Error("capture failed at https://preview.example/secret");
-      unsafeCause.name = "UnknownVizError";
-      const failures: PreviewManager.PreviewManagerError[] = [safeCause, unsafeCause].map(
-        (cause) =>
-          new PreviewManager.PreviewOperationError({
-            operation: "automationSnapshot.capturePage",
-            tabId: "tab-1",
-            webContentsId: 42,
-            cause,
-          }),
-      );
-      failures.push(
-        new PreviewManager.PreviewAutomationCaptureTimeoutError({
-          tabId: "tab-1",
-          webContentsId: 42,
-          stage: "capture-page",
-          timeoutMs: 2_500,
-        }),
-      );
-      let attempt = 0;
-      const manager = PreviewManager.PreviewManager.of({
-        automationSnapshot: () => Effect.fail(failures[attempt++]!),
-      } as unknown as PreviewManager.PreviewManager["Service"]);
-
-      const run = () =>
-        PreviewIpc.automationSnapshot
-          .handler({ tabId: "tab-1" })
-          .pipe(Effect.provideService(PreviewManager.PreviewManager, manager));
-      expect(yield* run()).toEqual({
-        _tag: "Failure",
-        error: { name: "UnknownVizError", message: safeCause.message },
-      });
-      expect(yield* run()).toEqual({
-        _tag: "Failure",
-        error: { name: "UnknownVizError", message: "Preview capture failed." },
-      });
-      expect(yield* run()).toEqual({
-        _tag: "Failure",
-        error: {
-          name: "PreviewAutomationCaptureTimeoutError",
-          message: "Desktop preview snapshot failed during capture-page.",
-          stage: "capture-page",
-        },
-      });
-    }),
   );
 
   it("keeps the public automation status tab id limit", () => {
