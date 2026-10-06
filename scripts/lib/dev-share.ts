@@ -23,7 +23,7 @@ import {
 } from "@t3tools/tailscale";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type { ChildProcessSpawner } from "effect/unstable/process";
+import type { ChildProcessSpawner } from "effect/process";
 
 /**
  * Human-readable gloss for each diagnostic. Deliberately our own words rather
@@ -55,7 +55,7 @@ const explainCommandFailure = (error: TailscaleCommandError): string | undefined
  * Each wraps a real underlying failure and so keeps it as `cause`; the message
  * is derived only from the structural fields, never from `cause.message`.
  */
-export class TailscaleUnavailableError extends Schema.TaggedErrorClass<TailscaleUnavailableError>()(
+export class TailscaleUnavailableError extends Schema.TaggedError<TailscaleUnavailableError>()(
   "TailscaleUnavailableError",
   { cause: Schema.Defect() },
 ) {
@@ -69,7 +69,7 @@ export class TailscaleUnavailableError extends Schema.TaggedErrorClass<Tailscale
 }
 
 /** No underlying failure: the status read succeeded and simply had no name. */
-export class TailnetNameMissingError extends Schema.TaggedErrorClass<TailnetNameMissingError>()(
+export class TailnetNameMissingError extends Schema.TaggedError<TailnetNameMissingError>()(
   "TailnetNameMissingError",
   {},
 ) {
@@ -87,7 +87,7 @@ export class TailnetNameMissingError extends Schema.TaggedErrorClass<TailnetName
  * semantics (a `tailscale serve` invocation failed for this port) and differ
  * only in which one, which the message states plainly.
  */
-export class DevServeFailedError extends Schema.TaggedErrorClass<DevServeFailedError>()(
+export class DevServeFailedError extends Schema.TaggedError<DevServeFailedError>()(
   "DevServeFailedError",
   {
     stage: Schema.Literals(["clear-existing", "serve"]),
@@ -110,13 +110,10 @@ export class DevServeFailedError extends Schema.TaggedErrorClass<DevServeFailedE
   }
 }
 
-export const DevShareError = Schema.Union([
-  TailscaleUnavailableError,
-  TailnetNameMissingError,
-  DevServeFailedError,
-]);
-export type DevShareError = typeof DevShareError.Type;
-export const isDevShareError = Schema.is(DevShareError);
+export type DevShareError =
+  | TailscaleUnavailableError
+  | TailnetNameMissingError
+  | DevServeFailedError;
 
 /**
  * Removes any mapping for `webPort`, reporting whether the port is now clear.

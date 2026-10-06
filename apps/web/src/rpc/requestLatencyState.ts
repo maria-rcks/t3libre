@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { WS_METHODS } from "@t3tools/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import { appAtomRegistry } from "./atomRegistry";
 
@@ -28,10 +28,7 @@ interface PendingRpcAckRequest {
 }
 
 const pendingRpcAckRequests = new Map<string, PendingRpcAckRequest>();
-const untrackedRpcAckMethods = new Set<string>([
-  WS_METHODS.previewAutomationConnect,
-  WS_METHODS.serverGetUsageSummary,
-]);
+const untrackedRpcAckMethods = new Set<string>([WS_METHODS.serverGetUsageSummary]);
 const longRunningRpcAckMethods = new Set<string>([
   WS_METHODS.serverUpdateProvider,
   WS_METHODS.serverRefreshProviders,
@@ -112,7 +109,7 @@ export function acknowledgeRpcRequest(requestId: string): void {
   setSlowRpcAckRequests(slowRequests.filter((request) => request.requestId !== requestId));
 }
 
-export function clearAllTrackedRpcRequests(): void {
+function clearAllTrackedRpcRequests(): void {
   for (const pending of pendingRpcAckRequests.values()) {
     clearTimeout(pending.timeoutId);
   }

@@ -1,6 +1,6 @@
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, type AtomRegistry } from "effect/reactivity";
 
 import {
   flattenQueuedThreadMessages,
@@ -9,7 +9,7 @@ import {
 } from "./thread-outbox-model";
 import type { ThreadOutboxStorage } from "./thread-outbox-storage";
 
-export class ThreadOutboxManagerError extends Schema.TaggedErrorClass<ThreadOutboxManagerError>()(
+export class ThreadOutboxManagerError extends Schema.TaggedError<ThreadOutboxManagerError>()(
   "ThreadOutboxManagerError",
   {
     operation: Schema.Literals([

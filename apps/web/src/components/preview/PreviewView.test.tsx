@@ -7,13 +7,12 @@ import {
   FILL_PREVIEW_VIEWPORT,
   ThreadId,
 } from "@t3tools/contracts";
-import { act, Profiler } from "react";
+import { act, createElement, Profiler } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(async (_tabId: string, _url: string): Promise<void> => undefined),
-  ensurePortForward: vi.fn<() => Promise<number>>(),
   rememberPreviewUrl: vi.fn(),
   readPreparedConnection: vi.fn(() => ({ httpBaseUrl: "http://172.25.85.75:3773" })),
   submittedUrl: null as ((url: string) => void) | null,
@@ -28,13 +27,15 @@ const mocks = vi.hoisted(() => ({
   openPictureInPicture: vi.fn(async (_tabId: string): Promise<void> => undefined),
   closePictureInPicture: vi.fn(async (_tabId: string): Promise<void> => undefined),
   pickElement: vi.fn(),
-  capturePreviewAnnotationScreenshot: vi.fn(),
   addPreviewAnnotation: vi.fn(),
   addImage: vi.fn(),
   toggleAnnotation: null as (() => void) | null,
   pictureInPicture: false,
   showEmptyState: false,
   loading: false,
+  serverEpoch: null as string | null,
+  recordingTabIds: new Set<string>(),
+  recordingRuntimeTabId: null as string | null,
   recordVisitForThread: vi.fn(),
 }));
 
@@ -57,12 +58,9 @@ vi.mock("~/browserHistoryStore", () => ({
   useThreadRecentHistory: () => EMPTY_HISTORY,
 }));
 
-vi.mock("~/state/session", () => ({
+vi.mock("~/state/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/state/session")>()),
   readPreparedConnection: mocks.readPreparedConnection,
-}));
-
-vi.mock("~/browser/browserEnvironmentHttp", () => ({
-  previewEnvironmentPost: () => fetch("https://test.t3coderelay.com/api/auth/websocket-ticket"),
 }));
 
 // Stubbed at the direct dependency rather than letting the real module pull in
@@ -94,10 +92,6 @@ vi.mock("~/composerDraftStore", () => ({
     }),
 }));
 
-vi.mock("~/lib/previewAnnotation", () => ({
-  capturePreviewAnnotationScreenshot: mocks.capturePreviewAnnotationScreenshot,
-}));
-
 vi.mock("~/localApi", () => ({
   ensureLocalApi: vi.fn(),
 }));
@@ -107,6 +101,7 @@ vi.mock("~/previewStateStore", () => ({
   updatePreviewServerSnapshot: vi.fn(),
   useThreadPreviewState: () => ({
     activeTabId: "tab-1",
+    serverEpoch: mocks.serverEpoch,
     desktopByTabId: {
       "tab-1": {
         hasWebContents: true,
@@ -155,11 +150,11 @@ vi.mock("~/state/use-atom-command", () => ({
 }));
 
 vi.mock("~/browser/browserRecording", () => ({
-  findActiveBrowserRecordingRuntimeTabId: vi.fn(() => null),
+  findActiveBrowserRecordingRuntimeTabId: () => mocks.recordingRuntimeTabId,
   isBrowserRecordingStartCancelledError: vi.fn(() => false),
   startBrowserRecording: vi.fn(),
   stopBrowserRecording: vi.fn(),
-  useActiveBrowserRecordingTabIds: () => new Set(),
+  useActiveBrowserRecordingTabIds: () => mocks.recordingTabIds,
 }));
 
 vi.mock("~/browser/browserSurfaceStore", () => ({
@@ -175,7 +170,7 @@ vi.mock("~/previewMiniPlayerStore", () => {
         byThreadKey: mocks.miniPlayerTabId
           ? {
               "environment-1:thread-1": {
-                tabId: mocks.miniPlayerTabId,
+                source: { kind: "browser", tabId: mocks.miniPlayerTabId },
                 position: null,
               },
             }
@@ -189,9 +184,10 @@ vi.mock("~/previewMiniPlayerStore", () => {
     },
   );
   return {
-    selectThreadPreviewMiniPlayer: (
-      byThreadKey: Record<string, { tabId: string; position: null }>,
-    ) => byThreadKey["environment-1:thread-1"] ?? null,
+    browserMiniPlayerSource: (tabId: string) => ({ kind: "browser", tabId }),
+    selectThreadPreviewMiniPlayerTabId: (
+      byThreadKey: Record<string, { source: { tabId: string }; position: null }>,
+    ) => byThreadKey["environment-1:thread-1"]?.source.tabId ?? null,
     usePreviewMiniPlayerStore,
   };
 });
@@ -210,7 +206,6 @@ vi.mock("~/components/ui/toast", () => ({
 vi.mock("./previewBridge", () => ({
   previewBridge: {
     navigate: mocks.navigate,
-    ensurePortForward: mocks.ensurePortForward,
     pickElement: mocks.pickElement,
     pictureInPicture: {
       open: mocks.openPictureInPicture,
@@ -226,14 +221,14 @@ vi.mock("./PreviewChromeRow", () => ({
     onPictureInPicture?: () => void;
     pictureInPicture?: boolean;
     trailingActions?: {
-      props: { onNativePictureInPicture?: () => void };
+      props: { actions?: { toggleNativePictureInPicture?: () => void } };
     };
   }) => {
     mocks.submittedUrl = props.onSubmit;
     mocks.toggleAnnotation = props.onPickElement ?? null;
     mocks.togglePictureInPicture = props.onPictureInPicture ?? null;
     mocks.toggleNativePictureInPicture =
-      props.trailingActions?.props.onNativePictureInPicture ?? null;
+      props.trailingActions?.props.actions?.toggleNativePictureInPicture ?? null;
     mocks.pictureInPicturePressed = props.pictureInPicture ?? false;
     return null;
   },
@@ -246,18 +241,20 @@ vi.mock("./PreviewEmptyState", () => ({
   },
 }));
 vi.mock("./PreviewMoreMenu", () => ({
-  PreviewMoreMenu: (props: { onNativePictureInPicture: () => void }) => {
-    mocks.toggleNativePictureInPicture = props.onNativePictureInPicture;
+  PreviewMoreMenu: (props: { actions: { toggleNativePictureInPicture?: () => void } }) => {
+    mocks.toggleNativePictureInPicture = props.actions.toggleNativePictureInPicture ?? null;
     return null;
   },
 }));
 vi.mock("./PreviewUnreachable", () => ({ PreviewUnreachable: () => null }));
 vi.mock("./ZoomIndicator", () => ({ ZoomIndicator: () => null }));
-vi.mock("./AgentBrowserCursor", () => ({ AgentBrowserCursor: () => null }));
+vi.mock("./AgentBrowserCursor", () => ({
+  AgentBrowserCursor: () => createElement("agent-cursor"),
+}));
 vi.mock("~/browser/BrowserSurfaceSlot", () => ({ BrowserSurfaceSlot: () => null }));
 vi.mock("./usePreviewSession", () => ({ usePreviewSession: vi.fn() }));
 
-import { PreviewView, previewProfileName } from "./PreviewView";
+import { PreviewView } from "./PreviewView";
 import { toastManager } from "~/components/ui/toast";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 
@@ -346,8 +343,6 @@ describe("PreviewView navigation", () => {
     mocks.openPictureInPicture.mockClear();
     mocks.closePictureInPicture.mockClear();
     mocks.pickElement.mockReset();
-    mocks.capturePreviewAnnotationScreenshot.mockReset();
-    mocks.capturePreviewAnnotationScreenshot.mockResolvedValue({ status: "none" });
     mocks.addPreviewAnnotation.mockClear();
     vi.mocked(toastManager.add).mockClear();
     mocks.addImage.mockClear();
@@ -355,13 +350,36 @@ describe("PreviewView navigation", () => {
     mocks.pictureInPicture = false;
     mocks.showEmptyState = false;
     mocks.loading = false;
+    mocks.serverEpoch = null;
+    mocks.recordingTabIds = new Set();
+    mocks.recordingRuntimeTabId = null;
     mocks.recordVisitForThread.mockClear();
   });
 
-  it("labels a tab whose saved profile was removed", () => {
-    expect(previewProfileName(BUILT_IN_BROWSER_PROFILES, "profile-removed")).toBe(
-      "Removed profile",
-    );
+  it("shows the cursor in a replacement browser while the old instance still records", async () => {
+    const document = installTestDom();
+    const { createRoot } = await import("react-dom/client");
+    const container = document.createElement("div");
+    const root = createRoot(container as unknown as Element);
+    const hasCursor = (node: TestNode): boolean =>
+      node.nodeName === "AGENT-CURSOR" || node.childNodes.some(hasCursor);
+    mocks.recordingTabIds.add(TEST_RUNTIME_TAB_ID);
+    mocks.recordingRuntimeTabId = TEST_RUNTIME_TAB_ID;
+    try {
+      await act(() => {
+        root.render(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />);
+      });
+      expect(hasCursor(container)).toBe(false);
+      mocks.serverEpoch = "replacement-server";
+      await act(() => {
+        root.render(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />);
+      });
+      expect(hasCursor(container)).toBe(true);
+      expect(mocks.recordingTabIds.has(TEST_RUNTIME_TAB_ID)).toBe(true);
+    } finally {
+      await act(() => root.unmount());
+      vi.unstubAllGlobals();
+    }
   });
 
   it("does not rerender while loading time passes", async () => {
@@ -446,53 +464,6 @@ describe("PreviewView navigation", () => {
     });
   });
 
-  it("keeps the latest submission when remote forwards resolve out of order", async () => {
-    const document = installTestDom();
-    const { createRoot } = await import("react-dom/client");
-    const root = createRoot(document.createElement("div") as unknown as Element);
-    let resolveFirst!: (port: number) => void;
-    let resolveSecond!: (port: number) => void;
-    const first = new Promise<number>((resolve) => {
-      resolveFirst = resolve;
-    });
-    const second = new Promise<number>((resolve) => {
-      resolveSecond = resolve;
-    });
-    mocks.readPreparedConnection.mockReturnValue({ httpBaseUrl: "https://test.t3coderelay.com" });
-    mocks.ensurePortForward.mockReset();
-    mocks.ensurePortForward.mockReturnValueOnce(first).mockReturnValueOnce(second);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ ticket: "test-ticket" })),
-    );
-    try {
-      await act(() =>
-        root.render(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />),
-      );
-      await act(async () => {
-        mocks.submittedUrl?.("localhost:3000/older");
-        mocks.submittedUrl?.("localhost:4000/newer");
-      });
-      expect(mocks.ensurePortForward).toHaveBeenCalledTimes(2);
-      await act(async () => {
-        resolveSecond(44000);
-      });
-      await act(async () => {
-        resolveFirst(43000);
-      });
-      expect(mocks.navigate.mock.calls).toEqual([
-        [TEST_RUNTIME_TAB_ID, "http://localhost:44000/newer"],
-      ]);
-      expect(mocks.recordVisitForThread.mock.calls).toEqual([
-        [TEST_THREAD_REF, "http://localhost:4000/newer"],
-      ]);
-    } finally {
-      await act(() => root.unmount());
-      mocks.readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://172.25.85.75:3773" });
-      vi.unstubAllGlobals();
-    }
-  });
-
   it("maps an empty-state localhost server onto the WSL host", async () => {
     mocks.showEmptyState = true;
     renderToStaticMarkup(
@@ -543,7 +514,10 @@ describe("PreviewView navigation", () => {
     renderToStaticMarkup(<PreviewView {...props} />);
     expect(mocks.pictureInPicturePressed).toBe(false);
     mocks.togglePictureInPicture?.();
-    expect(mocks.openMiniPlayer).toHaveBeenCalledWith(props.threadRef, "tab-1");
+    expect(mocks.openMiniPlayer).toHaveBeenCalledWith(props.threadRef, {
+      kind: "browser",
+      tabId: "tab-1",
+    });
     expect(mocks.closeRightPanel).toHaveBeenCalledWith(props.threadRef);
 
     mocks.miniPlayerTabId = "tab-1";
@@ -639,7 +613,7 @@ describe("PreviewView navigation", () => {
     expect(toastManager.add).toHaveBeenCalledTimes(1);
   });
 
-  it("still sends when the picked element's crop cannot be captured", async () => {
+  it("still sends annotation text when the picked element's crop is malformed", async () => {
     const annotation = {
       id: "annotation-2",
       pageUrl: "https://example.com/dashboard",
@@ -650,7 +624,7 @@ describe("PreviewView navigation", () => {
       strokes: [],
       styleChanges: [],
       screenshot: {
-        dataUrl: "data:image/png;base64,c2NyZWVuc2hvdA==",
+        dataUrl: "data:image/png;base64,%%%",
         width: 10,
         height: 10,
         cropRect: { x: 0, y: 0, width: 10, height: 10 },
@@ -659,7 +633,6 @@ describe("PreviewView navigation", () => {
     };
     const onSendAnnotation = vi.fn();
     mocks.pickElement.mockResolvedValue({ annotation, submission: "send" });
-    mocks.capturePreviewAnnotationScreenshot.mockResolvedValue({ status: "failed" });
 
     renderToStaticMarkup(
       <PreviewView

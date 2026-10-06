@@ -89,6 +89,22 @@ export const DESCRIPTOR_PRESETS_BY_KIND: Partial<
   [ProviderDriverKind.make("grok")]: [
     { id: "reasoningEffort", label: "Reasoning", type: "select", choices: EFFORT_CHOICES },
   ],
+  [ProviderDriverKind.make("pi")]: [
+    {
+      id: "thinking",
+      label: "Thinking",
+      type: "select",
+      choices: [
+        { id: "off", label: "Off" },
+        { id: "minimal", label: "Minimal" },
+        { id: "low", label: "Low" },
+        { id: "medium", label: "Medium", isDefault: true },
+        { id: "high", label: "High" },
+        { id: "xhigh", label: "Extra High" },
+        { id: "max", label: "Max" },
+      ],
+    },
+  ],
   [ProviderDriverKind.make("opencode")]: [
     { id: "variant", label: "Reasoning", type: "select", choices: EFFORT_CHOICES },
     {
@@ -104,7 +120,7 @@ export const DESCRIPTOR_PRESETS_BY_KIND: Partial<
 };
 
 let nextKey = 0;
-export function newEditorKey(): string {
+function newEditorKey(): string {
   nextKey += 1;
   return `k${nextKey}`;
 }
@@ -140,7 +156,7 @@ export function emptyEditorChoice(): EditorChoice {
  * by built-in runtime profiles a custom entry does not have, so they are
  * dropped rather than stored as a plain option value.
  */
-export function descriptorToEditor(descriptor: ProviderOptionDescriptor): EditorDescriptor {
+function descriptorToEditor(descriptor: ProviderOptionDescriptor): EditorDescriptor {
   const promptInjected = new Set(
     descriptor.type === "select" ? (descriptor.promptInjectedValues ?? []) : [],
   );

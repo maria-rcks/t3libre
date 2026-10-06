@@ -16,7 +16,6 @@ import {
   useFaviconProjectRefForThread,
 } from "~/browserFaviconStore";
 import { useBrowserPointerStore } from "~/browser/browserPointerStore";
-import { restoreForwardedBrowserUrl } from "~/browser/browserTargetResolver";
 import { applyPreviewDesktopState, type DesktopPreviewOverlay } from "~/previewStateStore";
 import { previewEnvironment } from "~/state/preview";
 import { usePreparedConnection } from "~/state/session";
@@ -40,8 +39,10 @@ export function usePreviewBridge(input: {
   threadRef: ScopedThreadRef;
   tabId: string;
   runtimeTabId: string;
+  /** The server drives this tab and reports its navigation itself. */
+  serverDriven?: boolean;
 }): void {
-  const { threadRef, tabId, runtimeTabId } = input;
+  const { threadRef, tabId, runtimeTabId, serverDriven = false } = input;
   const clearBrowserPointer = useBrowserPointerStore((state) => state.clear);
   const reportStatus = useAtomCommand(previewEnvironment.reportStatus, "preview status report");
   const bridge = previewBridge;
@@ -65,27 +66,6 @@ export function usePreviewBridge(input: {
   const handleStateChange = useEffectEvent(
     (changedTabId: string, state: DesktopPreviewTabState): void => {
       if (changedTabId !== runtimeTabId) return;
-      if (state.navStatus.kind !== "Idle") {
-        state = {
-          ...state,
-          navStatus: {
-            ...state.navStatus,
-            url: restoreForwardedBrowserUrl(stableThreadRef.environmentId, state.navStatus.url),
-          },
-        };
-      }
-      if (state.favicon) {
-        state = {
-          ...state,
-          favicon: {
-            ...state.favicon,
-            pageUrl: restoreForwardedBrowserUrl(
-              stableThreadRef.environmentId,
-              state.favicon.pageUrl,
-            ),
-          },
-        };
-      }
       if (shouldClearBrowserPointer(lastDesktopNavStatus.current, state.navStatus)) {
         clearBrowserPointer(runtimeTabId);
       }
@@ -101,7 +81,7 @@ export function usePreviewBridge(input: {
         lastReportedUrl: lastReportedUrl.current,
         lastReportedKind: lastReportedKind.current,
       });
-      if (!reported) return;
+      if (!reported || serverDriven) return;
       lastReportedUrl.current = reported.lastReportedUrl;
       lastReportedKind.current = reported.lastReportedKind;
       void reportStatus({

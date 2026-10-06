@@ -6,7 +6,9 @@ import {
   COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX,
   COMPOSER_RESTING_EXPANSION_MIN_PX,
   getRestingComposerImagePreviewCounts,
+  overlayComposerIsResting,
   resolveComposerTimelineInset,
+  resolveScrollToEndClearance,
   resolveRestingComposerControlsLayout,
   resolveRestingComposerControlsNaturalWidth,
   shouldAnimateComposerRestingTransition,
@@ -76,6 +78,24 @@ describe("shouldUseCompactComposerPrimaryActions", () => {
   });
 });
 
+describe("overlayComposerIsResting", () => {
+  it("drops a resting reservation once a status bar replaces the composer", () => {
+    // The composer rested on a scroll, then the thread swapped it for the
+    // subagent bar. The bar's 56px overlay must not keep the resting estimate.
+    const isResting = overlayComposerIsResting({
+      composerMounted: false,
+      composerReportedResting: true,
+    });
+    expect(isResting).toBe(false);
+    expect(resolveComposerTimelineInset({ currentInset: 0, overlayHeight: 56, isResting })).toBe(
+      56,
+    );
+    expect(overlayComposerIsResting({ composerMounted: true, composerReportedResting: true })).toBe(
+      true,
+    );
+  });
+});
+
 describe("resolveComposerTimelineInset", () => {
   it("follows the expanded overlay height", () => {
     expect(
@@ -89,6 +109,34 @@ describe("resolveComposerTimelineInset", () => {
     ).toBe(200);
   });
 
+  it("uses the measured expanded height while the resting strip host is mounting", () => {
+    expect(
+      resolveComposerTimelineInset({ currentInset: 172, overlayHeight: 110, isResting: true }),
+    ).toBe(172);
+  });
+
+  it("keeps timeline padding stable when the model-only strip appears on collapse", () => {
+    const expanded = resolveComposerTimelineInset({
+      currentInset: 0,
+      overlayHeight: 172,
+      isResting: false,
+    });
+    const collapsed = resolveComposerTimelineInset({
+      currentInset: expanded,
+      overlayHeight: 110,
+      isResting: true,
+      restingOnlyHeight: 32,
+    });
+    expect(collapsed).toBe(expanded);
+    expect(
+      resolveComposerTimelineInset({
+        currentInset: collapsed,
+        overlayHeight: 172,
+        isResting: false,
+      }),
+    ).toBe(expanded);
+  });
+
   it("reserves the empty expansion when no larger height is known", () => {
     expect(
       resolveComposerTimelineInset({ currentInset: 0, overlayHeight: 60, isResting: true }),
@@ -100,35 +148,22 @@ describe("shouldUseRestingComposerLayout", () => {
   const resting = {
     isExistingThread: true,
     isMobileViewport: false,
-    isFocused: false,
-    isScrollCollapsed: false,
+    isScrollCollapsed: true,
     hasExpandedChrome: false,
-    collapseOnBlur: true,
+    hasMultilinePrompt: false,
+    timelineOverflows: true,
   };
 
-  it("uses the resting layout for an unfocused desktop composer", () => {
+  it("uses the resting layout after a timeline scroll", () => {
     expect(shouldUseRestingComposerLayout(resting)).toBe(true);
   });
 
-  it("keeps an unfocused composer expanded when blur collapse is off", () => {
-    expect(shouldUseRestingComposerLayout({ ...resting, collapseOnBlur: false })).toBe(false);
+  it("keeps the composer expanded until the timeline is scrolled", () => {
+    expect(shouldUseRestingComposerLayout({ ...resting, isScrollCollapsed: false })).toBe(false);
   });
 
-  it("rests a scroll-collapsed composer even while focused", () => {
-    expect(
-      shouldUseRestingComposerLayout({ ...resting, isFocused: true, isScrollCollapsed: true }),
-    ).toBe(true);
-  });
-
-  it("rests a scroll-collapsed composer regardless of the blur preference", () => {
-    expect(
-      shouldUseRestingComposerLayout({
-        ...resting,
-        isFocused: true,
-        isScrollCollapsed: true,
-        collapseOnBlur: false,
-      }),
-    ).toBe(true);
+  it("keeps the composer expanded while the timeline fits above it", () => {
+    expect(shouldUseRestingComposerLayout({ ...resting, timelineOverflows: false })).toBe(false);
   });
 
   it("keeps new-thread composers expanded", () => {
@@ -139,13 +174,22 @@ describe("shouldUseRestingComposerLayout", () => {
     expect(shouldUseRestingComposerLayout({ ...resting, isMobileViewport: true })).toBe(false);
   });
 
-  it("expands when focus is anywhere in the composer", () => {
-    expect(shouldUseRestingComposerLayout({ ...resting, isFocused: true })).toBe(false);
-  });
-
   it("keeps drawers and composer-owned menus expanded", () => {
     expect(shouldUseRestingComposerLayout({ ...resting, hasExpandedChrome: true })).toBe(false);
   });
+
+  it.each([false, true])(
+    "keeps multiline drafts expanded when scroll collapsed is %s",
+    (isScrollCollapsed) => {
+      expect(
+        shouldUseRestingComposerLayout({
+          ...resting,
+          hasMultilinePrompt: true,
+          isScrollCollapsed,
+        }),
+      ).toBe(false);
+    },
+  );
 });
 
 describe("shouldAnimateComposerRestingTransition", () => {
@@ -426,5 +470,105 @@ describe("resolveRestingComposerControlsLayout hysteresis", () => {
         previous: { hiddenCount: 2, visible: false },
       }),
     ).toEqual({ hiddenCount: 2, visible: true });
+  });
+});
+
+describe("resolveScrollToEndClearance", () => {
+  it("removes the side tab gap in both composer states while clearing overlapping attachments", () => {
+    for (const overlayHeight of [120, 214]) {
+      const layout = {
+        overlayHeight,
+        mainSurfaceTop: 534,
+        button: { left: 340, right: 460 },
+        attachments: [{ top: 500, left: 600, right: 700 }],
+      };
+      expect(resolveScrollToEndClearance(layout)).toBe(overlayHeight - 34);
+      expect(resolveScrollToEndClearance({ ...layout, attachments: [] })).toBe(overlayHeight);
+      expect(
+        resolveScrollToEndClearance({
+          ...layout,
+          attachments: [...layout.attachments, { top: 500, left: 100, right: 700 }],
+        }),
+      ).toBe(overlayHeight);
+      expect(resolveScrollToEndClearance({ ...layout, button: { left: 590, right: 710 } })).toBe(
+        overlayHeight,
+      );
+    }
+  });
+});
+
+describe("progressive composer controls", () => {
+  const measurement = {
+    gap: 4,
+    naturalFixedWidth: 140,
+    minimumFixedWidth: 80,
+    blockWidths: [80, 140],
+    iconOnlyBlockWidths: [40, 60],
+    overflowWidth: 24,
+  };
+
+  it("keeps labels while they fit and removes trailing labels before controls", () => {
+    for (const [hostWidth, iconOnlyCount, hiddenCount] of [
+      [368, 0, 0],
+      [367, 1, 0],
+      [288, 1, 0],
+      [287, 2, 0],
+      [248, 2, 0],
+      [247, 2, 1],
+      [211, 2, 2],
+    ] as const) {
+      expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth })).toEqual({
+        hiddenCount,
+        iconOnlyCount,
+        visible: true,
+      });
+    }
+  });
+
+  it("requires slack to restore labels and controls", () => {
+    for (const [hostWidth, previous, promoted] of [
+      [
+        368,
+        { hiddenCount: 0, iconOnlyCount: 1, visible: true },
+        { hiddenCount: 0, iconOnlyCount: 0, visible: true },
+      ],
+      [
+        288,
+        { hiddenCount: 0, iconOnlyCount: 2, visible: true },
+        { hiddenCount: 0, iconOnlyCount: 1, visible: true },
+      ],
+      [
+        248,
+        { hiddenCount: 1, iconOnlyCount: 2, visible: true },
+        { hiddenCount: 0, iconOnlyCount: 2, visible: true },
+      ],
+    ] as const) {
+      expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth, previous })).toEqual(
+        previous,
+      );
+      expect(
+        resolveRestingComposerControlsLayout({
+          ...measurement,
+          hostWidth: hostWidth + 1,
+          previous,
+        }),
+      ).toEqual(promoted);
+    }
+  });
+
+  it("settles through fractional label-width changes at each threshold", () => {
+    for (const hostWidth of [368, 288, 248]) {
+      let previous = resolveRestingComposerControlsLayout({ ...measurement, hostWidth });
+      for (let index = 0; index < 10; index += 1) {
+        const next = resolveRestingComposerControlsLayout({
+          ...measurement,
+          hostWidth,
+          previous,
+          naturalFixedWidth: 140 + (index % 2) * 0.5,
+        });
+        if (index > 1) expect(next).toEqual(previous);
+        previous = next;
+      }
+    }
   });
 });

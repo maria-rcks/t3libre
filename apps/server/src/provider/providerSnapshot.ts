@@ -2,6 +2,7 @@ import type {
   CustomModelSetting,
   ProviderDriverKind,
   ModelCapabilities,
+  RuntimeMode,
   ServerProvider,
   ServerProviderAuth,
   ServerProviderSkill,
@@ -14,7 +15,7 @@ import * as Effect from "effect/Effect";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { readCustomModelEntries } from "@t3tools/shared/model";
 import { isWindowsCommandNotFound } from "../processRunner.ts";
 import { createProviderVersionAdvisory } from "./providerMaintenance.ts";
@@ -35,7 +36,7 @@ export interface CommandResult {
   readonly code: number;
 }
 
-export class ProviderCommandNotFoundError extends Schema.TaggedErrorClass<ProviderCommandNotFoundError>()(
+export class ProviderCommandNotFoundError extends Schema.TaggedError<ProviderCommandNotFoundError>()(
   "ProviderCommandNotFoundError",
   {
     binaryPath: Schema.String,
@@ -64,7 +65,10 @@ export interface ServerProviderPresentation {
   readonly displayName: string;
   readonly badgeLabel?: string;
   readonly showInteractionModeToggle?: boolean;
+  readonly reportsContextWindow?: boolean;
+  readonly supportedRuntimeModes?: ReadonlyArray<RuntimeMode>;
   readonly requiresNewThreadForModelChange?: boolean;
+  readonly supportsConversationRollback?: boolean;
 }
 
 export type ServerProviderDraft = Omit<ServerProvider, "instanceId" | "driver">;
@@ -105,44 +109,14 @@ export const spawnAndCollect = (binaryPath: string, command: ChildProcess.Comman
     return result;
   }).pipe(Effect.scoped);
 
-export function detailFromResult(
-  result: CommandResult & { readonly timedOut?: boolean },
-): string | undefined {
-  if (result.timedOut) return "Timed out while running command.";
-  const stderr = nonEmptyTrimmed(result.stderr);
-  if (stderr) return stderr;
-  const stdout = nonEmptyTrimmed(result.stdout);
-  if (stdout) return stdout;
-  if (result.code !== 0) {
-    return `Command exited with code ${result.code}.`;
-  }
-  return undefined;
-}
-
-export function extractAuthBoolean(value: unknown): boolean | undefined {
-  if (globalThis.Array.isArray(value)) {
-    for (const entry of value) {
-      const nested = extractAuthBoolean(entry);
-      if (nested !== undefined) return nested;
-    }
-    return undefined;
-  }
-
-  if (!value || typeof value !== "object") return undefined;
-
-  const record = value as Record<string, unknown>;
-  for (const key of ["authenticated", "isAuthenticated", "loggedIn", "isLoggedIn"] as const) {
-    if (typeof record[key] === "boolean") return record[key];
-  }
-  for (const key of ["auth", "status", "session", "account"] as const) {
-    const nested = extractAuthBoolean(record[key]);
-    if (nested !== undefined) return nested;
-  }
-  return undefined;
-}
-
+/**
+ * Return the first semantic version found in CLI output, or null. Accepts a
+ * leading "v" (for example `opencode v2.0.3`).
+ */
 export function parseGenericCliVersion(output: string): string | null {
-  const match = output.match(/\b(\d+\.\d+\.\d+)\b/);
+  // "opencode v2.0.3"-style output: the optional "v" has to be consumed first,
+  // since "v2" itself contains no word boundary.
+  const match = output.match(/\bv?(\d+\.\d+\.\d+)\b/);
   return match?.[1] ?? null;
 }
 
@@ -244,10 +218,19 @@ export function buildServerProvider(input: {
     : undefined;
   return {
     displayName: input.presentation.displayName,
+    ...(typeof input.presentation.supportsConversationRollback === "boolean"
+      ? { supportsConversationRollback: input.presentation.supportsConversationRollback }
+      : {}),
     ...(input.presentation.badgeLabel ? { badgeLabel: input.presentation.badgeLabel } : {}),
     ...(typeof input.presentation.showInteractionModeToggle === "boolean"
       ? { showInteractionModeToggle: input.presentation.showInteractionModeToggle }
       : {}),
+    ...(typeof input.presentation.reportsContextWindow === "boolean"
+      ? { reportsContextWindow: input.presentation.reportsContextWindow }
+      : {}),
+    ...(input.presentation.supportedRuntimeModes === undefined
+      ? {}
+      : { supportedRuntimeModes: [...input.presentation.supportedRuntimeModes] }),
     ...(typeof input.presentation.requiresNewThreadForModelChange === "boolean"
       ? { requiresNewThreadForModelChange: input.presentation.requiresNewThreadForModelChange }
       : {}),

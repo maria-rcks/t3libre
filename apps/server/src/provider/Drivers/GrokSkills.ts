@@ -19,14 +19,14 @@ import type { GrokSettings, ServerProviderSkill } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { ChildProcess } from "effect/unstable/process";
+import { ChildProcess } from "effect/process";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import { spawnAndCollect } from "../providerSnapshot.ts";
 
 const GROK_SKILLS_PROBE_TIMEOUT_MS = 4_000;
 
-class GrokSkillsProbeError extends Schema.TaggedErrorClass<GrokSkillsProbeError>()(
+class GrokSkillsProbeError extends Schema.TaggedError<GrokSkillsProbeError>()(
   "GrokSkillsProbeError",
   {
     stage: Schema.Literals(["spawn", "timeout", "exit", "decode"]),
@@ -89,10 +89,6 @@ function decodeGrokInspectSkills(stdout: string): ReadonlyArray<ServerProviderSk
   }
 
   return [...skillsByName.values()].sort((left, right) => left.name.localeCompare(right.name));
-}
-
-export function parseGrokInspectSkills(stdout: string): ReadonlyArray<ServerProviderSkill> {
-  return decodeGrokInspectSkills(stdout) ?? [];
 }
 
 /**

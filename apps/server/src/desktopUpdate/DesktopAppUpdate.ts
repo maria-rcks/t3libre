@@ -15,7 +15,7 @@ import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 
-import { ServerConfig } from "../config.ts";
+import * as ServerConfig from "../config.ts";
 import * as DesktopTelemetryReceiver from "../resourceTelemetry/DesktopTelemetryReceiver.ts";
 
 /** Backstop for a desktop updater that hangs without ever reporting a
@@ -25,7 +25,7 @@ const DESKTOP_INSTALL_TIMEOUT = Duration.minutes(2);
 
 /** Progress stage a desktop update state maps to, or null when the state
     carries no progress worth streaming. */
-export function desktopUpdateProgressStage(
+function desktopUpdateProgressStage(
   state: DesktopUpdateState,
 ): ServerSelfUpdateProgressStage | null {
   switch (state.status) {
@@ -63,7 +63,7 @@ export class DesktopAppUpdate extends Context.Service<
 >()("t3/desktopUpdate/DesktopAppUpdate") {}
 
 export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* () {
-  const config = yield* ServerConfig;
+  const config = yield* ServerConfig.ServerConfig;
   const crypto = yield* Crypto.Crypto;
   const receiver = yield* DesktopTelemetryReceiver.DesktopTelemetryReceiver;
   const inFlight = yield* Ref.make(false);
@@ -106,7 +106,7 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
               ? emitStage(desktopUpdateProgressStage(report.state)).pipe(
                   Effect.as(Option.none<DesktopUpdateStatusReport>()),
                 )
-              : Effect.succeed(Option.some(report)),
+              : Effect.succeedSome(report),
         ),
         Stream.filterMap(
           Option.match({

@@ -1,5 +1,4 @@
 // @effect-diagnostics globalTimers:off -- The Node socket client owns its response deadline and clears it on every completion path.
-import * as NodeCrypto from "node:crypto";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 
@@ -18,11 +17,12 @@ import {
 } from "@t3tools/shared/hostProcess";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { Argument, Command } from "effect/unstable/cli";
+import { Argument, Command } from "effect/cli";
 
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
 import { baseDirFlag } from "./config.ts";
@@ -31,7 +31,7 @@ const CLI_RESPONSE_TIMEOUT_MS = 17_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const isDesktopAppActivationResponse = Schema.is(DesktopAppActivationResponse);
 
-export class DesktopAppSshUnsupportedError extends Schema.TaggedErrorClass<DesktopAppSshUnsupportedError>()(
+export class DesktopAppSshUnsupportedError extends Schema.TaggedError<DesktopAppSshUnsupportedError>()(
   "DesktopAppSshUnsupportedError",
   {},
 ) {
@@ -40,7 +40,7 @@ export class DesktopAppSshUnsupportedError extends Schema.TaggedErrorClass<Deskt
   }
 }
 
-export class DesktopAppPlatformUnsupportedError extends Schema.TaggedErrorClass<DesktopAppPlatformUnsupportedError>()(
+export class DesktopAppPlatformUnsupportedError extends Schema.TaggedError<DesktopAppPlatformUnsupportedError>()(
   "DesktopAppPlatformUnsupportedError",
   { platform: Schema.String },
 ) {
@@ -49,7 +49,7 @@ export class DesktopAppPlatformUnsupportedError extends Schema.TaggedErrorClass<
   }
 }
 
-export class DesktopAppUnreachableError extends Schema.TaggedErrorClass<DesktopAppUnreachableError>()(
+export class DesktopAppUnreachableError extends Schema.TaggedError<DesktopAppUnreachableError>()(
   "DesktopAppUnreachableError",
   {
     candidateAddresses: Schema.Array(Schema.String),
@@ -63,7 +63,7 @@ export class DesktopAppUnreachableError extends Schema.TaggedErrorClass<DesktopA
   }
 }
 
-export class DesktopAppRequestFailedError extends Schema.TaggedErrorClass<DesktopAppRequestFailedError>()(
+export class DesktopAppRequestFailedError extends Schema.TaggedError<DesktopAppRequestFailedError>()(
   "DesktopAppRequestFailedError",
   {
     code: DesktopAppActivationErrorCode,
@@ -81,7 +81,7 @@ function isDesktopPlatform(platform: NodeJS.Platform): platform is DesktopAppAct
   return platform === "darwin" || platform === "linux" || platform === "win32";
 }
 
-export function sendDesktopAppActivationRequest(input: {
+function sendDesktopAppActivationRequest(input: {
   readonly address: string;
   readonly fallbackAddress?: string;
   readonly request: DesktopAppActivationRequest;
@@ -178,9 +178,9 @@ export function sendDesktopAppActivationRequest(input: {
 }
 
 const appEnvironment = Config.all({
-  t3Home: Config.string("T3CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  sshConnection: Config.string("SSH_CONNECTION").pipe(Config.option),
-  sshTty: Config.string("SSH_TTY").pipe(Config.option),
+  t3Home: Config.String("T3CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  sshConnection: Config.String("SSH_CONNECTION").pipe(Config.option),
+  sshTty: Config.String("SSH_TTY").pipe(Config.option),
 });
 
 const runAppCommand = Effect.fn("cli.app")(function* (flags: {
@@ -212,9 +212,11 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
       userId,
       joinPath: path.join,
     }).address;
+  const crypto = yield* Crypto.Crypto;
+  const requestId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
   const request: DesktopAppActivationRequest = {
     version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
-    requestId: NodeCrypto.randomUUID(),
+    requestId,
     type: "open-workspace",
     workspaceRoot,
     platform: hostPlatform,
@@ -251,7 +253,7 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
 
 export const appCommand = Command.make("app", {
   baseDir: baseDirFlag,
-  workspaceRoot: Argument.string("path").pipe(
+  workspaceRoot: Argument.String("path").pipe(
     Argument.withDescription("Project directory. Default: current directory."),
     Argument.optional,
   ),

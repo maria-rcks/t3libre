@@ -14,16 +14,6 @@ export interface TerminalLinkMatch {
   end: number;
 }
 
-export interface TerminalLinkBufferPosition {
-  x: number;
-  y: number;
-}
-
-export interface TerminalLinkBufferRange {
-  start: TerminalLinkBufferPosition;
-  end: TerminalLinkBufferPosition;
-}
-
 export interface TerminalBufferLineLike {
   readonly isWrapped?: boolean;
   translateToString(trimRight?: boolean): string;
@@ -45,9 +35,14 @@ const URL_PATTERN = /https?:\/\/[^\s"'`<>]+/giu;
 const FILE_PATH_PATTERN =
   /(?:~\/|\.{1,2}\/|\/|[A-Za-z]:[\\/]|\\\\)[^\s"'`<>]+|[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+(?::\d+){0,2}/g;
 const TRAILING_PUNCTUATION_PATTERN = /[.,;!?]+$/;
+// Paths also drop a trailing colon: compilers end `file:line:col:` with one.
+const TRAILING_PATH_PUNCTUATION_PATTERN = /[.,;:!?]+$/;
 
-function trimClosingDelimiters(value: string): string {
-  let output = value.replace(TRAILING_PUNCTUATION_PATTERN, "");
+function trimClosingDelimiters(value: string, kind: TerminalLinkKind): string {
+  let output = value.replace(
+    kind === "path" ? TRAILING_PATH_PUNCTUATION_PATTERN : TRAILING_PUNCTUATION_PATTERN,
+    "",
+  );
   if (output.length === 0) return output;
 
   const trimUnbalanced = (open: string, close: string) => {
@@ -83,7 +78,7 @@ function collectMatches(
     const start = rawMatch.index ?? -1;
     if (start < 0 || raw.length === 0) continue;
 
-    const trimmed = trimClosingDelimiters(raw);
+    const trimmed = trimClosingDelimiters(raw, kind);
     if (trimmed.length === 0) continue;
     if (kind === "path" && isTerminalUrl(trimmed)) continue;
 
@@ -197,43 +192,6 @@ export function collectWrappedTerminalLinkLine(
     text: segments.map((segment) => segment.text).join(""),
     segments,
   };
-}
-
-function resolveCharacterPosition(
-  segments: ReadonlyArray<WrappedTerminalLinkLineSegment>,
-  characterIndex: number,
-): TerminalLinkBufferPosition {
-  for (const segment of segments) {
-    if (characterIndex < segment.endIndex) {
-      return {
-        x: characterIndex - segment.startIndex + 1,
-        y: segment.bufferLineNumber,
-      };
-    }
-  }
-
-  const lastSegment = segments[segments.length - 1];
-  return {
-    x: Math.max(lastSegment?.text.length ?? 0, 1),
-    y: lastSegment?.bufferLineNumber ?? 1,
-  };
-}
-
-export function resolveWrappedTerminalLinkRange(
-  wrappedLine: WrappedTerminalLinkLine,
-  match: Pick<TerminalLinkMatch, "start" | "end">,
-): TerminalLinkBufferRange {
-  return {
-    start: resolveCharacterPosition(wrappedLine.segments, match.start),
-    end: resolveCharacterPosition(wrappedLine.segments, match.end - 1),
-  };
-}
-
-export function wrappedTerminalLinkRangeIntersectsBufferLine(
-  range: TerminalLinkBufferRange,
-  bufferLineNumber: number,
-): boolean {
-  return range.start.y <= bufferLineNumber && bufferLineNumber <= range.end.y;
 }
 
 export function isTerminalLinkActivation(

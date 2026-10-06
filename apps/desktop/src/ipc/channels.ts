@@ -1,4 +1,5 @@
 export const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
+export const SET_NOTIFICATION_BADGE_CHANNEL = "desktop:set-notification-badge";
 export const PICK_PROJECT_FAVICON_CHANNEL = "desktop:pick-project-favicon";
 export const PICK_THEME_FILES_CHANNEL = "desktop:pick-theme-files";
 export const SET_THEME_CHANNEL = "desktop:set-theme";
@@ -7,7 +8,10 @@ export const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 export const OPEN_SYSTEM_SETTINGS_CHANNEL = "desktop:open-system-settings";
 export const PROBE_REMOTE_EDITORS_CHANNEL = "desktop:probe-remote-editors";
 export const MENU_ACTION_CHANNEL = "desktop:menu-action";
+export const PASTE_AS_TEXT_CHANNEL = "desktop:paste-as-text";
+export const SNAP_SHOT_EVENT_CHANNEL = "desktop:snap-shot-event";
 export const QUIT_SHORTCUT_CHANNEL = "desktop:quit-shortcut";
+export const TRACKPAD_SCROLL_END_CHANNEL = "desktop:trackpad-scroll-end";
 export const GET_WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:get-window-fullscreen-state";
 export const WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:window-fullscreen-state";
 export const DESKTOP_APP_ACTIVATION_READY_CHANNEL = "desktop:app-activation-ready";
@@ -22,10 +26,26 @@ export const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 export const GET_APP_BRANDING_CHANNEL = "desktop:get-app-branding";
 export const GET_SYSTEM_LOCALE_CHANNEL = "desktop:get-system-locale";
 export const GET_LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANNEL = "desktop:get-local-environment-bootstraps";
+export const GET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL = "desktop:get-local-environment-enabled";
+export const SET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL = "desktop:set-local-environment-enabled";
 export const GET_LOCAL_ENVIRONMENT_BEARER_TOKEN_CHANNEL =
   "desktop:get-local-environment-bearer-token";
 export const GET_CLIENT_SETTINGS_CHANNEL = "desktop:get-client-settings";
 export const SET_CLIENT_SETTINGS_CHANNEL = "desktop:set-client-settings";
+export const SETUP_SNAP_SHOT_CHANNEL = "desktop:setup-snap-shot";
+export const PREVIEW_SNAP_SHOT_CONFIG_CHANNEL = "desktop:preview-snap-shot-config";
+export const APPLY_SNAP_SHOT_CONFIG_CHANNEL = "desktop:apply-snap-shot-config";
+export const REQUEST_SNAP_SHOT_PERMISSIONS_CHANNEL = "desktop:request-snap-shot-permissions";
+export const GET_SNAP_SHOT_STATE_CHANNEL = "desktop:get-snap-shot-state";
+export const CHECK_SNAP_SHOT_SHORTCUT_CHANNEL = "desktop:check-snap-shot-shortcut";
+export const SET_SNAP_SHOT_SHORTCUT_SUPPRESSED_CHANNEL =
+  "desktop:set-snap-shot-shortcut-suppressed";
+export const LIST_PENDING_SNAP_SHOTS_CHANNEL = "desktop:list-pending-snap-shots";
+export const READ_SNAP_SHOT_CHANNEL = "desktop:read-snap-shot";
+export const SET_SNAP_SHOT_ANIMATION_DESTINATION_CHANNEL =
+  "desktop:set-snap-shot-animation-destination";
+export const DISMISS_SNAP_SHOT_ANIMATION_CHANNEL = "desktop:dismiss-snap-shot-animation";
+export const ACKNOWLEDGE_SNAP_SHOT_CHANNEL = "desktop:acknowledge-snap-shot";
 export const GET_CONNECTION_CATALOG_CHANNEL = "desktop:get-connection-catalog";
 export const SET_CONNECTION_CATALOG_CHANNEL = "desktop:set-connection-catalog";
 export const CLEAR_CONNECTION_CATALOG_CHANNEL = "desktop:clear-connection-catalog";
@@ -52,13 +72,13 @@ export const PREVIEW_CREATE_TAB_CHANNEL = "desktop:preview-create-tab";
 export const PREVIEW_CLOSE_TAB_CHANNEL = "desktop:preview-close-tab";
 export const PREVIEW_REGISTER_WEBVIEW_CHANNEL = "desktop:preview-register-webview";
 export const PREVIEW_NAVIGATE_CHANNEL = "desktop:preview-navigate";
-export const PREVIEW_PORT_FORWARD_CHANNEL = "desktop:preview-port-forward";
 export const PREVIEW_GO_BACK_CHANNEL = "desktop:preview-go-back";
 export const PREVIEW_GO_FORWARD_CHANNEL = "desktop:preview-go-forward";
 export const PREVIEW_REFRESH_CHANNEL = "desktop:preview-refresh";
 export const PREVIEW_ZOOM_IN_CHANNEL = "desktop:preview-zoom-in";
 export const PREVIEW_ZOOM_OUT_CHANNEL = "desktop:preview-zoom-out";
 export const PREVIEW_RESET_ZOOM_CHANNEL = "desktop:preview-reset-zoom";
+export const PREVIEW_SET_ZOOM_FACTOR_CHANNEL = "desktop:preview-set-zoom-factor";
 export const PREVIEW_HARD_RELOAD_CHANNEL = "desktop:preview-hard-reload";
 export const PREVIEW_SET_COLOR_SCHEME_CHANNEL = "desktop:preview-set-color-scheme";
 export const PREVIEW_SET_AUDIO_MUTED_CHANNEL = "desktop:preview-set-audio-muted";
@@ -77,17 +97,20 @@ export const PREVIEW_COPY_ARTIFACT_CHANNEL = "desktop:preview-copy-artifact";
 export const PREVIEW_PICTURE_IN_PICTURE_OPEN_CHANNEL = "desktop:preview-pip-open";
 export const PREVIEW_PICTURE_IN_PICTURE_CLOSE_CHANNEL = "desktop:preview-pip-close";
 export const PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL = "desktop:preview-pip-frame";
-export const PREVIEW_AUTOMATION_STATUS_CHANNEL = "desktop:preview-automation-status";
-export const PREVIEW_AUTOMATION_SNAPSHOT_CHANNEL = "desktop:preview-automation-snapshot";
-export const PREVIEW_AUTOMATION_CLICK_CHANNEL = "desktop:preview-automation-click";
-export const PREVIEW_AUTOMATION_TYPE_CHANNEL = "desktop:preview-automation-type";
-export const PREVIEW_AUTOMATION_PRESS_CHANNEL = "desktop:preview-automation-press";
-export const PREVIEW_AUTOMATION_SCROLL_CHANNEL = "desktop:preview-automation-scroll";
-export const PREVIEW_AUTOMATION_EVALUATE_CHANNEL = "desktop:preview-automation-evaluate";
-export const PREVIEW_AUTOMATION_WAIT_FOR_CHANNEL = "desktop:preview-automation-wait-for";
 export const PREVIEW_RECORDING_START_CHANNEL = "desktop:preview-recording-start";
 export const PREVIEW_RECORDING_STOP_CHANNEL = "desktop:preview-recording-stop";
 export const PREVIEW_RECORDING_SAVE_CHANNEL = "desktop:preview-recording-save";
 export const PREVIEW_RECORDING_FRAME_CHANNEL = "desktop:preview-recording-frame";
 export const PREVIEW_STATE_CHANGE_CHANNEL = "desktop:preview-state-change";
 export const PREVIEW_POINTER_EVENT_CHANNEL = "desktop:preview-pointer-event";
+
+export const MAC_PERMISSION_HELPER_CHANNEL = "desktop:mac-permission-helper";
+
+export const CHECK_SYSTEM_PERMISSION_CHANNEL = "desktop:check-system-permission";
+
+export const PREVIEW_RECORDING_INPUT_CHANNEL = "desktop:preview-recording-input";
+
+export const RECEIVE_PROVIDER_AUTH_CALLBACK_CHANNEL = "desktop:receive-provider-auth-callback";
+export const CANCEL_PROVIDER_AUTH_CALLBACK_CHANNEL = "desktop:cancel-provider-auth-callback";
+export const TAKE_LEGACY_LOCAL_STORAGE_CHANNEL = "desktop:take-legacy-local-storage";
+export const COMPLETE_LEGACY_LOCAL_STORAGE_CHANNEL = "desktop:complete-legacy-local-storage";

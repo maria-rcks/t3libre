@@ -3,6 +3,7 @@ import * as Option from "effect/Option";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import {
+  CLOUD_ENDPOINT_CONFIRMED_ORIGIN,
   CLOUD_ENDPOINT_HTTP_ORIGIN,
   CLOUD_ENDPOINT_RUNTIME_CONFIG,
   CLOUD_LINKED_USER_ID,
@@ -70,6 +71,7 @@ export const clearPersistedCloudLink = Effect.gen(function* () {
       secrets.remove(CLOUD_MINT_PUBLIC_KEY),
       secrets.remove(CLOUD_ENDPOINT_RUNTIME_CONFIG),
       secrets.remove(CLOUD_ENDPOINT_HTTP_ORIGIN),
+      secrets.remove(CLOUD_ENDPOINT_CONFIRMED_ORIGIN),
       secrets.remove(PUBLISH_AGENT_ACTIVITY_SECRET),
     ],
     { concurrency: "unbounded" },
