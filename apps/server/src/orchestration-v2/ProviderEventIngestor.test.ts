@@ -27,12 +27,13 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as EventSink from "./EventSink.ts";
 import * as EventStore from "./EventStore.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
+import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import { makeProviderFailure } from "./ProviderFailure.ts";
 import {
   makeProviderEventRoutingState,
@@ -41,21 +42,29 @@ import {
   selectInheritedBackgroundTurnItems,
 } from "./RunExecutionService.ts";
 
-const TestDatabaseLayer = SqlitePersistenceMemory;
-const TestStoresLayer = Layer.merge(EventStore.layer, ProjectionStore.layer).pipe(
-  Layer.provide(TestDatabaseLayer),
+const layerTestDatabase = SqlitePersistence.layerMemory;
+const layerTestStores = Layer.merge(EventStore.layer, ProjectionStore.layer).pipe(
+  Layer.provide(layerTestDatabase),
 );
 
-const TestEventSinkLayer = EventSink.layer.pipe(
-  Layer.provide(Layer.mergeAll(TestStoresLayer, TestDatabaseLayer)),
+const layerTestEventSink = EventSink.layer.pipe(
+  Layer.provide(Layer.mergeAll(layerTestStores, layerTestDatabase)),
 );
 
-const TestLayer = Layer.mergeAll(
-  TestStoresLayer,
-  TestEventSinkLayer,
+const layerTest = Layer.mergeAll(
+  layerTestStores,
+  layerTestEventSink,
   IdAllocator.layer,
+  ThreadCommandExecutor.layer,
   ProviderEventIngestor.layer.pipe(
-    Layer.provide(Layer.mergeAll(TestStoresLayer, TestEventSinkLayer, IdAllocator.layer)),
+    Layer.provide(
+      Layer.mergeAll(
+        layerTestStores,
+        layerTestEventSink,
+        IdAllocator.layer,
+        ThreadCommandExecutor.layer,
+      ),
+    ),
   ),
 );
 const modelSelection = {
@@ -124,11 +133,11 @@ function threadCreatedEvent(
   });
 }
 
-const layer = it.layer(TestLayer);
+const layer = it.layer(layerTest);
 
 it.effect("records accepted billed turn usage once without billing the context window", () => {
   const recorded: Array<Readonly<Record<string, unknown>>> = [];
-  const analytics = Layer.succeed(ProviderEventIngestor.ProviderTurnAnalytics, {
+  const layerAnalytics = Layer.succeed(ProviderEventIngestor.ProviderTurnAnalytics, {
     record: (properties: Readonly<Record<string, unknown>>) =>
       Effect.sync(() => {
         recorded.push(properties);
@@ -223,7 +232,7 @@ it.effect("records accepted billed turn usage once without billing the context w
       interactionMode: "default",
       durationMs: 120,
     });
-  }).pipe(Effect.provide(TestLayer.pipe(Layer.provide(analytics))));
+  }).pipe(Effect.provide(layerTest.pipe(Layer.provide(layerAnalytics))));
 });
 
 layer("ProviderEventIngestorV2", (it) => {
@@ -724,8 +733,9 @@ layer("ProviderEventIngestorV2", (it) => {
     }),
   );
 
-  for (const terminal of ["completed", "interrupted", "failed", "cancelled", "control"] as const) {
-    it.effect(`dismisses only native questions when a provider turn ends with ${terminal}`, () =>
+  it.effect.each(["completed", "interrupted", "failed", "cancelled", "control"] as const)(
+    "dismisses only native questions when a provider turn ends with %s",
+    (terminal) =>
       Effect.gen(function* () {
         const now = yield* DateTime.now;
         const eventSink = yield* EventSink.EventSinkV2;
@@ -909,8 +919,7 @@ layer("ProviderEventIngestorV2", (it) => {
         const repeated = yield* ingestor.ingestNormalized(input);
         assert.isFalse(repeated.some((entry) => entry.event.type === "runtime-request.updated"));
       }),
-    );
-  }
+  );
 
   it.effect(
     "preserves an answer committed after terminal normalization reads a pending question",
@@ -1232,6 +1241,101 @@ layer("ProviderEventIngestorV2", (it) => {
       assert.equal(threadEvents[0]?.threadId, childThreadId);
       assert.equal(messageEvents[0]?.type, "message.updated");
       assert.equal(messageEvents[0]?.threadId, childThreadId);
+    }),
+  );
+
+  it.effect("moves a native subagent's thread to the model its provider reports later", () =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const rootEvent = yield* threadCreatedEvent(now);
+      if (rootEvent.type !== "thread.created") {
+        throw new Error("Expected a thread.created fixture event");
+      }
+      const childThreadId = idAllocator.derive.threadFromProviderThread({
+        driver: CODEX_DRIVER,
+        nativeThreadId: "native-late-model-subagent",
+      });
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId: rootEvent.threadId,
+      });
+      const ingest = (event: ProviderEventIngestor.ProviderEventIngestInput["event"]) =>
+        ingestor.ingestNormalized({
+          providerSessionId,
+          providerInstanceId: modelSelection.instanceId,
+          threadId: rootEvent.threadId,
+          event,
+        });
+      yield* eventSink.write({ events: [rootEvent] });
+      // The subagent's thread starts on the parent's model and options.
+      yield* ingest({
+        type: "app_thread.created",
+        driver: CODEX_DRIVER,
+        appThread: {
+          ...rootEvent.payload,
+          id: childThreadId,
+          title: "review design",
+          modelSelection: {
+            ...modelSelection,
+            options: [{ id: "reasoningEffort", value: "xhigh" }],
+          },
+          activeProviderThreadId: null,
+          lineage: {
+            parentThreadId: rootEvent.threadId,
+            relationshipToParent: "subagent",
+            rootThreadId: rootEvent.threadId,
+          },
+        },
+      });
+      const subagentUpdated = {
+        type: "subagent.updated",
+        driver: CODEX_DRIVER,
+        subagent: {
+          id: NodeId.make("node:late-model-subagent"),
+          threadId: rootEvent.threadId,
+          runId: null,
+          parentNodeId: NodeId.make("node:root"),
+          origin: "provider_native",
+          createdBy: "agent",
+          driver: CODEX_DRIVER,
+          providerInstanceId: modelSelection.instanceId,
+          providerThreadId: null,
+          childThreadId,
+          nativeTaskRef: null,
+          prompt: "Review the design",
+          title: "review design",
+          model: "gpt-6.1-sol",
+          status: "running",
+          result: null,
+          startedAt: now,
+          completedAt: null,
+          updatedAt: now,
+        },
+      } satisfies ProviderEventIngestor.ProviderEventIngestInput["event"];
+
+      const first = yield* ingest(subagentUpdated);
+      const repeated = yield* ingest(subagentUpdated);
+      const childThread = yield* projectionStore.getThread(childThreadId);
+
+      assert.deepEqual(
+        first.map((stored) => [stored.event.type, stored.event.threadId]),
+        [
+          ["subagent.updated", rootEvent.threadId],
+          ["thread.model-selection-updated", childThreadId],
+        ],
+      );
+      assert.deepEqual(
+        repeated.map((stored) => stored.event.type),
+        ["subagent.updated"],
+      );
+      assert.deepEqual(childThread.modelSelection, {
+        instanceId: modelSelection.instanceId,
+        model: "gpt-6.1-sol",
+      });
     }),
   );
 });

@@ -10,9 +10,8 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as ServerConfig from "../config.ts";
 import * as ModelManifest from "./ModelManifest.ts";
-import { ProviderRegistryLive } from "./Layers/ProviderRegistry.ts";
-import * as ProviderRegistry from "./Services/ProviderRegistry.ts";
-import * as ProviderInstanceRegistry from "./Services/ProviderInstanceRegistry.ts";
+import * as ProviderRegistry from "./ProviderRegistry.ts";
+import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "./ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
 import { BUILT_IN_DRIVERS } from "./builtInDrivers.ts";
@@ -51,6 +50,9 @@ const provider: ServerProvider = {
   slashCommands: [],
 };
 
+// The first release that runs the V2 orchestrator.
+const V2_RELEASE = "0.0.46";
+
 describe("provider compatibility", () => {
   it("bundles a compatibility policy for every built-in harness", () => {
     for (const builtIn of BUILT_IN_DRIVERS) {
@@ -61,10 +63,40 @@ describe("provider compatibility", () => {
           ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
           builtIn.driverKind,
           null,
+          V2_RELEASE,
         ),
         `Missing bundled compatibility policy for ${builtIn.driverKind}`,
       );
     }
+  });
+
+  it("keeps releases before V2 on the OpenCode 1 policy they shipped with", () => {
+    // Every installed build fetches main's manifest, and 0.0.45 and older run the
+    // V1 orchestrator, which cannot drive OpenCode 2.
+    const opencode = ProviderDriverKind.make("opencode");
+    for (const [version, expected] of [
+      ["1.14.19", "supported"],
+      ["2.0.18", "broken"],
+      ["1.14.18", "broken"],
+    ] as const) {
+      const advisory = resolveProviderCompatibility(
+        ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
+        opencode,
+        version,
+        "0.0.45",
+      );
+      assert.strictEqual(advisory?.status, expected, `OpenCode ${version} on 0.0.45`);
+      assert.strictEqual(advisory?.recommendedVersion, "1.14.19");
+    }
+    // Pi has no driver before V2.
+    assert.isUndefined(
+      resolveProviderCompatibility(
+        ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
+        ProviderDriverKind.make("pi"),
+        "1.0.0",
+        "0.0.45",
+      ),
+    );
   });
 
   it("supports OpenCode 2 and gives OpenCode 1.x limited support", () => {
@@ -79,13 +111,16 @@ describe("provider compatibility", () => {
       ["1.14.19", "graceful"],
       ["1.14.18", "broken"],
     ] as const) {
-      const advisory = resolveProviderCompatibility(
-        ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
-        opencode,
-        version,
-      );
-      assert.strictEqual(advisory?.status, expected, `OpenCode ${version}`);
-      assert.strictEqual(advisory?.recommendedRange, ">=2.0.18");
+      for (const t3CodeVersion of [V2_RELEASE, "0.0.46-preview.20261002.2598"]) {
+        const advisory = resolveProviderCompatibility(
+          ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
+          opencode,
+          version,
+          t3CodeVersion,
+        );
+        assert.strictEqual(advisory?.status, expected, `OpenCode ${version} on ${t3CodeVersion}`);
+        assert.strictEqual(advisory?.recommendedRange, ">=2.0.18");
+      }
     }
     // The advisory rides beside the probe: a ready 1.x instance stays ready and selectable.
     const ready = applyProviderCompatibility(
@@ -94,7 +129,14 @@ describe("provider compatibility", () => {
       ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
     );
     assert.strictEqual(ready.status, "ready");
-    assert.strictEqual(ready.compatibilityAdvisory?.status, "graceful");
+    assert.strictEqual(
+      ready.compatibilityAdvisory?.status,
+      resolveProviderCompatibility(
+        ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
+        opencode,
+        "1.18.33",
+      )?.status,
+    );
   });
 
   it("compares Cursor build dates without treating semver prereleases as stable", () => {
@@ -280,7 +322,7 @@ it.effect("a remote policy refresh preserves a newer health result on the regist
         })),
       ),
     );
-    const dependencies = Layer.mergeAll(
+    const layerDependencies = Layer.mergeAll(
       Layer.succeed(ModelManifest.ModelManifest, {
         current: Ref.get(manifest),
         refresh,
@@ -319,7 +361,7 @@ it.effect("a remote policy refresh preserves a newer health result on the regist
       assert.strictEqual(updated?.compatibilityAdvisory?.status, "supported");
       assert.strictEqual(updated?.status, "error");
       assert.strictEqual(updated?.message, "Authentication failed");
-    }).pipe(Effect.provide(ProviderRegistryLive.pipe(Layer.provide(dependencies))));
+    }).pipe(Effect.provide(ProviderRegistry.layer.pipe(Layer.provide(layerDependencies))));
   }).pipe(Effect.scoped),
 );
 

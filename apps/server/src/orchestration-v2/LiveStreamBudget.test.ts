@@ -111,39 +111,37 @@ describe("bufferLatestLiveStream", () => {
       ),
   );
 
-  for (const limit of ["items", "bytes"] as const) {
-    it.effect(
-      `keeps an in-flight update charged to the ${limit} budget when the same key updates`,
-      () =>
-        Effect.scoped(
-          Effect.gen(function* () {
-            const input = yield* Queue.unbounded<Event>();
-            const closed = yield* Deferred.make<void>();
-            const first = { sequence: 1, text: "first" };
-            const pull = yield* Stream.toPull(
-              bufferLatestLiveStream(
-                Stream.fromQueue(input).pipe(Stream.ensuring(Deferred.succeed(closed, undefined))),
-                () => "same-key",
-                limit === "items" ? { maxItems: 1 } : { maxSerializedBytes: 32 },
-              ),
-            );
-            yield* Queue.offer(input, first);
-            expect(yield* pull).toEqual([first]);
-            yield* Queue.offer(input, { sequence: 2, text: "next" });
-            yield* Deferred.await(closed);
-            const result = yield* pull.pipe(Effect.result);
-            expect(result._tag).toBe("Failure");
-            if (result._tag === "Failure")
-              expect(result.failure._tag).toBe("LiveStreamBufferError");
-          }),
-        ),
-    );
-  }
+  it.effect.each(["items", "bytes"] as const)(
+    "keeps an in-flight update charged to the %s budget when the same key updates",
+    (limit) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const input = yield* Queue.unbounded<Event>();
+          const closed = yield* Deferred.make<void>();
+          const first = { sequence: 1, text: "first" };
+          const pull = yield* Stream.toPull(
+            bufferLatestLiveStream(
+              Stream.fromQueue(input).pipe(Stream.ensuring(Deferred.succeed(closed, undefined))),
+              () => "same-key",
+              limit === "items" ? { maxItems: 1 } : { maxSerializedBytes: 32 },
+            ),
+          );
+          yield* Queue.offer(input, first);
+          expect(yield* pull).toEqual([first]);
+          yield* Queue.offer(input, { sequence: 2, text: "next" });
+          yield* Deferred.await(closed);
+          const result = yield* pull.pipe(Effect.result);
+          expect(result._tag).toBe("Failure");
+          if (result._tag === "Failure") expect(result.failure._tag).toBe("LiveStreamBufferError");
+        }),
+      ),
+  );
 });
 
 describe("replayAndBufferLiveEvents", () => {
-  for (const phase of ["high-water", "replay"] as const) {
-    it.effect(`unsubscribes and cancels a blocked ${phase} read on live overflow`, () =>
+  it.effect.each(["high-water", "replay"] as const)(
+    "unsubscribes and cancels a blocked %s read on live overflow",
+    (phase) =>
       Effect.scoped(
         Effect.gen(function* () {
           const pubsub = yield* PubSub.unbounded<Event>();
@@ -185,11 +183,11 @@ describe("replayAndBufferLiveEvents", () => {
           expect(yield* PubSub.size(pubsub)).toBe(0);
         }),
       ),
-    );
-  }
+  );
 
-  for (const limit of ["items", "bytes"] as const) {
-    it.effect(`counts an unacknowledged replay batch toward the live ${limit} limit`, () =>
+  it.effect.each(["items", "bytes"] as const)(
+    "counts an unacknowledged replay batch toward the live %s limit",
+    (limit) =>
       Effect.scoped(
         Effect.gen(function* () {
           const pubsub = yield* PubSub.unbounded<Event>();
@@ -222,8 +220,7 @@ describe("replayAndBufferLiveEvents", () => {
           if (result._tag === "Failure") expect(result.failure._tag).toBe("LiveStreamBufferError");
         }),
       ),
-    );
-  }
+  );
 
   it.effect("lets a fast reader replay a database page larger than both buffer limits", () =>
     Effect.scoped(

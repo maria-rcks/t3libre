@@ -29,7 +29,7 @@ import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as ServerConfig from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
@@ -43,11 +43,11 @@ import { handoffBudget } from "../ContextHandoffBudget.ts";
 import { makePiAdapterV2, PI_PROVIDER } from "./PiAdapterV2.ts";
 import { makePiRpcConnection, type PiRpcRecord } from "./PiRpc.ts";
 
-const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
+const layerServerConfig = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-pi-v2-adapter-",
 }).pipe(Layer.provide(NodeServices.layer));
 
-const testLayer = Layer.mergeAll(NodeServices.layer, IdAllocator.layer, serverConfigLayer);
+const layerTest = Layer.mergeAll(NodeServices.layer, IdAllocator.layer, layerServerConfig);
 
 const decodeJsonLine = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
 const encodeJsonLine = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
@@ -458,7 +458,7 @@ const expectModelFailure = (errorMessage: string) =>
         terminal.status === "failed" &&
         terminal.failure.message === errorMessage,
     );
-  }).pipe(Effect.scoped, Effect.provide(testLayer));
+  }).pipe(Effect.scoped, Effect.provide(layerTest));
 
 describe("PiAdapterV2", () => {
   it.effect("stops provider-initiated work that has no T3 turn owner", () =>
@@ -481,7 +481,7 @@ describe("PiAdapterV2", () => {
         sessionError.type === "provider_session.updated" &&
           sessionError.providerSession.lastError?.includes("invisible tool execution") === true,
       );
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("injects the T3 MCP extension and bearer when a session exists", () =>
@@ -510,7 +510,7 @@ describe("PiAdapterV2", () => {
     }).pipe(
       Effect.ensuring(Effect.sync(() => McpProviderSession.clearMcpProviderSession(THREAD_ID))),
       Effect.scoped,
-      Effect.provide(testLayer),
+      Effect.provide(layerTest),
     ),
   );
 
@@ -528,7 +528,7 @@ describe("PiAdapterV2", () => {
       const error = yield* runtime.resumeThread({ providerThread }).pipe(Effect.flip);
       assert.equal(error._tag, "ProviderAdapterResumeThreadError");
       assert.match(String(error.cause), /while a turn is active/);
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("waits for a slow Pi resume without starting a replacement", () =>
@@ -555,7 +555,7 @@ describe("PiAdapterV2", () => {
       assert.isFalse(fake.allRequests().some((request) => request.type === "new_session"));
       yield* startTurn(runtime, providerThread, "default");
       yield* fake.takeRequest("prompt");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("creates a distinct native session after a failed resume", () =>
@@ -586,11 +586,12 @@ describe("PiAdapterV2", () => {
       );
       yield* startTurn(runtime, replacement, "default");
       yield* fake.takeRequest("prompt");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
-  for (const invalidReplacement of ["veto", "same identity"] as const) {
-    it.effect(`rejects a replacement with ${invalidReplacement}`, () =>
+  it.effect.each(["veto", "same identity"] as const)(
+    "rejects a replacement with %s",
+    (invalidReplacement) =>
       Effect.gen(function* () {
         const fake = yield* makeFakePi;
         const { runtime } = yield* openRuntime(fake);
@@ -616,9 +617,8 @@ describe("PiAdapterV2", () => {
         );
         yield* startTurn(runtime, providerThread, "default").pipe(Effect.flip);
         assert.isFalse(fake.allRequests().some((request) => request.type === "prompt"));
-      }).pipe(Effect.scoped, Effect.provide(testLayer)),
-    );
-  }
+      }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
 
   it.effect("retires a timed-out lifecycle process before a late switch can race replacement", () =>
     Effect.gen(function* () {
@@ -661,7 +661,7 @@ describe("PiAdapterV2", () => {
           .allRequests()
           .some((request) => request.type === "new_session" || request.type === "prompt"),
       );
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect(
@@ -707,7 +707,7 @@ describe("PiAdapterV2", () => {
         assert.equal(replacement.nativeThreadRef?.nativeId, "/fake/fresh-after-delay.jsonl");
         assert.isNull(replacement.contextUsage);
         assert.isNull(replacement.nativeConversationHeadRef);
-      }).pipe(Effect.scoped, Effect.provide(testLayer)),
+      }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("replaces a native session when the first resume's state refresh fails", () =>
@@ -736,7 +736,7 @@ describe("PiAdapterV2", () => {
       yield* startTurn(runtime, replacement, "default");
       yield* fake.takeRequest("prompt");
       assert.isTrue(fake.allRequests().some((request) => request.type === "new_session"));
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("retires an interrupted switch before accepting further requests", () =>
@@ -765,7 +765,7 @@ describe("PiAdapterV2", () => {
         })
         .pipe(Effect.flip);
       assert.isFalse(fake.allRequests().some((request) => request.type === "new_session"));
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("budgets legacy native history with Pi's selected model capacity", () =>
@@ -814,7 +814,7 @@ describe("PiAdapterV2", () => {
         existingProviderThread: { ...providerThread, nativeThreadRef: null },
       });
       assert.equal(runtime.getModelContextWindow?.(modelSelection("default")), 32_000);
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("adopts the run's provider thread identity instead of minting a second row", () =>
@@ -856,7 +856,7 @@ describe("PiAdapterV2", () => {
       assert.isTrue(
         updated.type === "provider_thread.updated" && updated.providerThread.id === placeholder.id,
       );
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("resets applied thinking when returning to Pi default", () =>
@@ -909,7 +909,7 @@ describe("PiAdapterV2", () => {
       assert.equal(replayModel["modelId"], "grok-4.6");
       const resetLevel = yield* fake.takeRequest("set_thinking_level");
       assert.equal(resetLevel["level"], "medium");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("expands a selected $ skill through Pi's native skill command", () =>
@@ -944,7 +944,7 @@ describe("PiAdapterV2", () => {
       );
       const prompt = yield* fake.takeRequest("prompt");
       assert.equal(prompt["message"], "/skill:repo-review Review this change please");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("expands every selected $ skill through Pi native skill commands", () =>
@@ -980,93 +980,129 @@ describe("PiAdapterV2", () => {
       yield* startTurn(runtime, providerThread, "default", [], "use $repo-review and $deploy");
       const prompt = yield* fake.takeRequest("prompt");
       assert.equal(prompt["message"], "/skill:repo-review /skill:deploy use  and");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
-  for (const historical of [false, true]) {
-    it.effect(
-      `natively forks ${historical ? "a historical turn" : "the latest turn"} into an independent session`,
-      () =>
-        Effect.gen(function* () {
-          const fake = yield* makeFakePi;
-          const forkFake = yield* makeFakePi;
-          const forkFile = "/fake/forked.jsonl";
-          const { runtime, takeEvent } = yield* openRuntime(
-            fake,
-            "default",
-            THREAD_ID,
-            SESSION_ID,
-            forkFake,
-          );
-          const source = yield* runtime.ensureThread({
-            threadId: THREAD_ID,
-            modelSelection: modelSelection("default"),
-            runtimePolicy,
-          });
-          const turn = (ordinal: number): OrchestrationV2ProviderTurn => ({
-            id: ProviderTurnId.make(`turn-${ordinal}`),
-            providerThreadId: source.id,
-            nodeId: NodeId.make(`node-${ordinal}`),
-            runAttemptId: null,
-            nativeTurnRef: { driver: PI_PROVIDER, nativeId: `u${ordinal}`, strength: "strong" },
-            ordinal,
-            status: "completed",
-            startedAt: null,
-            completedAt: null,
-          });
-          forkFake.queueState({ sessionFile: forkFile });
-          fake.queueState({ sessionFile: forkFile });
-          const target = ThreadId.make("fork-target");
-          const forked = yield* runtime.forkThread({
-            sourceProviderThread: source,
-            sourceProviderTurns: historical ? [turn(1), turn(2)] : [turn(1)],
-            providerTurnId: turn(1).id,
-            targetThreadId: target,
-          });
-          assert.equal(forked.appThreadId, target);
-          assert.equal(forked.nativeThreadRef?.nativeId, forkFile);
-          assert.notEqual(forked.id, source.id);
-          assert.equal(source.nativeThreadRef?.nativeId, FAKE_SESSION_FILE);
-          const args = forkFake.lastSpawn().args;
-          assert.equal(args[args.indexOf("--fork") + 1], FAKE_SESSION_FILE);
-          assert.include(args, "--no-extensions");
-          assert.include(args, "--no-tools");
-          assert.notInclude(args, "--no-session");
-          assert.deepEqual(
-            forkFake
-              .allRequests()
-              .filter((request) => request.type === "fork")
-              .map((request) => request.entryId),
-            historical ? ["u2"] : [],
-          );
-          assert.isFalse(
-            fake
-              .allRequests()
-              .some((request) => request.type === "fork" || request.type === "clone"),
-          );
-          // ProviderTurnStartService adopts the fork into its pending row.
-          const adopted = { ...forked, id: ProviderThreadId.make("pending-fork-row") };
-          yield* startTurn(runtime, adopted, "default", [], "Continue", undefined, 1, target);
-          yield* fake.emit({ type: "agent_start" });
-          yield* fake.emit({ type: "agent_settled" });
-          const updated = yield* takeEvent(
-            (event) =>
-              event.type === "provider_thread.updated" &&
-              event.providerThread.appThreadId === target,
-          );
-          assert.isTrue(
-            updated.type === "provider_thread.updated" && updated.providerThread.id === adopted.id,
-          );
-          yield* takeEvent((event) => event.type === "turn.terminal");
-          yield* runtime.resumeThread({ providerThread: adopted });
-          assert.equal(
-            fake.allRequests().findLast((request) => request.type === "switch_session")
-              ?.sessionPath,
-            forkFile,
-          );
-        }).pipe(Effect.scoped, Effect.provide(testLayer)),
-    );
-  }
+  it.effect.each([
+    { historical: false, label: "the latest turn" },
+    { historical: true, label: "a historical turn" },
+  ])("natively forks $label into an independent session", ({ historical }) =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakePi;
+      const forkFake = yield* makeFakePi;
+      const forkFile = "/fake/forked.jsonl";
+      const { runtime, takeEvent } = yield* openRuntime(
+        fake,
+        "default",
+        THREAD_ID,
+        SESSION_ID,
+        forkFake,
+      );
+      const source = yield* runtime.ensureThread({
+        threadId: THREAD_ID,
+        modelSelection: modelSelection("default"),
+        runtimePolicy,
+      });
+      const turn = (ordinal: number): OrchestrationV2ProviderTurn => ({
+        id: ProviderTurnId.make(`turn-${ordinal}`),
+        providerThreadId: source.id,
+        nodeId: NodeId.make(`node-${ordinal}`),
+        runAttemptId: null,
+        nativeTurnRef: { driver: PI_PROVIDER, nativeId: `u${ordinal}`, strength: "strong" },
+        ordinal,
+        status: "completed",
+        startedAt: null,
+        completedAt: null,
+      });
+      forkFake.queueState({ sessionFile: forkFile });
+      fake.queueState({ sessionFile: forkFile });
+      const target = ThreadId.make("fork-target");
+      const forked = yield* runtime.forkThread({
+        sourceProviderThread: source,
+        sourceProviderTurns: historical ? [turn(1), turn(2)] : [turn(1)],
+        providerTurnId: turn(1).id,
+        targetThreadId: target,
+      });
+      assert.equal(forked.appThreadId, target);
+      assert.equal(forked.nativeThreadRef?.nativeId, forkFile);
+      assert.notEqual(forked.id, source.id);
+      assert.equal(source.nativeThreadRef?.nativeId, FAKE_SESSION_FILE);
+      const args = forkFake.lastSpawn().args;
+      assert.equal(args[args.indexOf("--fork") + 1], FAKE_SESSION_FILE);
+      assert.include(args, "--no-extensions");
+      assert.include(args, "--no-tools");
+      assert.notInclude(args, "--no-session");
+      assert.deepEqual(
+        forkFake
+          .allRequests()
+          .filter((request) => request.type === "fork")
+          .map((request) => request.entryId),
+        historical ? ["u2"] : [],
+      );
+      assert.isFalse(
+        fake.allRequests().some((request) => request.type === "fork" || request.type === "clone"),
+      );
+      // ProviderTurnStartService adopts the fork into its pending row.
+      const adopted = { ...forked, id: ProviderThreadId.make("pending-fork-row") };
+      yield* startTurn(runtime, adopted, "default", [], "Continue", undefined, 1, target);
+      yield* fake.emit({ type: "agent_start" });
+      yield* fake.emit({ type: "agent_settled" });
+      const updated = yield* takeEvent(
+        (event) =>
+          event.type === "provider_thread.updated" && event.providerThread.appThreadId === target,
+      );
+      assert.isTrue(
+        updated.type === "provider_thread.updated" && updated.providerThread.id === adopted.id,
+      );
+      yield* takeEvent((event) => event.type === "turn.terminal");
+      yield* runtime.resumeThread({ providerThread: adopted });
+      assert.equal(
+        fake.allRequests().findLast((request) => request.type === "switch_session")?.sessionPath,
+        forkFile,
+      );
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("presents explicitly namespaced MCP extension tools", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakePi;
+      const { runtime, takeEvent } = yield* openRuntime(fake);
+      const providerThread = yield* runtime.ensureThread({
+        threadId: THREAD_ID,
+        modelSelection: modelSelection("default"),
+        runtimePolicy,
+      });
+      yield* startTurn(runtime, providerThread);
+      yield* fake.takeRequest("prompt");
+      yield* fake.emit({ type: "agent_start" });
+      for (const type of ["tool_execution_start", "tool_execution_end"]) {
+        yield* fake.emit({
+          type,
+          toolCallId: "weather-call",
+          toolName: "mcp__weather__get_weather",
+          args: { city: "Berlin" },
+          result: { content: [{ type: "text", text: "Sunny" }] },
+          isError: false,
+        });
+        const event = yield* takeEvent(
+          (event) => event.type === "turn_item.updated" && event.turnItem.type === "dynamic_tool",
+        );
+        if (event.type !== "turn_item.updated" || event.turnItem.type !== "dynamic_tool")
+          return yield* Effect.die("Expected an MCP tool item");
+        assert.equal(event.turnItem.title, "get weather");
+        assert.equal(
+          event.turnItem.status,
+          type === "tool_execution_start" ? "running" : "completed",
+        );
+        assert.deepEqual(event.turnItem.toolSource, {
+          key: "mcp:weather",
+          name: "weather",
+          kind: "integration",
+        });
+        assert.deepEqual(event.turnItem.input, { city: "Berlin" });
+      }
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
 
   it.effect("observes official subagent results without inventing child threads", () =>
     Effect.gen(function* () {
@@ -1157,7 +1193,103 @@ describe("PiAdapterV2", () => {
           subagentItem.turnItem.type === "subagent" &&
           subagentItem.turnItem.childThreadId === null,
       );
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("persists edit patches and write content on file change items", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakePi;
+      const { runtime, takeEvent } = yield* openRuntime(fake);
+      const providerThread = yield* runtime.ensureThread({
+        threadId: THREAD_ID,
+        modelSelection: modelSelection("default"),
+        runtimePolicy,
+      });
+      yield* startTurn(runtime, providerThread);
+      yield* fake.takeRequest("prompt");
+      yield* fake.emit({ type: "agent_start" });
+      const patch = "--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-old\n+new\n";
+      yield* fake.emit({
+        type: "tool_execution_start",
+        toolCallId: "call_edit",
+        toolName: "edit",
+        args: { path: "a.ts", edits: [{ oldText: "old", newText: "new" }] },
+      });
+      yield* fake.emit({
+        type: "tool_execution_end",
+        toolCallId: "call_edit",
+        toolName: "edit",
+        isError: false,
+        result: {
+          content: [{ type: "text", text: "Successfully replaced 1 block(s) in a.ts." }],
+          details: { diff: "-1 old\n+1 new", patch, firstChangedLine: 1 },
+        },
+      });
+      const edit = yield* takeEvent(
+        (event) =>
+          event.type === "turn_item.updated" &&
+          event.turnItem.type === "file_change" &&
+          event.turnItem.status === "completed",
+      );
+      assert.isTrue(
+        edit.type === "turn_item.updated" &&
+          edit.turnItem.type === "file_change" &&
+          edit.turnItem.fileName === "a.ts" &&
+          edit.turnItem.diffStr === patch,
+      );
+
+      yield* fake.emit({
+        type: "tool_execution_start",
+        toolCallId: "call_write",
+        toolName: "write",
+        args: { path: "b.ts", content: "export {};\n" },
+      });
+      yield* fake.emit({
+        type: "tool_execution_end",
+        toolCallId: "call_write",
+        toolName: "write",
+        isError: false,
+        result: { content: [{ type: "text", text: "Successfully wrote to b.ts" }] },
+      });
+      const write = yield* takeEvent(
+        (event) =>
+          event.type === "turn_item.updated" &&
+          event.turnItem.type === "file_change" &&
+          event.turnItem.status === "completed",
+      );
+      assert.isTrue(
+        write.type === "turn_item.updated" &&
+          write.turnItem.type === "file_change" &&
+          write.turnItem.fileName === "b.ts" &&
+          write.turnItem.newStr === "export {};\n",
+      );
+
+      // A failed edit has no patch, so it keeps the error to show when expanded.
+      yield* fake.emit({
+        type: "tool_execution_start",
+        toolCallId: "call_edit_failed",
+        toolName: "edit",
+        args: { path: "c.ts", edits: [{ oldText: "missing", newText: "new" }] },
+      });
+      yield* fake.emit({
+        type: "tool_execution_end",
+        toolCallId: "call_edit_failed",
+        toolName: "edit",
+        isError: true,
+        result: { content: [{ type: "text", text: "Could not find the text in c.ts." }] },
+      });
+      const failedEdit = yield* takeEvent(
+        (event) =>
+          event.type === "turn_item.updated" &&
+          event.turnItem.type === "file_change" &&
+          event.turnItem.status === "failed",
+      );
+      assert.isTrue(
+        failedEdit.type === "turn_item.updated" &&
+          failedEdit.turnItem.type === "file_change" &&
+          failedEdit.turnItem.diffStr === "Could not find the text in c.ts.",
+      );
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("settles a command-only prompt from its deferred ack and idle probe", () =>
@@ -1185,7 +1317,7 @@ describe("PiAdapterV2", () => {
       // settles the turn as completed.
       const terminal = yield* takeEvent((event) => event.type === "turn.terminal");
       assert.isTrue(terminal.type === "turn.terminal" && terminal.status === "completed");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("leaves /compacted as an ordinary prompt", () =>
@@ -1201,7 +1333,7 @@ describe("PiAdapterV2", () => {
       const prompt = yield* fake.takeRequest("prompt");
       assert.equal(prompt["message"], "/compacted please");
       assert.isFalse(fake.allRequests().some((request) => request["type"] === "compact"));
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("fails a compact that never started", () =>
@@ -1227,7 +1359,7 @@ describe("PiAdapterV2", () => {
           terminal.status === "failed" &&
           terminal.failure.message === "Nothing to compact (session too small)",
       );
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("restarts Pi when Stop interrupts a user compact", () =>
@@ -1257,7 +1389,7 @@ describe("PiAdapterV2", () => {
       yield* fake.closeStdout;
       const terminal = yield* takeEvent((event) => event.type === "turn.terminal");
       assert.isTrue(terminal.type === "turn.terminal" && terminal.status === "interrupted");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("steers /compact as RPC compact instead of a prompt", () =>
@@ -1317,7 +1449,7 @@ describe("PiAdapterV2", () => {
       yield* fake.takeRequest("get_state");
       const terminal = yield* takeEvent((event) => event.type === "turn.terminal");
       assert.isTrue(terminal.type === "turn.terminal" && terminal.status === "completed");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("persists current xAI capacity text for the thread error banner", () =>
@@ -1357,7 +1489,7 @@ describe("PiAdapterV2", () => {
       const uiResponse = yield* fake.takeRequest("extension_ui_response");
       assert.equal(uiResponse["id"], "ui-trust");
       assert.equal(uiResponse["confirmed"], true);
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("remembers session approvals only for identical confirmation content", () =>
@@ -1413,7 +1545,7 @@ describe("PiAdapterV2", () => {
         other.type === "runtime_request.updated" &&
           other.runtimeRequest.nativeRequestRef?.nativeId === "ui-other",
       );
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("offers an explicit empty value for extension input dialogs", () =>
@@ -1448,7 +1580,7 @@ describe("PiAdapterV2", () => {
       const response = yield* fake.takeRequest("extension_ui_response");
       assert.equal(response["value"], "");
       assert.isUndefined(response["cancelled"]);
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("raises bridge edit confirmations as file-change approvals", () =>
@@ -1479,7 +1611,7 @@ describe("PiAdapterV2", () => {
           `${title} should be ${requestKind}`,
         );
       }
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("reads a thread snapshot from pi's active branch", () =>
@@ -1512,7 +1644,7 @@ describe("PiAdapterV2", () => {
       assert.equal(snapshot.messages[0]!.text, "hello pi");
       assert.equal(snapshot.messages[1]!.role, "assistant");
       assert.equal(snapshot.messages[1]!.text, "hello back");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("keeps snapshot message identities distinct across native sessions", () =>
@@ -1546,7 +1678,7 @@ describe("PiAdapterV2", () => {
       fake.queueMessages(messages);
       const b = yield* runtime.readThreadSnapshot({ providerThread: second });
       assert.notEqual(a.messages[0]!.id, b.messages[0]!.id);
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("rejects a nonpersistent session UUID instead of treating it as a resumable path", () =>
@@ -1563,7 +1695,7 @@ describe("PiAdapterV2", () => {
         })
         .pipe(Effect.result);
       assert.equal(result._tag, "Failure");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("keeps a settled turn's late prompt rejection off the next turn", () =>
@@ -1599,7 +1731,7 @@ describe("PiAdapterV2", () => {
       assert.isTrue(
         secondTerminal.type === "turn.terminal" && secondTerminal.status === "completed",
       );
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("shows compaction progress and completes the same activity row", () =>
@@ -1665,7 +1797,7 @@ describe("PiAdapterV2", () => {
       yield* fake.emit({ type: "agent_settled" });
       const terminal = yield* takeEvent((event) => event.type === "turn.terminal");
       assert.isTrue(terminal.type === "turn.terminal" && terminal.status === "completed");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("uses distinct compaction IDs for first turns in separate threads", () =>
@@ -1723,7 +1855,7 @@ describe("PiAdapterV2", () => {
           first.turnItem.ordinal === second.turnItem.ordinal &&
           first.turnItem.id !== second.turnItem.id,
       );
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("shows aborted compactions as stopped", () =>
@@ -1760,7 +1892,7 @@ describe("PiAdapterV2", () => {
           stopped.turnItem.status === "cancelled" &&
           stopped.turnItem.title === "Context compaction stopped",
       );
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("keeps the turn open and updates one retry row through final failure", () =>
@@ -1855,7 +1987,7 @@ describe("PiAdapterV2", () => {
           terminal.retry.maxAttempts === 3 &&
           terminal.retryStartedAt === firstRetry.turnItem.startedAt,
       );
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("preserves exhausted retry failure through non-retrying compaction", () =>
@@ -1919,7 +2051,7 @@ describe("PiAdapterV2", () => {
           terminal.retry?.attempt === 5 &&
           terminal.retry.maxAttempts === 5,
       );
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("marks retry progress recovered when Pi succeeds", () =>
@@ -1970,7 +2102,7 @@ describe("PiAdapterV2", () => {
       yield* fake.emit({ type: "agent_settled" });
       const terminal = yield* takeEvent((event) => event.type === "turn.terminal");
       assert.isTrue(terminal.type === "turn.terminal" && terminal.status === "completed");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("stops active retry progress when the turn is interrupted", () =>
@@ -2021,7 +2153,7 @@ describe("PiAdapterV2", () => {
       );
       const terminal = yield* takeEvent((event) => event.type === "turn.terminal");
       assert.isTrue(terminal.type === "turn.terminal" && terminal.status === "interrupted");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("keeps extension-started compaction and recovery in the settled turn", () =>
@@ -2069,7 +2201,7 @@ describe("PiAdapterV2", () => {
       yield* fake.takeRequest("get_state");
       const terminal = yield* takeEvent((event) => event.type === "turn.terminal");
       assert.isTrue(terminal.type === "turn.terminal" && terminal.status === "completed");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("keeps working after a settle probe fails before detached compaction", () =>
@@ -2110,7 +2242,7 @@ describe("PiAdapterV2", () => {
       yield* fake.takeRequest("get_state");
       const terminal = yield* takeEvent((event) => event.type === "turn.terminal");
       assert.isTrue(terminal.type === "turn.terminal" && terminal.status === "completed");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("restarts Pi when Stop interrupts detached compaction", () =>
@@ -2147,7 +2279,7 @@ describe("PiAdapterV2", () => {
       yield* fake.closeStdout;
       const terminal = yield* takeEvent((event) => event.type === "turn.terminal");
       assert.isTrue(terminal.type === "turn.terminal" && terminal.status === "interrupted");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("ignores an idle snapshot made stale by a steer", () =>
@@ -2225,7 +2357,7 @@ describe("PiAdapterV2", () => {
       yield* fake.takeRequest("get_state");
       const terminal = yield* takeEvent((event) => event.type === "turn.terminal");
       assert.isTrue(terminal.type === "turn.terminal" && terminal.status === "completed");
-    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 });
 
