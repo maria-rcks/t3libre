@@ -12,20 +12,12 @@ type ThreadSwipeGesture = {
 const SWIPE_THRESHOLD_PX = 120;
 const SWIPE_IDLE_MS = 180;
 
-function canScrollHorizontally(target: EventTarget | null): boolean {
-  const firstElement =
-    target instanceof HTMLElement ? target : target instanceof Node ? target.parentElement : null;
-
-  for (
-    let element = firstElement;
-    element && element !== document.body;
-    element = element.parentElement
-  ) {
-    const overflowX = window.getComputedStyle(element).overflowX;
-    if (
-      /^(auto|scroll|overlay)$/.test(overflowX) &&
-      element.scrollWidth > element.clientWidth + 1
-    ) {
+function canScrollHorizontally(path: ReadonlyArray<EventTarget>): boolean {
+  for (const target of path) {
+    if (target === document.body) break;
+    if (!(target instanceof HTMLElement)) continue;
+    const overflowX = window.getComputedStyle(target).overflowX;
+    if (/^(auto|scroll|overlay)$/.test(overflowX) && target.scrollWidth > target.clientWidth + 1) {
       return true;
     }
   }
@@ -71,7 +63,7 @@ export function DesktopThreadSwipeNavigation(input: {
 
       const deltaX = event.deltaX;
       if (Math.abs(deltaX) < 2 || Math.abs(deltaX) <= Math.abs(event.deltaY) * 1.15) return;
-      if (canScrollHorizontally(event.composedPath()[0] ?? event.target)) return;
+      if (canScrollHorizontally(event.composedPath())) return;
 
       event.preventDefault();
       if (idleTimer !== null) window.clearTimeout(idleTimer);
@@ -79,7 +71,6 @@ export function DesktopThreadSwipeNavigation(input: {
 
       if (accumulatedDeltaX !== 0 && Math.sign(accumulatedDeltaX) !== Math.sign(deltaX)) {
         accumulatedDeltaX = 0;
-        didNavigate = false;
       }
       accumulatedDeltaX += deltaX;
 
