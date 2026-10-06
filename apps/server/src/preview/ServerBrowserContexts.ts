@@ -21,6 +21,8 @@ interface Options {
 export class ServerBrowserContexts {
   private readonly options: Options;
   private readonly contexts = new Map<string, Promise<BrowserContext>>();
+  /** Profile clears in progress; a context for that profile opens after its storage is gone. */
+  private readonly clearing = new Map<string, Promise<void>>();
   private browser: Promise<Browser> | undefined;
   private closing: Promise<void> | undefined;
 
@@ -72,18 +74,21 @@ export class ServerBrowserContexts {
     const key = JSON.stringify([profileId, isolationKey ?? null]);
     const cached = this.contexts.get(key);
     if (cached) return cached;
-    const pending = this.createContext(profileId, isolationKey).then(async (context) => {
-      context.on("close", () => {
-        if (this.contexts.get(key) === pending) this.contexts.delete(key);
-        this.options.onContextClose?.(context);
+    const cleared = this.clearing.get(key)?.catch(constVoid) ?? Promise.resolve();
+    const pending = cleared
+      .then(() => this.createContext(profileId, isolationKey))
+      .then(async (context) => {
+        context.on("close", () => {
+          if (this.contexts.get(key) === pending) this.contexts.delete(key);
+          this.options.onContextClose?.(context);
+        });
+        for (const page of context.pages()) await page.close().catch(constVoid);
+        if (this.closing) {
+          await context.close().catch(constVoid);
+          throw new Error("The preview browser is closed.");
+        }
+        return context;
       });
-      for (const page of context.pages()) await page.close().catch(constVoid);
-      if (this.closing) {
-        await context.close().catch(constVoid);
-        throw new Error("The preview browser is closed.");
-      }
-      return context;
-    });
     this.contexts.set(key, pending);
     void pending.catch(() => {
       if (this.contexts.get(key) === pending) this.contexts.delete(key);
@@ -142,13 +147,21 @@ export class ServerBrowserContexts {
   async clearProfile(profileId: string) {
     if (profileId === INCOGNITO_BROWSER_PROFILE_ID) return;
     const key = JSON.stringify([profileId, null]);
-    const pending = this.contexts.get(key);
-    if (pending) {
-      this.contexts.delete(key);
-      const context = await pending.catch(() => undefined);
-      await context?.close();
+    const clearing = (async () => {
+      const pending = this.contexts.get(key);
+      if (pending) {
+        this.contexts.delete(key);
+        const context = await pending.catch(() => undefined);
+        await context?.close();
+      }
+      await NodeFSP.rm(this.profileDirectory(profileId), { recursive: true, force: true });
+    })();
+    this.clearing.set(key, clearing);
+    try {
+      await clearing;
+    } finally {
+      if (this.clearing.get(key) === clearing) this.clearing.delete(key);
     }
-    await NodeFSP.rm(this.profileDirectory(profileId), { recursive: true, force: true });
   }
 
   close() {

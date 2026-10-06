@@ -138,6 +138,34 @@ describe("ServerBrowserContexts", () => {
     await pool.close();
   });
 
+  it("opens a profile requested during its clear only after the storage is deleted", async () => {
+    launches.persistent.mockImplementation(async () => makeContext() as unknown as BrowserContext);
+    const configuration = options();
+    const pool = new ServerBrowserContexts(configuration);
+    await pool.contextFor("work/team");
+    const removing = Promise.withResolvers<void>();
+    const removed = Promise.withResolvers<void>();
+    let deleted = false;
+    launches.rm.mockImplementationOnce(async () => {
+      removing.resolve();
+      await removed.promise;
+      deleted = true;
+    });
+    // Launching starts by resolving the executable; record whether storage was gone by then.
+    const launchedAfterDelete: Array<boolean> = [];
+    configuration.executable.mockImplementation(async () => {
+      launchedAfterDelete.push(deleted);
+      return "/test/chromium";
+    });
+    const clearing = pool.clearProfile("work/team");
+    const reopening = pool.contextFor("work/team");
+    await removing.promise;
+    removed.resolve();
+    await Promise.all([clearing, reopening]);
+    expect(launchedAfterDelete).toEqual([true]);
+    await pool.close();
+  });
+
   it.each([undefined, "default"])(
     "never retries a failed %s launch with the sandbox disabled",
     async (profile) => {
