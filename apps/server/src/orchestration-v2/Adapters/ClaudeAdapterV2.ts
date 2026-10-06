@@ -6523,6 +6523,7 @@ export function makeClaudeAdapterV2(
                 workflowRunHandles,
                 status: "running",
               });
+              continue;
             }
             // A resume task_started reuses the resuming tool call's
             // tool_use_id (e.g. SendMessage), whose tool_result only

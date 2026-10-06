@@ -6286,6 +6286,29 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             }),
           );
           yield* harness.offerAndWait(
+            claudeSdkFrame({
+              type: "user",
+              message: {
+                role: "user",
+                content: [
+                  {
+                    type: "tool_result",
+                    tool_use_id: "toolu-workflow",
+                    content: "Workflow launched successfully.",
+                  },
+                ],
+              },
+              parent_tool_use_id: null,
+              uuid: "00000000-0000-4000-8000-000000001009",
+              session_id: WAKE_NATIVE_SESSION,
+              tool_use_result: {
+                taskType: "local_workflow",
+                runId: "workflow-run-1",
+                scriptPath: "/tmp/workflow.ts",
+              },
+            }),
+          );
+          yield* harness.offerAndWait(
             makeResultFrame({
               uuid: "00000000-0000-4000-8000-000000001002",
               result: "Workflow is running.",
