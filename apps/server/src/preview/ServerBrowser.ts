@@ -1968,18 +1968,16 @@ const make = Effect.gen(function* () {
           // Dropped frames must still release Chromium.
           if (Queue.offerUnsafe(output, next)) return;
           if (next._tag === "frame") runFork(next.ack);
-          // The stream only ends on `gone`, so it replaces a stalled backlog.
-          else if (next._tag === "gone" || next._tag === "control") {
-            runFork(
-              Queue.clear(output).pipe(
-                Effect.flatMap((dropped) =>
-                  Effect.forEach(dropped, (item) =>
-                    item._tag === "frame" ? item.ack : Effect.void,
-                  ),
-                ),
-                Effect.andThen(Queue.offer(output, next)),
-              ),
-            );
+          // State a stalled viewer cannot miss replaces its backlog. It runs
+          // synchronously so an older replacement can never land after a newer one.
+          else if (next._tag === "gone" || next._tag === "control" || next._tag === "fileChooser") {
+            const dropped = Effect.runSyncExit(Queue.clear(output));
+            if (dropped._tag === "Failure") return;
+            Queue.offerUnsafe(output, next);
+            // The controller's open picker may have been in the dropped backlog.
+            const chooser = next._tag === "control" ? fileChooserMessage(tab) : null;
+            if (chooser && tab.control.controller === viewer.id) Queue.offerUnsafe(output, chooser);
+            for (const item of dropped.value) if (item._tag === "frame") runFork(item.ack);
           }
         },
         pause: () => {

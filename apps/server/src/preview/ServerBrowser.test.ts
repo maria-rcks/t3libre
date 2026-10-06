@@ -233,6 +233,15 @@ const ready = Effect.gen(function* () {
   const tabId = PreviewTabId.make(opened.tabId!);
   return { browser, broker, tabId };
 });
+/** Fills a viewer's output the way a viewer that stopped reading leaves it. */
+const stallViewer = (
+  viewer: ServerBrowser.ServerBrowserViewer,
+  item: ServerBrowser.ServerBrowserViewerOutput,
+) => {
+  // The service hands out the read side of a queue it also writes to.
+  const output = viewer.output as unknown as Queue.Queue<ServerBrowser.ServerBrowserViewerOutput>;
+  while (Queue.offerUnsafe(output, item));
+};
 const viewerInput = (tabId: string, canOperate: boolean) => ({
   threadId: scope.thread.threadId,
   tabId,
@@ -858,6 +867,57 @@ it.live("a page's file picker goes to the controller and takes its uploaded file
       while (closed._tag !== "fileChooserClosed") closed = yield* Queue.take(viewer.output);
       expect(closed.id).toBe(offered.id);
       expect(yield* answer(offered.id)).toBe(false);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("a file picker replaces a stalled viewer backlog instead of being dropped", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, tabId } = yield* ready;
+      const page = contexts[0]!.page;
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      yield* viewer.input({ type: "takeControl" });
+      const accept = Promise.withResolvers<string>();
+      page.emit("filechooser", {
+        isMultiple: () => false,
+        element: () => ({ getAttribute: () => accept.promise }),
+        setFiles: async () => {},
+      });
+      // The viewer stopped reading: its output is full when the picker opens.
+      yield* Queue.clear(viewer.output);
+      stallViewer(viewer, { _tag: "viewport", width: 1, height: 1 });
+      accept.resolve(".csv");
+      // The picker is offered within the microtasks that follow its accept attribute.
+      yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+      expect(yield* Queue.clear(viewer.output)).toEqual([
+        expect.objectContaining({ _tag: "fileChooser", accept: ".csv" }),
+      ]);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("control updates replace a stalled viewer backlog in the order they happen", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, tabId } = yield* ready;
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      yield* Queue.clear(viewer.output);
+      // Chromium is slow to take back the frames the replacement drops.
+      const acked = Promise.withResolvers<void>();
+      yield* Effect.addFinalizer(() => Effect.sync(() => acked.resolve()));
+      stallViewer(viewer, {
+        _tag: "frame",
+        data: Buffer.alloc(0),
+        ack: Effect.promise(() => acked.promise),
+      });
+      yield* viewer.input({ type: "takeControl" });
+      yield* viewer.input({ type: "releaseControl" });
+      const controls = (yield* Queue.clear(viewer.output)).flatMap((item) =>
+        item._tag === "control" ? [item.controller] : [],
+      );
+      expect(controls[0]).toBe("you");
+      expect(controls.at(-1)).not.toBe("you");
     }),
   ).pipe(Effect.provide(layer)),
 );
