@@ -330,7 +330,7 @@ it.layer(NodeServices.layer)("CliTokenManager.deviceAuthorizationLogin", (it) =>
 });
 
 it.layer(NodeServices.layer)("CliTokenManager.layerWithSharedAuthorization", (it) => {
-  for (const scenario of [
+  it.effect.each([
     {
       name: "prefers the stored home over the dev-share home",
       stored: true,
@@ -366,70 +366,68 @@ it.layer(NodeServices.layer)("CliTokenManager.layerWithSharedAuthorization", (it
       configured: false,
       expected: "local",
     },
-  ]) {
-    it.effect(scenario.name, () =>
-      Effect.gen(function* () {
-        const config = yield* ServerConfig.ServerConfig;
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-auth-priority-" });
-        const storedHome = path.join(directory, "stored");
-        const configuredHome = path.join(directory, "configured");
-        const localConfig = ServerConfig.make({
-          ...config,
-          secretsDir: path.join(directory, "local"),
-          connectDevShare: scenario.devShare,
-          ...(scenario.configured ? { connectAuthorizationHome: configuredHome } : {}),
-        });
-        for (const [identity, secretsDir] of [
-          ["stored", path.join(storedHome, "userdata", "secrets")],
-          ["configured", path.join(configuredHome, "userdata", "secrets")],
-          ["local", localConfig.secretsDir],
-        ] as const) {
-          yield* Effect.gen(function* () {
-            const manager = yield* CliTokenManager.CloudCliTokenManager;
-            yield* manager.store({
-              accessToken: identity,
-              refreshToken: identity,
-              expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
-            });
-          }).pipe(
-            Effect.provide(
-              CliTokenManager.layer.pipe(
-                Layer.provide(ServerSecretStore.layer),
-                Layer.provide(ServerConfig.layer({ ...localConfig, secretsDir })),
-              ),
-            ),
-          );
-        }
+  ])("$name", (scenario) =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-auth-priority-" });
+      const storedHome = path.join(directory, "stored");
+      const configuredHome = path.join(directory, "configured");
+      const localConfig = ServerConfig.make({
+        ...config,
+        secretsDir: path.join(directory, "local"),
+        connectDevShare: scenario.devShare,
+        ...(scenario.configured ? { connectAuthorizationHome: configuredHome } : {}),
+      });
+      for (const [identity, secretsDir] of [
+        ["stored", path.join(storedHome, "userdata", "secrets")],
+        ["configured", path.join(configuredHome, "userdata", "secrets")],
+        ["local", localConfig.secretsDir],
+      ] as const) {
         yield* Effect.gen(function* () {
-          const secrets = yield* ServerSecretStore.ServerSecretStore;
-          if (scenario.stored) {
-            yield* secrets.set(
-              CliTokenManager.CLOUD_CLI_AUTHORIZATION_HOME_SECRET,
-              new TextEncoder().encode(storedHome),
-            );
-          }
-          const token = yield* Effect.gen(function* () {
-            const manager = yield* CliTokenManager.CloudCliTokenManager;
-            return yield* manager.getExisting;
-          }).pipe(Effect.provide(CliTokenManager.layerWithSharedAuthorization));
-          assert.isTrue(Option.isSome(token));
-          assert.equal(Option.getOrThrow(token).accessToken, scenario.expected);
+          const manager = yield* CliTokenManager.CloudCliTokenManager;
+          yield* manager.store({
+            accessToken: identity,
+            refreshToken: identity,
+            expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+          });
         }).pipe(
           Effect.provide(
-            ServerSecretStore.layer.pipe(Layer.provideMerge(ServerConfig.layer(localConfig))),
+            CliTokenManager.layer.pipe(
+              Layer.provide(ServerSecretStore.layer),
+              Layer.provide(ServerConfig.layer({ ...localConfig, secretsDir })),
+            ),
           ),
         );
+      }
+      yield* Effect.gen(function* () {
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        if (scenario.stored) {
+          yield* secrets.set(
+            CliTokenManager.CLOUD_CLI_AUTHORIZATION_HOME_SECRET,
+            new TextEncoder().encode(storedHome),
+          );
+        }
+        const token = yield* Effect.gen(function* () {
+          const manager = yield* CliTokenManager.CloudCliTokenManager;
+          return yield* manager.getExisting;
+        }).pipe(Effect.provide(CliTokenManager.layerWithSharedAuthorization));
+        assert.isTrue(Option.isSome(token));
+        assert.equal(Option.getOrThrow(token).accessToken, scenario.expected);
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(
-            ServerConfig.layerTest(process.cwd(), { prefix: "t3-cli-auth-config-" }),
-            ExternalLauncher.layer,
-            layerDeviceFlow({ requests: [], tokenReplies: [] }),
-          ),
+          ServerSecretStore.layer.pipe(Layer.provideMerge(ServerConfig.layer(localConfig))),
+        ),
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          ServerConfig.layerTest(process.cwd(), { prefix: "t3-cli-auth-config-" }),
+          ExternalLauncher.layer,
+          layerDeviceFlow({ requests: [], tokenReplies: [] }),
         ),
       ),
-    );
-  }
+    ),
+  );
 });
