@@ -92,14 +92,14 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
           })
           .pipe(
             Effect.map((viewer) => ({ _tag: "attached" as const, viewer })),
-            Effect.catchTag("ServerBrowserTabNotFoundError", () =>
-              Effect.succeed({ _tag: "gone" as const }),
-            ),
-            Effect.catchTag("ServerBrowserLaunchError", (error) => {
-              const setup = hostSetup(error.cause);
-              return setup === undefined
-                ? Effect.fail(error)
-                : Effect.succeed({ _tag: "hostSetup" as const, reason: encodeHostSetup(setup) });
+            Effect.catchTags({
+              ServerBrowserTabNotFoundError: () => Effect.succeed({ _tag: "gone" as const }),
+              ServerBrowserLaunchError: (error) => {
+                const setup = hostSetup(error.cause);
+                return setup === undefined
+                  ? Effect.fail(error)
+                  : Effect.succeed({ _tag: "hostSetup" as const, reason: encodeHostSetup(setup) });
+              },
             }),
           );
         const incoming = NodeHttpServerRequest.toIncomingMessage(request);
@@ -188,11 +188,12 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
         return yield* Effect.raceFirst(Effect.forever(sendOutput), Effect.forever(receiveInput));
       }),
     ).pipe(
-      Effect.catchTag("ServerBrowserLaunchError", (error) =>
-        Effect.logWarning("server preview browser failed to start", { cause: error.cause }).pipe(
-          Effect.as(HttpServerResponse.text("Service Unavailable", { status: 503 })),
-        ),
-      ),
+      Effect.catchTags({
+        ServerBrowserLaunchError: (error) =>
+          Effect.logWarning("server preview browser failed to start", { cause: error.cause }).pipe(
+            Effect.as(HttpServerResponse.text("Service Unavailable", { status: 503 })),
+          ),
+      }),
       // A dropped socket is a normal end of viewing.
       Effect.catch(() => Effect.succeed(HttpServerResponse.empty())),
     );
