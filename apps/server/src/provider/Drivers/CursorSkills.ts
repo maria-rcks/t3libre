@@ -11,6 +11,7 @@
 import * as NodeOS from "node:os";
 
 import type { ServerProviderSkill } from "@t3tools/contracts";
+import * as ByteSize from "effect/ByteSize";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -19,12 +20,13 @@ import * as Schema from "effect/Schema";
 import { parse as parseYamlDocument } from "yaml";
 
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
-const SKILL_MENTION_PATTERN = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s|$)/g;
-const HAS_SKILL_MENTION_PATTERN = /(^|\s)\$[a-zA-Z][a-zA-Z0-9:_-]*(?=\s|$)/;
+const SKILL_MENTION_PATTERN =
+  /(^|\s)\p{Sc}(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)(?=\s|$)/gu;
+const HAS_SKILL_MENTION_PATTERN = new RegExp(SKILL_MENTION_PATTERN.source, "u");
 const MAX_SKILL_DEPTH = 10;
-const MAX_SKILL_BYTES = FileSystem.Size(1_000_000);
+const MAX_SKILL_BYTES = ByteSize.bytes(1_000_000);
 const MAX_SKILL_SCAN_ENTRIES = 10_000;
-const MAX_SKILL_SCAN_BYTES = FileSystem.Size(8_000_000);
+const MAX_SKILL_SCAN_BYTES = ByteSize.bytes(8_000_000);
 
 interface CursorSkillFrontmatter {
   readonly description?: string;
@@ -41,7 +43,7 @@ interface CursorSkillScanBudget {
   incomplete: boolean;
 }
 
-class CursorSkillsProbeError extends Schema.TaggedErrorClass<CursorSkillsProbeError>()(
+class CursorSkillsProbeError extends Schema.TaggedError<CursorSkillsProbeError>()(
   "CursorSkillsProbeError",
   {
     reason: Schema.Literals(["scan-budget-exhausted", "filesystem-error"]),
@@ -147,16 +149,18 @@ const discoverSkillsInRoot = Effect.fn("discoverCursorSkillsInRoot")(function* (
     if (!resolvedDirectory) {
       return;
     }
-    if (
-      visitedDirectories.has(resolvedDirectory) ||
-      (resolvedDirectory !== rootDirectory &&
-        !resolvedDirectory.startsWith(`${rootDirectory}${path.sep}`))
-    ) {
+    if (visitedDirectories.has(resolvedDirectory)) {
       return;
     }
     visitedDirectories.add(resolvedDirectory);
+    // A symlink whose target lives outside the root is a skill package
+    // boundary: read its own SKILL.md so linked skill libraries show up, but
+    // never walk the target tree.
+    const insideRoot =
+      resolvedDirectory === rootDirectory ||
+      resolvedDirectory.startsWith(`${rootDirectory}${path.sep}`);
 
-    const skillPath = path.join(resolvedDirectory, "SKILL.md");
+    const skillPath = path.join(directory, "SKILL.md");
     const skillInfo = yield* orUndefined(fileSystem.stat(skillPath), input.budget);
     if (skillInfo?.type === "File") {
       let frontmatter: CursorSkillFrontmatter | undefined = { cliVisible: true };
@@ -167,7 +171,7 @@ const discoverSkillsInRoot = Effect.fn("discoverCursorSkillsInRoot")(function* (
           frontmatter = parseSkillFrontmatter(contents);
         }
       }
-      const name = path.basename(resolvedDirectory).trim();
+      const name = path.basename(directory).trim();
       if (frontmatter?.cliVisible && name) {
         skills.push({
           name,
@@ -184,7 +188,10 @@ const discoverSkillsInRoot = Effect.fn("discoverCursorSkillsInRoot")(function* (
       }
     }
 
-    const entries = yield* orUndefined(fileSystem.readDirectory(resolvedDirectory), input.budget);
+    if (!insideRoot) {
+      return;
+    }
+    const entries = yield* orUndefined(fileSystem.readDirectory(directory), input.budget);
     if (!entries) {
       return;
     }
@@ -194,7 +201,7 @@ const discoverSkillsInRoot = Effect.fn("discoverCursorSkillsInRoot")(function* (
         return;
       }
       input.budget.remainingEntries -= 1;
-      const child = path.join(resolvedDirectory, entry);
+      const child = path.join(directory, entry);
       const info = yield* orUndefined(fileSystem.stat(child), input.budget);
       if (info?.type !== "Directory") continue;
       if (depth >= MAX_SKILL_DEPTH) {

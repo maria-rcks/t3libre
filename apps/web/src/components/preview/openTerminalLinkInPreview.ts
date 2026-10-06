@@ -9,8 +9,9 @@ import {
 } from "~/browser/browserDefaults";
 import { isWebUrl, resolveBrowserLinkTargetPreference } from "~/browser/browserLinkTarget";
 import type { OpenPreviewMutation } from "~/browser/openFileInPreview";
+import { isPreviewAvailableFor, previewRuntimeFor } from "~/browser/previewRuntime";
 import { recordVisitForThread } from "~/browserHistoryStore";
-import { applyPreviewServerSnapshot, isPreviewSupportedInRuntime } from "~/previewStateStore";
+import { applyPreviewServerSnapshot } from "~/previewStateStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 
 const terminalLinkErrorContext = {
@@ -20,7 +21,7 @@ const terminalLinkErrorContext = {
   cause: Schema.Defect(),
 };
 
-export class TerminalLinkPreviewOpenError extends Schema.TaggedErrorClass<TerminalLinkPreviewOpenError>()(
+export class TerminalLinkPreviewOpenError extends Schema.TaggedError<TerminalLinkPreviewOpenError>()(
   "TerminalLinkPreviewOpenError",
   terminalLinkErrorContext,
 ) {
@@ -34,21 +35,21 @@ interface OpenTerminalLinkInPreviewInput<E> {
   readonly threadRef: ScopedThreadRef;
   readonly openPreview: OpenPreviewMutation<E>;
   readonly fallbackToBrowser: () => void;
+  /** Cmd/Ctrl-click bypasses the preference and opens in the system browser. */
+  readonly forceBrowser: boolean;
 }
 
 /**
- * Opens a terminal hyperlink where the "Open links in" setting says. Terminal
- * links are activated with the platform modifier already held, so unlike chat
- * links the modifier cannot double as the system-browser override; the setting
- * alone decides, and the system browser is the fallback whenever the in-app
- * one cannot take the URL.
+ * Opens a terminal hyperlink where the "Open links in" setting says, unless a
+ * Cmd/Ctrl-click explicitly requests the system browser.
  */
 export async function openTerminalLinkInPreview<E>(
   input: OpenTerminalLinkInPreviewInput<E>,
 ): Promise<void> {
   const supportsPreview =
+    !input.forceBrowser &&
     isWebUrl(input.url) &&
-    isPreviewSupportedInRuntime() &&
+    isPreviewAvailableFor(input.threadRef.environmentId) &&
     input.threadRef.threadId.length > 0 &&
     (await resolveBrowserLinkTargetPreference()) === "app";
 
@@ -64,6 +65,7 @@ export async function openTerminalLinkInPreview<E>(
   };
 
   const defaults = await resolveBrowserDefaults();
+  const runtime = previewRuntimeFor(input.threadRef.environmentId);
   const result = await input.openPreview({
     environmentId: input.threadRef.environmentId,
     input: {
@@ -73,6 +75,7 @@ export async function openTerminalLinkInPreview<E>(
       // mapping, so the configured defaults are applied explicitly.
       viewport: browserDefaultOpenViewport(defaults),
       profileId: browserDefaultOpenProfileId(defaults),
+      ...(runtime === undefined ? {} : { runtime }),
     },
   });
   if (result._tag === "Failure") {

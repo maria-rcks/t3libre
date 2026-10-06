@@ -14,6 +14,7 @@ import * as Ref from "effect/Ref";
 import * as BrowserSession from "../BrowserSession.ts";
 import * as BrowserImport from "./BrowserImport.ts";
 import { BROWSER_IMPORT_SOURCES, sourcePathContext } from "./Sources.ts";
+import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
 const helium = BROWSER_IMPORT_SOURCES.find((source) => source.id === "helium")!;
 
@@ -33,7 +34,7 @@ const cookie = {
  * Dies if the import reaches session work: every case here covers a request
  * that must be rejected before a cookie is read or written.
  */
-const rejectedBeforeSession = Layer.succeed(
+const layerRejectedBeforeSession = Layer.succeed(
   BrowserSession.BrowserSession,
   BrowserSession.BrowserSession.of({
     getPartition: () => Effect.die("getPartition must not be reached"),
@@ -51,7 +52,7 @@ const rejectedBeforeSession = Layer.succeed(
 const withImporter = Effect.fnUntraced(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-import-" });
-  const environment = Layer.succeed(HostProcessEnvironment, { HOME: home });
+  const layerEnvironment = Layer.succeed(HostProcessEnvironment, { HOME: home });
   const context = yield* sourcePathContext.pipe(
     Effect.provideService(HostProcessEnvironment, { HOME: home }),
     Effect.provideService(HostProcessPlatform, "darwin"),
@@ -66,8 +67,8 @@ const withImporter = Effect.fnUntraced(function* () {
   const importer = yield* BrowserImport.BrowserImport.pipe(
     Effect.provide(
       BrowserImport.layer.pipe(
-        Layer.provide(rejectedBeforeSession),
-        Layer.provide(environment),
+        Layer.provide(layerRejectedBeforeSession),
+        Layer.provide(layerEnvironment),
         Layer.provide(Layer.succeed(HostProcessPlatform, "darwin")),
         Layer.provide(Layer.succeed(HostProcessExecutablePath, "/Applications/T3 Code.app")),
         Layer.provide(NodeServices.layer),
@@ -105,28 +106,30 @@ describe("BrowserImport.importCookies", () => {
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
-  it.effect("refuses to import while the source browser holds its profile", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const { importer, root } = yield* withImporter();
-      // The lock Chromium leaves while it is running, dangling target and
-      // all. This must stop the import before it ever asks the keychain.
-      yield* fileSystem.symlink("host-that-does-not-exist-1234", `${root}/SingletonLock`);
+  it.effect.skipIf(!symlinksSupported)(
+    "refuses to import while the source browser holds its profile",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const { importer, root } = yield* withImporter();
+        // The lock Chromium leaves while it is running, dangling target and
+        // all. This must stop the import before it ever asks the keychain.
+        yield* fileSystem.symlink("host-that-does-not-exist-1234", `${root}/SingletonLock`);
 
-      const error = yield* importer
-        .importCookies({
-          input: {
-            sourceId: "helium",
-            sourceProfileDirectory: "Default",
-            targetProfileId: "default",
-          },
-          scope: "persist:t3code-preview-test",
-          persistent: true,
-        })
-        .pipe(Effect.flip);
+        const error = yield* importer
+          .importCookies({
+            input: {
+              sourceId: "helium",
+              sourceProfileDirectory: "Default",
+              targetProfileId: "default",
+            },
+            scope: "persist:t3code-preview-test",
+            persistent: true,
+          })
+          .pipe(Effect.flip);
 
-      assert.equal(error.reason, "browserRunning");
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+        assert.equal(error.reason, "browserRunning");
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 });
 

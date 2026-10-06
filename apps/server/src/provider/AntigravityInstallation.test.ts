@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest";
 import {
   HostProcessArchitecture,
   HostProcessEnvironment,
+  HostProcessIsExecutable,
   HostProcessPlatform,
 } from "@t3tools/shared/hostProcess";
 import * as Deferred from "effect/Deferred";
@@ -18,18 +19,18 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import { HttpClient, HttpClientResponse } from "effect/http";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as NodeCrypto from "node:crypto";
 
-import {
-  makeAntigravityInstallation,
-  type AntigravityExecutable,
-  type AntigravityInstallation,
-  type AntigravityInstallationOptions,
-} from "./AntigravityInstallation.ts";
+import * as AntigravityInstallation from "./AntigravityInstallation.ts";
 import { ANTIGRAVITY_AUTH_BROWSER_MARKER } from "./antigravityAuthSupport.ts";
-import type { AntigravityReleaseAsset } from "./antigravityRelease.ts";
+import {
+  resolveAntigravityReleaseAsset,
+  type AntigravityReleaseAsset,
+} from "./antigravityRelease.ts";
+
+import antigravityInitialize from "../../../../packages/effect-acp/test/fixtures/antigravity-initialize.json" with { type: "json" };
 
 const serverContents = "antigravity runtime\n";
 const harnessContents = "local harness\n";
@@ -55,9 +56,24 @@ const zipFixtures = {
     "UEsDBBQAAAAIAAAAIl1zEy/oFAAAABQAAAASAAAAYWd5X2FjcF9zZXJ2ZXIuZXhlS8wryUwvSizLLKlUKCoFcnJTuQBQSwMEFAAAAAgAAAAiXV9yAykQAAAADgAAABkAAABsb2NhbGhhcm5lc3NfZXh0ZXJuYWwuZXhly8lPTsxRyEgsykstLuYCAFBLAQIUAxQAAAAIAAAAIl1zEy/oFAAAABQAAAASAAAAAAAAAAAAAADtgQAAAABhZ3lfYWNwX3NlcnZlci5leGVQSwECFAMUAAAACAAAACJdX3IDKRAAAAAOAAAAGQAAAAAAAAAAAAAA7YFEAAAAbG9jYWxoYXJuZXNzX2V4dGVybmFsLmV4ZVBLBQYAAAAAAgACAIcAAACLAAAAAAA=",
 };
 
-const completeArchive = Buffer.from(zipFixtures.complete, "base64");
+// The installation checks POSIX exec bits off the real filesystem unless the
+// platform is win32, so a linux platform mock cannot pass on NTFS. Default to
+// the host and let the fixture names follow; the suite is about install
+// mechanics, which are the same on every platform.
+const hostPlatform: NodeJS.Platform =
+  HostProcessPlatform.defaultValue() === "win32" ? "win32" : "linux";
+const completeArchive = Buffer.from(
+  hostPlatform === "win32" ? zipFixtures.windows : zipFixtures.complete,
+  "base64",
+);
+const executableName = hostPlatform === "win32" ? "agy_acp_server.exe" : "agy_acp_server.par";
+const harnessName =
+  hostPlatform === "win32" ? "localharness_external.exe" : "localharness_external";
 
-function releaseAsset(archive: Uint8Array = completeArchive, platform: NodeJS.Platform = "linux") {
+function releaseAsset(
+  archive: Uint8Array = completeArchive,
+  platform: NodeJS.Platform = hostPlatform,
+) {
   return {
     version: "fixture-new",
     url: "https://dl.google.com/antigravity-test.zip",
@@ -117,7 +133,7 @@ interface HarnessOptions {
   readonly path?: string;
   readonly previous?: boolean;
   readonly fileSystem?: FileSystem.FileSystem;
-  readonly validate?: AntigravityInstallationOptions["validate"];
+  readonly validate?: AntigravityInstallation.AntigravityInstallationOptions["validate"];
   readonly useDefaultValidation?: boolean;
 }
 
@@ -128,7 +144,7 @@ const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
   const path = yield* Path.Path;
   const baseDir =
     options.baseDir ?? (yield* fs.makeTempDirectoryScoped({ prefix: "t3-agy-test-" }));
-  const platform = options.platform ?? "linux";
+  const platform = options.platform ?? hostPlatform;
   const archive = options.archive ?? completeArchive;
   const asset = options.asset === undefined ? releaseAsset(archive, platform) : options.asset;
   const managedDirectory = path.join(baseDir, "tools", "antigravity-acp", `${platform}-x64`);
@@ -141,7 +157,10 @@ const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
   }
   const stagingReleased = yield* Deferred.make<void>();
   const requests: string[] = [];
-  const validations: Array<{ executable: AntigravityExecutable; version: string }> = [];
+  const validations: Array<{
+    executable: AntigravityInstallation.AntigravityExecutable;
+    version: string;
+  }> = [];
   const installationFs = options.fileSystem ?? fs;
   const trackedFs = FileSystem.FileSystem.of({
     ...installationFs,
@@ -154,13 +173,13 @@ const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
           )
         : installationFs.makeTempDirectoryScoped(settings),
   });
-  const installation = yield* makeAntigravityInstallation({
+  const installation = yield* AntigravityInstallation.makeAntigravityInstallation({
     baseDir,
     releaseAsset: asset,
     ...(options.useDefaultValidation
       ? {}
       : {
-          validate: (executable: AntigravityExecutable, version: string) =>
+          validate: (executable: AntigravityInstallation.AntigravityExecutable, version: string) =>
             Effect.sync(() => validations.push({ executable, version })).pipe(
               Effect.andThen(options.validate?.(executable, version) ?? Effect.void),
             ),
@@ -204,7 +223,7 @@ const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
   return { installation, fs, path, baseDir, requests, validations, stagingReleased };
 });
 
-const terminalState = (installation: AntigravityInstallation["Service"]) =>
+const terminalState = (installation: AntigravityInstallation.AntigravityInstallation["Service"]) =>
   installation.changes.pipe(
     Stream.filter((state) => ["succeeded", "failed", "cancelled"].includes(state.phase)),
     Stream.runHead,
@@ -212,7 +231,7 @@ const terminalState = (installation: AntigravityInstallation["Service"]) =>
   );
 
 const expectPreviousRelease = Effect.fn("test.expectPreviousAntigravityRelease")(function* (
-  installation: AntigravityInstallation["Service"],
+  installation: AntigravityInstallation.AntigravityInstallation["Service"],
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -227,6 +246,19 @@ const expectPreviousRelease = Effect.fn("test.expectPreviousAntigravityRelease")
 });
 
 it.layer(NodeServices.layer)("Antigravity installation", (it) => {
+  it.effect("reports missing Node before downloading the standalone provider runtime", () =>
+    Effect.gen(function* () {
+      const { installation, requests, validations } = yield* makeHarness();
+      yield* installation.start;
+      expect(yield* terminalState(installation)).toMatchObject({
+        phase: "failed",
+        message: expect.stringContaining("Install Node.js"),
+      });
+      expect(requests).toEqual([]);
+      expect(validations).toEqual([]);
+    }).pipe(Effect.provideService(HostProcessIsExecutable, true)),
+  );
+
   it.effect("verifies both files before activating a streamed download", () =>
     Effect.gen(function* () {
       const enteredValidation = yield* Deferred.make<void>();
@@ -277,10 +309,25 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
 
   it.effect.each([
     {
-      name: "the expected release",
+      name: "the expected release with protocol 1",
+      protocolVersion: 1,
       agentName: "antigravity-acp",
       version: "fixture-new",
       valid: true,
+    },
+    {
+      name: "the expected release with protocol 2 and legacy fields",
+      protocolVersion: 2,
+      agentName: "antigravity-acp",
+      version: "fixture-new",
+      valid: true,
+    },
+    {
+      name: "an unsupported protocol version",
+      protocolVersion: 3,
+      agentName: "antigravity-acp",
+      version: "fixture-new",
+      valid: false,
     },
     { name: "a different agent", agentName: "other-agent", version: "fixture-new", valid: false },
     {
@@ -313,6 +360,8 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
           if (!profile) return yield* Effect.die("Expected a disposable validation profile.");
           profiles.add(profile);
           const helper = command.args[0] === "-e";
+          // The runtime unpacks straight into the disposable profile.
+          if (!helper) expect(command.options.env?.TMPDIR).toBe(profile);
           const output = yield* Queue.unbounded<Uint8Array>();
           const exited = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
           const terminate = Deferred.succeed(exited, ChildProcessSpawner.ExitCode(0)).pipe(
@@ -351,14 +400,9 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
                       ...(request.method === "initialize"
                         ? {
                             result: {
-                              protocolVersion: 1,
+                              ...antigravityInitialize,
+                              protocolVersion: testCase.protocolVersion ?? 2,
                               agentInfo: { name: testCase.agentName, version: testCase.version },
-                              agentCapabilities: {
-                                loadSession: true,
-                                sessionCapabilities: { resume: {} },
-                                auth: { logout: {} },
-                              },
-                              authMethods: [{ id: "oauth-personal", name: "Google" }],
                             },
                           }
                         : {
@@ -472,7 +516,7 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
           ...fs,
           sink: (target, options) =>
             (stage === "download" && target.endsWith("download.zip")) ||
-            (stage === "extract" && target.endsWith("agy_acp_server.par"))
+            (stage === "extract" && target.endsWith(executableName))
               ? fs.sink(target, options).pipe(Sink.mapInputEffect(() => Effect.fail(noSpace)))
               : fs.sink(target, options),
           writeFileString: (target, content, options) =>
@@ -525,7 +569,7 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
           fileSystem: FileSystem.FileSystem.of({
             ...fs,
             sink: (target, options) =>
-              phase === "extracting" && target.endsWith("agy_acp_server.par")
+              phase === "extracting" && target.endsWith(executableName)
                 ? fs
                     .sink(target, options)
                     .pipe(
@@ -681,65 +725,71 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
       }),
   );
 
-  it.effect("honors explicit paths and reports invalid overrides without falling back", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-agy-path-test-" });
-      const externalDirectory = path.join(baseDir, "external");
-      const externalExecutable = path.join(externalDirectory, "agy_acp_server.par");
-      const externalHarness = path.join(externalDirectory, "localharness_external");
-      yield* fs.makeDirectory(externalDirectory);
-      yield* fs.writeFileString(externalExecutable, "external server", { mode: 0o755 });
-      yield* fs.writeFileString(externalHarness, "external harness", { mode: 0o755 });
-      const { installation } = yield* makeHarness({
-        baseDir,
-        path: externalDirectory,
-        previous: true,
-      });
-      yield* expectPreviousRelease(installation);
-      expect(yield* installation.resolve(undefined, { PATH: externalDirectory })).toMatchObject({
-        source: "managed",
-        version: previousVersion,
-      });
-      expect(yield* installation.resolve(externalExecutable)).toMatchObject({
-        executablePath: externalExecutable,
-        source: "override",
-        managedVersionDirectory: null,
-      });
-      expect(yield* installation.resolve("agy_acp_server.par")).toMatchObject({
-        source: "override",
-      });
-      yield* fs.remove(externalHarness);
-      expect(yield* installation.resolve(externalExecutable).pipe(Effect.flip)).toMatchObject({
-        operation: "resolve",
-      });
-      expect(
-        yield* installation.resolve(path.join(baseDir, "missing")).pipe(Effect.flip),
-      ).toMatchObject({
-        operation: "resolve",
-      });
-      yield* expectPreviousRelease(installation);
-      yield* fs.writeFileString(externalHarness, "external harness", { mode: 0o755 });
-      yield* installation.remove();
-      expect(yield* installation.resolve()).toMatchObject({
-        source: "path",
-        executablePath: externalExecutable,
-      });
-      const isolated = yield* makeHarness({ baseDir });
-      expect(yield* isolated.installation.resolve().pipe(Effect.flip)).toMatchObject({
-        operation: "resolve",
-      });
-      expect(
-        yield* isolated.installation.resolve(undefined, { PATH: externalDirectory }),
-      ).toMatchObject({
-        source: "path",
-        executablePath: externalExecutable,
-      });
-      expect(
-        yield* isolated.installation.resolve("agy_acp_server.par", { PATH: externalDirectory }),
-      ).toMatchObject({ source: "override", executablePath: externalExecutable });
-    }),
+  // Real posix executables in a real temp dir, resolved by a linux-mocked
+  // PATH walk; a Windows temp path cannot be split on `:`.
+  it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+    "honors explicit paths and reports invalid overrides without falling back",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const baseDir = yield* fs
+          .makeTempDirectoryScoped({ prefix: "t3-agy-path-test-" })
+          .pipe(Effect.flatMap((directory) => fs.realPath(directory)));
+        const externalDirectory = path.join(baseDir, "external");
+        const externalExecutable = path.join(externalDirectory, executableName);
+        const externalHarness = path.join(externalDirectory, harnessName);
+        yield* fs.makeDirectory(externalDirectory);
+        yield* fs.writeFileString(externalExecutable, "external server", { mode: 0o755 });
+        yield* fs.writeFileString(externalHarness, "external harness", { mode: 0o755 });
+        const { installation } = yield* makeHarness({
+          baseDir,
+          path: externalDirectory,
+          previous: true,
+        });
+        yield* expectPreviousRelease(installation);
+        expect(yield* installation.resolve(undefined, { PATH: externalDirectory })).toMatchObject({
+          source: "managed",
+          version: previousVersion,
+        });
+        expect(yield* installation.resolve(externalExecutable)).toMatchObject({
+          executablePath: externalExecutable,
+          source: "override",
+          managedVersionDirectory: null,
+        });
+        expect(yield* installation.resolve(executableName)).toMatchObject({
+          source: "override",
+        });
+        yield* fs.remove(externalHarness);
+        expect(yield* installation.resolve(externalExecutable).pipe(Effect.flip)).toMatchObject({
+          operation: "resolve",
+        });
+        expect(
+          yield* installation.resolve(path.join(baseDir, "missing")).pipe(Effect.flip),
+        ).toMatchObject({
+          operation: "resolve",
+        });
+        yield* expectPreviousRelease(installation);
+        yield* fs.writeFileString(externalHarness, "external harness", { mode: 0o755 });
+        yield* installation.remove();
+        expect(yield* installation.resolve()).toMatchObject({
+          source: "path",
+          executablePath: externalExecutable,
+        });
+        const isolated = yield* makeHarness({ baseDir });
+        expect(yield* isolated.installation.resolve().pipe(Effect.flip)).toMatchObject({
+          operation: "resolve",
+        });
+        expect(
+          yield* isolated.installation.resolve(undefined, { PATH: externalDirectory }),
+        ).toMatchObject({
+          source: "path",
+          executablePath: externalExecutable,
+        });
+        expect(
+          yield* isolated.installation.resolve(executableName, { PATH: externalDirectory }),
+        ).toMatchObject({ source: "override", executablePath: externalExecutable });
+      }),
   );
 
   it.effect("keeps leased releases available while new sessions resolve the new release", () =>
@@ -770,20 +820,12 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
         yield* fs.remove(previous.harnessPath);
         const externalDirectory = path.join(baseDir, "external");
         yield* fs.makeDirectory(externalDirectory);
-        yield* fs.writeFileString(
-          path.join(externalDirectory, "agy_acp_server.par"),
-          "external server",
-          {
-            mode: 0o755,
-          },
-        );
-        yield* fs.writeFileString(
-          path.join(externalDirectory, "localharness_external"),
-          "external harness",
-          {
-            mode: 0o755,
-          },
-        );
+        yield* fs.writeFileString(path.join(externalDirectory, executableName), "external server", {
+          mode: 0o755,
+        });
+        yield* fs.writeFileString(path.join(externalDirectory, harnessName), "external harness", {
+          mode: 0o755,
+        });
         const restarted = yield* makeHarness({ baseDir, path: externalDirectory });
         expect(yield* restarted.installation.state).toMatchObject({
           phase: "failed",
@@ -820,8 +862,8 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
         const profileDirectory = path.join(baseDir, "providers", "antigravity", "profile");
         yield* fs.makeDirectory(externalDirectory);
         yield* fs.makeDirectory(profileDirectory, { recursive: true });
-        const externalExecutable = path.join(externalDirectory, "agy_acp_server.par");
-        const externalHarness = path.join(externalDirectory, "localharness_external");
+        const externalExecutable = path.join(externalDirectory, executableName);
+        const externalHarness = path.join(externalDirectory, harnessName);
         const profilePath = path.join(profileDirectory, "preferences.json");
         yield* fs.writeFileString(externalExecutable, "external server", { mode: 0o755 });
         yield* fs.writeFileString(externalHarness, "external harness", { mode: 0o755 });
@@ -906,4 +948,28 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
       expect(requests).toEqual([]);
     }),
   );
+
+  it("resolves all supported platform release assets including Intel Mac", () => {
+    const supportedPlatforms: Array<{ readonly platform: NodeJS.Platform; readonly arch: string }> =
+      [
+        { platform: "darwin", arch: "arm64" },
+        { platform: "darwin", arch: "x64" },
+        { platform: "linux", arch: "x64" },
+        { platform: "linux", arch: "arm64" },
+        { platform: "win32", arch: "x64" },
+        { platform: "win32", arch: "arm64" },
+      ];
+
+    for (const { platform, arch } of supportedPlatforms) {
+      const asset = resolveAntigravityReleaseAsset(platform, arch);
+      expect(asset).not.toBeNull();
+      expect(asset?.version).toBe("1.3.0");
+      expect(asset?.url).toContain("1.3.0");
+      expect(asset?.archiveBytes).toBeGreaterThan(0);
+      expect(asset?.executable.bytes).toBeGreaterThan(0);
+      expect(asset?.harness.bytes).toBeGreaterThan(0);
+    }
+
+    expect(resolveAntigravityReleaseAsset("freebsd", "x64")).toBeNull();
+  });
 });

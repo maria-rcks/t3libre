@@ -28,7 +28,7 @@ import {
   forwardAntigravityCallback,
   validateAntigravityCallbackUrl,
 } from "./antigravityCallback.ts";
-import type { ProviderAuthController } from "./Services/ProviderAuthService.ts";
+import type { ProviderAuthController } from "./ProviderAuthService.ts";
 
 const AUTH_TIMEOUT_MS = 300_000;
 const FORWARDING_FAILED_MESSAGE = "Could not deliver the sign-in response. Start sign-in again.";
@@ -96,6 +96,7 @@ function visibleSnapshot(snapshot: AuthSnapshot, ownerSessionId: string): Provid
     ...snapshot.state,
     flowId: null,
     authorizationUrl: null,
+    interaction: null,
     expiresAt: null,
     ...(busy ? { message: "Sign-in is in progress in another client." } : {}),
   };
@@ -113,6 +114,9 @@ function safeAuthFailure(cause: Cause.Cause<unknown>, usesBrowser: boolean): str
       }
       if (/access_denied|denied access|cancelled/i.test(error.value.errorMessage)) {
         return "Google sign-in was not approved. Start sign-in again.";
+      }
+      if (error.value.method === "session/new" && error.value.code === -32603) {
+        return "Antigravity authenticated, but could not initialize a session or load models.";
       }
       if (!usesBrowser && error.value.code === -32602) {
         return "Antigravity rejected the configured credentials. Check the provider settings.";
@@ -514,7 +518,23 @@ export const makeAntigravityAuth = Effect.fn("makeAntigravityAuth")(function* <
     }),
     subscribe: (ownerSessionId) =>
       SubscriptionRef.changes(snapshot).pipe(
-        Stream.map((value) => visibleSnapshot(value, ownerSessionId)),
+        Stream.map((value) => {
+          const state = visibleSnapshot(value, ownerSessionId);
+          return {
+            ...state,
+            credentialOwner: "provider" as const,
+            interaction:
+              state.phase === "waiting" && state.authorizationUrl && state.flowId
+                ? {
+                    type: "browser" as const,
+                    id: state.flowId,
+                    url: state.authorizationUrl,
+                    requiresConsent: false,
+                    acceptsCallback: true,
+                  }
+                : null,
+          };
+        }),
         Stream.interruptWhen(Deferred.await(closed)),
       ),
     isLogoutPrompt: (text, hasAttachments) => !hasAttachments && text.trim() === "/logout",

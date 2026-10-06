@@ -8,10 +8,10 @@
  *
  * @module browserLinkTarget
  */
-import type { BrowserLinkTarget } from "@t3tools/contracts";
+import type { BrowserLinkTarget, ScopedThreadRef } from "@t3tools/contracts";
 
 import { ensureClientSettingsHydrated, getClientSettings } from "~/hooks/useSettings";
-import { isPreviewSupportedInRuntime } from "~/previewStateStore";
+import { isPreviewAvailableFor } from "./previewRuntime";
 
 export interface ResolveLinkTargetInput {
   readonly url: string;
@@ -55,13 +55,14 @@ export function isWebUrl(url: string): boolean {
  * hydration the snapshot is the schema default ("system"), so a link clicked
  * in the first moments after launch would ignore a persisted "app" — opening
  * is asynchronous anyway, so waiting costs nothing the user can see.
+ * Read failures reject rather than choosing a browser without the saved preference.
  */
 export async function resolveBrowserLinkTargetPreference(): Promise<BrowserLinkTarget> {
   await ensureClientSettingsHydrated();
   return getClientSettings().browserLinkTarget;
 }
 
-/** Whether the in-app target is available at all in this client. */
-export function canOpenLinksInApp(hasThread: boolean): boolean {
-  return hasThread && isPreviewSupportedInRuntime();
+/** Whether this thread's environment has an in-app browser available to this client. */
+export function canOpenLinksInApp(threadRef: ScopedThreadRef | null | undefined): boolean {
+  return threadRef != null && isPreviewAvailableFor(threadRef.environmentId);
 }

@@ -6,11 +6,12 @@ const ExternalUrlTarget = Schema.Literals([
   "markdown-link",
   "pull-request",
   "provider-auth",
+  "html-render",
 ]);
 
 export type ExternalUrlTarget = typeof ExternalUrlTarget.Type;
 
-export class ExternalUrlOpenError extends Schema.TaggedErrorClass<ExternalUrlOpenError>()(
+export class ExternalUrlOpenError extends Schema.TaggedError<ExternalUrlOpenError>()(
   "ExternalUrlOpenError",
   {
     target: ExternalUrlTarget,

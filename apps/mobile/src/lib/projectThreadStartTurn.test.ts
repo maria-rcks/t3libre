@@ -19,6 +19,40 @@ describe("project thread title", () => {
     expect(deriveThreadTitleFromPrompt(" \n ")).toBe("New thread");
   });
 
+  it("derives attachment-only titles from prepared image metadata", () => {
+    const uploadedAttachments = [
+      {
+        type: "image" as const,
+        id: "prepared-photo",
+        name: "photo.png",
+        mimeType: "image/png",
+        sizeBytes: 3,
+      },
+    ];
+    const input = buildProjectThreadStartTurnInput({
+      projectId: ProjectId.make("project"),
+      projectCwd: "/workspace",
+      threadId: "image-thread",
+      commandId: "image-command",
+      messageId: "image-message",
+      createdAt: "2026-09-04T00:00:00Z",
+      text: "",
+      uploadedAttachments,
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      workspaceMode: "local",
+      branch: null,
+      worktreePath: null,
+      startFromOrigin: false,
+      worktreeBranchName: "unused",
+    });
+
+    expect(input.titleSeed).toBe("Image: photo.png");
+    expect(input.bootstrap.createThread.title).toBe(input.titleSeed);
+    expect(input.message.attachments).toEqual(uploadedAttachments);
+  });
+
   it.each([
     {
       comment: undefined,
@@ -26,7 +60,7 @@ describe("project thread title", () => {
     },
     {
       comment: 'Why "shared"?',
-      title: 'Keep `cache[key]` & <parser> shared. Retry! Comment: Why "shared"?',
+      title: "Keep `cache[key]` & <parser> shared. Retry! Commen...",
     },
   ])("uses readable titles and intact links with comment $comment", ({ comment, title }) => {
     const quoteText = "Keep `cache[key]` & <parser> shared.\n  Retry!";
@@ -65,4 +99,39 @@ describe("project thread title", () => {
     expect(input.bootstrap.createThread.title).toBe(input.titleSeed);
     expect(input.message.text).toBe(text);
   });
+});
+
+describe("new thread on an existing branch", () => {
+  it.each([null, "/worktrees/existing"])(
+    "reuses the selected workspace %s without preparing a new worktree",
+    (worktreePath) => {
+      const input = buildProjectThreadStartTurnInput({
+        projectId: ProjectId.make("project"),
+        projectCwd: "/workspace",
+        threadId: "new-thread",
+        commandId: "command",
+        messageId: "message",
+        createdAt: "2026-09-06T00:00:00Z",
+        text: "Start fresh",
+        uploadedAttachments: [],
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        workspaceMode: "local",
+        branch: "feature/existing",
+        worktreePath,
+        startFromOrigin: false,
+        worktreeBranchName: "unused",
+      });
+
+      expect(input.bootstrap.createThread).toMatchObject({
+        projectId: "project",
+        branch: "feature/existing",
+        worktreePath,
+      });
+      expect(input.bootstrap).not.toHaveProperty("prepareWorktree");
+      expect(input.bootstrap).not.toHaveProperty("runSetupScript");
+      expect(input.threadId).toBe("new-thread");
+    },
+  );
 });

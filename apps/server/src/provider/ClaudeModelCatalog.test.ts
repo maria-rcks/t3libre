@@ -7,9 +7,12 @@ import {
   formatClaudeVersionUpgradeMessage,
   normalizeClaudeCatalogEffort,
   resolveClaudeCatalogApiModelId,
+  resolveClaudeCatalogContextWindowTokens,
+  resolveClaudeCatalogEffort,
   resolveClaudeModelCatalog,
   resolveClaudeModelsForVersion,
   resolveClaudeModelSlug,
+  scopeClaudeModelCatalog,
 } from "./ClaudeModelCatalog.ts";
 
 /**
@@ -38,7 +41,10 @@ const manifest = (): ModelManifestData => ({
                 id: "contextWindow",
                 label: "Context Window",
                 type: "select",
-                options: [{ id: "large", label: "Large", isDefault: true }],
+                options: [
+                  { id: "large", label: "Large", isDefault: true },
+                  { id: "small", label: "Small" },
+                ],
               },
             ],
           },
@@ -65,6 +71,54 @@ const manifest = (): ModelManifestData => ({
 });
 
 describe("Claude model catalog", () => {
+  it("resolves capacity from selected options and fixed catalog windows without guessing custom models", () => {
+    const source = manifest();
+    const profile = source.providers!.claudeAgent!.profiles.synthetic!;
+    const catalog = resolveClaudeModelCatalog({
+      ...source,
+      providers: {
+        claudeAgent: {
+          ...source.providers!.claudeAgent!,
+          profiles: {
+            fixed: {
+              capabilities: { optionDescriptors: [] },
+              adapter: { claudeCode: { fixedContextWindowTokens: 64_000 } },
+            },
+            synthetic: {
+              ...profile,
+              adapter: { claudeCode: { contextWindowTokens: { large: 1_000_000, small: 32_000 } } },
+            },
+          },
+          models: [
+            ...source.providers!.claudeAgent!.models,
+            {
+              slug: "fixed",
+              name: "Fixed",
+              status: "current",
+              profile: "fixed",
+            },
+          ],
+        },
+      },
+    });
+    const selection = { instanceId: ProviderInstanceId.make("claudeAgent"), model: "synthetic" };
+    assert.equal(resolveClaudeCatalogContextWindowTokens(catalog, selection), 1_000_000);
+    assert.equal(
+      resolveClaudeCatalogContextWindowTokens(catalog, {
+        ...selection,
+        options: [{ id: "contextWindow", value: "small" }],
+      }),
+      32_000,
+    );
+    assert.equal(
+      resolveClaudeCatalogContextWindowTokens(catalog, { ...selection, model: "fixed" }),
+      64_000,
+    );
+    assert.isUndefined(
+      resolveClaudeCatalogContextWindowTokens(catalog, { ...selection, model: "custom" }),
+    );
+  });
+
   it("filters models at runtime-version boundaries and derives the upgrade message", () => {
     const catalog = resolveClaudeModelCatalog(manifest());
     assert.deepStrictEqual(resolveClaudeModelsForVersion(catalog, "3.1.9"), []);
@@ -133,5 +187,59 @@ describe("Claude model catalog", () => {
       },
     };
     assert.isFalse(hasValidClaudeManifestAdapters(malformed));
+  });
+
+  it("appends custom models with their own descriptors and keeps bare slugs opaque", () => {
+    const catalog = scopeClaudeModelCatalog(resolveClaudeModelCatalog(manifest()), [
+      "synthetic",
+      {
+        slug: "claude-custom-tuned",
+        name: "Tuned",
+        capabilities: {
+          optionDescriptors: [
+            {
+              id: "effort",
+              label: "Reasoning",
+              type: "select",
+              options: [
+                { id: "gentle", label: "Gentle", isDefault: true },
+                { id: "brutal", label: "Brutal" },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+
+    // The bare custom slug shadows the built-in alias, so it no longer resolves to it.
+    assert.strictEqual(resolveClaudeModelSlug(catalog, "synthetic"), "synthetic");
+    assert.strictEqual(resolveClaudeCatalogEffort(catalog, "synthetic", "extreme"), undefined);
+
+    // The entry with descriptors resolves user-defined effort ids and passes
+    // them through untouched (no effortMap, no model suffix).
+    assert.strictEqual(
+      resolveClaudeCatalogEffort(catalog, "claude-custom-tuned", "brutal"),
+      "brutal",
+    );
+    assert.strictEqual(
+      resolveClaudeCatalogEffort(catalog, "claude-custom-tuned", "bogus"),
+      "gentle",
+    );
+    assert.strictEqual(
+      normalizeClaudeCatalogEffort(catalog, "brutal", "claude-custom-tuned"),
+      "brutal",
+    );
+    assert.strictEqual(
+      resolveClaudeCatalogApiModelId(catalog, {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-custom-tuned",
+        options: [{ id: "effort", value: "brutal" }],
+      }),
+      "claude-custom-tuned",
+    );
+    assert.deepStrictEqual(
+      resolveClaudeModelsForVersion(catalog, "3.2.0").map((model) => model.slug),
+      ["claude-synthetic-next", "claude-custom-tuned"],
+    );
   });
 });

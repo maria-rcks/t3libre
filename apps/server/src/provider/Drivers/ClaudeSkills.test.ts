@@ -1,3 +1,4 @@
+import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -153,6 +154,48 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     }),
   );
 
+  it.effect("recovers colon-bearing descriptions with invocation metadata intact", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const configDir = path.join(tempDir, "claude-home");
+
+      for (const [description, comment] of [
+        ["Browser automation + AI test authoring via kane-cli: run browser objectives, ...", ""],
+        ['Read C:\\skills\\guide#tag: continue with "quoted".', " # trailing: comment"],
+      ] as const) {
+        yield* writeSkill(
+          path.join(configDir, "skills"),
+          "kane-cli",
+          [
+            "---",
+            "name: frontmatter-alias",
+            `description: ${description}${comment}`,
+            "allowed-tools: [Read, Write]",
+            "disable-model-invocation: yes",
+            "user-invocable: no",
+            "---",
+          ].join("\n"),
+        );
+
+        const skills = yield* discoverClaudeSkills({ homePath: configDir }, undefined);
+
+        assert.deepEqual(skills, [
+          {
+            name: "kane-cli",
+            path: path.join(configDir, "skills", "kane-cli", "SKILL.md"),
+            enabled: true,
+            scope: "user",
+            description,
+            userInvocationOnly: true,
+            userInvocable: false,
+          },
+        ]);
+      }
+    }),
+  );
+
   it.effect("falls back to the directory name and skips malformed frontmatter", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -162,7 +205,17 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
       const skillsDir = path.join(configDir, "skills");
 
       yield* writeSkill(skillsDir, "no-frontmatter", "# Just a heading\n");
-      yield* writeSkill(skillsDir, "broken-yaml", "---\nname: [unclosed\n---\n");
+      for (const [directoryName, field] of [
+        ["broken-yaml", "name: [unclosed"],
+        ["broken-tools", "allowed-tools: [Read, Write"],
+        ["broken-quoted", 'name: "unclosed: text'],
+      ] as const) {
+        yield* writeSkill(
+          skillsDir,
+          directoryName,
+          ["---", "description: Run: browser objectives.", field, "---"].join("\n"),
+        );
+      }
       // A stray file (not a directory with SKILL.md) must be skipped.
       yield* fs.makeDirectory(skillsDir, { recursive: true });
       yield* fs.writeFileString(path.join(skillsDir, "README.md"), "not a skill");
@@ -492,7 +545,11 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
 
   it.effect("lets the administrator's managed policy outrank every other settings file", () =>
     Effect.gen(function* () {
-      const path = yield* Path.Path;
+      // The function is pure on its `path` argument, so hand it the
+      // implementation matching each platform under test rather than the
+      // host's.
+      const path = yield* Path.Path.pipe(Effect.provide(NodePath.layerPosix));
+      const win32Path = yield* Path.Path.pipe(Effect.provide(NodePath.layerWin32));
 
       for (const [platform, expected] of [
         ["darwin", "/Library/Application Support/ClaudeCode/managed-settings.json"],
@@ -508,14 +565,15 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
       }
 
       assert.deepEqual(
-        skillOverrideSettingsPaths(path, "/home/.claude", undefined, "win32", {
-          PROGRAMDATA: "C:/ProgramData",
+        skillOverrideSettingsPaths(win32Path, "C:\\Users\\me\\.claude", undefined, "win32", {
+          PROGRAMDATA: "C:\\ProgramData",
         }).at(-1),
-        "C:/ProgramData/ClaudeCode/managed-settings.json",
+        "C:\\ProgramData\\ClaudeCode\\managed-settings.json",
       );
-      assert.deepEqual(skillOverrideSettingsPaths(path, "/home/.claude", undefined, "win32", {}), [
-        "/home/.claude/settings.json",
-      ]);
+      assert.deepEqual(
+        skillOverrideSettingsPaths(win32Path, "C:\\Users\\me\\.claude", undefined, "win32", {}),
+        ["C:\\Users\\me\\.claude\\settings.json"],
+      );
 
       // Only the repository root's local file joins in, after the
       // workspace's own local file so it wins.
