@@ -1442,7 +1442,9 @@ describe("deriveMessagesTimelineRows", () => {
       activeTurnStartedAt: input.latestRun.startedAt,
     });
     expect(
-      pendingRows.some((row) => row.kind === "work-live" && row.entry.id === "work-after-text-0"),
+      pendingRows.some(
+        (row) => row.kind === "work-live" && row.entry.id === `work-after-text-${count - 1}`,
+      ),
     ).toBe(true);
   });
 
@@ -1994,7 +1996,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(rows.some((row) => row.kind === "thinking")).toBe(false);
   });
 
-  it("keeps an actually running tool in the shared activity row", () => {
+  it("keeps the latest tool in the shared activity row ahead of older pending calls", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -2007,6 +2009,7 @@ describe("deriveMessagesTimelineRows", () => {
             runId: "turn-1" as never,
             label: "Running rg",
             command: "rg toolCall",
+            detail: "exit code 1",
             requestKind: "command",
             tone: "tool" as const,
             toolLifecycleStatus: "inProgress" as const,
@@ -2058,14 +2061,16 @@ describe("deriveMessagesTimelineRows", () => {
     expect(rows.map((row) => row.kind)).toEqual(["working", "work-live"]);
     expect(rows.some((row) => row.kind === "thinking")).toBe(false);
     expect(rows.find((row) => row.kind === "work-live")).toMatchObject({
-      entry: { id: "running-command" },
+      entry: { id: "completed-command" },
       active: true,
       groupedEntries: [
-        { id: "running-command" },
+        { id: "running-command", toolLifecycleStatus: "failed" },
         { id: "completed-edit" },
         { id: "completed-command" },
       ],
     });
+    const liveRow = rows.find((row) => row.kind === "work-live")!;
+    expect(liveWorkEntryLabel(liveRow.groupedEntries[0]!, undefined, false)).toBe("Failed rg");
   });
 
   it("folds each run of a provider-native subagent thread like a normal turn", () => {
@@ -2458,9 +2463,16 @@ describe("deriveMessagesTimelineRows", () => {
     });
   });
 
-  it.each(["inProgress", "completed", "stopped"] as const)("last tool shimmer (%s)", (status) => {
-    const rows = deriveMessagesTimelineRows({
-      timelineEntries: [
+  it.each(
+    (["inProgress", "completed", "stopped", "declined", "failed"] as const).flatMap((status) =>
+      [false, true].flatMap((separated) =>
+        [false, true].map((expanded) => ({ status, separated, expanded })),
+      ),
+    ),
+  )(
+    "last tool owns the live display ($status, separated=$separated, expanded=$expanded)",
+    ({ status, separated, expanded }) => {
+      const timelineEntries: TimelineEntry[] = [
         {
           id: "first-running-entry",
           kind: "work",
@@ -2505,32 +2517,51 @@ describe("deriveMessagesTimelineRows", () => {
             toolLifecycleStatus: status,
           },
         },
-      ],
-      latestRun: {
-        runId: "turn-1" as never,
-        status: "running",
-        startedAt: "2026-01-01T00:00:00Z",
-        completedAt: null,
-      },
-      isWorking: true,
-      activeTurnStartedAt: "2026-01-01T00:00:00Z",
-      turnDiffSummaries: [],
-      supportsConversationRollback: false,
-    });
+      ];
+      if (!separated) timelineEntries.splice(1, 1);
+      const rows = deriveMessagesTimelineRows({
+        timelineEntries,
+        expandedWorkGroupIds: new Set(
+          expanded ? ["work-group:first-running-entry", "work-group:second-running-entry"] : [],
+        ),
+        latestRun: {
+          runId: "turn-1" as never,
+          status: "running",
+          startedAt: "2026-01-01T00:00:00Z",
+          completedAt: null,
+        },
+        isWorking: true,
+        activeTurnStartedAt: "2026-01-01T00:00:00Z",
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+      });
 
-    expect(rows.map((row) => row.kind)).toEqual(["working", "work-live", "message", "work-live"]);
-    expect(rows.filter((row) => row.kind === "work-live").map((row) => row.entry.id)).toEqual([
-      "first-running",
-      "second-running",
-    ]);
-    expect(rows.filter((row) => row.kind === "work-live").map((row) => row.active)).toEqual([
-      false,
-      status !== "stopped",
-    ]);
-    expect(rows.find((row) => row.kind === "work-live" && !row.active)).toMatchObject({
-      entry: { toolLifecycleStatus: "inProgress" },
-    });
-  });
+      const liveRows = rows.filter((row) => row.kind === "work-live");
+      expect(liveRows.filter((row) => row.active).map((row) => row.entry.id)).toEqual(
+        status === "inProgress" || status === "completed" ? ["second-running"] : [],
+      );
+      if (separated) {
+        const first = liveRows.find((row) => row.entry.id === "first-running")!;
+        expect(first.active).toBe(false);
+        expect(liveWorkEntryLabel(first.entry, undefined, first.active)).toBe("Ran rg");
+      }
+      const displayedEntries = rows.flatMap((row) =>
+        row.kind === "work" || row.kind === "work-live" ? row.groupedEntries : [],
+      );
+      if (separated || expanded || status !== "failed") {
+        expect(displayedEntries.filter((entry) => entry.id === "first-running")).not.toHaveLength(
+          0,
+        );
+      }
+      for (const entry of displayedEntries) {
+        expect(entry.toolLifecycleStatus).toBe(entry.id === "first-running" ? "completed" : status);
+      }
+      if (expanded)
+        expect(rows.some((row) => row.kind === "work" && row.isExpandedToolGroup)).toBe(true);
+      expect(timelineEntries[0]).toMatchObject({ entry: { toolLifecycleStatus: "inProgress" } });
+      expect(timelineEntries.at(-1)).toMatchObject({ entry: { toolLifecycleStatus: status } });
+    },
+  );
 
   it("does not revive stale in-progress tools before a fresh send has a turn id", () => {
     const rows = deriveMessagesTimelineRows({

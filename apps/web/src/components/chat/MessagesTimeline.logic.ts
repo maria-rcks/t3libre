@@ -1178,6 +1178,23 @@ function withoutSubagentDelegationRows(entries: ReadonlyArray<TimelineEntry>) {
 }
 
 const supersededReasoningEntries = new WeakMap<TimelineEntry, TimelineEntry>();
+const supersededToolEntries = new WeakMap<WorkLogEntry, WorkLogEntry>();
+
+/** Settle the display without changing the provider's pending call or its output. */
+function settledToolEntry(entry: WorkLogEntry) {
+  if (entry.toolLifecycleStatus !== "inProgress") {
+    return entry;
+  }
+  let settled = supersededToolEntries.get(entry);
+  if (!settled) {
+    settled = {
+      ...entry,
+      toolLifecycleStatus: workEntryDisplayIndicatesToolFailure(entry) ? "failed" : "completed",
+    };
+    supersededToolEntries.set(entry, settled);
+  }
+  return settled;
+}
 
 /** A steer or subsequent activity ends thinking even if the provider omits its completion. */
 function settleSupersededReasoning(entries: ReadonlyArray<TimelineEntry>) {
@@ -1325,16 +1342,13 @@ export function deriveMessagesTimelineRows(input: {
   );
   const activeWorkAnchor = activeToolEntries[0];
   const latestVisibleToolEntry = visibleActiveToolEntries.at(-1);
-  const latestRunningToolEntry = visibleActiveToolEntries.findLast((entry) =>
-    workEntryIsActiveTurnActivity(entry.entry),
-  );
   const latestToolKeepsActivityLive =
-    latestRunningToolEntry !== undefined ||
-    (latestVisibleToolEntry !== undefined &&
+    latestVisibleToolEntry !== undefined &&
+    (workEntryIsActiveTurnActivity(latestVisibleToolEntry.entry) ||
       workEntryIndicatesToolSuccess(latestVisibleToolEntry.entry));
   const latestToolFailed =
-    latestRunningToolEntry === undefined &&
     latestVisibleToolEntry !== undefined &&
+    !workEntryIsActiveTurnActivity(latestVisibleToolEntry.entry) &&
     latestVisibleToolEntry.entry.toolLifecycleStatus !== "declined" &&
     workEntryDisplayIndicatesToolFailure(latestVisibleToolEntry.entry);
 
@@ -1349,7 +1363,7 @@ export function deriveMessagesTimelineRows(input: {
               ? LIVE_ACTIVITY_ROW_ID
               : `work-live:${activeWorkAnchor.id}`,
             createdAt: activeWorkAnchor.createdAt,
-            entry: (latestRunningToolEntry ?? latestVisibleToolEntry).entry,
+            entry: latestVisibleToolEntry.entry,
             groupedEntries: visibleActiveToolEntries.map((entry) => entry.entry),
             groupId,
             expanded: input.expandedWorkGroupIds?.has(groupId) ?? false,
@@ -1795,13 +1809,24 @@ export function deriveMessagesTimelineRows(input: {
     attachCreatedThreadSummaries(nextRows, timelineEntries),
   );
   // Concurrent tools can span commentary-separated groups. Only the last
-  // activity row owns the animation; earlier calls keep their provider status.
+  // activity row owns the animation; earlier calls display their settled label.
   const lastActivityIndex = result.findLastIndex(
     (row) => row.kind === "thinking" || row.kind === "work-live",
   );
+  const lastActivity = result[lastActivityIndex];
+  const liveEntryId = lastActivity?.kind === "work-live" ? lastActivity.entry.id : undefined;
+  const settleEntry = (entry: WorkLogEntry) =>
+    entry.id !== liveEntryId && workEntryIsInActiveRun(entry) ? settledToolEntry(entry) : entry;
   return result.map((row, index) => {
-    if (row.kind === "work-live" && row.active && index !== lastActivityIndex) {
-      row = { ...row, active: false };
+    if (row.kind === "work-live") {
+      row = {
+        ...row,
+        active: row.active && index === lastActivityIndex,
+        entry: settleEntry(row.entry),
+        groupedEntries: row.groupedEntries.map(settleEntry),
+      };
+    } else if (row.kind === "work" && row.groupedEntries.some(workEntryIsInActiveRun)) {
+      row = { ...row, groupedEntries: row.groupedEntries.map(settleEntry) };
     }
     return timelineRowIsWorkLog(row) && timelineRowIsWorkLog(result[index + 1])
       ? { ...row, continuesWorkLog: true }
