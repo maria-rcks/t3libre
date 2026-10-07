@@ -1461,6 +1461,87 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-timeline-row-kind="turn-fold"');
   });
 
+  it.each(["prompt", "notification", "steer"])(
+    "finds folded runless assistant text after a %s",
+    async (boundary) => {
+      const prompt = buildUserTimelineEntry("Investigate the imported response");
+      const commentary = buildAssistantTimelineEntry("Hidden runless search match");
+      const final = buildAssistantTimelineEntry("The final answer stays visible");
+      const timelineEntries = [
+        prompt,
+        ...(boundary === "notification"
+          ? [
+              {
+                kind: "work" as const,
+                id: "wake-notification",
+                createdAt: MESSAGE_CREATED_AT,
+                entry: {
+                  id: "wake-notification",
+                  runId: null,
+                  createdAt: MESSAGE_CREATED_AT,
+                  label: "Automatic wake",
+                  tone: "info" as const,
+                  itemType: "notification" as const,
+                },
+              },
+            ]
+          : boundary === "steer"
+            ? [
+                {
+                  ...prompt,
+                  id: "steer-entry",
+                  message: {
+                    ...prompt.message,
+                    id: MessageId.make("steer-message"),
+                    text: "Keep investigating",
+                    inputIntent: "steer" as const,
+                  },
+                },
+              ]
+            : []),
+        {
+          ...commentary,
+          id: "hidden-commentary-entry",
+          message: { ...commentary.message, id: MessageId.make("hidden-commentary") },
+        },
+        {
+          ...final,
+          id: "final-answer-entry",
+          message: { ...final.message, id: MessageId.make("final-answer") },
+        },
+      ];
+      const props = { ...buildProps(), timelineEntries };
+      let renderer: ReactTestRenderer | undefined;
+      try {
+        await act(() => {
+          renderer = create(<MessagesTimeline {...props} />);
+        });
+        expect(renderer!.root.findAllByProps({ "data-message-id": "hidden-commentary" })).toHaveLength(
+          0,
+        );
+        await act(() => {
+          renderer!.update(
+            <MessagesTimeline
+              {...props}
+              findTarget={{
+                messageId: MessageId.make("hidden-commentary"),
+                occurrence: 0,
+                query: "search match",
+                key: "find-runless-commentary",
+              }}
+            />,
+          );
+        });
+        expect(
+          renderer!.root.findAllByProps({ "data-message-id": "hidden-commentary" }).length,
+        ).toBeGreaterThan(0);
+        expect(renderer!.root.findByProps({ "aria-expanded": true }).type).toBe("button");
+      } finally {
+        await act(() => renderer?.unmount());
+      }
+    },
+  );
+
   it("shows a collapsed disclosure for superseded attempt output", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const runId = RunId.make("run-steered");

@@ -786,7 +786,7 @@ function timelineEntryFoldRunId(entry: TimelineEntry, runlessKey: RunId | null):
 }
 
 /** A steer adds input to its existing turn, without creating a new header. */
-function timelineEntryStartsResponse(entry: TimelineEntry): boolean {
+export function timelineEntryStartsResponse(entry: TimelineEntry): boolean {
   return (
     (entry.kind === "message" &&
       entry.message.role === "user" &&

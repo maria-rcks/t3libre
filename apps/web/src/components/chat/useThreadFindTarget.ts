@@ -1,8 +1,8 @@
 import type { LegendListRef } from "@legendapp/list/react";
-import type { RunId, RunAttemptId } from "@t3tools/contracts";
+import { RunId, type RunAttemptId } from "@t3tools/contracts";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { TimelineEntry } from "../../session-logic";
-import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
+import { timelineEntryStartsResponse, type MessagesTimelineRow } from "./MessagesTimeline.logic";
 import type { CitationHistoryPage } from "./useAssistantCitationTarget";
 import type { ThreadFindTarget } from "./ThreadFind";
 import { toastManager } from "../ui/toast";
@@ -83,8 +83,21 @@ export function useThreadFindTarget({
       return;
     }
     const row = rows.find((row) => row.kind === "message" && row.message.id === target.messageId);
-    if (!row && source.kind === "message" && source.message.runId) {
-      onExpandTurn(source.message.runId);
+    if (!row && source.kind === "message") {
+      let runId = source.message.runId;
+      if (runId == null) {
+        const boundary = entries
+          .slice(0, entries.indexOf(source))
+          .findLast(timelineEntryStartsResponse);
+        const boundaryRunId =
+          boundary?.kind === "message"
+            ? boundary.message.runId
+            : boundary?.kind === "work"
+              ? boundary.entry.runId
+              : null;
+        if (boundary && boundaryRunId == null) runId = RunId.make(`runless:${boundary.id}`);
+      }
+      if (runId) onExpandTurn(runId);
       if (source.attempt) onExpandAttempt(source.attempt.id);
       return;
     }
