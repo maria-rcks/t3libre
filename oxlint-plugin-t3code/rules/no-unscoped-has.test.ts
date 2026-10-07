@@ -326,4 +326,14 @@ describe("t3code/no-outset-state-indicators", () => {
     "ignores outlineOffset in unrelated data objects",
     `const defaults = { outlineOffset: 2 }; const options = <Editor options={{ outlineOffset: 2 }} />;`,
   );
+
+  indicators.valid(
+    "matches ring widths and inset companions across template layout expressions",
+    "const className = `focus-visible:ring-2 ${layout} focus-visible:ring-inset`;",
+  );
+
+  indicators.valid(
+    "matches outline widths and inward offsets across template layout expressions",
+    "const className = `focus-visible:outline-3 ${layout} focus-visible:-outline-offset-3`;",
+  );
 });

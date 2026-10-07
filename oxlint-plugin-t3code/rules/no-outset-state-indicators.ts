@@ -161,8 +161,9 @@ export default defineRule({
           context.report({ node, message: message(utility) });
         }
       },
-      TemplateElement(node) {
-        for (const utility of outsetOverrides(node.value.cooked ?? node.value.raw)) {
+      TemplateLiteral(node) {
+        const text = node.quasis.map((part) => part.value.cooked ?? part.value.raw).join(" ");
+        for (const utility of outsetOverrides(text)) {
           context.report({ node, message: message(utility) });
         }
       },
