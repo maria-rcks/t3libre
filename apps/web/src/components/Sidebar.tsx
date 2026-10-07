@@ -73,6 +73,7 @@ import {
   FolderIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
+  MessageSquareIcon,
   PinIcon,
   PinOffIcon,
   PlusIcon,
@@ -745,7 +746,7 @@ const SIDEBAR_DRAG_DISTANCE = 6;
 
 type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
 
-// Zero-height markers reserve no label space at rest. During a drag the
+// Empty-section markers reserve no label space at rest. During a drag the
 // sorting strategy opens 24px for a 16px label with 4px clearance on each side.
 const SIDEBAR_DRAG_LABEL_HEIGHT = 24;
 
@@ -754,28 +755,38 @@ function SidebarDragBoundary(props: {
   label: string;
   visible: boolean;
   isDropTarget: boolean;
+  persistent?: boolean;
 }) {
+  const Icon = props.marker === "pinned-header" ? PinIcon : MessageSquareIcon;
   return (
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
-      className="pointer-events-none relative mx-0.5 -mb-px h-0"
+      className={cn("pointer-events-none relative mx-0.5", props.persistent ? "h-8" : "-mb-px h-0")}
     >
-      {props.visible ? (
-        <div className="sidebar-drag-boundary-label absolute inset-x-2 top-1 flex h-4 items-center gap-2">
-          <span
-            className={cn(
-              "shrink-0 text-xs font-medium",
-              props.isDropTarget ? "text-primary" : "text-sidebar-foreground/80",
-            )}
-          >
-            {props.label}
-          </span>
+      {props.persistent || props.visible ? (
+        <div
+          className={cn(
+            "sidebar-drag-boundary-label absolute inset-x-2 flex items-center gap-2",
+            props.persistent ? "inset-y-0" : "top-1 h-4",
+            props.isDropTarget
+              ? "text-primary"
+              : props.visible
+                ? "text-sidebar-foreground/80"
+                : "text-sidebar-muted-foreground/60",
+          )}
+        >
+          {props.persistent ? <Icon aria-hidden className="size-3 shrink-0" /> : null}
+          <span className="shrink-0 text-xs font-medium">{props.label}</span>
           <span
             aria-hidden
             className={cn(
               "h-px flex-1",
-              props.isDropTarget ? "bg-primary/50" : "bg-sidebar-foreground/25",
+              props.isDropTarget
+                ? "bg-primary/50"
+                : props.visible
+                  ? "bg-sidebar-foreground/25"
+                  : "bg-sidebar-border/60",
             )}
           />
         </div>
@@ -813,7 +824,6 @@ function SidebarSectionHeader(props: {
         onClick={props.toggle.onToggle}
         expanded={props.toggle.expanded}
         icon={<Icon aria-hidden className="size-3 shrink-0" />}
-        lineStyle="label"
         tone={
           props.isDropTarget ? "accent" : props.dragging ? "emphasized" : snoozed ? "info" : "muted"
         }
@@ -3674,7 +3684,9 @@ export default function Sidebar() {
         const listRect = list.getBoundingClientRect();
         const scale = list.offsetWidth > 0 ? listRect.width / list.offsetWidth : 1;
         dragLabelOffsetRef.current =
-          header.getBoundingClientRect().top - listRect.top + SIDEBAR_DRAG_LABEL_HEIGHT * scale;
+          header.getBoundingClientRect().top -
+          listRect.top +
+          Math.max(SIDEBAR_DRAG_LABEL_HEIGHT * scale, header.getBoundingClientRect().height);
       } else {
         dragLabelOffsetRef.current = 0;
       }
@@ -5313,25 +5325,13 @@ export default function Sidebar() {
                         }
                         switch (item.marker) {
                           case "pinned-header":
-                            if (pinnedThreads.length > 0) {
-                              items.push(
-                                <li
-                                  key="pinned-section-label"
-                                  data-thread-selection-safe
-                                  className="mx-0.5 flex h-8 items-center gap-2 px-2 text-xs font-medium text-sidebar-muted-foreground/60"
-                                >
-                                  <PinIcon aria-hidden className="size-3 shrink-0" />
-                                  <span className="shrink-0">Pinned</span>
-                                  <span aria-hidden className="h-px min-w-2 flex-1 bg-current" />
-                                </li>,
-                              );
-                            }
                             items.push(
                               <SidebarDragBoundary
                                 key="pinned-header"
                                 marker="pinned-header"
                                 label="Pinned"
                                 visible={from !== null}
+                                persistent={pinnedThreads.length > 0}
                                 isDropTarget={dragTargetSection === "pinned"}
                               />,
                             );
@@ -5342,6 +5342,7 @@ export default function Sidebar() {
                                 key="pinned-divider"
                                 marker="pinned-divider"
                                 label="Active"
+                                persistent={pinnedThreads.length > 0 && activeThreads.length > 0}
                                 visible={from !== null}
                                 isDropTarget={dragTargetSection === "active"}
                               />,

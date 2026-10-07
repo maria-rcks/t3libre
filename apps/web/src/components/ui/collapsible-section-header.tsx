@@ -15,14 +15,12 @@ export function CollapsibleSectionHeader({
   expanded,
   tone = "muted",
   icon,
-  lineStyle = "subtle",
   accessory,
   ...buttonProps
 }: Omit<ComponentProps<"button">, "className" | "style" | "aria-expanded"> & {
   expanded: boolean;
   tone?: keyof typeof tones;
   icon?: ReactNode;
-  lineStyle?: "subtle" | "label";
   accessory?: ReactNode;
 }) {
   return (
@@ -37,13 +35,7 @@ export function CollapsibleSectionHeader({
     >
       {icon}
       <span className="shrink-0">{children}</span>
-      <span
-        aria-hidden
-        className={cn(
-          "h-px min-w-2 flex-1",
-          lineStyle === "label" ? "bg-current" : tones[tone].line,
-        )}
-      />
+      <span aria-hidden className={cn("h-px min-w-2 flex-1", tones[tone].line)} />
       {accessory}
       <ChevronDownIcon
         aria-hidden
