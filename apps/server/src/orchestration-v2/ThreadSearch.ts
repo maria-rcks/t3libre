@@ -195,15 +195,13 @@ export const make = Effect.gen(function* () {
           AND fork_run.run_id = json_extract(history.payload_json, '$.forkedFrom.runId')
         WHERE json_extract(history.payload_json, '$.forkedFrom.type') = 'run'
           AND NOT EXISTS (SELECT 1 FROM json_each(history.visited) WHERE value = source.thread_id)
-      ), messages AS (
-        SELECT json_extract(item.payload_json, '$.messageId') AS message_id,
-          history.depth, item.ordinal, item.turn_item_id,
-          lower(json_extract(item.payload_json, '$.text')) AS text
+      ), visible_items AS (
+        SELECT item.payload_json, item.type, history.depth, item.ordinal, item.turn_item_id
         FROM history
         INNER JOIN orchestration_v2_projection_turn_items AS item ON item.thread_id = history.thread_id
         LEFT JOIN orchestration_v2_projection_runs AS run
           ON run.run_id = item.run_id AND run.thread_id = item.thread_id
-        WHERE item.type IN ('user_message', 'assistant_message')
+        WHERE item.type IN ('user_message', 'assistant_message', 'user_input_request')
           AND (
             (history.depth = 0
               AND (run.status IS NULL OR run.status <> 'rolled_back')
@@ -215,6 +213,18 @@ export const make = Effect.gen(function* () {
               OR (item.run_id IS NULL AND json_extract(history.payload_json, '$.historyOrigin') = 'v1_import')
             ))
           )
+      ), messages AS (
+        SELECT json_extract(item.payload_json, '$.messageId') AS message_id,
+          item.depth, item.ordinal, item.turn_item_id,
+          lower(json_extract(item.payload_json, '$.text')) AS text
+        FROM visible_items AS item
+        WHERE item.type IN ('user_message', 'assistant_message')
+          AND NOT (item.type = 'user_message' AND json_extract(item.payload_json, '$.messageId') IN (
+            SELECT 'async-answer:' || json_extract(request.payload_json, '$.questionAnswer.requestId')
+            FROM visible_items AS request
+            WHERE request.type = 'user_input_request'
+              AND json_extract(request.payload_json, '$.questionAnswer.requestId') IS NOT NULL
+          ))
       ), counts AS (
         SELECT message_id, depth, ordinal, turn_item_id,
           (length(text) - length(replace(text, lower(${query}), ''))) / length(${query}) AS count

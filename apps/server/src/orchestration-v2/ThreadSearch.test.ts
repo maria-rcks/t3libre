@@ -5,6 +5,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
   TurnItemId,
   type OrchestrationV2AppThread,
@@ -287,6 +288,53 @@ it.layer(layerTest)("ThreadSearch", (it) => {
       assert.deepEqual(yield* search.find({ threadId, query: "notification-only" }), {
         total: 0,
         match: null,
+      });
+      yield* projections.apply(
+        message(threadId, "async-answer:answered", "user", "reply-only answered", { ordinal: 3 }),
+      );
+      yield* projections.apply(
+        message(threadId, "async-answer:orphan", "user", "reply-only orphan", { ordinal: 4 }),
+      );
+      const request = {
+        id: EventId.make("question:answered"),
+        type: "turn-item.updated",
+        threadId,
+        occurredAt: at(3),
+        payload: {
+          id: TurnItemId.make("question:answered"),
+          type: "user_input_request",
+          threadId,
+          runId: null,
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 2,
+          status: "completed",
+          title: null,
+          startedAt: at(3),
+          completedAt: at(3),
+          updatedAt: at(3),
+          requestId: RuntimeRequestId.make("answered"),
+          questions: [],
+        },
+      } satisfies OrchestrationV2DomainEvent;
+      yield* projections.apply(request);
+      assert.deepEqual(yield* search.find({ threadId, query: "reply-only" }), {
+        total: 2,
+        match: { messageId: MessageId.make("async-answer:answered"), occurrence: 0 },
+      });
+      yield* projections.apply({
+        ...request,
+        payload: {
+          ...request.payload,
+          questionAnswer: { requestId: "answered", answers: {}, attachmentsByQuestionId: {} },
+        },
+      });
+      assert.deepEqual(yield* search.find({ threadId, query: "reply-only" }), {
+        total: 1,
+        match: { messageId: MessageId.make("async-answer:orphan"), occurrence: 0 },
       });
     }),
   );
