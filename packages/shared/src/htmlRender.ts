@@ -367,14 +367,10 @@ function bootstrapMarkup(markup: string): string {
 
 // Comments, raw text, and template contents are blanked to the same length,
 // so offsets still line up and inert tags cannot receive the bootstrap.
-// Focus refresh keeps real style openings visible to locate the generated marker.
-const blankNonMarkup = (html: string, keepStyleTags = false) => {
+const blankNonMarkup = (html: string) => {
   const scan = html.replace(
     /<!--[\s\S]*?(?:-->|$)|<(script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)\b[\s\S]*?(?:<\/\1\s*>|$)|<plaintext\b[\s\S]*$/gi,
-    (match) => {
-      const opening = keepStyleTags ? (/^<style\b[^>]*>/i.exec(match)?.[0] ?? "") : "";
-      return opening + " ".repeat(match.length - opening.length);
-    },
+    (match) => " ".repeat(match.length),
   );
   const parts: string[] = [];
   let depth = 0;
@@ -399,15 +395,62 @@ const blankNonMarkup = (html: string, keepStyleTags = false) => {
 
 /** Refreshes a generated page's focus policy without changing its stored bytes or theme bootstrap. */
 export function injectHtmlRenderFocusStyles(html: string): string | undefined {
-  const scan = blankNonMarkup(html, true);
-  const theme = /<style\b[^>]*\sid\s*=\s*(?:"t3-theme"|'t3-theme'|t3-theme(?=[\s>]))[^>]*>/i.exec(
-    scan,
-  );
-  if (!theme) return undefined;
-  if (/<style\b[^>]*\sid\s*=\s*(?:"t3-focus"|'t3-focus'|t3-focus(?=[\s>]))[^>]*>/i.test(scan)) {
-    return html;
+  const tags = /<(\/?)([a-z][a-z0-9:-]*)(?=[\s/>])|<!--|<!|<\?/gi;
+  let themeAt: number | undefined;
+  let hasFocus = false;
+  let templateDepth = 0;
+  for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
+    if (html.startsWith("<!--", tag.index)) {
+      const end = html.indexOf("-->", tags.lastIndex);
+      tags.lastIndex = end < 0 ? html.length : end + 3;
+      continue;
+    }
+    // Consume the complete opening before looking for another tag, including quoted > and <.
+    let end = tags.lastIndex;
+    let quote = "";
+    for (; end < html.length; end++) {
+      const character = html[end];
+      if (quote) {
+        if (character === quote) quote = "";
+      } else if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === ">") {
+        break;
+      }
+    }
+    if (end === html.length) break;
+    const name = tag[2]?.toLowerCase();
+    const closing = tag[1] === "/";
+    if (name === "template") {
+      templateDepth = closing ? Math.max(0, templateDepth - 1) : templateDepth + 1;
+    }
+    if (name === "style" && !closing && templateDepth === 0) {
+      const attributes = html.slice(tags.lastIndex, end);
+      for (const attribute of attributes.matchAll(
+        /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g,
+      )) {
+        if (attribute[1]?.toLowerCase() !== "id") continue;
+        const id = attribute[2] ?? attribute[3] ?? attribute[4];
+        if (id === "t3-theme") themeAt ??= tag.index;
+        if (id === "t3-focus") hasFocus = true;
+        break;
+      }
+    }
+    tags.lastIndex = end + 1;
+    if (!closing && name === "plaintext") break;
+    if (
+      !closing &&
+      /^(?:script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)$/u.test(name ?? "")
+    ) {
+      const rawEnd = new RegExp(`</${name}(?=[\\s/>])`, "gi");
+      rawEnd.lastIndex = tags.lastIndex;
+      const closed = rawEnd.exec(html);
+      tags.lastIndex = closed ? closed.index : html.length;
+    }
   }
-  return html.slice(0, theme.index) + FOCUS_STYLE + html.slice(theme.index);
+  if (themeAt === undefined) return undefined;
+  if (hasFocus) return html;
+  return html.slice(0, themeAt) + FOCUS_STYLE + html.slice(themeAt);
 }
 
 /**

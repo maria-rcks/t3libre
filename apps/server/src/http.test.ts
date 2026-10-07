@@ -318,8 +318,7 @@ describe("generated HTML focus protection", () => {
       const path = yield* Path.Path;
       const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-html-focus-" });
       const file = path.join(directory, "render.html");
-      const original =
-        '<!doctype html><head><style id="t3-theme">:root{--ring:blue}</style></head><body><button>édit</button></body>';
+      const original = `<!doctype html><head><meta data-example="<style id='t3-theme'> >" data-focus="<style id='t3-focus'>"><style id="t3-theme">:root{--ring:blue}</style></head><body><button>édit</button></body>`;
       const policy =
         '<style id="t3-focus">:where(:focus-visible){outline-style:solid!important;outline-width:2px!important;outline-offset:-2px!important}</style>';
       const expected = original.replace('<style id="t3-theme">', `${policy}<style id="t3-theme">`);
@@ -365,6 +364,9 @@ describe("generated HTML focus protection", () => {
       const generated = '<style id="t3-theme">:root{--ring:blue}</style><button>edit</button>';
       for (const [contents, download, isAttachment] of [
         [ordinary, false, true],
+        [`<div data-example="<style id='t3-theme'> >">édit</div>`, false, true],
+        [`<div data-example='<style id="t3-theme">'>édit</div>`, false, true],
+        [`<style data-example="id='t3-theme'">body{color:red}</style>`, false, true],
         [generated, true, true],
         [generated, false, false],
       ] as const) {
@@ -373,7 +375,9 @@ describe("generated HTML focus protection", () => {
           yield* assetFileResponse({ path: filePath, download, isAttachment }),
         );
         expect(response.headers.get("cache-control")).toBe("private, max-age=3600");
-        expect(yield* Effect.promise(() => response.text())).toBe(contents);
+        const bytes = new TextEncoder().encode(contents);
+        expect(response.headers.get("content-length")).toBe(String(bytes.byteLength));
+        expect(yield* Effect.promise(() => response.arrayBuffer())).toEqual(bytes.buffer);
         expect(yield* fs.readFileString(filePath)).toBe(contents);
       }
       yield* fs.writeFileString(filePath, generated);

@@ -7,6 +7,7 @@ import {
   htmlRenderTheme,
   htmlRenderThemeFragment,
   injectHtmlRenderBootstrap,
+  injectHtmlRenderFocusStyles,
   htmlRenderThemeMessage,
   readHtmlRenderContentHeight,
   readHtmlRenderLinkRequest,
@@ -71,6 +72,103 @@ describe("injectHtmlRenderBootstrap", () => {
       injected.indexOf("<html><head>"),
     );
     expect(injected).toContain('<meta name="viewport" content="width=device-width');
+  });
+});
+
+describe("injectHtmlRenderFocusStyles", () => {
+  const theme = '<style id="t3-theme">:root{--ring:red}</style>';
+
+  it("adds inward focus styles immediately before the real theme without changing it", () => {
+    const injected = injectHtmlRenderFocusStyles(theme);
+    expect(injected).toMatch(/^<style id="t3-focus">/);
+    expect(injected).toContain("outline-width:2px!important;outline-offset:-2px!important");
+    expect(injected?.endsWith(theme)).toBe(true);
+  });
+
+  it.each([
+    `<div data-example="<style id='t3-theme'>"></div>`,
+    `<div data-example='<style id="t3-theme">'></div>`,
+    `<div data-example="> <style id='t3-theme'>"></div>`,
+    `<style data-example="<style id='t3-theme'>">body{color:red}</style>`,
+    `<style data-example="id='t3-theme'">body{color:red}</style>`,
+    `<style data-id="t3-theme">body{color:red}</style>`,
+    `<style id="other" id="t3-theme">body{color:red}</style>`,
+    `<style id="T3-THEME">body{color:red}</style>`,
+  ])("ignores quoted theme decoys and preserves their bytes: %s", (decoy) => {
+    expect(injectHtmlRenderFocusStyles(decoy)).toBeUndefined();
+    expect(injectHtmlRenderFocusStyles(decoy + theme)).toBe(
+      decoy + injectHtmlRenderFocusStyles(theme),
+    );
+  });
+
+  it.each([
+    `<div data-example="<style id='t3-focus'>"></div>`,
+    `<div data-example='<style id="t3-focus">'></div>`,
+    `<style data-example="<style id='t3-focus'>">body{color:red}</style>`,
+    `<style data-example="id='t3-focus'">body{color:red}</style>`,
+    `<style id="T3-FOCUS">body{color:red}</style>`,
+  ])("does not let quoted focus decoys suppress injection: %s", (decoy) => {
+    expect(injectHtmlRenderFocusStyles(decoy + theme)).toBe(
+      decoy + injectHtmlRenderFocusStyles(theme),
+    );
+  });
+
+  it.each([
+    "script",
+    "style",
+    "textarea",
+    "title",
+    "xmp",
+    "iframe",
+    "noembed",
+    "noframes",
+    "noscript",
+  ])("ignores marker text inside %s raw content", (tag) => {
+    const decoy = `<${tag}><style id="t3-theme"><style id="t3-focus"></${tag}>`;
+    expect(injectHtmlRenderFocusStyles(decoy)).toBeUndefined();
+    expect(injectHtmlRenderFocusStyles(decoy + theme)).toBe(
+      decoy + injectHtmlRenderFocusStyles(theme),
+    );
+  });
+
+  it.each([
+    '<!-- <style id="t3-theme"><style id="t3-focus"> -->',
+    '<template><template><style id="t3-theme"></style><style id="t3-focus"></style></template></template>',
+    '<template data-example="</template>"><style id="t3-theme"></style></template>',
+  ])("ignores markers in comments and nested templates: %s", (decoy) => {
+    expect(injectHtmlRenderFocusStyles(decoy)).toBeUndefined();
+    expect(injectHtmlRenderFocusStyles(decoy + theme)).toBe(
+      decoy + injectHtmlRenderFocusStyles(theme),
+    );
+  });
+
+  it.each(["</style/>", '</style data-example=">">'])(
+    "recognizes marker tags after a raw-text closing tag with attributes or slash: %s",
+    (closing) => {
+      const prefix = `<style>body{color:red}${closing}`;
+      expect(injectHtmlRenderFocusStyles(prefix + theme)).toBe(
+        prefix + injectHtmlRenderFocusStyles(theme),
+      );
+    },
+  );
+
+  it.each([
+    `<style data-example="> <style id='t3-focus'>" id='t3-theme'>body{color:red}</style>`,
+    `<style data-example='> <style id="t3-focus">' id=t3-theme>body{color:red}</style>`,
+  ])("recognizes real marker attributes after quoted decoys and embedded >: %s", (realTheme) => {
+    expect(injectHtmlRenderFocusStyles(realTheme)).toBe(
+      injectHtmlRenderFocusStyles(theme)?.slice(0, -theme.length) + realTheme,
+    );
+  });
+
+  it("keeps an existing real focus policy without injecting a duplicate", () => {
+    const html = theme + '<style id="t3-focus">:focus-visible{outline-offset:-2px}</style>';
+    expect(injectHtmlRenderFocusStyles(html)).toBe(html);
+  });
+
+  it("ignores markers after plaintext and inside unclosed quoted attributes", () => {
+    expect(injectHtmlRenderFocusStyles("<plaintext>" + theme)).toBeUndefined();
+    expect(injectHtmlRenderFocusStyles(`<div data-example="<style id='t3-theme'>`)).toBeUndefined();
   });
 });
 
