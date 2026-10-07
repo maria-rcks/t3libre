@@ -62,14 +62,17 @@ import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 // Status hues follow the system-wide convention set by sidebar v1 and the
 // Live Activity/widgets (amber approval, indigo input, sky working) so a
 // thread reads the same color everywhere it surfaces.
-const STATUS_LABEL_BY_STATUS: Partial<
-  Record<ThreadListV2Status, { label: string; className: string }>
+const STATUS_LABEL_BY_STATUS: Record<
+  ThreadListV2Status,
+  { label: string; className: string } | undefined
 > = {
   approval: { label: "Approval", className: "text-warning-foreground" },
   input: { label: "Input", className: "text-adaptive-indigo-600-300" },
   working: { label: "Working", className: "text-adaptive-sky-600-400" },
+  waiting: { label: "Waiting", className: "text-foreground-muted" },
   failed: { label: "Failed", className: "text-danger-foreground" },
   limited: { label: "Limited", className: "text-warning-foreground" },
+  ready: undefined,
 };
 
 // Menus keep lifecycle and title regeneration together. Archive keeps its
