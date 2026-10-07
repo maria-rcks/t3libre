@@ -275,6 +275,42 @@ describe("resolveAutoSettlementAt", () => {
     ).toBeNull();
   });
 
+  it.each(["manual", "timer"])("restarts inactivity on a %s snooze wake", (wake) => {
+    const thread = {
+      ...shell({ latestRunCompletedAt: at(-4 * DAY_MS) }),
+      ...(wake === "manual"
+        ? { lastSnoozeWakeAt: at(-1_000) }
+        : { snoozedAt: at(-3 * DAY_MS), snoozedUntil: at(-1_000) }),
+    };
+    const input = {
+      thread,
+      pullRequest: null,
+      nowMs: NOW_MS,
+      autoSettleAfterDays: 1,
+      autoSettleOnMerge: false,
+    };
+    expect(ThreadSettlementService.resolveAutoSettlementAt(input)).toBeNull();
+    expect(
+      ThreadSettlementService.resolveAutoSettlementAt({ ...input, nowMs: NOW_MS + DAY_MS }),
+    ).toEqual(at(-1_000));
+  });
+
+  it("does not restart inactivity at the timer after work woke the thread early", () => {
+    expect(
+      ThreadSettlementService.resolveAutoSettlementAt({
+        thread: shell({
+          snoozedAt: at(-5 * DAY_MS),
+          latestRunCompletedAt: at(-4 * DAY_MS),
+          snoozedUntil: at(-1_000),
+        }),
+        pullRequest: null,
+        nowMs: NOW_MS,
+        autoSettleAfterDays: 1,
+        autoSettleOnMerge: false,
+      }),
+    ).toEqual(at(-4 * DAY_MS));
+  });
+
   it("settles on merge only after the user's last action and preserves the activity time", () => {
     const thread = shell({
       latestUserMessageAt: at(-2 * 60 * 60 * 1_000),
@@ -291,6 +327,12 @@ describe("resolveAutoSettlementAt", () => {
       autoSettleOnMerge: true,
     };
     expect(ThreadSettlementService.resolveAutoSettlementAt(input)).toEqual(at(-90 * 60 * 1_000));
+    expect(
+      ThreadSettlementService.resolveAutoSettlementAt({
+        ...input,
+        thread: { ...thread, lastSnoozeWakeAt: at(-1_000) },
+      }),
+    ).toEqual(at(-90 * 60 * 1_000));
     expect(
       ThreadSettlementService.resolveAutoSettlementAt({ ...input, autoSettleOnMerge: false }),
     ).toBeNull();

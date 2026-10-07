@@ -4474,6 +4474,40 @@ it.layer(layerSharedApplicationDataPlaneTest)("snooze projection", (it) => {
       assert.deepEqual(thread.updatedAt, firstUpdatedAt);
 
       yield* orchestrator.dispatch({
+        type: "thread.unsnooze",
+        commandId: CommandId.make("runtime-layer-snoozed-thread-wake"),
+        threadId,
+        reason: "user",
+      });
+      const manuallyAwakened = yield* orchestrator.getThreadProjection(threadId);
+      const wakeAt = manuallyAwakened.thread.lastSnoozeWakeAt;
+      assert.isNotNull(wakeAt);
+      assert.isNull(manuallyAwakened.thread.snoozedUntil);
+      assert.deepEqual(manuallyAwakened.thread.unsettledAt, firstProjection.thread.unsettledAt);
+      const projections = yield* ProjectionStore.ProjectionStoreV2.pipe(
+        Effect.provide(ProjectionStore.layer),
+      );
+      const candidate = (yield* projections.getSettlementCandidates(threadId))[0];
+      assert.deepEqual(candidate?.lastSnoozeWakeAt, wakeAt);
+      yield* TestClock.adjust("10 seconds");
+      yield* orchestrator.dispatch({
+        type: "thread.unsnooze",
+        commandId: CommandId.make("runtime-layer-snoozed-thread-wake-again"),
+        threadId,
+        reason: "user",
+      });
+      assert.deepEqual(
+        (yield* orchestrator.getThreadProjection(threadId)).thread.lastSnoozeWakeAt,
+        wakeAt,
+      );
+      yield* orchestrator.dispatch({
+        type: "thread.snooze",
+        commandId: CommandId.make("runtime-layer-snoozed-thread-snooze-after-wake"),
+        threadId,
+        snoozedUntil,
+      });
+
+      yield* orchestrator.dispatch({
         type: "message.dispatch",
         createdBy: "user",
         creationSource: "web",
@@ -5055,6 +5089,10 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
         } else {
           assert.isNull(armedShell.snoozedUntil);
           assert.isNull(armedShell.snoozedAt);
+          assert.deepEqual(
+            (yield* orchestrator.getThreadProjection(threadId)).thread.lastSnoozeWakeAt,
+            yield* DateTime.now,
+          );
           assert.isTrue(armedShell.limitRecovery!.autoResume);
         }
       }

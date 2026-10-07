@@ -203,8 +203,24 @@ export function resolveAutoSettlementAt(input: {
     return activityAtMs === null ? thread.createdAt : DateTime.makeUnsafe(activityAtMs);
   }
   if (input.autoSettleAfterDays === null || activityAtMs === null) return null;
-  return activityAtMs < input.nowMs - input.autoSettleAfterDays * DAY_MS
-    ? DateTime.makeUnsafe(activityAtMs)
+  const snoozedUntilMs = toMillis(thread.snoozedUntil);
+  const snoozedAtMs = toMillis(thread.snoozedAt);
+  const completedAtMs = toMillis(thread.latestRunCompletedAt);
+  // Timer wakes are derived. Work that completed after snoozing woke early,
+  // so its original timer must not restart inactivity a second time.
+  const timerWakeAtMs =
+    snoozedUntilMs !== null &&
+    snoozedUntilMs <= input.nowMs &&
+    (snoozedAtMs === null || completedAtMs === null || completedAtMs <= snoozedAtMs)
+      ? snoozedUntilMs
+      : null;
+  const inactivityAtMs = Math.max(
+    activityAtMs,
+    toMillis(thread.lastSnoozeWakeAt) ?? activityAtMs,
+    timerWakeAtMs ?? activityAtMs,
+  );
+  return inactivityAtMs < input.nowMs - input.autoSettleAfterDays * DAY_MS
+    ? DateTime.makeUnsafe(inactivityAtMs)
     : null;
 }
 
