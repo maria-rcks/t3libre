@@ -1794,11 +1794,19 @@ export function deriveMessagesTimelineRows(input: {
   const result = attachTrailingToolGroupsToAssistant(
     attachCreatedThreadSummaries(nextRows, timelineEntries),
   );
-  return result.map((row, index) =>
-    timelineRowIsWorkLog(row) && timelineRowIsWorkLog(result[index + 1])
-      ? { ...row, continuesWorkLog: true }
-      : row,
+  // Concurrent tools can span commentary-separated groups. Only the last
+  // activity row owns the animation; earlier calls keep their provider status.
+  const lastActivityIndex = result.findLastIndex(
+    (row) => row.kind === "thinking" || row.kind === "work-live",
   );
+  return result.map((row, index) => {
+    if (row.kind === "work-live" && row.active && index !== lastActivityIndex) {
+      row = { ...row, active: false };
+    }
+    return timelineRowIsWorkLog(row) && timelineRowIsWorkLog(result[index + 1])
+      ? { ...row, continuesWorkLog: true }
+      : row;
+  });
 }
 
 /** Adjacent work stays one visual list even when virtualization splits its groups. */

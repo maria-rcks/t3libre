@@ -2458,7 +2458,7 @@ describe("deriveMessagesTimelineRows", () => {
     });
   });
 
-  it("keeps separated in-progress tool runs visible", () => {
+  it.each(["inProgress", "completed", "stopped"] as const)("last tool shimmer (%s)", (status) => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -2502,7 +2502,7 @@ describe("deriveMessagesTimelineRows", () => {
             command: "rg second",
             requestKind: "command",
             tone: "tool" as const,
-            toolLifecycleStatus: "inProgress" as const,
+            toolLifecycleStatus: status,
           },
         },
       ],
@@ -2523,6 +2523,13 @@ describe("deriveMessagesTimelineRows", () => {
       "first-running",
       "second-running",
     ]);
+    expect(rows.filter((row) => row.kind === "work-live").map((row) => row.active)).toEqual([
+      false,
+      status !== "stopped",
+    ]);
+    expect(rows.find((row) => row.kind === "work-live" && !row.active)).toMatchObject({
+      entry: { toolLifecycleStatus: "inProgress" },
+    });
   });
 
   it("does not revive stale in-progress tools before a fresh send has a turn id", () => {
