@@ -3,7 +3,7 @@ import {
   useHasTimelineBackground,
 } from "./ChatTimelineBackground";
 import { type RunId } from "@t3tools/contracts";
-import { type MouseEvent, memo, useCallback, useMemo, useState } from "react";
+import { type MouseEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type TurnDiffFileChange } from "../../types";
 import {
   buildTurnDiffTree,
@@ -44,24 +44,50 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
     onFileContextMenu,
   } = props;
   const glass = useHasTimelineBackground();
+  const headerRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [headerPinned, setHeaderPinned] = useState(false);
+  useEffect(() => {
+    const header = headerRef.current;
+    const sentinel = sentinelRef.current;
+    if (!glass || !header || !sentinel) return;
+    let root = header.parentElement;
+    while (root && !/auto|scroll/.test(getComputedStyle(root).overflowY)) {
+      root = root.parentElement;
+    }
+    // One backdrop spans the card. Only a pinned header needs to cover rows beneath it.
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry) setHeaderPinned(entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0));
+      },
+      {
+        root,
+        threshold: 1,
+        rootMargin: `-${parseFloat(getComputedStyle(header).top)}px 0px 0px 0px`,
+      },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [glass]);
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
   const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
 
   return (
     <div
       className={cn(
-        "@container/changed-files mt-4 rounded-lg",
-        !glass && "bg-secondary dark:bg-input/20",
+        "@container/changed-files relative mt-4 rounded-lg",
+        glass ? CHAT_BACKGROUND_GLASS_SURFACE_CLASSES : "bg-secondary dark:bg-input/20",
       )}
       data-changed-files-state="tree"
     >
+      {glass && <div ref={sentinelRef} aria-hidden="true" className="absolute top-0 h-px w-px" />}
       <div
+        ref={headerRef}
         data-changed-files-header=""
         className={cn(
           "sticky top-[calc(var(--chat-timeline-header-inset,0px)+0.5rem)] z-10 flex items-center justify-between gap-2 rounded-t-lg px-3 py-2",
-          glass
-            ? CHAT_BACKGROUND_GLASS_SURFACE_CLASSES
-            : "bg-secondary dark:bg-background dark:bg-linear-to-b dark:from-input/20 dark:to-input/20",
+          (!glass || headerPinned) &&
+            "bg-secondary dark:bg-background dark:bg-linear-to-b dark:from-input/20 dark:to-input/20",
         )}
       >
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-foreground">
@@ -123,7 +149,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           </Tooltip>
         </div>
       </div>
-      <div className={cn(glass && CHAT_BACKGROUND_GLASS_SURFACE_CLASSES, "rounded-b-lg")}>
+      <div className="rounded-b-lg">
         <ChangedFilesTree
           key={`${runId}:${allDirectoriesExpanded}`}
           runId={runId}
