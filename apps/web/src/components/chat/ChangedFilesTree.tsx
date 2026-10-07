@@ -47,42 +47,43 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   } = props;
   const glass = useHasTimelineBackground();
   const headerRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
   const [headerPinned, setHeaderPinned] = useState(false);
   useEffect(() => {
     const header = headerRef.current;
-    const sentinel = sentinelRef.current;
-    if (!glass || !header || !sentinel) return;
-    let root = header.parentElement;
+    const card = header?.parentElement;
+    if (!glass || !header || !card) return;
+    let root = card.parentElement;
     while (root && !/auto|scroll/.test(getComputedStyle(root).overflowY)) {
       root = root.parentElement;
     }
     // One backdrop spans the card. Only a pinned header needs to cover rows beneath it.
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry) setHeaderPinned(entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0));
-      },
-      {
-        root,
-        threshold: 1,
-        rootMargin: `-${parseFloat(getComputedStyle(header).top)}px 0px 0px 0px`,
-      },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [glass, headerInset]);
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      setHeaderPinned(header.getBoundingClientRect().top > card.getBoundingClientRect().top + 0.5);
+    };
+    const scheduleMeasure = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    const scrollTarget = root ?? window;
+    scrollTarget.addEventListener("scroll", scheduleMeasure, { passive: true });
+    scheduleMeasure();
+    return () => {
+      scrollTarget.removeEventListener("scroll", scheduleMeasure);
+      cancelAnimationFrame(frame);
+    };
+  }, [glass, headerInset, allDirectoriesExpanded, files]);
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
   const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
 
   return (
     <div
       className={cn(
-        "@container/changed-files relative mt-4 rounded-lg",
+        "@container/changed-files mt-4 rounded-lg",
         glass ? CHAT_BACKGROUND_GLASS_SURFACE_CLASSES : "bg-secondary dark:bg-input/20",
       )}
       data-changed-files-state="tree"
     >
-      {glass && <div ref={sentinelRef} aria-hidden="true" className="absolute top-0 h-px w-px" />}
       <div
         ref={headerRef}
         data-changed-files-header=""
