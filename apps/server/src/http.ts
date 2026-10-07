@@ -5,6 +5,7 @@ import {
   EnvironmentHttpApi,
 } from "@t3tools/contracts";
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
+import { injectHtmlRenderFocusStyles } from "@t3tools/shared/htmlRender";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -165,6 +166,7 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
     readonly fileName?: string;
     readonly mimeType?: string;
     readonly file?: OpenMediaFile;
+    readonly isAttachment?: boolean;
   },
   rangeHeader?: string,
   ifRangeHeader?: string,
@@ -172,6 +174,23 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
 ) {
   const headers = assetResponseHeaders(asset.path, asset);
   const mediaFile = asset.file;
+  if (
+    asset.isAttachment &&
+    !mediaFile &&
+    !asset.download &&
+    headers["Content-Type"] === "text/html; charset=utf-8"
+  ) {
+    const fs = yield* FileSystem.FileSystem;
+    const html = injectHtmlRenderFocusStyles(yield* fs.readFileString(asset.path));
+    if (html !== undefined) {
+      const bytes = new TextEncoder().encode(html);
+      headers["Cache-Control"] = "private, no-store";
+      headers["Content-Length"] = String(bytes.byteLength);
+      return method === "HEAD"
+        ? HttpServerResponse.empty({ status: 200, headers })
+        : HttpServerResponse.uint8Array(bytes, { headers });
+    }
+  }
   const mediaInfo = mediaFile ? yield* statMediaFile(asset.path, mediaFile) : undefined;
   const isMedia = /^(?:audio|video)\//i.test(headers["Content-Type"] ?? "");
   if (isMedia) {

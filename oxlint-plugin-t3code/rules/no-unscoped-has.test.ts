@@ -223,8 +223,53 @@ describe("t3code/no-outset-state-indicators", () => {
   );
 
   indicators.invalid(
-    "does not borrow an inset from another state or the decorative base",
-    `const el = <button className="ring-inset focus:ring-inset focus-visible:ring-2" />;`,
+    "does not borrow an inset from another state",
+    `const el = <button className="focus:ring-inset focus-visible:ring-2" />;`,
+  );
+
+  indicators.valid(
+    "allows an unconditional inset for state ring widths",
+    `const el = <button className="ring-inset focus-visible:ring-2" />;`,
+  );
+
+  indicators.valid(
+    "allows an unconditional inset for an arbitrary attribute state on the same element",
+    `const el = <button className="ring-inset [&[aria-selected=true]]:ring-2" />;`,
+  );
+
+  indicators.invalid(
+    "does not borrow an unconditional inset for a descendant target",
+    `const el = <button className="ring-inset [&_button]:focus-visible:ring-2" />;`,
+  );
+
+  indicators.valid(
+    "allows checked inset geometry with an added dark color condition",
+    `const el = <button className="ring-1 ring-black/5 data-checked:ring-2 data-checked:ring-inset data-checked:ring-primary dark:data-checked:ring-primary" />;`,
+  );
+
+  indicators.valid(
+    "allows an inset with fewer matching bracketed state conditions",
+    `const value = cn("has-[:focus-visible]:ring-inset", "dark:has-[:focus-visible]:ring-2");`,
+  );
+
+  indicators.invalid(
+    "does not borrow an inset that only applies in dark mode",
+    `const el = <button className="ring-1 data-checked:ring-primary dark:data-checked:ring-inset" />;`,
+  );
+
+  indicators.invalid(
+    "does not borrow a conditional covering inset",
+    `const value = cn("dark:data-checked:ring-2", active && "data-checked:ring-inset");`,
+  );
+
+  indicators.invalid(
+    "preserves explicit outset diagnostics alongside covering insets",
+    `const el = <button className="data-checked:ring-inset dark:data-checked:ring-2 dark:data-checked:ring-outset" />;`,
+  );
+
+  indicators.invalid(
+    "does not borrow an inset from another arbitrary descendant target",
+    `const el = <button className="[&_span]:focus-visible:ring-inset dark:[&_button]:focus-visible:ring-2" />;`,
   );
 
   indicators.valid(
@@ -335,6 +380,156 @@ describe("t3code/no-outset-state-indicators", () => {
   indicators.valid(
     "matches outline widths and inward offsets across template layout expressions",
     "const className = `focus-visible:outline-3 ${layout} focus-visible:-outline-offset-3`;",
+  );
+
+  indicators.valid(
+    "matches guaranteed ring companions across composition arguments",
+    `const value = cn("focus-visible:ring-2", "focus-visible:ring-inset");`,
+  );
+
+  indicators.invalid(
+    "checks a base ring width used by a focus color",
+    `const el = <button className="ring-1 ring-ring/50 focus:ring-ring" />;`,
+  );
+
+  indicators.invalid(
+    "checks a base ring width used by a selected color across composer arguments",
+    `const value = cn("ring-1", "data-selected:ring-primary");`,
+  );
+
+  indicators.valid(
+    "allows base ring geometry with a guaranteed base inset",
+    `const value = cn("ring-1 ring-inset", "focus:ring-ring");`,
+  );
+
+  indicators.valid(
+    "allows base ring geometry with an inset under its color state",
+    `const el = <button className="ring-1 focus:ring-ring focus:ring-inset" />;`,
+  );
+
+  indicators.invalid(
+    "does not borrow a conditional base inset for a state ring color",
+    `const value = cn("ring-1 focus:ring-ring", active && "ring-inset");`,
+  );
+
+  indicators.invalid(
+    "checks a conditional base ring width with a guaranteed state color",
+    `const value = cn(active && "ring-1", "focus:ring-ring");`,
+  );
+
+  indicators.valid(
+    "preserves decorative base rings without a focus or selection state",
+    `const el = <button className="ring-1 ring-border hover:ring-primary" />;`,
+  );
+
+  indicators.invalid(
+    "checks a wider base outline used by a focus color",
+    `const el = <button className="outline-3 focus:outline-ring" />;`,
+  );
+
+  indicators.invalid(
+    "rejects unknown base outline widths used by a focus color",
+    `const el = <button className="outline-(length:--focus-width) focus:outline-ring" />;`,
+  );
+
+  indicators.invalid(
+    "rejects conditional unknown base outline widths used by a focus color",
+    `const value = cn(active && "outline-(length:--focus-width)", "focus:outline-ring");`,
+  );
+
+  indicators.valid(
+    "allows the bare base outline using the shared inward default",
+    `const el = <button className="outline focus:outline-ring" />;`,
+  );
+
+  indicators.valid(
+    "allows a wider base outline with its matching inward offset",
+    `const value = cn("outline-3", "focus:outline-ring focus:-outline-offset-3");`,
+  );
+
+  indicators.valid(
+    "allows state outline colors using the shared inward default",
+    `const el = <button className="outline-2 focus:outline-ring" />;`,
+  );
+
+  indicators.invalid(
+    "checks a conditional wider base outline with a guaranteed state color",
+    `const value = cn(active && "outline-3", "focus:outline-ring");`,
+  );
+
+  indicators.valid(
+    "matches guaranteed companions across nested arrays and composition calls",
+    `const value = twMerge(clsx(["focus-visible:ring-2", ["rounded"]]), "focus-visible:ring-inset");`,
+  );
+
+  indicators.valid(
+    "matches a conditional width with an unconditional inset companion",
+    `const value = cn(active && "focus-visible:ring-2", "focus-visible:ring-inset");`,
+  );
+
+  indicators.valid(
+    "matches guaranteed outline geometry across composition arguments",
+    `const value = classNames("focus-visible:outline-3", "focus-visible:-outline-offset-3");`,
+  );
+
+  indicators.valid(
+    "recognizes fractional and typed pixel outline widths",
+    `const el = <button className="focus-visible:outline-[.5px] focus-visible:-outline-offset-[.5px] data-selected:outline-[length:3px] data-selected:-outline-offset-3" />;`,
+  );
+
+  indicators.invalid(
+    "does not borrow a conditional inset companion",
+    `const value = cn("focus-visible:ring-2", active && "focus-visible:ring-inset");`,
+  );
+
+  indicators.invalid(
+    "does not borrow an inset companion from another conditional branch",
+    `const value = cn(active ? "focus-visible:ring-2" : "focus-visible:ring-inset");`,
+  );
+
+  indicators.invalid(
+    "does not borrow an inset companion from a conditional class map",
+    `const value = cn("focus-visible:ring-2", { "focus-visible:ring-inset": active });`,
+  );
+
+  indicators.invalid(
+    "does not combine separate cva variants",
+    `const value = cva("rounded", { variants: { tone: { active: "focus-visible:ring-2", inactive: "focus-visible:ring-inset" } } });`,
+  );
+
+  indicators.invalid(
+    "does not borrow a conditional inward outline offset",
+    `const value = cn("focus-visible:outline-3", active && "focus-visible:-outline-offset-3");`,
+  );
+
+  indicators.invalid(
+    "checks wider outline geometry across composition arguments",
+    `const value = cn("focus-visible:outline-4", "focus-visible:-outline-offset-2");`,
+  );
+
+  indicators.invalid(
+    "checks an outset override across composition arguments",
+    `const value = cn("ring-outset!", "focus-visible:ring-2 focus-visible:ring-inset");`,
+  );
+
+  indicators.invalid(
+    "rejects percentage outline widths that the default offset cannot cover",
+    `const el = <button className="focus-visible:outline-[10%]" />;`,
+  );
+
+  indicators.invalid(
+    "rejects math outline widths that the default offset cannot cover",
+    `const el = <button className="focus-visible:outline-[calc(2px+1em)]" />;`,
+  );
+
+  indicators.invalid(
+    "rejects stepped math outline widths that the default offset cannot cover",
+    `const el = <button className="data-selected:outline-[round(up,3px,2px)]" />;`,
+  );
+
+  indicators.valid(
+    "preserves untyped variable and functional colors",
+    `const el = <button className="focus-visible:ring-[var(--focus-color)] focus-visible:outline-[oklch(0.7_0.2_200)] focus-visible:ring-[color-mix(in_oklab,red,blue)]" />;`,
   );
 
   indicators.valid(

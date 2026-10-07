@@ -174,6 +174,7 @@ export type ResolvedAsset =
       readonly fileName?: string;
       readonly mimeType?: string;
       readonly file?: OpenMediaFile;
+      readonly isAttachment?: boolean;
     }
   | {
       readonly kind: "bytes";
@@ -827,6 +828,7 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
       ? ({
           kind: "file",
           path: attachmentPath,
+          isAttachment: true,
           ...(claims.download ? { download: true } : {}),
           ...(claims.fileName !== undefined ? { fileName: claims.fileName } : {}),
           ...(claims.mimeType !== undefined ? { mimeType: claims.mimeType } : {}),

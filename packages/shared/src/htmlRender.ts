@@ -321,11 +321,14 @@ export function htmlRenderThemeMessage(theme: HtmlRenderTheme) {
 
 // The frame scrolls a page taller than itself, but a scrollbar inside the
 // reply reads as a box within the thread, so it stays hidden.
-// Keep the default focus outline inside frame edges; authored page styles still win.
+// Authored pages choose their focus color; the frame owns containment.
 const BASE_CSS =
   "html{background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}" +
   "html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}" +
   ":where(:focus-visible){outline:2px solid var(--ring);outline-offset:-2px}@media(forced-colors:active){:where(:focus-visible){outline-color:Highlight}}";
+
+const FOCUS_STYLE =
+  '<style id="t3-focus">:where(:focus-visible){outline-style:solid!important;outline-width:2px!important;outline-offset:-2px!important}</style>';
 
 function rootRule(theme: HtmlRenderTheme): string {
   const declarations = Object.entries(theme.variables)
@@ -357,16 +360,21 @@ function bootstrapMarkup(markup: string): string {
       ? ""
       : '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<style id="t3-theme">${defaultCss}</style>`,
+    FOCUS_STYLE,
     `<script>${BOOTSTRAP_SCRIPT}</script>`,
   ].join("");
 }
 
 // Comments, raw text, and template contents are blanked to the same length,
 // so offsets still line up and inert tags cannot receive the bootstrap.
-const blankNonMarkup = (html: string) => {
+// Focus refresh keeps real style openings visible to locate the generated marker.
+const blankNonMarkup = (html: string, keepStyleTags = false) => {
   const scan = html.replace(
     /<!--[\s\S]*?(?:-->|$)|<(script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)\b[\s\S]*?(?:<\/\1\s*>|$)|<plaintext\b[\s\S]*$/gi,
-    (match) => " ".repeat(match.length),
+    (match) => {
+      const opening = keepStyleTags ? /^<style\b[^>]*>/i.exec(match)?.[0] ?? "" : "";
+      return opening + " ".repeat(match.length - opening.length);
+    },
   );
   const parts: string[] = [];
   let depth = 0;
@@ -388,6 +396,18 @@ const blankNonMarkup = (html: string) => {
   parts.push(scan.slice(at));
   return parts.join("");
 };
+
+/** Refreshes a generated page's focus policy without changing its stored bytes or theme bootstrap. */
+export function injectHtmlRenderFocusStyles(html: string): string | undefined {
+  const scan = blankNonMarkup(html, true);
+  const theme =
+    /<style\b[^>]*\sid\s*=\s*(?:"t3-theme"|'t3-theme'|t3-theme(?=[\s>]))[^>]*>/i.exec(scan);
+  if (!theme) return undefined;
+  if (/<style\b[^>]*\sid\s*=\s*(?:"t3-focus"|'t3-focus'|t3-focus(?=[\s>]))[^>]*>/i.test(scan)) {
+    return html;
+  }
+  return html.slice(0, theme.index) + FOCUS_STYLE + html.slice(theme.index);
+}
 
 /**
  * Inserts the theme bootstrap at the start of the document head, so a page's

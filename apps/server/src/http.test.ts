@@ -311,6 +311,84 @@ it.layer(
   );
 });
 
+describe("generated HTML focus protection", () => {
+  it.effect("refreshes stored pages and returns matching GET and HEAD metadata", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-html-focus-" });
+      const file = path.join(directory, "render.html");
+      const original =
+        '<!doctype html><head><style id="t3-theme">:root{--ring:blue}</style></head><body><button>édit</button></body>';
+      const policy =
+        '<style id="t3-focus">:where(:focus-visible){outline-style:solid!important;outline-width:2px!important;outline-offset:-2px!important}</style>';
+      const expected = original.replace('<style id="t3-theme">', `${policy}<style id="t3-theme">`);
+      // Older pages get refreshed; pages stored with the policy are not injected twice.
+      for (const stored of [original, expected]) {
+        yield* fs.writeFileString(file, stored);
+        const get = HttpServerResponse.toWeb(
+          yield* assetFileResponse({ path: file, isAttachment: true }),
+        );
+        const head = HttpServerResponse.toWeb(
+          yield* assetFileResponse({ path: file, isAttachment: true }, undefined, undefined, "HEAD"),
+        );
+        expect(get.status).toBe(200);
+        expect(head.status).toBe(200);
+        expect(get.headers.get("content-type")).toBe("text/html; charset=utf-8");
+        expect(get.headers.get("content-security-policy")).toBe(
+          "sandbox allow-scripts allow-forms allow-popups",
+        );
+        expect(get.headers.get("cache-control")).toBe("private, no-store");
+        expect(head.headers.get("cache-control")).toBe("private, no-store");
+        const bytes = new TextEncoder().encode(expected);
+        expect(get.headers.get("content-length")).toBe(String(bytes.byteLength));
+        expect(head.headers.get("content-length")).toBe(String(bytes.byteLength));
+        expect(yield* Effect.promise(() => get.arrayBuffer())).toEqual(bytes.buffer);
+        expect(yield* Effect.promise(() => head.text())).toBe("");
+        expect(yield* fs.readFileString(file)).toBe(stored);
+      }
+    }).pipe(Effect.provide(layerFileResponse)),
+  );
+
+  it.effect("preserves ordinary HTML, workspace pages, downloads and guarded descriptors", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-html-focus-preserve-" });
+      const filePath = path.join(directory, "page.html");
+      const ordinary = "<!doctype html><body><button>edit</button></body>";
+      const generated = '<style id="t3-theme">:root{--ring:blue}</style><button>edit</button>';
+      for (const [contents, download, isAttachment] of [
+        [ordinary, false, true],
+        [generated, true, true],
+        [generated, false, false],
+      ] as const) {
+        yield* fs.writeFileString(filePath, contents);
+        const response = HttpServerResponse.toWeb(
+          yield* assetFileResponse({ path: filePath, download, isAttachment }),
+        );
+        expect(response.headers.get("cache-control")).toBe("private, max-age=3600");
+        expect(yield* Effect.promise(() => response.text())).toBe(contents);
+        expect(yield* fs.readFileString(filePath)).toBe(contents);
+      }
+      yield* fs.writeFileString(filePath, generated);
+      const canonicalPath = yield* fs.realPath(filePath);
+      const file = yield* openMediaFile(canonicalPath);
+      if (!file) throw new Error("Expected an opened HTML file");
+      const response = HttpServerResponse.toWeb(
+        yield* assetFileResponse({
+          path: canonicalPath,
+          file,
+          mimeType: "text/html",
+          isAttachment: true,
+        }),
+      );
+      expect(response.headers.get("cache-control")).toBe("private, max-age=3600");
+      expect(yield* Effect.promise(() => response.text())).toBe(generated);
+    }).pipe(Effect.provide(layerFileResponse)),
+  );
+});
+
 describe("video asset byte ranges", () => {
   it.effect("uses current descriptor metadata after an in-place truncate or extension", () =>
     Effect.gen(function* () {

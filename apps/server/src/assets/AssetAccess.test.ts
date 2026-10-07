@@ -931,6 +931,7 @@ describe("AssetAccess", () => {
       expect(yield* resolveAsset(token, "ignored.png")).toEqual({
         kind: "file",
         path: attachmentPath,
+        isAttachment: true,
       });
     }).pipe(Effect.provide(layerTest)),
   );
@@ -961,6 +962,7 @@ describe("AssetAccess", () => {
       ).toEqual({
         kind: "file",
         path: attachmentPath,
+        isAttachment: true,
         fileName: "demo.mp4",
         mimeType: "video/mp4",
       });
@@ -1009,6 +1011,7 @@ describe("AssetAccess", () => {
       ).toEqual({
         kind: "file",
         path: attachmentPath,
+        isAttachment: true,
         fileName: "report.pdf",
         mimeType: "application/pdf",
       });
@@ -1041,6 +1044,7 @@ describe("AssetAccess", () => {
         ).toEqual({
           kind: "file",
           path: attachmentPath,
+          isAttachment: true,
           fileName: "recording.wav",
           mimeType: disposition === "inline" ? "audio/wav" : "application/octet-stream",
           ...(disposition === "attachment" ? { download: true } : {}),

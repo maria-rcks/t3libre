@@ -325,6 +325,50 @@ function positionBox(node: HTMLElement, rect: PreviewAnnotationRect): void {
   node.style.height = `${rect.height}px`;
 }
 
+/** Nested SVG client dimensions are zero; map its viewport back through the viewBox. */
+function nestedSvgViewportRect(element: SVGSVGElement): DOMRect {
+  const matrix = element.getScreenCTM();
+  if (!matrix) return element.getBoundingClientRect();
+  let x = 0;
+  let y = 0;
+  let width = element.width.animVal.value;
+  let height = element.height.animVal.value;
+  if (width <= 0 || height <= 0) return new DOMRect();
+  const viewBox = element.viewBox.animVal;
+  if (viewBox.width > 0 && viewBox.height > 0) {
+    x = viewBox.x;
+    y = viewBox.y;
+    const ratio = element.preserveAspectRatio.animVal;
+    if (ratio.align === SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_NONE) {
+      width = viewBox.width;
+      height = viewBox.height;
+    } else {
+      const scale = (ratio.meetOrSlice === SVGPreserveAspectRatio.SVG_MEETORSLICE_SLICE
+        ? Math.max
+        : Math.min)(width / viewBox.width, height / viewBox.height);
+      width /= scale;
+      height /= scale;
+      const alignment = ratio.align - SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_XMINYMIN;
+      x -= ((width - viewBox.width) * (alignment % 3)) / 2;
+      y -= ((height - viewBox.height) * Math.floor(alignment / 3)) / 2;
+    }
+  }
+  const points = [
+    new DOMPoint(x, y),
+    new DOMPoint(x + width, y),
+    new DOMPoint(x, y + height),
+    new DOMPoint(x + width, y + height),
+  ].map((point) => point.matrixTransform(matrix));
+  const left = Math.min(...points.map((point) => point.x));
+  const top = Math.min(...points.map((point) => point.y));
+  return new DOMRect(
+    left,
+    top,
+    Math.max(...points.map((point) => point.x)) - left,
+    Math.max(...points.map((point) => point.y)) - top,
+  );
+}
+
 /** Paint the visible portion without changing the element bounds used in the annotation. */
 function visibleElementRect(element: Element): PreviewAnnotationRect {
   const rect = element.getBoundingClientRect();
@@ -355,12 +399,21 @@ function visibleElementRect(element: Element): PreviewAnnotationRect {
       clips = false;
     }
     if (!clipThisAncestor) continue;
+    if (
+      ancestor instanceof SVGElement &&
+      !(ancestor instanceof SVGSVGElement || ancestor instanceof SVGForeignObjectElement)
+    )
+      continue;
     const paintClip =
       style.contentVisibility === "auto" || /(?:paint|strict|content)/.test(style.contain);
     const clipsX = paintClip || style.overflowX !== "visible";
     const clipsY = paintClip || style.overflowY !== "visible";
     if (!clipsX && !clipsY) continue;
-    const bounds = ancestor.getBoundingClientRect();
+    const svgViewport =
+      ancestor instanceof SVGSVGElement && ancestor.ownerSVGElement
+        ? nestedSvgViewportRect(ancestor)
+        : null;
+    const bounds = svgViewport ?? ancestor.getBoundingClientRect();
     const scaleX = ancestor.offsetWidth > 0 ? bounds.width / ancestor.offsetWidth : 1;
     const scaleY = ancestor.offsetHeight > 0 ? bounds.height / ancestor.offsetHeight : 1;
     const clipMargin = style.getPropertyValue("overflow-clip-margin").split(/\s+/);
@@ -368,7 +421,7 @@ function visibleElementRect(element: Element): PreviewAnnotationRect {
     const clipBox = clipMargin[0];
     if (clipsX) {
       const scrollStart = bounds.left + ancestor.clientLeft * scaleX;
-      const scrollEnd = scrollStart + ancestor.clientWidth * scaleX;
+      const scrollEnd = svgViewport?.right ?? scrollStart + ancestor.clientWidth * scaleX;
       let start = scrollStart;
       let end = scrollEnd;
       if (style.overflowX === "clip" || paintClip) {
@@ -391,7 +444,7 @@ function visibleElementRect(element: Element): PreviewAnnotationRect {
     }
     if (clipsY) {
       const scrollStart = bounds.top + ancestor.clientTop * scaleY;
-      const scrollEnd = scrollStart + ancestor.clientHeight * scaleY;
+      const scrollEnd = svgViewport?.bottom ?? scrollStart + ancestor.clientHeight * scaleY;
       let start = scrollStart;
       let end = scrollEnd;
       if (style.overflowY === "clip" || paintClip) {
