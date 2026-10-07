@@ -191,12 +191,14 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
     }
     const html = source === undefined ? undefined : injectHtmlRenderFocusStyles(source);
     if (html !== undefined) {
-      const bytes = new TextEncoder().encode(html);
       headers["Cache-Control"] = "private, no-store";
+      if (method === "HEAD") {
+        headers["Content-Length"] = String(Buffer.byteLength(html, "utf8"));
+        return HttpServerResponse.empty({ status: 200, headers });
+      }
+      const bytes = new TextEncoder().encode(html);
       headers["Content-Length"] = String(bytes.byteLength);
-      return method === "HEAD"
-        ? HttpServerResponse.empty({ status: 200, headers })
-        : HttpServerResponse.uint8Array(bytes, { headers });
+      return HttpServerResponse.uint8Array(bytes, { headers });
     }
   }
   const mediaInfo = mediaFile ? yield* statMediaFile(asset.path, mediaFile) : undefined;
