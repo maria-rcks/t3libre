@@ -753,6 +753,7 @@ function SidebarDragBoundary(props: {
   marker: "pinned-header" | "pinned-divider";
   label: string;
   visible: boolean;
+  showDivider?: boolean;
   isDropTarget: boolean;
 }) {
   return (
@@ -761,6 +762,12 @@ function SidebarDragBoundary(props: {
       data-testid={`sidebar-${props.marker}`}
       className="pointer-events-none relative mx-0.5 -mb-px h-0"
     >
+      {props.showDivider && !props.visible ? (
+        <span
+          aria-hidden
+          className="absolute inset-x-2 top-0 h-0.5 bg-sidebar-muted-foreground/60"
+        />
+      ) : null}
       {props.visible ? (
         <div className="sidebar-drag-boundary-label absolute inset-x-2 top-1 flex h-4 items-center gap-2">
           <span
@@ -802,6 +809,7 @@ function SidebarSectionHeader(props: {
         ? "snoozed"
         : "settled";
   const snoozed = shelf === "snoozed";
+  const Icon = snoozed ? AlarmClockIcon : shelf === "working" ? CircleDashedIcon : CircleCheckIcon;
   return (
     <SortableSidebarMarker
       marker={props.marker}
@@ -811,6 +819,8 @@ function SidebarSectionHeader(props: {
       <CollapsibleSectionHeader
         onClick={props.toggle.onToggle}
         expanded={props.toggle.expanded}
+        icon={<Icon aria-hidden className="size-3 shrink-0" />}
+        lineStyle="label"
         tone={
           props.isDropTarget ? "accent" : props.dragging ? "emphasized" : snoozed ? "info" : "muted"
         }
@@ -5396,6 +5406,7 @@ export default function Sidebar() {
                                 key="pinned-divider"
                                 marker="pinned-divider"
                                 label="Active"
+                                showDivider={pinnedThreads.length > 0}
                                 visible={from !== null}
                                 isDropTarget={dragTargetSection === "active"}
                               />,
