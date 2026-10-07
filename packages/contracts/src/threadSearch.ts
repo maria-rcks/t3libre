@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 
 import {
   IsoDateTime,
+  MessageId,
   ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -40,3 +41,22 @@ export class OrchestrationSearchThreadsError extends Schema.TaggedError<Orchestr
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}
+
+/** One occurrence at a time keeps navigation bounded even in very long threads. */
+export const OrchestrationFindThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  query: TrimmedString.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  index: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+});
+export type OrchestrationFindThreadInput = typeof OrchestrationFindThreadInput.Type;
+
+export const OrchestrationFindThreadResult = Schema.Struct({
+  total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  match: Schema.NullOr(
+    Schema.Struct({
+      messageId: MessageId,
+      occurrence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    }),
+  ),
+});
+export type OrchestrationFindThreadResult = typeof OrchestrationFindThreadResult.Type;

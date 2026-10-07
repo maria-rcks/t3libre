@@ -2307,3 +2307,8 @@ code {
     }
   }
 }
+
+::highlight(t3-thread-find) {
+  background-color: color-mix(in srgb, var(--primary) 35%, transparent);
+  color: inherit;
+}

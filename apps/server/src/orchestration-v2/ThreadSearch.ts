@@ -1,5 +1,8 @@
 import {
   IsoDateTime,
+  MessageId,
+  type OrchestrationFindThreadInput,
+  type OrchestrationFindThreadResult,
   OrchestrationThreadSearchSource,
   type OrchestrationSearchThreadsInput,
   type OrchestrationSearchThreadsResult,
@@ -68,6 +71,9 @@ function buildSearchSnippet(text: string, query: string): string {
 export class ThreadSearch extends Context.Service<
   ThreadSearch,
   {
+    readonly find: (
+      input: OrchestrationFindThreadInput,
+    ) => Effect.Effect<OrchestrationFindThreadResult, ThreadSearchError>;
     readonly search: (
       input: OrchestrationSearchThreadsInput,
     ) => Effect.Effect<OrchestrationSearchThreadsResult, ThreadSearchError>;
@@ -162,7 +168,67 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  return ThreadSearch.of({ search });
+  const findRow = SqlSchema.findAll({
+    Request: Schema.Struct({ threadId: ThreadId, query: Schema.String, index: Schema.Int }),
+    Result: Schema.Struct({
+      total: Schema.Int,
+      messageId: Schema.NullOr(MessageId),
+      occurrence: Schema.NullOr(Schema.Int),
+    }),
+    execute: ({ threadId, query, index }) => sql`
+      WITH messages AS (
+        SELECT messages.message_id, messages.created_at,
+          lower(json_extract(messages.payload_json, '$.text')) AS text
+        FROM orchestration_v2_projection_messages AS messages
+        INNER JOIN orchestration_v2_projection_threads AS threads ON threads.thread_id = messages.thread_id
+        INNER JOIN projection_projects AS projects ON projects.project_id = threads.project_id
+        WHERE messages.thread_id = ${threadId}
+          AND threads.deleted_at IS NULL AND projects.deleted_at IS NULL
+          AND messages.role IN ('user', 'assistant')
+          AND json_extract(messages.payload_json, '$.notification') IS NULL
+      ), counts AS (
+        SELECT message_id, created_at,
+          (length(text) - length(replace(text, lower(${query}), ''))) / length(${query}) AS count
+        FROM messages
+      ), positions AS (
+        SELECT message_id, count,
+          sum(count) OVER (ORDER BY created_at, message_id ROWS UNBOUNDED PRECEDING) AS end_index
+        FROM counts WHERE count > 0
+      ), total AS (
+        SELECT coalesce(sum(count), 0) AS count FROM counts
+      )
+      SELECT total.count AS total, positions.message_id AS "messageId",
+        ${index} - (positions.end_index - positions.count) AS occurrence
+      FROM total LEFT JOIN positions
+        ON ${index} >= positions.end_index - positions.count AND ${index} < positions.end_index
+    `,
+  });
+
+  const find: ThreadSearch["Service"]["find"] = Effect.fn("ThreadSearch.find")(function* (input) {
+    const rows = yield* findRow({
+      threadId: input.threadId,
+      query: input.query,
+      index: input.index ?? 0,
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ThreadSearchError({
+            operation: Schema.isSchemaError(cause) ? "decode" : "query",
+            cause,
+          }),
+      ),
+    );
+    const row = rows[0];
+    return {
+      total: row?.total ?? 0,
+      match:
+        row?.messageId != null && row.occurrence !== null
+          ? { messageId: row.messageId, occurrence: row.occurrence }
+          : null,
+    };
+  });
+
+  return ThreadSearch.of({ search, find });
 });
 
 export const layer = Layer.effect(ThreadSearch, make);

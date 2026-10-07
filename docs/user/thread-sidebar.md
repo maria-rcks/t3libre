@@ -177,6 +177,10 @@ On web and desktop, open the command palette with `Cmd/Ctrl+K` to search threads
 across connected environments. Message search starts after two characters and
 includes your messages and final agent responses.
 
+Use `Cmd/Ctrl+F` or **Find in conversation** in the command palette to search the
+current thread, including older messages. `Enter` moves to the next match,
+`Shift+Enter` moves to the previous match, and `Escape` closes find.
+
 Use **Settings → Keybindings** to find or customize shortcuts for searching files
 and copying a thread reference. A copied reference uses the thread's pull request
 link when available, otherwise its thread ID. See [keybindings](./keybindings.md)

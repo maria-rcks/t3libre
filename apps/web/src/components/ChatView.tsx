@@ -229,7 +229,8 @@ import {
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
-import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { ThreadFind, type ThreadFindTarget } from "./chat/ThreadFind";
+import { isCommandPaletteOpen, onOpenThreadFind } from "../commandPaletteBus";
 import { subscribeSnapShotComposerFocus } from "../lib/desktopSnapShot";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
@@ -1543,6 +1544,20 @@ export default function ChatView(props: ChatViewProps) {
     [environmentId, threadId],
   );
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
+  const [findThreadKey, setFindThreadKey] = useState<string | null>(null);
+  const [findTarget, setFindTarget] = useState<ThreadFindTarget | null>(null);
+  useEffect(() => {
+    setFindThreadKey(null);
+    setFindTarget(null);
+  }, [routeThreadKey]);
+  useEffect(
+    () =>
+      onOpenThreadFind((target) => {
+        if (routeKind === "server" && scopedThreadKey(target) === routeThreadKey)
+          setFindThreadKey(routeThreadKey);
+      }),
+    [routeKind, routeThreadKey],
+  );
   const currentRouteThreadKeyRef = useRef<string | null>(routeThreadKey);
   useLayoutEffect(() => {
     currentRouteThreadKeyRef.current = routeThreadKey;
@@ -7818,6 +7833,17 @@ export default function ChatView(props: ChatViewProps) {
       });
       if (!command) return;
 
+      if (command === "thread.find" && routeKind === "server") {
+        event.preventDefault();
+        event.stopPropagation();
+        setFindThreadKey(routeThreadKey);
+        window.requestAnimationFrame(() =>
+          document
+            .querySelector<HTMLInputElement>('input[aria-label="Find in conversation"]')
+            ?.focus(),
+        );
+        return;
+      }
       if (command === "thread.copyReference") {
         event.preventDefault();
         event.stopPropagation();
@@ -8079,6 +8105,8 @@ export default function ChatView(props: ChatViewProps) {
     supportsSettlement,
     confirmAndUnpinThread,
     copyActiveThreadReference,
+    routeKind,
+    routeThreadKey,
     getShortcutContext,
     toggleRightPanel,
     toggleThreadPanel,
@@ -11017,6 +11045,19 @@ export default function ChatView(props: ChatViewProps) {
           />
         </header>
 
+        {routeKind === "server" && findThreadKey === routeThreadKey ? (
+          <ThreadFind
+            key={routeThreadKey}
+            threadRef={routeThreadRef}
+            onTarget={setFindTarget}
+            onClose={() => {
+              setFindThreadKey(null);
+              setFindTarget(null);
+              focusComposer();
+            }}
+          />
+        ) : null}
+
         {/* Main content area with optional plan sidebar */}
         <div className="relative flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
@@ -11067,8 +11108,20 @@ export default function ChatView(props: ChatViewProps) {
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
+                findTarget={
+                  paintOnlyDisplayedTimeline || findThreadKey !== routeThreadKey ? null : findTarget
+                }
                 citationRequest={paintOnlyDisplayedTimeline ? null : citationRequest}
                 citationHistoryLoading={threadDetailLoading}
+                {...(!paintOnlyDisplayedTimeline && threadHistoryControls?.hasMoreHistory
+                  ? {
+                      loadEarlier: {
+                        loading: serverThreadHistory.loading,
+                        cursor: serverThreadHistory.historyCursor,
+                        onLoadEarlier: threadHistoryControls.onLoadEarlier,
+                      },
+                    }
+                  : {})}
                 {...(!paintOnlyDisplayedTimeline
                   ? {
                       onCiteAssistantText: citeAssistantText,

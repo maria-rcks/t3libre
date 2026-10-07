@@ -1368,6 +1368,33 @@ describe("composer and pull request shortcuts", () => {
   }
 
   it.each(["MacIntel", "Win32", "Linux"])(
+    "finds the current conversation without taking terminal or preview find on %s",
+    (platform) => {
+      const input = event({
+        key: "f",
+        metaKey: platform === "MacIntel",
+        ctrlKey: platform !== "MacIntel",
+      });
+      assert.strictEqual(
+        resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { terminalFocus: false, previewFocus: false, draftThreadRoute: false },
+        }),
+        "thread.find",
+      );
+      for (const context of [
+        { terminalFocus: true },
+        { previewFocus: true },
+        { draftThreadRoute: true },
+      ]) {
+        assert.isNull(
+          resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context }),
+        );
+      }
+    },
+  );
+
+  it.each(["MacIntel", "Win32", "Linux"])(
     "edits the last queued message with Alt+ArrowUp from the composer on %s",
     (platform) => {
       const input = event({ key: "ArrowUp", altKey: true });

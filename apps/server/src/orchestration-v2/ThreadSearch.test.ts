@@ -6,6 +6,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2Notification,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -91,7 +92,11 @@ const message = (
   id: string,
   role: "user" | "assistant" | "system",
   text: string,
-  options: { readonly minute?: number; readonly streaming?: boolean } = {},
+  options: {
+    readonly minute?: number;
+    readonly streaming?: boolean;
+    readonly notification?: OrchestrationV2Notification;
+  } = {},
 ): OrchestrationV2DomainEvent => ({
   id: EventId.make(`message:${id}`),
   type: "message.updated",
@@ -111,6 +116,7 @@ const message = (
     streaming: options.streaming ?? false,
     createdAt: at(options.minute ?? 1),
     updatedAt: at(options.minute ?? 1),
+    ...(options.notification ? { notification: options.notification } : {}),
   },
 });
 
@@ -172,6 +178,64 @@ it.layer(layerTest)("ThreadSearch", (it) => {
       assert.lengthOf((yield* search.search({ query: "needle", limit: 1 })).matches, 1);
       // LIKE wildcards in the query match literally.
       assert.deepEqual((yield* search.search({ query: "ne%le" })).matches, []);
+    }),
+  );
+
+  it.effect("finds every literal occurrence across persisted current-thread messages", () =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const search = yield* ThreadSearch.ThreadSearch;
+      const project = ProjectId.make("project:find");
+      const threadId = ThreadId.make("thread:find");
+      const other = ThreadId.make("thread:other");
+      yield* createProject(project);
+      yield* Effect.forEach(
+        [
+          thread(threadId, project, { archivedAt: at(5) }),
+          thread(other, project),
+          message(threadId, "old", "user", "Needle needle", { minute: 1 }),
+          message(threadId, "new", "assistant", "needle %_ needle", { minute: 2 }),
+          message(threadId, "ignored", "system", "needle"),
+          message(threadId, "notification", "user", "needle notification-only", {
+            notification: {
+              source: { kind: "background_task" },
+              outcome: "completed",
+              summary: "Background activity finished",
+            },
+          }),
+          message(other, "other", "assistant", "needle"),
+        ],
+        projections.apply,
+        { discard: true },
+      );
+      assert.deepEqual(yield* search.find({ threadId, query: "NEEDLE" }), {
+        total: 4,
+        match: { messageId: MessageId.make("old"), occurrence: 0 },
+      });
+      assert.deepEqual(yield* search.find({ threadId, query: "needle", index: 1 }), {
+        total: 4,
+        match: { messageId: MessageId.make("old"), occurrence: 1 },
+      });
+      assert.deepEqual(yield* search.find({ threadId, query: "needle", index: 3 }), {
+        total: 4,
+        match: { messageId: MessageId.make("new"), occurrence: 1 },
+      });
+      assert.deepEqual(yield* search.find({ threadId, query: "needle", index: 4 }), {
+        total: 4,
+        match: null,
+      });
+      assert.deepEqual(yield* search.find({ threadId, query: "%_" }), {
+        total: 1,
+        match: { messageId: MessageId.make("new"), occurrence: 0 },
+      });
+      assert.deepEqual(yield* search.find({ threadId, query: "missing" }), {
+        total: 0,
+        match: null,
+      });
+      assert.deepEqual(yield* search.find({ threadId, query: "notification-only" }), {
+        total: 0,
+        match: null,
+      });
     }),
   );
 

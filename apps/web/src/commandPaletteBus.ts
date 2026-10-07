@@ -1,4 +1,8 @@
-import type { EnvironmentId, PullRequestLinkedThreadsResult } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  PullRequestLinkedThreadsResult,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 
 export interface CommandPaletteLinkedThreads {
   readonly environmentId: EnvironmentId;
@@ -36,4 +40,14 @@ export function isCommandPaletteOpen(): boolean {
   return (
     typeof document !== "undefined" && document.querySelector("[data-command-palette]") !== null
   );
+}
+
+export function openThreadFind(threadRef: ScopedThreadRef): void {
+  window.dispatchEvent(new CustomEvent("t3code:find-thread", { detail: threadRef }));
+}
+
+export function onOpenThreadFind(listener: (threadRef: ScopedThreadRef) => void): () => void {
+  const handler = (event: Event) => listener((event as CustomEvent<ScopedThreadRef>).detail);
+  window.addEventListener("t3code:find-thread", handler);
+  return () => window.removeEventListener("t3code:find-thread", handler);
 }
