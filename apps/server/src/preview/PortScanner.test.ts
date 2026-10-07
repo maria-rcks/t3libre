@@ -613,6 +613,86 @@ effectIt.effect(
   },
 );
 
+for (const platform of ["linux", "win32"] as const) {
+  for (const ownedFirst of [true, false]) {
+    effectIt.effect(
+      `does not probe mixed-ownership ports on ${platform} with the owned listener ${ownedFirst ? "first" : "last"}`,
+      () => {
+        const port = LSOF_TEST_PORT;
+        const owned =
+          platform === "win32" ? `::1|${port}|1234|node` : `p1234\ncnode\nn[::1]:${port}`;
+        const unowned =
+          platform === "win32"
+            ? `127.0.0.1|${port}|5678|binary`
+            : `p5678\ncbinary\nn127.0.0.1:${port}`;
+        let stdout = (ownedFirst ? [owned, unowned] : [unowned, owned]).join("\n");
+        let mixedOwnership = true;
+        const requests: string[] = [];
+        const explicitUrl = `http://[::1]:${port}/app?mode=preview`;
+        const fetchFn = ((input: Parameters<typeof globalThis.fetch>[0]) => {
+          const url = String(input);
+          requests.push(url);
+          if (mixedOwnership && url !== explicitUrl) {
+            return Promise.reject(new TypeError("binary listener"));
+          }
+          return Promise.resolve(
+            new Response("app", { headers: { "content-type": "text/html" } }),
+          );
+        }) as typeof globalThis.fetch;
+        const layer = PortScanner.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(ProcessRunner.ProcessRunner, {
+                run: () =>
+                  Effect.succeed({
+                    stdout,
+                    stderr: "",
+                    code: null,
+                    timedOut: false,
+                    stdoutTruncated: false,
+                    stderrTruncated: false,
+                    stdoutInvalidUtf8: false,
+                    stderrInvalidUtf8: false,
+                  }),
+              }),
+              Layer.succeed(HostProcessPlatform, platform),
+              FetchHttpClient.layer.pipe(
+                Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchFn)),
+              ),
+            ),
+          ),
+        );
+
+        return Effect.gen(function* () {
+          const scanner = yield* PortScanner.PortDiscovery;
+          yield* scanner.registerTerminalProcesses({
+            threadId: "scanner-thread",
+            terminalId: "scanner-terminal",
+            processIds: [1234],
+          });
+          expect(yield* scanner.scan()).toHaveLength(0);
+          expect(requests).toEqual([]);
+          const configured = yield* scanner.scan([explicitUrl]);
+          expect(configured).toHaveLength(1);
+          expect(configured[0]?.url).toBe(explicitUrl);
+          expect(configured[0]?.terminal).toBeNull();
+          expect(requests).toEqual([explicitUrl]);
+
+          stdout = `${owned}\n${owned}`;
+          mixedOwnership = false;
+          expect(yield* scanner.scan()).toHaveLength(1);
+          expect(requests).toEqual([explicitUrl, `http://localhost:${port}/`]);
+
+          stdout = (ownedFirst ? [owned, unowned] : [unowned, owned]).join("\n");
+          mixedOwnership = true;
+          expect(yield* scanner.scan()).toHaveLength(0);
+          expect(requests).toEqual([explicitUrl, `http://localhost:${port}/`]);
+        }).pipe(Effect.provide(layer));
+      },
+    );
+  }
+}
+
 effectIt.effect("aborts HTTP and HTTPS probes when they time out", () => {
   const aborted: string[] = [];
   const fetchFn = ((

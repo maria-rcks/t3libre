@@ -205,14 +205,23 @@ const parseLsofOutput = (
       if (portMatch == null) continue;
       const url = `http://localhost:${portMatch}`;
       const key = `localhost:${portMatch}`;
-      if (seen.has(key)) continue;
+      const terminal = pid === null ? null : (terminalByProcessId.get(pid) ?? null);
+      const existing = seen.get(key);
+      if (existing) {
+        // Different bind addresses share this localhost destination. Every
+        // listener at the port must be owned before it can receive probes.
+        if (terminal === null && existing.terminal !== null) {
+          seen.set(key, { ...existing, terminal: null });
+        }
+        continue;
+      }
       seen.set(key, {
         host: "localhost",
         port: portMatch,
         url,
         processName,
         pid,
-        terminal: pid === null ? null : (terminalByProcessId.get(pid) ?? null),
+        terminal,
       });
     }
   }
@@ -248,14 +257,22 @@ const parseWindowsListenerOutput = (
     const pid = Number(pidRaw);
     if (!Number.isInteger(port) || port <= 0 || port >= 65536) continue;
     const normalizedPid = Number.isInteger(pid) && pid > 0 ? pid : null;
-    if (seen.has(port)) continue;
+    const terminal =
+      normalizedPid === null ? null : (terminalByProcessId.get(normalizedPid) ?? null);
+    const existing = seen.get(port);
+    if (existing) {
+      if (terminal === null && existing.terminal !== null) {
+        seen.set(port, { ...existing, terminal: null });
+      }
+      continue;
+    }
     seen.set(port, {
       host: "localhost",
       port,
       url: `http://localhost:${port}`,
       processName: processNameRaw?.trim() || null,
       pid: normalizedPid,
-      terminal: normalizedPid === null ? null : (terminalByProcessId.get(normalizedPid) ?? null),
+      terminal,
     });
   }
   return [...seen.values()].toSorted((left, right) => left.port - right.port);
