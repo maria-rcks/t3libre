@@ -3,6 +3,70 @@ import * as Option from "effect/Option";
 
 import { getPropertyName } from "../utils.ts";
 
+const CLASS_COMPOSERS = new Set(["cn", "clsx", "classNames", "cva", "twMerge"]);
+const CLASS_EXPRESSION_TYPES = new Set([
+  "ArrayExpression",
+  "ObjectExpression",
+  "Property",
+  "SpreadElement",
+  "ConditionalExpression",
+  "LogicalExpression",
+  "BinaryExpression",
+  "TemplateLiteral",
+  "JSXExpressionContainer",
+  "TSAsExpression",
+  "TSSatisfiesExpression",
+  "TSNonNullExpression",
+  "ParenthesizedExpression",
+]);
+
+const isClassName = (name: string) =>
+  /^(?:class|className|classNames)$|(?:Class|ClassNames?|Classes)$|(?:^|_)CLASS(?:_?NAMES?|ES)?$/u.test(
+    name,
+  );
+
+/** Follow class expressions to their owner, without following variables or unrelated calls. */
+function isClassString(node: ESTree.Node): boolean {
+  let current = node;
+  while (current.parent !== null) {
+    const parent = current.parent;
+    if (parent.type === "JSXAttribute") {
+      return parent.name.type === "JSXIdentifier" && isClassName(parent.name.name);
+    }
+    if (parent.type === "VariableDeclarator") {
+      return parent.id.type === "Identifier" && isClassName(parent.id.name);
+    }
+    if (parent.type === "ReturnStatement") {
+      let owner: ESTree.Node | null = parent.parent;
+      while (owner !== null) {
+        if (owner.type === "FunctionDeclaration" || owner.type === "FunctionExpression") {
+          return owner.id ? isClassName(owner.id.name) : isClassString(owner);
+        }
+        if (owner.type === "ArrowFunctionExpression") return isClassString(owner);
+        owner = owner.parent;
+      }
+      return false;
+    }
+    if (parent.type === "ArrowFunctionExpression" && parent.body === current) {
+      return isClassString(parent);
+    }
+    if (parent.type === "Property") {
+      const name = getPropertyName(parent.key);
+      if (parent.value === current && Option.isSome(name) && isClassName(name.value)) return true;
+    }
+    if (parent.type === "CallExpression") {
+      const name = getPropertyName(
+        parent.callee.type === "MemberExpression" ? parent.callee.property : parent.callee,
+      );
+      return Option.isSome(name) && CLASS_COMPOSERS.has(name.value);
+    }
+    if (parent.type === "ConditionalExpression" && parent.test === current) return false;
+    if (!CLASS_EXPRESSION_TYPES.has(parent.type)) return false;
+    current = parent;
+  }
+  return false;
+}
+
 /** Split variants without treating a colon inside an arbitrary selector as a separator. */
 function classUtility(token: string) {
   let depth = 0;
@@ -156,12 +220,13 @@ export default defineRule({
       `${utility} can paint a focus or selection indicator outside its element, where an ancestor may clip it. Pair state ring widths with ring-inset under the same variant. Remove outline offset overrides to use the shared inward default, or use a negative offset at least as large as its outline width.`;
     return {
       Literal(node) {
-        if (typeof node.value !== "string") return;
+        if (typeof node.value !== "string" || !isClassString(node)) return;
         for (const utility of outsetOverrides(node.value)) {
           context.report({ node, message: message(utility) });
         }
       },
       TemplateLiteral(node) {
+        if (!isClassString(node)) return;
         const text = node.quasis.map((part) => part.value.cooked ?? part.value.raw).join(" ");
         for (const utility of outsetOverrides(text)) {
           context.report({ node, message: message(utility) });

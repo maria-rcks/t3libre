@@ -336,4 +336,69 @@ describe("t3code/no-outset-state-indicators", () => {
     "matches outline widths and inward offsets across template layout expressions",
     "const className = `focus-visible:outline-3 ${layout} focus-visible:-outline-offset-3`;",
   );
+
+  indicators.valid(
+    "ignores utility names in prose",
+    `const message = "Avoid outline-offset-2 on focus indicators";`,
+  );
+
+  indicators.valid(
+    "ignores utility names in titles and accessible labels",
+    `const el = <button title="outline-offset-2" aria-label="focus-visible:ring-2" />;`,
+  );
+
+  indicators.valid(
+    "ignores utility names in test expectations and descriptions",
+    `it("focus-visible:ring-2", () => { expect(message).toBe("outline-offset-2"); });`,
+  );
+
+  indicators.valid(
+    "ignores utility names in prose templates",
+    "const message = `Avoid outline-offset-2 for ${control}`;",
+  );
+
+  indicators.invalid(
+    "checks nested arrays in class composition calls",
+    `const value = cn([active && "focus-visible:ring-2"]);`,
+  );
+
+  indicators.invalid(
+    "checks nested variant options in cva calls",
+    `const recipe = cva("rounded", { variants: { tone: { selected: "data-selected:ring-2" } } });`,
+  );
+
+  indicators.invalid(
+    "checks conditional class props",
+    `const el = <button className={active ? "focus-visible:ring-2" : "rounded"} />;`,
+  );
+
+  indicators.invalid(
+    "checks class maps and alternate class attributes",
+    `const el = <Widget classNames={{ trigger: "focus-visible:ring-2" }} />;`,
+  );
+
+  indicators.invalid(
+    "checks uppercase class constants",
+    `const BUTTON_CLASS_NAME = "focus-visible:ring-2";`,
+  );
+
+  indicators.invalid(
+    "checks camelcase class properties",
+    `const options = { buttonClass: "focus-visible:ring-2" };`,
+  );
+
+  indicators.invalid(
+    "checks named class maps",
+    `const defaultClassNames = { trigger: "focus-visible:ring-2" };`,
+  );
+
+  indicators.invalid(
+    "checks strings returned by named class helpers",
+    `function rowToneClass(active) { if (active) return "focus-visible:ring-2"; return "rounded"; }`,
+  );
+
+  indicators.valid(
+    "ignores local prose inside named class helpers",
+    `function rowToneClass() { const message = "Avoid outline-offset-2"; return "rounded"; }`,
+  );
 });
