@@ -124,7 +124,10 @@ export function useThreadFindTarget({
       let start = -1;
       for (let occurrence = 0; occurrence <= target.occurrence; occurrence++) {
         const next = text.indexOf(query, start + (start < 0 ? 1 : query.length));
-        if (next < 0) break;
+        if (next < 0) {
+          start = -1;
+          break;
+        }
         start = next;
       }
       let range: Range | null = null;
