@@ -395,7 +395,7 @@ const blankNonMarkup = (html: string) => {
 
 /** Refreshes a generated page's focus policy without changing its stored bytes or theme bootstrap. */
 export function injectHtmlRenderFocusStyles(html: string): string | undefined {
-  const tags = /<(\/?)([a-z][a-z0-9:-]*)(?=[\s/>])|<!--|<!|<\?/gi;
+  const tags = /<(\/?)([a-z][^\t\n\f\r />]*)(?=[\t\n\f\r />])|<!--|<!|<\?/gi;
   let themeAt: number | undefined;
   let hasFocus = false;
   let templateDepth = 0;
@@ -442,7 +442,7 @@ export function injectHtmlRenderFocusStyles(html: string): string | undefined {
       !closing &&
       /^(?:script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)$/u.test(name ?? "")
     ) {
-      const rawEnd = new RegExp(`</${name}(?=[\\s/>])`, "gi");
+      const rawEnd = new RegExp(`</${name}(?=[\\t\\n\\f\\r />])`, "gi");
       rawEnd.lastIndex = tags.lastIndex;
       const closed = rawEnd.exec(html);
       tags.lastIndex = closed ? closed.index : html.length;

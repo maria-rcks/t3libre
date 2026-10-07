@@ -89,6 +89,8 @@ describe("injectHtmlRenderFocusStyles", () => {
     `<div data-example="<style id='t3-theme'>"></div>`,
     `<div data-example='<style id="t3-theme">'></div>`,
     `<div data-example="> <style id='t3-theme'>"></div>`,
+    `<my-theme_card data-example="<style id='t3-theme'>"></my-theme_card>`,
+    `<my-theme.card data-example="<style id='t3-theme'>"></my-theme.card>`,
     `<style data-example="<style id='t3-theme'>">body{color:red}</style>`,
     `<style data-example="id='t3-theme'">body{color:red}</style>`,
     `<style data-id="t3-theme">body{color:red}</style>`,
@@ -104,6 +106,8 @@ describe("injectHtmlRenderFocusStyles", () => {
   it.each([
     `<div data-example="<style id='t3-focus'>"></div>`,
     `<div data-example='<style id="t3-focus">'></div>`,
+    `<my-theme_card data-example="<style id='t3-focus'>"></my-theme_card>`,
+    `<my-theme.card data-example="<style id='t3-focus'>"></my-theme.card>`,
     `<style data-example="<style id='t3-focus'>">body{color:red}</style>`,
     `<style data-example="id='t3-focus'">body{color:red}</style>`,
     `<style id="T3-FOCUS">body{color:red}</style>`,

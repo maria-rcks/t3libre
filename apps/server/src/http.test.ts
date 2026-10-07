@@ -366,6 +366,7 @@ describe("generated HTML focus protection", () => {
         [ordinary, false, true],
         [`<div data-example="<style id='t3-theme'> >">édit</div>`, false, true],
         [`<div data-example='<style id="t3-theme">'>édit</div>`, false, true],
+        [`<my-theme_card data-example="<style id='t3-theme'>">édit</my-theme_card>`, false, true],
         [`<style data-example="id='t3-theme'">body{color:red}</style>`, false, true],
         [generated, true, true],
         [generated, false, false],
