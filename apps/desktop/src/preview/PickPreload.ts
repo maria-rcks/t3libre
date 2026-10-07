@@ -363,15 +363,54 @@ function visibleElementRect(element: Element): PreviewAnnotationRect {
     const bounds = ancestor.getBoundingClientRect();
     const scaleX = ancestor.offsetWidth > 0 ? bounds.width / ancestor.offsetWidth : 1;
     const scaleY = ancestor.offsetHeight > 0 ? bounds.height / ancestor.offsetHeight : 1;
+    const clipMargin = style.getPropertyValue("overflow-clip-margin").split(/\s+/);
+    const margin = Number.parseFloat(clipMargin.at(-1) ?? "") || 0;
+    const clipBox = clipMargin[0];
     if (clipsX) {
-      const start = bounds.left + ancestor.clientLeft * scaleX;
+      const scrollStart = bounds.left + ancestor.clientLeft * scaleX;
+      const scrollEnd = scrollStart + ancestor.clientWidth * scaleX;
+      let start = scrollStart;
+      let end = scrollEnd;
+      if (style.overflowX === "clip" || paintClip) {
+        if (clipBox === "content-box") {
+          start += Number.parseFloat(style.paddingLeft) * scaleX;
+          end -= Number.parseFloat(style.paddingRight) * scaleX;
+        } else if (clipBox === "border-box") {
+          start = bounds.left;
+          end = bounds.right;
+        }
+        start -= margin * scaleX;
+        end += margin * scaleX;
+      }
+      if (style.overflowX !== "clip" && style.overflowX !== "visible") {
+        start = Math.max(start, scrollStart);
+        end = Math.min(end, scrollEnd);
+      }
       left = Math.max(left, start);
-      right = Math.min(right, start + ancestor.clientWidth * scaleX);
+      right = Math.min(right, end);
     }
     if (clipsY) {
-      const start = bounds.top + ancestor.clientTop * scaleY;
+      const scrollStart = bounds.top + ancestor.clientTop * scaleY;
+      const scrollEnd = scrollStart + ancestor.clientHeight * scaleY;
+      let start = scrollStart;
+      let end = scrollEnd;
+      if (style.overflowY === "clip" || paintClip) {
+        if (clipBox === "content-box") {
+          start += Number.parseFloat(style.paddingTop) * scaleY;
+          end -= Number.parseFloat(style.paddingBottom) * scaleY;
+        } else if (clipBox === "border-box") {
+          start = bounds.top;
+          end = bounds.bottom;
+        }
+        start -= margin * scaleY;
+        end += margin * scaleY;
+      }
+      if (style.overflowY !== "clip" && style.overflowY !== "visible") {
+        start = Math.max(start, scrollStart);
+        end = Math.min(end, scrollEnd);
+      }
       top = Math.max(top, start);
-      bottom = Math.min(bottom, start + ancestor.clientHeight * scaleY);
+      bottom = Math.min(bottom, end);
     }
   }
   return { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
