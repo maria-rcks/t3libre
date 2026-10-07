@@ -2664,6 +2664,7 @@ function AssistantMessageMeta({
   alwaysVisible?: boolean;
 }) {
   const ctx = use(TimelineRowCtx);
+  const glass = useHasTimelineBackground();
 
   return (
     <div
@@ -2690,7 +2691,16 @@ function AssistantMessageMeta({
       />
       {!message.streaming && (
         <Tooltip>
-          <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
+          <TooltipTrigger
+            render={
+              <p
+                className={cn(
+                  "text-muted-foreground text-xs tabular-nums",
+                  glass && "text-foreground/80",
+                )}
+              />
+            }
+          >
             {formatDayAwareTimestamp(message.updatedAt, ctx.timestampFormat)}
           </TooltipTrigger>
           <TooltipPopup>
@@ -5103,6 +5113,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: WorkEntryRowP
 function WorkEntryLogRow(props: WorkEntryRowProps) {
   const { workEntry, workspaceRoot, displayLabel } = props;
   const ctx = use(TimelineRowCtx);
+  const glass = useHasTimelineBackground();
   const { threadRef, onImageExpand, timestampFormat } = ctx;
   const { retryableWorkspacePreparationRunIds, onRetryWorkspacePreparation } = ctx;
   const createdThread =
@@ -5154,7 +5165,11 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
         }
         label={
           <span
-            className={cn("text-sm font-medium", warning ? "text-warning" : "text-destructive")}
+            className={cn(
+              "text-sm font-medium",
+              warning ? "text-warning" : "text-destructive",
+              warning && glass && "text-foreground/90",
+            )}
           >
             {label}
           </span>
