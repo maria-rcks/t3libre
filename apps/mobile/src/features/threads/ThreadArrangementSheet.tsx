@@ -27,7 +27,11 @@ import {
   threadDragAction,
   type ThreadMoveDestination,
 } from "./threadOrder";
-import { getThreadListV2OrderedSection, threadListInboxReturns } from "./threadListV2";
+import {
+  getThreadListV2OrderedSection,
+  threadListV2BranchGroupKeys,
+  threadListInboxReturns,
+} from "./threadListV2";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
 
 const ROW_HEIGHT = 56;
@@ -156,7 +160,7 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
   const pendingOrder = useAtomValue(pendingThreadOrderAtom);
   const dropBusy = useAtomValue(threadDropBusyAtom);
   const { moveThread } = useThreadListActions();
-  const { workingShelfEnabled } = useThreadListV2ShelfPreferences();
+  const { workingShelfEnabled, branchGroupingEnabled } = useThreadListV2ShelfPreferences();
   const [now, setNow] = useState(() => new Date().toISOString());
   const [expanded, setExpanded] = useState({ snoozed: false, settled: false });
   useEffect(() => {
@@ -191,7 +195,11 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
       ),
     };
     const pinned = getThreadListV2OrderedSection({ ...shared, section: "pinned" });
-    const active = getThreadListV2OrderedSection({ ...shared, section: "active" });
+    const active = getThreadListV2OrderedSection({
+      ...shared,
+      section: "active",
+      branchGroupingEnabled,
+    });
     const visible = new Set([...pinned, ...active].map(keyOf));
     const parked = threads.filter(
       (thread) => thread.archivedAt === null && !visible.has(keyOf(thread)),
@@ -205,10 +213,22 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
       snoozed: parked.filter((thread) => effectiveSnoozed(thread, { now })),
       settled: parked.filter((thread) => !effectiveSnoozed(thread, { now })),
     };
-  }, [threads, configs, now, queuedThreadKeys, pendingOrder, workingShelfEnabled]);
+  }, [
+    threads,
+    configs,
+    now,
+    queuedThreadKeys,
+    pendingOrder,
+    workingShelfEnabled,
+    branchGroupingEnabled,
+  ]);
   const planners = useMemo(() => {
     const planner = (section: "pinned" | "active") =>
       createThreadMovePlanner({
+        groupById:
+          branchGroupingEnabled && section === "active"
+            ? threadListV2BranchGroupKeys(threads)
+            : undefined,
         ordered: sections[section],
         allThreads: threads,
         section,
@@ -227,7 +247,7 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
         ),
       });
     return { pinned: planner("pinned"), active: planner("active") };
-  }, [sections, threads, configs, workingShelfEnabled]);
+  }, [sections, threads, configs, workingShelfEnabled, branchGroupingEnabled]);
   const rows = useMemo(() => {
     const result: Row[] = [];
     let offset = 0;

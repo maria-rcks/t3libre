@@ -43,6 +43,15 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Group related threads
+
+Enable **Group threads by branch and worktree** in **Settings → General** on web
+and desktop, or **Group by branch and worktree** in **Settings → Thread behavior**
+on mobile. Threads stay in their existing sections and group within their project
+and machine. Pinned threads keep their order, and search keeps its usual results.
+Move threads within their group; pinning or settling still moves them between
+sections. Turn grouping off to return to the saved thread order.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

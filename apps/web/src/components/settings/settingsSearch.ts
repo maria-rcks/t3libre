@@ -309,6 +309,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["usage quota rate limit reset recover continue"],
   },
   {
+    id: "branch-grouping",
+    title: "Group threads by branch and worktree",
+    to: "/settings/general",
+    searchTerms: ["project sidebar organize checkout folders"],
+  },
+  {
     id: "working-shelf",
     title: "Working section (beta)",
     to: "/settings/general",

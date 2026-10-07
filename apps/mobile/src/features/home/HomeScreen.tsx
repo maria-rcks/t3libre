@@ -50,6 +50,7 @@ import { useThreadRowProviderInstanceResolver } from "../threads/thread-provider
 import {
   buildThreadListV2Items,
   getThreadListV2OrderedSection,
+  threadListV2BranchGroupKeys,
   buildThreadListV2ListItems,
   threadListV2ListItemsAreEqual,
   threadListInboxReturns,
@@ -469,6 +470,7 @@ export function HomeScreen(props: HomeScreenProps) {
     settledShelfExpanded,
     snoozedShelfExpanded,
     workingShelfEnabled,
+    branchGroupingEnabled,
     workingShelfExpanded,
     toggleSettledShelf,
     toggleSnoozedShelf,
@@ -510,6 +512,10 @@ export function HomeScreen(props: HomeScreenProps) {
   const threadMoveAvailability = useMemo(() => {
     const sectionAvailability = (section: "pinned" | "active") =>
       computeThreadMoveAvailability({
+        groupById:
+          branchGroupingEnabled && section === "active"
+            ? threadListV2BranchGroupKeys(props.threads)
+            : undefined,
         allThreads: props.threads,
         section,
         pendingOrder,
@@ -518,6 +524,7 @@ export function HomeScreen(props: HomeScreenProps) {
         ordered: getThreadListV2OrderedSection({
           threads: props.threads,
           section,
+          branchGroupingEnabled,
           pendingOrder,
           now: new Date().toISOString(),
           settlementEnvironmentIds,
@@ -532,6 +539,7 @@ export function HomeScreen(props: HomeScreenProps) {
     ]);
   }, [
     workingShelfEnabled,
+    branchGroupingEnabled,
     pinReorderEnvironmentIds,
     activeReorderEnvironmentIds,
     props.threads,
@@ -559,6 +567,7 @@ export function HomeScreen(props: HomeScreenProps) {
       settledLimit: settledVisibleCount,
       now: new Date().toISOString(),
       workingShelfEnabled,
+      branchGroupingEnabled,
       workingShelfExpanded,
       inboxReturnAt: threadListInboxReturns.returnedAt,
       snoozedShelfExpanded,
@@ -567,6 +576,7 @@ export function HomeScreen(props: HomeScreenProps) {
     });
   }, [
     workingShelfEnabled,
+    branchGroupingEnabled,
     workingShelfExpanded,
     pendingOrder,
     queuedThreadKeys,
@@ -718,6 +728,7 @@ export function HomeScreen(props: HomeScreenProps) {
           onNewThreadOnBranch={props.onNewThreadOnBranch}
           thread={thread}
           variant={item.item.variant}
+          branchGroupStart={item.item.branchGroupStart === true}
           hasQueuedMessages={item.hasQueuedMessages}
           snoozed={item.item.snoozed}
           pinned={item.item.pinned}

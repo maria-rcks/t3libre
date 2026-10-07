@@ -1,7 +1,9 @@
-import { ProjectId, RunId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, RunId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  groupThreadsByBranch,
+  threadBranchGroupLabel,
   activeThreadAnchorTimestampMs,
   generateSpreadPinOrderKeys,
   getLatestThreadForProject,
@@ -509,5 +511,46 @@ describe("sortActiveThreadsByOrderKey", () => {
     const keys = new Map(assignments.map((assignment) => [assignment.id, assignment.orderKey]));
     const updated = threads.map((thread) => ({ ...thread, activeOrderKey: keys.get(thread.id) }));
     expect(sortActiveThreadsByOrderKey(updated).map((thread) => thread.id)).toEqual(orderedIds);
+  });
+});
+
+describe("branch and worktree grouping", () => {
+  it("keeps shelf order inside a group without combining environments, projects or checkouts", () => {
+    const first = {
+      id: "first",
+      environmentId: EnvironmentId.make("a"),
+      projectId: ProjectId.make("p"),
+      branch: "main",
+      worktreePath: null,
+    };
+    const rows = [
+      first,
+      { ...first, id: "other-branch", branch: "feature" },
+      { ...first, id: "same-checkout" },
+      { ...first, id: "other-project", projectId: ProjectId.make("q") },
+      { ...first, id: "other-environment", environmentId: EnvironmentId.make("b") },
+      { ...first, id: "worktree", worktreePath: "/repo/one" },
+      { ...first, id: "worktree-again", worktreePath: "/repo/one" },
+      { ...first, id: "other-worktree", worktreePath: "/repo/two" },
+    ];
+    expect(groupThreadsByBranch(rows).map((row) => row.id)).toEqual([
+      "first",
+      "same-checkout",
+      "other-branch",
+      "other-project",
+      "other-environment",
+      "worktree",
+      "worktree-again",
+      "other-worktree",
+    ]);
+    expect(rows[1]?.id).toBe("other-branch");
+  });
+
+  it("labels detached and named checkouts, including Windows worktree paths", () => {
+    expect(threadBranchGroupLabel({ branch: null, worktreePath: null })).toBe("Local checkout");
+    expect(threadBranchGroupLabel({ branch: null, worktreePath: "/repo/task" })).toBe("task");
+    expect(threadBranchGroupLabel({ branch: "feature", worktreePath: "C:\\repo\\task" })).toBe(
+      "feature · task",
+    );
   });
 });

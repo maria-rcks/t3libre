@@ -4,6 +4,42 @@ import type { EnvironmentThreadShell } from "./models.ts";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 
+type BranchGroupThread = Pick<
+  EnvironmentThreadShell,
+  "environmentId" | "projectId" | "branch" | "worktreePath"
+>;
+
+/** Branch names and paths only identify work inside their project and environment. */
+export function threadBranchGroupKey(thread: BranchGroupThread): string {
+  return JSON.stringify([
+    thread.environmentId,
+    thread.projectId,
+    thread.worktreePath,
+    thread.branch,
+  ]);
+}
+
+export function threadBranchGroupLabel(
+  thread: Pick<BranchGroupThread, "branch" | "worktreePath">,
+): string {
+  const worktree = thread.worktreePath?.split(/[\\/]/).filter(Boolean).at(-1);
+  if (thread.branch && worktree && thread.branch !== worktree)
+    return `${thread.branch} · ${worktree}`;
+  return thread.branch || worktree || "Local checkout";
+}
+
+/** Keep each shelf's existing order within groups; its leading row orders the groups. */
+export function groupThreadsByBranch<T extends BranchGroupThread>(threads: readonly T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const thread of threads) {
+    const key = threadBranchGroupKey(thread);
+    const group = groups.get(key);
+    if (group) group.push(thread);
+    else groups.set(key, [thread]);
+  }
+  return [...groups.values()].flat();
+}
+
 export interface ThreadSortInput {
   readonly createdAt: string;
   readonly updatedAt: string;

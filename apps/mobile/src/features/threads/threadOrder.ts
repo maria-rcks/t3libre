@@ -81,6 +81,8 @@ function rowOrder(row: OrderRow, section: PendingThreadOrder["section"]) {
  * are supported. Menu availability and execution use this same planner. */
 export function createThreadMovePlanner(input: {
   readonly ordered: readonly OrderRow[];
+  /** An opt-in view can constrain arrangement without changing lifecycle actions. */
+  readonly groupById?: ReadonlyMap<string, string> | undefined;
   readonly allThreads?: readonly OrderRow[];
   readonly section: PendingThreadOrder["section"];
   readonly reorderableEnvironmentIds: ReadonlySet<EnvironmentId>;
@@ -99,6 +101,14 @@ export function createThreadMovePlanner(input: {
   );
   return (movedId: string, direction: ThreadMoveDestination) => {
     if (!writableIds.has(movedId)) return null;
+    if (input.groupById && orderedIds.includes(movedId)) {
+      const targetId =
+        typeof direction === "string"
+          ? orderedIds[orderedIds.indexOf(movedId) + (direction === "up" ? -1 : 1)]
+          : direction.targetId;
+      if (targetId == null || input.groupById.get(movedId) !== input.groupById.get(targetId))
+        return null;
+    }
     const nextIds = threadOrderAfterMove(orderedIds, movedId, direction);
     if (nextIds === null) return null;
     const assignments = planPinnedReorder({ orderedIds: nextIds, keysById, movedId });
@@ -125,6 +135,8 @@ export interface ThreadMoveAvailability {
  */
 export function computeThreadMoveAvailability(input: {
   readonly ordered: readonly OrderRow[];
+  /** An opt-in view can constrain arrangement without changing lifecycle actions. */
+  readonly groupById?: ReadonlyMap<string, string> | undefined;
   readonly allThreads?: readonly OrderRow[];
   readonly section: PendingThreadOrder["section"];
   readonly reorderableEnvironmentIds: ReadonlySet<EnvironmentId>;
@@ -221,6 +233,11 @@ export function computeThreadMoveAvailability(input: {
     const adjacentAvailable = (towardUp: boolean): boolean => {
       const shifted = index + (towardUp ? -1 : 1);
       if (shifted < 0 || shifted >= orderedIds.length) return false;
+      if (
+        input.groupById &&
+        input.groupById.get(movedId) !== input.groupById.get(orderedIds[shifted]!)
+      )
+        return false;
       // The swap exchanges the row with its neighbor; afterwards the moved row
       // sits at `shifted` between `beforeIndex` and `afterIndex` of the OLD
       // order: moving up it lands between old(index-2) and old(index-1),

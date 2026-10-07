@@ -18,6 +18,8 @@ import {
   sortWorkingThreadsBySend,
 } from "@t3tools/client-runtime/state/thread-inbox";
 import {
+  groupThreadsByBranch,
+  threadBranchGroupKey,
   sortActiveThreadsByOrderKey,
   resolveSettledThreadTimestamp,
   sortPinnedThreadsByOrderKey,
@@ -227,10 +229,17 @@ export function sortThreadsForListV2<
   return sortActiveThreadsByOrderKey(threads);
 }
 
+export function threadListV2BranchGroupKeys(threads: readonly EnvironmentThreadShell[]) {
+  return new Map(
+    threads.map((thread) => [`${thread.environmentId}:${thread.id}`, threadBranchGroupKey(thread)]),
+  );
+}
+
 /** Canonical card section for Move up/down, independent of search or scope. */
 export function getThreadListV2OrderedSection(input: {
   readonly threads: readonly EnvironmentThreadShell[];
   readonly section: "pinned" | "active";
+  readonly branchGroupingEnabled?: boolean;
   readonly pendingOrder?: PendingThreadOrder | null;
   readonly now: string;
   readonly settlementEnvironmentIds?: ReadonlySet<EnvironmentId>;
@@ -263,10 +272,14 @@ export function getThreadListV2OrderedSection(input: {
     input.pendingOrder?.section === input.section
       ? reconcilePendingThreadOrder(input.pendingOrder, ordered)
       : null;
-  return applyPendingThreadOrder(ordered, input.section, pending);
+  const arranged = applyPendingThreadOrder(ordered, input.section, pending);
+  return input.branchGroupingEnabled && input.section !== "pinned"
+    ? groupThreadsByBranch(arranged)
+    : arranged;
 }
 
 export interface ThreadListV2Item {
+  readonly branchGroupStart?: boolean;
   readonly thread: EnvironmentThreadShell;
   readonly variant: "card" | "slim";
   /** Snoozed-shelf row: shows the wake countdown and offers Wake. */
@@ -411,6 +424,7 @@ export function threadListV2ListItemsAreEqual(
         previous.item.variant === item.item.variant &&
         previous.item.snoozed === item.item.snoozed &&
         previous.item.pinned === item.item.pinned &&
+        previous.item.branchGroupStart === item.item.branchGroupStart &&
         previous.snoozeWakeLabelText === item.snoozeWakeLabelText &&
         previous.timeLabel === item.timeLabel &&
         previous.snoozePresetMinute === item.snoozePresetMinute &&
@@ -610,6 +624,7 @@ export function buildThreadListV2ListItems(input: {
  * the settled recency tail, matching the web v2 list.
  */
 export function buildThreadListV2Items(input: {
+  readonly branchGroupingEnabled?: boolean;
   readonly pendingOrder?: PendingThreadOrder | null;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly environmentId: EnvironmentId | null;
@@ -748,7 +763,11 @@ export function buildThreadListV2Items(input: {
       : orderedSnoozed.filter(
           (thread) => `${thread.environmentId}:${thread.id}` === selectedThreadKey,
         );
-  const orderedSettled = sortSettledThreads(settled);
+  const sortedSettled = sortSettledThreads(settled);
+  const orderedSettled =
+    input.branchGroupingEnabled && query.length === 0
+      ? groupThreadsByBranch(sortedSettled)
+      : sortedSettled;
   const settledLimit = input.settledLimit ?? Number.POSITIVE_INFINITY;
   const pagedSettled =
     orderedSettled.length > settledLimit ? orderedSettled.slice(0, settledLimit) : orderedSettled;
@@ -764,58 +783,41 @@ export function buildThreadListV2Items(input: {
         );
 
   const items: ThreadListV2Item[] = [];
-  for (const thread of applyPendingThreadOrder(
-    sortPinnedThreadsByOrderKey(pinned),
-    "pinned",
-    pending,
-  )) {
-    items.push({
-      thread,
-      variant: "card",
-      snoozed: false,
-      pinned: true,
-      isLast: false,
-    });
-  }
-  for (const thread of orderedActive) {
-    items.push({
-      thread,
-      variant: "card",
-      snoozed: false,
-      pinned: false,
-      isLast: false,
-    });
-  }
+  const appendSection = (
+    threads: readonly EnvironmentThreadShell[],
+    variant: "card" | "slim",
+    snoozed = false,
+    pinned = false,
+  ) => {
+    const grouped = input.branchGroupingEnabled && !pinned && input.searchQuery.trim().length === 0;
+    const ordered = grouped ? groupThreadsByBranch(threads) : threads;
+    let previousGroup: string | null = null;
+    for (const thread of ordered) {
+      const group = grouped ? threadBranchGroupKey(thread) : null;
+      items.push({
+        thread,
+        variant,
+        snoozed,
+        pinned,
+        isLast: false,
+        ...(grouped ? { branchGroupStart: group !== previousGroup } : {}),
+      });
+      previousGroup = group;
+    }
+  };
+  appendSection(
+    applyPendingThreadOrder(sortPinnedThreadsByOrderKey(pinned), "pinned", pending),
+    "card",
+    false,
+    true,
+  );
+  appendSection(orderedActive, "card");
   const workingShelfHeaderIndex = orderedWorking.length > 0 ? items.length : null;
-  for (const thread of visibleWorking) {
-    items.push({
-      thread,
-      variant: "card",
-      snoozed: false,
-      pinned: false,
-      isLast: false,
-    });
-  }
+  appendSection(visibleWorking, "card");
   const snoozedShelfHeaderIndex = orderedSnoozed.length > 0 ? items.length : null;
-  for (const thread of visibleSnoozed) {
-    items.push({
-      thread,
-      variant: "slim",
-      snoozed: true,
-      pinned: false,
-      isLast: false,
-    });
-  }
+  appendSection(visibleSnoozed, "slim", true);
   const settledShelfHeaderIndex = orderedSettled.length > 0 ? items.length : null;
-  for (const thread of visibleSettled) {
-    items.push({
-      thread,
-      variant: "slim",
-      snoozed: false,
-      pinned: false,
-      isLast: false,
-    });
-  }
+  appendSection(visibleSettled, "slim");
   const last = items.at(-1);
   if (last) {
     items[items.length - 1] = { ...last, isLast: true };

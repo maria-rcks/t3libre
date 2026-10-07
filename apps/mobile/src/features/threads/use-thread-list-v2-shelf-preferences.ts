@@ -18,6 +18,8 @@ export function useThreadListV2ShelfPreferences() {
   const settledShelfExpanded =
     loaded && preferencesResult.value.threadListSettledShelfExpanded === true;
   // Working section beta: off until the preference loads and is enabled.
+  const branchGroupingEnabled =
+    loaded && preferencesResult.value.sidebarBranchGroupingEnabled === true;
   const workingShelfEnabled = loaded && preferencesResult.value.workingShelfEnabled === true;
   const workingShelfExpanded =
     loaded && preferencesResult.value.threadListWorkingShelfExpanded === true;
@@ -52,6 +54,7 @@ export function useThreadListV2ShelfPreferences() {
     settledShelfExpanded,
     snoozedShelfExpanded,
     workingShelfEnabled,
+    branchGroupingEnabled,
     workingShelfExpanded,
     toggleSettledShelf,
     toggleSnoozedShelf,

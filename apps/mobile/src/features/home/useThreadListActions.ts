@@ -26,7 +26,12 @@ import {
   createThreadMovePlanner,
   threadDropLifecycle,
 } from "../threads/threadOrder";
-import { getThreadListV2OrderedSection } from "../threads/threadListV2";
+import { mobilePreferencesAtom } from "../../state/preferences";
+import { AsyncResult } from "effect/reactivity";
+import {
+  getThreadListV2OrderedSection,
+  threadListV2BranchGroupKeys,
+} from "../threads/threadListV2";
 import { threadCanArchive } from "./threadArchive";
 import { resolveThreadTitleRename } from "../threads/thread-title-rename";
 
@@ -608,7 +613,12 @@ export function useThreadListActions(): {
         );
         return false;
       }
+      const preferences = appAtomRegistry.get(mobilePreferencesAtom);
+      const branchGroupingEnabled =
+        AsyncResult.isSuccess(preferences) &&
+        preferences.value.sidebarBranchGroupingEnabled === true;
       const ordered = getThreadListV2OrderedSection({
+        branchGroupingEnabled,
         threads: shells,
         section,
         now: new Date().toISOString(),
@@ -625,6 +635,10 @@ export function useThreadListActions(): {
         ),
       });
       const assignments = createThreadMovePlanner({
+        groupById:
+          branchGroupingEnabled && section === "active"
+            ? threadListV2BranchGroupKeys(shells)
+            : undefined,
         allThreads: shells,
         ordered,
         section,

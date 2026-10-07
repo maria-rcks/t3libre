@@ -45,6 +45,7 @@ export function SettingsThreadsRouteScreen() {
           contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
         >
           <AutoSettleSettingsRows />
+          <BranchGroupingSettingsSection />
           <BetaSettingsSection />
           <LegacySettingsSection />
         </ScrollView>
@@ -236,6 +237,30 @@ function AutoSettleSettingsRows() {
           </View>
         </SettingsSection>
       ) : null}
+    </View>
+  );
+}
+
+function BranchGroupingSettingsSection() {
+  const preferences = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  return (
+    <View className="gap-3">
+      <SettingsSection title="Sidebar grouping">
+        <SettingsSwitchRow
+          icon="folder"
+          label="Group by branch and worktree"
+          value={
+            AsyncResult.isSuccess(preferences) &&
+            preferences.value.sidebarBranchGroupingEnabled === true
+          }
+          onValueChange={(value) => savePreferences({ sidebarBranchGroupingEnabled: value })}
+        />
+      </SettingsSection>
+      <Text className="px-2 text-sm text-foreground-muted">
+        Group threads by project, branch and worktree within each section. Pinned threads keep their
+        saved order.
+      </Text>
     </View>
   );
 }

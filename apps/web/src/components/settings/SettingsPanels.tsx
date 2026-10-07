@@ -570,6 +570,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.sidebarProjectSortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder
         ? ["Project order"]
         : []),
+      ...(settings.sidebarBranchGroupingEnabled !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarBranchGroupingEnabled
+        ? ["Branch and worktree grouping"]
+        : []),
       ...(settings.sidebarWorkingShelfEnabled !==
       DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
         ? ["Working section"]
@@ -710,6 +714,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarProjectGroupingMode,
       settings.sidebarProjectSortOrder,
       settings.sidebarWorkingShelfEnabled,
+      settings.sidebarBranchGroupingEnabled,
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
       settings.timestampFormat,
@@ -810,6 +815,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
+      sidebarBranchGroupingEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarBranchGroupingEnabled,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
@@ -2387,6 +2393,34 @@ export function GeneralSettingsPanel() {
                 updateSettings({ sidebarWorkingShelfEnabled: Boolean(checked) })
               }
               aria-label="Working section (beta)"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("branch-grouping")}
+          description="Group threads by project, branch and worktree within each section. Pinned threads keep their saved order."
+          resetAction={
+            settings.sidebarBranchGroupingEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarBranchGroupingEnabled ? (
+              <SettingResetButton
+                label="branch and worktree grouping"
+                onClick={() =>
+                  updateSettings({
+                    sidebarBranchGroupingEnabled:
+                      DEFAULT_UNIFIED_SETTINGS.sidebarBranchGroupingEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarBranchGroupingEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarBranchGroupingEnabled: Boolean(checked) })
+              }
+              aria-label="Group threads by branch and worktree"
             />
           }
         />

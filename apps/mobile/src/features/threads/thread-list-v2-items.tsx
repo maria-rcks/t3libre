@@ -11,6 +11,7 @@ import { RowPressable } from "../../components/RowPressable";
 import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { threadArrangementOpenAtom } from "../../state/thread-order";
+import { threadBranchGroupLabel } from "@t3tools/client-runtime/state/thread-sort";
 import type { ThreadMoveDestination } from "./threadOrder";
 import type {
   EnvironmentProject,
@@ -450,6 +451,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
 });
 
 export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
+  readonly branchGroupStart?: boolean;
   readonly thread: EnvironmentThreadShell;
   readonly variant: "card" | "slim";
   /** A message for this thread is waiting in the outbox. */
@@ -1226,6 +1228,17 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   return (
     <View collapsable={false}>
+      {props.branchGroupStart ? (
+        <Text
+          accessibilityRole="header"
+          className="px-5 pb-1 pt-3 text-xs font-medium text-foreground-muted"
+          numberOfLines={1}
+        >
+          {props.projectTitle ?? props.project?.title ?? "Project"} /{" "}
+          {threadBranchGroupLabel(thread)}
+          {props.environmentLabel ? ` · ${props.environmentLabel}` : null}
+        </Text>
+      ) : null}
       {customSnoozeOpen && (
         <CustomSnoozeSheet onClose={() => setCustomSnoozeOpen(false)} onSnooze={handleSnooze} />
       )}

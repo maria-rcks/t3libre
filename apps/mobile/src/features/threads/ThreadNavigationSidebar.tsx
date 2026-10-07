@@ -67,6 +67,7 @@ import { useThreadRowProviderInstanceResolver } from "./thread-provider-instance
 import {
   buildThreadListV2Items,
   getThreadListV2OrderedSection,
+  threadListV2BranchGroupKeys,
   buildThreadListV2ListItems,
   isThreadListV2ListItem,
   threadListV2ListItemsAreEqual,
@@ -294,6 +295,7 @@ function ThreadNavigationSidebarPane(
     settledShelfExpanded,
     snoozedShelfExpanded,
     workingShelfEnabled,
+    branchGroupingEnabled,
     workingShelfExpanded,
     toggleSettledShelf,
     toggleSnoozedShelf,
@@ -333,6 +335,10 @@ function ThreadNavigationSidebarPane(
   const threadMoveAvailability = useMemo(() => {
     const sectionAvailability = (section: "pinned" | "active") =>
       computeThreadMoveAvailability({
+        groupById:
+          branchGroupingEnabled && section === "active"
+            ? threadListV2BranchGroupKeys(threads)
+            : undefined,
         allThreads: threads,
         section,
         pendingOrder,
@@ -341,6 +347,7 @@ function ThreadNavigationSidebarPane(
         ordered: getThreadListV2OrderedSection({
           threads,
           section,
+          branchGroupingEnabled,
           pendingOrder,
           now: new Date().toISOString(),
           settlementEnvironmentIds,
@@ -355,6 +362,7 @@ function ThreadNavigationSidebarPane(
     ]);
   }, [
     workingShelfEnabled,
+    branchGroupingEnabled,
     pinReorderEnvironmentIds,
     activeReorderEnvironmentIds,
     threads,
@@ -380,6 +388,7 @@ function ThreadNavigationSidebarPane(
       settledLimit: settledVisibleCount,
       now: new Date().toISOString(),
       workingShelfEnabled,
+      branchGroupingEnabled,
       workingShelfExpanded,
       inboxReturnAt: threadListInboxReturns.returnedAt,
       snoozedShelfExpanded,
@@ -388,6 +397,7 @@ function ThreadNavigationSidebarPane(
     });
   }, [
     workingShelfEnabled,
+    branchGroupingEnabled,
     workingShelfExpanded,
     pendingOrder,
     queuedThreadKeys,
@@ -693,6 +703,7 @@ function ThreadNavigationSidebarPane(
               onNewThreadOnBranch={props.onNewThreadOnBranch}
               thread={thread}
               variant={item.item.variant}
+              branchGroupStart={item.item.branchGroupStart === true}
               hasQueuedMessages={item.hasQueuedMessages}
               snoozed={item.item.snoozed}
               pinned={item.item.pinned}
@@ -837,7 +848,7 @@ function ThreadNavigationSidebarPane(
       workingShelfEnabled,
     ],
   );
-  // The list ignores sort/group options, so only the environment and project
+  // Project menu options scope the list, so only the environment and project
   // filters can light the "customized" state.
   const filterCustomized = options.selectedEnvironmentId !== null || selectedProjectKey !== null;
   const filterIcon = filterCustomized

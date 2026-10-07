@@ -2,6 +2,7 @@ import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import * as DateTime from "effect/DateTime";
 import { planPinnedMove } from "@t3tools/client-runtime/state/thread-sort";
 import {
+  computeThreadMoveAvailability,
   createPendingThreadOrder,
   createThreadMovePlanner,
   threadOrderAfterMove,
@@ -31,6 +32,7 @@ import {
   buildThreadListV2Items,
   buildThreadListV2ListItems,
   getThreadListV2OrderedSection,
+  threadListV2BranchGroupKeys,
   isThreadListV2ListItem,
   resolveThreadListV2SnoozeMenuSelection,
   resolveThreadListV2SnoozeGateExpiryMs,
@@ -2300,5 +2302,68 @@ describe("Working section beta", () => {
       "v2-settled-shelf",
       "settled",
     ]);
+  });
+});
+
+describe("opt-in branch and worktree grouping", () => {
+  it("groups active rows while preserving default, pin and search ordering", () => {
+    const rows = [
+      makeThread({ id: ThreadId.make("a1"), title: "Thread A1", branch: "a", activeOrderKey: "f" }),
+      makeThread({ id: ThreadId.make("b"), title: "Thread B", branch: "b", activeOrderKey: "n" }),
+      makeThread({ id: ThreadId.make("a2"), title: "Thread A2", branch: "a", activeOrderKey: "t" }),
+    ];
+    const input = { threads: rows, environmentId: null, searchQuery: "", now: NOW };
+    expect(buildThreadListV2Items(input).items.map(({ thread }) => thread.id)).toEqual([
+      "a1",
+      "b",
+      "a2",
+    ]);
+    const grouped = buildThreadListV2Items({ ...input, branchGroupingEnabled: true });
+    expect(grouped.items.map(({ thread }) => thread.id)).toEqual(["a1", "a2", "b"]);
+    expect(grouped.items.map(({ branchGroupStart }) => branchGroupStart)).toEqual([
+      true,
+      false,
+      true,
+    ]);
+    expect(
+      buildThreadListV2Items({
+        ...input,
+        branchGroupingEnabled: true,
+        searchQuery: "Thread",
+      }).items.map(({ thread }) => thread.id),
+    ).toEqual(["a1", "b", "a2"]);
+    const pinned = rows.map((thread) => ({
+      ...thread,
+      pinnedAt: NOW,
+      pinOrderKey: thread.activeOrderKey,
+    }));
+    expect(
+      buildThreadListV2Items({ ...input, threads: pinned, branchGroupingEnabled: true }).items.map(
+        ({ thread }) => thread.id,
+      ),
+    ).toEqual(["a1", "b", "a2"]);
+  });
+
+  it("offers and executes moves inside a group and refuses an invisible cross-group move", () => {
+    const rows = [
+      makeThread({ id: ThreadId.make("a1"), title: "A1", branch: "a", activeOrderKey: "f" }),
+      makeThread({ id: ThreadId.make("a2"), title: "A2", branch: "a", activeOrderKey: "n" }),
+      makeThread({ id: ThreadId.make("b"), title: "B", branch: "b", activeOrderKey: "t" }),
+    ];
+    const input = {
+      ordered: rows,
+      section: "active" as const,
+      reorderableEnvironmentIds: new Set([environmentId]),
+      groupById: threadListV2BranchGroupKeys(rows),
+    };
+    const availability = computeThreadMoveAvailability(input);
+    const planner = createThreadMovePlanner(input);
+    expect(availability.get(`${environmentId}:a1`)?.canMoveDown).toBe(true);
+    expect(planner(`${environmentId}:a1`, "down")).not.toBeNull();
+    expect(availability.get(`${environmentId}:a2`)?.canMoveDown).toBe(false);
+    expect(planner(`${environmentId}:a2`, "down")).toBeNull();
+    expect(
+      planner(`${environmentId}:a1`, { targetId: `${environmentId}:b`, placement: "after" }),
+    ).toBeNull();
   });
 });
