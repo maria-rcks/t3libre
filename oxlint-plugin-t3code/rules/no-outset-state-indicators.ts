@@ -1,7 +1,7 @@
 import { defineRule, type ESTree } from "@oxlint/plugins";
 import * as Option from "effect/Option";
 
-import { getPropertyName, unwrapExpression } from "../utils.ts";
+import { getPropertyName } from "../utils.ts";
 
 /** Split variants without treating a colon inside an arbitrary selector as a separator. */
 function classUtility(token: string) {
@@ -66,22 +66,6 @@ function isInlineStyleProperty(node: Extract<ESTree.Node, { type: "Property" }>)
     container.parent.type === "JSXAttribute" &&
     container.parent.name.type === "JSXIdentifier" &&
     container.parent.name.name === "style"
-  );
-}
-
-function isInwardInlineOffset(node: Extract<ESTree.Node, { type: "Property" }>) {
-  const value = unwrapExpression(node.value);
-  if (Option.isNone(value)) return false;
-  const expression = value.value;
-  if (expression.type === "Literal" && typeof expression.value === "string") {
-    return /^-\d+(?:\.\d+)?px$/u.test(expression.value) && parseFloat(expression.value) <= -2;
-  }
-  return (
-    expression.type === "UnaryExpression" &&
-    expression.operator === "-" &&
-    expression.argument.type === "Literal" &&
-    typeof expression.argument.value === "number" &&
-    expression.argument.value >= 2
   );
 }
 
@@ -186,8 +170,12 @@ export default defineRule({
         const name = getPropertyName(node.key);
         if (Option.isNone(name)) return;
         if (name.value === "outlineOffset") {
-          if (isInlineStyleProperty(node) && !isInwardInlineOffset(node)) {
-            context.report({ node, message: message("inline outlineOffset override") });
+          if (isInlineStyleProperty(node)) {
+            context.report({
+              node,
+              message:
+                "Inline outlineOffset overrides bypass the checked outline width. Use the shared inward default or a checked outline-offset class instead.",
+            });
           }
           return;
         }

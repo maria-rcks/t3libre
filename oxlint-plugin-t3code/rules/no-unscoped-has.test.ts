@@ -317,9 +317,9 @@ describe("t3code/no-outset-state-indicators", () => {
     `const el = <button style={{ outlineOffset: offset }} />;`,
   );
 
-  indicators.valid(
-    "allows known inward inline offsets",
-    `const a = <button style={{ outlineOffset: -2 }} />; const b = <button style={{ outlineOffset: "-3px" }} />;`,
+  indicators.invalid(
+    "rejects inline offsets that can override a wider outline",
+    `const el = <button className="focus-visible:outline-3 focus-visible:-outline-offset-3" style={{ outlineOffset: -2 }} />;`,
   );
 
   indicators.valid(
