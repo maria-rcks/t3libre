@@ -394,6 +394,7 @@ function orderedListGutterStyle(
 
 type MarkdownImageHastNode = {
   type?: string;
+  value?: string;
   tagName?: string;
   properties?: Record<string, unknown>;
   children?: MarkdownImageHastNode[];
@@ -446,6 +447,28 @@ function markStandaloneImages(node: MarkdownImageHastNode) {
   node.children?.forEach((child) => {
     if (child.type === "element") markStandaloneImages(child);
   });
+}
+
+/** Keep unmatched inline `<A>` placeholders from opening an HTML link over later blocks. */
+function rehypePreserveBareAnchorPlaceholders() {
+  return (tree: MarkdownImageHastNode) => {
+    const anchors: Array<MarkdownImageHastNode | null> = [];
+    const visit = (node: MarkdownImageHastNode) => {
+      if (node.type === "raw" && typeof node.value === "string") {
+        if (/^<a(?:\s|>)/i.test(node.value)) {
+          anchors.push(/^<a\s*>$/i.test(node.value) ? node : null);
+        } else if (/^<\/a\s*>$/i.test(node.value)) {
+          anchors.pop();
+        }
+      }
+      node.children?.forEach(visit);
+    };
+
+    visit(tree);
+    for (const anchor of anchors) {
+      if (anchor) anchor.type = "text";
+    }
+  };
 }
 
 /** Carries authored image source metadata through the sanitizer to the image renderer. */
@@ -514,6 +537,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 
 const CHAT_MARKDOWN_REHYPE_PLUGINS = [
+  rehypePreserveBareAnchorPlaceholders,
   rehypeRaw,
   rehypePreserveImageSourceMeta,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
