@@ -30,6 +30,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   files: ReadonlyArray<TurnDiffFileChange>;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
+  headerInset?: number;
   onToggleAllDirectories: () => void;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   onFileContextMenu?: ChangedFileContextMenuHandler | undefined;
@@ -39,6 +40,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
     files,
     allDirectoriesExpanded,
     resolvedTheme,
+    headerInset = 0,
     onToggleAllDirectories,
     onOpenTurnDiff,
     onFileContextMenu,
@@ -68,7 +70,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [glass]);
+  }, [glass, headerInset]);
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
   const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
 
