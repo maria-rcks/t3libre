@@ -1553,8 +1553,14 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(
     () =>
       onOpenThreadFind((target) => {
-        if (routeKind === "server" && scopedThreadKey(target) === routeThreadKey)
+        if (routeKind === "server" && scopedThreadKey(target) === routeThreadKey) {
           setFindThreadKey(routeThreadKey);
+          window.requestAnimationFrame(() =>
+            document
+              .querySelector<HTMLInputElement>('input[aria-label="Find in conversation"]')
+              ?.focus(),
+          );
+        }
       }),
     [routeKind, routeThreadKey],
   );

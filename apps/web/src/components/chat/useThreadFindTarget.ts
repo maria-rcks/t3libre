@@ -38,11 +38,19 @@ export function useThreadFindTarget({
   const navigation = useRef<{ key: string; pages: Set<string>; finished: boolean } | null>(null);
   const [finishedKey, setFinishedKey] = useState<string | null>(null);
   const [readyKey, setReadyKey] = useState<string | null>(null);
+  const [sourceMatch, setSourceMatch] = useState<{
+    key: string;
+    messageId: string;
+    before: string;
+    match: string;
+    after: string;
+  } | null>(null);
   useEffect(() => {
     if (!target) {
       navigation.current = null;
       setFinishedKey(null);
       setReadyKey(null);
+      setSourceMatch(null);
       return;
     }
     if (navigation.current?.key !== target.key) {
@@ -121,9 +129,13 @@ export function useThreadFindTarget({
       for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node as Text);
       const text = fold(nodes.map((node) => node.data).join(""));
       const query = fold(target.query);
+      const rawText = row.kind === "message" ? row.message.text : "";
+      const raw = fold(rawText);
+      const useSource = raw.split(query).length !== text.split(query).length;
+      const searchable = useSource ? raw : text;
       let start = -1;
       for (let occurrence = 0; occurrence <= target.occurrence; occurrence++) {
-        const next = text.indexOf(query, start + (start < 0 ? 1 : query.length));
+        const next = searchable.indexOf(query, start + (start < 0 ? 1 : query.length));
         if (next < 0) {
           start = -1;
           break;
@@ -131,7 +143,26 @@ export function useThreadFindTarget({
         start = next;
       }
       let range: Range | null = null;
-      if (start >= 0) {
+      if (useSource && start >= 0) {
+        const before = rawText.slice(Math.max(0, start - 80), start);
+        const match = rawText.slice(start, start + query.length);
+        const after = rawText.slice(start + query.length, start + query.length + 80);
+        setSourceMatch((current) =>
+          current?.key === target.key &&
+          current.before === before &&
+          current.match === match &&
+          current.after === after
+            ? current
+            : { key: target.key, messageId: target.messageId, before, match, after },
+        );
+        const matchElement = source.querySelector<HTMLElement>(
+          `[data-thread-find-match="${CSS.escape(target.key)}"]`,
+        );
+        if (!matchElement) return;
+        range = document.createRange();
+        range.selectNodeContents(matchElement);
+      } else if (start >= 0) {
+        setSourceMatch(null);
         range = document.createRange();
         let offset = 0;
         for (const node of nodes) {
@@ -193,6 +224,7 @@ export function useThreadFindTarget({
     };
   }, [listRef, row, target, viewport]);
   return {
+    sourceMatch: sourceMatch?.key === target?.key ? sourceMatch : null,
     alwaysRender: row ? { keys: [row.id] } : undefined,
     positioning: target !== null && finishedKey !== target.key,
     key: row ? target?.key : undefined,

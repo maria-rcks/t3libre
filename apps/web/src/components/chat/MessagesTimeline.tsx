@@ -299,6 +299,7 @@ import {
 
 interface TimelineRowSharedState {
   findTarget: ThreadFindTarget | null;
+  findSourceMatch: ReturnType<typeof useThreadFindTarget>["sourceMatch"];
   citationRequest: AssistantCitationTarget | null;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
@@ -1175,6 +1176,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       findTarget,
+      findSourceMatch: findNavigation.sourceMatch,
       citationRequest: readyCitationRequest,
       listRef,
       timestampFormat,
@@ -1212,6 +1214,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }),
     [
       findTarget,
+      findNavigation.sourceMatch,
       readyCitationRequest,
       listRef,
       timestampFormat,
@@ -1785,6 +1788,11 @@ type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["grouped
 type TimelineRow = MessagesTimelineRow;
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
+  const ctx = use(TimelineRowCtx);
+  const sourceMatch =
+    row.kind === "message" && ctx.findSourceMatch?.messageId === row.message.id
+      ? ctx.findSourceMatch
+      : null;
   const isExpandedToolGroup = row.kind === "work" && row.isExpandedToolGroup;
   const isSubagentGroup = row.kind === "event" && row.projectedItem.item.type === "subagent";
   const isWorkLogRow =
@@ -1853,6 +1861,16 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
       {row.kind === "attempt-fold" ? <AttemptFoldTimelineRow row={row} /> : null}
       {row.kind === "context-compaction" ? <ContextCompactionTimelineRow row={row} /> : null}
+      {sourceMatch ? (
+        <div className="mb-2 rounded-md border border-border bg-muted/30 px-3 py-2">
+          <p className="mb-1 text-xs text-muted-foreground">Match in message source</p>
+          <div className="whitespace-pre-wrap wrap-anywhere font-mono text-xs">
+            {sourceMatch.before}
+            <span data-thread-find-match={sourceMatch.key}>{sourceMatch.match}</span>
+            {sourceMatch.after}
+          </div>
+        </div>
+      ) : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
