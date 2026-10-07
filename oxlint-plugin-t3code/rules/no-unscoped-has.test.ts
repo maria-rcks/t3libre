@@ -313,6 +313,21 @@ describe("t3code/no-outset-state-indicators", () => {
   );
 
   indicators.invalid(
+    "reports pseudo-element outset overrides that defeat a state inset",
+    `const el = <button className="before:ring-outset! focus-visible:before:ring-2 focus-visible:before:ring-inset" />;`,
+  );
+
+  indicators.invalid(
+    "reports pseudo-element outset overrides under another condition",
+    `const el = <button className="dark:before:ring-outset! focus-visible:before:ring-2 focus-visible:before:ring-inset" />;`,
+  );
+
+  indicators.valid(
+    "allows a parent decorative outset ring alongside a safe descendant state ring",
+    `const el = <div className="ring-1 ring-border ring-outset [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-inset" />;`,
+  );
+
+  indicators.invalid(
     "reports an outset override when the state inset uses a base ring width",
     `const el = <button className="ring-1 ring-outset! focus-visible:ring-inset focus-visible:ring-ring" />;`,
   );

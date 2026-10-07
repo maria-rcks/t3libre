@@ -132,20 +132,22 @@ function classUtility(token: string) {
   };
 }
 
+function elementTarget(variants: string[]) {
+  return variants
+    .filter(
+      (variant) =>
+        (variant.startsWith("[") && !/^\[&(?::[\w-]+|\[[^\]]+\])+\]$/u.test(variant)) ||
+        /^(?:before|after|first-letter|first-line|marker|selection|file|placeholder|backdrop|details-content|\*{1,2})$/u.test(variant),
+    )
+    .join(":");
+}
+
 /** Conditions may be added, but an inset must still address the same element or pseudo-element. */
 function variantCovers(inset: string, target: string) {
   const insetVariants = classUtility(inset).variants;
   const targetVariants = classUtility(target).variants;
-  const elementVariants = (variants: string[]) =>
-    variants
-      .filter(
-        (variant) =>
-          (variant.startsWith("[") && !/^\[&(?::[\w-]+|\[[^\]]+\])+\]$/u.test(variant)) ||
-          /^(?:before|after|first-letter|first-line|marker|selection|file|placeholder|backdrop|details-content|\*{1,2})$/u.test(variant),
-      )
-      .join(":");
   return (
-    elementVariants(insetVariants) === elementVariants(targetVariants) &&
+    elementTarget(insetVariants) === elementTarget(targetVariants) &&
     insetVariants.every((variant) => targetVariants.includes(variant))
   );
 }
@@ -241,16 +243,19 @@ function outsetOverrides(text: string, companions: string) {
       const offset = pixelLength(candidate.utility.slice("-outline-offset-".length));
       return width !== undefined && offset !== undefined && offset >= width;
     });
-  const hasStateRing = classes.some(
-    (candidate) =>
-      isStateVariant(candidate.variant) &&
-      variantCovers("", candidate.variant) &&
-      (isRingWidth(candidate.utility) ||
-        candidate.utility === "ring-inset" ||
-        (hasBaseRing && isColorUtility(candidate.utility, "ring"))),
-  );
+  const hasStateRing = (variants: string[]) =>
+    classes.some(
+      (candidate) =>
+        isStateVariant(candidate.variant) &&
+        elementTarget(candidate.variants) === elementTarget(variants) &&
+        (isRingWidth(candidate.utility) ||
+          candidate.utility === "ring-inset" ||
+          (hasBaseRing &&
+            variantCovers("", candidate.variant) &&
+            isColorUtility(candidate.utility, "ring"))),
+    );
   const offenders: string[] = [];
-  for (const { utility, variant } of ownClasses) {
+  for (const { utility, variant, variants } of ownClasses) {
     const state = isStateVariant(variant);
     if (state && isRingWidth(utility) && !hasInset(variant)) {
       offenders.push(`${variant}${utility}`);
@@ -271,7 +276,7 @@ function outsetOverrides(text: string, companions: string) {
       continue;
     }
     if (
-      ((state || hasStateRing) && utility === "ring-outset") ||
+      (utility === "ring-outset" && (state || hasStateRing(variants))) ||
       (utility.startsWith("[--tw-ring-inset:") && utility !== "[--tw-ring-inset:inset]")
     ) {
       offenders.push(utility);
