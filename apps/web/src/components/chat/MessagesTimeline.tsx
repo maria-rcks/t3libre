@@ -1877,11 +1877,15 @@ function ContextCompactionTimelineRow({
 }: {
   row: Extract<TimelineRow, { kind: "context-compaction" }>;
 }) {
+  const glass = useHasTimelineBackground();
   return (
     <div
       role="separator"
       aria-label={row.label}
-      className="mx-auto flex w-full max-w-(--chat-content-max-width) items-center gap-3 py-1 text-muted-foreground text-xs"
+      className={cn(
+        "mx-auto flex w-full max-w-(--chat-content-max-width) items-center gap-3 py-1 text-muted-foreground text-xs",
+        glass && "text-foreground/80",
+      )}
     >
       <span className="h-px flex-1 bg-border/70" />
       <span

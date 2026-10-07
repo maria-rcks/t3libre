@@ -33,6 +33,12 @@ const HTML_RENDER_VARIABLES = Object.keys(
   htmlRenderTheme(getStandardThemeColors("light"), "light").variables,
 ).filter((variable) => variable !== "--font-sans" && variable !== "--font-mono");
 
+const HTML_RENDER_APP_ALIASES: Readonly<Record<string, string>> = {
+  "--accent-surface": "--accent",
+  "--accent-surface-foreground": "--accent-foreground",
+  "--destructive-surface": "--error-surface",
+};
+
 /** A primitive snapshot keeps external-store reads stable while tracking the painted CSS. */
 function readPaintedTheme(): string {
   if (typeof document === "undefined") return "";
@@ -47,7 +53,9 @@ function readPaintedTheme(): string {
         : variable === "--accent-foreground"
           ? getThemeColorVariable("accentForeground")
           : variable;
-    const value = styles.getPropertyValue(appVariable).trim();
+    const value =
+      styles.getPropertyValue(appVariable).trim() ||
+      styles.getPropertyValue(HTML_RENDER_APP_ALIASES[variable] ?? appVariable).trim();
     if (value) variables[variable] = value;
   }
   return JSON.stringify({
@@ -69,15 +77,17 @@ export function useHtmlRenderTheme() {
   const mono = useClientSettings((settings) => settings.fontFamilyCode);
   const paintedTheme = useSyncExternalStore(subscribeToThemePreview, readPaintedTheme, () => "");
   return useMemo(() => {
-    const base = htmlRenderTheme(colors, resolvedTheme, {
+    const painted = paintedTheme
+      ? (JSON.parse(paintedTheme) as {
+          appearance: ThemeAppearance;
+          variables: Record<string, string>;
+        })
+      : null;
+    const base = htmlRenderTheme(colors, painted?.appearance ?? resolvedTheme, {
       sans: appearanceFontStack(sans, HTML_RENDER_DEFAULT_FONTS.sans),
       mono: appearanceFontStack(mono, HTML_RENDER_DEFAULT_FONTS.mono),
     });
-    if (!paintedTheme) return base;
-    const painted = JSON.parse(paintedTheme) as {
-      appearance: ThemeAppearance;
-      variables: Record<string, string>;
-    };
+    if (!painted) return base;
     return {
       ...base,
       appearance: painted.appearance,
