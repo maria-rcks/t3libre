@@ -219,7 +219,10 @@ function outsetOverrides(text: string, companions: string) {
   const hasInset = (variant: string) =>
     insetVariants.some((inset) => variantCovers(inset, variant));
   const baseRingStateColors = classes.filter(
-    (candidate) => isStateVariant(candidate.variant) && isColorUtility(candidate.utility, "ring"),
+    (candidate) =>
+      isStateVariant(candidate.variant) &&
+      variantCovers("", candidate.variant) &&
+      isColorUtility(candidate.utility, "ring"),
   );
   const baseOutlineWidth = Math.max(
     2,
@@ -233,7 +236,7 @@ function outsetOverrides(text: string, companions: string) {
   );
   const hasInwardOutlineOffset = (variant: string, width: number | undefined) =>
     classes.some((candidate) => {
-      if (candidate.variant !== variant && candidate.variant !== "") return false;
+      if (!variantCovers(candidate.variant, variant)) return false;
       if (!candidate.utility.startsWith("-outline-offset-")) return false;
       const offset = pixelLength(candidate.utility.slice("-outline-offset-".length));
       return width !== undefined && offset !== undefined && offset >= width;
@@ -241,6 +244,7 @@ function outsetOverrides(text: string, companions: string) {
   const hasStateRing = classes.some(
     (candidate) =>
       isStateVariant(candidate.variant) &&
+      variantCovers("", candidate.variant) &&
       (isRingWidth(candidate.utility) ||
         candidate.utility === "ring-inset" ||
         (hasBaseRing && isColorUtility(candidate.utility, "ring"))),
@@ -254,7 +258,11 @@ function outsetOverrides(text: string, companions: string) {
     }
     if (
       !hasInset("") &&
-      ((state && isColorUtility(utility, "ring") && hasBaseRing && !hasInset(variant)) ||
+      ((state &&
+        variantCovers("", variant) &&
+        isColorUtility(utility, "ring") &&
+        hasBaseRing &&
+        !hasInset(variant)) ||
         (variant === "" &&
           isRingWidth(utility) &&
           baseRingStateColors.some((color) => !hasInset(color.variant))))
@@ -275,7 +283,9 @@ function outsetOverrides(text: string, companions: string) {
         ? utility === "outline"
           ? 1
           : pixelLength(utility.slice("outline-".length))
-        : baseOutlineWidth;
+        : variantCovers("", variant)
+          ? baseOutlineWidth
+          : 2;
       if (
         (width === undefined || width > 2) &&
         !hasInwardOutlineOffset(variant, width)
@@ -290,6 +300,7 @@ function outsetOverrides(text: string, companions: string) {
         classes.some(
           (candidate) =>
             isStateVariant(candidate.variant) &&
+            variantCovers("", candidate.variant) &&
             isColorUtility(candidate.utility, "outline") &&
             !hasInwardOutlineOffset(candidate.variant, width),
         )
@@ -309,7 +320,7 @@ function outsetOverrides(text: string, companions: string) {
     const amount = pixelLength(offset[2] ?? "");
     const widths = classes.filter(
       (candidate) =>
-        (candidate.variant === variant || candidate.variant === "") &&
+        variantCovers(candidate.variant, variant) &&
         isWidthUtility(candidate.utility, "outline"),
     );
     // Without a guaranteed width in this composition, the shared focus outline defaults to 2px.

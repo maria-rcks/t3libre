@@ -422,6 +422,36 @@ describe("t3code/no-outset-state-indicators", () => {
     `const el = <button className="ring-1 ring-border hover:ring-primary" />;`,
   );
 
+  indicators.valid(
+    "does not reuse a parent decorative ring for a descendant focus color",
+    `const el = <div className="ring-1 ring-border [&_button]:focus-visible:ring-ring" />;`,
+  );
+
+  indicators.valid(
+    "does not reuse a parent decorative outline for a descendant focus color",
+    `const el = <div className="outline-3 [&_button]:focus-visible:outline-ring" />;`,
+  );
+
+  indicators.invalid(
+    "does not borrow a parent outline offset for a pseudo-element",
+    `const el = <button className="-outline-offset-3 focus-visible:before:outline-3" />;`,
+  );
+
+  indicators.invalid(
+    "does not borrow a parent outline offset for a descendant",
+    `const el = <div className="-outline-offset-3 [&_button]:focus-visible:outline-3" />;`,
+  );
+
+  indicators.valid(
+    "allows a weaker outline offset condition on the same pseudo-element",
+    `const el = <button className="focus-visible:before:-outline-offset-3 dark:focus-visible:before:outline-3" />;`,
+  );
+
+  indicators.valid(
+    "does not reuse a parent outline width for a descendant offset",
+    `const el = <div className="outline-4 [&_button]:focus-visible:-outline-offset-2" />;`,
+  );
+
   indicators.invalid(
     "checks a wider base outline used by a focus color",
     `const el = <button className="outline-3 focus:outline-ring" />;`,
