@@ -51,14 +51,14 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
     <div
       className={cn(
         "@container/changed-files mt-4 rounded-lg",
-        glass ? CHAT_BACKGROUND_GLASS_SURFACE_CLASSES : "bg-secondary dark:bg-input/20",
+        !glass && "bg-secondary dark:bg-input/20",
       )}
       data-changed-files-state="tree"
     >
       <div
         data-changed-files-header=""
         className={cn(
-          "sticky top-2 z-10 flex items-center justify-between gap-2 rounded-t-lg px-3 py-2",
+          "sticky top-[calc(var(--chat-timeline-header-inset,0px)+0.5rem)] z-10 flex items-center justify-between gap-2 rounded-t-lg px-3 py-2",
           glass
             ? CHAT_BACKGROUND_GLASS_SURFACE_CLASSES
             : "bg-secondary dark:bg-background dark:bg-linear-to-b dark:from-input/20 dark:to-input/20",
@@ -110,7 +110,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                 <Button
                   type="button"
                   size="xs"
-                  variant="ghost-muted"
+                  variant={glass ? "ghost" : "ghost-muted"}
                   aria-label="Open diff"
                   onClick={() => onOpenTurnDiff(runId, files[0]?.path)}
                 />
@@ -123,15 +123,17 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           </Tooltip>
         </div>
       </div>
-      <ChangedFilesTree
-        key={`${runId}:${allDirectoriesExpanded}`}
-        runId={runId}
-        files={files}
-        allDirectoriesExpanded={allDirectoriesExpanded}
-        resolvedTheme={resolvedTheme}
-        onOpenTurnDiff={onOpenTurnDiff}
-        onFileContextMenu={onFileContextMenu}
-      />
+      <div className={cn(glass && CHAT_BACKGROUND_GLASS_SURFACE_CLASSES, "rounded-b-lg")}>
+        <ChangedFilesTree
+          key={`${runId}:${allDirectoriesExpanded}`}
+          runId={runId}
+          files={files}
+          allDirectoriesExpanded={allDirectoriesExpanded}
+          resolvedTheme={resolvedTheme}
+          onOpenTurnDiff={onOpenTurnDiff}
+          onFileContextMenu={onFileContextMenu}
+        />
+      </div>
     </div>
   );
 });
@@ -146,6 +148,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
 }) {
   const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, runId, onFileContextMenu } =
     props;
+  const glass = useHasTimelineBackground();
   const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);
   const directoryPathsKey = useMemo(
     () => collectDirectoryPaths(treeNodes).join("\u0000"),
@@ -206,7 +209,12 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
               className="size-3.5 shrink-0 text-muted-foreground/75"
               icon={isExpanded ? Folder : FolderClosed}
             />
-            <span className="truncate font-mono text-2xs text-muted-foreground/90 group-hover:text-foreground/90">
+            <span
+              className={cn(
+                "truncate font-mono text-2xs group-hover:text-foreground/90",
+                glass ? "text-foreground/80" : "text-muted-foreground/90",
+              )}
+            >
               {node.name}
             </span>
             {hasNonZeroStat(node.stat) && (

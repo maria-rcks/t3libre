@@ -80,6 +80,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type CSSProperties,
   type MouseEvent,
   type ReactNode,
 } from "react";
@@ -1387,6 +1388,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
               topFadeEnabled && topFadeMaskEnabled && "topbar-scroll-fade",
             )}
+            style={{ "--chat-timeline-header-inset": `${headerInset}px` } as CSSProperties}
             ListHeaderComponent={listHeader}
             ListFooterComponent={timelineListFooter}
           />
@@ -5309,7 +5311,9 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
             : iconConfig.className,
   );
   const headingClass = showWarningIndicator
-    ? "font-medium text-warning"
+    ? glass
+      ? "font-medium text-foreground/90"
+      : "font-medium text-warning"
     : showDestructiveRowStyle
       ? "font-medium text-destructive"
       : workLogEntryIsToolLike(workEntry)
