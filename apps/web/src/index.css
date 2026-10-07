@@ -376,7 +376,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --surface-glass-color: var(--message-surface);
   text-shadow: none;
   @variant dark {
-    --surface-glass-color: var(--card);
+    :where(html:not([data-theme-id])) & {
+      --surface-glass-color: var(--card);
+    }
   }
 }
 
