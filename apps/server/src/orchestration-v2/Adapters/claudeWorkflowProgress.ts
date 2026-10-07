@@ -23,12 +23,12 @@ const excerpt = (value: unknown) =>
 const optional = <K extends string, V>(key: K, value: V | undefined) =>
   value === undefined ? {} : { [key]: value };
 
-const agentStates: Readonly<Record<string, OrchestrationV2WorkflowAgent["state"]>> = {
-  queued: "queued",
-  start: "running",
-  done: "completed",
-  error: "failed",
-};
+const agentStates: ReadonlyMap<string, OrchestrationV2WorkflowAgent["state"]> = new Map([
+  ["queued", "queued"],
+  ["start", "running"],
+  ["done", "completed"],
+  ["error", "failed"],
+]);
 
 function parseAgent(value: unknown): OrchestrationV2WorkflowAgent | undefined {
   const entry = record(value);
@@ -38,7 +38,7 @@ function parseAgent(value: unknown): OrchestrationV2WorkflowAgent | undefined {
   return {
     index,
     label,
-    state: agentStates[text(entry.state) ?? ""] ?? "running",
+    state: agentStates.get(text(entry.state) ?? "") ?? "running",
     ...optional("agentId", text(entry.agentId)),
     ...optional("phaseIndex", count(entry.phaseIndex)),
     ...optional("phaseTitle", text(entry.phaseTitle)),
