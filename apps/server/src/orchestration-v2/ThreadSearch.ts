@@ -168,6 +168,8 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  // Inherited items are a fork snapshot: later source rollbacks do not hide them.
+  // Only the requested thread applies live visibility; ancestors stop at their fork run.
   const findRow = SqlSchema.findAll({
     Request: Schema.Struct({ threadId: ThreadId, query: Schema.String, index: Schema.Int }),
     Result: Schema.Struct({
@@ -176,23 +178,50 @@ export const make = Effect.gen(function* () {
       occurrence: Schema.NullOr(Schema.Int),
     }),
     execute: ({ threadId, query, index }) => sql`
-      WITH messages AS (
-        SELECT messages.message_id, messages.created_at,
-          lower(json_extract(messages.payload_json, '$.text')) AS text
-        FROM orchestration_v2_projection_messages AS messages
-        INNER JOIN orchestration_v2_projection_threads AS threads ON threads.thread_id = messages.thread_id
+      WITH RECURSIVE history(thread_id, payload_json, cutoff, depth, visited) AS (
+        SELECT threads.thread_id, threads.payload_json, NULL, 0, json_array()
+        FROM orchestration_v2_projection_threads AS threads
         INNER JOIN projection_projects AS projects ON projects.project_id = threads.project_id
-        WHERE messages.thread_id = ${threadId}
+        WHERE threads.thread_id = ${threadId}
           AND threads.deleted_at IS NULL AND projects.deleted_at IS NULL
-          AND messages.role IN ('user', 'assistant')
-          AND json_extract(messages.payload_json, '$.notification') IS NULL
+        UNION ALL
+        SELECT source.thread_id, source.payload_json, fork_run.ordinal, history.depth + 1,
+          json_insert(history.visited, '$[#]', history.thread_id)
+        FROM history
+        INNER JOIN orchestration_v2_projection_threads AS source
+          ON source.thread_id = json_extract(history.payload_json, '$.forkedFrom.threadId')
+        INNER JOIN orchestration_v2_projection_runs AS fork_run
+          ON fork_run.thread_id = source.thread_id
+          AND fork_run.run_id = json_extract(history.payload_json, '$.forkedFrom.runId')
+        WHERE json_extract(history.payload_json, '$.forkedFrom.type') = 'run'
+          AND NOT EXISTS (SELECT 1 FROM json_each(history.visited) WHERE value = source.thread_id)
+      ), messages AS (
+        SELECT json_extract(item.payload_json, '$.messageId') AS message_id,
+          history.depth, item.ordinal, item.turn_item_id,
+          lower(json_extract(item.payload_json, '$.text')) AS text
+        FROM history
+        INNER JOIN orchestration_v2_projection_turn_items AS item ON item.thread_id = history.thread_id
+        LEFT JOIN orchestration_v2_projection_runs AS run
+          ON run.run_id = item.run_id AND run.thread_id = item.thread_id
+        WHERE item.type IN ('user_message', 'assistant_message')
+          AND (
+            (history.depth = 0
+              AND (run.status IS NULL OR run.status <> 'rolled_back')
+              AND NOT (item.type = 'user_message'
+                AND json_extract(item.payload_json, '$.inputIntent') IS 'queued_turn'
+                AND run.status IS 'cancelled'))
+            OR (history.depth > 0 AND (
+              run.ordinal <= history.cutoff
+              OR (item.run_id IS NULL AND json_extract(history.payload_json, '$.historyOrigin') = 'v1_import')
+            ))
+          )
       ), counts AS (
-        SELECT message_id, created_at,
+        SELECT message_id, depth, ordinal, turn_item_id,
           (length(text) - length(replace(text, lower(${query}), ''))) / length(${query}) AS count
         FROM messages
       ), positions AS (
         SELECT message_id, count,
-          sum(count) OVER (ORDER BY created_at, message_id ROWS UNBOUNDED PRECEDING) AS end_index
+          sum(count) OVER (ORDER BY depth DESC, ordinal, turn_item_id ROWS UNBOUNDED PRECEDING) AS end_index
         FROM counts WHERE count > 0
       ), total AS (
         SELECT coalesce(sum(count), 0) AS count FROM counts

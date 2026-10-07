@@ -8,6 +8,7 @@ import type { ThreadFindTarget } from "./ThreadFind";
 import { toastManager } from "../ui/toast";
 
 const fold = (text: string) => text.replace(/[A-Z]/g, (character) => character.toLowerCase());
+const MAX_POSITION_ATTEMPTS = 8;
 
 /** Load and unfold the same history used by citation navigation, then pin its virtual row. */
 export function useThreadFindTarget({
@@ -35,7 +36,13 @@ export function useThreadFindTarget({
   historyError: string | null;
   onManualNavigation: () => void;
 }) {
-  const navigation = useRef<{ key: string; pages: Set<string>; finished: boolean } | null>(null);
+  const navigation = useRef<{
+    key: string;
+    pages: Set<string>;
+    finished: boolean;
+    positionAttempts: number;
+  } | null>(null);
+  const cancelScroll = useRef<(() => void) | null>(null);
   const [finishedKey, setFinishedKey] = useState<string | null>(null);
   const [readyKey, setReadyKey] = useState<string | null>(null);
   const [sourceMatch, setSourceMatch] = useState<{
@@ -54,7 +61,12 @@ export function useThreadFindTarget({
       return;
     }
     if (navigation.current?.key !== target.key) {
-      navigation.current = { key: target.key, pages: new Set(), finished: false };
+      navigation.current = {
+        key: target.key,
+        pages: new Set(),
+        finished: false,
+        positionAttempts: 0,
+      };
       setFinishedKey(null);
       setReadyKey(null);
       onManualNavigation();
@@ -114,6 +126,42 @@ export function useThreadFindTarget({
     historyError,
   ]);
 
+  useEffect(() => {
+    if (!target) return;
+    const cancelForNavigation = () => {
+      const current = navigation.current;
+      if (!current || current.key !== target.key || current.finished) return;
+      current.finished = true;
+      cancelScroll.current?.();
+      setFinishedKey(target.key);
+      onManualNavigation();
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY !== 0) cancelForNavigation();
+    };
+    const onScrollKey = (event: KeyboardEvent) => {
+      if (
+        ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key) &&
+        !(
+          event.target instanceof Element &&
+          event.target.closest("input, textarea, [contenteditable=true]")
+        )
+      )
+        cancelForNavigation();
+    };
+    const ownerDocument = viewport?.ownerDocument ?? document;
+    ownerDocument.addEventListener("pointerdown", cancelForNavigation, true);
+    ownerDocument.addEventListener("keydown", onScrollKey);
+    viewport?.addEventListener("wheel", onWheel, { passive: true });
+    viewport?.addEventListener("touchmove", cancelForNavigation, { passive: true });
+    return () => {
+      ownerDocument.removeEventListener("pointerdown", cancelForNavigation, true);
+      ownerDocument.removeEventListener("keydown", onScrollKey);
+      viewport?.removeEventListener("wheel", onWheel);
+      viewport?.removeEventListener("touchmove", cancelForNavigation);
+    };
+  }, [onManualNavigation, target, viewport]);
+
   const row =
     target && readyKey === target.key
       ? rows.find((row) => row.kind === "message" && row.message.id === target.messageId)
@@ -122,6 +170,7 @@ export function useThreadFindTarget({
     const list = listRef.current;
     if (!target || !row || !list || !viewport) return;
     let cancelled = false;
+    let scrolling = false;
     let frame: number | null = null;
     let observer: MutationObserver | null = null;
     const resizeObserver = new ResizeObserver(() => schedule());
@@ -191,7 +240,19 @@ export function useThreadFindTarget({
       if (!(scroll instanceof HTMLElement)) return;
       const rect = (range ?? body).getBoundingClientRect();
       if (rect.height <= 0) return;
-      if (!navigation.current?.finished) {
+      const current = navigation.current;
+      if (current?.key === target.key && !current.finished && !scrolling) {
+        // Keep the limit across row/layout changes that restart this effect.
+        if (current.positionAttempts >= MAX_POSITION_ATTEMPTS) {
+          current.finished = true;
+          setFinishedKey(target.key);
+          toastManager.add({
+            type: "warning",
+            title: "Could not scroll to the matching message",
+            description: "Try the match again after the conversation finishes loading.",
+          });
+          return;
+        }
         const offset = Math.max(
           0,
           scroll.scrollTop +
@@ -199,19 +260,18 @@ export function useThreadFindTarget({
             scroll.getBoundingClientRect().top -
             Math.min(100, scroll.clientHeight / 3),
         );
+        scrolling = true;
+        current.positionAttempts++;
         void list.scrollToOffset({ offset, animated: false }).then(() => {
-          if (cancelled) return;
+          scrolling = false;
+          if (cancelled || navigation.current !== current || current.finished) return;
           const positioned = (range ?? body).getBoundingClientRect();
           const bounds = scroll.getBoundingClientRect();
-          if (
-            navigation.current?.key === target.key &&
-            positioned.top < bounds.bottom &&
-            positioned.bottom > bounds.top
-          ) {
-            navigation.current.finished = true;
+          if (positioned.top < bounds.bottom && positioned.bottom > bounds.top) {
+            current.finished = true;
             setFinishedKey(target.key);
           }
-          schedule();
+          if (!current.finished) schedule();
         });
       }
       if (range && typeof Highlight !== "undefined" && CSS.highlights) {
@@ -220,15 +280,26 @@ export function useThreadFindTarget({
       }
     };
     const schedule = () => {
+      if (cancelled) return;
       if (frame !== null) cancelAnimationFrame(frame);
       frame = requestAnimationFrame(position);
     };
+    const stopScrolling = () => {
+      cancelled = true;
+      if (frame !== null) cancelAnimationFrame(frame);
+      const scroll = list.getScrollableNode();
+      // Supersede Legend's pending request before it can override the gesture.
+      if (scroll instanceof HTMLElement)
+        void list.scrollToOffset({ offset: scroll.scrollTop, animated: false });
+    };
+    cancelScroll.current = stopScrolling;
     observer = new MutationObserver(schedule);
     observer.observe(viewport, { childList: true, subtree: true, characterData: true });
     resizeObserver.observe(viewport);
     schedule();
     return () => {
       cancelled = true;
+      if (cancelScroll.current === stopScrolling) cancelScroll.current = null;
       observer?.disconnect();
       resizeObserver.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
