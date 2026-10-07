@@ -2347,11 +2347,17 @@ describe("opt-in branch and worktree grouping", () => {
   it("offers and executes moves inside a group and refuses an invisible cross-group move", () => {
     const rows = [
       makeThread({ id: ThreadId.make("a1"), title: "A1", branch: "a", activeOrderKey: "f" }),
-      makeThread({ id: ThreadId.make("a2"), title: "A2", branch: "a", activeOrderKey: "n" }),
-      makeThread({ id: ThreadId.make("b"), title: "B", branch: "b", activeOrderKey: "t" }),
+      makeThread({ id: ThreadId.make("b"), title: "B", branch: "b", activeOrderKey: "n" }),
+      makeThread({ id: ThreadId.make("a2"), title: "A2", branch: "a", activeOrderKey: "t" }),
+      makeThread({ id: ThreadId.make("a3"), title: "A3", branch: "a", activeOrderKey: "w" }),
     ];
     const input = {
-      ordered: rows,
+      ordered: getThreadListV2OrderedSection({
+        threads: rows,
+        section: "active",
+        branchGroupingEnabled: true,
+        now: NOW,
+      }),
       section: "active" as const,
       reorderableEnvironmentIds: new Set([environmentId]),
       groupById: threadListV2BranchGroupKeys(rows),
@@ -2359,9 +2365,24 @@ describe("opt-in branch and worktree grouping", () => {
     const availability = computeThreadMoveAvailability(input);
     const planner = createThreadMovePlanner(input);
     expect(availability.get(`${environmentId}:a1`)?.canMoveDown).toBe(true);
-    expect(planner(`${environmentId}:a1`, "down")).not.toBeNull();
-    expect(availability.get(`${environmentId}:a2`)?.canMoveDown).toBe(false);
-    expect(planner(`${environmentId}:a2`, "down")).toBeNull();
+    const assignments = planner(`${environmentId}:a1`, "down");
+    expect(assignments).not.toBeNull();
+    const keys = new Map(assignments!.map(({ id, orderKey }) => [id, orderKey]));
+    const updated = rows.map((thread) => ({
+      ...thread,
+      activeOrderKey: keys.get(`${thread.environmentId}:${thread.id}`) ?? thread.activeOrderKey,
+    }));
+    expect(
+      buildThreadListV2Items({
+        threads: updated,
+        environmentId: null,
+        searchQuery: "",
+        branchGroupingEnabled: true,
+        now: NOW,
+      }).items.map(({ thread }) => thread.id),
+    ).toEqual(["a2", "a1", "a3", "b"]);
+    expect(availability.get(`${environmentId}:a3`)?.canMoveDown).toBe(false);
+    expect(planner(`${environmentId}:a3`, "down")).toBeNull();
     expect(
       planner(`${environmentId}:a1`, { targetId: `${environmentId}:b`, placement: "after" }),
     ).toBeNull();

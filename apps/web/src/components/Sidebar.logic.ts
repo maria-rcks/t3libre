@@ -319,6 +319,7 @@ export function planSidebarThreadDrop(input: {
   readonly activeReorderableKeys?: ReadonlySet<string>;
   /** Working beta: the inbox sorts by time, so drops only change lifecycle. */
   readonly activeTimeOrdered?: boolean;
+  readonly activeGrouped?: boolean;
 }): SidebarThreadDropPlan {
   const {
     activeKey,
@@ -344,13 +345,21 @@ export function planSidebarThreadDrop(input: {
     order: readonly string[],
     keysById: ReadonlyMap<string, string | null | undefined>,
     writable: ReadonlySet<string> | undefined,
+    requireOrderedKeys = false,
   ) => {
-    if (!writable) return planPinnedReorder({ orderedIds: order, keysById, movedId: activeKey });
+    if (!writable)
+      return planPinnedReorder({
+        orderedIds: order,
+        keysById,
+        movedId: activeKey,
+        requireOrderedKeys,
+      });
     if (!writable.has(activeKey)) return null;
     const assignments = planPinnedReorder({
       orderedIds: order.filter((key) => writable.has(key) || keysById.get(key) != null),
       keysById,
       movedId: activeKey,
+      requireOrderedKeys,
     });
     return assignments.every(({ id }) => writable.has(id)) ? assignments : null;
   };
@@ -378,7 +387,7 @@ export function planSidebarThreadDrop(input: {
       ) {
         return { kind: "none" };
       }
-      const assignments = arrange(order, activeKeysById, activeReorderableKeys);
+      const assignments = arrange(order, activeKeysById, activeReorderableKeys, input.activeGrouped);
       if (assignments === null) return { kind: "none" };
       return {
         kind: "move-active",

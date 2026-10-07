@@ -139,6 +139,27 @@ describe("computeThreadMoveAvailability matches the reference planner", () => {
             .join(",")}`,
         ).toEqual(answer);
       }
+      const groupedInput = {
+        ordered,
+        allThreads,
+        section: "pinned" as const,
+        reorderableEnvironmentIds: WRITABLE,
+        groupById: new Map(
+          ordered.map((row, index) => [
+            `${row.environmentId}:${row.id}`,
+            String(Math.floor(index / 3)),
+          ]),
+        ),
+      };
+      const groupedBatch = computeThreadMoveAvailability(groupedInput);
+      const groupedPlanner = createThreadMovePlanner(groupedInput);
+      for (const row of ordered) {
+        const id = `${row.environmentId}:${row.id}`;
+        expect(groupedBatch.get(id), `grouped seed ${seed} row ${id}`).toEqual({
+          canMoveUp: groupedPlanner(id, "up") !== null,
+          canMoveDown: groupedPlanner(id, "down") !== null,
+        });
+      }
     }
   });
 

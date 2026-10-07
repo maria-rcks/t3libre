@@ -111,7 +111,12 @@ export function createThreadMovePlanner(input: {
     }
     const nextIds = threadOrderAfterMove(orderedIds, movedId, direction);
     if (nextIds === null) return null;
-    const assignments = planPinnedReorder({ orderedIds: nextIds, keysById, movedId });
+    const assignments = planPinnedReorder({
+      orderedIds: nextIds,
+      keysById,
+      movedId,
+      requireOrderedKeys: input.groupById !== undefined,
+    });
     return assignments === null ||
       assignments.length === 0 ||
       assignments.some((assignment) => !writableIds.has(assignment.id))
@@ -191,6 +196,24 @@ export function computeThreadMoveAvailability(input: {
     .filter((key) => !reservedKeys.has(key))
     .slice(0, orderedIds.length);
   const currentKeys = orderedIds.map((id) => keysById.get(id) ?? null);
+  // Check the unchanged rows after removing any one row in constant time.
+  const prefixOrdered = [true];
+  const suffixOrdered = [true];
+  if (input.groupById) {
+    suffixOrdered[currentKeys.length] = true;
+    for (let index = 0; index < currentKeys.length; index += 1) {
+      const key = currentKeys[index] ?? null;
+      prefixOrdered[index + 1] =
+        prefixOrdered[index]! && key !== null && (index === 0 || currentKeys[index - 1]! < key);
+    }
+    for (let index = currentKeys.length - 1; index >= 0; index -= 1) {
+      const key = currentKeys[index] ?? null;
+      suffixOrdered[index] =
+        suffixOrdered[index + 1]! &&
+        key !== null &&
+        (index === currentKeys.length - 1 || key < currentKeys[index + 1]!);
+    }
+  }
   const writableRow = orderedIds.map((id) => writableIds.has(id));
   let baselineWrites = 0;
   let baselineUnwritableWrites = 0;
@@ -248,7 +271,18 @@ export function computeThreadMoveAvailability(input: {
       const afterId = afterIndex >= orderedIds.length ? null : (orderedIds[afterIndex] ?? null);
       const beforeKey = beforeId === null ? null : (keysById.get(beforeId) ?? null);
       const afterKey = afterId === null ? null : (keysById.get(afterId) ?? null);
-      if ((beforeId === null || beforeKey != null) && (afterId === null || afterKey != null)) {
+      const remainingKeysOrdered =
+        !input.groupById ||
+        (prefixOrdered[index]! &&
+          suffixOrdered[index + 1]! &&
+          (index === 0 ||
+            index === currentKeys.length - 1 ||
+            currentKeys[index - 1]! < currentKeys[index + 1]!));
+      if (
+        remainingKeysOrdered &&
+        (beforeId === null || beforeKey != null) &&
+        (afterId === null || afterKey != null)
+      ) {
         const key = fastPathKey(beforeKey, afterKey);
         // A fresh key is a single-write plan for the (writable) moved row.
         if (key !== null) return true;
