@@ -7625,9 +7625,11 @@ export default function ChatView(props: ChatViewProps) {
       : null;
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
-    const backgroundWorkItems = [childInputBannerItem, goalBannerItem, backgroundWorkBannerItem].filter(
-      (item) => item !== null,
-    );
+    const backgroundWorkItems = [
+      childInputBannerItem,
+      goalBannerItem,
+      backgroundWorkBannerItem,
+    ].filter((item) => item !== null);
     const resumeCompactionItems =
       resumeCompactionBannerItem === null ? [] : [resumeCompactionBannerItem];
     const wokeThreadItems = wokeThreadBannerItem === null ? [] : [wokeThreadBannerItem];
