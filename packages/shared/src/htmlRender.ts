@@ -321,9 +321,11 @@ export function htmlRenderThemeMessage(theme: HtmlRenderTheme) {
 
 // The frame scrolls a page taller than itself, but a scrollbar inside the
 // reply reads as a box within the thread, so it stays hidden.
+// Keep the default focus outline inside frame edges; authored page styles still win.
 const BASE_CSS =
   "html{background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}" +
-  "html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}";
+  "html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}" +
+  ":where(:focus-visible){outline:2px solid var(--ring);outline-offset:-2px}@media(forced-colors:active){:where(:focus-visible){outline-color:Highlight}}";
 
 function rootRule(theme: HtmlRenderTheme): string {
   const declarations = Object.entries(theme.variables)

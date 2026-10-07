@@ -665,6 +665,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   * {
     @apply border-border outline-ring/50;
   }
+  /* The app's 2px outlines stay inside controls at clipped and scrollport edges. */
+  *,
+  ::before,
+  ::after {
+    outline-offset: -2px;
+  }
   :where([data-slot="menu-popup"], [data-slot="select-popup"], [data-slot="popover-popup"]):focus,
   :where(
     [data-slot="menu-popup"],
@@ -2165,6 +2171,14 @@ code {
   }
 }
 
+/* Forced colors removes box shadows, so focused controls need an outline. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}
+
 /* Rich text composer (Tiptap). The stored prompt stays markdown; only the
    surface renders styled text. Markers (** * ` ~~) appear as non-editable
    widgets while the caret is on styled text. */
@@ -2202,7 +2216,7 @@ code {
 /* Selected chips (node selection from arrowing into or clicking a chip). */
 .composer-tiptap .ProseMirror-selectednode {
   outline: 2px solid var(--ring);
-  outline-offset: 1px;
+  outline-offset: -2px;
   border-radius: 6px;
 }
 

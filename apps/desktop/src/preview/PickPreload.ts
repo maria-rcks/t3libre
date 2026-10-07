@@ -274,7 +274,7 @@ function isAnnotationNode(element: Element): boolean {
 function pickFromPoint(clientX: number, clientY: number): Element | null {
   for (const candidate of document.elementsFromPoint(clientX, clientY)) {
     if (!(candidate instanceof Element)) continue;
-    if (isAnnotationNode(candidate)) continue;
+    if (isAnnotationNode(candidate)) return null;
     if (candidate === document.documentElement || candidate === document.body) continue;
     return candidate;
   }
@@ -303,7 +303,8 @@ function createBox(color: string, fill: string): HTMLDivElement {
   node.style.cssText = [
     "position:fixed",
     "pointer-events:none",
-    `border:2px solid ${color}`,
+    `outline:2px solid ${color}`,
+    "outline-offset:-2px",
     `background:${fill}`,
     "border-radius:3px",
     "box-sizing:border-box",
@@ -314,10 +315,60 @@ function createBox(color: string, fill: string): HTMLDivElement {
 }
 
 function positionBox(node: HTMLElement, rect: PreviewAnnotationRect): void {
+  if (rect.width <= 0 || rect.height <= 0) {
+    node.style.display = "none";
+    return;
+  }
   node.style.display = "block";
   node.style.transform = `translate(${rect.x}px, ${rect.y}px)`;
   node.style.width = `${rect.width}px`;
   node.style.height = `${rect.height}px`;
+}
+
+/** Paint the visible portion without changing the element bounds used in the annotation. */
+function visibleElementRect(element: Element): PreviewAnnotationRect {
+  const rect = element.getBoundingClientRect();
+  let left = Math.max(0, rect.left);
+  let top = Math.max(0, rect.top);
+  let right = Math.min(document.documentElement.clientWidth, rect.right);
+  let bottom = Math.min(document.documentElement.clientHeight, rect.bottom);
+  let position = getComputedStyle(element).position;
+  let clips = position !== "fixed" && position !== "absolute";
+  for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    const style = getComputedStyle(ancestor);
+    // Positioned descendants escape overflow between themselves and their containing block.
+    clips ||=
+      (position === "absolute" && style.position !== "static") ||
+      style.transform !== "none" ||
+      style.perspective !== "none" ||
+      style.filter !== "none" ||
+      /(?:paint|layout|strict|content)/.test(style.contain) ||
+      /(?:transform|perspective|filter)/.test(style.willChange);
+    const clipThisAncestor = clips;
+    if (style.position === "fixed" || style.position === "absolute") {
+      position = style.position;
+      clips = false;
+    }
+    if (!clipThisAncestor) continue;
+    const paintClip = /(?:paint|strict|content)/.test(style.contain);
+    const clipsX = paintClip || style.overflowX !== "visible";
+    const clipsY = paintClip || style.overflowY !== "visible";
+    if (!clipsX && !clipsY) continue;
+    const bounds = ancestor.getBoundingClientRect();
+    const scaleX = ancestor.offsetWidth > 0 ? bounds.width / ancestor.offsetWidth : 1;
+    const scaleY = ancestor.offsetHeight > 0 ? bounds.height / ancestor.offsetHeight : 1;
+    if (clipsX) {
+      const start = bounds.left + ancestor.clientLeft * scaleX;
+      left = Math.max(left, start);
+      right = Math.min(right, start + ancestor.clientWidth * scaleX);
+    }
+    if (clipsY) {
+      const start = bounds.top + ancestor.clientTop * scaleY;
+      top = Math.max(top, start);
+      bottom = Math.min(bottom, start + ancestor.clientHeight * scaleY);
+    }
+  }
+  return { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
 }
 
 function createLabel(): HTMLDivElement {
@@ -341,11 +392,15 @@ function updateSelectedVisual(target: SelectedElement): void {
     target.label.style.display = "none";
     return;
   }
-  const rect = target.element.getBoundingClientRect();
-  positionBox(target.outline, rectFromDomRect(rect));
+  const rect = visibleElementRect(target.element);
+  positionBox(target.outline, rect);
+  if (rect.width === 0 || rect.height === 0) {
+    target.label.style.display = "none";
+    return;
+  }
   target.label.textContent = describeRawElement(target.element);
   target.label.style.display = "block";
-  target.label.style.transform = `translate(${Math.max(4, rect.left)}px, ${Math.max(4, rect.top - 22)}px)`;
+  target.label.style.transform = `translate(${Math.max(4, rect.x)}px, ${Math.max(4, rect.y - 22)}px)`;
 }
 
 function toStackFrame(frame: {
@@ -600,6 +655,8 @@ function startAnnotation(): void {
   editor.appendChild(stylePanel);
 
   const selected = new Map<Element, SelectedElement>();
+  let hoveredElement: Element | null = null;
+  let hoverPoint: PreviewAnnotationPoint | null = null;
   const regions: PreviewAnnotationRegionTarget[] = [];
   const strokes: PreviewAnnotationStrokeTarget[] = [];
   const styleChanges = new Map<string, PreviewAnnotationStyleChange>();
@@ -645,7 +702,7 @@ function startAnnotation(): void {
       button.classList.toggle("text-primary", active);
       button.classList.toggle("text-foreground", !active);
     }
-    if (tool !== "select") hoverOutline.style.display = "none";
+    if (tool !== "select") clearHoverOutline();
     if (tool !== "marquee") marqueeBox.style.display = "none";
     document.documentElement.setAttribute("data-t3code-annotation-tool", tool);
   };
@@ -658,6 +715,7 @@ function startAnnotation(): void {
       }
     }
     selected.delete(target.element);
+    syncResizeTargets();
     target.outline.remove();
     target.label.remove();
     for (const [key, change] of styleChanges) {
@@ -676,6 +734,7 @@ function startAnnotation(): void {
       baselineStyles: new Map(),
     };
     selected.set(element, target);
+    syncResizeTargets();
     root.append(target.outline, target.label);
     updateSelectedVisual(target);
     updateStatus();
@@ -1098,7 +1157,31 @@ function startAnnotation(): void {
 
   const repaint = (): void => {
     for (const target of selected.values()) updateSelectedVisual(target);
+    if (hoverPoint && tool === "select" && dragStart === null) updateHoverOutline();
     queueEditorLayout();
+  };
+
+  const resizeObserver = new ResizeObserver(repaint);
+  const observedElements = new Set<Element>();
+  const syncResizeTargets = (): void => {
+    const next = new Set<Element>([document.documentElement]);
+    for (const element of [...selected.keys(), ...(hoveredElement ? [hoveredElement] : [])]) {
+      for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
+        next.add(ancestor);
+      }
+    }
+    for (const element of observedElements) {
+      if (!next.has(element)) {
+        resizeObserver.unobserve(element);
+        observedElements.delete(element);
+      }
+    }
+    for (const element of next) {
+      if (!observedElements.has(element)) {
+        resizeObserver.observe(element);
+        observedElements.add(element);
+      }
+    }
   };
 
   const removeTargetAtPoint = (x: number, y: number): boolean => {
@@ -1174,7 +1257,21 @@ function startAnnotation(): void {
   };
 
   const clearHoverOutline = (): void => {
+    hoveredElement = null;
+    hoverPoint = null;
     hoverOutline.style.display = "none";
+    syncResizeTargets();
+  };
+
+  const updateHoverOutline = (): void => {
+    if (!hoverPoint) return;
+    const target = pickFromPoint(hoverPoint.x, hoverPoint.y);
+    if (target !== hoveredElement) {
+      hoveredElement = target;
+      syncResizeTargets();
+    }
+    if (target) positionBox(hoverOutline, visibleElementRect(target));
+    else hoverOutline.style.display = "none";
   };
 
   const onPointerMove = (event: PointerEvent): void => {
@@ -1183,9 +1280,8 @@ function startAnnotation(): void {
       return;
     }
     if (tool === "select" && dragStart === null) {
-      const target = pickFromPoint(event.clientX, event.clientY);
-      if (target) positionBox(hoverOutline, rectFromDomRect(target.getBoundingClientRect()));
-      else clearHoverOutline();
+      hoverPoint = { x: event.clientX, y: event.clientY };
+      updateHoverOutline();
       return;
     }
     clearHoverOutline();
@@ -1302,6 +1398,7 @@ function startAnnotation(): void {
   const teardown = (notifyMain: boolean): void => {
     if (finished) return;
     finished = true;
+    resizeObserver.disconnect();
     restoreStyles();
     window.removeEventListener("pointermove", onPointerMove, true);
     window.removeEventListener("pointerdown", onPointerDown, true);
@@ -1428,6 +1525,7 @@ function startAnnotation(): void {
   ipcRenderer.on(CANCEL_PICK_CHANNEL, onCancel);
   ipcRenderer.on(ANNOTATION_CAPTURED_CHANNEL, onCaptured);
   document.documentElement.appendChild(host);
+  syncResizeTargets();
   refreshToolButtons();
   updateStatus();
   activeSession = {
