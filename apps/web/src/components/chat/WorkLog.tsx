@@ -49,6 +49,7 @@ type RowContent = {
 };
 
 function WorkLogLine({ icon, label, trailing, wrapLabel }: RowContent) {
+  const glass = useHasTimelineBackground();
   return (
     <div className="flex min-h-6 min-w-0 items-center gap-1.5 text-sm leading-relaxed select-none [&_*]:select-none">
       {icon ? (
@@ -57,6 +58,7 @@ function WorkLogLine({ icon, label, trailing, wrapLabel }: RowContent) {
       <div
         className={cn(
           "min-w-0 flex-1 text-secondary-label",
+          glass && "text-foreground/80",
           !wrapLabel && "truncate [&_*]:whitespace-nowrap",
         )}
       >

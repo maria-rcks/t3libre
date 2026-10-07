@@ -1,6 +1,28 @@
-import type { CSSProperties } from "react";
+import { useSyncExternalStore, type CSSProperties } from "react";
 import { cn } from "../../lib/utils";
 import { useClientSettings } from "../../hooks/useSettings";
+
+let failedImage: string | null = null;
+const imageListeners = new Set<() => void>();
+
+function setFailedImage(image: string | null) {
+  if (failedImage === image) return;
+  failedImage = image;
+  for (const listener of imageListeners) listener();
+}
+
+function subscribeToImage(listener: () => void) {
+  imageListeners.add(listener);
+  return () => imageListeners.delete(listener);
+}
+
+export function useTimelineBackgroundFailed(image: string) {
+  return useSyncExternalStore(
+    subscribeToImage,
+    () => failedImage === image,
+    () => false,
+  );
+}
 
 export const CHAT_BACKGROUND_GLASS_SURFACE_CLASSES =
   "surface-glass [--surface-glass-color:var(--secondary)] [text-shadow:none] dark:[--surface-glass-color:color-mix(in_srgb,var(--input)_20%,var(--background))]";
@@ -34,7 +56,7 @@ export function TimelineBackgroundImage({
   blur: number;
   className?: string | undefined;
 }) {
-  if (!image) return null;
+  if (!image || opacity === 0) return null;
 
   return (
     <div
@@ -42,9 +64,18 @@ export function TimelineBackgroundImage({
       className={cn("pointer-events-none absolute inset-0 -z-10 overflow-hidden", className)}
     >
       <img
+        key={image}
         src={image}
         alt=""
         draggable={false}
+        onError={(event) => {
+          event.currentTarget.style.visibility = "hidden";
+          setFailedImage(image);
+        }}
+        onLoad={(event) => {
+          event.currentTarget.style.visibility = "";
+          if (failedImage === image) setFailedImage(null);
+        }}
         className="absolute inset-0 size-full object-cover"
         style={{
           opacity: opacity / 100,
@@ -66,5 +97,8 @@ export function ChatTimelineBackground({ className }: { className?: string | und
 
 /** Timeline cards only pay for backdrop blur when there is a wallpaper to show through. */
 export function useHasTimelineBackground() {
-  return useClientSettings((settings) => Boolean(settings.timelineBackgroundImage));
+  const image = useClientSettings((settings) => settings.timelineBackgroundImage);
+  const opacity = useClientSettings((settings) => settings.timelineBackgroundOpacity);
+  const failed = useTimelineBackgroundFailed(image);
+  return Boolean(image) && opacity > 0 && !failed;
 }

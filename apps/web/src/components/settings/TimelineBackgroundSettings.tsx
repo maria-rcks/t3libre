@@ -11,6 +11,7 @@ import {
   TimelineBackgroundImage,
   CHAT_BACKGROUND_TEXT_SHADOW_CLASSES,
   timelineTextShadowStyle,
+  useTimelineBackgroundFailed,
 } from "../chat/ChatTimelineBackground";
 import ChatMarkdown from "../ChatMarkdown";
 import {
@@ -48,6 +49,8 @@ export function TimelineBackgroundSettings() {
   const previewBlur = blurDraft ?? blur;
   const previewShadowOpacity = shadowOpacityDraft ?? shadowOpacity;
   const previewShadowBlur = shadowBlurDraft ?? shadowBlur;
+  const imageFailed = useTimelineBackgroundFailed(image);
+  const hasPreviewBackground = Boolean(image) && previewOpacity > 0 && !imageFailed;
   const fileInput = useRef<HTMLInputElement>(null);
   const request = useRef(0);
 
@@ -185,8 +188,8 @@ export function TimelineBackgroundSettings() {
           <WorkingIndicator createdAt={previewStartedAt} />
           <AssistantMessageSurface>
             <ChatMarkdown
-              glassSurfaces={Boolean(image)}
-              className={cn(image && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES)}
+              glassSurfaces={hasPreviewBackground}
+              className={cn(hasPreviewBackground && CHAT_BACKGROUND_TEXT_SHADOW_CLASSES)}
               cwd={undefined}
               text="I'll adjust the spacing and colors, then check how it looks."
             />
@@ -219,9 +222,9 @@ export function TimelineBackgroundSettings() {
         status={
           busy ? (
             <span role="status">Loading image…</span>
-          ) : error ? (
+          ) : error || imageFailed ? (
             <span role="alert" className="text-destructive">
-              {error}
+              {error || "This image is unavailable. Choose another image or remove it."}
             </span>
           ) : null
         }

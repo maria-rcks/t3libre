@@ -6,8 +6,10 @@ import {
   getStandardThemeColors,
   getThemeColorsForMode,
   getThemeDefinition,
+  getThemeColorVariable,
   resolveThemeHalf,
   subscribeToCustomThemes,
+  subscribeToThemePreview,
   type ThemeAppearance,
   type ThemeHalves,
   type ThemePreference,
@@ -27,6 +29,33 @@ function resolveActiveThemeColors(
     : (getThemeColorsForMode(definition, appearance) ?? definition.colors);
 }
 
+const HTML_RENDER_VARIABLES = Object.keys(
+  htmlRenderTheme(getStandardThemeColors("light"), "light").variables,
+).filter((variable) => variable !== "--font-sans" && variable !== "--font-mono");
+
+/** A primitive snapshot keeps external-store reads stable while tracking the painted CSS. */
+function readPaintedTheme(): string {
+  if (typeof document === "undefined") return "";
+  const root = document.documentElement;
+  const styles = getComputedStyle(root);
+  const variables: Record<string, string> = {};
+  for (const variable of HTML_RENDER_VARIABLES) {
+    // HTML's accent is the brand color; the app's --accent is a hover surface.
+    const appVariable =
+      variable === "--accent" || variable === "--chart-1"
+        ? getThemeColorVariable("accent")
+        : variable === "--accent-foreground"
+          ? getThemeColorVariable("accentForeground")
+          : variable;
+    const value = styles.getPropertyValue(appVariable).trim();
+    if (value) variables[variable] = value;
+  }
+  return JSON.stringify({
+    appearance: root.classList.contains("dark") ? "dark" : "light",
+    variables,
+  });
+}
+
 /** The app's active theme and fonts, as handed to agent HTML renders. Stable until one changes. */
 export function useHtmlRenderTheme() {
   const { theme, resolvedTheme, themeHalves } = useTheme();
@@ -38,12 +67,21 @@ export function useHtmlRenderTheme() {
   );
   const sans = useClientSettings((settings) => settings.fontFamilySans);
   const mono = useClientSettings((settings) => settings.fontFamilyCode);
-  return useMemo(
-    () =>
-      htmlRenderTheme(colors, resolvedTheme, {
-        sans: appearanceFontStack(sans, HTML_RENDER_DEFAULT_FONTS.sans),
-        mono: appearanceFontStack(mono, HTML_RENDER_DEFAULT_FONTS.mono),
-      }),
-    [colors, resolvedTheme, sans, mono],
-  );
+  const paintedTheme = useSyncExternalStore(subscribeToThemePreview, readPaintedTheme, () => "");
+  return useMemo(() => {
+    const base = htmlRenderTheme(colors, resolvedTheme, {
+      sans: appearanceFontStack(sans, HTML_RENDER_DEFAULT_FONTS.sans),
+      mono: appearanceFontStack(mono, HTML_RENDER_DEFAULT_FONTS.mono),
+    });
+    if (!paintedTheme) return base;
+    const painted = JSON.parse(paintedTheme) as {
+      appearance: ThemeAppearance;
+      variables: Record<string, string>;
+    };
+    return {
+      ...base,
+      appearance: painted.appearance,
+      variables: { ...base.variables, ...painted.variables },
+    };
+  }, [colors, resolvedTheme, sans, mono, paintedTheme]);
 }

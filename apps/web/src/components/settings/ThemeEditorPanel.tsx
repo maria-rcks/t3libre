@@ -33,10 +33,10 @@ import { Button } from "../ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
-import { Textarea } from "../ui/textarea";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { getThemeRoleLabel, ThemeColorField } from "./ThemeColorPicker";
+import { ThemeCssEditor } from "./ThemeCssEditor";
 import {
   clearThemeInspectorHover,
   clearThemeInspectorHighlights,
@@ -1260,15 +1260,10 @@ export function ThemeEditorPanel({
             <details className="space-y-2">
               <summary className="cursor-pointer text-sm font-medium">Custom CSS</summary>
               <p className="text-xs text-muted-foreground">
-                Applies to the whole app on web and desktop. Use .dark for dark mode overrides.
+                Saved with this theme and included when you export it. Applies to web and desktop.
+                Use .dark for dark mode overrides.
               </p>
-              <Textarea
-                aria-label="Custom CSS"
-                variant="code"
-                spellCheck={false}
-                value={css}
-                onChange={(event) => setCss(event.target.value)}
-              />
+              <ThemeCssEditor value={css} onChange={setCss} />
             </details>
           </div>
           <div className="flex items-center justify-end gap-2 border-t border-border/70 px-3 py-2">

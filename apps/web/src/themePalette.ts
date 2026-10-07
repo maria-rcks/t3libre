@@ -91,8 +91,10 @@ export function subscribeToThemePreview(listener: () => void): () => void {
 }
 
 function setThemePreviewSidebarArtwork(next: boolean | null): void {
-  if (themePreviewSidebarArtwork === next) return;
   themePreviewSidebarArtwork = next;
+}
+
+function notifyThemePreviewListeners(): void {
   for (const listener of themePreviewListeners) listener();
 }
 
@@ -1540,6 +1542,7 @@ export function applyThemeColorPreview(
     // A half-typed hex keeps the last good value instead of blanking the role.
     if (isThemeColor(value)) root.style.setProperty(APP_THEME_VARIABLES[role], value);
   }
+  notifyThemePreviewListeners();
 }
 
 export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppearance): void {
@@ -1547,6 +1550,7 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
 
   const root = document.documentElement;
   if (!root?.style) return;
+  if (appearance) root.classList.toggle("dark", appearance === "dark");
 
   setThemePreviewSidebarArtwork(null);
   const palette = getThemeDefinition(theme);
@@ -1559,6 +1563,7 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
     for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
       root.style.setProperty(APP_THEME_VARIABLES[role], value);
     }
+    notifyThemePreviewListeners();
     return;
   }
 
@@ -1566,6 +1571,7 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
   for (const variable of Object.values(APP_THEME_VARIABLES)) {
     root.style.removeProperty(variable);
   }
+  notifyThemePreviewListeners();
 }
 
 export function resolveThemeAppearance(
