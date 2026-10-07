@@ -453,12 +453,31 @@ function markStandaloneImages(node: MarkdownImageHastNode) {
 function rehypePreserveBareAnchorPlaceholders() {
   return (tree: MarkdownImageHastNode) => {
     const anchors: Array<MarkdownImageHastNode | null> = [];
+    let rawTextTag: string | undefined;
     const visit = (node: MarkdownImageHastNode) => {
       if (node.type === "raw" && typeof node.value === "string") {
-        if (/^<a(?:\s|>)/i.test(node.value)) {
-          anchors.push(/^<a\s*>$/i.test(node.value) ? node : null);
-        } else if (/^<\/a\s*>$/i.test(node.value)) {
-          anchors.pop();
+        // Raw blocks can contain several tags. Consume whole tags, quoted attributes,
+        // and comments so text resembling a closing anchor cannot pair a placeholder.
+        for (const [tag] of node.value.matchAll(
+          /<!--[\s\S]*?(?:-->|$)|<\/?[A-Za-z](?:[^"'<>]|"[^"]*"|'[^']*')*>/g,
+        )) {
+          if (tag.startsWith("<!--")) continue;
+          const closing = /^<\/([a-z]+)\s*>$/i.exec(tag)?.[1]?.toLowerCase();
+          if (rawTextTag) {
+            if (rawTextTag !== "plaintext" && closing === rawTextTag) rawTextTag = undefined;
+            continue;
+          }
+          const opening = /^<([a-z]+)(?:\s|>)/i.exec(tag)?.[1]?.toLowerCase();
+          if (
+            opening &&
+            /^(?:script|style|textarea|title|xmp|iframe|noembed|noframes|plaintext)$/.test(opening)
+          ) {
+            rawTextTag = opening;
+          } else if (opening === "a") {
+            anchors.push(node.value === tag && /^<a\s*>$/i.test(tag) ? node : null);
+          } else if (closing === "a") {
+            anchors.pop();
+          }
         }
       }
       node.children?.forEach(visit);
