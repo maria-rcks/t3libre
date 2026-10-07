@@ -154,27 +154,25 @@ function Root({
   ...props
 }: ComponentProps<"div"> & {
   density?: "default" | "comfortable" | "spacious";
-  placement?: "attached" | "floating" | "inline";
+  placement?: "attached" | "floating";
   variant?: ComposerBannerVariant;
   width?: "fill" | "content";
 }) {
-  const contentProps = {
-    className: cn(
-      "min-w-0 px-1 py-(--composer-banner-padding-block) after:block after:h-(--chat-composer-attachment-overlap) text-xs/4 [--composer-banner-icon-column:--spacing(7)] [--composer-banner-padding-block:--spacing(1)] sm:[--composer-banner-icon-column:--spacing(6)]",
-      density === "comfortable" && "[--composer-banner-padding-block:--spacing(1.25)]",
-      density === "spacious" && "px-3 [--composer-banner-padding-block:--spacing(3)]",
-      width === "content" ? "w-fit max-w-full flex-none" : "@container",
-      className,
-    ),
-    "data-slot": "composer-banner",
-    "data-composer-banner-width": width,
-    ...props,
-  };
-  // Inline trees borrow the banner's columns, without introducing another surface.
-  return placement === "inline" ? (
-    <div {...contentProps} />
-  ) : (
-    <Surface placement={placement} variant={variant} {...contentProps} />
+  return (
+    <Surface
+      className={cn(
+        "min-w-0 px-1 py-(--composer-banner-padding-block) after:block after:h-(--chat-composer-attachment-overlap) text-xs/4 [--composer-banner-icon-column:--spacing(7)] [--composer-banner-padding-block:--spacing(1)] sm:[--composer-banner-icon-column:--spacing(6)]",
+        density === "comfortable" && "[--composer-banner-padding-block:--spacing(1.25)]",
+        density === "spacious" && "px-3 [--composer-banner-padding-block:--spacing(3)]",
+        width === "content" ? "w-fit max-w-full flex-none" : "@container",
+        className,
+      )}
+      data-slot="composer-banner"
+      placement={placement}
+      data-composer-banner-width={width}
+      variant={variant}
+      {...props}
+    />
   );
 }
 
@@ -307,47 +305,6 @@ function Count({ className, ...props }: ComponentProps<"span">) {
   );
 }
 
-/** One short progress line per task or workflow member, bounded like the Tasks banner. */
-function Segments({
-  statuses,
-  className,
-  tone = "status",
-}: {
-  statuses: readonly ("pending" | "inProgress" | "completed" | "failed")[];
-  className?: string;
-  tone?: "status" | "neutral";
-}) {
-  if (statuses.length <= 1 || statuses.length > 10) return null;
-
-  return (
-    <span aria-hidden className={cn("flex w-10 shrink-0 items-center gap-0.5", className)}>
-      {statuses.map((status, index) => (
-        <span
-          // Segments represent ordered progress slots, with no per-item state.
-          // oxlint-disable-next-line react/no-array-index-key
-          key={index}
-          className={cn(
-            "h-[3px] min-w-0 flex-1 rounded-full",
-            tone === "neutral"
-              ? status === "pending"
-                ? "bg-muted-foreground/25"
-                : status === "inProgress"
-                  ? "bg-foreground/70"
-                  : "bg-muted-foreground/60"
-              : status === "completed"
-                ? "bg-success"
-                : status === "inProgress"
-                  ? "bg-primary"
-                  : status === "failed"
-                    ? "bg-destructive"
-                    : "bg-muted-foreground/25",
-          )}
-        />
-      ))}
-    </span>
-  );
-}
-
 function Body({ className, ...props }: ComponentProps<"div">) {
   return <div className={cn("min-w-0 ps-8 sm:ps-7", className)} {...props} />;
 }
@@ -396,7 +353,6 @@ export const ComposerBanner = {
   Children,
   Scroll,
   Count,
-  Segments,
   Body,
   Dot,
   ToggleIcon,

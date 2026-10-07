@@ -2033,10 +2033,13 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   );
 }
 
+/** Remembers a workflow card's open state across virtualized remounts, like subagent groups. */
 function TimelineWorkflowCard({
+  rowId,
   agent,
   inWorkflowThread = false,
 }: {
+  rowId: string;
   agent: OrchestrationV2Subagent;
   inWorkflowThread?: boolean;
 }) {
@@ -2056,12 +2059,29 @@ function TimelineWorkflowCard({
       ]),
     [shells, archivedShells, ctx.activeThreadEnvironmentId],
   );
+  const { expandedEntries } = ctx.workGroupViewState;
+  const key = `workflow:${agent.id}`;
   return (
     <WorkflowCard
       agent={agent}
+      provider={ctx.providerStatuses.find(
+        (provider) => provider.instanceId === agent.providerInstanceId,
+      )}
       onOpenThread={ctx.onOpenThread}
       inWorkflowThread={inWorkflowThread}
       isThreadUnavailable={(threadId) => !available.has(threadId)}
+      initialExpanded={
+        expandedEntries.has(`${key}:open`)
+          ? true
+          : expandedEntries.has(`${key}:closed`)
+            ? false
+            : null
+      }
+      onExpandedChange={(open) => {
+        ctx.onToggleWorkEntry(rowId, !open);
+        expandedEntries.delete(`${key}:${open ? "closed" : "open"}`);
+        expandedEntries.add(`${key}:${open ? "open" : "closed"}`);
+      }}
     />
   );
 }
@@ -2086,7 +2106,7 @@ function ProviderUserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "m
   return agent?.workflow &&
     agent.childThreadId === ctx.threadRef?.threadId &&
     agent.prompt === row.message.text ? (
-    <TimelineWorkflowCard agent={agent} inWorkflowThread />
+    <TimelineWorkflowCard rowId={row.id} agent={agent} inWorkflowThread />
   ) : (
     <UserMessageTimelineRow row={row} />
   );
@@ -3210,7 +3230,7 @@ function V2SubagentTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "eve
   return (
     <>
       {workflows.map((agent) => (
-        <TimelineWorkflowCard key={agent.id} agent={agent} />
+        <TimelineWorkflowCard key={agent.id} rowId={row.id} agent={agent} />
       ))}
       {ordinary.length > 1 ? (
         <V2SubagentGroup row={{ ...row, projectedItem: ordinary[0]!, subagents: ordinary }} />

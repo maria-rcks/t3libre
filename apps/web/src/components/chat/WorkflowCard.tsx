@@ -1,408 +1,206 @@
-import { ThreadId, type OrchestrationV2Subagent } from "@t3tools/contracts";
+import { ThreadId, type OrchestrationV2Subagent, type ServerProvider } from "@t3tools/contracts";
 import {
-  projectedSubagentsToRuntime,
   isActiveSubagentStatus,
-  type RuntimeSubagent,
+  projectedSubagentsToRuntime,
 } from "@t3tools/client-runtime/state/subagentRuntime";
-import {
-  ArrowUpRightIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  CircleDotIcon,
-  CircleIcon,
-  CodeIcon,
-  GitBranchIcon,
-  MinusIcon,
-  XIcon,
-} from "lucide-react";
-import { useId, useState } from "react";
+import { ArrowUpRightIcon, ChevronDownIcon, CodeIcon } from "lucide-react";
+import { useState } from "react";
 import { cn } from "~/lib/utils";
-import { Button, InlineButton } from "../ui/button";
-import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import { Button } from "../ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Dialog, DialogHeader, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
-import { AgentElapsed } from "./AgentElapsed";
-import { ComposerBanner } from "./ComposerBanner";
+import { WorkLogBlock } from "./WorkLog";
+import {
+  SubagentAvatar,
+  SubagentElapsed,
+  SubagentRow,
+  subagentRowDetail,
+  subagentStatusVisual,
+} from "./V2LifecycleRow";
 
-type WorkflowStatus = RuntimeSubagent["status"];
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
-function statusLabel(status: WorkflowStatus) {
-  switch (status) {
-    case "pending":
-      return "Queued";
-    case "running":
-      return "Running";
-    case "waiting":
-      return "Waiting";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    case "cancelled":
-    case "interrupted":
-      return "Stopped";
-    case "idle":
-      return "Idle";
-  }
-}
-
-function progressStatus(member: RuntimeSubagent) {
-  if (member.status === "completed" || member.status === "failed") return member.status;
-  if (member.status === "cancelled" || member.status === "interrupted") return "failed";
-  return member.status !== "pending" && isActiveSubagentStatus(member.status)
-    ? "inProgress"
-    : "pending";
-}
-
-function StatusMark({ status }: { status: WorkflowStatus }) {
-  const Icon =
-    status === "completed"
-      ? CheckIcon
-      : status === "failed"
-        ? XIcon
-        : status === "pending"
-          ? CircleIcon
-          : isActiveSubagentStatus(status)
-            ? CircleDotIcon
-            : MinusIcon;
-  return (
-    <span
-      className="flex size-3 shrink-0 items-center justify-center"
-      aria-label={statusLabel(status)}
-    >
-      <Icon
-        aria-hidden
-        className={cn(
-          "size-3",
-          status === "completed"
-            ? "text-muted-foreground"
-            : status === "failed"
-              ? "text-destructive"
-              : status !== "pending" && isActiveSubagentStatus(status)
-                ? "text-foreground/80"
-                : "text-muted-foreground/40",
-        )}
-      />
-    </span>
-  );
-}
-
-/** The same ordered phase tree in the conversation and workspace lineage. */
+/** A workflow coordinator drawn like a subagent group: its phases in order, each listing its agents. */
 export function WorkflowCard({
   agent,
+  provider,
   onOpenThread,
-  inWorkflowThread = false,
-  variant = "conversation",
   isThreadUnavailable,
+  inWorkflowThread = false,
+  initialExpanded = null,
+  onExpandedChange,
 }: {
   agent: OrchestrationV2Subagent;
+  provider: ServerProvider | undefined;
   onOpenThread: (threadId: ThreadId) => void;
+  isThreadUnavailable: (threadId: ThreadId) => boolean;
   inWorkflowThread?: boolean;
-  variant?: "conversation" | "panel";
-  isThreadUnavailable?: (threadId: ThreadId) => boolean;
+  /** A remembered user choice; null follows the default of open while running. */
+  initialExpanded?: boolean | null;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
-  const panel = variant === "panel";
-  const [expanded, setExpanded] = useState(!panel);
+  const [userExpanded, setUserExpanded] = useState(initialExpanded);
   const [scriptOpen, setScriptOpen] = useState(false);
-  const detailsId = useId();
-  const { childThreadId } = agent;
-  const coordinatorUnavailable = childThreadId !== null && isThreadUnavailable?.(childThreadId);
-  const runtime = projectedSubagentsToRuntime([agent]);
-  const coordinator = runtime[0]!;
-  const members = runtime.slice(1);
-  const phaseMap = new Map(coordinator.phases.map((phase) => [phase.index, phase.title]));
+  const [coordinator, ...members] = projectedSubagentsToRuntime([agent]);
+  const title = coordinator!.workflowName ?? coordinator!.title;
+  const active = isActiveSubagentStatus(agent.status);
+  const expanded = userExpanded ?? (active || inWorkflowThread);
+  const failed = agent.status === "failed" || members.some(({ status }) => status === "failed");
+
+  const phaseTitles = new Map(coordinator!.phases.map((phase) => [phase.index, phase.title]));
   for (const member of members) {
-    if (member.phaseIndex !== null && !phaseMap.has(member.phaseIndex)) {
-      phaseMap.set(member.phaseIndex, member.phaseTitle ?? `Phase ${member.phaseIndex}`);
+    if (member.phaseIndex !== null && !phaseTitles.has(member.phaseIndex)) {
+      phaseTitles.set(member.phaseIndex, member.phaseTitle ?? `Phase ${member.phaseIndex}`);
     }
   }
-  const phases = [...phaseMap]
-    .sort(([a], [b]) => a - b)
-    .map(([index, title]) => ({ index, title }));
-  if (members.some((member) => member.phaseIndex === null)) {
-    phases.push({ index: -1, title: "Other agents" });
-  }
-  const completed = members.filter((member) => member.status === "completed").length;
-  const activeMember = members.find((member) => isActiveSubagentStatus(member.status));
-  const currentPhase = activeMember
-    ? (activeMember.phaseIndex ?? -1)
-    : phases.findLast((phase) =>
-        members.some((member) => (member.phaseIndex ?? -1) === phase.index),
-      )?.index;
-  const title = coordinator.workflowName ?? coordinator.title;
+  const phases = [...phaseTitles].sort(([a], [b]) => a - b);
+  const phaseCount = phases.length;
+  if (members.some((member) => member.phaseIndex === null)) phases.push([-1, "Other agents"]);
+  const done = members.filter(({ status }) => status === "completed").length;
+  const current = members.find(({ status }) => isActiveSubagentStatus(status));
+  const summary = active
+    ? [
+        current ? (phaseTitles.get(current.phaseIndex ?? -1) ?? null) : null,
+        members.length > 0 ? `${done} of ${plural(members.length, "agent")} done` : "Starting",
+      ]
+    : [
+        phaseCount > 0 ? plural(phaseCount, "phase") : null,
+        plural(members.length, "agent"),
+        subagentStatusVisual(agent.status).label,
+      ];
+  const coordinatorThreadId = agent.childThreadId;
 
   return (
-    <section
-      aria-label={`Workflow: ${title}`}
-      data-workflow-card
-      className={cn("min-w-0", !panel && "my-2")}
-    >
-      <ComposerBanner.Root placement={panel ? "inline" : "floating"}>
-        <ComposerBanner.Row>
-          <ComposerBanner.Icon>
-            <GitBranchIcon />
-          </ComposerBanner.Icon>
-          <ComposerBanner.Content className="block py-1">
-            <div className="min-w-0">
-              {panel && !inWorkflowThread && childThreadId !== null ? (
-                <InlineButton
-                  aria-label={`Open workflow: ${title}`}
-                  disabled={coordinatorUnavailable}
-                  onClick={coordinatorUnavailable ? undefined : () => onOpenThread(childThreadId)}
-                  className="max-w-full"
-                >
-                  <span className="truncate">{title}</span>
-                </InlineButton>
-              ) : (
-                <span className="block truncate font-medium text-foreground/80">{title}</span>
-              )}
-              <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-2xs text-muted-foreground/70">
-                <span>{statusLabel(coordinator.status)}</span>
-                <AgentElapsed agent={coordinator} />
-              </span>
-            </div>
-          </ComposerBanner.Content>
-          <ComposerBanner.Actions>
-            {members.length > 0 ? (
-              <ComposerBanner.Count
-                aria-label={`${completed} of ${members.length} agents completed`}
-              >
-                {completed}/{members.length}
-              </ComposerBanner.Count>
-            ) : null}
-            <ComposerBanner.Segments
-              tone="neutral"
-              className="@min-[560px]:w-20"
-              statuses={members.map(progressStatus)}
-            />
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              aria-label={expanded ? "Collapse workflow" : "Expand workflow"}
-              aria-expanded={expanded}
-              aria-controls={detailsId}
-              onClick={() => setExpanded(!expanded)}
-            >
-              <ChevronDownIcon aria-hidden className={cn("size-3.5", !expanded && "rotate-180")} />
-            </Button>
-          </ComposerBanner.Actions>
-        </ComposerBanner.Row>
-        {expanded ? (
-          <div id={detailsId}>
-            <ComposerBanner.Children
-              aria-label="Workflow phases"
-              className={panel ? "ml-3 border-l border-border/65 pl-1" : undefined}
-            >
-              {phases.map((phase) => (
-                <WorkflowPhase
-                  key={`${agent.id}:${phase.index}`}
-                  title={phase.title}
-                  members={members.filter((member) => (member.phaseIndex ?? -1) === phase.index)}
-                  coordinatorStatus={coordinator.status}
-                  defaultExpanded={phase.index === currentPhase}
-                  panel={panel}
-                  onOpenThread={onOpenThread}
-                  isThreadUnavailable={isThreadUnavailable}
-                />
-              ))}
-              {phases.length === 0 ? (
-                <p className="px-1 py-2 text-2xs text-muted-foreground">
-                  {isActiveSubagentStatus(coordinator.status)
-                    ? "Waiting for agents…"
-                    : "No agents reported"}
-                </p>
-              ) : null}
-            </ComposerBanner.Children>
-            <div className="mt-1 flex flex-wrap items-center justify-end gap-1">
-              {agent.prompt ? (
-                <Button size="xs" variant="ghost-muted" onClick={() => setScriptOpen(true)}>
-                  <CodeIcon aria-hidden className="size-3" />
-                  View script
-                </Button>
-              ) : null}
-              {!panel && !inWorkflowThread && childThreadId !== null ? (
-                <Button
-                  size="xs"
-                  variant="ghost-muted"
-                  disabled={coordinatorUnavailable}
-                  onClick={coordinatorUnavailable ? undefined : () => onOpenThread(childThreadId)}
-                >
-                  Open workflow
-                  <ArrowUpRightIcon aria-hidden className="size-3" />
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-      </ComposerBanner.Root>
-      <Dialog open={scriptOpen} onOpenChange={setScriptOpen}>
-        <DialogPopup className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Workflow script</DialogTitle>
-          </DialogHeader>
-          <div className="flex h-[70vh] min-h-0 flex-col">
-            <ReadOnlySourcePreview name="workflow.js" text={agent.prompt} />
-          </div>
-        </DialogPopup>
-      </Dialog>
-    </section>
-  );
-}
-
-function WorkflowPhase({
-  title,
-  members,
-  coordinatorStatus,
-  defaultExpanded,
-  panel,
-  onOpenThread,
-  isThreadUnavailable,
-}: {
-  title: string;
-  members: RuntimeSubagent[];
-  coordinatorStatus: WorkflowStatus;
-  defaultExpanded: boolean;
-  panel: boolean;
-  onOpenThread: (threadId: ThreadId) => void;
-  isThreadUnavailable: ((threadId: ThreadId) => boolean) | undefined;
-}) {
-  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
-  const expanded = userExpanded ?? defaultExpanded;
-  const membersId = useId();
-  const completed = members.filter((member) => member.status === "completed").length;
-  const failed = members.some((member) => member.status === "failed");
-  const active = members.some((member) => isActiveSubagentStatus(member.status));
-  const summary =
-    members.length > 0
-      ? `${completed}/${members.length}${failed ? " · failed" : active ? " · active" : ""}`
-      : isActiveSubagentStatus(coordinatorStatus)
-        ? "Upcoming"
-        : "No agents";
-  return (
-    <div>
-      <ComposerBanner.Row
-        render={<button type="button" />}
-        aria-label={`${title}: ${summary}`}
-        aria-expanded={expanded}
-        aria-controls={membersId}
-        onClick={() => setUserExpanded(!expanded)}
-        className="py-1 pe-2 hover:bg-accent/30"
+    <WorkLogBlock>
+      <Collapsible
+        open={expanded}
+        onOpenChange={(open) => {
+          setUserExpanded(open);
+          onExpandedChange?.(open);
+        }}
+        data-workflow-card
       >
-        <ComposerBanner.Icon>
-          <ChevronDownIcon className={cn(!expanded && "-rotate-90")} />
-        </ComposerBanner.Icon>
-        <ComposerBanner.Content>
-          <span className="min-w-0 truncate font-medium text-foreground/80">{title}</span>
-        </ComposerBanner.Content>
-        <ComposerBanner.Actions>
-          <ComposerBanner.Count>{summary}</ComposerBanner.Count>
-          <ComposerBanner.Segments tone="neutral" statuses={members.map(progressStatus)} />
-        </ComposerBanner.Actions>
-      </ComposerBanner.Row>
-      {expanded ? (
-        <ul id={membersId} aria-label={`${title} agents`} className="mb-1 ml-3 list-none">
-          {members.map((member) => (
-            <li key={member.id}>
-              <WorkflowMember
-                agent={member}
-                panel={panel}
-                onOpenThread={onOpenThread}
-                unavailable={Boolean(
-                  member.childThreadId &&
-                  isThreadUnavailable?.(ThreadId.make(member.childThreadId)),
-                )}
-              />
-            </li>
-          ))}
-          {members.length === 0 ? (
-            <li className="px-1 py-2 text-2xs text-muted-foreground">
-              {isActiveSubagentStatus(coordinatorStatus)
-                ? "Waiting for agents in this phase."
-                : "No agents were reported for this phase."}
-            </li>
-          ) : null}
-        </ul>
-      ) : null}
-    </div>
-  );
-}
-
-function WorkflowMember({
-  agent,
-  panel,
-  onOpenThread,
-  unavailable,
-}: {
-  agent: RuntimeSubagent;
-  panel: boolean;
-  onOpenThread: (threadId: ThreadId) => void;
-  unavailable?: boolean;
-}) {
-  const childThreadId = agent.childThreadId ? ThreadId.make(agent.childThreadId) : null;
-  const content = (
-    <>
-      <ComposerBanner.Icon>
-        <StatusMark status={agent.status} />
-      </ComposerBanner.Icon>
-      <ComposerBanner.Content>
-        <span
+        <CollapsibleTrigger
+          aria-label={`Workflow: ${title}`}
           className={cn(
-            "min-w-0 truncate",
-            agent.status === "completed" && "text-muted-foreground/55",
+            "flex w-full min-w-0 items-center gap-3 py-2 text-left transition-opacity hover:opacity-100",
+            expanded || active ? "text-foreground opacity-100" : "text-muted-foreground opacity-55",
           )}
         >
-          <span className="sr-only">{statusLabel(agent.status)}: </span>
-          {agent.title}
-        </span>
-      </ComposerBanner.Content>
-      <ComposerBanner.Actions>
-        {agent.attempt !== null && agent.attempt > 1 ? (
-          <span className="shrink-0 text-3xs text-muted-foreground">#{agent.attempt}</span>
-        ) : null}
-        {!panel && agent.model ? (
-          <span className="max-w-28 truncate text-3xs text-muted-foreground">{agent.model}</span>
-        ) : null}
-        <span className="shrink-0 text-3xs tabular-nums text-muted-foreground">
-          <AgentElapsed agent={agent} />
-        </span>
-        {childThreadId ? (
-          <ArrowUpRightIcon aria-hidden className="size-3 shrink-0 text-muted-foreground/60" />
-        ) : null}
-      </ComposerBanner.Actions>
-    </>
-  );
-  const className = "py-1 pe-2";
-  const description = [
-    statusLabel(agent.status),
-    agent.model,
-    agent.attempt && agent.attempt > 1 ? `Attempt ${agent.attempt}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          childThreadId ? (
-            <ComposerBanner.Row
-              render={<button type="button" disabled={unavailable} />}
-              aria-label={`Open ${agent.title}`}
-              onClick={unavailable ? undefined : () => onOpenThread(childThreadId)}
+          <SubagentAvatar driver={agent.driver} provider={provider} status={agent.status} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-semibold">{title}</span>
+            <span
               className={cn(
-                className,
-                "cursor-pointer hover:bg-accent/30 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-transparent",
+                "block truncate text-3xs text-muted-foreground",
+                active ? "text-info" : failed && "text-destructive",
               )}
-            />
-          ) : (
-            <ComposerBanner.Row className={className} tabIndex={0} />
-          )
-        }
-      >
-        {content}
-      </TooltipTrigger>
-      <TooltipPopup>
-        {agent.title} · {unavailable ? "This related thread is unavailable" : description}
-      </TooltipPopup>
-    </Tooltip>
+            >
+              {summary.filter(Boolean).join(" · ")}
+            </span>
+          </span>
+          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+            <SubagentElapsed agent={coordinator!} />
+          </span>
+          <ChevronDownIcon
+            aria-hidden
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform",
+              expanded && "rotate-180",
+            )}
+          />
+        </CollapsibleTrigger>
+        {/* Virtualized rows must settle before disclosure scroll anchoring resumes. */}
+        <CollapsiblePanel animate={false}>
+          {expanded ? (
+            <div className="mt-1 mb-1 rounded-lg border border-border/60 bg-card/30 p-1">
+              {phases.map(([index, phaseTitle]) => {
+                const phaseMembers = members.filter(
+                  (member) => (member.phaseIndex ?? -1) === index,
+                );
+                return (
+                  <section key={index} aria-label={phaseTitle}>
+                    <h4 className="px-2 pt-2 pb-0.5 text-3xs font-medium text-muted-foreground">
+                      {phaseTitle}
+                    </h4>
+                    {phaseMembers.map((member) => {
+                      const childThreadId = member.childThreadId
+                        ? ThreadId.make(member.childThreadId)
+                        : null;
+                      // A member's progress is its prompt, and a structured result is raw
+                      // JSON; neither reads as one line, so those rows show their status.
+                      const detail = subagentRowDetail(
+                        member.status,
+                        /^\s*[[{]/.test(member.result ?? "") ? null : member.result,
+                        null,
+                      );
+                      const retried = member.attempt !== null && member.attempt > 1;
+                      return (
+                        <SubagentRow
+                          key={member.id}
+                          driver={agent.driver}
+                          provider={provider}
+                          status={member.status}
+                          title={member.title}
+                          statusLabel={[
+                            subagentStatusVisual(member.status).label,
+                            retried ? `Attempt ${member.attempt}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                          showStatusLabel={
+                            detail !== null && (member.status !== "completed" || retried)
+                          }
+                          detail={detail}
+                          failed={member.status === "failed"}
+                          trailing={<SubagentElapsed agent={member} />}
+                          onOpen={childThreadId ? () => onOpenThread(childThreadId) : undefined}
+                          disabled={childThreadId !== null && isThreadUnavailable(childThreadId)}
+                        />
+                      );
+                    })}
+                  </section>
+                );
+              })}
+              {members.length === 0 ? (
+                <p className="px-2 py-1.5 text-2xs text-muted-foreground">
+                  {active ? "Waiting for agents…" : "No agents reported"}
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-1 pt-1">
+                {agent.prompt ? (
+                  <Button size="xs" variant="ghost-muted" onClick={() => setScriptOpen(true)}>
+                    <CodeIcon aria-hidden className="size-3" />
+                    View script
+                  </Button>
+                ) : null}
+                {!inWorkflowThread && coordinatorThreadId !== null ? (
+                  <Button
+                    size="xs"
+                    variant="ghost-muted"
+                    disabled={isThreadUnavailable(coordinatorThreadId)}
+                    onClick={() => onOpenThread(coordinatorThreadId)}
+                  >
+                    Open workflow
+                    <ArrowUpRightIcon aria-hidden className="size-3" />
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </CollapsiblePanel>
+        <Dialog open={scriptOpen} onOpenChange={setScriptOpen}>
+          <DialogPopup className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Workflow script</DialogTitle>
+            </DialogHeader>
+            <div className="flex h-[70vh] min-h-0 flex-col">
+              <ReadOnlySourcePreview name="workflow.js" text={agent.prompt} />
+            </div>
+          </DialogPopup>
+        </Dialog>
+      </Collapsible>
+    </WorkLogBlock>
   );
 }

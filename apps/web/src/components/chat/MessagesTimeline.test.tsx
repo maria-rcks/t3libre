@@ -2310,7 +2310,16 @@ describe("MessagesTimeline", () => {
             />,
           );
         });
-        expect(container.querySelector('[aria-label="Workflow: Release review"]')).not.toBeNull();
+        const trigger = container.querySelector<HTMLButtonElement>(
+          'button[aria-label="Workflow: Release review"]',
+        )!;
+        expect(trigger.textContent).toContain("1 phase · 5 agents · Completed");
+        // A settled workflow starts collapsed, except inside its own thread.
+        if (source === "subagent event") {
+          expect(container.querySelector('[aria-label="Open live reviewer"]')).toBeNull();
+          await act(async () => trigger.click());
+        }
+        expect(container.querySelector('[aria-label="Inspect"]')?.textContent).toContain("Inspect");
         const coordinator = [...container.querySelectorAll("button")].find(
           (button) => button.textContent === "Open workflow",
         );
@@ -2339,12 +2348,9 @@ describe("MessagesTimeline", () => {
         }
         expect(onOpenThread).toHaveBeenCalledTimes(2);
         onOpenThread.mockClear();
-        const phase = container.querySelector<HTMLButtonElement>(
-          'button[aria-label="Inspect: 5/5"]',
-        )!;
-        await act(async () => phase.click());
+        await act(async () => trigger.click());
         expect(container.querySelector('[aria-label="Open deleted reviewer"]')).toBeNull();
-        await act(async () => phase.click());
+        await act(async () => trigger.click());
         expect(
           container.querySelector('[aria-label="Open deleted reviewer"]')?.textContent,
         ).toContain("deleted reviewer");
@@ -2546,14 +2552,12 @@ describe("MessagesTimeline", () => {
         });
         expect(container.querySelectorAll("[data-workflow-card]")).toHaveLength(workflowCount);
         for (let index = 0; index < workflowCount; index++) {
-          const card = container.querySelector(
-            `[aria-label="Workflow: Historical review ${index}"]`,
+          const trigger = container.querySelector<HTMLButtonElement>(
+            `button[aria-label="Workflow: Historical review ${index}"]`,
           )!;
-          expect(card).not.toBeNull();
-          const phase = card.querySelector<HTMLButtonElement>('button[aria-label="Inspect: 1/1"]')!;
-          await act(async () => phase.click());
+          const card = trigger.closest("[data-workflow-card]")!;
           expect(card.querySelector(`[aria-label="Open Reviewer ${index}"]`)).toBeNull();
-          await act(async () => phase.click());
+          await act(async () => trigger.click());
           const member = card.querySelector<HTMLButtonElement>(
             `[aria-label="Open Reviewer ${index}"]`,
           )!;
