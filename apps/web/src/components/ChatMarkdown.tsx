@@ -467,14 +467,14 @@ function rehypePreserveBareAnchorPlaceholders() {
             if (rawTextTag !== "plaintext" && closing === rawTextTag) rawTextTag = undefined;
             continue;
           }
-          const opening = /^<([a-z]+)(?:\s|>)/i.exec(tag)?.[1]?.toLowerCase();
+          const opening = /^<([a-z]+)(?:\s|\/?>)/i.exec(tag)?.[1]?.toLowerCase();
           if (
             opening &&
             /^(?:script|style|textarea|title|xmp|iframe|noembed|noframes|plaintext)$/.test(opening)
           ) {
             rawTextTag = opening;
           } else if (opening === "a") {
-            anchors.push(node.value === tag && /^<a\s*>$/i.test(tag) ? node : null);
+            anchors.push(node.value === tag && /^<a\s*\/?>$/i.test(tag) ? node : null);
           } else if (closing === "a") {
             anchors.pop();
           }

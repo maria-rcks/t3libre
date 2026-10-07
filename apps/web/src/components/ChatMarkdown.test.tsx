@@ -76,7 +76,7 @@ function codeButton(renderer: ReactTestRenderer, label: string) {
 }
 
 describe("ChatMarkdown bare anchor placeholders", () => {
-  it.each(["<A>", "<a>", "<a >"])(
+  it.each(["<A>", "<a>", "<a >", "<a/>", "<A/>", "<a />"])(
     "preserves unmatched %s without linking later blocks",
     (token) => {
       const text = `- **"From ${token}"** appears in the header.\n\n- **Tests:** cover inheritance.\n\nThe deferred move continues on B.\n\nSee <a href="https://example.com">the link</a>.`;
