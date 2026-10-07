@@ -340,17 +340,23 @@ function visibleElementRect(element: Element): PreviewAnnotationRect {
     clips ||=
       (position === "absolute" && style.position !== "static") ||
       style.transform !== "none" ||
+      style.translate !== "none" ||
+      style.scale !== "none" ||
+      style.rotate !== "none" ||
       style.perspective !== "none" ||
       style.filter !== "none" ||
+      style.backdropFilter !== "none" ||
+      style.contentVisibility === "auto" ||
       /(?:paint|layout|strict|content)/.test(style.contain) ||
-      /(?:transform|perspective|filter)/.test(style.willChange);
+      /(?:transform|translate|scale|rotate|perspective|filter)/.test(style.willChange);
     const clipThisAncestor = clips;
     if (style.position === "fixed" || style.position === "absolute") {
       position = style.position;
       clips = false;
     }
     if (!clipThisAncestor) continue;
-    const paintClip = /(?:paint|strict|content)/.test(style.contain);
+    const paintClip =
+      style.contentVisibility === "auto" || /(?:paint|strict|content)/.test(style.contain);
     const clipsX = paintClip || style.overflowX !== "visible";
     const clipsY = paintClip || style.overflowY !== "visible";
     if (!clipsX && !clipsY) continue;

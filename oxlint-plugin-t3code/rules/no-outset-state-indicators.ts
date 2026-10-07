@@ -1,7 +1,7 @@
-import { defineRule } from "@oxlint/plugins";
+import { defineRule, type ESTree } from "@oxlint/plugins";
 import * as Option from "effect/Option";
 
-import { getPropertyName } from "../utils.ts";
+import { getPropertyName, unwrapExpression } from "../utils.ts";
 
 /** Split variants without treating a colon inside an arbitrary selector as a separator. */
 function classUtility(token: string) {
@@ -34,13 +34,55 @@ function isStateVariant(variant: string) {
   );
 }
 
+/** Recognize widths without treating arbitrary theme colors as lengths. */
+function isWidthUtility(utility: string, prefix: "ring" | "outline") {
+  if (utility === prefix) return true;
+  if (!utility.startsWith(`${prefix}-`)) return false;
+  const value = utility.slice(prefix.length + 1);
+  if (pixelLength(value) !== undefined) return true;
+  return /^[[(](?:length:|(?:\d+(?:\.\d+)?|\.\d+)(?:[a-z]+|%)|(?:calc|min|max|clamp)\()/u.test(
+    value,
+  );
+}
+
 function isRingWidth(utility: string) {
-  if (utility === "ring") return true;
-  const width = /^ring-(.+)$/u.exec(utility)?.[1];
-  if (width === undefined) return false;
-  const pixels = pixelLength(width);
-  if (pixels !== undefined) return pixels > 0;
-  return /^\[(?:length:|\d+(?:\.\d+)?(?:rem|em|vw|vh|%)|calc\()/u.test(width);
+  return isWidthUtility(utility, "ring") && pixelLength(utility.slice("ring-".length)) !== 0;
+}
+
+/** Inspect JSX style objects, leaving similarly named application data alone. */
+function isInlineStyleProperty(node: Extract<ESTree.Node, { type: "Property" }>) {
+  let expression: ESTree.Node = node.parent;
+  if (expression.type !== "ObjectExpression") return false;
+  while (
+    expression.parent?.type === "TSAsExpression" ||
+    expression.parent?.type === "TSSatisfiesExpression" ||
+    expression.parent?.type === "ParenthesizedExpression"
+  ) {
+    expression = expression.parent;
+  }
+  const container = expression.parent;
+  return (
+    container?.type === "JSXExpressionContainer" &&
+    container.parent.type === "JSXAttribute" &&
+    container.parent.name.type === "JSXIdentifier" &&
+    container.parent.name.name === "style"
+  );
+}
+
+function isInwardInlineOffset(node: Extract<ESTree.Node, { type: "Property" }>) {
+  const value = unwrapExpression(node.value);
+  if (Option.isNone(value)) return false;
+  const expression = value.value;
+  if (expression.type === "Literal" && typeof expression.value === "string") {
+    return /^-\d+(?:\.\d+)?px$/u.test(expression.value) && parseFloat(expression.value) <= -2;
+  }
+  return (
+    expression.type === "UnaryExpression" &&
+    expression.operator === "-" &&
+    expression.argument.type === "Literal" &&
+    typeof expression.argument.value === "number" &&
+    expression.argument.value >= 2
+  );
 }
 
 function outsetOverrides(text: string) {
@@ -71,8 +113,8 @@ function outsetOverrides(text: string) {
       continue;
     }
 
-    if (state && /^outline-(?:\d|\[)/u.test(utility)) {
-      const width = pixelLength(utility.slice("outline-".length));
+    if (state && isWidthUtility(utility, "outline")) {
+      const width = utility === "outline" ? 1 : pixelLength(utility.slice("outline-".length));
       if (
         (width === undefined || width > 2) &&
         !classes.some((candidate) => {
@@ -98,13 +140,15 @@ function outsetOverrides(text: string) {
     const widths = classes.filter(
       (candidate) =>
         (candidate.variant === variant || candidate.variant === "") &&
-        /^outline-(?:\d|\[)/u.test(candidate.utility),
+        isWidthUtility(candidate.utility, "outline"),
     );
     // Without a width in this literal, the shared focus outline defaults to 2px.
     const width = widths.length
       ? Math.max(
-          ...widths.map(
-            (candidate) => pixelLength(candidate.utility.slice("outline-".length)) ?? Infinity,
+          ...widths.map((candidate) =>
+            candidate.utility === "outline"
+              ? 1
+              : (pixelLength(candidate.utility.slice("outline-".length)) ?? Infinity),
           ),
         )
       : 2;
@@ -140,7 +184,14 @@ export default defineRule({
       },
       Property(node) {
         const name = getPropertyName(node.key);
-        if (Option.isNone(name) || name.value !== "--tw-ring-inset") return;
+        if (Option.isNone(name)) return;
+        if (name.value === "outlineOffset") {
+          if (isInlineStyleProperty(node) && !isInwardInlineOffset(node)) {
+            context.report({ node, message: message("inline outlineOffset override") });
+          }
+          return;
+        }
+        if (name.value !== "--tw-ring-inset") return;
         if (node.value.type === "Literal" && node.value.value === "inset") return;
         context.report({ node, message: message("--tw-ring-inset override") });
       },

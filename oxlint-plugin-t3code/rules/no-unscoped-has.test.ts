@@ -271,4 +271,59 @@ describe("t3code/no-outset-state-indicators", () => {
     "reports an outset override when the state inset uses a base ring width",
     `const el = <button className="ring-1 ring-outset! focus-visible:ring-inset focus-visible:ring-ring" />;`,
   );
+
+  indicators.invalid(
+    "requires an inset companion for explicitly typed variable ring widths",
+    `const el = <button className="focus-visible:ring-(length:--focus-width)" />;`,
+  );
+
+  indicators.invalid(
+    "requires an inset companion for font-relative arbitrary ring widths",
+    `const el = <button className="focus-visible:ring-[2ch]" />;`,
+  );
+
+  indicators.valid(
+    "allows typed variable and font-relative ring widths when inset",
+    `const el = <button className="focus-visible:ring-(length:--focus-width) focus-visible:ring-inset data-selected:ring-[2ch] data-selected:ring-inset" />;`,
+  );
+
+  indicators.invalid(
+    "rejects dynamic outline widths that the default offset cannot cover",
+    `const el = <button className="focus-visible:outline-(length:--focus-width) focus-visible:-outline-offset-2" />;`,
+  );
+
+  indicators.invalid(
+    "rejects font-relative outline widths that the default offset cannot cover",
+    `const el = <button className="focus-visible:outline-[2ch]" />;`,
+  );
+
+  indicators.valid(
+    "preserves arbitrary ring and outline colors",
+    `const el = <button className="focus-visible:ring-(color:--focus-color) focus-visible:ring-[color:var(--focus-color)] focus-visible:outline-(color:--focus-color) focus-visible:outline-[color:var(--focus-color)]" />;`,
+  );
+
+  indicators.invalid(
+    "reports inline offsets that override inward classes",
+    `const el = <button className="focus-visible:outline-2 focus-visible:-outline-offset-2" style={{ outlineOffset: 2 }} />;`,
+  );
+
+  indicators.invalid(
+    "reports inline negative offsets smaller than the default outline width",
+    `const el = <button style={{ outlineOffset: -1 }} />;`,
+  );
+
+  indicators.invalid(
+    "reports unknown inline offsets",
+    `const el = <button style={{ outlineOffset: offset }} />;`,
+  );
+
+  indicators.valid(
+    "allows known inward inline offsets",
+    `const a = <button style={{ outlineOffset: -2 }} />; const b = <button style={{ outlineOffset: "-3px" }} />;`,
+  );
+
+  indicators.valid(
+    "ignores outlineOffset in unrelated data objects",
+    `const defaults = { outlineOffset: 2 }; const options = <Editor options={{ outlineOffset: 2 }} />;`,
+  );
 });
