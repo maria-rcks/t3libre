@@ -78,6 +78,7 @@ function makeFakeBrowserWindow() {
     focus: vi.fn(),
     isDestroyed: vi.fn(() => false),
     getURL: vi.fn(() => "t3code-dev://app/"),
+    getTitle: vi.fn(() => "T3 Code Dev"),
     getZoomLevel: vi.fn(() => zoomLevel),
     getZoomFactor: vi.fn(() => 1.2 ** zoomLevel),
     setZoomLevel: vi.fn((level: number) => {
@@ -611,7 +612,60 @@ describe("DesktopWindow", () => {
         navigationUrl: "not a url",
       }),
     );
+    assert.isFalse(
+      DesktopWindow.isSameOriginRendererNavigation({
+        applicationUrl: "t3code://app/",
+        navigationUrl: "t3code://other/",
+      }),
+    );
+    assert.isFalse(
+      DesktopWindow.isSameOriginRendererNavigation({
+        applicationUrl: "t3code://app/",
+        navigationUrl: "file:///tmp/page.html",
+      }),
+    );
   });
+
+  it.effect("keeps application titles on load and falls back for empty or external titles", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = layerTest({ window: fakeWindow.window, createCount, mainWindow });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        const environment = yield* DesktopEnvironment.DesktopEnvironment.pipe(
+          Effect.provide(layerDesktopEnvironment),
+        );
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        const updateTitle = fakeWindow.windowListeners.get("page-title-updated");
+        const finishLoad = fakeWindow.webContentsListeners.get("did-finish-load");
+        if (!updateTitle || !finishLoad) {
+          return yield* Effect.die("title listeners were not registered");
+        }
+        const event = { preventDefault: vi.fn() };
+        const title = "project / thread - T3 Code Dev";
+        updateTitle(event, title);
+        assert.equal(vi.mocked(fakeWindow.window.setTitle).mock.lastCall?.[0], title);
+        vi.mocked(fakeWindow.window.webContents.getTitle).mockReturnValue(title);
+        finishLoad();
+        assert.equal(vi.mocked(fakeWindow.window.setTitle).mock.lastCall?.[0], title);
+        updateTitle(event, "  ");
+        assert.equal(
+          vi.mocked(fakeWindow.window.setTitle).mock.lastCall?.[0],
+          environment.displayName,
+        );
+        vi.mocked(fakeWindow.window.webContents.getURL).mockReturnValue("https://example.com/");
+        updateTitle(event, "external page");
+        assert.equal(
+          vi.mocked(fakeWindow.window.setTitle).mock.lastCall?.[0],
+          environment.displayName,
+        );
+        assert.equal(event.preventDefault.mock.calls.length, 3);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
 
   it.effect("does not open a development window until the backend is ready", () =>
     Effect.gen(function* () {

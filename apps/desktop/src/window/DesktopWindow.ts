@@ -216,7 +216,14 @@ export function isSameOriginRendererNavigation(input: {
   readonly navigationUrl: string;
 }): boolean {
   try {
-    return new URL(input.applicationUrl).origin === new URL(input.navigationUrl).origin;
+    const application = new URL(input.applicationUrl);
+    const navigation = new URL(input.navigationUrl);
+    // Custom application protocols have an opaque ("null") URL origin.
+    return (
+      application.protocol === navigation.protocol &&
+      application.host === navigation.host &&
+      application.origin === navigation.origin
+    );
   } catch {
     return false;
   }
@@ -671,9 +678,16 @@ export const make = Effect.gen(function* () {
       if (input.type === "gestureScrollEnd") window.webContents.send(TRACKPAD_SCROLL_END_CHANNEL);
     });
 
-    window.on("page-title-updated", (event) => {
+    const syncWindowTitle = (title: string) => {
+      const trusted = isSameOriginRendererNavigation({
+        applicationUrl,
+        navigationUrl: window.webContents.getURL(),
+      });
+      window.setTitle(trusted && title.trim() ? title : environment.displayName);
+    };
+    window.on("page-title-updated", (event, title) => {
       event.preventDefault();
-      window.setTitle(environment.displayName);
+      syncWindowTitle(title);
     });
     window.on("resize", scheduleBoundsPersist);
     window.on("move", scheduleBoundsPersist);
@@ -748,7 +762,7 @@ export const make = Effect.gen(function* () {
       }
       clearDevelopmentLoadRetry();
       developmentLoadRetryIndex = 0;
-      window.setTitle(environment.displayName);
+      syncWindowTitle(window.webContents.getTitle());
       if (environment.platform === "darwin") syncMacosWindowButtons(window);
     });
     window.webContents.on(

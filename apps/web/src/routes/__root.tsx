@@ -9,6 +9,7 @@ import {
   type ErrorComponentProps,
   useLocation,
   useNavigate,
+  useParams,
   useRouter,
 } from "@tanstack/react-router";
 import { Check, Copy } from "lucide";
@@ -75,7 +76,14 @@ import {
   primaryServerConfigEventAtom,
   primaryServerWelcomeAtom,
 } from "../state/server";
-import { readProject, setActiveEnvironmentId, useActiveEnvironmentId } from "../state/entities";
+import {
+  readProject,
+  setActiveEnvironmentId,
+  useActiveEnvironmentId,
+  useProject,
+  useThreadShell,
+} from "../state/entities";
+import { resolveThreadRouteRef } from "../threadRoutes";
 import {
   createKeybindingsUpdateToastController,
   type KeybindingsUpdateToastController,
@@ -337,14 +345,27 @@ function FontAppearanceSync() {
 }
 
 function DocumentTitleSync() {
+  const { environmentId, threadId } = useParams({ strict: false });
+  const threadRef = useMemo(
+    () => resolveThreadRouteRef({ environmentId, threadId }),
+    [environmentId, threadId],
+  );
+  const thread = useThreadShell(threadRef);
+  const project = useProject(
+    thread ? scopeProjectRef(thread.environmentId, thread.projectId) : null,
+  );
   const primaryServerVersion =
     useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null;
-  const title = resolveServerBackedAppDisplayName({
+  const appName = resolveServerBackedAppDisplayName({
     baseName: APP_BASE_NAME,
     fallbackDisplayName: APP_DISPLAY_NAME,
     fallbackStageLabel: APP_STAGE_LABEL,
     primaryServerVersion,
   });
+  const title =
+    thread && !thread.deletedAt && project
+      ? `${project.title} / ${thread.title} - ${appName}`
+      : appName;
 
   useEffect(() => {
     document.title = title;
