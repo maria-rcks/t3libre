@@ -351,7 +351,7 @@ describe("generated HTML focus protection", () => {
         expect(head.headers.get("content-length")).toBe(String(bytes.byteLength));
         expect(yield* Effect.promise(() => get.arrayBuffer())).toEqual(bytes.buffer);
         expect(yield* Effect.promise(() => head.text())).toBe("");
-        expect(yield* fs.readFile(file)).toEqual(new TextEncoder().encode(stored));
+        expect(new Uint8Array(yield* fs.readFile(file))).toEqual(new TextEncoder().encode(stored));
       }
     }).pipe(Effect.provide(layerFileResponse)),
   );
@@ -393,7 +393,7 @@ describe("generated HTML focus protection", () => {
         expect(response.headers.get("cache-control")).toBe("private, max-age=3600");
         expect(response.headers.get("content-length")).toBe(String(bytes.byteLength));
         expect(yield* Effect.promise(() => response.arrayBuffer())).toEqual(bytes.buffer);
-        expect(yield* fs.readFile(filePath)).toEqual(bytes);
+        expect(new Uint8Array(yield* fs.readFile(filePath))).toEqual(bytes);
       }
       yield* fs.writeFileString(filePath, generated);
       const canonicalPath = yield* fs.realPath(filePath);
