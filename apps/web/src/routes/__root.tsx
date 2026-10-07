@@ -363,7 +363,7 @@ function DocumentTitleSync() {
     primaryServerVersion,
   });
   const title =
-    thread && !thread.deletedAt && project
+    thread && !thread.deletedAt && project && thread.title.trim() && project.title.trim()
       ? `${project.title} / ${thread.title} - ${appName}`
       : appName;
 
