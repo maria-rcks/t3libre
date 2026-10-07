@@ -252,6 +252,8 @@ function stubDomGlobals() {
     desktopBridge: undefined,
   });
   vi.stubGlobal("document", {
+    addEventListener: () => {},
+    removeEventListener: () => {},
     documentElement: {
       classList,
       offsetHeight: 0,
