@@ -2303,9 +2303,9 @@ describe("Working shelf (beta)", () => {
       expect(plan.kind).toBe("move-active");
       if (plan.kind !== "move-active") return;
       for (const { id, orderKey } of plan.assignments) keys.set(id, orderKey);
-      expect([...desired].sort((left, right) => keys.get(left)!.localeCompare(keys.get(right)!))).toEqual(
-        desired,
-      );
+      expect(
+        [...desired].sort((left, right) => keys.get(left)!.localeCompare(keys.get(right)!)),
+      ).toEqual(desired);
       expect(plan.assignments.every(({ orderKey }) => orderKey !== keys.get("hidden"))).toBe(true);
       expect(keys.get("hidden")).toBe("ej");
       expect(

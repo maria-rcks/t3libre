@@ -3821,8 +3821,10 @@ export default function Sidebar() {
       ...settledThreads.filter((candidate) => key(candidate) !== dragState.activeKey),
       applySidebarThreadDrop(thread, "settled", dragState.occurredAt),
     ]);
-    return (branchGroupingEnabled ? groupThreadsByBranch(sorted) : sorted).map(key);
-  }, [branchGroupingEnabled, dragState, settledThreads, threadByKey]);
+    return (
+      branchGroupingEnabled && !isSearchingThreads ? groupThreadsByBranch(sorted) : sorted
+    ).map(key);
+  }, [branchGroupingEnabled, isSearchingThreads, dragState, settledThreads, threadByKey]);
   // Working beta: the inbox is time-ordered too, so the preview shows the
   // slot a drop will land in, not the slot under the pointer.
   const draggedActiveOrder = useMemo(() => {
@@ -3837,8 +3839,17 @@ export default function Sidebar() {
       ],
       inboxReturns.returnedAt,
     );
-    return (branchGroupingEnabled ? groupThreadsByBranch(sorted) : sorted).map(key);
-  }, [branchGroupingEnabled, activeThreads, dragState, threadByKey, workingShelfEnabled]);
+    return (
+      branchGroupingEnabled && !isSearchingThreads ? groupThreadsByBranch(sorted) : sorted
+    ).map(key);
+  }, [
+    branchGroupingEnabled,
+    isSearchingThreads,
+    activeThreads,
+    dragState,
+    threadByKey,
+    workingShelfEnabled,
+  ]);
   const sidebarSortingStrategy = useMemo(
     () =>
       createSidebarSortingStrategy({

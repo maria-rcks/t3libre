@@ -387,7 +387,12 @@ export function planSidebarThreadDrop(input: {
       ) {
         return { kind: "none" };
       }
-      const assignments = arrange(order, activeKeysById, activeReorderableKeys, input.activeGrouped);
+      const assignments = arrange(
+        order,
+        activeKeysById,
+        activeReorderableKeys,
+        input.activeGrouped,
+      );
       if (assignments === null) return { kind: "none" };
       return {
         kind: "move-active",
