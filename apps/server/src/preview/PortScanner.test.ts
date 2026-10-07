@@ -635,9 +635,7 @@ for (const platform of ["linux", "win32"] as const) {
           if (mixedOwnership && url !== explicitUrl) {
             return Promise.reject(new TypeError("binary listener"));
           }
-          return Promise.resolve(
-            new Response("app", { headers: { "content-type": "text/html" } }),
-          );
+          return Promise.resolve(new Response("app", { headers: { "content-type": "text/html" } }));
         }) as typeof globalThis.fetch;
         const layer = PortScanner.layer.pipe(
           Layer.provide(
