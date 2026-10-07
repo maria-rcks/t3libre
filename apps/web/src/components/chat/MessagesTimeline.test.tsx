@@ -1516,9 +1516,9 @@ describe("MessagesTimeline", () => {
         await act(() => {
           renderer = create(<MessagesTimeline {...props} />);
         });
-        expect(renderer!.root.findAllByProps({ "data-message-id": "hidden-commentary" })).toHaveLength(
-          0,
-        );
+        expect(
+          renderer!.root.findAllByProps({ "data-message-id": "hidden-commentary" }),
+        ).toHaveLength(0);
         await act(() => {
           renderer!.update(
             <MessagesTimeline
