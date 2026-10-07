@@ -40,7 +40,6 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
     files,
     allDirectoriesExpanded,
     resolvedTheme,
-    headerInset = 0,
     onToggleAllDirectories,
     onOpenTurnDiff,
     onFileContextMenu,
@@ -72,7 +71,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
       scrollTarget.removeEventListener("scroll", scheduleMeasure);
       cancelAnimationFrame(frame);
     };
-  }, [glass, headerInset, allDirectoriesExpanded, files]);
+  });
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
   const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
 
