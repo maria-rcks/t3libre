@@ -458,15 +458,22 @@ function rehypePreserveBareAnchorPlaceholders() {
       if (node.type === "raw" && typeof node.value === "string") {
         // Raw blocks can contain several tags. Consume whole tags, quoted attributes,
         // and comments so text resembling a closing anchor cannot pair a placeholder.
-        for (const [tag] of node.value.matchAll(
-          /<!--[\s\S]*?(?:-->|$)|<\/?[A-Za-z](?:[^"'<>]|"[^"]*"|'[^']*')*>/g,
-        )) {
-          if (tag.startsWith("<!--")) continue;
-          const closing = /^<\/([a-z]+)\s*>$/i.exec(tag)?.[1]?.toLowerCase();
+        const tags = /<!--[\s\S]*?(?:-->|$)|<\/?[A-Za-z](?:[^"'<>]|"[^"]*"|'[^']*')*>/g;
+        let offset = 0;
+        while (rawTextTag !== "plaintext") {
+          // Raw text ends at its closing tag even inside comment-looking text.
+          const matcher = rawTextTag ? new RegExp(`</${rawTextTag}\\s*>`, "gi") : tags;
+          matcher.lastIndex = offset;
+          const match = matcher.exec(node.value);
+          if (!match) break;
+          const [tag] = match;
+          offset = matcher.lastIndex;
           if (rawTextTag) {
-            if (rawTextTag !== "plaintext" && closing === rawTextTag) rawTextTag = undefined;
+            rawTextTag = undefined;
             continue;
           }
+          if (tag.startsWith("<!--")) continue;
+          const closing = /^<\/([a-z]+)\s*>$/i.exec(tag)?.[1]?.toLowerCase();
           const opening = /^<([a-z]+)(?:\s|\/?>)/i.exec(tag)?.[1]?.toLowerCase();
           if (
             opening &&
