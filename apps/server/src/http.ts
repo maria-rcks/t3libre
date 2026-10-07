@@ -181,7 +181,15 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
     headers["Content-Type"] === "text/html; charset=utf-8"
   ) {
     const fs = yield* FileSystem.FileSystem;
-    const html = injectHtmlRenderFocusStyles(yield* fs.readFileString(asset.path));
+    const raw = yield* fs.readFile(asset.path);
+    let source: string | undefined;
+    try {
+      source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw);
+    } catch {
+      // Uploaded HTML may use another encoding; serve its original bytes in that case.
+      source = undefined;
+    }
+    const html = source === undefined ? undefined : injectHtmlRenderFocusStyles(source);
     if (html !== undefined) {
       const bytes = new TextEncoder().encode(html);
       headers["Cache-Control"] = "private, no-store";

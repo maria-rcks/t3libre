@@ -323,7 +323,7 @@ describe("generated HTML focus protection", () => {
         '<style id="t3-focus">:where(:focus-visible){outline-style:solid!important;outline-width:2px!important;outline-offset:-2px!important}</style>';
       const expected = original.replace('<style id="t3-theme">', `${policy}<style id="t3-theme">`);
       // Older pages get refreshed; pages stored with the policy are not injected twice.
-      for (const stored of [original, expected]) {
+      for (const stored of [original, expected, `\uFEFF${original}`, `\uFEFF${expected}`]) {
         yield* fs.writeFileString(file, stored);
         const get = HttpServerResponse.toWeb(
           yield* assetFileResponse({ path: file, isAttachment: true }),
@@ -344,12 +344,14 @@ describe("generated HTML focus protection", () => {
         );
         expect(get.headers.get("cache-control")).toBe("private, no-store");
         expect(head.headers.get("cache-control")).toBe("private, no-store");
-        const bytes = new TextEncoder().encode(expected);
+        const bytes = new TextEncoder().encode(
+          stored.startsWith("\uFEFF") ? `\uFEFF${expected}` : expected,
+        );
         expect(get.headers.get("content-length")).toBe(String(bytes.byteLength));
         expect(head.headers.get("content-length")).toBe(String(bytes.byteLength));
         expect(yield* Effect.promise(() => get.arrayBuffer())).toEqual(bytes.buffer);
         expect(yield* Effect.promise(() => head.text())).toBe("");
-        expect(yield* fs.readFileString(file)).toBe(stored);
+        expect(yield* fs.readFile(file)).toEqual(new TextEncoder().encode(stored));
       }
     }).pipe(Effect.provide(layerFileResponse)),
   );
@@ -380,6 +382,18 @@ describe("generated HTML focus protection", () => {
         expect(response.headers.get("content-length")).toBe(String(bytes.byteLength));
         expect(yield* Effect.promise(() => response.arrayBuffer())).toEqual(bytes.buffer);
         expect(yield* fs.readFileString(filePath)).toBe(contents);
+      }
+      // Inline uploads with non-UTF-8 bytes keep the original response and persisted data.
+      for (const invalid of [0xe9, 0xff]) {
+        const bytes = new Uint8Array([...new TextEncoder().encode(generated), invalid]);
+        yield* fs.writeFile(filePath, bytes);
+        const response = HttpServerResponse.toWeb(
+          yield* assetFileResponse({ path: filePath, isAttachment: true }),
+        );
+        expect(response.headers.get("cache-control")).toBe("private, max-age=3600");
+        expect(response.headers.get("content-length")).toBe(String(bytes.byteLength));
+        expect(yield* Effect.promise(() => response.arrayBuffer())).toEqual(bytes.buffer);
+        expect(yield* fs.readFile(filePath)).toEqual(bytes);
       }
       yield* fs.writeFileString(filePath, generated);
       const canonicalPath = yield* fs.realPath(filePath);
