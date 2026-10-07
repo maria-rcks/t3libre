@@ -3840,7 +3840,7 @@ export function makeClaudeAdapterV2(
         });
 
         const buildToolCallArtifacts = (input: {
-          readonly context: ActiveClaudeTurnContext;
+          readonly context: Pick<ActiveClaudeTurnContext, "input" | "providerTurnId">;
           readonly nativeItemId: string;
           readonly toolName: string;
           readonly classification: ClaudeToolClassification;
@@ -5195,7 +5195,7 @@ export function makeClaudeAdapterV2(
 
         // Ends open calls whose results will never arrive.
         const endToolCalls = Effect.fnUntraced(function* (input: {
-          readonly context: ActiveClaudeTurnContext;
+          readonly context: Pick<ActiveClaudeTurnContext, "input" | "providerTurnId">;
           readonly toolCalls: ReadonlyArray<ActiveClaudeToolCall>;
           readonly status: Extract<
             OrchestrationV2ProviderTurn["status"],
