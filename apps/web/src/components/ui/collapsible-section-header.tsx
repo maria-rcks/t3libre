@@ -40,8 +40,8 @@ export function CollapsibleSectionHeader({
       <span
         aria-hidden
         className={cn(
-          "min-w-2 flex-1",
-          lineStyle === "label" ? "h-0.5 bg-current" : cn("h-px", tones[tone].line),
+          "h-px min-w-2 flex-1",
+          lineStyle === "label" ? "bg-current" : tones[tone].line,
         )}
       />
       {accessory}

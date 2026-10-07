@@ -753,7 +753,6 @@ function SidebarDragBoundary(props: {
   marker: "pinned-header" | "pinned-divider";
   label: string;
   visible: boolean;
-  showDivider?: boolean;
   isDropTarget: boolean;
 }) {
   return (
@@ -762,12 +761,6 @@ function SidebarDragBoundary(props: {
       data-testid={`sidebar-${props.marker}`}
       className="pointer-events-none relative mx-0.5 -mb-px h-0"
     >
-      {props.showDivider && !props.visible ? (
-        <span
-          aria-hidden
-          className="absolute inset-x-2 top-0 h-0.5 bg-sidebar-muted-foreground/60"
-        />
-      ) : null}
       {props.visible ? (
         <div className="sidebar-drag-boundary-label absolute inset-x-2 top-1 flex h-4 items-center gap-2">
           <span
@@ -1120,24 +1113,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   settlementSupported: boolean;
   // Same contract for thread.snooze/unsnooze.
   snoozeSupported: boolean;
-  // Renders the pin glyph. Pinned cards keep the full settle/snooze quick
-  // actions: settling clears the pin server-side, and snoozing hides the
-  // card until wake with the pin intact underneath. The glyph is also the
-  // in-row pin state cue (the pinned block has no header), so it always
-  // shows while pinned; it only becomes a clickable unpin quick-action once
-  // the pinning capability is confirmed, and stays a passive marker while
-  // the descriptor is not loaded. Pinning itself lives in the context menu.
-  pinningSupported: boolean;
-  isPinned: boolean;
   // Present on rows whose server supports every drop outcome: dnd-kit
   // sortable bag applied to the row root so the whole row drags (the
   // pointer sensor's distance constraint keeps plain clicks working).
   sortable?: SortableThreadRowBag | undefined;
   dropVerb: SidebarDropVerb | null;
-  // While dragging, the pin marker stays only for a pinned thread still over
-  // the pinned section. Any other position shows the verb badge instead, and
-  // the badge carries its own icon.
-  dragOverPinned: boolean;
   // The action this row will take when the sweep is released.
   sweepAction: SidebarSweepAction | null;
   // Compact wake countdown ("2h") for rows in the snoozed shelf.
@@ -1173,7 +1153,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onUnsettle: (threadRef: ScopedThreadRef) => void;
   onSnooze: (threadRef: ScopedThreadRef, preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
-  onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
   changeRequestSnapshot: ThreadChangeRequestSnapshot | null;
@@ -1200,7 +1179,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     onThreadClick,
     onUnsettle,
     onUnsnooze,
-    onUnpin,
     openPullRequestsInRightPanel,
     renamingTitle,
     thread,
@@ -1526,14 +1504,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     },
     [onUnsnooze, threadRef],
   );
-  const handleUnpinClick = useCallback(
-    (event: ReactMouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onUnpin(threadRef);
-    },
-    [onUnpin, threadRef],
-  );
   const handleSnoozePreset = useCallback(
     (preset: Pick<SnoozePreset, "snoozedUntil">) => {
       onSnooze(threadRef, preset);
@@ -1758,42 +1728,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       <TooltipPopup side="top">Unsent draft</TooltipPopup>
     </Tooltip>
   ) : null;
-  const showPin =
-    props.isPinned && (!sortable?.isDragging || (props.dragOverPinned && props.dropVerb === null));
-  const pinIndicator = showPin ? (
-    props.pinningSupported && canOperateThread && !sortable?.isDragging ? (
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-label="Unpin thread"
-              onClick={handleUnpinClick}
-              className="group/unpin inline-flex cursor-pointer items-center rounded-sm text-muted-foreground/65 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          }
-        >
-          {/* Pin marks the pinned state at rest; hover and focus swap in pin-off so the
-              icon reads as the action the button performs. */}
-          <PinIcon
-            aria-hidden
-            className="size-3 shrink-0 group-hover/unpin:hidden group-focus-visible/unpin:hidden"
-          />
-          <PinOffIcon
-            aria-hidden
-            className="hidden size-3 shrink-0 group-hover/unpin:block group-focus-visible/unpin:block"
-          />
-        </TooltipTrigger>
-        <TooltipPopup>Unpin thread</TooltipPopup>
-      </Tooltip>
-    ) : (
-      <PinIcon
-        aria-label="Pinned"
-        role="img"
-        className="size-3 shrink-0 text-muted-foreground/65"
-      />
-    )
-  ) : null;
 
   if (variant === "slim") {
     return (
@@ -1840,7 +1774,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             </span>
             {draftIndicator}
             {title}
-            {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
@@ -2010,7 +1943,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : (
                 <span className="flex-1" />
               )}
-              {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping
                   the hidden state out of flow lets the project label reclaim
@@ -5268,19 +5200,11 @@ export default function Sidebar() {
                               serverConfigs.get(thread.environmentId)?.environment.capabilities
                                 .threadSnooze === true
                             }
-                            pinningSupported={
-                              serverConfigs.get(thread.environmentId)?.environment.capabilities
-                                .threadPinning === true
-                            }
-                            isPinned={thread.pinnedAt != null}
                             sortable={sortable}
                             dropVerb={
                               dragState?.activeKey === threadKey
                                 ? resolveSidebarDropVerb(dragState.activeSection, dragTargetSection)
                                 : null
-                            }
-                            dragOverPinned={
-                              dragState?.activeKey === threadKey && dragTargetSection === "pinned"
                             }
                             sweepAction={
                               actionSweep?.keys.has(threadKey) ? actionSweep.action : null
@@ -5337,7 +5261,6 @@ export default function Sidebar() {
                             onUnsettle={attemptUnsettle}
                             onSnooze={attemptSnooze}
                             onUnsnooze={attemptUnsnooze}
-                            onUnpin={attemptUnpin}
                             onAcknowledgeWoke={acknowledgeWoke}
                             onFileDropThreads={handleThreadFileDrop}
                             changeRequestSnapshot={
@@ -5390,6 +5313,19 @@ export default function Sidebar() {
                         }
                         switch (item.marker) {
                           case "pinned-header":
+                            if (pinnedThreads.length > 0) {
+                              items.push(
+                                <li
+                                  key="pinned-section-label"
+                                  data-thread-selection-safe
+                                  className="mx-0.5 flex h-8 items-center gap-2 px-2 text-xs font-medium text-sidebar-muted-foreground/60"
+                                >
+                                  <PinIcon aria-hidden className="size-3 shrink-0" />
+                                  <span className="shrink-0">Pinned</span>
+                                  <span aria-hidden className="h-px min-w-2 flex-1 bg-current" />
+                                </li>,
+                              );
+                            }
                             items.push(
                               <SidebarDragBoundary
                                 key="pinned-header"
@@ -5406,7 +5342,6 @@ export default function Sidebar() {
                                 key="pinned-divider"
                                 marker="pinned-divider"
                                 label="Active"
-                                showDivider={pinnedThreads.length > 0}
                                 visible={from !== null}
                                 isDropTarget={dragTargetSection === "active"}
                               />,
