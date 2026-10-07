@@ -343,9 +343,9 @@ function nestedSvgViewportRect(element: SVGSVGElement): DOMRect {
       width = viewBox.width;
       height = viewBox.height;
     } else {
-      const scale = (ratio.meetOrSlice === SVGPreserveAspectRatio.SVG_MEETORSLICE_SLICE
-        ? Math.max
-        : Math.min)(width / viewBox.width, height / viewBox.height);
+      const scale = (
+        ratio.meetOrSlice === SVGPreserveAspectRatio.SVG_MEETORSLICE_SLICE ? Math.max : Math.min
+      )(width / viewBox.width, height / viewBox.height);
       width /= scale;
       height /= scale;
       const alignment = ratio.align - SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_XMINYMIN;

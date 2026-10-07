@@ -398,6 +398,66 @@ describe("t3code/no-outset-state-indicators", () => {
   );
 
   indicators.valid(
+    "matches guaranteed companions across string concatenation",
+    `const el = <button className={"focus-visible:ring-2 " + "ring-inset"} />;`,
+  );
+
+  indicators.valid(
+    "matches guaranteed companions across literal template interpolations",
+    "const className = `${'focus-visible:ring-2 '}ring-inset`;",
+  );
+
+  indicators.valid(
+    "evaluates inset tokens split across literal concatenation",
+    `const className = "focus-visible:ring-2 ring-in" + "set";`,
+  );
+
+  indicators.valid(
+    "preserves complete tokens around unknown concatenated layout fragments",
+    `const className = "focus-visible:ring-2 " + layout + " ring-inset";`,
+  );
+
+  indicators.invalid(
+    "checks ring widths split across literal concatenation",
+    `const className = "focus-visible:ring-" + "2";`,
+  );
+
+  indicators.invalid(
+    "checks ring widths split across literal template interpolation",
+    "const className = `focus-visible:ring-${'2'}`;",
+  );
+
+  indicators.valid(
+    "does not check partial tokens inside nested literal concatenation",
+    `const className = ("focus-visible:ring-" + "2") + "-unknown";`,
+  );
+
+  indicators.invalid(
+    "does not treat an unknown interpolation inside an inset token as a companion",
+    "const className = `focus-visible:ring-2 ring-in${value}set`;",
+  );
+
+  indicators.invalid(
+    "does not treat an unknown interpolation after an inset token as a companion",
+    "const className = `focus-visible:ring-2 ring-inset${value}`;",
+  );
+
+  indicators.invalid(
+    "does not treat an unknown concatenated suffix as a guaranteed inset boundary",
+    `const className = "focus-visible:ring-2 " + "ring-inset" + value;`,
+  );
+
+  indicators.invalid(
+    "does not borrow a conditional concatenated inset companion",
+    `const className = "focus-visible:ring-2 " + (active ? "ring-inset" : "");`,
+  );
+
+  indicators.invalid(
+    "does not borrow a conditional interpolated inset companion",
+    "const className = `focus-visible:ring-2 ${active && 'ring-inset'}`;",
+  );
+
+  indicators.valid(
     "matches guaranteed ring companions across composition arguments",
     `const value = cn("focus-visible:ring-2", "focus-visible:ring-inset");`,
   );

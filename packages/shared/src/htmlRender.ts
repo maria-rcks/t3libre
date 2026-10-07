@@ -372,7 +372,7 @@ const blankNonMarkup = (html: string, keepStyleTags = false) => {
   const scan = html.replace(
     /<!--[\s\S]*?(?:-->|$)|<(script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)\b[\s\S]*?(?:<\/\1\s*>|$)|<plaintext\b[\s\S]*$/gi,
     (match) => {
-      const opening = keepStyleTags ? /^<style\b[^>]*>/i.exec(match)?.[0] ?? "" : "";
+      const opening = keepStyleTags ? (/^<style\b[^>]*>/i.exec(match)?.[0] ?? "") : "";
       return opening + " ".repeat(match.length - opening.length);
     },
   );
@@ -400,8 +400,9 @@ const blankNonMarkup = (html: string, keepStyleTags = false) => {
 /** Refreshes a generated page's focus policy without changing its stored bytes or theme bootstrap. */
 export function injectHtmlRenderFocusStyles(html: string): string | undefined {
   const scan = blankNonMarkup(html, true);
-  const theme =
-    /<style\b[^>]*\sid\s*=\s*(?:"t3-theme"|'t3-theme'|t3-theme(?=[\s>]))[^>]*>/i.exec(scan);
+  const theme = /<style\b[^>]*\sid\s*=\s*(?:"t3-theme"|'t3-theme'|t3-theme(?=[\s>]))[^>]*>/i.exec(
+    scan,
+  );
   if (!theme) return undefined;
   if (/<style\b[^>]*\sid\s*=\s*(?:"t3-focus"|'t3-focus'|t3-focus(?=[\s>]))[^>]*>/i.test(scan)) {
     return html;

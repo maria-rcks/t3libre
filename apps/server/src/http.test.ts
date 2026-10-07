@@ -330,7 +330,12 @@ describe("generated HTML focus protection", () => {
           yield* assetFileResponse({ path: file, isAttachment: true }),
         );
         const head = HttpServerResponse.toWeb(
-          yield* assetFileResponse({ path: file, isAttachment: true }, undefined, undefined, "HEAD"),
+          yield* assetFileResponse(
+            { path: file, isAttachment: true },
+            undefined,
+            undefined,
+            "HEAD",
+          ),
         );
         expect(get.status).toBe(200);
         expect(head.status).toBe(200);

@@ -34,9 +34,18 @@ function isClassComposer(node: Extract<ESTree.Node, { type: "CallExpression" }>)
 
 /** Collect only fragments that a composition always includes, leaving conditional variants apart. */
 function staticClassText(node: ESTree.Node): string {
-  if (node.type === "Literal") return typeof node.value === "string" ? node.value : "";
+  if (node.type === "Literal" && typeof node.value === "string") return node.value;
+  if (node.type === "BinaryExpression" && node.operator === "+") {
+    return staticClassText(node.left) + staticClassText(node.right);
+  }
   if (node.type === "TemplateLiteral") {
-    return node.quasis.map((part) => part.value.cooked ?? part.value.raw).join(" ");
+    return node.quasis
+      .map(
+        (part, index) =>
+          (part.value.cooked ?? part.value.raw) +
+          (node.expressions[index] ? staticClassText(node.expressions[index]) : ""),
+      )
+      .join("");
   }
   if (node.type === "ArrayExpression") {
     return node.elements.map((element) => (element ? staticClassText(element) : "")).join(" ");
@@ -52,7 +61,24 @@ function staticClassText(node: ESTree.Node): string {
   ) {
     return staticClassText(node.expression);
   }
-  return "";
+  return "__t3_dynamic_class__";
+}
+
+/** Check joined strings at their outer boundary, so partial tokens are never separate classes. */
+function isJoinedClassFragment(node: ESTree.Node) {
+  let parent = node.parent;
+  while (
+    parent?.type === "TSAsExpression" ||
+    parent?.type === "TSSatisfiesExpression" ||
+    parent?.type === "TSNonNullExpression" ||
+    parent?.type === "ParenthesizedExpression"
+  ) {
+    parent = parent.parent;
+  }
+  return (
+    parent?.type === "TemplateLiteral" ||
+    (parent?.type === "BinaryExpression" && parent.operator === "+")
+  );
 }
 
 function companionClassText(node: ESTree.Node) {
@@ -62,7 +88,11 @@ function companionClassText(node: ESTree.Node) {
     if (current.type === "CallExpression") {
       if (!isClassComposer(current)) break;
       fragments.push(staticClassText(current));
-    } else if (current.type === "ArrayExpression") {
+    } else if (
+      current.type === "ArrayExpression" ||
+      current.type === "TemplateLiteral" ||
+      (current.type === "BinaryExpression" && current.operator === "+")
+    ) {
       fragments.push(staticClassText(current));
     } else if (!CLASS_EXPRESSION_TYPES.has(current.type)) {
       break;
@@ -137,7 +167,9 @@ function elementTarget(variants: string[]) {
     .filter(
       (variant) =>
         (variant.startsWith("[") && !/^\[&(?::[\w-]+|\[[^\]]+\])+\]$/u.test(variant)) ||
-        /^(?:before|after|first-letter|first-line|marker|selection|file|placeholder|backdrop|details-content|\*{1,2})$/u.test(variant),
+        /^(?:before|after|first-letter|first-line|marker|selection|file|placeholder|backdrop|details-content|\*{1,2})$/u.test(
+          variant,
+        ),
     )
     .join(":");
 }
@@ -229,7 +261,9 @@ function outsetOverrides(text: string, companions: string) {
   const baseOutlineWidth = Math.max(
     2,
     ...classes
-      .filter((candidate) => candidate.variant === "" && isWidthUtility(candidate.utility, "outline"))
+      .filter(
+        (candidate) => candidate.variant === "" && isWidthUtility(candidate.utility, "outline"),
+      )
       .map((candidate) =>
         candidate.utility === "outline"
           ? 1
@@ -291,10 +325,7 @@ function outsetOverrides(text: string, companions: string) {
         : variantCovers("", variant)
           ? baseOutlineWidth
           : 2;
-      if (
-        (width === undefined || width > 2) &&
-        !hasInwardOutlineOffset(variant, width)
-      ) {
+      if ((width === undefined || width > 2) && !hasInwardOutlineOffset(variant, width)) {
         offenders.push(`${variant}${utility}`);
       }
     }
@@ -325,8 +356,7 @@ function outsetOverrides(text: string, companions: string) {
     const amount = pixelLength(offset[2] ?? "");
     const widths = classes.filter(
       (candidate) =>
-        variantCovers(candidate.variant, variant) &&
-        isWidthUtility(candidate.utility, "outline"),
+        variantCovers(candidate.variant, variant) && isWidthUtility(candidate.utility, "outline"),
     );
     // Without a guaranteed width in this composition, the shared focus outline defaults to 2px.
     const width = widths.length
@@ -358,15 +388,23 @@ export default defineRule({
       `${utility} can paint a focus or selection indicator outside its element, where an ancestor may clip it. Pair state ring widths with ring-inset under the same variant. For state colors using a base ring width, add ring-inset to that base. Remove outline offset overrides to use the shared inward default, or use a negative offset at least as large as its outline width.`;
     return {
       Literal(node) {
-        if (typeof node.value !== "string" || !isClassString(node)) return;
+        if (typeof node.value !== "string" || isJoinedClassFragment(node) || !isClassString(node)) {
+          return;
+        }
         for (const utility of outsetOverrides(node.value, companionClassText(node))) {
           context.report({ node, message: message(utility) });
         }
       },
       TemplateLiteral(node) {
-        if (!isClassString(node)) return;
-        const text = node.quasis.map((part) => part.value.cooked ?? part.value.raw).join(" ");
+        if (isJoinedClassFragment(node) || !isClassString(node)) return;
+        const text = staticClassText(node);
         for (const utility of outsetOverrides(text, companionClassText(node))) {
+          context.report({ node, message: message(utility) });
+        }
+      },
+      BinaryExpression(node) {
+        if (node.operator !== "+" || isJoinedClassFragment(node) || !isClassString(node)) return;
+        for (const utility of outsetOverrides(staticClassText(node), companionClassText(node))) {
           context.report({ node, message: message(utility) });
         }
       },
