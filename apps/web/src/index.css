@@ -1923,7 +1923,7 @@ code {
 .chat-markdown blockquote {
   border-left: 2px solid var(--contrast-border);
   padding-left: 0.8rem;
-  color: var(--contrast-muted-foreground);
+  color: var(--chat-blockquote-color, var(--contrast-muted-foreground));
 }
 
 .chat-markdown section[data-footnotes] {
