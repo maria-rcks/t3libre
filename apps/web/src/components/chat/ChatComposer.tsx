@@ -5221,7 +5221,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onRestingChange(isComposerResting);
   }, [isComposerResting, onRestingChange]);
   // The resting footer floats over the prompt row, so the row reserves its
-  // measured width. Wide actions like "Compact and send" vary too much for a fixed inset.
+  // measured width. Wide actions like the compact-before-send chip vary too much for a fixed inset.
   const [restingActionsElement, setRestingActionsElement] = useState<HTMLDivElement | null>(null);
   const [restingActionsWidth, setRestingActionsWidth] = useState<number | null>(null);
   useLayoutEffect(() => {
