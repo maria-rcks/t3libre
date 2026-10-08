@@ -6,10 +6,13 @@ import { unwrapExpression } from "../utils.ts";
 const SCROLLS_VERTICALLY = /(?:^|:)overflow-(?:y-)?auto$/u;
 // Either utility keeps the content box the same width whether or not the scrollbar shows. Both
 // exemptions must be unprefixed: a variant such as lg: leaves every other state unprotected.
-const RESERVES_GUTTER = /^(?:scrollbar-gutter-(?:stable|both)|\[scrollbar-gutter:stable[^\]]*\])$/u;
+const RESERVES_GUTTER =
+  /^(?:scrollbar-gutter-(?:stable|both)|\[scrollbar-gutter:stable(?:_both-edges)?\])$/u;
 const HIDES_SCROLLBAR = /^\[scrollbar-width:none\]$/u;
 const CENTERED_BY_MARGIN = /(?:^|:)mx?-auto$/u;
-const COLUMN = /(?:^|:)flex-col$/u;
+const COLUMN = /(?:^|:)flex-col(?:-reverse)?$/u;
+const ALWAYS_COLUMN = /^flex-col(?:-reverse)?$/u;
+const ROW = /(?:^|:)flex-row(?:-reverse)?$/u;
 const CENTERS_COLUMN_ITEMS = /(?:^|:)(?:items-center(?:-safe)?|place-items-center)$/u;
 const CENTERS_ROW_ITEMS =
   /(?:^|:)(?:justify-center(?:-safe)?|\[justify-content:safe_center\]|place-items-center|place-content-center)$/u;
@@ -43,7 +46,13 @@ function collectClassNames(node: unknown, classNames: ClassNames, always: boolea
       if (typeof value.value === "string") addAll(value.value);
       return;
     case "TemplateLiteral":
-      for (const quasi of value.quasis) addAll(quasi.value.cooked);
+      value.quasis.forEach((quasi, index) => {
+        // A token touching an interpolation is only part of a class name, such as `${prefix}x`.
+        const tokens = (quasi.value.cooked ?? "").split(/\s+/u);
+        if (index > 0) tokens.shift();
+        if (!quasi.tail) tokens.pop();
+        addAll(tokens.join(" "));
+      });
       for (const nested of value.expressions) collectClassNames(nested, classNames, always);
       return;
     case "JSXExpressionContainer":
@@ -117,10 +126,13 @@ export default defineRule({
         if (possible.size === 0) return;
 
         if (hasClass(possible, SCROLLS_VERTICALLY)) {
-          const centersItems = hasClass(possible, COLUMN)
-            ? hasClass(possible, CENTERS_COLUMN_ITEMS)
-            : hasClass(possible, CENTERS_ROW_ITEMS);
-          if (centersItems) report(node, classNames);
+          // A responsive or conditional direction can render as either axis, so check both.
+          const centersColumn =
+            hasClass(possible, COLUMN) && hasClass(possible, CENTERS_COLUMN_ITEMS);
+          const centersRow =
+            (!hasClass(classNames.always, ALWAYS_COLUMN) || hasClass(possible, ROW)) &&
+            hasClass(possible, CENTERS_ROW_ITEMS);
+          if (centersColumn || centersRow) report(node, classNames);
         }
 
         if (!hasClass(possible, CENTERED_BY_MARGIN)) return;
