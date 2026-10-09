@@ -215,7 +215,9 @@ export const make = Effect.gen(function* () {
     const linkedThisSweep = new Set<string>();
     const persistence = yield* Semaphore.make(1);
 
-    const syncEntry = Effect.fn("PullRequestSyncReactor.syncEntry")(function* (
+    // One call per thread link per sweep (thousands a minute on large installs).
+    // Its rare dispatches stay traced under the group span.
+    const syncEntry = Effect.fnUntraced(function* (
       entry: LinkEntry,
       fields: SnapshotFields,
       fetchedStack: { readonly stack: ThreadPullRequestStack | null } | null,

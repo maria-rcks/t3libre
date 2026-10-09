@@ -344,10 +344,12 @@ const maybeOpenBrowser = (target: string) =>
     );
   });
 
+// Phase and server fields go on the startup spans only. As inherited span
+// annotations they were copied onto every span of the workers forked during
+// startup (the effect worker, PR sync), which is most of the trace file.
 const runStartupPhase = <A, E, R>(phase: string, effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
-    Effect.annotateSpans({ "startup.phase": phase }),
-    Effect.withSpan(`server.startup.${phase}`),
+    Effect.withSpan(`server.startup.${phase}`, { attributes: { "startup.phase": phase } }),
   );
 
 interface StartupOptions {
@@ -581,8 +583,9 @@ const make = (options?: StartupOptions) =>
         Effect.gen(function* () {
           yield* Effect.logDebug("startup phase: recording startup heartbeat");
           yield* recordStartupHeartbeat.pipe(
-            Effect.annotateSpans({ "startup.phase": "heartbeat.record" }),
-            Effect.withSpan("server.startup.heartbeat.record"),
+            Effect.withSpan("server.startup.heartbeat.record", {
+              attributes: { "startup.phase": "heartbeat.record" },
+            }),
             Effect.ignoreCause({ log: true }),
           );
           if (serverConfig.startupPresentation === "headless") {
@@ -653,12 +656,15 @@ const make = (options?: StartupOptions) =>
       yield* Effect.logDebug("startup phase: complete");
       yield* flushCompileCache;
     }).pipe(
-      Effect.annotateSpans({
-        "server.mode": serverConfig.mode,
-        "server.port": serverConfig.port,
-        "server.host": serverConfig.host ?? "default",
+      Effect.withSpan("server.startup", {
+        kind: "server",
+        root: true,
+        attributes: {
+          "server.mode": serverConfig.mode,
+          "server.port": serverConfig.port,
+          "server.host": serverConfig.host ?? "default",
+        },
       }),
-      Effect.withSpan("server.startup", { kind: "server", root: true }),
     );
 
     yield* Effect.forkScoped(
