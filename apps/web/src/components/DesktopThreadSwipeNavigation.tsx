@@ -1,8 +1,6 @@
 import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { isElectron } from "../env";
-
 type ThreadSwipeDirection = "previous" | "next";
 type ThreadSwipeGesture = {
   direction: ThreadSwipeDirection;
@@ -35,9 +33,8 @@ export function DesktopThreadSwipeNavigation(input: {
     navigateRef.current = input.navigate;
   }, [input.navigate]);
 
+  // Mounted only in Electron; the document already suppresses Chromium's overscroll navigation.
   useEffect(() => {
-    if (!isElectron) return;
-
     let accumulatedDeltaX = 0;
     let didNavigate = false;
     let idleTimer: number | null = null;
@@ -92,7 +89,7 @@ export function DesktopThreadSwipeNavigation(input: {
     };
   }, []);
 
-  if (!isElectron || gesture === null) return null;
+  if (gesture === null) return null;
 
   const isPrevious = gesture.direction === "previous";
   const edgeOffset = (1 - gesture.progress) * 45;
