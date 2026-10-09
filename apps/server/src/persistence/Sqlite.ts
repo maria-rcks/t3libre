@@ -55,20 +55,3 @@ export const layerConfig = Layer.unwrap(
     return layerFromPath(dbPath);
   }),
 );
-
-// A live server owns schema initialization; CLI authentication only writes sessions.
-export const layerExistingConfig = Layer.unwrap(
-  Effect.gen(function* () {
-    const { dbPath } = yield* ServerConfig.ServerConfig;
-    return Layer.provideMerge(
-      Layer.effectDiscard(
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient;
-          yield* sql`PRAGMA busy_timeout = 5000;`;
-          yield* sql`PRAGMA foreign_keys = ON;`;
-        }),
-      ),
-      NodeSqliteClient.layer({ filename: dbPath }),
-    );
-  }),
-);

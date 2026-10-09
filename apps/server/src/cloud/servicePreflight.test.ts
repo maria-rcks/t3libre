@@ -29,6 +29,5 @@ it("accepts the current launcher protocol", () => {
     status: "ready",
     version: "1.2.3",
     launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
-    ownershipProtocol: 1,
   });
 });

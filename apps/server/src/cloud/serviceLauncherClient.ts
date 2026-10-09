@@ -25,15 +25,12 @@ export class ServiceLauncherClientError extends Schema.TaggedError<ServiceLaunch
       "send",
       "disconnect",
       "timeout",
-      "ownership-unavailable",
     ]),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     switch (this.operation) {
-      case "ownership-unavailable":
-        return "The service launcher must be updated and restarted before a safe server update can run.";
       case "decode-context":
         return "The service launcher supplied invalid startup context.";
       case "version-mismatch":
@@ -145,16 +142,6 @@ export const resolveServiceLauncherMode = Effect.fn("cloud.service_launcher_clie
   },
 );
 
-export const resolveServiceLauncherOwnership = Effect.fn(
-  "cloud.service_launcher_client.resolve_ownership",
-)(function* () {
-  const { context } = yield* resolveStartup();
-  if (context?.update?.status === "pending" && context.ownership === undefined) {
-    return yield* new ServiceLauncherClientError({ operation: "ownership-unavailable" });
-  }
-  return context?.ownership;
-});
-
 export const make = Effect.fn("cloud.service_launcher_client.make")(function* (options?: {
   readonly currentVersion?: string;
 }) {
@@ -213,25 +200,23 @@ export const make = Effect.fn("cloud.service_launcher_client.make")(function* (o
     );
 
   const requestUpdate = (input: { readonly targetVersion: string; readonly dbPath: string }) =>
-    context !== undefined && context.ownershipProtocol !== 1
-      ? Effect.fail(new ServiceLauncherClientError({ operation: "ownership-unavailable" }))
-      : exchange(
-          { type: "request-update", ...input },
-          (reply) => reply.type === "update-accepted" || reply.type === "update-rejected",
-        ).pipe(
-          Effect.flatMap((reply) =>
-            reply.type === "update-accepted"
-              ? Effect.succeed(reply.updateId)
-              : reply.type === "update-rejected"
-                ? Effect.fail(
-                    new ServiceLauncherRejectedError({
-                      targetVersion: input.targetVersion,
-                      reason: reply.reason,
-                    }),
-                  )
-                : Effect.die("service launcher returned an impossible update response"),
-          ),
-        );
+    exchange(
+      { type: "request-update", ...input },
+      (reply) => reply.type === "update-accepted" || reply.type === "update-rejected",
+    ).pipe(
+      Effect.flatMap((reply) =>
+        reply.type === "update-accepted"
+          ? Effect.succeed(reply.updateId)
+          : reply.type === "update-rejected"
+            ? Effect.fail(
+                new ServiceLauncherRejectedError({
+                  targetVersion: input.targetVersion,
+                  reason: reply.reason,
+                }),
+              )
+            : Effect.die("service launcher returned an impossible update response"),
+      ),
+    );
 
   const pending = context?.update?.status === "pending" ? context.update : undefined;
   const outcome =

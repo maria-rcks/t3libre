@@ -73,14 +73,8 @@ update can roll back to the previous version. If the update still fails:
 3. For a command-line server, stop it and relaunch the exact version shown in the notice.
 
 Only one server can use a T3 home directory at a time. If startup reports that
-another server owns it, finish active work and stop that server before retrying.
-Use a separate home directory for an independent server.
-
-If an interrupted update requires manual recovery, stop the background service
-and preserve the home directory, including its database backup, before recovering
-it. T3 Code refuses to restore an older backup over another server's writes.
-If an update says the service launcher is too old, update on the server's machine
-with `t3 update`, then restart the background service.
+another server owns it, stop that server before retrying, or use a separate home
+directory and pair with the running server.
 
 ## Update providers
 

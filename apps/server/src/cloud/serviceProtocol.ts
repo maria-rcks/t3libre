@@ -23,9 +23,7 @@ export interface PendingServiceUpdate {
   readonly status: "pending";
 }
 
-export type ServiceUpdateRecord =
-  | PendingServiceUpdate
-  | (ServerSelfUpdateOutcome & { readonly dbPath?: string });
+export type ServiceUpdateRecord = PendingServiceUpdate | ServerSelfUpdateOutcome;
 
 export interface ServiceState {
   readonly protocol: typeof SERVICE_LAUNCHER_PROTOCOL;
@@ -38,8 +36,6 @@ export interface ServiceLauncherContext {
   readonly protocol: typeof SERVICE_LAUNCHER_PROTOCOL;
   readonly childVersion: string;
   readonly update?: ServiceUpdateRecord;
-  readonly ownership?: { readonly previousOwnerId: string | null; readonly ownerId: string };
-  readonly ownershipProtocol?: 1;
 }
 
 export type ServiceLauncherChildMessage =
@@ -100,8 +96,6 @@ function decodeServiceUpdate(value: unknown): ServiceUpdateRecord | undefined {
   }
   if (
     (status === "committed" || status === "rolled-back" || status === "failed") &&
-    (value.dbPath === undefined ||
-      (typeof value.dbPath === "string" && value.dbPath.trim() !== "")) &&
     (value.reason === undefined || (typeof value.reason === "string" && value.reason.trim() !== ""))
   ) {
     return {
@@ -109,7 +103,6 @@ function decodeServiceUpdate(value: unknown): ServiceUpdateRecord | undefined {
       fromVersion,
       targetVersion,
       status,
-      ...(typeof value.dbPath === "string" ? { dbPath: value.dbPath } : {}),
       ...(typeof value.reason === "string" ? { reason: value.reason } : {}),
     };
   }
@@ -196,22 +189,6 @@ export function serviceStateHasPendingUpdate(value: string): boolean {
   }
 }
 
-/** Find a safe backup directory name across launcher protocol revisions. */
-export function serviceStatePendingUpdateId(value: string): string | undefined {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return isRecord(parsed) &&
-      isRecord(parsed.update) &&
-      parsed.update.status === "pending" &&
-      typeof parsed.update.id === "string" &&
-      /^[a-zA-Z0-9_-]+$/.test(parsed.update.id)
-      ? parsed.update.id
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** Reads the active version across launcher protocol revisions for downgrade protection. */
 export function serviceStateActiveVersion(value: string): string | undefined {
   try {
@@ -243,17 +220,6 @@ export function decodeServiceLauncherContext(value: string): ServiceLauncherCont
   }
   const update = parsed.update === undefined ? undefined : decodeServiceUpdate(parsed.update);
   if (parsed.update !== undefined && update === undefined) return undefined;
-  const ownership = parsed.ownership;
-  if (parsed.ownershipProtocol !== undefined && parsed.ownershipProtocol !== 1) return undefined;
-  if (
-    ownership !== undefined &&
-    (!isRecord(ownership) ||
-      !(ownership.previousOwnerId === null || typeof ownership.previousOwnerId === "string") ||
-      typeof ownership.ownerId !== "string" ||
-      ownership.ownerId.length === 0 ||
-      update?.status !== "pending")
-  )
-    return undefined;
   const selectedVersion =
     update?.status === "pending" || update?.status === "committed"
       ? update.targetVersion
@@ -266,16 +232,7 @@ export function decodeServiceLauncherContext(value: string): ServiceLauncherCont
   return {
     protocol: SERVICE_LAUNCHER_PROTOCOL,
     childVersion: parsed.childVersion,
-    ...(parsed.ownershipProtocol === 1 ? { ownershipProtocol: 1 as const } : {}),
     ...(update === undefined ? {} : { update }),
-    ...(isRecord(ownership)
-      ? {
-          ownership: {
-            previousOwnerId: ownership.previousOwnerId as string | null,
-            ownerId: ownership.ownerId as string,
-          },
-        }
-      : {}),
   };
 }
 

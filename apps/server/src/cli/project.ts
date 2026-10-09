@@ -25,8 +25,8 @@ import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
-import * as ServerOwnership from "../serverOwnership.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as ServerOwnership from "../serverOwnership.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
@@ -346,21 +346,22 @@ const getOfflineSnapshot = Effect.fn("getOfflineSnapshot")(function* () {
 });
 
 const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecutionMode")(
-  function* (config: ServerConfig.ServerConfig["Service"]) {
+  function* (
+    environmentAuth: EnvironmentAuth.EnvironmentAuth["Service"],
+    config: ServerConfig.ServerConfig["Service"],
+  ) {
     const runtimeState = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
-    const fs = yield* FileSystem.FileSystem;
-    if (Option.isNone(runtimeState) || !(yield* fs.exists(config.dbPath))) {
+    if (Option.isNone(runtimeState)) {
       return Option.none<{ readonly origin: string }>();
     }
 
-    const attempt = Effect.gen(function* () {
-      const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
-      return yield* withProjectCliSessionToken(environmentAuth, (token) =>
-        fetchLiveOrchestrationSnapshot(runtimeState.value.origin, token).pipe(
-          Effect.as({ origin: runtimeState.value.origin }),
-        ),
-      );
-    }).pipe(Effect.provide(EnvironmentAuth.layerRuntimeExistingDatabase));
+    const attempt = withProjectCliSessionToken(environmentAuth, (token) =>
+      fetchLiveOrchestrationSnapshot(runtimeState.value.origin, token).pipe(
+        Effect.as({
+          origin: runtimeState.value.origin,
+        }),
+      ),
+    );
 
     const attempted = yield* Effect.result(attempt);
     if (attempted._tag === "Success") {
@@ -371,6 +372,7 @@ const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecu
       origin: runtimeState.value.origin,
       cause: attempted.failure,
     });
+    // The offline path decides whether that server still owns the home.
     return Option.none<{ readonly origin: string }>();
   },
 );
@@ -398,24 +400,22 @@ const runProjectMutation = Effect.fn("runProjectMutation")(function* (
   const minimumLogLevel = config.logLevel;
 
   return yield* Effect.gen(function* () {
-    const liveMode = yield* tryResolveLiveProjectExecutionMode(config);
+    const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
+    const liveMode = yield* tryResolveLiveProjectExecutionMode(environmentAuth, config);
 
     if (Option.isSome(liveMode)) {
-      return yield* Effect.gen(function* () {
-        const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
-        return yield* withProjectCliSessionToken(environmentAuth, (token) =>
-          Effect.gen(function* () {
-            const snapshot = yield* fetchLiveOrchestrationSnapshot(liveMode.value.origin, token);
-            const output = yield* run({
-              snapshot,
-              dispatch: (command) =>
-                dispatchLiveOrchestrationCommand(liveMode.value.origin, token, command),
-              mode: "live",
-            });
-            yield* Console.log(output);
-          }),
-        );
-      }).pipe(Effect.provide(EnvironmentAuth.layerRuntimeExistingDatabase));
+      return yield* withProjectCliSessionToken(environmentAuth, (token) =>
+        Effect.gen(function* () {
+          const snapshot = yield* fetchLiveOrchestrationSnapshot(liveMode.value.origin, token);
+          const output = yield* run({
+            snapshot,
+            dispatch: (command) =>
+              dispatchLiveOrchestrationCommand(liveMode.value.origin, token, command),
+            mode: "live",
+          });
+          yield* Console.log(output);
+        }),
+      );
     }
 
     const layerOfflineRuntime = layerProjectCliRuntime.pipe(
@@ -423,27 +423,27 @@ const runProjectMutation = Effect.fn("runProjectMutation")(function* (
       Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
     );
 
-    return yield* Effect.scoped(
-      Effect.gen(function* () {
-        yield* ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath);
-        yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
-        return yield* Effect.gen(function* () {
-          const snapshot = yield* getOfflineSnapshot();
-          const projects = yield* ProjectService.ProjectService;
-          const output = yield* run({
-            snapshot,
-            dispatch: (command) => projectMutationOperation(projects, command).pipe(Effect.asVoid),
-            mode: "offline",
-          });
-          yield* Console.log(output);
-        }).pipe(Effect.provide(layerOfflineRuntime));
-      }),
-    ).pipe(Effect.provide(ProcessRunner.layer));
+    // An unreachable server may still be running; never write behind it.
+    yield* ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath).pipe(
+      Effect.provide(ProcessRunner.layer),
+    );
+    yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
+    return yield* Effect.gen(function* () {
+      const snapshot = yield* getOfflineSnapshot();
+      const projects = yield* ProjectService.ProjectService;
+      const output = yield* run({
+        snapshot,
+        dispatch: (command) => projectMutationOperation(projects, command).pipe(Effect.asVoid),
+        mode: "offline",
+      });
+      yield* Console.log(output);
+    }).pipe(Effect.provide(layerOfflineRuntime));
   }).pipe(
+    Effect.scoped,
     Effect.provide(
-      WorkspacePaths.layer.pipe(
+      Layer.mergeAll(EnvironmentAuth.layerRuntime, WorkspacePaths.layer).pipe(
         Layer.provideMerge(FetchHttpClient.layer),
-        Layer.provideMerge(ServerConfig.layer(config)),
+        Layer.provide(ServerConfig.layer(config)),
         Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
       ),
     ),

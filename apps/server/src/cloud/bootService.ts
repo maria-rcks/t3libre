@@ -1,7 +1,6 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -15,7 +14,6 @@ import * as Schema from "effect/Schema";
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 
 import * as ProcessRunner from "../processRunner.ts";
-import * as ServerOwnership from "../serverOwnership.ts";
 import {
   ensurePinnedRuntimeInstalled,
   pinnedRuntimeCommand,
@@ -502,10 +500,7 @@ export type BootServiceError =
   | BootServiceInstallError
   | BootServicePrerequisiteError
   | BootServiceUpdatePendingError
-  | BootServiceDowngradeRefusedError
-  | ServerOwnership.ServerAlreadyRunningError
-  | ServerOwnership.ServerOwnershipError
-  | ServerOwnership.ServerUpdateRecoveryRequiredError;
+  | BootServiceDowngradeRefusedError;
 
 export interface BootServiceStatus {
   readonly supported: boolean;
@@ -571,7 +566,6 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const runner = yield* ProcessRunner.ProcessRunner;
-  const crypto = yield* Crypto.Crypto;
   const host = input.host ?? { execPath: hostExecPath };
   const xmlSafeInstallerDirectories = installerPath.split(":").filter(
     (directory) =>
@@ -638,15 +632,6 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     detectedManager === undefined
       ? new BootServiceUnsupportedError({ platform })
       : Effect.succeed(detectedManager),
-  );
-
-  const requireStopped = ServerOwnership.requireServerStopped(
-    path.join(input.baseDir, "userdata", "server-runtime.json"),
-  ).pipe(
-    Effect.provideService(FileSystem.FileSystem, fs),
-    Effect.provideService(ProcessRunner.ProcessRunner, runner),
-    Effect.provideService(HostProcessPlatform, platform),
-    Effect.provideService(Crypto.Crypto, crypto),
   );
 
   const logFailure = (error: { readonly message: string }) =>
@@ -761,10 +746,6 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     readonly start?: boolean;
   }) {
     const manager = yield* requireManager;
-    const alreadyInstalled = yield* fs
-      .exists(unitPath)
-      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
-    if (!alreadyInstalled) yield* requireStopped;
     yield* fs
       .makeDirectory(input.logsDir, { recursive: true })
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -843,8 +824,6 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     }
 
     yield* Effect.gen(function* () {
-      // Keep a stopped unit recoverable if an unmanaged server wins the handoff.
-      if (!installed || start) yield* requireStopped;
       if (installed) {
         const previousStateText = yield* fs.readFileString(statePath).pipe(Effect.option);
         if (Option.isSome(previousStateText)) {
@@ -929,7 +908,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       return false;
     }
     yield* runSteps(manager.stop);
-    yield* requireStopped.pipe(Effect.andThen(runSteps(manager.activate))).pipe(
+    yield* runSteps(manager.activate).pipe(
       // Same recovery as a failed repair: a service that was running should
       // not be left stopped because daemon-reload or enable failed.
       Effect.tapError(() => runSteps(manager.restart).pipe(Effect.ignore)),

@@ -83,7 +83,6 @@ it.effect("returns the launcher-generated ID only after update acceptance", () =
     const host = new FakeLauncherProcess({
       protocol: SERVICE_LAUNCHER_PROTOCOL,
       childVersion: "1.0.0",
-      ownershipProtocol: 1,
     });
     const client = yield* makeClient(host, "1.0.0");
     const requested = yield* Effect.forkChild(
@@ -104,7 +103,6 @@ it.effect("preserves a launcher rejection as a distinct error", () =>
     const host = new FakeLauncherProcess({
       protocol: SERVICE_LAUNCHER_PROTOCOL,
       childVersion: "1.0.0",
-      ownershipProtocol: 1,
     });
     const client = yield* makeClient(host, "1.0.0");
     const requested = yield* Effect.forkChild(
@@ -136,20 +134,5 @@ it.effect("rejects contradictory trial context instead of leaving activation clo
     });
     const error = yield* makeClient(host, "1.1.0").pipe(Effect.flip);
     expect(error.message).toBe("The service launcher supplied invalid startup context.");
-  }),
-);
-
-it.effect("refuses updates from an older launcher before sending an update request", () =>
-  Effect.gen(function* () {
-    const host = new FakeLauncherProcess({
-      protocol: SERVICE_LAUNCHER_PROTOCOL,
-      childVersion: "1.0.0",
-    });
-    const client = yield* makeClient(host, "1.0.0");
-    const error = yield* client
-      .requestUpdate({ targetVersion: "1.1.0", dbPath: "/tmp/state.sqlite" })
-      .pipe(Effect.flip);
-    expect(error._tag).toBe("ServiceLauncherClientError");
-    expect(host.sent).toEqual([]);
   }),
 );

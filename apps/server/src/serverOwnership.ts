@@ -1,27 +1,24 @@
-// @effect-diagnostics nodeBuiltinImport:off - Publication must finish synchronously while the scope holds ownership.
-// @effect-diagnostics schemaSyncInEffect:off - Descriptor validation and publication are synchronous under the ownership lock.
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+// @effect-diagnostics nodeBuiltinImport:off - The ownership lock is a native SQLite handle held for the server's lifetime.
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
+
 import { SERVER_EXIT_CODE_STATE_DIR_OWNED } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Crypto from "effect/Crypto";
-import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Runtime from "effect/Runtime";
 import * as Schema from "effect/Schema";
 
 import * as ProcessRunner from "./processRunner.ts";
-import { acquireServerOwnershipLock, SERVER_UPDATE_RECOVERY_FILE } from "./serverOwnershipLock.ts";
 import {
-  serviceStateHasPendingUpdate,
-  serviceStatePendingUpdateId,
-} from "./cloud/serviceProtocol.ts";
-
-import {
+  clearPersistedServerRuntimeState,
   isProcessAlive,
+  persistServerRuntimeState,
   readPersistedServerRuntimeState,
-  PersistedServerRuntimeState,
+  type PersistedServerRuntimeState,
 } from "./serverRuntimeState.ts";
 
 export class ServerAlreadyRunningError extends Schema.TaggedError<ServerAlreadyRunningError>()(
@@ -33,84 +30,35 @@ export class ServerAlreadyRunningError extends Schema.TaggedError<ServerAlreadyR
   override readonly [Runtime.errorExitCode] = SERVER_EXIT_CODE_STATE_DIR_OWNED;
 
   override get message(): string {
-    return `A T3 Code server already owns ${this.stateDir}. Finish active agent work, stop that server through the app or terminal that started it, then retry this command with the same home directory. No server was stopped.`;
+    return `A T3 Code server already owns ${this.stateDir}. Stop that server, or use a separate T3 home and pair with it, then retry. No server was stopped.`;
   }
 }
 
 export class ServerOwnershipError extends Schema.TaggedError<ServerOwnershipError>()(
   "ServerOwnershipError",
-  { statePath: Schema.String, cause: Schema.Defect() },
+  { stateDir: Schema.String, cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return `Could not acquire or update server ownership at ${this.statePath}.`;
+    return `Could not acquire server ownership of ${this.stateDir}.`;
   }
 }
 
-export class ServerOwnershipReleasedError extends Schema.TaggedError<ServerOwnershipReleasedError>()(
-  "ServerOwnershipReleasedError",
-  { statePath: Schema.String },
-) {
-  override get message(): string {
-    return `Cannot publish server runtime state after ownership was released at ${this.statePath}.`;
-  }
-}
+const isSqliteBusy = (cause: unknown) =>
+  cause instanceof Error &&
+  (("errcode" in cause && cause.errcode === 5) ||
+    ("code" in cause && cause.code === "SQLITE_BUSY"));
 
-export class ServerUpdateRecoveryRequiredError extends Schema.TaggedError<ServerUpdateRecoveryRequiredError>()(
-  "ServerUpdateRecoveryRequiredError",
-  { statePath: Schema.String },
-) {
-  override readonly [Runtime.errorExitCode] = SERVER_EXIT_CODE_STATE_DIR_OWNED;
-  override get message(): string {
-    return `An interrupted server update requires recovery at ${this.statePath}. Recover the database and service state before restarting. No database files were restored.`;
-  }
-}
-
-const isServerUpdateRecoveryRequiredError = Schema.is(ServerUpdateRecoveryRequiredError);
-
-const requireNoInterruptedRestore = (statePath: string) =>
-  Effect.try({
-    try: () => {
-      const marker = NodePath.join(NodePath.dirname(statePath), SERVER_UPDATE_RECOVERY_FILE);
-      if (NodeFS.existsSync(marker)) {
-        throw new ServerUpdateRecoveryRequiredError({ statePath: marker });
-      }
-      const runtimeDir = NodePath.join(NodePath.dirname(NodePath.dirname(statePath)), "runtime");
-      let contents: string;
-      try {
-        contents = NodeFS.readFileSync(NodePath.join(runtimeDir, "service-state.json"), "utf8");
-      } catch (cause) {
-        if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return;
-        throw cause;
-      }
-      const updateId = serviceStatePendingUpdateId(contents);
-      if (
-        serviceStateHasPendingUpdate(contents) &&
-        (updateId === undefined ||
-          NodeFS.existsSync(NodePath.join(runtimeDir, "db-backup", updateId)))
-      ) {
-        throw new ServerUpdateRecoveryRequiredError({ statePath: runtimeDir });
-      }
-    },
-    catch: (cause) =>
-      isServerUpdateRecoveryRequiredError(cause)
-        ? cause
-        : new ServerOwnershipError({ statePath, cause }),
-  });
-
-const encodeRuntimeState = Schema.encodeSync(Schema.fromJsonString(PersistedServerRuntimeState));
-const decodeRuntimeState = Schema.decodeUnknownSync(
-  Schema.fromJsonString(PersistedServerRuntimeState),
-);
-
-/** Treat a legacy record as stale only when process start time proves PID reuse. */
+/**
+ * Servers from before this lock only publish `server-runtime.json`. Treat
+ * their record as stale only when the process start time proves PID reuse.
+ */
 const legacyOwnerIsLive = Effect.fn("legacyOwnerIsLive")(function* (
   state: PersistedServerRuntimeState,
 ) {
   if (!isProcessAlive(state.pid)) return false;
   const recordedAt = Date.parse(state.startedAt);
   if (!Number.isFinite(recordedAt)) return true;
-  const platform = yield* HostProcessPlatform;
-  const windows = platform === "win32";
+  const windows = (yield* HostProcess.Platform) === "win32";
   const runner = yield* ProcessRunner.ProcessRunner;
   const result = yield* runner
     .run({
@@ -131,137 +79,69 @@ const legacyOwnerIsLive = Effect.fn("legacyOwnerIsLive")(function* (
   if (Option.isNone(result) || result.value.code !== 0) return true;
   const output = result.value.stdout.trim();
   const startedAt = Date.parse(windows ? output : `${output} UTC`);
-  // ps reports whole seconds. Unknown identity stays conservative, and no
-  // process is ever signalled based on this comparison.
+  // ps reports whole seconds. Unknown identity stays conservative.
   return !Number.isFinite(startedAt) || startedAt <= recordedAt + 1_000;
 });
 
 /**
- * Hold an OS file lock until the server and its finalizers stop. This separate
- * SQLite file never contains application data and must never be unlinked.
- * SQLite releases the lock on process exit, including SIGKILL. No PID is killed
- * and no heartbeat can expire while a live server is paused.
+ * Hold an exclusive lock on the state directory until the scope closes. The
+ * lock is an exclusive transaction on `server-owner.sqlite`, which never holds
+ * data and must never be unlinked: the OS releases it when the process exits,
+ * even on SIGKILL, so a crashed owner never blocks the next start.
  */
 export const acquireServerOwnership = Effect.fn("acquireServerOwnership")(function* (
   statePath: string,
-  trial?: { readonly previousOwnerId: string | null; readonly ownerId: string },
 ) {
+  const stateDir = NodePath.dirname(statePath);
   const crypto = yield* Crypto.Crypto;
-  const ownerId =
-    trial?.ownerId ??
-    (yield* crypto.randomUUIDv4.pipe(
-      Effect.mapError((cause) => new ServerOwnershipError({ statePath, cause })),
-    ));
-  const resource = yield* Effect.acquireRelease(
-    Effect.tryPromise({
-      try: async () => {
-        const lock = await acquireServerOwnershipLock(NodePath.dirname(statePath));
-        return {
-          lock,
-          path: NodePath.join(lock.stateDir, NodePath.basename(statePath)),
-          active: true,
-        };
+  const ownerId = yield* crypto.randomUUIDv4.pipe(
+    Effect.mapError((cause) => new ServerOwnershipError({ stateDir, cause })),
+  );
+  yield* Effect.acquireRelease(
+    Effect.try({
+      try: () => {
+        NodeFS.mkdirSync(stateDir, { recursive: true });
+        const db = new NodeSqlite.DatabaseSync(NodePath.join(stateDir, "server-owner.sqlite"));
+        try {
+          db.exec("PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;");
+        } catch (cause) {
+          db.close();
+          throw cause;
+        }
+        return db;
       },
       catch: (cause) =>
-        cause instanceof Error &&
-        (("errcode" in cause && cause.errcode === 5) ||
-          ("code" in cause && cause.code === "SQLITE_BUSY"))
-          ? new ServerAlreadyRunningError({ stateDir: NodePath.dirname(statePath) })
-          : new ServerOwnershipError({ statePath, cause }),
+        isSqliteBusy(cause)
+          ? new ServerAlreadyRunningError({ stateDir })
+          : new ServerOwnershipError({ stateDir, cause }),
     }),
-    (resource) =>
-      Effect.gen(function* () {
-        resource.active = false;
-        const state = yield* readPersistedServerRuntimeState(resource.path);
-        yield* Effect.try({
-          try: () => {
-            if (Option.isSome(state) && state.value.ownerId === ownerId) {
-              NodeFS.rmSync(resource.path, { force: true });
-            }
-          },
-          catch: (cause) => new ServerOwnershipError({ statePath, cause }),
-        }).pipe(Effect.ignore({ log: true }));
-      }).pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            resource.active = false;
-            resource.lock.close();
-          }),
+    (db) =>
+      readPersistedServerRuntimeState(statePath).pipe(
+        // Only remove discovery this owner published.
+        Effect.flatMap((state) =>
+          Option.isSome(state) && state.value.ownerId === ownerId
+            ? clearPersistedServerRuntimeState(statePath)
+            : Effect.void,
         ),
+        Effect.ignore({ log: true }),
+        Effect.ensuring(Effect.sync(() => db.close())),
       ),
   );
 
-  if (trial === undefined) yield* requireNoInterruptedRestore(resource.path);
-  if (trial === undefined && statePath !== resource.path)
-    yield* requireNoInterruptedRestore(statePath);
-
-  // Older releases have no lock. Do not replace their record while their PID
-  // still identifies that process. New records with a free lock belong to a
-  // crashed or stopped owner.
-  const previous = yield* Effect.try({
-    try: () => {
-      try {
-        const contents = NodeFS.readFileSync(resource.path, "utf8");
-        return Option.some(decodeRuntimeState(contents));
-      } catch (cause) {
-        if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
-          return Option.none<PersistedServerRuntimeState>();
-        }
-        throw cause;
-      }
-    },
-    catch: (cause) => new ServerOwnershipError({ statePath, cause }),
-  });
+  // An unreadable record cannot name a live owner; this server replaces it.
+  const previous = yield* readPersistedServerRuntimeState(statePath).pipe(
+    Effect.orElseSucceed(() => Option.none<PersistedServerRuntimeState>()),
+  );
   if (
     Option.isSome(previous) &&
     previous.value.ownerId === undefined &&
     (yield* legacyOwnerIsLive(previous.value))
   ) {
-    return yield* new ServerAlreadyRunningError({ stateDir: resource.lock.stateDir });
+    return yield* new ServerAlreadyRunningError({ stateDir });
   }
-
-  yield* Effect.try({
-    try: () => {
-      if (trial !== undefined && resource.lock.readOwnerId() !== trial.previousOwnerId) {
-        throw Object.assign(
-          new Error("Another owner used the database after the update snapshot."),
-          { code: "T3_STATE_DIR_OWNED" },
-        );
-      }
-      resource.lock.claim(ownerId);
-    },
-    catch: (cause) =>
-      cause instanceof Error && "code" in cause && cause.code === "T3_STATE_DIR_OWNED"
-        ? new ServerAlreadyRunningError({ stateDir: resource.lock.stateDir })
-        : new ServerOwnershipError({ statePath, cause }),
-  });
 
   return {
     publish: (state: PersistedServerRuntimeState) =>
-      Effect.suspend<void, ServerOwnershipError | ServerOwnershipReleasedError, never>(() => {
-        if (!resource.active) return Effect.fail(new ServerOwnershipReleasedError({ statePath }));
-        return Effect.try({
-          try: () => {
-            const temporaryPath = `${resource.path}.${ownerId}.tmp`;
-            try {
-              NodeFS.writeFileSync(
-                temporaryPath,
-                `${encodeRuntimeState({ ...state, ownerId })}\n`,
-                {
-                  mode: 0o600,
-                },
-              );
-              NodeFS.renameSync(temporaryPath, resource.path);
-            } finally {
-              NodeFS.rmSync(temporaryPath, { force: true });
-            }
-          },
-          catch: (cause) => new ServerOwnershipError({ statePath, cause }),
-        });
-      }),
+      persistServerRuntimeState({ path: statePath, state: { ...state, ownerId } }),
   };
 });
-
-/** Check before service setup. The server still acquires its own lifetime lock. */
-export const requireServerStopped = (statePath: string) =>
-  Effect.scoped(acquireServerOwnership(statePath)).pipe(Effect.asVoid);

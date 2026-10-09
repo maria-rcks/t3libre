@@ -43,7 +43,6 @@ import * as SessionStore from "./SessionStore.ts";
 import { REUSABLE_DEV_SESSION_EXPIRES_AT, resolveReusableDevAuth } from "./ReusableDevAuth.ts";
 import { verifyRequestDpopProof } from "./dpop.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
-import { acquireServerOwnershipLock } from "../serverOwnershipLock.ts";
 
 const DEFAULT_SESSION_SUBJECT = "cli-issued-session";
 export const INTERNAL_ADMINISTRATIVE_BOOTSTRAP_SUBJECT = "administrative-bootstrap";
@@ -1308,39 +1307,9 @@ export const layer = Layer.effect(EnvironmentAuth, make).pipe(
   Layer.provideMerge(EnvironmentAuthPolicy.layer),
 );
 
-export class CliDatabaseAccessError extends Schema.TaggedError<CliDatabaseAccessError>()(
-  "CliDatabaseAccessError",
-  { stateDir: Schema.String, cause: Schema.Defect() },
-) {
-  override get message(): string {
-    return `Cannot open CLI authentication state at ${this.stateDir} while another CLI command or service update owns it. Wait for the update, or recover an interrupted update before retrying.`;
-  }
-}
+const layerStorage = Layer.mergeAll(ServerSecretStore.layer, SqlitePersistence.layerConfig);
 
-const makeLayerRuntime = (existingDatabase: boolean) =>
-  Layer.unwrap(
-    Effect.gen(function* () {
-      const config = yield* ServerConfig.ServerConfig;
-      yield* Effect.acquireRelease(
-        Effect.tryPromise({
-          try: () => acquireServerOwnershipLock(config.stateDir, { cli: true }),
-          catch: (cause) => new CliDatabaseAccessError({ stateDir: config.stateDir, cause }),
-        }),
-        (lock) => Effect.sync(() => lock.close()),
-      );
-      return layer.pipe(
-        Layer.provideMerge(
-          Layer.mergeAll(
-            ServerSecretStore.layer,
-            existingDatabase
-              ? SqlitePersistence.layerExistingConfig
-              : SqlitePersistence.layerConfig,
-          ),
-        ),
-        Layer.provideMerge(ServerEnvironment.layerIdentity),
-      );
-    }),
-  );
-
-export const layerRuntime = makeLayerRuntime(false);
-export const layerRuntimeExistingDatabase = makeLayerRuntime(true);
+export const layerRuntime = layer.pipe(
+  Layer.provideMerge(layerStorage),
+  Layer.provideMerge(ServerEnvironment.layerIdentity),
+);

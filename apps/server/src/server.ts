@@ -731,11 +731,8 @@ const layerMakeRoutes = Layer.mergeAll(
 const layerMakeServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
-    const trial = yield* ServiceLauncherClient.resolveServiceLauncherOwnership();
-    const ownership = yield* ServerOwnership.acquireServerOwnership(
-      config.serverRuntimeStatePath,
-      trial,
-    );
+    // Before anything opens the database: one server per T3 home.
+    const ownership = yield* ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath);
     const activation = yield* Deferred.make<void>();
     const awaitActivation = Deferred.await(activation);
     const layerActivation = Layer.succeed(ServerActivation.ServerActivation, awaitActivation);
@@ -770,6 +767,7 @@ const layerMakeServer = Layer.unwrap(
           port: address.port,
           serviceManaged: launcher.managed,
         });
+        // Ownership release removes this record.
         yield* ownership
           .publish(state)
           .pipe(
