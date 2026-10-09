@@ -632,7 +632,6 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
           args: ["-NoProfile", "-NonInteractive", "-Command", command],
           timeout: Duration.millis(WINDOWS_LISTENER_TIMEOUT_MS),
           maxOutputBytes: 1024 * 1024,
-          outputMode: "truncate",
         })
         .pipe(
           Effect.map((result) => parseWindowsListenerOutput(result.stdout, terminalByProcessId)),
@@ -657,8 +656,8 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
         command: "lsof",
         args: ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"],
         timeout: Duration.millis(LSOF_TIMEOUT_MS),
+        // Partial output could hide another app's listener on an owned port.
         maxOutputBytes: 1024 * 1024,
-        outputMode: "truncate",
       })
       .pipe(
         Effect.map((result) => parseLsofOutput(result.stdout, terminalByProcessId)),
