@@ -436,7 +436,9 @@ function visibleElementRect(element: Element): PreviewAnnotationRect {
     const bounds = svgViewport ?? ancestor.getBoundingClientRect();
     const scaleX = ancestor.offsetWidth > 0 ? bounds.width / ancestor.offsetWidth : 1;
     const scaleY = ancestor.offsetHeight > 0 ? bounds.height / ancestor.offsetHeight : 1;
-    const clipMargin = style.getPropertyValue("overflow-clip-margin").split(/\s+/);
+    const clipMargin = viewportOverflow
+      ? []
+      : style.getPropertyValue("overflow-clip-margin").split(/\s+/);
     const margin = Number.parseFloat(clipMargin.at(-1) ?? "") || 0;
     const clipBox = clipMargin[0];
     if (clipsX) {
