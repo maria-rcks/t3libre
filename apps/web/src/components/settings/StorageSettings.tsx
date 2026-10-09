@@ -277,24 +277,30 @@ function CleanupSection() {
     setPending(true);
     try {
       await Promise.all(
-        supported.map(async (environment) => {
-          const result = await run({ environmentId: environment.environmentId, input: {} });
-          if (result._tag === "Success") {
-            const failures = result.value.entries.filter((entry) => entry.outcome === "failed");
-            if (failures.length > 0)
+        supported
+          .filter((environment) =>
+            state.some(
+              (entry) => entry.environmentId === environment.environmentId && entry.allowed,
+            ),
+          )
+          .map(async (environment) => {
+            const result = await run({ environmentId: environment.environmentId, input: {} });
+            if (result._tag === "Success") {
+              const failures = result.value.entries.filter((entry) => entry.outcome === "failed");
+              if (failures.length > 0)
+                toastManager.add({
+                  type: "error",
+                  title: `Cleanup failed on ${environment.label}`,
+                  description: failures[0]!.reason,
+                });
+            } else if (!isAtomCommandInterrupted(result)) {
               toastManager.add({
                 type: "error",
-                title: `Cleanup failed on ${environment.label}`,
-                description: failures[0]!.reason,
+                title: `Could not run cleanup on ${environment.label}`,
+                description: String(squashAtomCommandFailure(result)),
               });
-          } else if (!isAtomCommandInterrupted(result)) {
-            toastManager.add({
-              type: "error",
-              title: `Could not run cleanup on ${environment.label}`,
-              description: String(squashAtomCommandFailure(result)),
-            });
-          }
-        }),
+            }
+          }),
       );
     } finally {
       setPending(false);
@@ -305,7 +311,7 @@ function CleanupSection() {
       <SettingsRow
         {...searchableSetting("storage-delete-now")}
         description={
-          <span aria-live="polite">
+          <span>
             {!hasRules
               ? "Turn on a cleanup rule to use this."
               : summaries.map(({ environment, description }) => (
@@ -320,7 +326,7 @@ function CleanupSection() {
           <Button
             variant="outline"
             size="sm"
-            disabled={pending || !hasRules || state.some((entry) => !entry.allowed)}
+            disabled={pending || !hasRules || !state.some((entry) => entry.allowed)}
             onClick={() => void deleteNow()}
           >
             {pending ? "Deleting…" : "Delete now"}
