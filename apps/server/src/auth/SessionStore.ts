@@ -383,6 +383,8 @@ export class SessionStore extends Context.Service<
        * before storing this session.
        */
       readonly replaceActiveForSubjectAndMethod?: boolean;
+      /** Replace only this session, of the same method, in the issuance transaction. */
+      readonly replaceSessionId?: AuthSessionId;
     }) => Effect.Effect<IssuedSession, SessionCredentialInternalError>;
     readonly verify: (token: string) => Effect.Effect<VerifiedSession, SessionCredentialError>;
     readonly issueWebSocketToken: (
@@ -405,6 +407,9 @@ export class SessionStore extends Context.Service<
       SessionCredentialInternalError
     >;
     readonly streamChanges: Stream.Stream<SessionCredentialChange>;
+    readonly awaitInvalidation: (
+      sessionId: AuthSessionId,
+    ) => Effect.Effect<void, SessionCredentialVerificationError>;
     readonly revoke: (
       sessionId: AuthSessionId,
     ) => Effect.Effect<boolean, SessionCredentialInternalError>;
@@ -426,8 +431,9 @@ export class SessionStore extends Context.Service<
 const SIGNING_SECRET_NAME = "server-signing-key";
 const DEFAULT_SESSION_TTL = Duration.days(30);
 const DEFAULT_WEBSOCKET_TOKEN_TTL = Duration.minutes(5);
+
 const SessionClaims = Schema.Struct({
-  v: Schema.Literal(1),
+  v: Schema.Literals([1, 2]),
   kind: Schema.Literal("session"),
   sid: AuthSessionId,
   sub: Schema.String,
@@ -708,8 +714,14 @@ export const make = Effect.gen(function* () {
         expiresAt,
       } satisfies AuthSessions.CreateAuthSessionInput;
       const replacedSessionIds = yield* (
-        input?.replaceActiveForSubjectAndMethod
-          ? authSessions.createReplacingActive({ session: sessionRecord, revokedAt: issuedAt })
+        input?.replaceSessionId !== undefined || input?.replaceActiveForSubjectAndMethod
+          ? authSessions.createReplacingActive({
+              session: sessionRecord,
+              revokedAt: issuedAt,
+              ...(input.replaceSessionId !== undefined
+                ? { replaceSessionId: input.replaceSessionId }
+                : {}),
+            })
           : authSessions.create(sessionRecord).pipe(Effect.as([] as ReadonlyArray<AuthSessionId>))
       ).pipe(Effect.mapError((cause) => new SessionCredentialIssueError({ sessionId, cause })));
       if (replacedSessionIds.length > 0) {
@@ -1038,6 +1050,35 @@ export const make = Effect.gen(function* () {
     return revokedSessionIds.length;
   });
 
+  const awaitInvalidation = Effect.fn(function* (sessionId: AuthSessionId) {
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        // Subscribe before reading: revocation can race with the WebSocket upgrade.
+        const subscription = yield* PubSub.subscribe(changesPubSub);
+        const row = yield* authSessions
+          .getById({ sessionId })
+          .pipe(
+            Effect.mapError(
+              (cause) => new SessionCredentialVerificationError({ sessionId, cause }),
+            ),
+          );
+        if (Option.isNone(row) || row.value.revokedAt !== null) return;
+        const now = yield* DateTime.now;
+        const remaining = row.value.expiresAt.epochMilliseconds - now.epochMilliseconds;
+        if (remaining <= 0) return;
+        yield* Effect.raceFirst(
+          Stream.fromSubscription(subscription).pipe(
+            Stream.filter(
+              (change) => change.type === "clientRemoved" && change.sessionId === sessionId,
+            ),
+            Stream.runHead,
+          ),
+          Effect.sleep(Duration.millis(remaining)),
+        );
+      }),
+    );
+  });
+
   return SessionStore.of({
     cookieName,
     legacyCookieName,
@@ -1046,6 +1087,7 @@ export const make = Effect.gen(function* () {
     issueWebSocketToken,
     verifyWebSocketToken,
     listActive,
+    awaitInvalidation,
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);
     },
