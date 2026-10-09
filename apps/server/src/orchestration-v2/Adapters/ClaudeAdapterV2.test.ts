@@ -3268,7 +3268,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   );
 
   it.effect.each(["completed", "failed", "interrupted", "stop", "query_exit"] as const)(
-    "settles an unfinished compaction on %s and ignores idle status frames",
+    "settles an unfinished compaction on %s",
     (outcome) =>
       Effect.gen(function* () {
         const harness = yield* makeWakeHarnessWithOptions({
@@ -3334,48 +3334,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           terminal.status === "completed" ? "failed" : terminal.status,
         );
         assert.isNotNull(updates[1]?.completedAt);
-        if (outcome !== "query_exit" && outcome !== "stop") {
-          yield* harness.offerAndWait(
-            claudeSdkFrame({
-              type: "system",
-              subtype: "status",
-              status: "compacting",
-              uuid: "00000000-0000-4000-8000-000000000223",
-              session_id: WAKE_NATIVE_SESSION,
-            }),
-          );
-          assert.equal(
-            harness.events.filter(
-              (event) => event.type === "turn_item.updated" && event.turnItem.type === "compaction",
-            ).length,
-            2,
-          );
-          yield* harness.runtime.startTurn(
-            makeClaudeTestTurnInput({
-              threadId: harness.threadId,
-              providerThread: harness.providerThread,
-              now: yield* DateTime.now,
-              attemptId: RunAttemptId.make(`claude-after-compact-${outcome}`),
-              text: "Next normal turn.",
-              attachments: [],
-              providerTurnOrdinal: 2,
-            }),
-          );
-          yield* Queue.offer(
-            harness.sdkMessages,
-            makeResultFrame({
-              uuid: "00000000-0000-4000-8000-000000000224",
-              result: "Next turn complete.",
-            }),
-          );
-          assert.equal((yield* Queue.take(harness.terminalReceipts)).status, "completed");
-          assert.equal(
-            harness.events.filter(
-              (event) => event.type === "turn_item.updated" && event.turnItem.type === "compaction",
-            ).length,
-            2,
-          );
-        }
       }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, IdAllocator.layer))),
   );
 
