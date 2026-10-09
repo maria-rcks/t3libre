@@ -374,6 +374,7 @@ function nestedSvgViewportRect(element: SVGSVGElement): DOMRect {
 /** Paint the visible portion without changing the element bounds used in the annotation. */
 function visibleElementRect(element: Element): PreviewAnnotationRect {
   const rect = element.getBoundingClientRect();
+  const rootStyle = getComputedStyle(document.documentElement);
   let left = Math.max(0, rect.left);
   let top = Math.max(0, rect.top);
   let right = Math.min(document.documentElement.clientWidth, rect.right);
@@ -408,8 +409,23 @@ function visibleElementRect(element: Element): PreviewAnnotationRect {
       continue;
     const paintClip =
       style.contentVisibility === "auto" || /(?:paint|strict|content)/.test(style.contain);
-    const clipsX = paintClip || style.overflowX !== "visible";
-    const clipsY = paintClip || style.overflowY !== "visible";
+    // Root overflow, and uncontained body overflow on a visible HTML root,
+    // apply to the viewport already intersected above rather than their box.
+    const viewportOverflow =
+      ancestor === document.documentElement ||
+      (ancestor === document.body &&
+        ancestor instanceof HTMLBodyElement &&
+        ancestor.parentElement instanceof HTMLHtmlElement &&
+        rootStyle.overflowX === "visible" &&
+        rootStyle.overflowY === "visible" &&
+        [rootStyle, style].every(
+          (candidate) =>
+            candidate.contain === "none" &&
+            candidate.contentVisibility === "visible" &&
+            !/(?:^|\s)(?:size|inline-size)(?:\s|$)/.test(candidate.containerType),
+        ));
+    const clipsX = paintClip || (!viewportOverflow && style.overflowX !== "visible");
+    const clipsY = paintClip || (!viewportOverflow && style.overflowY !== "visible");
     if (!clipsX && !clipsY) continue;
     const svgViewport =
       ancestor instanceof SVGSVGElement && ancestor.ownerSVGElement
@@ -425,7 +441,11 @@ function visibleElementRect(element: Element): PreviewAnnotationRect {
     const clipBox = clipMargin[0];
     if (clipsX) {
       const scrollStart = bounds.left + ancestor.clientLeft * scaleX;
-      const scrollEnd = svgViewport?.right ?? scrollStart + ancestor.clientWidth * scaleX;
+      const scrollEnd =
+        svgViewport?.right ??
+        (ancestor === document.documentElement
+          ? bounds.right - Number.parseFloat(style.borderRightWidth) * scaleX
+          : scrollStart + ancestor.clientWidth * scaleX);
       let start = scrollStart;
       let end = scrollEnd;
       if (style.overflowX === "clip" || paintClip) {
@@ -448,7 +468,11 @@ function visibleElementRect(element: Element): PreviewAnnotationRect {
     }
     if (clipsY) {
       const scrollStart = bounds.top + ancestor.clientTop * scaleY;
-      const scrollEnd = svgViewport?.bottom ?? scrollStart + ancestor.clientHeight * scaleY;
+      const scrollEnd =
+        svgViewport?.bottom ??
+        (ancestor === document.documentElement
+          ? bounds.bottom - Number.parseFloat(style.borderBottomWidth) * scaleY
+          : scrollStart + ancestor.clientHeight * scaleY);
       let start = scrollStart;
       let end = scrollEnd;
       if (style.overflowY === "clip" || paintClip) {
