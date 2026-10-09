@@ -214,8 +214,8 @@ export function SnapShotCoordinator() {
   const drainingRef = useRef<Promise<void> | null>(null);
   const rerunRequestedRef = useRef(false);
   const soundedCaptureIdsRef = useRef(new Set<string>());
-  // Undelivered captures stay pending and every drain revisits them, so report each one once.
-  const reportedCaptureIdsRef = useRef(new Set<string>());
+  // Undelivered captures stay pending and every drain revisits them, so report each failure once.
+  const reportedCaptureFailuresRef = useRef(new Map<string, unknown>());
   const pendingAnimationStartsRef = useRef(new Set<string>());
 
   const currentTarget = routeThreadRef ?? routeDraftId;
@@ -261,8 +261,8 @@ export function SnapShotCoordinator() {
   );
 
   const reportOnce = useCallback((id: string, toast: Parameters<typeof toastManager.add>[0]) => {
-    if (reportedCaptureIdsRef.current.has(id)) return;
-    reportedCaptureIdsRef.current.add(id);
+    if (reportedCaptureFailuresRef.current.get(id) === toast.title) return;
+    reportedCaptureFailuresRef.current.set(id, toast.title);
     toastManager.add(toast);
   }, []);
 
@@ -288,6 +288,7 @@ export function SnapShotCoordinator() {
             item.id,
             resolveCaptureTarget,
           );
+          if (!getClientSettings().snapShotEnabled) return;
           const target = capturedTarget
             ? resolveExistingSnapShotTarget(capturedTarget, routeThreadRef)
             : null;
@@ -308,7 +309,7 @@ export function SnapShotCoordinator() {
             await deliverSnapShot(bridge, item, target);
             captureTargetsRef.current.delete(item.id);
             soundedCaptureIdsRef.current.delete(item.id);
-            reportedCaptureIdsRef.current.delete(item.id);
+            reportedCaptureFailuresRef.current.delete(item.id);
           } catch (error) {
             await dismissSnapShotAnimation(item.id);
             reportOnce(
