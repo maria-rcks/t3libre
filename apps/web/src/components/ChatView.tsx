@@ -7422,7 +7422,7 @@ export default function ChatView(props: ChatViewProps) {
     const first = childThreadInputs[0];
     if (!first || activePendingApproval || activePendingUserInput) return null;
     return {
-      id: `child-input:${first.requestId}`,
+      id: `child-input:${first.id}`,
       variant: "info",
       priority: "activity",
       icon: <MessageCircleIcon />,
@@ -7431,15 +7431,15 @@ export default function ChatView(props: ChatViewProps) {
           ? "Subagent needs input"
           : `${childThreadInputs.length} subagents need input`,
       description: childThreadInputs.map((child, index) => (
-        <Fragment key={child.threadId}>
+        <Fragment key={child.id}>
           {index > 0 ? ", " : null}
-          <InlineButton tone="muted" onClick={() => onOpenRelatedThread(child.threadId)}>
+          <InlineButton tone="muted" onClick={() => onOpenRelatedThread(child.id)}>
             {child.title}
           </InlineButton>
         </Fragment>
       )),
       actions: (
-        <Button size="xs" variant="ghost" onClick={() => onOpenRelatedThread(first.threadId)}>
+        <Button size="xs" variant="ghost" onClick={() => onOpenRelatedThread(first.id)}>
           Open question
         </Button>
       ),

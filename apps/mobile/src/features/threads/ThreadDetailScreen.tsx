@@ -515,7 +515,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
           Keyboard.dismiss();
           navigation.navigate("Thread", {
             environmentId: props.environmentId,
-            threadId: childInput.threadId,
+            threadId: childInput.id,
           });
         },
       };

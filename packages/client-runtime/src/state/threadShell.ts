@@ -3,7 +3,6 @@ import type {
   OrchestrationV2ShellSnapshot,
   OrchestrationV2ThreadShell,
   ProjectId,
-  RuntimeRequestId,
   ScopedProjectRef,
   ScopedThreadRef,
   ThreadId,
@@ -26,11 +25,6 @@ import {
 const EMPTY_THREADS: ReadonlyArray<OrchestrationV2ThreadShell> = Object.freeze([]);
 const EMPTY_SCOPED_THREAD_REFS: ReadonlyArray<ScopedThreadRef> = Object.freeze([]);
 const EMPTY_THREAD_INDEX: ReadonlyMap<ThreadId, OrchestrationV2ThreadShell> = new Map();
-type ChildThreadInput = {
-  readonly threadId: ThreadId;
-  readonly title: string;
-  readonly requestId: RuntimeRequestId;
-};
 const EMPTY_THREAD_REFS_BY_PROJECT: ReadonlyMap<
   ProjectId,
   ReadonlyArray<ScopedThreadRef>
@@ -146,10 +140,10 @@ export function createEnvironmentThreadShellAtoms(input: {
   });
 
   // Child questions are hidden with their sidebar rows. Read their shell summaries,
-  // without subscribing to every child transcript or repainting on unrelated activity.
+  // without subscribing to every child transcript.
   const childThreadInputsAtomFamily = Atom.family((key: string) => {
     const ref = parseThreadKey(key);
-    let previous: ReadonlyArray<ChildThreadInput> = [];
+    let previous: ReadonlyArray<EnvironmentThreadShell> = [];
     return Atom.make((get) => {
       const children = new Map<ThreadId, OrchestrationV2ThreadShell[]>();
       for (const thread of get(environmentThreadsAtom(ref.environmentId))) {
@@ -161,7 +155,7 @@ export function createEnvironmentThreadShellAtoms(input: {
       }
       const seen = new Set<ThreadId>([ref.threadId]);
       const pending = [ref.threadId];
-      const next: ChildThreadInput[] = [];
+      const next: EnvironmentThreadShell[] = [];
       for (const parent of pending) {
         for (const child of children.get(parent) ?? []) {
           if (seen.has(child.id)) continue;
@@ -171,27 +165,11 @@ export function createEnvironmentThreadShellAtoms(input: {
             child.pendingRuntimeRequest?.kind === "user_input" &&
             !isProviderNativeSubagentThread(child)
           ) {
-            next.push({
-              threadId: child.id,
-              title: scopedThread(ref.environmentId, child).title,
-              requestId: child.pendingRuntimeRequest.id,
-            });
+            next.push(scopedThread(ref.environmentId, child));
           }
         }
       }
-      if (
-        previous.length === next.length &&
-        next.every((child, index) => {
-          const old = previous[index];
-          return (
-            old?.threadId === child.threadId &&
-            old.title === child.title &&
-            old.requestId === child.requestId
-          );
-        })
-      ) {
-        return previous;
-      }
+      if (arrayElementsEqual(previous, next)) return previous;
       previous = next;
       return next;
     }).pipe(Atom.withLabel(`environment-child-thread-inputs:${key}`));
