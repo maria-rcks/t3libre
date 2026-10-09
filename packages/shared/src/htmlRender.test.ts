@@ -86,6 +86,8 @@ describe("injectHtmlRenderFocusStyles", () => {
   });
 
   it.each([
+    `<![CDATA[> <style id="t3-theme">]]>`,
+    `<svg><![CDATA[> <style id="t3-theme">]]></svg>`,
     `<div data-example="<style id='t3-theme'>"></div>`,
     `<div data-example='<style id="t3-theme">'></div>`,
     `<div data-example="> <style id='t3-theme'>"></div>`,
@@ -104,6 +106,8 @@ describe("injectHtmlRenderFocusStyles", () => {
   });
 
   it.each([
+    `<![CDATA[> <style id="t3-focus">]]>`,
+    `<svg><![CDATA[> <style id="t3-focus">]]></svg>`,
     `<div data-example="<style id='t3-focus'>"></div>`,
     `<div data-example='<style id="t3-focus">'></div>`,
     `<my-theme_card data-example="<style id='t3-focus'>"></my-theme_card>`,
@@ -169,6 +173,16 @@ describe("injectHtmlRenderFocusStyles", () => {
     const html = theme + '<style id="t3-focus">:focus-visible{outline-offset:-2px}</style>';
     expect(injectHtmlRenderFocusStyles(html)).toBe(html);
   });
+
+  it.each(["<![CDATA[", "<svg><![CDATA["])(
+    "keeps generated head protection before authored declarations: %s",
+    (opening) => {
+      const page = `<html><head>${theme}</head><body>${opening}> <style id="t3-focus">]]></svg></body></html>`;
+      const injected = injectHtmlRenderFocusStyles(page);
+      expect(injected).toBe(page.replace(theme, injectHtmlRenderFocusStyles(theme)!));
+      expect(injectHtmlRenderFocusStyles(injected!)).toBe(injected);
+    },
+  );
 
   it("ignores markers after plaintext and inside unclosed quoted attributes", () => {
     expect(injectHtmlRenderFocusStyles("<plaintext>" + theme)).toBeUndefined();

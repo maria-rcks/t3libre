@@ -396,7 +396,7 @@ function visibleElementRect(element: Element): PreviewAnnotationRect {
       /(?:paint|layout|strict|content)/.test(style.contain) ||
       /(?:transform|translate|scale|rotate|perspective|filter)/.test(style.willChange);
     const clipThisAncestor = clips;
-    if (style.position === "fixed" || style.position === "absolute") {
+    if (clipThisAncestor && (style.position === "fixed" || style.position === "absolute")) {
       position = style.position;
       clips = false;
     }
@@ -414,7 +414,9 @@ function visibleElementRect(element: Element): PreviewAnnotationRect {
     const svgViewport =
       ancestor instanceof SVGSVGElement && ancestor.ownerSVGElement
         ? nestedSvgViewportRect(ancestor)
-        : null;
+        : ancestor instanceof SVGElement
+          ? ancestor.getBoundingClientRect()
+          : null;
     const bounds = svgViewport ?? ancestor.getBoundingClientRect();
     const scaleX = ancestor.offsetWidth > 0 ? bounds.width / ancestor.offsetWidth : 1;
     const scaleY = ancestor.offsetHeight > 0 ? bounds.height / ancestor.offsetHeight : 1;

@@ -243,26 +243,26 @@ function isInlineStyleProperty(node: Extract<ESTree.Node, { type: "Property" }>)
 function outsetOverrides(text: string, companions: string) {
   const ownClasses = text.split(/\s+/u).map(classUtility);
   const classes = [...ownClasses, ...companions.split(/\s+/u).map(classUtility)];
-  const hasBaseRing = classes.some(
-    (candidate) => candidate.variant === "" && isRingWidth(candidate.utility),
-  );
+  const hasBaseRing = (target: ReturnType<typeof classUtility>) =>
+    classes.some(
+      (candidate) =>
+        !candidate.state && isRingWidth(candidate.utility) && variantCovers(candidate, target),
+    );
   const insets = classes.filter((candidate) => candidate.utility === "ring-inset");
   const hasInset = (target: ReturnType<typeof classUtility>) =>
     insets.some((inset) => variantCovers(inset, target));
   const baseStateColors = (prefix: "ring" | "outline") =>
-    classes.filter(
-      (candidate) =>
-        candidate.state && candidate.target === "" && isColorUtility(candidate.utility, prefix),
-    );
+    classes.filter((candidate) => candidate.state && isColorUtility(candidate.utility, prefix));
   const baseRingStateColors = baseStateColors("ring");
   const baseOutlineStateColors = baseStateColors("outline");
   const outlineWidths = classes.filter((candidate) => isWidthUtility(candidate.utility, "outline"));
-  const baseOutlineWidth = Math.max(
-    2,
-    ...outlineWidths
-      .filter((candidate) => candidate.variant === "")
-      .map((candidate) => outlineWidth(candidate.utility) ?? Infinity),
-  );
+  const baseOutlineWidth = (target: ReturnType<typeof classUtility>) =>
+    Math.max(
+      2,
+      ...outlineWidths
+        .filter((candidate) => !candidate.state && variantCovers(candidate, target))
+        .map((candidate) => outlineWidth(candidate.utility) ?? Infinity),
+    );
   const hasInwardOutlineOffset = (
     target: ReturnType<typeof classUtility>,
     width: number | undefined,
@@ -280,19 +280,18 @@ function outsetOverrides(text: string, companions: string) {
         candidate.target === target.target &&
         (isRingWidth(candidate.utility) ||
           candidate.utility === "ring-inset" ||
-          (hasBaseRing && candidate.target === "" && isColorUtility(candidate.utility, "ring"))),
+          (hasBaseRing(candidate) && isColorUtility(candidate.utility, "ring"))),
     );
   const offenders: string[] = [];
   for (const token of ownClasses) {
-    const { utility, variant, state, target } = token;
+    const { utility, variant, state } = token;
     if (
       (state &&
-        (isRingWidth(utility) ||
-          (target === "" && hasBaseRing && isColorUtility(utility, "ring"))) &&
+        (isRingWidth(utility) || (hasBaseRing(token) && isColorUtility(utility, "ring"))) &&
         !hasInset(token)) ||
-      (variant === "" &&
+      (!state &&
         isRingWidth(utility) &&
-        baseRingStateColors.some((color) => !hasInset(color)))
+        baseRingStateColors.some((color) => variantCovers(token, color) && !hasInset(color)))
     ) {
       offenders.push(`${variant}${utility}`);
       continue;
@@ -306,15 +305,17 @@ function outsetOverrides(text: string, companions: string) {
     }
 
     const isOutlineWidth = isWidthUtility(utility, "outline");
-    const outline = isOutlineWidth ? outlineWidth(utility) : target === "" ? baseOutlineWidth : 2;
+    const outline = isOutlineWidth ? outlineWidth(utility) : baseOutlineWidth(token);
     if (
       (outline === undefined || outline > 2) &&
       ((state &&
         (isOutlineWidth || isColorUtility(utility, "outline")) &&
         !hasInwardOutlineOffset(token, outline)) ||
-        (variant === "" &&
+        (!state &&
           isOutlineWidth &&
-          baseOutlineStateColors.some((color) => !hasInwardOutlineOffset(color, outline))))
+          baseOutlineStateColors.some(
+            (color) => variantCovers(token, color) && !hasInwardOutlineOffset(color, outline),
+          )))
     ) {
       offenders.push(`${variant}${utility}`);
     }

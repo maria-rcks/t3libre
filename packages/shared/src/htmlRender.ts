@@ -402,8 +402,10 @@ export function injectHtmlRenderFocusStyles(html: string): string | undefined {
   let hasFocus = false;
   let templateDepth = 0;
   for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
-    if (html.startsWith("<!--", tag.index)) {
-      const end = html.indexOf("-->", tags.lastIndex);
+    // Declaration payloads cannot identify our generated head bootstrap, even
+    // where HTML parses CDATA as a bogus comment rather than foreign text.
+    if (html.startsWith("<!--", tag.index) || html.startsWith("<![CDATA[", tag.index)) {
+      const end = html.indexOf(html.startsWith("<!--", tag.index) ? "-->" : "]]>", tags.lastIndex);
       tags.lastIndex = end < 0 ? html.length : end + 3;
       continue;
     }
