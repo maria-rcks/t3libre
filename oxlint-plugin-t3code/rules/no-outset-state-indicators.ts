@@ -1,7 +1,8 @@
 import { defineRule, type ESTree } from "@oxlint/plugins";
 
 const CLASS_COMPOSERS = new Set(["cn", "clsx", "classNames", "cva", "twMerge"]);
-const STATE_VARIANT = /(?:^|[^\w])(?:focus(?:-visible|-within)?|selected|checked|pressed)(?=$|[^\w])/u;
+const STATE_VARIANT =
+  /(?:^|[^\w])(?:focus(?:-visible|-within)?|selected|checked|pressed)(?=$|[^\w])/u;
 const RING_WIDTH = /^ring(?:-(?:[1-9]\d*|\[[^\]]+\]|\(length:[^)]+\)))?$/u;
 const OUTLINE_WIDTH = /^outline-(\d+|\[[^\]]+\]|\(length:[^)]+\))$/u;
 const INWARD_OFFSET = /^-outline-offset-(\d+)$/u;
@@ -29,6 +30,7 @@ type ParsedClass = ReturnType<typeof parseClass>;
 const covers = (companion: ParsedClass, indicator: ParsedClass) =>
   companion.variants.every((variant) => indicator.variants.includes(variant));
 
+/** Strings a composition always includes; conditional branches and class maps are not guaranteed. */
 function collectStrings(node: unknown, out: string[]) {
   if (Array.isArray(node)) {
     for (const child of node) collectStrings(child, out);
@@ -36,6 +38,7 @@ function collectStrings(node: unknown, out: string[]) {
   }
   if (typeof node !== "object" || node === null || !("type" in node)) return;
   const current = node as ESTree.Node;
+  if (/^(?:Conditional|Logical|Object)Expression$/u.test(current.type)) return;
   if (current.type === "Literal" && typeof current.value === "string") out.push(current.value);
   if (current.type === "TemplateElement") out.push(current.value.cooked ?? current.value.raw);
   for (const [key, value] of Object.entries(current)) {
@@ -43,8 +46,8 @@ function collectStrings(node: unknown, out: string[]) {
   }
 }
 
-/** Classes from the whole `cn(...)`/`cva(...)` call, so companions in sibling arguments count. */
-function scopeClasses(node: ESTree.Node) {
+/** Classes guaranteed alongside a node, so companions in sibling `cn(...)` arguments count. */
+function scopeClasses(node: ESTree.Node, own: ParsedClass[]) {
   let root: ESTree.Node = node;
   for (let current = node.parent; current; current = current.parent) {
     if (/Statement$|Declaration$|^JSX(?:Attribute|Element)$/u.test(current.type)) break;
@@ -58,7 +61,7 @@ function scopeClasses(node: ESTree.Node) {
   }
   const strings: string[] = [];
   collectStrings(root, strings);
-  return strings.join(" ").split(/\s+/u).map(parseClass);
+  return [...own, ...strings.join(" ").split(/\s+/u).map(parseClass)];
 }
 
 function offenders(text: string, node: ESTree.Node) {
@@ -75,7 +78,7 @@ function offenders(text: string, node: ESTree.Node) {
     }
     if (!STATE_VARIANT.test(variants.join(":"))) continue;
     if (RING_WIDTH.test(utility)) {
-      scope ??= scopeClasses(node);
+      scope ??= scopeClasses(node, own);
       const inset = scope.some((other) => other.utility === "ring-inset" && covers(other, token));
       if (!inset) found.push(label);
       continue;
@@ -84,7 +87,7 @@ function offenders(text: string, node: ESTree.Node) {
     if (outline) {
       const width = Number(outline[1]);
       if (width <= 2) continue;
-      scope ??= scopeClasses(node);
+      scope ??= scopeClasses(node, own);
       const inward = scope.some((other) => {
         const offset = INWARD_OFFSET.exec(other.utility);
         return offset !== null && Number(offset[1]) >= width && covers(other, token);

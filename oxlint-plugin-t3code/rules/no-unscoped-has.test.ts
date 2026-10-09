@@ -136,7 +136,7 @@ describe("t3code/no-outset-state-indicators", () => {
       "outlines covered by the inward default": `const el = <button className="focus-visible:outline-2 focus-visible:outline-ring" />;`,
       "wider outlines with a matching inward offset": `const el = <button className="focus-visible:outline-3 focus-visible:-outline-offset-3" />;`,
       "decorative rings without a state": `const el = <img className="ring-2 ring-background" />;`,
-      "prose": `const note = "the focus ring stays visible";`,
+      prose: `const note = "the focus ring stays visible";`,
     }),
   )("valid: %s", (name, source) => {
     indicators.valid(name, source);
@@ -146,10 +146,12 @@ describe("t3code/no-outset-state-indicators", () => {
     Object.entries({
       "state rings without an inset": `const el = <button className="focus-visible:ring-2 focus-visible:ring-ring" />;`,
       "an inset from another state": `const el = <button className="focus:ring-inset focus-visible:ring-2" />;`,
+      "an inset from another conditional branch": `const value = cn(active ? "focus:ring-2" : "ring-inset");`,
       "arbitrary state ring widths": `const value = cn("has-[:focus-visible]:ring-[3px]");`,
       "positive outline offsets": `const el = <button className="focus-visible:outline-2 focus-visible:outline-offset-2" />;`,
       "arbitrary outline offsets": `const el = <button className="focus-visible:[outline-offset:2px]" />;`,
-      "wide outlines without an inward offset": "const className = `focus-visible:outline-4 ${layout}`;",
+      "wide outlines without an inward offset":
+        "const className = `focus-visible:outline-4 ${layout}`;",
     }),
   )("invalid: %s", (name, source) => {
     indicators.invalid(name, source);
