@@ -262,6 +262,7 @@ function stubDomGlobals() {
 beforeEach(stubDomGlobals);
 beforeAll(async () => {
   Object.defineProperty(window, "matchMedia", { value: matchMedia, configurable: true });
+  await (await import("@t3tools/shared/markdownPipeline")).loadRehypeRaw();
   ({ MessagesTimeline, resolvePreviewAnnotationImage } = await import("./MessagesTimeline"));
 }, 30_000);
 
