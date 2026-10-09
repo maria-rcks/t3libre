@@ -52,7 +52,7 @@ import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools.ts";
 import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
 import { EnvironmentToolkit } from "../../mcp/toolkits/environment/tools.ts";
@@ -66,15 +66,15 @@ import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2Event,
   type ProviderAdapterV2TurnInput,
-} from "../ProviderAdapter.ts";
-import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
-import { makeProviderFailure } from "../ProviderFailure.ts";
+} from "@t3tools/provider-core/server/ProviderAdapter";
+import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/continuationRequests";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 import {
   mergeClaudeWorkflowProgress,
   parseClaudeWorkflowRunHandles,
 } from "./claudeWorkflowProgress.ts";
-import * as IdAllocator from "../IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 
 it("retains workflow snapshots, orders phases, and keeps terminal members monotone per attempt", () => {
   const previous = mergeClaudeWorkflowProgress({
@@ -580,10 +580,13 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       type: "http",
       url: "http://127.0.0.1:43123/mcp",
       headers: {
-        Authorization: "Bearer secret-claude-token",
+        Authorization: "${T3_CODE_MCP_AUTHORIZATION}",
       },
       timeout: ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_TIMEOUT_MS,
     },
+  } as const;
+  const T3_MCP_ENVIRONMENT = {
+    T3_CODE_MCP_AUTHORIZATION: "Bearer secret-claude-token",
   } as const;
 
   const withMcpSession = (threadId: ThreadId, run: () => void) => {
@@ -633,6 +636,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       assert.deepEqual(overrides, {
         allowedTools: [ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD],
         mcpServers: T3_MCP_SERVERS,
+        mcpEnvironment: T3_MCP_ENVIRONMENT,
       });
     });
   });
@@ -649,6 +653,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       assert.deepEqual(overrides, {
         allowedTools: ["Read", "mcp__t3-code__*"],
         mcpServers: T3_MCP_SERVERS,
+        mcpEnvironment: T3_MCP_ENVIRONMENT,
       });
     });
   });
@@ -668,6 +673,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
           ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
         ],
         mcpServers: T3_MCP_SERVERS,
+        mcpEnvironment: T3_MCP_ENVIRONMENT,
       });
       assert.isFalse(overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD));
     });
@@ -799,11 +805,12 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
             type: "http",
             url: "http://127.0.0.1:43123/mcp",
             headers: {
-              Authorization: "Bearer secret-claude-token",
+              Authorization: "${T3_CODE_MCP_AUTHORIZATION}",
             },
             timeout: ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_TIMEOUT_MS,
           },
         },
+        mcpEnvironment: { T3_CODE_MCP_AUTHORIZATION: "Bearer secret-claude-token" },
       });
 
       const options = ClaudeAdapterV2.makeClaudeQueryOptions({
@@ -814,8 +821,14 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
         nativeThreadId: "native-thread-claude-mcp",
         resume: false,
         cwd: "/workspace",
-        ...overrides,
+        allowedTools: overrides.allowedTools ?? [],
+        mcpServers: overrides.mcpServers ?? {},
+        environment: { ...overrides.mcpEnvironment },
       });
+      // mcpServers becomes a CLI argument, readable by every local user; the
+      // credential may only travel in the child's environment.
+      assert.notInclude(JSON.stringify(options.mcpServers), "secret-claude-token");
+      assert.equal(options.env?.T3_CODE_MCP_AUTHORIZATION, "Bearer secret-claude-token");
       assert.isObject(options.systemPrompt);
       const systemPrompt = options.systemPrompt as {
         readonly type: string;

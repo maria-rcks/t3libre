@@ -1,4 +1,5 @@
 import type { NodeId, ThreadId } from "@t3tools/contracts";
+import { boundedSnapshotProjection } from "@t3tools/shared/orchestrationV2BoundedSnapshot";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -24,7 +25,11 @@ import * as ThreadSnapshotLoader from "./threadSnapshotHttp.ts";
 // Same cold-open budget as the full snapshot path; bounded payloads should fit.
 const DEFAULT_BOUNDED_THREAD_SNAPSHOT_TIMEOUT_MS = 6_000;
 
-/** Load a bounded recent-window thread snapshot over HTTP. */
+/**
+ * Load a bounded recent-window thread snapshot over HTTP. Opts into compact
+ * turnItems and restores them, so callers always see the full bounded shape.
+ * Older servers ignore the query and send the full shape.
+ */
 export const fetchEnvironmentBoundedThreadSnapshot = Effect.fn(
   "clientRuntime.state.fetchEnvironmentBoundedThreadSnapshot",
 )(function* (input: {
@@ -47,13 +52,21 @@ export const fetchEnvironmentBoundedThreadSnapshot = Effect.fn(
     request: ({ client, headers }) =>
       client.threadBoundedSnapshot({
         params: { threadId: input.threadId },
-        query:
-          input.requiredSubagentId === undefined
+        query: {
+          compactTurnItems: "1",
+          ...(input.requiredSubagentId === undefined
             ? {}
-            : { requiredSubagentId: input.requiredSubagentId },
+            : { requiredSubagentId: input.requiredSubagentId }),
+        },
         headers: withOrchestrationProtocolHeader(headers),
       }),
-  });
+  }).pipe(
+    // Drop the marker with the restore so nothing can restore twice.
+    Effect.map(({ turnItemsOmitLocalVisible, ...snapshot }) => ({
+      ...snapshot,
+      projection: boundedSnapshotProjection({ ...snapshot, turnItemsOmitLocalVisible }),
+    })),
+  );
 });
 
 /** Resolve a child's owning subagent without expanding the parent's timeline window. */
