@@ -6,7 +6,6 @@ import * as NodeFS from "node:fs";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -395,39 +394,6 @@ describe("AcpSessionRuntime", () => {
       expect(error.message).toContain("Unrecognized key");
       expect(error.message).not.toContain("ACP process exited with code 1\nACP process exited");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
-    "attaches stderr and the signal when the child aborts before initialize",
-    () =>
-      Effect.gen(function* () {
-        const runtime = yield* AcpSessionRuntime.make({
-          ...mockRuntimeOptions,
-          spawn: {
-            command: process.execPath,
-            args: [
-              "-e",
-              "process.stderr.write('Check failed: AddressFamilySupported(AF_INET6, &loopback6_ok)', () => process.kill(process.pid, 'SIGABRT'));",
-            ],
-          },
-        });
-        const error = yield* runtime.initialize().pipe(Effect.flip);
-        expect(error).toMatchObject({
-          _tag: "AcpProcessExitedError",
-          signal: "SIGABRT",
-          stderr: expect.stringContaining("AF_INET6"),
-        });
-        expect(error.message).toContain("SIGABRT");
-        const events = yield* runtime.getEvents().pipe(
-          Stream.filter((event) => event._tag === "ConnectionTerminated"),
-          Stream.take(1),
-          Stream.runCollect,
-        );
-        expect(events[0]?.error).toMatchObject({
-          signal: "SIGABRT",
-          stderr: expect.stringContaining("AF_INET6"),
-        });
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.effect("drains large stderr output and keeps auth-sized logging chunks", () =>

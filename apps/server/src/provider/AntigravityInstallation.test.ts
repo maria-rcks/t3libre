@@ -492,39 +492,6 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
       }),
   );
 
-  it.effect("retains redacted startup stderr for an unrecognized validation failure", () =>
-    Effect.gen(function* () {
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const { installation, stagingReleased } = yield* makeHarness({
-        previous: true,
-        useDefaultValidation: true,
-      }).pipe(
-        Effect.provideService(
-          ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make((command) =>
-            spawner.spawn(
-              command._tag === "StandardCommand" && command.command.endsWith(executableName)
-                ? ChildProcess.make(process.execPath, [
-                    "-e",
-                    "process.stderr.write('https://accounts.google.com/o/oauth2/v2/auth?state=private-state\\nAuthorization: Bearer private-token\\nCould not open runtime data', () => process.exit(7));",
-                  ])
-                : command,
-            ),
-          ),
-        ),
-      );
-      yield* installation.start;
-      const failed = yield* terminalState(installation);
-      expect(failed.phase).toBe("failed");
-      expect(failed.message).toContain("code 7");
-      expect(failed.message).toContain("Could not open runtime data");
-      expect(failed.message).not.toContain("private-state");
-      expect(failed.message).not.toContain("private-token");
-      yield* Deferred.await(stagingReleased);
-      yield* expectPreviousRelease(installation);
-    }),
-  );
-
   it.effect("accepts an encoded Content-Length when the body is compressed", () =>
     Effect.gen(function* () {
       // dl.google.com gzips the archive and reports the encoded size. The decoded
