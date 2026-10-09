@@ -7,7 +7,8 @@ const STORAGE_KEY = "t3code:usage-page-preferences:v1";
 const UsagePagePreferencesSchema = Schema.Struct({
   metric: Schema.Literals(["cost", "tokens", "limits"]),
   windowDays: Schema.Literals([1, 7, 30, 90]),
-  provider: Schema.optional(UsageProviderKind),
+  /** Providers filtered out of the page. Stored as hidden so new providers show by default. */
+  hiddenProviders: Schema.optional(Schema.Array(UsageProviderKind)),
 });
 export type UsagePagePreferences = typeof UsagePagePreferencesSchema.Type;
 

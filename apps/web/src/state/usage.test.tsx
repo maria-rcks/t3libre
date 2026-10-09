@@ -22,11 +22,18 @@ const input = {
   timeZone: "UTC",
 };
 
-function environment(id: string, cost: number | null, hostId = id): EnvironmentUsageStatus {
+function environment(
+  id: string,
+  cost: number | null,
+  hostId = id,
+  provider: UsageProviderKind = "codex",
+): EnvironmentUsageStatus {
   return {
     environmentId: EnvironmentId.make(id),
     label: id,
     isPending: cost === null,
+    canReadDiagnostics: true,
+    isConnected: true,
     error: null,
     needsCursorKeychainAccess: false,
     summary:
@@ -39,7 +46,7 @@ function environment(id: string, cost: number | null, hostId = id): EnvironmentU
             buckets: [
               {
                 day: input.sinceDay,
-                provider: "codex",
+                provider,
                 model: id,
                 totals: {
                   uncachedInputTokens: 100,
@@ -60,7 +67,7 @@ function environment(id: string, cost: number | null, hostId = id): EnvironmentU
               {
                 fingerprint: {
                   hostId,
-                  provider: "codex",
+                  provider,
                   resolvedHomePath: "/sessions",
                   volumeId: hostId,
                 },
@@ -83,12 +90,14 @@ let latest: UsageView;
 
 function Probe({
   selected,
-  provider = null,
+  hidden,
+  window = input,
 }: {
   selected: ReadonlySet<EnvironmentId> | null;
-  provider?: UsageProviderKind | null;
+  hidden?: ReadonlySet<UsageProviderKind>;
+  window?: typeof input;
 }) {
-  const usage = useUsage(input, selected, provider);
+  const usage = useUsage(window, selected, hidden);
   useLayoutEffect(() => {
     latest = usage;
   }, [usage]);
@@ -165,74 +174,6 @@ describe("usage environment selection", () => {
     expect(latest.merged.duplicateSources).toEqual([]);
   });
 
-  it("filters tokens, prices, sessions and charts without changing the original summaries", async () => {
-    const original = environment("mixed", 10);
-    const summary = original.summary!;
-    const opencode = {
-      ...summary.buckets[0]!,
-      provider: "opencode" as const,
-      model: "opencode-model",
-      hourStart: "2026-09-04T12:00:00Z",
-      totals: {
-        uncachedInputTokens: 20,
-        cachedInputTokens: 30,
-        cacheCreationTokens: 10,
-        outputTokens: 40,
-        reasoningTokens: 15,
-      },
-      categoryCostUsd: { input: 1, cacheRead: 0.5, cacheWrite: 0.5, output: 1 },
-      costUsd: 3,
-    };
-    testState.environments = [
-      {
-        ...original,
-        summary: {
-          ...summary,
-          buckets: [...summary.buckets, opencode],
-          sources: [
-            ...summary.sources,
-            {
-              ...summary.sources[0]!,
-              fingerprint: { ...summary.sources[0]!.fingerprint, provider: "opencode" },
-              distinctSessions: 8,
-            },
-          ],
-        },
-      },
-    ];
-    const before = structuredClone(testState.environments);
-    await act(() => renderer?.update(<Probe selected={null} provider="opencode" />));
-    expect(latest.merged.totalTokens).toBe(100);
-    expect(latest.merged.outputTokens).toBe(40);
-    expect(latest.merged.reasoningTokens).toBe(15);
-    expect(latest.merged.costUsd).toBe(3);
-    expect(latest.merged.categoryCost).toMatchObject({ input: 1, output: 1 });
-    expect(latest.merged.sessions).toBe(8);
-    expect(latest.merged.models.map((model) => model.model)).toEqual(["opencode-model"]);
-    expect(latest.merged.providers.map((provider) => provider.provider)).toEqual(["opencode"]);
-    for (const totals of [latest.merged.daily[0]!, latest.merged.hourly[0]!]) {
-      expect(totals).toMatchObject({ totalTokens: 100, costUsd: 3 });
-      expect([...totals.byProvider.keys()]).toEqual(["opencode"]);
-      expect(totals.byProvider.get("opencode")).toEqual({
-        totalTokens: 100,
-        costUsd: 3,
-        reasoningTokens: 15,
-      });
-    }
-    expect(testState.environments).toEqual(before);
-
-    await act(() => renderer?.update(<Probe selected={null} provider="claude" />));
-    expect(latest.merged.totalTokens).toBe(0);
-    expect(latest.merged.sessions).toBe(0);
-
-    await act(() => renderer?.update(<Probe selected={null} />));
-    expect(latest.merged.totalTokens).toBe(250);
-    expect(latest.merged.costUsd).toBe(13);
-    expect(latest.merged.sessions).toBe(9);
-    expect(latest.merged.models).toHaveLength(2);
-    expect(testState.environments).toEqual(before);
-  });
-
   it("keeps selected cached results visible during a refresh", async () => {
     testState.environments = [
       { ...environment("a", 10), isPending: true },
@@ -242,5 +183,58 @@ describe("usage environment selection", () => {
     expect(latest.merged.costUsd).toBe(10);
     expect(latest.isPending).toBe(false);
     expect(latest.isPartial).toBe(false);
+  });
+
+  it("shows the last answered usage until the next window answers, for the same selection", async () => {
+    const selected = new Set([EnvironmentId.make("a")]);
+    await act(() => renderer?.update(<Probe selected={selected} />));
+    expect(latest.shown?.merged.costUsd).toBe(10);
+
+    // A new window that nothing has answered yet.
+    const nextWindow = { ...input, sinceDay: UsageDay.make("2026-08-28") };
+    testState.environments = [environment("a", null)];
+    await act(() => renderer?.update(<Probe selected={selected} window={nextWindow} />));
+    expect(latest.isPending).toBe(true);
+    expect(latest.shown?.window).toBe(input);
+    expect(latest.shown?.merged.costUsd).toBe(10);
+
+    // A window that fails everywhere keeps it too.
+    testState.environments = [{ ...environment("a", null), isPending: false, error: "Offline" }];
+    await act(() => renderer?.update(<Probe selected={selected} window={nextWindow} />));
+    expect(latest.isPending).toBe(false);
+    expect(latest.shown?.window).toBe(input);
+    expect(latest.shown?.merged.costUsd).toBe(10);
+
+    // Once the new window answers, it replaces the kept one.
+    testState.environments = [environment("a", 30)];
+    await act(() => renderer?.update(<Probe selected={selected} window={nextWindow} />));
+    expect(latest.shown?.window).toBe(nextWindow);
+    expect(latest.shown?.merged.costUsd).toBe(30);
+
+    // A different provider filter does not reuse usage merged with the old one.
+    testState.environments = [environment("a", null)];
+    await act(() =>
+      renderer?.update(<Probe selected={selected} hidden={new Set(["claude"])} window={input} />),
+    );
+    expect(latest.shown).toBeNull();
+
+    // Another selection has nothing of its own to show.
+    testState.environments = [environment("a", null)];
+    await select("a");
+    expect(latest.shown).toBeNull();
+  });
+});
+
+describe("usage provider filter", () => {
+  it("drops hidden providers from totals and sessions, then restores them", async () => {
+    testState.environments = [environment("a", 10), environment("c", 5, "c", "claude")];
+    await act(() => renderer?.update(<Probe selected={null} hidden={new Set(["codex"])} />));
+    expect(latest.merged.costUsd).toBe(5);
+    expect(latest.merged.sessions).toBe(1);
+    expect(latest.merged.providers.map((entry) => entry.provider)).toEqual(["claude"]);
+
+    await act(() => renderer?.update(<Probe selected={null} />));
+    expect(latest.merged.costUsd).toBe(15);
+    expect(latest.merged.sessions).toBe(2);
   });
 });

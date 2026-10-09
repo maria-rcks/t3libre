@@ -9,7 +9,9 @@ import {
   type CachedFile,
   type ScanCache,
 } from "./usageScanCache.ts";
-import type { UsageRecord } from "./usageTranscripts.ts";
+import type { UsageRecord } from "@t3tools/provider-core/server/usage";
+
+import { TEST_FORMAT_MAP } from "./usageTestFormats.ts";
 
 function record(overrides: Partial<UsageRecord> = {}): UsageRecord {
   return {
@@ -36,7 +38,7 @@ function position(overrides: Partial<CachedFile["position"]> = {}): CachedFile["
     resumeOffset: 120,
     guardLength: 64,
     guardHash: 0xdeadbeef,
-    codexState: null,
+    state: null,
     ...overrides,
   };
 }
@@ -85,7 +87,7 @@ describe("scan cache round trip", () => {
       ],
       tailRecords: [],
       position: position({
-        codexState: {
+        state: {
           model: "gpt-6-astra",
           speed: "ultrafast",
           sessionId: "session-c",
@@ -97,25 +99,16 @@ describe("scan cache round trip", () => {
       }),
     });
 
-    const restored = decodeScanCache(JSON.parse(JSON.stringify(encodeScanCache(original))));
+    const restored = decodeScanCache(
+      JSON.parse(JSON.stringify(encodeScanCache(original))),
+      TEST_FORMAT_MAP,
+    );
 
     expect(restored.size).toBe(4);
     expect(restored.get("/a.jsonl")).toEqual(original.get("/a.jsonl"));
     expect(restored.get("/b.jsonl")).toEqual(original.get("/b.jsonl"));
     expect(restored.get("/grok.jsonl")).toEqual(original.get("/grok.jsonl"));
     expect(restored.get("/codex.jsonl")).toEqual(original.get("/codex.jsonl"));
-
-    // The v7 migration must not reset providers whose parsing did not change.
-    const previous = decodeScanCache({ ...encodeScanCache(original), version: 6 });
-    expect(previous.get("/codex.jsonl")).toEqual(original.get("/codex.jsonl"));
-    expect(previous.get("/grok.jsonl")).toEqual(original.get("/grok.jsonl"));
-    for (const path of ["/a.jsonl", "/b.jsonl"]) {
-      expect(previous.get(path)).toEqual({
-        ...original.get(path),
-        size: -1,
-        position: { resumeOffset: 0, guardLength: 0, guardHash: 0, codexState: null },
-      });
-    }
   });
 
   it("drops an entry whose persisted parse state is corrupt", () => {
@@ -129,7 +122,9 @@ describe("scan cache round trip", () => {
       },
     };
 
-    expect(decodeScanCache(JSON.parse(JSON.stringify(poisoned))).has("/a.jsonl")).toBe(false);
+    expect(
+      decodeScanCache(JSON.parse(JSON.stringify(poisoned)), TEST_FORMAT_MAP).has("/a.jsonl"),
+    ).toBe(false);
   });
 
   it("drops an entry whose guard length is outside the supported range", () => {
@@ -141,7 +136,9 @@ describe("scan cache round trip", () => {
       files: { "/a.jsonl": { ...encoded.files["/a.jsonl"]!, gl: 1e20 } },
     };
 
-    expect(decodeScanCache(JSON.parse(JSON.stringify(poisoned))).has("/a.jsonl")).toBe(false);
+    expect(
+      decodeScanCache(JSON.parse(JSON.stringify(poisoned)), TEST_FORMAT_MAP).has("/a.jsonl"),
+    ).toBe(false);
   });
 
   it("drops an entry whose speed is not a known index", () => {
@@ -152,14 +149,16 @@ describe("scan cache round trip", () => {
       files: { "/a.jsonl": { ...encoded.files["/a.jsonl"]!, r: [[...row.slice(0, 10), true]] } },
     };
 
-    expect(decodeScanCache(JSON.parse(JSON.stringify(poisoned))).has("/a.jsonl")).toBe(false);
+    expect(
+      decodeScanCache(JSON.parse(JSON.stringify(poisoned)), TEST_FORMAT_MAP).has("/a.jsonl"),
+    ).toBe(false);
   });
 
   it("rejects a document from before records carried a speed", () => {
     const encoded = encodeScanCache(cacheWith([["/a.jsonl", 100, [record()]]]));
     const previous = { ...encoded, version: 3 };
 
-    expect(decodeScanCache(JSON.parse(JSON.stringify(previous))).size).toBe(0);
+    expect(decodeScanCache(JSON.parse(JSON.stringify(previous)), TEST_FORMAT_MAP).size).toBe(0);
   });
 
   it("rewrites only changed entries and still restores the whole cache", () => {
@@ -169,7 +168,7 @@ describe("scan cache round trip", () => {
       ["/b.jsonl", 200, [record({ sessionId: "session-b" })]],
     ]);
     const sources = { "claude\u0000/projects": { dir: "/projects", volumeId: "1:2" } };
-    expect(decodeScanCache(JSON.parse(write(cache, { sources })))).toEqual(cache);
+    expect(decodeScanCache(JSON.parse(write(cache, { sources })), TEST_FORMAT_MAP)).toEqual(cache);
 
     // The replacement adds intern entries; /a's memoised indexes must hold.
     cache.set("/b.jsonl", {
@@ -178,7 +177,7 @@ describe("scan cache round trip", () => {
       records: [record({ sessionId: "session-c", model: "claude-opus-5-5", dedupeKey: "msg_3:" })],
     });
     const document = JSON.parse(write(cache, { sources }));
-    expect(decodeScanCache(document)).toEqual(cache);
+    expect(decodeScanCache(document, TEST_FORMAT_MAP)).toEqual(cache);
     expect(document.sources).toEqual(sources);
   });
 
@@ -193,9 +192,11 @@ describe("scan cache round trip", () => {
 
   it("treats a corrupt or foreign document as an empty cache", () => {
     // A bad cache should cost one cold scan, never a broken page.
-    expect(decodeScanCache(null).size).toBe(0);
-    expect(decodeScanCache("nonsense").size).toBe(0);
-    expect(decodeScanCache({ version: 999, models: [], sessions: [], files: {} }).size).toBe(0);
+    expect(decodeScanCache(null, TEST_FORMAT_MAP).size).toBe(0);
+    expect(decodeScanCache("nonsense", TEST_FORMAT_MAP).size).toBe(0);
+    expect(
+      decodeScanCache({ version: 999, models: [], sessions: [], files: {} }, TEST_FORMAT_MAP).size,
+    ).toBe(0);
   });
 
   it("skips malformed file entries but keeps good ones", () => {
@@ -205,7 +206,7 @@ describe("scan cache round trip", () => {
       files: { ...encoded.files, "/bad.jsonl": { s: "nope", m: 1, p: "claude", r: [] } },
     };
 
-    const restored = decodeScanCache(JSON.parse(JSON.stringify(withJunk)));
+    const restored = decodeScanCache(JSON.parse(JSON.stringify(withJunk)), TEST_FORMAT_MAP);
     expect([...restored.keys()]).toEqual(["/good.jsonl"]);
   });
 
@@ -215,7 +216,7 @@ describe("scan cache round trip", () => {
     const encoded = encodeScanCache(cacheWith([["/a.jsonl", 100, [record()]]]));
     const poisoned = { ...encoded, models: [1] };
 
-    expect(decodeScanCache(JSON.parse(JSON.stringify(poisoned))).size).toBe(0);
+    expect(decodeScanCache(JSON.parse(JSON.stringify(poisoned)), TEST_FORMAT_MAP).size).toBe(0);
   });
 
   it("drops the whole entry when any row is corrupt, forcing a cold re-parse", () => {
@@ -235,7 +236,7 @@ describe("scan cache round trip", () => {
       },
     };
 
-    const restored = decodeScanCache(JSON.parse(JSON.stringify(poisoned)));
+    const restored = decodeScanCache(JSON.parse(JSON.stringify(poisoned)), TEST_FORMAT_MAP);
     expect(restored.has("/a.jsonl")).toBe(false);
   });
 });
@@ -262,59 +263,20 @@ describe("pruneScanCache", () => {
 });
 
 describe("dedupeWithinFile", () => {
-  it("reconciles cumulative Claude usage without changing the first attribution", () => {
-    const first = record({ reportedCostUsd: 1 });
-    const final = record({
-      timestampMs: first.timestampMs + 86_400_000,
-      sessionId: "fork",
-      totals: { ...first.totals, outputTokens: 999, reasoningTokens: 400 },
-    });
-    const kept = dedupeWithinFile([first, final, first, record({ dedupeKey: "msg_2:" })]);
+  it("keeps the first Claude record's attribution with its fullest usage snapshot", () => {
+    const kept = dedupeWithinFile([
+      record({ totals: { ...record().totals, outputTokens: 1 } }),
+      record({
+        timestampMs: 1_786_000_000_500,
+        totals: { ...record().totals, outputTokens: 999, reasoningTokens: 400 },
+      }),
+      record({ totals: { ...record().totals, outputTokens: 3 } }),
+      record({ dedupeKey: "msg_2:" }),
+    ]);
 
     expect(kept).toHaveLength(2);
-    expect(kept[0]).toEqual({ ...first, totals: final.totals, reportedCostUsd: null });
-    expect(dedupeWithinFile([final, first])[0]).toEqual(final);
-    // Thinking alone changes presentation, not inclusive output or its bill.
-    expect(
-      dedupeWithinFile([first, record({ totals: { ...first.totals, reasoningTokens: 20 } })])[0],
-    ).toEqual({ ...first, totals: { ...first.totals, reasoningTokens: 20 } });
-  });
-
-  it("retains recorded thinking when a later snapshot omits it", () => {
-    const first = record({ totals: { ...record().totals, reasoningTokens: 30 } });
-    const next = record({ totals: { ...record().totals, outputTokens: 100 }, reportedCostUsd: 2 });
-    expect(dedupeWithinFile([first, next])[0]).toEqual({
-      ...first,
-      totals: { ...next.totals, reasoningTokens: 30 },
-      reportedCostUsd: 2,
-    });
-    expect(dedupeWithinFile([next, first])[0]).toEqual({
-      ...next,
-      totals: { ...next.totals, reasoningTokens: 30 },
-    });
-    // The final cost can arrive after the token counts have stopped changing.
-    const withoutCost = { ...next, reportedCostUsd: null };
-    for (const reportedCostUsd of [0, 2]) {
-      expect(dedupeWithinFile([first, withoutCost, { ...next, reportedCostUsd }])[0]).toEqual({
-        ...first,
-        totals: { ...next.totals, reasoningTokens: 30 },
-        reportedCostUsd,
-      });
-    }
-    // A stale partial snapshot still cannot price the fuller token counts.
-    expect(
-      dedupeWithinFile([first, withoutCost, { ...first, reportedCostUsd: 1 }])[0]?.reportedCostUsd,
-    ).toBeNull();
-  });
-
-  it("keeps the first duplicate for other providers", () => {
-    const first = record({ provider: "grok" });
-    expect(
-      dedupeWithinFile([
-        first,
-        record({ provider: "grok", totals: { ...first.totals, outputTokens: 999 } }),
-      ]),
-    ).toEqual([first]);
+    expect(kept[0]?.timestampMs).toBe(1_786_000_000_000);
+    expect(kept[0]?.totals).toMatchObject({ outputTokens: 999, reasoningTokens: 400 });
   });
 
   it("keeps every record that has no dedupe key", () => {

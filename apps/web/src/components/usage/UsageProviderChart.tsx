@@ -1,6 +1,6 @@
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import type { UsageProviderKind } from "@t3tools/contracts";
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { DailyTotals, HourlyTotals } from "@t3tools/shared/usageMerge";
 import {
@@ -10,17 +10,21 @@ import {
   formatTokens,
   formatUsd,
 } from "@t3tools/shared/usageFormat";
+import { cn } from "~/lib/utils";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION, providerThinkingColor } from "./usageProviders";
 
 const VIEW_WIDTH = 960;
 const VIEW_HEIGHT = 260;
 const TICK_COUNT = 4;
 const PLOT_TOP = 8;
+const NONE_LOADING: ReadonlySet<UsageProviderKind> = new Set();
 
 export type UsageChartMetric = "tokens" | "cost";
 
 interface UsageProviderChartProps {
   readonly providers: readonly UsageProviderKind[];
+  /** Providers whose figures are still coming in: their lines are muted. */
+  readonly loadingProviders?: ReadonlySet<UsageProviderKind>;
   readonly days: readonly string[];
   readonly daily: readonly DailyTotals[];
   readonly hours: readonly string[];
@@ -36,6 +40,7 @@ export interface DayColumn {
   readonly bands: readonly {
     readonly provider: UsageProviderKind;
     readonly value: number;
+    /** Recorded thinking, a subset of `value`; always 0 for cost. */
     readonly thinking: number;
   }[];
   readonly total: number;
@@ -150,6 +155,10 @@ function curvePath(segments: readonly CurveSegment[]): string {
   return path;
 }
 
+function areaPath(line: string) {
+  return line === "" ? "" : `${line} L${VIEW_WIDTH},${VIEW_HEIGHT} L0,${VIEW_HEIGHT} Z`;
+}
+
 /**
  * Builds a scale whose maximum is a readable 1/2/5 x 10^n step at or above the
  * peak.
@@ -172,8 +181,84 @@ export function niceScale(peak: number, count: number): { max: number; ticks: re
   return { max, ticks };
 }
 
+const PLACEHOLDER_TICKS = Array.from({ length: TICK_COUNT + 1 }, (_, index) => index);
+
+/**
+ * Scales to the largest single provider-period. With nothing to show yet while
+ * providers load, unlabeled placeholder gridlines hold their usual spacing so
+ * nothing shifts on arrival.
+ */
+export function chartScale(
+  columns: readonly DayColumn[],
+  loadingProviders: ReadonlySet<UsageProviderKind>,
+) {
+  // Not the sum: layered series each measure from zero, so a combined peak
+  // would leave the plot permanently half empty.
+  const peak = columns.reduce(
+    (max, column) => column.bands.reduce((inner, band) => Math.max(inner, band.value), max),
+    0,
+  );
+  return peak === 0 && loadingProviders.size > 0
+    ? { max: TICK_COUNT, ticks: PLACEHOLDER_TICKS, labeled: false }
+    : { ...niceScale(peak, TICK_COUNT), labeled: true };
+}
+
+// Leave room above the top gridline so the constant-width stroke is not
+// clipped when a series reaches the peak.
+function valueToY(value: number, max: number) {
+  return max === 0 ? VIEW_HEIGHT : VIEW_HEIGHT - (value / max) * (VIEW_HEIGHT - PLOT_TOP);
+}
+
+/** Per-provider paths in paint order, heaviest first. */
+function buildChart(
+  periods: readonly string[],
+  byPeriod: ReadonlyMap<string, DailyTotals | HourlyTotals>,
+  metric: UsageChartMetric,
+  providers: readonly UsageProviderKind[],
+  loadingProviders: ReadonlySet<UsageProviderKind>,
+) {
+  const columns = buildPeriodColumns(periods, byPeriod, metric);
+  const scale = chartScale(columns, loadingProviders);
+  const stepX = periods.length < 2 ? 0 : VIEW_WIDTH / (periods.length - 1);
+  // Each provider's total, plus a dashed series for its recorded thinking.
+  const paths = providers.flatMap((provider) => {
+    const slot = PROVIDER_ORDER.indexOf(provider);
+    return (["value", "thinking"] as const).flatMap((series) => {
+      const values = columns.map((column) => column.bands[slot]?.[series] ?? 0);
+      const total = values.reduce((sum, value) => sum + value, 0);
+      if (series === "thinking" && total === 0) return [];
+      const line = curvePath(
+        smoothCurve(
+          values.map((value, periodIndex) => ({
+            x: periodIndex * stepX,
+            y: valueToY(value, scale.max),
+          })),
+        ),
+      );
+      return [
+        {
+          key: `${provider}:${series}`,
+          color:
+            series === "thinking"
+              ? providerThinkingColor(provider)
+              : PROVIDER_PRESENTATION[provider].color,
+          thinking: series === "thinking",
+          loading: loadingProviders.has(provider),
+          total,
+          line,
+          area: areaPath(line),
+        },
+      ];
+    });
+  });
+
+  // Paint the heavier series first so the lighter one is not buried.
+  return { columns, scale, stepX, paths: paths.toSorted((a, b) => b.total - a.total) };
+}
+
 export function UsageProviderChart({
   providers,
+  loadingProviders = NONE_LOADING,
   days,
   daily,
   hours,
@@ -196,77 +281,14 @@ export function UsageProviderChart({
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const hoverPositionRef = useRef<{ x: number; y: number } | null>(null);
 
-  const { paths, ticks, stepX, toY, series } = useMemo(() => {
-    if (periods.length === 0) {
-      return {
-        paths: [],
-        series: [] as readonly DayColumn[],
-        stepX: 0,
-        ticks: [0] as readonly number[],
-        toY: () => VIEW_HEIGHT,
-      };
-    }
-
-    const columns = buildPeriodColumns(periods, byPeriod, metric);
-    // Each series measures from zero, including thinking, so scale to the
-    // largest displayed value rather than a provider's combined total.
-    const peak = columns.reduce(
-      (max, column) =>
-        column.bands.reduce(
-          (inner, band) => Math.max(inner, band.value - band.thinking, band.thinking),
-          max,
-        ),
-      0,
-    );
-    const { max, ticks: tickValues } = niceScale(peak, TICK_COUNT);
-    const step = periods.length === 1 ? 0 : VIEW_WIDTH / (periods.length - 1);
-    // Leave room above the top gridline so the constant-width stroke is not
-    // clipped when a series reaches the peak.
-    const toY = (value: number) =>
-      max === 0 ? VIEW_HEIGHT : VIEW_HEIGHT - (value / max) * (VIEW_HEIGHT - PLOT_TOP);
-
-    const built = providers.flatMap((provider) => {
-      const providerIndex = PROVIDER_ORDER.indexOf(provider);
-      const kinds = metric === "tokens" ? (["other", "thinking"] as const) : (["other"] as const);
-      return kinds.flatMap((kind) => {
-        const values = columns.map((column) => {
-          const band = column.bands[providerIndex];
-          return kind === "thinking"
-            ? (band?.thinking ?? 0)
-            : (band?.value ?? 0) - (band?.thinking ?? 0);
-        });
-        const total = values.reduce((sum, value) => sum + value, 0);
-        if (kind === "thinking" && total === 0) return [];
-        const line = curvePath(
-          smoothCurve(
-            values.map((value, periodIndex) => ({ x: periodIndex * step, y: toY(value) })),
-          ),
-        );
-        return [
-          {
-            key: `${provider}:${kind}`,
-            color:
-              kind === "thinking"
-                ? providerThinkingColor(provider)
-                : PROVIDER_PRESENTATION[provider].color,
-            thinking: kind === "thinking",
-            total,
-            area: line === "" ? "" : `${line} L${VIEW_WIDTH},${VIEW_HEIGHT} L0,${VIEW_HEIGHT} Z`,
-            line,
-          },
-        ];
-      });
-    });
-
-    // Paint the heavier series first so the lighter one is not buried.
-    return {
-      paths: built.toSorted((a, b) => b.total - a.total),
-      series: columns,
-      stepX: step,
-      ticks: tickValues,
-      toY,
-    };
-  }, [byPeriod, metric, periods, providers]);
+  const { columns, scale, paths, stepX } = useMemo(
+    () => buildChart(periods, byPeriod, metric, providers, loadingProviders),
+    [byPeriod, loadingProviders, metric, periods, providers],
+  );
+  const toY = (value: number) => valueToY(value, scale.max);
+  // The delay keeps a quick answer from flashing, as with the page's figures.
+  const seriesClassName = (loading: boolean) =>
+    cn("transition-opacity", loading && "opacity-40 delay-150");
 
   const format = metric === "tokens" ? formatTokens : formatUsd;
 
@@ -327,7 +349,8 @@ export function UsageProviderChart({
   );
 
   const hoveredPeriod = hoverIndex === null ? undefined : periods[hoverIndex];
-  const hoveredColumn = hoverIndex === null ? undefined : series[hoverIndex];
+  const hoveredColumn = hoverIndex === null ? undefined : columns[hoverIndex];
+  const partial = providers.some((provider) => loadingProviders.has(provider));
   const formatPeriod = (period: string) =>
     resolution === "hour" ? formatHourShort(period, timeZone) : formatDayShort(period);
   const formatTooltipPeriod = (period: string) =>
@@ -340,15 +363,17 @@ export function UsageProviderChart({
       <div className="flex gap-2">
         {/* Axis labels sit outside the plot so they stay aligned to gridlines. */}
         <div className="relative h-56 w-14 shrink-0">
-          {ticks.map((tick) => (
-            <span
-              key={tick}
-              className="absolute right-0 -translate-y-1/2 text-3xs text-muted-foreground tabular-nums"
-              style={{ top: `${(toY(tick) / VIEW_HEIGHT) * 100}%` }}
-            >
-              {tick === 0 ? "0" : format(tick)}
-            </span>
-          ))}
+          {scale.labeled
+            ? scale.ticks.map((tick) => (
+                <span
+                  key={tick}
+                  className="absolute right-0 -translate-y-1/2 text-3xs text-muted-foreground tabular-nums"
+                  style={{ top: `${(toY(tick) / VIEW_HEIGHT) * 100}%` }}
+                >
+                  {tick === 0 ? "0" : format(tick)}
+                </span>
+              ))
+            : null}
         </div>
 
         <div
@@ -365,9 +390,9 @@ export function UsageProviderChart({
             viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
             preserveAspectRatio="none"
             role="img"
-            aria-label={`${resolution === "hour" ? "Hourly" : "Daily"} ${metric === "tokens" ? "tokens by provider, with thinking shown separately" : "cost by provider"}`}
+            aria-label={`${resolution === "hour" ? "Hourly" : "Daily"} ${metric === "tokens" ? "processed tokens" : "cost"} by provider`}
           >
-            {ticks.map((tick) => {
+            {scale.ticks.map((tick) => {
               const y = toY(tick);
               return (
                 <line
@@ -385,13 +410,20 @@ export function UsageProviderChart({
             })}
 
             {/* Fills first, then every stroke, so no series covers another's line. */}
-            {paths.map(({ key, color, area }) => (
-              <path key={key} d={area} fill={color} fillOpacity={0.12} />
+            {paths.map(({ key, color, loading, area }) => (
+              <path
+                key={key}
+                d={area}
+                className={seriesClassName(loading)}
+                fill={color}
+                fillOpacity={0.12}
+              />
             ))}
-            {paths.map(({ key, color, thinking, line }) => (
+            {paths.map(({ key, color, thinking, loading, line }) => (
               <path
                 key={key}
                 d={line}
+                className={seriesClassName(loading)}
                 fill="none"
                 stroke={color}
                 strokeDasharray={thinking ? "4 3" : undefined}
@@ -428,7 +460,7 @@ export function UsageProviderChart({
                 const { label, driverKind } = PROVIDER_PRESENTATION[provider];
                 const band = hoveredColumn?.bands.find((band) => band.provider === provider);
                 return (
-                  <div key={provider} className="mb-1 last:mb-0">
+                  <Fragment key={provider}>
                     <div className="flex items-center justify-between gap-3">
                       <span className="flex items-center gap-1.5 text-muted-foreground">
                         <ProviderInstanceIcon
@@ -438,37 +470,34 @@ export function UsageProviderChart({
                         />
                         {label}
                       </span>
-                      <span className="text-foreground tabular-nums">
+                      <span
+                        className={cn(
+                          "tabular-nums",
+                          loadingProviders.has(provider)
+                            ? "text-muted-foreground"
+                            : "text-foreground",
+                        )}
+                      >
                         {format(band?.value ?? 0)}
                       </span>
                     </div>
-                    {metric === "tokens" && (band?.thinking ?? 0) > 0 ? (
-                      <div className="ml-4.5 mt-0.5 flex flex-col gap-0.5 text-muted-foreground">
-                        <div className="flex justify-between gap-4">
-                          <span>Other tokens</span>
-                          <span className="tabular-nums">
-                            {formatTokens((band?.value ?? 0) - (band?.thinking ?? 0))}
-                          </span>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <span className="flex items-center gap-1.5">
-                            <span
-                              aria-hidden
-                              className="w-3 border-t-2 border-dashed"
-                              style={{ borderColor: providerThinkingColor(provider) }}
-                            />
-                            Thinking
-                          </span>
-                          <span className="tabular-nums">{formatTokens(band?.thinking ?? 0)}</span>
-                        </div>
+                    {(band?.thinking ?? 0) > 0 ? (
+                      <div className="flex items-center justify-between gap-3 pl-4.5 text-muted-foreground">
+                        <span>Thinking</span>
+                        <span className="tabular-nums">{formatTokens(band?.thinking ?? 0)}</span>
                       </div>
                     ) : null}
-                  </div>
+                  </Fragment>
                 );
               })}
               <div className="mt-1 flex items-center justify-between gap-3 border-t border-border pt-1">
                 <span className="text-muted-foreground">Total</span>
-                <span className="text-foreground tabular-nums">
+                <span
+                  className={cn(
+                    "tabular-nums",
+                    partial ? "text-muted-foreground" : "text-foreground",
+                  )}
+                >
                   {format(hoveredColumn?.total ?? 0)}
                 </span>
               </div>

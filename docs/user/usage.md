@@ -13,17 +13,13 @@ cost, split by token type and by speed. These estimates are not your subscriptio
 split, such as a provider-reported cost for a model without public rates, shows as **Other**.
 Select a model under **Breakdown** to see its trend, cache hit rate, and cost per million tokens.
 
-**Tokens** separates recorded **Thinking** from other tokens, using a softer shade of each
-provider's color. Thinking is part of output, so separating it does not increase totals or cost.
-Claude Code, Codex, Grok Build, OpenCode, and Antigravity can recover this split from existing
-history when it contains a separate count. Unreported thinking stays in **Output**; Cursor's
-account history does not provide a separate count. Pi and generic ACP history are not currently
-included on Usage.
+**Tokens** shows recorded **Thinking** separately, in a lighter shade of each provider's color.
+Thinking is part of output, so this does not change totals or cost. Thinking a provider does not
+report separately stays in **Output**.
 
-Totals depend on the history available on each server. Recovering previously missed Claude Code
-usage can increase historical output and estimated costs. Deleted transcripts keep their saved
-usage, but missing counts cannot be recovered without the original history. Grok turns without a
-saved completed-turn record are missing from the totals.
+Totals depend on the history available on each server. Claude Code history is re-read once to pick
+up its thinking counts and output it previously missed, which can raise past totals and estimated
+costs. Grok turns without a saved completed-turn record are missing from the totals.
 
 OpenCode reads its SQLite database and older JSON history. Antigravity reads local conversation
 databases, including T3-managed profiles. Set `OPENCODE_DATA_DIR` or `ANTIGRAVITY_DATA_DIR` on the
@@ -48,7 +44,8 @@ your app understands. Update the app to include newly supported providers.
 
 On web and desktop, use the environment dropdown to filter costs, tokens, and limits. All
 environments are selected by default. The dropdown shows which environments are still scanning;
-results appear as each one responds.
+results appear as each one responds, and figures still updating are dimmed. Cursor shows its last
+saved totals first, then updates them when Cursor's API responds.
 
 If recent work is missing or a new model shows no cost, refresh to rescan session history and
 update model pricing.

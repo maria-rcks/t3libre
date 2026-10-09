@@ -15,9 +15,14 @@
  * @module usageScanCache
  */
 import type { UsageProviderKind } from "@t3tools/contracts";
+import type {
+  TranscriptUsageFormat,
+  UsageRecord,
+  UsageSpeed,
+} from "@t3tools/provider-core/server/usage";
+import * as Schema from "effect/Schema";
 
 import { GUARD_LENGTH, type TranscriptParsePosition } from "./usageTranscriptReader.ts";
-import type { CodexScanState, UsageRecord, UsageSpeed } from "./usageTranscripts.ts";
 
 // v2: Codex fork-copy suppression changed what a file parses to, so v1
 // entries would keep serving double-counted records forever.
@@ -25,33 +30,25 @@ import type { CodexScanState, UsageRecord, UsageSpeed } from "./usageTranscripts
 // re-parses only its appended bytes instead of starting over.
 // v4: records carry Claude fast mode, which v3 rows never captured.
 // v5: Codex records carry their service tier. v4 rows store speed the same
-// way, so v4 entries still load; see `decodeScanCache` for v4 Codex entries.
-// v6: Claude records capture thinking tokens. Retain old records for deleted
-// transcripts, but re-parse available Claude files to recover the breakdown.
-// v7: retain Claude's fuller usage updates rather than its first content block.
-const USAGE_SCAN_CACHE_VERSION = 7 as const;
+// way, so v4 entries still load; see `decodeScanCache` for v4 stateful entries.
+// v6: Claude records keep their fullest usage snapshot and recorded thinking.
+const USAGE_SCAN_CACHE_VERSION = 6 as const;
 const SPEED_COMPATIBLE_SINCE_VERSION = 4;
 
 /**
  * Each cache version writes its own file in the state directory. An older
  * server sharing that directory cannot read a newer cache and would replace
  * it, dropping saved usage for deleted transcripts. Separate files keep both.
- * A new server combines retained legacy entries using each transcript's latest
- * cached modification time to resolve overlap, including after a downgrade.
+ * When its own file is missing, a server reads the newest older file once.
  */
-export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v7.json";
+export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v6.json";
 export const LEGACY_SCAN_CACHE_FILE_NAMES = [
-  "usage-scan-cache-v6.json",
   "usage-scan-cache-v5.json",
   "usage-scan-cache.json",
 ] as const;
 
 /** Serialised as the index into this list. */
 const SPEEDS: readonly UsageSpeed[] = ["standard", "fast", "ultrafast"];
-
-function isSpeed(value: unknown): value is UsageSpeed {
-  return SPEEDS.some((speed) => speed === value);
-}
 
 export interface CachedFile {
   readonly size: number;
@@ -100,8 +97,8 @@ interface SerializedFile {
   readonly o: number;
   readonly gl: number;
   readonly gh: number;
-  /** Codex reducer state at `o`; `null` for stateless providers. */
-  readonly cs: CodexScanState | null;
+  /** The format's encoded reducer state at `o`; `null` for stateless formats. */
+  readonly cs: unknown;
 }
 
 interface SerializedCache {
@@ -155,7 +152,7 @@ function serializeFile(entry: CachedFile, tables: InternTables): SerializedFile 
     o: entry.position.resumeOffset,
     gl: entry.position.guardLength,
     gh: entry.position.guardHash,
-    cs: entry.position.codexState,
+    cs: entry.position.state,
   };
 }
 
@@ -218,10 +215,15 @@ function isRecordArray(value: unknown): value is readonly unknown[] {
  * Rebuilds the cache from a parsed document.
  *
  * Anything malformed yields an empty cache rather than an error: a corrupt
- * cache should cost one cold scan, never a broken page.
+ * cache should cost one cold scan, never a broken page. Entries of a provider
+ * without a transcript format in `formats` are dropped.
  */
-export function decodeScanCache(document: unknown): ScanCache {
+export function decodeScanCache(
+  document: unknown,
+  formats: ReadonlyMap<UsageProviderKind, TranscriptUsageFormat<unknown>>,
+): ScanCache {
   const cache: ScanCache = new Map();
+  const isValidState = makeStateValidators(formats);
   if (typeof document !== "object" || document === null) return cache;
 
   const root = document as Partial<SerializedCache>;
@@ -308,7 +310,9 @@ export function decodeScanCache(document: unknown): ScanCache {
     if (typeof raw !== "object" || raw === null) continue;
     const entry = raw as Partial<SerializedFile>;
     if (typeof entry.s !== "number" || typeof entry.m !== "number") continue;
-    if (entry.p !== "claude" && entry.p !== "codex" && entry.p !== "grok") continue;
+    if (entry.p === undefined) continue;
+    const format = formats.get(entry.p);
+    if (format === undefined) continue;
     if (!isRecordArray(entry.r) || !isRecordArray(entry.t)) continue;
     // Position fields feed byte offsets and a Buffer allocation in the reader,
     // so anything outside their real ranges must reject the entry: a bogus
@@ -328,28 +332,35 @@ export function decodeScanCache(document: unknown): ScanCache {
     ) {
       continue;
     }
-    // Older Codex records lack service tiers; older Claude entries drop updates.
-    // Keep them for deleted transcripts, but re-parse available files whole:
-    // no file has size -1, and a zero position cannot resume.
-    const legacyCodex = entry.p === "codex" && version < 5;
-    const needsReparse = legacyCodex || (entry.p === "claude" && version < 7);
-    const codexState = legacyCodex ? null : decodeCodexState(entry.cs);
-    if (codexState === undefined) continue;
+    // v4 records of stateful formats (Codex) predate service tiers, and
+    // pre-v6 Claude records miss later usage snapshots. Keep them, because the
+    // transcript may be gone, but make a live one re-parse whole: no file has
+    // size -1, and a zero position cannot resume.
+    const legacy =
+      (format.state !== undefined && version < 5) || (entry.p === "claude" && version < 6);
+    // A corrupt state disqualifies the entry: resuming with it would attach
+    // appended usage to the wrong model or replay fork-copied history.
+    if (!legacy && !isValidState.get(entry.p)?.(entry.cs)) continue;
 
-    const provider: UsageProviderKind = entry.p;
+    const provider = entry.p;
     const records = decodeRecords(entry.r, provider);
     const tailRecords = decodeRecords(entry.t, provider);
     if (records === null || tailRecords === null) continue;
 
     cache.set(path, {
-      size: needsReparse ? -1 : entry.s,
+      size: legacy ? -1 : entry.s,
       mtimeMs: entry.m,
       provider,
       records,
       tailRecords,
-      position: needsReparse
-        ? { resumeOffset: 0, guardLength: 0, guardHash: 0, codexState: null }
-        : { resumeOffset: entry.o, guardLength: entry.gl, guardHash: entry.gh, codexState },
+      position: legacy
+        ? { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null }
+        : {
+            resumeOffset: entry.o,
+            guardLength: entry.gl,
+            guardHash: entry.gh,
+            state: entry.cs,
+          },
     });
   }
 
@@ -357,35 +368,21 @@ export function decodeScanCache(document: unknown): ScanCache {
 }
 
 /**
- * Validates a persisted Codex reducer state. Returns `undefined` for a corrupt
- * value, which disqualifies the entry: resuming with a bad state would attach
- * appended usage to the wrong model or replay fork-copied history.
+ * Per provider, whether a persisted state is valid: `null`, or one the
+ * format's schema accepts.
  */
-function decodeCodexState(value: unknown): CodexScanState | null | undefined {
-  if (value === null) return null;
-  if (typeof value !== "object") return undefined;
-  const state = value as Partial<CodexScanState>;
-  if (
-    typeof state.model !== "string" ||
-    !isSpeed(state.speed) ||
-    typeof state.sessionId !== "string" ||
-    (state.lastUsageSignature !== null && typeof state.lastUsageSignature !== "string") ||
-    typeof state.sawSessionMeta !== "boolean" ||
-    typeof state.suppressingForkCopies !== "boolean" ||
-    typeof state.forkCopyAnchorMs !== "number" ||
-    !Number.isFinite(state.forkCopyAnchorMs)
-  ) {
-    return undefined;
-  }
-  return {
-    model: state.model,
-    speed: state.speed,
-    sessionId: state.sessionId,
-    lastUsageSignature: state.lastUsageSignature ?? null,
-    sawSessionMeta: state.sawSessionMeta,
-    suppressingForkCopies: state.suppressingForkCopies,
-    forkCopyAnchorMs: state.forkCopyAnchorMs,
-  };
+function makeStateValidators(
+  formats: ReadonlyMap<UsageProviderKind, TranscriptUsageFormat<unknown>>,
+): ReadonlyMap<UsageProviderKind, (value: unknown) => boolean> {
+  return new Map(
+    [...formats].map(([provider, format]) => {
+      const isState = format.state === undefined ? undefined : Schema.is(format.state.schema);
+      return [
+        provider,
+        (value: unknown) => value === null || (isState !== undefined && isState(value)),
+      ] as const;
+    }),
+  );
 }
 
 /** Keeps saved usage after transcript cleanup, until the reporting retention expires. */
@@ -403,19 +400,25 @@ export function pruneScanCache(cache: ScanCache, retentionCutoffMs: number): num
 /**
  * Within-file de-duplication, applied before an entry is cached.
  *
- * Claude repeats cumulative message usage across content blocks. Keep the
- * fullest recorded snapshot, not the sum, and retain the first attribution.
+ * Callers stitching an incremental parse together pass one `seen` set across
+ * the line and tail record batches so the whole file stays deduplicated as a
+ * unit; the set is mutated in place.
  */
-export function dedupeWithinFile(records: readonly UsageRecord[]): readonly UsageRecord[] {
+export function dedupeWithinFile(
+  records: readonly UsageRecord[],
+  seen: Set<string> = new Set(),
+): readonly UsageRecord[] {
   const kept: UsageRecord[] = [];
   const indexes = new Map<string, number>();
   for (const record of records) {
     if (record.dedupeKey !== null) {
       const index = indexes.get(record.dedupeKey);
       if (index !== undefined) {
-        kept[index] = reconcileClaudeUsage(kept[index]!, record);
+        kept[index] = fullerClaudeSnapshot(kept[index]!, record);
         continue;
       }
+      if (seen.has(record.dedupeKey)) continue;
+      seen.add(record.dedupeKey);
       indexes.set(record.dedupeKey, kept.length);
     }
     kept.push(record);
@@ -423,35 +426,13 @@ export function dedupeWithinFile(records: readonly UsageRecord[]): readonly Usag
   return kept;
 }
 
-/** A stale fork copy must not replace a fuller snapshot of the same message. */
-export function reconcileClaudeUsage(previous: UsageRecord, next: UsageRecord): UsageRecord {
-  if (previous.provider !== "claude" || next.provider !== "claude") return previous;
-  const totals = { ...previous.totals };
-  let changed = false;
-  let billableChanged = false;
-  let matchesNext = true;
-  for (const key of Object.keys(totals) as (keyof typeof totals)[]) {
-    totals[key] = Math.max(totals[key], next.totals[key]);
-    changed ||= totals[key] !== previous.totals[key];
-    billableChanged ||= key !== "reasoningTokens" && totals[key] !== previous.totals[key];
-    matchesNext &&= key === "reasoningTokens" || totals[key] === next.totals[key];
-  }
-  // A matching snapshot can supply a missing cost even after counts stop changing.
-  // A partial snapshot still cannot price the reconciled billable totals.
-  const reportedCostUsd = billableChanged
-    ? matchesNext
-      ? next.reportedCostUsd
-      : null
-    : (previous.reportedCostUsd ?? (matchesNext ? next.reportedCostUsd : null));
-  if (!changed && reportedCostUsd === previous.reportedCostUsd) return previous;
-  return { ...previous, totals, reportedCostUsd };
-}
-
-/** The provisional tail can override a message without changing its resumable base. */
-export function cachedFileRecords(
-  entry: Pick<CachedFile, "records" | "tailRecords">,
-): readonly UsageRecord[] {
-  return entry.tailRecords.length === 0
-    ? entry.records
-    : dedupeWithinFile([...entry.records, ...entry.tailRecords]);
+/**
+ * Claude Code repeats a message's usage on every content block, and later
+ * blocks can carry fuller output and thinking counts. Keep the first block's
+ * attribution with the fullest snapshot; never sum the repeats.
+ */
+function fullerClaudeSnapshot(kept: UsageRecord, next: UsageRecord): UsageRecord {
+  return next.provider === "claude" && next.totals.outputTokens > kept.totals.outputTokens
+    ? { ...kept, totals: next.totals, reportedCostUsd: next.reportedCostUsd }
+    : kept;
 }

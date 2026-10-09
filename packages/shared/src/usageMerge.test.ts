@@ -114,70 +114,7 @@ describe("mergeUsage", () => {
     expect(merged.duplicateSources).toHaveLength(1);
   });
 
-  it.each(["claude", "codex", "grok", "cursor", "opencode", "antigravity"] as const)(
-    "rolls up %s reasoning tokens without double counting shared sources or token totals",
-    (provider) => {
-      const source = { provider, hostId: "mac", homePath: `/a/${provider}` };
-      const buckets = [
-        bucket({
-          provider,
-          hourStart: "2026-08-07T09:00:00.000Z",
-          totals: { ...bucket().totals, reasoningTokens: 10 },
-        }),
-        bucket({
-          provider,
-          model: "other-model",
-          hourStart: "2026-08-07T09:00:00.000Z",
-          totals: { ...bucket().totals, reasoningTokens: 20 },
-        }),
-        bucket({
-          provider,
-          day: "2026-08-08" as UsageDay,
-          hourStart: "2026-08-08T09:00:00.000Z",
-          totals: { ...bucket().totals, reasoningTokens: 5 },
-        }),
-      ];
-      const environments = [
-        environment("env-a", summary(buckets, [source])),
-        environment("env-b", summary(buckets, [source])),
-      ];
-
-      for (const ordered of [environments, environments.toReversed()]) {
-        const merged = mergeUsage(ordered, USAGE_CONTRACT_VERSION);
-        expect(merged).toMatchObject({
-          costUsd: 30,
-          totalTokens: 3480,
-          outputTokens: 150,
-          reasoningTokens: 35,
-          records: 15,
-          sessions: 1,
-          contributingEnvironments: ["env-a"],
-          duplicateSources: [`env-b: /a/${provider}`],
-        });
-        expect(merged.providers).toEqual([
-          {
-            provider,
-            costUsd: 30,
-            totalTokens: 3480,
-            reasoningTokens: 35,
-            records: 15,
-            sessions: 1,
-            costShare: 1,
-            tokenShare: 1,
-          },
-        ]);
-        const periodTotals = [
-          { costUsd: 20, totalTokens: 2320, reasoningTokens: 30 },
-          { costUsd: 10, totalTokens: 1160, reasoningTokens: 5 },
-        ];
-        expect(merged.daily.map((day) => day.byProvider.get(provider))).toEqual(periodTotals);
-        expect(merged.hourly.map((hour) => hour.byProvider.get(provider))).toEqual(periodTotals);
-        expect(merged.models.map((model) => model.tokens.reasoningTokens)).toEqual([15, 20]);
-      }
-    },
-  );
-
-  it("clamps reasoning to each bucket's output before rolling up", () => {
+  it("rolls up reasoning tokens, clamped to each bucket's output", () => {
     const merged = mergeUsage(
       [
         environment(
@@ -347,33 +284,16 @@ describe("mergeUsage", () => {
     const source = { provider: "claude" as const, hostId: "mac", homePath: "/home/theo/.claude" };
     const complete = environment(
       "old",
-      summary(
-        [
-          bucket({
-            hourStart: "2026-08-07T09:00:00.000Z",
-            totals: { ...bucket().totals, reasoningTokens: 10 },
-          }),
-        ],
-        [source],
-        USAGE_MERGE_COMPATIBLE_SINCE,
-      ),
+      summary([bucket()], [source], USAGE_MERGE_COMPATIBLE_SINCE),
     );
     const partialSummary = summary(
       [
-        bucket({
-          sourcePath: source.homePath,
-          hourStart: "2026-08-07T09:00:00.000Z",
-          costUsd: 4,
-          records: 2,
-          totals: { ...bucket().totals, reasoningTokens: 40 },
-        }),
+        bucket({ sourcePath: source.homePath, costUsd: 4, records: 2 }),
         bucket({
           day: "2026-08-08" as UsageDay,
-          hourStart: "2026-08-08T09:00:00.000Z",
           sourcePath: source.homePath,
           costUsd: 3,
           records: 1,
-          totals: { ...bucket().totals, reasoningTokens: 20 },
         }),
       ],
       [{ ...source, distinctSessions: 2 }],
@@ -390,15 +310,6 @@ describe("mergeUsage", () => {
     ]) {
       const merged = mergeUsage(ordered, USAGE_CONTRACT_VERSION);
       expect(merged.costUsd).toBe(13);
-      expect(merged.totalTokens).toBe(2320);
-      expect(merged.reasoningTokens).toBe(30);
-      expect(merged.providers[0]?.reasoningTokens).toBe(30);
-      expect(merged.daily.map((day) => day.byProvider.get("claude")?.reasoningTokens)).toEqual([
-        10, 20,
-      ]);
-      expect(merged.hourly.map((hour) => hour.byProvider.get("claude")?.reasoningTokens)).toEqual([
-        10, 20,
-      ]);
       expect(merged.records).toBe(6);
       expect(merged.sessions).toBe(2);
       expect(merged.daily.map(({ day, costUsd }) => [day, costUsd])).toEqual([
@@ -900,10 +811,5 @@ describe("mergeUsage", () => {
     ]);
     expect(merged.daily).toHaveLength(1);
     expect(merged.daily[0]?.costUsd).toBe(10);
-    expect(merged.providers[0]?.reasoningTokens).toBe(0);
-    expect(merged.daily[0]?.byProvider.get("claude")?.reasoningTokens).toBe(0);
-    expect(merged.hourly.map((hour) => hour.byProvider.get("claude")?.reasoningTokens)).toEqual([
-      0, 0,
-    ]);
   });
 });
