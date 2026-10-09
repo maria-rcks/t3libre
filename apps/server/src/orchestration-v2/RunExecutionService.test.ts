@@ -1060,203 +1060,201 @@ it.effect.each([
   "start-guard",
   "late-start-guard",
   "baseline-interruption",
-] as const)(
-  "handles %s before the provider turn starts",
-  (scenario) =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("thread:run-execution-settings-failure");
-      const runId = RunId.make("run:run-execution-settings-failure");
-      const attemptId = RunAttemptId.make("attempt:run-execution-settings-failure");
-      const providerInstanceId = ProviderInstanceId.make("codex");
-      const providerSessionId = ProviderSessionId.make("session:run-execution-settings-failure");
-      const providerThreadId = ProviderThreadId.make(
-        "provider-thread:run-execution-settings-failure",
-      );
-      const rootNodeId = NodeId.make("node:run-execution-settings-failure");
-      const checkpointScope = {
-        id: CheckpointScopeId.make("checkpoint-scope:run-execution-settings-failure"),
-      } as OrchestrationV2CheckpointScope;
-      const providerStarts = yield* Ref.make(0);
-      const preparations = yield* Ref.make(0);
-      const preparationCloses = yield* Ref.make(0);
-      const preparationStarted = yield* Deferred.make<void>();
-      const startGuards = yield* Ref.make(0);
-      const prepares =
-        scenario === "start-guard" ||
-        scenario === "late-start-guard" ||
-        scenario === "baseline-interruption";
-      const refreshes = yield* Ref.make(0);
-      const guardedWrites = yield* Ref.make(0);
-      const writes = yield* Ref.make<ReadonlyArray<ReadonlyArray<OrchestrationV2DomainEvent>>>([]);
-      const layerTest = RunExecutionService.layer.pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            McpAppModelContext.layerEmpty,
-            Layer.mock(CheckpointService.CheckpointServiceV2)({
-              captureBaseline: () =>
-                scenario === "baseline-interruption"
-                  ? Deferred.await(preparationStarted).pipe(Effect.andThen(Effect.interrupt))
-                  : prepares
-                    ? Effect.void
-                    : Effect.die("not reached"),
-            }),
-            Layer.mock(EventSink.EventSinkV2)({
-              writeIfRunCurrent: (input) =>
-                Effect.gen(function* () {
-                  assert.equal(input.threadId, threadId);
-                  assert.equal(input.runId, runId);
-                  assert.equal(input.activeAttemptId, attemptId);
-                  assert.equal(input.expectedStatus, "running");
-                  yield* Ref.update(guardedWrites, (count) => count + 1);
-                  if (scenario === "stale-attempt") {
-                    return { committed: false, storedEvents: [] };
-                  }
-                  yield* Ref.update(writes, (current) => [...current, input.events]);
-                  return { committed: true, storedEvents: [] };
-                }),
-            }),
-            IdAllocator.layer,
-            Layer.mock(ProviderEventIngestor.ProviderEventIngestorV2)({
-              ingestNormalized: () => Effect.succeed([]),
-            }),
-            prepares
-              ? ServerSettings.layerTest()
-              : Layer.mock(ServerSettings.ServerSettingsService)({
-                  getSettings:
-                    scenario === "interruption"
-                      ? Effect.interrupt
-                      : Effect.fail(
-                          new ServerSettingsError({
-                            settingsPath: "<test>",
-                            operation: "read-file",
-                            cause: new Error("settings read failed"),
-                          }),
-                        ),
-                }),
-            Layer.succeed(RunFinalizationService.RunFinalizationObserver, {
-              refresh: () => Effect.void,
-              refreshAfterTurn: () => Ref.update(refreshes, (count) => count + 1),
-            }),
-          ),
+] as const)("handles %s before the provider turn starts", (scenario) =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread:run-execution-settings-failure");
+    const runId = RunId.make("run:run-execution-settings-failure");
+    const attemptId = RunAttemptId.make("attempt:run-execution-settings-failure");
+    const providerInstanceId = ProviderInstanceId.make("codex");
+    const providerSessionId = ProviderSessionId.make("session:run-execution-settings-failure");
+    const providerThreadId = ProviderThreadId.make(
+      "provider-thread:run-execution-settings-failure",
+    );
+    const rootNodeId = NodeId.make("node:run-execution-settings-failure");
+    const checkpointScope = {
+      id: CheckpointScopeId.make("checkpoint-scope:run-execution-settings-failure"),
+    } as OrchestrationV2CheckpointScope;
+    const providerStarts = yield* Ref.make(0);
+    const preparations = yield* Ref.make(0);
+    const preparationCloses = yield* Ref.make(0);
+    const preparationStarted = yield* Deferred.make<void>();
+    const startGuards = yield* Ref.make(0);
+    const prepares =
+      scenario === "start-guard" ||
+      scenario === "late-start-guard" ||
+      scenario === "baseline-interruption";
+    const refreshes = yield* Ref.make(0);
+    const guardedWrites = yield* Ref.make(0);
+    const writes = yield* Ref.make<ReadonlyArray<ReadonlyArray<OrchestrationV2DomainEvent>>>([]);
+    const layerTest = RunExecutionService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          McpAppModelContext.layerEmpty,
+          Layer.mock(CheckpointService.CheckpointServiceV2)({
+            captureBaseline: () =>
+              scenario === "baseline-interruption"
+                ? Deferred.await(preparationStarted).pipe(Effect.andThen(Effect.interrupt))
+                : prepares
+                  ? Effect.void
+                  : Effect.die("not reached"),
+          }),
+          Layer.mock(EventSink.EventSinkV2)({
+            writeIfRunCurrent: (input) =>
+              Effect.gen(function* () {
+                assert.equal(input.threadId, threadId);
+                assert.equal(input.runId, runId);
+                assert.equal(input.activeAttemptId, attemptId);
+                assert.equal(input.expectedStatus, "running");
+                yield* Ref.update(guardedWrites, (count) => count + 1);
+                if (scenario === "stale-attempt") {
+                  return { committed: false, storedEvents: [] };
+                }
+                yield* Ref.update(writes, (current) => [...current, input.events]);
+                return { committed: true, storedEvents: [] };
+              }),
+          }),
+          IdAllocator.layer,
+          Layer.mock(ProviderEventIngestor.ProviderEventIngestorV2)({
+            ingestNormalized: () => Effect.succeed([]),
+          }),
+          prepares
+            ? ServerSettings.layerTest()
+            : Layer.mock(ServerSettings.ServerSettingsService)({
+                getSettings:
+                  scenario === "interruption"
+                    ? Effect.interrupt
+                    : Effect.fail(
+                        new ServerSettingsError({
+                          settingsPath: "<test>",
+                          operation: "read-file",
+                          cause: new Error("settings read failed"),
+                        }),
+                      ),
+              }),
+          Layer.succeed(RunFinalizationService.RunFinalizationObserver, {
+            refresh: () => Effect.void,
+            refreshAfterTurn: () => Ref.update(refreshes, (count) => count + 1),
+          }),
         ),
-      );
+      ),
+    );
 
-      const result = yield* Effect.gen(function* () {
-        const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
-        yield* runExecution.startRootRun({
-          commandId: CommandId.make("command:run-execution-settings-failure"),
-          appThread: { id: threadId } as OrchestrationV2AppThread,
-          providerSessionId,
-          session: {
-            events: Stream.never,
-            prepareTurn: () =>
-              Effect.acquireRelease(
-                Ref.update(preparations, (count) => count + 1).pipe(
-                  Effect.andThen(Deferred.succeed(preparationStarted, undefined)),
+    const result = yield* Effect.gen(function* () {
+      const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
+      yield* runExecution.startRootRun({
+        commandId: CommandId.make("command:run-execution-settings-failure"),
+        appThread: { id: threadId } as OrchestrationV2AppThread,
+        providerSessionId,
+        session: {
+          events: Stream.never,
+          prepareTurn: () =>
+            Effect.acquireRelease(
+              Ref.update(preparations, (count) => count + 1).pipe(
+                Effect.andThen(Deferred.succeed(preparationStarted, undefined)),
+              ),
+              () => Ref.update(preparationCloses, (count) => count + 1),
+            ).pipe(Effect.asVoid),
+          startTurn: () => Ref.update(providerStarts, (count) => count + 1),
+        } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime,
+        run: {
+          id: runId,
+          threadId,
+          ordinal: 1,
+          providerInstanceId,
+          status: "running",
+        } as OrchestrationV2Run,
+        rootNode: { id: rootNodeId, status: "running" } as OrchestrationV2ExecutionNode,
+        checkpointScope,
+        providerThread: {
+          id: providerThreadId,
+          driver,
+        } as OrchestrationV2ProviderThread,
+        attempt: {
+          id: attemptId,
+          providerTurnId: null,
+          status: "running",
+        } as OrchestrationV2RunAttempt,
+        attemptId,
+        providerTurnOrdinal: 1,
+        // A declined start is a normal exit, not a preparation failure.
+        ...(scenario === "start-guard" || scenario === "late-start-guard"
+          ? {
+              shouldStartProviderTurn: () =>
+                Ref.updateAndGet(startGuards, (count) => count + 1).pipe(
+                  Effect.map((count) => scenario === "late-start-guard" && count === 1),
                 ),
-                () => Ref.update(preparationCloses, (count) => count + 1),
-              ).pipe(Effect.asVoid),
-            startTurn: () => Ref.update(providerStarts, (count) => count + 1),
-          } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime,
-          run: {
-            id: runId,
-            threadId,
-            ordinal: 1,
-            providerInstanceId,
-            status: "running",
-          } as OrchestrationV2Run,
-          rootNode: { id: rootNodeId, status: "running" } as OrchestrationV2ExecutionNode,
-          checkpointScope,
-          providerThread: {
-            id: providerThreadId,
-            driver,
-          } as OrchestrationV2ProviderThread,
-          attempt: {
-            id: attemptId,
-            providerTurnId: null,
-            status: "running",
-          } as OrchestrationV2RunAttempt,
-          attemptId,
-          providerTurnOrdinal: 1,
-          // A declined start is a normal exit, not a preparation failure.
-          ...(scenario === "start-guard" || scenario === "late-start-guard"
-            ? {
-                shouldStartProviderTurn: () =>
-                  Ref.updateAndGet(startGuards, (count) => count + 1).pipe(
-                    Effect.map((count) => scenario === "late-start-guard" && count === 1),
-                  ),
-              }
-            : {}),
-          message: {
-            messageId: MessageId.make("message:run-execution-settings-failure"),
-            text: "Start after settings fail.",
-            attachments: [],
-            createdBy: "user",
-            creationSource: "web",
+            }
+          : {}),
+        message: {
+          messageId: MessageId.make("message:run-execution-settings-failure"),
+          text: "Start after settings fail.",
+          attachments: [],
+          createdBy: "user",
+          creationSource: "web",
+        },
+        modelSelection: { instanceId: providerInstanceId, model: "gpt-5.4" },
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+          approvalPolicy: "never",
+          sandboxPolicy: {
+            type: "readOnly",
+            access: { type: "fullAccess" },
+            networkAccess: false,
           },
-          modelSelection: { instanceId: providerInstanceId, model: "gpt-5.4" },
-          runtimePolicy: {
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            cwd: process.cwd(),
-            approvalPolicy: "never",
-            sandboxPolicy: {
-              type: "readOnly",
-              access: { type: "fullAccess" },
-              networkAccess: false,
-            },
-          },
-        });
-      }).pipe(Effect.provide(layerTest), Effect.exit);
+        },
+      });
+    }).pipe(Effect.provide(layerTest), Effect.exit);
 
-      assert.equal(yield* Ref.get(providerStarts), 0);
-      assert.equal(yield* Ref.get(preparations), prepares ? 1 : 0);
-      assert.equal(yield* Ref.get(preparationCloses), prepares ? 1 : 0);
-      const events = (yield* Ref.get(writes)).flat();
-      if (scenario === "interruption" || scenario === "baseline-interruption") {
-        assert.isTrue(Exit.isFailure(result));
-        if (Exit.isFailure(result)) assert.isTrue(Cause.hasInterruptsOnly(result.cause));
-        assert.equal(yield* Ref.get(guardedWrites), 0);
-        assert.equal(yield* Ref.get(refreshes), 0);
-        assert.isEmpty(events);
-        return;
-      }
-      assert.isTrue(Exit.isSuccess(result));
-      if (scenario === "start-guard" || scenario === "late-start-guard") {
-        assert.equal(yield* Ref.get(startGuards), scenario === "late-start-guard" ? 2 : 1);
-        assert.equal(yield* Ref.get(guardedWrites), 0);
-        assert.equal(yield* Ref.get(refreshes), 0);
-        assert.isEmpty(events);
-        return;
-      }
-      assert.equal(yield* Ref.get(guardedWrites), 1);
-      if (scenario === "stale-attempt") {
-        assert.equal(yield* Ref.get(refreshes), 0);
-        assert.isEmpty(events);
-        return;
-      }
-      assert.equal(yield* Ref.get(refreshes), 1);
-      assert.deepEqual(
-        events
-          .filter(
-            (event) =>
-              event.type === "run.updated" ||
-              event.type === "run-attempt.updated" ||
-              event.type === "node.updated",
-          )
-          .map((event) => event.payload.status),
-        ["failed", "failed", "failed"],
-      );
-      const errorItem = events.find(
-        (event) => event.type === "turn-item.updated" && event.payload.type === "error",
-      );
-      assert.isDefined(errorItem);
-      if (errorItem?.type === "turn-item.updated" && errorItem.payload.type === "error") {
-        // The persisted item carries a bounded curated message; the exact
-        // underlying text stays in the logged cause.
-        assert.equal(errorItem.payload.failure.message, "Run preparation failed.");
-      }
-    }),
+    assert.equal(yield* Ref.get(providerStarts), 0);
+    assert.equal(yield* Ref.get(preparations), prepares ? 1 : 0);
+    assert.equal(yield* Ref.get(preparationCloses), prepares ? 1 : 0);
+    const events = (yield* Ref.get(writes)).flat();
+    if (scenario === "interruption" || scenario === "baseline-interruption") {
+      assert.isTrue(Exit.isFailure(result));
+      if (Exit.isFailure(result)) assert.isTrue(Cause.hasInterruptsOnly(result.cause));
+      assert.equal(yield* Ref.get(guardedWrites), 0);
+      assert.equal(yield* Ref.get(refreshes), 0);
+      assert.isEmpty(events);
+      return;
+    }
+    assert.isTrue(Exit.isSuccess(result));
+    if (scenario === "start-guard" || scenario === "late-start-guard") {
+      assert.equal(yield* Ref.get(startGuards), scenario === "late-start-guard" ? 2 : 1);
+      assert.equal(yield* Ref.get(guardedWrites), 0);
+      assert.equal(yield* Ref.get(refreshes), 0);
+      assert.isEmpty(events);
+      return;
+    }
+    assert.equal(yield* Ref.get(guardedWrites), 1);
+    if (scenario === "stale-attempt") {
+      assert.equal(yield* Ref.get(refreshes), 0);
+      assert.isEmpty(events);
+      return;
+    }
+    assert.equal(yield* Ref.get(refreshes), 1);
+    assert.deepEqual(
+      events
+        .filter(
+          (event) =>
+            event.type === "run.updated" ||
+            event.type === "run-attempt.updated" ||
+            event.type === "node.updated",
+        )
+        .map((event) => event.payload.status),
+      ["failed", "failed", "failed"],
+    );
+    const errorItem = events.find(
+      (event) => event.type === "turn-item.updated" && event.payload.type === "error",
+    );
+    assert.isDefined(errorItem);
+    if (errorItem?.type === "turn-item.updated" && errorItem.payload.type === "error") {
+      // The persisted item carries a bounded curated message; the exact
+      // underlying text stays in the logged cause.
+      assert.equal(errorItem.payload.failure.message, "Run preparation failed.");
+    }
+  }),
 );
 
 it.effect("keeps ingesting owned child events after the root turn terminalizes", () =>
