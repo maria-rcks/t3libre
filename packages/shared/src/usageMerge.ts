@@ -7,7 +7,6 @@
  * @module usageMerge
  */
 import {
-  USAGE_CODEX_MERGE_COMPATIBLE_SINCE,
   USAGE_MERGE_COMPATIBLE_SINCE,
   type EnvironmentId,
   type UsageBucket,
@@ -110,7 +109,6 @@ export interface UsageContractMismatch {
   readonly environmentId: EnvironmentId;
   readonly direction: "serverBehind" | "clientBehind";
   readonly contractVersion: number;
-  readonly provider?: "codex";
 }
 
 export interface MergedUsage {
@@ -316,35 +314,8 @@ function bucketTokens(bucket: UsageBucket): number {
   );
 }
 
-function isCompatibleUsageContractVersion(version: number, expected: number): boolean {
+export function isCompatibleUsageContractVersion(version: number, expected: number): boolean {
   return version >= USAGE_MERGE_COMPATIBLE_SINCE && version <= expected;
-}
-
-export function getUsageContractMismatch(
-  summary: UsageSummary,
-  expected: number,
-): Omit<UsageContractMismatch, "environmentId"> | null {
-  if (!isCompatibleUsageContractVersion(summary.contractVersion, expected)) {
-    return {
-      direction: summary.contractVersion < expected ? "serverBehind" : "clientBehind",
-      contractVersion: summary.contractVersion,
-    };
-  }
-  if (
-    expected >= USAGE_CODEX_MERGE_COMPATIBLE_SINCE &&
-    summary.contractVersion < USAGE_CODEX_MERGE_COMPATIBLE_SINCE &&
-    (summary.buckets.some((bucket) => bucket.provider === "codex") ||
-      summary.sources.some(
-        (source) => source.fingerprint.provider === "codex" && source.distinctSessions > 0,
-      ))
-  ) {
-    return {
-      direction: "serverBehind",
-      contractVersion: summary.contractVersion,
-      provider: "codex",
-    };
-  }
-  return null;
 }
 
 const EMPTY_MERGED: MergedUsage = {
@@ -380,9 +351,8 @@ const EMPTY_MERGED: MergedUsage = {
  * `expectedContractVersion` guards against incompatible server code: rather
  * than blocking the page, its data is excluded and the mismatch direction is
  * reported so the UI can identify which side needs updating. Versions in
- * [{@link USAGE_MERGE_COMPATIBLE_SINCE}, expected] still merge. Codex requires
- * v7 home ownership: older cached sessions cannot be reconciled with archives
- * after the sessions directory (and its filesystem identity) has been removed.
+ * [{@link USAGE_MERGE_COMPATIBLE_SINCE}, expected] still merge, so an additive
+ * provider expansion does not drop Claude/Codex totals from older servers.
  */
 export function mergeUsage(
   environments: readonly EnvironmentUsage[],
@@ -393,25 +363,18 @@ export function mergeUsage(
   const current: EnvironmentUsage[] = [];
   const contractMismatches: UsageContractMismatch[] = [];
   for (const environment of environments) {
-    const mismatch = getUsageContractMismatch(environment.summary, expectedContractVersion);
-    if (mismatch?.provider === "codex") {
-      current.push({
-        ...environment,
-        summary: {
-          ...environment.summary,
-          buckets: environment.summary.buckets.filter((bucket) => bucket.provider !== "codex"),
-          sources: environment.summary.sources.filter(
-            (source) => source.fingerprint.provider !== "codex",
-          ),
-        },
-      });
-    } else if (mismatch === null) {
+    if (
+      isCompatibleUsageContractVersion(environment.summary.contractVersion, expectedContractVersion)
+    ) {
       current.push(environment);
-    }
-    if (mismatch !== null) {
+    } else {
       contractMismatches.push({
         environmentId: environment.environmentId,
-        ...mismatch,
+        direction:
+          environment.summary.contractVersion < expectedContractVersion
+            ? "serverBehind"
+            : "clientBehind",
+        contractVersion: environment.summary.contractVersion,
       });
     }
   }

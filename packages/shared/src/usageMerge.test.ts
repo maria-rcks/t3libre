@@ -383,7 +383,7 @@ describe("mergeUsage", () => {
     ]);
   });
 
-  it("keeps unrelated providers from older servers while reporting incompatible Codex ownership", () => {
+  it("keeps the previous compatible contract version so additive provider expansions still merge", () => {
     const merged = mergeUsage(
       [
         environment(
@@ -396,73 +396,16 @@ describe("mergeUsage", () => {
         environment(
           "env-b",
           summary(
-            [
-              bucket({ costUsd: 4, provider: "codex", model: "gpt-5.6-sol" }),
-              ...(["claude", "grok", "cursor", "opencode", "antigravity"] as const).map(
-                (provider) => bucket({ provider, sourcePath: `/b/${provider}`, costUsd: 2 }),
-              ),
-            ],
-            [
-              { provider: "codex", hostId: "linux", homePath: "/b" },
-              ...(["claude", "grok", "cursor", "opencode", "antigravity"] as const).map(
-                (provider) => ({ provider, hostId: "linux", homePath: `/b/${provider}` }),
-              ),
-            ],
-            6,
+            [bucket({ costUsd: 4, provider: "codex", model: "gpt-5.6-sol" })],
+            [{ provider: "codex", hostId: "linux", homePath: "/b" }],
+            USAGE_CONTRACT_VERSION - 1,
           ),
         ),
       ],
       USAGE_CONTRACT_VERSION,
     );
 
-    expect(merged.costUsd).toBe(20);
-    expect(merged.sessions).toBe(6);
-    expect(merged.records).toBe(30);
-    expect(merged.providers.map((provider) => provider.provider).sort()).toEqual([
-      "antigravity",
-      "claude",
-      "cursor",
-      "grok",
-      "opencode",
-    ]);
-    expect(merged.contractMismatches).toEqual([
-      { environmentId: "env-b", direction: "serverBehind", contractVersion: 6, provider: "codex" },
-    ]);
-  });
-
-  it("keeps legacy Codex on older clients and excludes newer summaries with an update notice", () => {
-    const source = { provider: "codex" as const, hostId: "mac", homePath: "/codex/sessions" };
-    const merged = mergeUsage(
-      [
-        environment("legacy", summary([bucket({ provider: "codex" })], [source], 6)),
-        environment("current", summary([bucket({ provider: "codex" })], [source])),
-      ],
-      6,
-    );
-    expect(merged.costUsd).toBe(10);
-    expect(merged.sessions).toBe(1);
-    expect(merged.contributingEnvironments).toEqual(["legacy"]);
-    expect(merged.contractMismatches).toEqual([
-      {
-        environmentId: "current",
-        direction: "clientBehind",
-        contractVersion: USAGE_CONTRACT_VERSION,
-      },
-    ]);
-  });
-
-  it("does not request an update when an older server has no Codex usage", () => {
-    const usage = summary(
-      [bucket()],
-      [
-        { provider: "claude", hostId: "mac", homePath: "/claude" },
-        { provider: "codex", hostId: "mac", homePath: "/codex/sessions", distinctSessions: 0 },
-      ],
-      6,
-    );
-    const merged = mergeUsage([environment("legacy", usage)], USAGE_CONTRACT_VERSION);
-    expect(merged.costUsd).toBe(10);
-    expect(merged.sessions).toBe(1);
+    expect(merged.costUsd).toBe(14);
     expect(merged.contractMismatches).toEqual([]);
   });
 
@@ -725,30 +668,21 @@ describe("mergeUsage", () => {
     expect(merged.models.map((model) => model.model)).toEqual(["higher-cost", "lower-cost"]);
   });
 
-  it.each(["claude", "codex"] as const)(
-    "keeps two %s machines apart when hostname and home path collide",
-    (provider) => {
-      // Every Mac resolves /Users/theo/.claude, so a hostname clash used to make
-      // one machine's usage vanish. Filesystem identity separates them.
-      const shape = { provider, hostId: "mac", homePath: `/Users/theo/.${provider}` };
-      const merged = mergeUsage(
-        [
-          environment(
-            "env-a",
-            summary([bucket({ provider })], [{ ...shape, volumeId: "16777220:1234" }]),
-          ),
-          environment(
-            "env-b",
-            summary([bucket({ provider })], [{ ...shape, volumeId: "16777221:9999" }]),
-          ),
-        ],
-        USAGE_CONTRACT_VERSION,
-      );
+  it("keeps two machines apart when hostname and home path collide", () => {
+    // Every Mac resolves /Users/theo/.claude, so a hostname clash used to make
+    // one machine's usage vanish. Filesystem identity separates them.
+    const shape = { provider: "claude" as const, hostId: "mac", homePath: "/Users/theo/.claude" };
+    const merged = mergeUsage(
+      [
+        environment("env-a", summary([bucket()], [{ ...shape, volumeId: "16777220:1234" }])),
+        environment("env-b", summary([bucket()], [{ ...shape, volumeId: "16777221:9999" }])),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
 
-      expect(merged.costUsd).toBe(20);
-      expect(merged.duplicateSources).toHaveLength(0);
-    },
-  );
+    expect(merged.costUsd).toBe(20);
+    expect(merged.duplicateSources).toHaveLength(0);
+  });
 
   it("still collapses two servers reading the same directory", () => {
     const same = {

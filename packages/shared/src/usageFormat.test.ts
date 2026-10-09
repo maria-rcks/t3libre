@@ -7,7 +7,6 @@ import {
   formatHourShort,
   formatPercent,
   formatRelativeHourShort,
-  formatUsageContractMismatch,
   makeWindow,
 } from "./usageFormat.ts";
 
@@ -19,22 +18,6 @@ describe("formatPercent", () => {
     expect(formatPercent(0.001)).toBe("0.1%");
     expect(formatPercent(0.023)).toBe("2.3%");
     expect(formatPercent(0.00004, 2)).toBe("<0.01%");
-  });
-});
-
-describe("usage compatibility notice", () => {
-  it("explains Codex-only exclusion without claiming other providers were excluded", () => {
-    expect(
-      formatUsageContractMismatch("workstation", { direction: "serverBehind", provider: "codex" }),
-    ).toBe(
-      "Update the server on workstation to include its Codex usage; other providers remain in totals.",
-    );
-    expect(formatUsageContractMismatch("workstation", { direction: "serverBehind" })).toBe(
-      "workstation runs an older server version and is excluded from totals.",
-    );
-    expect(formatUsageContractMismatch("workstation", { direction: "clientBehind" })).toBe(
-      "This client is older than the server on workstation; its usage is excluded from totals.",
-    );
   });
 });
 

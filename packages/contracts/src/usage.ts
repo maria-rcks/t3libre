@@ -14,25 +14,22 @@ import * as Schema from "effect/Schema";
 import { ForwardCompatibleArray, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
- * Bumped when the shape or source ownership of {@link UsageSummary} changes
- * incompatibly. The client renders partial coverage for an older version
+ * Bumped whenever the shape of {@link UsageSummary} changes incompatibly. The
+ * client renders partial coverage when an environment reports an older version
  * rather than failing the whole page.
  * Adding providers or other array-element variants is additive: unknown
  * entries are skipped on decode and do not require a version bump. So are
  * optional bucket fields, which older clients ignore.
  */
-export const USAGE_CONTRACT_VERSION = 7 as const;
+export const USAGE_CONTRACT_VERSION = 6 as const;
 
 /**
  * Oldest {@link UsageSummary} version a current client will still merge.
  *
- * v5/v6 add providers and optional source attribution. v7 identifies Codex
- * active and archived rollouts by their shared home; earlier Codex sources
- * cannot merge safely, while other providers retain v4 compatibility.
+ * v5/v6 add providers and optional source attribution; v4 Claude/Codex
+ * buckets remain valid in mixed-version environments.
  */
 export const USAGE_MERGE_COMPATIBLE_SINCE = 4 as const;
-
-export const USAGE_CODEX_MERGE_COMPATIBLE_SINCE = 7 as const;
 
 export const UsageProviderKind = Schema.Literals([
   "claude",
@@ -155,8 +152,7 @@ export const UsageSourceFingerprint = Schema.Struct({
   provider: UsageProviderKind,
   resolvedHomePath: TrimmedNonEmptyString,
   /**
-   * Filesystem identity of the source root, as `device:inode`. Codex uses the
-   * shared home containing active and archived transcript directories.
+   * Filesystem identity of the transcript directory, as `device:inode`.
    *
    * Hostname and path alone are not enough: every Mac in a fleet resolves
    * `/Users/<user>/.claude`, so two machines that happen to share a hostname
@@ -187,6 +183,12 @@ export const UsageSource = Schema.Struct({
   message: Schema.NullOr(TrimmedNonEmptyString),
   /** An action the client can offer to make this source available. */
   action: Schema.optionalKey(Schema.Literal("enableCursorKeychain")),
+  /**
+   * Present when this source answered from its cache while a slow refresh (an
+   * account API, for example) runs. Repeat the request with `awaitRefresh` to
+   * get the refreshed source.
+   */
+  refreshing: Schema.optionalKey(Schema.Literal(true)),
 });
 export type UsageSource = typeof UsageSource.Type;
 
@@ -221,6 +223,12 @@ export const UsageSummaryInput = Schema.Struct({
   sinceTime: Schema.optional(TrimmedNonEmptyString),
   /** Exclusive UTC instant for an hourly rolling window. */
   untilTime: Schema.optional(TrimmedNonEmptyString),
+  /**
+   * Wait for slow sources to finish refreshing instead of answering from their
+   * cache. Clients send it as the follow-up to a summary with a `refreshing`
+   * source. Older servers ignore it and always wait.
+   */
+  awaitRefresh: Schema.optional(Schema.Boolean),
 });
 export type UsageSummaryInput = typeof UsageSummaryInput.Type;
 
