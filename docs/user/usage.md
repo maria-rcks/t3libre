@@ -34,18 +34,17 @@ variable. Use absolute paths or `~/` paths in the account's environment settings
 environment paths depend on each project's working directory and cannot be reliably discovered
 by Usage. Accounts sharing a history directory count once.
 
-The server saves its first hostname in `<T3 home>/usage-host-id` so container recreates keep
-the same usage identity. Persist T3 home alongside provider history. To assign a stable identity
-across containers or T3 homes that share history, set `T3CODE_HOST_ID` on each server. Use the
-same value for servers sharing history and different values for separate hosts. The override
-does not change the saved identity; removing it restores the saved value.
+The server saves its first hostname in `<T3 home>/usage-host-id`, so a recreated container keeps
+its usage identity when T3 home is persisted. Set `T3CODE_HOST_ID` to choose the identity
+explicitly.
 
 When your app and server support different providers, usage totals may cover only the providers
 your app understands. Update the app to include newly supported providers.
 
 On web and desktop, use the environment dropdown to filter costs, tokens, and limits. All
 environments are selected by default. The dropdown shows which environments are still scanning;
-results appear as each one responds.
+results appear as each one responds, and figures still updating are dimmed. Cursor shows its last
+saved totals first, then updates them when Cursor's API responds.
 
 If recent work is missing or a new model shows no cost, refresh to rescan session history and
 update model pricing.
