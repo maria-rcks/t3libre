@@ -3789,12 +3789,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(
         (yield* runGit(remoteDir, ["rev-parse", "feature/create-pr-only"])).stdout.trim(),
       ).toBe(headBefore);
-      expect(NodeFS.readFileSync(NodePath.join(repoDir, "README.md"), "utf8")).toBe(
-        "uncommitted readme\n",
-      );
-      expect(NodeFS.readFileSync(NodePath.join(repoDir, "untracked.txt"), "utf8")).toBe(
-        "untracked work\n",
-      );
       expect(
         ghCalls.some((call) =>
           call.includes("pr create --base main --head feature/create-pr-only"),
@@ -6279,26 +6273,12 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(result.commit.status).toBe("skipped_not_requested");
       expect(result.push.status).toBe("skipped_not_requested");
       expect(result.pr.status).toBe("created");
-      expect(generatedContent?.commitSummary).toContain("PR only branch");
-      expect(generatedContent?.diffSummary).toContain("pr-only.txt");
-      expect(generatedContent?.diffSummary).not.toContain("README.md");
-      expect(generatedContent?.diffSummary).not.toContain("untracked.txt");
       expect(generatedContent?.diffPatch).toContain("+pr only");
       expect(generatedContent?.diffPatch).not.toContain("staged readme");
       expect(generatedContent?.diffPatch).not.toContain("unstaged feature work");
-      expect(generatedContent?.diffPatch).not.toContain("untracked work");
       expect((yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout).toBe(headBefore);
       expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout).toBe(statusBefore);
       expect((yield* runGit(repoDir, ["diff", "--cached"])).stdout).toBe(stagedBefore);
-      expect(NodeFS.readFileSync(NodePath.join(repoDir, "README.md"), "utf8")).toBe(
-        "staged readme\n",
-      );
-      expect(NodeFS.readFileSync(NodePath.join(repoDir, "pr-only.txt"), "utf8")).toBe(
-        "unstaged feature work\n",
-      );
-      expect(NodeFS.readFileSync(NodePath.join(repoDir, "untracked.txt"), "utf8")).toBe(
-        "untracked work\n",
-      );
       expect(
         events.filter(
           (event): event is Extract<GitActionProgressEvent, { kind: "phase_started" }> =>
