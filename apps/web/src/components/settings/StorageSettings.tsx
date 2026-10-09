@@ -16,7 +16,6 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
-import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 
 import { Input } from "../ui/input";
@@ -37,6 +36,8 @@ import {
   useRelativeTimeTick,
 } from "./settingsLayout";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
+import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { SettingsGroup } from "./SettingsGroup";
 import type { ScopedSettingsTarget } from "./scopedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { searchableSetting } from "./settingsSearch";
@@ -166,9 +167,15 @@ const KEEP_WHEN_LABELS = {
   "tracked-changes": "Edited tracked files",
 } as const;
 
-function CleanupResults({ report }: { report: StorageCleanupReport }) {
+function CleanupResults({
+  report,
+  environmentLabel,
+}: {
+  report: StorageCleanupReport;
+  environmentLabel: string | undefined;
+}) {
   return (
-    <div className="space-y-3 text-sm">
+    <>
       {report.entries.map((entry, index) => {
         const name =
           entry.kind === "worktree"
@@ -177,26 +184,46 @@ function CleanupResults({ report }: { report: StorageCleanupReport }) {
               ? "Rotated logs"
               : "Browser artifacts";
         return (
-          <p
+          <SettingsRow
             key={`${entry.path ?? entry.kind}:${entry.threadId ?? index}`}
-            className={`wrap-anywhere ${entry.outcome === "failed" ? "text-destructive" : "text-muted-foreground"}`}
-          >
-            <span className="font-medium">{name}</span>: {entry.reason}
-            {entry.outcome === "removed" &&
-              entry.bytes !== null &&
-              ` · ${formatBytes(entry.bytes)}`}
-          </p>
+            title={environmentLabel ? `${environmentLabel}: ${name}` : name}
+            description={
+              <span
+                className={`wrap-anywhere ${entry.outcome === "failed" ? "text-destructive" : ""}`}
+              >
+                {entry.threadTitle && entry.threadTitle !== name ? `${entry.threadTitle}. ` : ""}
+                {entry.reason}
+              </span>
+            }
+            control={
+              entry.outcome === "removed" && (
+                <span className="text-xs text-muted-foreground">
+                  {[
+                    entry.kind !== "worktree" && entry.files !== null
+                      ? `${entry.files.toLocaleString()} ${entry.files === 1 ? "file" : "files"}`
+                      : null,
+                    entry.bytes !== null ? formatBytes(entry.bytes) : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              )
+            }
+          />
         );
       })}
       {report.omittedCount > 0 && (
-        <p className="text-sm text-muted-foreground">
+        <p className="px-3 py-2.5 text-xs text-muted-foreground sm:px-4">
+          {environmentLabel ? `${environmentLabel}: ` : ""}
           {report.omittedCount.toLocaleString()} more results.
         </p>
       )}
       {report.entries.length === 0 && report.omittedCount === 0 && (
-        <p className="text-sm text-muted-foreground">Nothing needed cleanup.</p>
+        <p className="px-3 py-2.5 text-xs text-muted-foreground sm:px-4">
+          {environmentLabel ? `${environmentLabel}: ` : ""}Nothing needed cleanup.
+        </p>
       )}
-    </div>
+    </>
   );
 }
 
@@ -204,7 +231,6 @@ function CleanupSection() {
   useRelativeTimeTick(60_000);
   const { connectedEnvironments } = useSettingsScope();
   const [pending, setPending] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const run = useAtomCommand(serverEnvironment.runStorageCleanup);
   const supported = connectedEnvironments.filter(
     (environment) => environment.serverConfig?.environment.capabilities.storageCleanupRun === true,
@@ -307,62 +333,63 @@ function CleanupSection() {
     }
   };
   return (
-    <SettingsSection id="storage-cleanup" title="Cleanup">
-      <SettingsRow
-        {...searchableSetting("storage-delete-now")}
-        description={
-          <span>
-            {!hasRules
-              ? "Turn on a cleanup rule to use this."
-              : summaries.map(({ environment, description }) => (
-                  <span key={environment.environmentId} className="block">
-                    {supported.length > 1 ? `${environment.label}: ` : ""}
-                    {description}
-                  </span>
-                ))}
-          </span>
-        }
-        control={
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={pending || !hasRules || !state.some((entry) => entry.allowed)}
-            onClick={() => void deleteNow()}
-          >
-            {pending ? "Deleting…" : "Delete now"}
-          </Button>
-        }
-      />
-      {summaries.some(({ report }) => report !== null) && (
+    <SettingsSection id="storage-cleanup" title="Cleanup" variant="plain">
+      <SettingsGroup>
         <SettingsRow
-          title="Last run"
+          {...searchableSetting("storage-delete-now")}
+          description={
+            <span>
+              {!hasRules
+                ? "Turn on a cleanup rule to use this."
+                : summaries.map(({ environment, description }) => (
+                    <span key={environment.environmentId} className="block">
+                      {supported.length > 1 ? `${environment.label}: ` : ""}
+                      {description}
+                    </span>
+                  ))}
+            </span>
+          }
           control={
-            <Button variant="outline" size="sm" onClick={() => setDetailsOpen(true)}>
-              View
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pending || !hasRules || !state.some((entry) => entry.allowed)}
+              onClick={() => void deleteNow()}
+            >
+              {pending ? "Deleting…" : "Delete now"}
             </Button>
           }
         />
+      </SettingsGroup>
+      {summaries.some(({ report }) => report !== null) && (
+        <FoldedSettingsSection
+          id="storage-cleanup-last-run"
+          title="Last run"
+          headerPlacement="inside"
+          summary={summaries
+            .flatMap(({ environment, report }) =>
+              report
+                ? [
+                    `${connectedEnvironments.length > 1 ? `${environment.label}: ` : ""}${report.counts.removed} removed, ${report.counts.kept} kept${report.counts.failed > 0 ? `, ${report.counts.failed} failed` : ""}`,
+                  ]
+                : [],
+            )
+            .join(" · ")}
+        >
+          {summaries.map(
+            ({ environment, report }) =>
+              report && (
+                <CleanupResults
+                  key={environment.environmentId}
+                  report={report}
+                  environmentLabel={
+                    connectedEnvironments.length > 1 ? environment.label : undefined
+                  }
+                />
+              ),
+          )}
+        </FoldedSettingsSection>
       )}
-      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogPopup>
-          <DialogHeader>
-            <DialogTitle>Last cleanup</DialogTitle>
-          </DialogHeader>
-          <DialogPanel>
-            {summaries.map(
-              ({ environment, report }) =>
-                report && (
-                  <div key={environment.environmentId}>
-                    {supported.length > 1 && (
-                      <p className="mb-3 text-sm font-medium">{environment.label}</p>
-                    )}
-                    <CleanupResults report={report} />
-                  </div>
-                ),
-            )}
-          </DialogPanel>
-        </DialogPopup>
-      </Dialog>
     </SettingsSection>
   );
 }
@@ -498,7 +525,7 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete inactive worktrees"
               status={ruleStatus("worktreeAfterDays")}
-              description="Branches and thread history are kept."
+              description="Remove worktrees after their threads have been inactive for this many days. Branches and thread history are kept."
               serverScoped={!isProjectScope}
               control={
                 <RetentionControl
@@ -586,7 +613,7 @@ export function StorageSettingsPanel() {
           <SettingsRow
             title="Delete old browser artifacts"
             status={ruleStatus("browserArtifactsAfterDays")}
-            description="Expired captures and their links are deleted."
+            description="Delete saved browser captures after this many days. Older capture links will no longer open."
             serverScoped
             control={
               <RetentionControl
@@ -599,7 +626,7 @@ export function StorageSettingsPanel() {
           <SettingsRow
             title="Delete old rotated logs"
             status={ruleStatus("logsAfterDays")}
-            description="Current logs are kept."
+            description="Delete inactive rotated log files after this many days. Current logs are kept."
             serverScoped
             control={
               <RetentionControl
