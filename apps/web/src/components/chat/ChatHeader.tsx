@@ -91,6 +91,41 @@ export const ChatHeader = memo(function ChatHeader({
   const interfaceFont = useClientSettings((settings) => settings.fontFamilySans);
   const breadcrumbContainerRef = useRef<HTMLDivElement>(null);
   const [collapseParentTitle, setCollapseParentTitle] = useState(false);
+  const activeThreadRef = useMemo(
+    () => scopeThreadRef(activeThreadEnvironmentId, activeThreadId),
+    [activeThreadEnvironmentId, activeThreadId],
+  );
+  const canOperateThread = useEnvironmentScope(
+    activeThreadEnvironmentId,
+    AuthOrchestrationOperateScope,
+  );
+  const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
+    reportFailure: false,
+  });
+  // Inline rename, keyed by thread: navigating away drops an in-progress
+  // rename instead of committing stale text. Cleared on thread change (not
+  // just hidden) so returning to the thread doesn't revive the old draft.
+  const [renaming, setRenaming] = useState<{
+    threadId: ThreadId;
+    environmentId: EnvironmentId;
+    title: string;
+  } | null>(null);
+  if (
+    renaming !== null &&
+    (renaming.threadId !== activeThreadId ||
+      renaming.environmentId !== activeThreadEnvironmentId ||
+      !canOperateThread)
+  ) {
+    setRenaming(null);
+  }
+  const renamingTitle =
+    canOperateThread &&
+    renaming?.threadId === activeThreadId &&
+    renaming.environmentId === activeThreadEnvironmentId
+      ? renaming.title
+      : null;
+  // Leaving rename swaps the input back for the title, which needs a fresh fit.
+  const isRenamingTitle = renamingTitle !== null;
   useEffect(() => {
     const list = breadcrumbContainerRef.current?.querySelector("ol");
     if (!list || !parentThreadLink) return;
@@ -126,40 +161,7 @@ export const ChatHeader = memo(function ChatHeader({
       document.fonts.removeEventListener("loadingdone", measure);
       observer.disconnect();
     };
-  }, [activeProjectName, activeThreadTitle, parentThreadLink, interfaceFont]);
-  const activeThreadRef = useMemo(
-    () => scopeThreadRef(activeThreadEnvironmentId, activeThreadId),
-    [activeThreadEnvironmentId, activeThreadId],
-  );
-  const canOperateThread = useEnvironmentScope(
-    activeThreadEnvironmentId,
-    AuthOrchestrationOperateScope,
-  );
-  const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
-    reportFailure: false,
-  });
-  // Inline rename, keyed by thread: navigating away drops an in-progress
-  // rename instead of committing stale text. Cleared on thread change (not
-  // just hidden) so returning to the thread doesn't revive the old draft.
-  const [renaming, setRenaming] = useState<{
-    threadId: ThreadId;
-    environmentId: EnvironmentId;
-    title: string;
-  } | null>(null);
-  if (
-    renaming !== null &&
-    (renaming.threadId !== activeThreadId ||
-      renaming.environmentId !== activeThreadEnvironmentId ||
-      !canOperateThread)
-  ) {
-    setRenaming(null);
-  }
-  const renamingTitle =
-    canOperateThread &&
-    renaming?.threadId === activeThreadId &&
-    renaming.environmentId === activeThreadEnvironmentId
-      ? renaming.title
-      : null;
+  }, [activeProjectName, activeThreadTitle, parentThreadLink, interfaceFont, isRenamingTitle]);
   const renameCommittedRef = useRef(false);
   const startRename = useCallback(() => {
     if (
