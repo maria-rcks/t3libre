@@ -7,7 +7,7 @@ import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import { useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
-import { CheckIcon, CircleAlertIcon, MinusIcon, Trash2Icon } from "lucide-react";
+import { ChevronRightIcon, Trash2Icon } from "lucide-react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -17,6 +17,7 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 
@@ -67,9 +68,7 @@ function WorktreesDirectoryRow() {
   return (
     <SettingsRow
       {...searchableSetting("storage-worktrees-location")}
-      description={
-        "Folder where new worktrees are created, on any drive, such as D:\\worktrees or ~/worktrees. Existing worktrees stay where they are. Leave empty to use the T3 home folder."
-      }
+      description={"New worktrees only. Leave empty to use the T3 home folder."}
       serverScoped
       settingKeys={["worktreesDirectory"]}
       resetAction={
@@ -171,15 +170,15 @@ const KEEP_WHEN_LABELS = {
 } as const;
 
 const CLEANUP_OUTCOMES = [
-  { outcome: "failed", label: "Failed", Icon: CircleAlertIcon, color: "text-destructive" },
-  { outcome: "removed", label: "Removed", Icon: CheckIcon, color: "text-success-foreground" },
-  { outcome: "kept", label: "Kept", Icon: MinusIcon, color: "text-muted-foreground" },
+  { outcome: "failed", label: "Failed" },
+  { outcome: "removed", label: "Removed" },
+  { outcome: "kept", label: "Kept" },
 ] as const;
 
 function CleanupResults({ report }: { report: StorageCleanupReport }) {
   return (
     <div className="space-y-4">
-      {CLEANUP_OUTCOMES.map(({ outcome, label, Icon, color }) => {
+      {CLEANUP_OUTCOMES.map(({ outcome, label }) => {
         const entries = report.entries.filter((entry) => entry.outcome === outcome);
         if (entries.length === 0) return null;
         return (
@@ -196,9 +195,8 @@ function CleanupResults({ report }: { report: StorageCleanupReport }) {
                 return (
                   <li
                     key={`${entry.path ?? entry.kind}:${entry.threadId ?? index}`}
-                    className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 py-2.5"
+                    className="py-2"
                   >
-                    <Icon aria-hidden="true" className={`mt-0.5 size-4 ${color}`} />
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                         <div className="min-w-0 flex-1 text-sm font-medium text-foreground">
@@ -209,7 +207,11 @@ function CleanupResults({ report }: { report: StorageCleanupReport }) {
                               >
                                 {name}
                               </TooltipTrigger>
-                              <TooltipPopup>{entry.path}</TooltipPopup>
+                              <TooltipPopup>
+                                {entry.threadTitle && <p>{entry.threadTitle}</p>}
+                                <p>{entry.path}</p>
+                                {outcome === "removed" && <p>{entry.reason}</p>}
+                              </TooltipPopup>
                             </Tooltip>
                           ) : (
                             name
@@ -224,16 +226,13 @@ function CleanupResults({ report }: { report: StorageCleanupReport }) {
                           </span>
                         )}
                       </div>
-                      {entry.threadTitle && (
-                        <p className="mt-0.5 wrap-anywhere text-xs text-muted-foreground">
-                          {entry.threadTitle}
+                      {outcome !== "removed" && (
+                        <p
+                          className={`mt-0.5 wrap-anywhere text-xs ${outcome === "failed" ? "text-destructive" : "text-muted-foreground"}`}
+                        >
+                          {entry.reason}
                         </p>
                       )}
-                      <p
-                        className={`mt-1 wrap-anywhere text-xs ${outcome === "failed" ? "text-destructive" : "text-muted-foreground"}`}
-                      >
-                        {entry.reason}
-                      </p>
                     </div>
                   </li>
                 );
@@ -244,8 +243,7 @@ function CleanupResults({ report }: { report: StorageCleanupReport }) {
       })}
       {report.omittedCount > 0 && (
         <p className="text-xs text-muted-foreground">
-          {report.omittedCount.toLocaleString()} more results. Recovered space includes all removed
-          items.
+          {report.omittedCount.toLocaleString()} more results. Total includes all removed items.
         </p>
       )}
       {report.entries.length === 0 && report.omittedCount === 0 && (
@@ -259,6 +257,7 @@ function CleanupSection() {
   useRelativeTimeTick(60_000);
   const { connectedEnvironments } = useSettingsScope();
   const [pending, setPending] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const run = useAtomCommand(serverEnvironment.runStorageCleanup);
   const supported = connectedEnvironments.filter(
     (environment) => environment.serverConfig?.environment.capabilities.storageCleanupRun === true,
@@ -326,6 +325,14 @@ function CleanupSection() {
             : "Cleanup hasn't run yet",
     };
   });
+  const counts = summaries.reduce(
+    (total, { report }) => ({
+      removed: total.removed + (report?.counts.removed ?? 0),
+      kept: total.kept + (report?.counts.kept ?? 0),
+      failed: total.failed + (report?.counts.failed ?? 0),
+    }),
+    { removed: 0, kept: 0, failed: 0 },
+  );
   const deleteNow = async () => {
     if (pending) return;
     setPending(true);
@@ -357,7 +364,7 @@ function CleanupSection() {
   return (
     <SettingsSection id="storage-cleanup" title="Cleanup">
       <SettingsSearchTarget id={searchableSetting("storage-delete-now").id}>
-        <div className="flex flex-wrap items-start justify-between gap-4 px-3 py-4 sm:px-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3 sm:px-4">
           <div className="min-w-0 flex-1 space-y-4" aria-live="polite">
             {summaries.map(({ environment, report, description }) => (
               <div key={environment.environmentId} className="space-y-1.5">
@@ -365,27 +372,15 @@ function CleanupSection() {
                   <p className="wrap-anywhere text-sm font-medium">{environment.label}</p>
                 )}
                 {report ? (
-                  <>
-                    <p className="text-2xl font-semibold tabular-nums tracking-tight">
-                      {formatBytes(report.bytesFreed)}{" "}
-                      <span className="text-sm font-normal tracking-normal text-muted-foreground">
-                        recovered
-                      </span>
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <p className="text-sm">
+                      <span className="font-medium tabular-nums">
+                        {formatBytes(report.bytesFreed)}
+                      </span>{" "}
+                      recovered
                     </p>
                     <p className="text-xs text-muted-foreground">{description}</p>
-                    <dl className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs">
-                      {(["removed", "kept", "failed"] as const).map((outcome) => (
-                        <div key={outcome} className="flex items-baseline gap-1.5">
-                          <dt className="text-muted-foreground">{outcome}</dt>
-                          <dd
-                            className={`order-first font-medium tabular-nums ${outcome === "failed" && report.counts.failed > 0 ? "text-destructive" : "text-foreground"}`}
-                          >
-                            {report.counts[outcome].toLocaleString()}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </>
+                  </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">{description}</p>
                 )}
@@ -407,23 +402,49 @@ function CleanupSection() {
         </div>
       </SettingsSearchTarget>
       {summaries.some(({ report }) => report !== null) && (
-        <div className="max-h-80 space-y-5 overflow-y-auto px-3 py-3 sm:px-4">
-          {summaries.map(
-            ({ environment, report }) =>
-              report && (
-                <div
-                  key={environment.environmentId}
-                  role="region"
-                  aria-label={`Cleanup results for ${environment.label}`}
-                >
-                  {supported.length > 1 && (
-                    <p className="mb-3 wrap-anywhere text-sm font-medium">{environment.label}</p>
-                  )}
-                  <CleanupResults report={report} />
-                </div>
-              ),
-          )}
-        </div>
+        <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen}>
+          <CollapsibleTrigger className="flex min-h-10 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-b-xl px-3 py-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4">
+            <span className="flex items-center gap-1.5">
+              <ChevronRightIcon
+                aria-hidden="true"
+                className={`size-3.5 transition-transform duration-150 motion-reduce:transition-none ${detailsOpen ? "rotate-90" : ""}`}
+              />
+              Details
+            </span>
+            {(["removed", "kept", "failed"] as const).map(
+              (outcome) =>
+                counts[outcome] > 0 && (
+                  <span
+                    key={outcome}
+                    className={outcome === "failed" ? "text-destructive" : "text-muted-foreground"}
+                  >
+                    {counts[outcome].toLocaleString()} {outcome}
+                  </span>
+                ),
+            )}
+          </CollapsibleTrigger>
+          <CollapsiblePanel>
+            <div className="max-h-80 space-y-5 overflow-y-auto px-3 pb-3 sm:px-4">
+              {summaries.map(
+                ({ environment, report }) =>
+                  report && (
+                    <div
+                      key={environment.environmentId}
+                      role="region"
+                      aria-label={`Cleanup results for ${environment.label}`}
+                    >
+                      {supported.length > 1 && (
+                        <p className="mb-3 wrap-anywhere text-sm font-medium">
+                          {environment.label}
+                        </p>
+                      )}
+                      <CleanupResults report={report} />
+                    </div>
+                  ),
+              )}
+            </div>
+          </CollapsiblePanel>
+        </Collapsible>
       )}
     </SettingsSection>
   );
@@ -548,7 +569,6 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete worktrees with deleted threads"
               status={ruleStatus("worktreeOnDelete")}
-              description="Remove unused worktrees when active or archived threads are deleted. The local changes rule controls which files are kept."
               serverScoped={!isProjectScope}
               control={
                 <Switch
@@ -561,7 +581,7 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete inactive worktrees"
               status={ruleStatus("worktreeAfterDays")}
-              description="Remove worktrees after their threads have been inactive for this many days. Branches and thread history are kept."
+              description="Branches and thread history are kept."
               serverScoped={!isProjectScope}
               control={
                 <RetentionControl
@@ -574,7 +594,7 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete merged worktrees"
               status={ruleStatus("worktreeOnMerge")}
-              description="Remove worktrees whose pull request is merged and whose commits are included in the default branch."
+              description="Only after the PR's commits reach the default branch."
               serverScoped={!isProjectScope}
               control={
                 <Switch
@@ -587,7 +607,7 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete unchanged worktrees"
               status={ruleStatus("worktreeUnchanged")}
-              description="Remove worktrees with no commits beyond the default branch."
+              description="No commits beyond the default branch."
               serverScoped={!isProjectScope}
               control={
                 <Switch
@@ -606,10 +626,10 @@ export function StorageSettingsPanel() {
                 status={ruleStatus("worktreeKeepWhen")}
                 description={
                   settings.worktreeKeepWhen === "any-local-files"
-                    ? "Keep worktrees containing local files, including ignored files except node_modules."
+                    ? "Includes ignored files, except node_modules."
                     : settings.worktreeKeepWhen === "tracked-changes"
-                      ? "Keep edited tracked files. Untracked and ignored files, including .env and build output, are deleted with the worktree."
-                      : "Keep tracked edits and untracked files. Ignored files, including .env and build output, are deleted with the worktree."
+                      ? "Deletes untracked and ignored files, including .env."
+                      : "Keeps edits and untracked files. Deletes ignored files, including .env."
                 }
                 serverScoped={!isProjectScope}
                 control={
@@ -649,7 +669,7 @@ export function StorageSettingsPanel() {
           <SettingsRow
             title="Delete old browser artifacts"
             status={ruleStatus("browserArtifactsAfterDays")}
-            description="Delete saved browser captures after this many days. Older capture links will no longer open."
+            description="Expired captures and their links are deleted."
             serverScoped
             control={
               <RetentionControl
@@ -662,7 +682,7 @@ export function StorageSettingsPanel() {
           <SettingsRow
             title="Delete old rotated logs"
             status={ruleStatus("logsAfterDays")}
-            description="Delete inactive rotated log files after this many days. Current logs are kept."
+            description="Current logs are kept."
             serverScoped
             control={
               <RetentionControl
