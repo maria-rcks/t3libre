@@ -632,7 +632,7 @@ describe("DesktopWindow", () => {
     );
   });
 
-  it.effect("does not open a development window until the backend is ready", () =>
+  it.effect("creates one window when bootstrap and backend readiness overlap", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
       const createCount = yield* Ref.make(0);
@@ -650,7 +650,13 @@ describe("DesktopWindow", () => {
         yield* desktopWindow.activate;
         assert.equal(yield* Ref.get(createCount), 0);
 
-        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        yield* Effect.all(
+          [
+            desktopWindow.ensureMain,
+            desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773")),
+          ],
+          { concurrency: "unbounded" },
+        );
         assert.equal(yield* Ref.get(createCount), 1);
         assert.equal(createdWindowOptions[0]?.width, 1100);
         assert.equal(createdWindowOptions[0]?.height, 780);

@@ -585,8 +585,9 @@ const make = (options?: StartupOptions) =>
 
       yield* forkBackground(
         recordStartupHeartbeat.pipe(
-          Effect.annotateSpans({ "startup.phase": "heartbeat.record" }),
-          Effect.withSpan("server.startup.heartbeat.record"),
+          Effect.withSpan("server.startup.heartbeat.record", {
+            attributes: { "startup.phase": "heartbeat.record" },
+          }),
           Effect.ignoreCause({ log: true }),
         ),
       );
