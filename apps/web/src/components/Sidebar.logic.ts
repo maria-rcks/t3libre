@@ -160,10 +160,33 @@ export type SidebarListMarker =
   | "pinned-divider"
   | "working-header"
   | "snoozed-header"
-  | "settled-header";
+  | "settled-header"
+  | `branch:${Exclude<SidebarSection, "pinned">}:${string}`;
+
+export function sidebarBranchGroupMarker(
+  section: Exclude<SidebarSection, "pinned">,
+  group: string,
+): SidebarListMarker {
+  return `branch:${section}:${group}`;
+}
+
+/** Project the same contiguous groups that the committed sidebar renders. */
+export function groupSidebarOrder(
+  order: readonly string[],
+  groupByKey: ReadonlyMap<string, string>,
+): string[] {
+  const groups = new Map<string, string[]>();
+  for (const key of order) {
+    const group = groupByKey.get(key) ?? key;
+    const rows = groups.get(group);
+    if (rows) rows.push(key);
+    else groups.set(group, [key]);
+  }
+  return [...groups.values()].flat();
+}
 
 export function sidebarMarkerId(marker: SidebarListMarker): string {
-  return `${SIDEBAR_MARKER_PREFIX}${marker}`;
+  return `${SIDEBAR_MARKER_PREFIX}${encodeURIComponent(marker)}`;
 }
 
 export type SidebarListItem =
@@ -320,7 +343,7 @@ export function planSidebarThreadDrop(input: {
   /** Working beta: the inbox sorts by time, so drops only change lifecycle. */
   readonly activeTimeOrdered?: boolean;
   /** Branch grouping can show active rows outside their saved key order. */
-  readonly activeGrouped?: boolean;
+  readonly activeGroupByKey?: ReadonlyMap<string, string>;
 }): SidebarThreadDropPlan {
   const {
     activeKey,
@@ -334,7 +357,7 @@ export function planSidebarThreadDrop(input: {
     activeOrder,
     activeKeysById,
     activeReorderableKeys,
-    activeGrouped,
+    activeGroupByKey,
   } = input;
   if (input.supportsSettlement === false && (target.section === "settled" || activeSettled)) {
     return { kind: "none" };
@@ -347,9 +370,9 @@ export function planSidebarThreadDrop(input: {
     order: readonly string[],
     keysById: ReadonlyMap<string, string | null | undefined>,
     writable: ReadonlySet<string> | undefined,
-    requireOrderedKeys = false,
+    groupById?: ReadonlyMap<string, string>,
   ) => {
-    const plan = { keysById, movedId: activeKey, requireOrderedKeys };
+    const plan = { keysById, movedId: activeKey, ...(groupById ? { groupById } : {}) };
     if (!writable) return planPinnedReorder({ ...plan, orderedIds: order });
     if (!writable.has(activeKey)) return null;
     const assignments = planPinnedReorder({
@@ -374,7 +397,9 @@ export function planSidebarThreadDrop(input: {
               unsnooze: activeSection === "snoozed",
             };
       }
-      const order = target.activeOrder;
+      const order = activeGroupByKey
+        ? groupSidebarOrder(target.activeOrder, activeGroupByKey)
+        : target.activeOrder;
       if (
         activeSection === "active" &&
         order.length === activeOrder.length &&
@@ -382,7 +407,11 @@ export function planSidebarThreadDrop(input: {
       ) {
         return { kind: "none" };
       }
-      const assignments = arrange(order, activeKeysById, activeReorderableKeys, activeGrouped);
+      const keys =
+        activeGroupByKey && activeSection !== "active"
+          ? new Map(activeKeysById).set(activeKey, null)
+          : activeKeysById;
+      const assignments = arrange(order, keys, activeReorderableKeys, activeGroupByKey);
       if (assignments === null) return { kind: "none" };
       return {
         kind: "move-active",

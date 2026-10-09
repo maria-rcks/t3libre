@@ -37,6 +37,7 @@ import {
   groupThreadsByBranch,
   threadBranchGroupKey,
   threadBranchGroupLabel,
+  planPinnedReorder,
   resolveSettledThreadTimestamp,
   sortSettledThreads,
 } from "@t3tools/client-runtime/state/thread-sort";
@@ -207,6 +208,7 @@ import {
   resolveSidebarThreadSection,
   resolveSidebarRowAccessibility,
   type SidebarDropVerb,
+  type SidebarDropTarget,
   resolveSidebarThreadStatus,
   resolveThreadLastVisitedAt,
   searchSidebarThreads,
@@ -215,6 +217,7 @@ import {
   shouldRecedeSidebarThread,
   resolveWorkingStartedAt,
   sidebarListItemId,
+  sidebarBranchGroupMarker,
   sidebarMarkerId,
   sidebarThreadKeyAtY,
   sortInboxThreadsByReturn,
@@ -692,6 +695,7 @@ function SortableSidebarMarker(props: {
   className?: string;
   children?: ReactNode;
   "data-testid"?: string;
+  role?: "presentation";
 }) {
   const { setNodeRef, transform, transition } = useSortable({
     id: sidebarMarkerId(props.marker),
@@ -701,6 +705,7 @@ function SortableSidebarMarker(props: {
   return (
     <li
       ref={setNodeRef}
+      role={props.role}
       data-thread-selection-safe
       data-testid={props["data-testid"]}
       className={cn("list-none", props.className)}
@@ -2773,6 +2778,18 @@ export default function Sidebar() {
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
   // Search results stay in their usual flat order.
   const groupByBranch = branchGroupingEnabled && !isSearchingThreads;
+  const branchGroupByKey = useMemo(
+    () =>
+      groupByBranch
+        ? new Map(
+            threads.map((thread) => [
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+              threadBranchGroupKey(thread),
+            ]),
+          )
+        : undefined,
+    [groupByBranch, threads],
+  );
   const {
     pinnedThreads,
     draggableThreadKeys,
@@ -3794,11 +3811,19 @@ export default function Sidebar() {
     const rowsOf = (
       list: readonly EnvironmentThreadShell[],
       section: SidebarSection,
-    ): SidebarListItem[] =>
-      list.map((thread) => {
+    ): SidebarListItem[] => {
+      const rows: SidebarListItem[] = [];
+      let previousGroup: string | undefined;
+      for (const thread of list) {
         const key = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-        return { kind: "thread", key, section };
-      });
+        const group = branchGroupByKey?.get(key);
+        if (section !== "pinned" && group !== undefined && group !== previousGroup)
+          rows.push({ kind: "marker", marker: sidebarBranchGroupMarker(section, group) });
+        previousGroup = group;
+        rows.push({ kind: "thread", key, section });
+      }
+      return rows;
+    };
     if (
       pinnedThreads.length +
         activeThreads.length +
@@ -3831,6 +3856,7 @@ export default function Sidebar() {
     return items;
   }, [
     activeThreads,
+    branchGroupByKey,
     pinnedThreads,
     renderedSettledThreads,
     settledThreads.length,
@@ -3903,18 +3929,58 @@ export default function Sidebar() {
   // slot a drop will land in, not the slot under the pointer.
   const draggedActiveOrder = useMemo(() => {
     const thread = dragState === null ? undefined : threadByKey.get(dragState.activeKey);
-    if (!workingShelfEnabled || dragState === null || thread === undefined) return undefined;
+    if ((!workingShelfEnabled && !groupByBranch) || dragState === null || thread === undefined)
+      return undefined;
     const key = (candidate: EnvironmentThreadShell) =>
       scopedThreadKey(scopeThreadRef(candidate.environmentId, candidate.id));
-    const sorted = sortInboxThreadsByReturn(
-      [
-        ...activeThreads.filter((candidate) => key(candidate) !== dragState.activeKey),
-        applySidebarThreadDrop(thread, "active", dragState.occurredAt),
-      ],
-      inboxReturns.returnedAt,
-    );
-    return (groupByBranch ? groupThreadsByBranch(sorted) : sorted).map(key);
-  }, [groupByBranch, activeThreads, dragState, threadByKey, workingShelfEnabled]);
+    const remaining = activeThreads.filter((row) => key(row) !== dragState.activeKey);
+    if (!workingShelfEnabled && branchGroupByKey) {
+      const keysById = new Map(threads.map((row) => [key(row), row.activeOrderKey ?? null]));
+      if (dragState.activeSection !== "active") keysById.set(dragState.activeKey, null);
+      const currentOrder = activeThreads.map(key);
+      return (target: SidebarDropTarget) => {
+        if (target.section !== "active")
+          return groupThreadsByBranch(sortThreadsForSidebar(remaining)).map(key);
+        if (
+          dragState.activeSection === "active" &&
+          target.activeOrder.every((id, index) => id === currentOrder[index])
+        )
+          return currentOrder;
+        const assignments = new Map(
+          planPinnedReorder({
+            orderedIds: target.activeOrder,
+            keysById,
+            movedId: dragState.activeKey,
+            groupById: branchGroupByKey,
+          }).map(({ id, orderKey }) => [id, orderKey]),
+        );
+        const rows = [
+          ...remaining,
+          applySidebarThreadDrop(thread, "active", dragState.occurredAt),
+        ].map((row) =>
+          assignments.has(key(row)) ? { ...row, activeOrderKey: assignments.get(key(row))! } : row,
+        );
+        return groupThreadsByBranch(sortThreadsForSidebar(rows)).map(key);
+      };
+    }
+    return (target: SidebarDropTarget) => {
+      const sorted = sortInboxThreadsByReturn(
+        target.section === "active"
+          ? [...remaining, applySidebarThreadDrop(thread, "active", dragState.occurredAt)]
+          : remaining,
+        inboxReturns.returnedAt,
+      );
+      return (groupByBranch ? groupThreadsByBranch(sorted) : sorted).map(key);
+    };
+  }, [
+    groupByBranch,
+    branchGroupByKey,
+    activeThreads,
+    dragState,
+    threadByKey,
+    threads,
+    workingShelfEnabled,
+  ]);
   const sidebarSortingStrategy = useMemo(
     () =>
       createSidebarSortingStrategy({
@@ -3922,6 +3988,7 @@ export default function Sidebar() {
         enabled: !isContextDrag,
         boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
         settledOrder: draggedSettledOrder,
+        ...(branchGroupByKey ? { branchGroupByKey } : {}),
         ...(draggedActiveOrder === undefined ? {} : { activeOrder: draggedActiveOrder }),
         settledExpanded: settledShelfExpanded,
         settledVisibleCount,
@@ -3929,6 +3996,7 @@ export default function Sidebar() {
         snoozedThreadCount: snoozedThreads.length,
       }),
     [
+      branchGroupByKey,
       draggedActiveOrder,
       draggedSettledOrder,
       isContextDrag,
@@ -3996,7 +4064,7 @@ export default function Sidebar() {
             activeKeysById,
             activeReorderableKeys: activeReorderableThreadKeys,
             activeTimeOrdered: workingShelfEnabled,
-            activeGrouped: branchGroupingEnabled,
+            ...(branchGroupByKey ? { activeGroupByKey: branchGroupByKey } : {}),
           }).kind !== "none"
         );
       },
@@ -4006,6 +4074,7 @@ export default function Sidebar() {
       },
     );
   }, [
+    branchGroupByKey,
     branchGroupingEnabled,
     activeKeysById,
     pinnedKeysById,
@@ -4025,10 +4094,14 @@ export default function Sidebar() {
     (event: DragEndEvent) => {
       const activeKey = String(event.active.id);
       const activeSection = sectionByThreadKey.get(activeKey);
-      const target =
+      const rawTarget =
         event.over === null
           ? null
           : resolveSidebarDropTarget(sidebarListItems, activeKey, String(event.over.id));
+      const target =
+        rawTarget?.section === "active" && typeof draggedActiveOrder === "function"
+          ? { ...rawTarget, activeOrder: draggedActiveOrder(rawTarget) }
+          : rawTarget;
       const activeThread = threadByKey.get(activeKey);
       if (activeSection === undefined || target === null || activeThread === undefined) return;
       if (branchGroupingEnabled && activeSection === "active" && target.section === "active") {
@@ -4053,7 +4126,7 @@ export default function Sidebar() {
         activeKeysById,
         activeReorderableKeys: activeReorderableThreadKeys,
         activeTimeOrdered: workingShelfEnabled,
-        activeGrouped: branchGroupingEnabled,
+        ...(branchGroupByKey ? { activeGroupByKey: branchGroupByKey } : {}),
       });
       if (plan.kind === "none") return;
       if (plan.kind === "settle" && settlingThreadKeysRef.current.has(activeKey)) return;
@@ -4180,6 +4253,7 @@ export default function Sidebar() {
       })();
     },
     [
+      branchGroupByKey,
       branchGroupingEnabled,
       activeKeysById,
       pinnedKeysById,
@@ -4187,6 +4261,7 @@ export default function Sidebar() {
       activeKeys,
       activeReorderableThreadKeys,
       draggableThreadKeys,
+      draggedActiveOrder,
       pinThread,
       pinnedKeys,
       planForwardNavigation,
@@ -5434,42 +5509,43 @@ export default function Sidebar() {
                           onDraftContextMenu={handleDraftContextMenu}
                         />,
                       ];
-                      let previousBranchGroup: string | null = null;
-                      for (const item of sidebarListItems) {
+                      for (const [itemIndex, item] of sidebarListItems.entries()) {
                         if (item.kind === "thread") {
                           const thread = threadByKey.get(item.key)!;
-                          if (branchGroupingEnabled && item.section !== "pinned") {
-                            const group = `${item.section}:${threadBranchGroupKey(thread)}`;
-                            if (group !== previousBranchGroup) {
-                              const projectKey =
-                                `${thread.environmentId}:${thread.projectId}` as const;
-                              const projectTitle =
-                                projectDisplayNameByKey.get(projectKey) ??
-                                projectByKey.get(projectKey)?.title ??
-                                "Project";
-                              const environment = environmentLabelById.get(thread.environmentId);
-                              items.push(
-                                <Tooltip key={`branch:${group}`} disabled={!thread.worktreePath}>
-                                  <TooltipTrigger
-                                    render={
-                                      <li
-                                        role="presentation"
-                                        className="truncate px-2 pb-1 pt-3 text-xs font-medium text-sidebar-muted-foreground"
-                                      />
-                                    }
-                                  >
+                          items.push(renderThreadRow(thread, item.section));
+                          continue;
+                        }
+                        if (item.marker.startsWith("branch:")) {
+                          const next = sidebarListItems[itemIndex + 1];
+                          const thread =
+                            next?.kind === "thread" ? threadByKey.get(next.key) : undefined;
+                          if (thread) {
+                            const projectKey =
+                              `${thread.environmentId}:${thread.projectId}` as const;
+                            const projectTitle =
+                              projectDisplayNameByKey.get(projectKey) ??
+                              projectByKey.get(projectKey)?.title ??
+                              "Project";
+                            const environment = environmentLabelById.get(thread.environmentId);
+                            items.push(
+                              <SortableSidebarMarker
+                                key={item.marker}
+                                marker={item.marker}
+                                role="presentation"
+                                className="truncate px-2 pb-1 pt-3 text-xs font-medium text-sidebar-muted-foreground"
+                              >
+                                <Tooltip disabled={!thread.worktreePath}>
+                                  <TooltipTrigger render={<div className="truncate" />}>
                                     {projectTitle} / {threadBranchGroupLabel(thread)}
                                     {environmentLabelById.size > 1 && environment
                                       ? ` · ${environment}`
                                       : null}
                                   </TooltipTrigger>
                                   <TooltipPopup>{thread.worktreePath}</TooltipPopup>
-                                </Tooltip>,
-                              );
-                            }
-                            previousBranchGroup = group;
+                                </Tooltip>
+                              </SortableSidebarMarker>,
+                            );
                           }
-                          items.push(renderThreadRow(thread, item.section));
                           continue;
                         }
                         switch (item.marker) {

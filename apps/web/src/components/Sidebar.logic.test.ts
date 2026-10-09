@@ -2314,5 +2314,41 @@ describe("Working shelf (beta)", () => {
         unsnooze: false,
       });
     });
+
+    it.each(["active", "pinned"] as const)(
+      "keeps grouped %s drops inside a writable group",
+      (activeSection) => {
+        const plan = planSidebarThreadDrop({
+          activeKey: "a1",
+          activeSection,
+          target: { section: "active", pinnedOrder: [], activeOrder: ["a2", "a3", "b", "a1"] },
+          pinnedOrder: activeSection === "pinned" ? ["a1"] : [],
+          pinnedKeysById: new Map(),
+          activeOrder: activeSection === "pinned" ? ["a2", "a3", "b"] : ["a1", "a2", "a3", "b"],
+          activeKeysById: new Map([
+            ["a1", "f"],
+            ["a2", "t"],
+            ["a3", "w"],
+            ["b", "x"],
+          ]),
+          activeReorderableKeys: new Set(["a1", "a2", "a3"]),
+          activeGroupByKey: new Map([
+            ["a1", "a"],
+            ["a2", "a"],
+            ["a3", "a"],
+            ["b", "b"],
+          ]),
+        });
+        expect(plan.kind).toBe("move-active");
+        if (plan.kind !== "move-active") return;
+        expect(plan.order).toEqual(["a2", "a3", "a1", "b"]);
+        expect(plan.assignments.every(({ id }) => id !== "b")).toBe(true);
+        // Re-entry ignores a retained active key; it keeps the destination group's anchor.
+        const key = plan.assignments.find(({ id }) => id === "a1")!.orderKey;
+        if (activeSection === "pinned") expect(key > "w").toBe(true);
+        else expect(key).toBe("w");
+        expect(plan.unpin).toBe(activeSection === "pinned");
+      },
+    );
   });
 });

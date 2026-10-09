@@ -254,6 +254,81 @@ describe("sidebar collision detection", () => {
 
 describe("sidebar drag projection", () => {
   it.each([
+    { active: "a1", over: "a2", aHeader: 48, a2: -35, bHeader: 48 },
+    { active: "a1", over: "p", aHeader: 247, a2: 164, bHeader: -68 },
+    { active: "p", over: "b", aHeader: -35, a2: -35, bHeader: 48 },
+  ])(
+    "keeps headings aligned when dragging $active over $over without Working",
+    ({ active, over, aHeader, a2, bHeader }) => {
+      const items = [
+        pinnedHeader,
+        thread("p", "pinned"),
+        divider,
+        marker("branch:active:a"),
+        thread("a1", "active"),
+        thread("a2", "active"),
+        marker("branch:active:b"),
+        thread("b", "active"),
+        settledHeader,
+        marker("settled-placeholder"),
+      ];
+      const transforms = preview(
+        {
+          items,
+          settledOrder: [],
+          settledExpanded: false,
+          boundaryLabelHeight: 24,
+          activeOrder: (target) =>
+            target.section !== "active"
+              ? ["b", "a2"]
+              : target.activeOrder.includes("p")
+                ? ["a1", "a2", "p", "b"]
+                : target.activeOrder,
+          branchGroupByKey: new Map([
+            ["p", "a"],
+            ["a1", "a"],
+            ["a2", "a"],
+            ["b", "b"],
+          ]),
+        },
+        active,
+        over,
+      );
+      expect(transforms.get(sidebarMarkerId("branch:active:a"))?.y).toBe(aHeader);
+      expect(transforms.get("a2")?.y).toBe(a2);
+      expect(transforms.get(sidebarMarkerId("branch:active:b"))?.y).toBe(bHeader);
+      expect(transforms.get("b")?.y).toBe(bHeader);
+    },
+  );
+
+  it("hides a departing group's heading and reserves an arriving group's heading", () => {
+    const items = [
+      pinnedHeader,
+      thread("p", "pinned"),
+      divider,
+      marker("branch:active:a"),
+      thread("a", "active"),
+      marker("branch:active:b"),
+      thread("b", "active"),
+      settledHeader,
+      marker("settled-placeholder"),
+    ];
+    const input = {
+      items,
+      settledOrder: [],
+      settledExpanded: false,
+      branchGroupByKey: new Map([
+        ["p", "new"],
+        ["a", "a"],
+        ["b", "b"],
+      ]),
+    };
+    expect(preview(input, "a", "p").get(sidebarMarkerId("branch:active:a"))?.scaleY).toBe(0);
+    // The arriving pin adds its 82px card and a 32px heading, with list gaps.
+    expect(preview(input, "p", "b").get(sidebarMarkerId("settled-header"))?.y).toBe(33);
+  });
+
+  it.each([
     ["a2", "a1"],
     ["p", "a1"],
     ["s", sidebarMarkerId("pinned-header")],

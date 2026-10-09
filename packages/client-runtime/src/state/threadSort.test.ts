@@ -545,7 +545,7 @@ describe("branch and worktree grouping", () => {
     );
   });
 
-  it("rewrites interleaved keys so a move inside a group keeps the group order", () => {
+  it("keeps interleaved groups stable without writing outside the moved group", () => {
     const keysById = new Map([
       ["a1", "f"],
       ["b", "n"],
@@ -557,11 +557,57 @@ describe("branch and worktree grouping", () => {
       orderedIds: desired,
       keysById,
       movedId: "a1",
-      requireOrderedKeys: true,
+      groupById: new Map([
+        ["a1", "a"],
+        ["a2", "a"],
+        ["a3", "a"],
+        ["b", "b"],
+      ]),
     });
+    expect(plan).toEqual([
+      { id: "a2", orderKey: "f" },
+      { id: "a1", orderKey: "t" },
+    ]);
     for (const { id, orderKey } of plan) keysById.set(id, orderKey);
-    expect(
-      desired.toSorted((left, right) => (keysById.get(left)! < keysById.get(right)! ? -1 : 1)),
-    ).toEqual(desired);
+    const rows = desired.map((id) => ({
+      id,
+      activeOrderKey: keysById.get(id),
+      createdAt: "2026-01-01T00:00:00Z",
+      environmentId: EnvironmentId.make("env"),
+      projectId: ProjectId.make("project"),
+      branch: id === "b" ? "b" : "a",
+      worktreePath: null,
+    }));
+    expect(groupThreadsByBranch(sortActiveThreadsByOrderKey(rows)).map((row) => row.id)).toEqual(
+      desired,
+    );
+    expect(keysById.get("b")).toBe("n");
+  });
+
+  it("extends a keyed group for a new row without taking another group's reserved keys", () => {
+    const reserved = `t${generateSpreadPinOrderKeys(1)[0]}`;
+    const keysById = new Map<string, string | null>([
+      ["a1", "f"],
+      ["a2", "t"],
+      ["new", null],
+      ["b", "w"],
+      ["hidden", reserved],
+    ]);
+    const plan = planPinnedReorder({
+      orderedIds: ["a1", "a2", "new", "b"],
+      keysById,
+      movedId: "new",
+      groupById: new Map([
+        ["a1", "a"],
+        ["a2", "a"],
+        ["new", "a"],
+        ["b", "b"],
+      ]),
+    });
+    expect(plan).toHaveLength(1);
+    expect(plan[0]!.id).toBe("new");
+    expect(plan[0]!.orderKey > "t").toBe(true);
+    expect(plan[0]!.orderKey).not.toBe("w");
+    expect(plan[0]!.orderKey).not.toBe(reserved);
   });
 });

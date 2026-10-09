@@ -120,6 +120,36 @@ function randomCase(rng: () => number) {
 const WRITABLE = new Set<EnvironmentId>(["env-w" as EnvironmentId]);
 
 describe("computeThreadMoveAvailability matches the reference planner", () => {
+  it("allows a writable group's move beside an unrelated read-only group", () => {
+    const ordered = [
+      makeRow("a1", "env-w", "f", false),
+      makeRow("a2", "env-w", "t", false),
+      makeRow("a3", "env-w", "w", false),
+      makeRow("b", "env-x", "n", false),
+    ];
+    const input = {
+      ordered,
+      section: "active" as const,
+      reorderableEnvironmentIds: WRITABLE,
+      groupById: new Map(
+        ordered.map((row) => [`${row.environmentId}:${row.id}`, row.environmentId]),
+      ),
+    };
+    const planner = createThreadMovePlanner(input);
+    expect(planner("env-w:a1", "down")).toEqual([
+      { id: "env-w:a2", orderKey: "f" },
+      { id: "env-w:a1", orderKey: "t" },
+    ]);
+    expect(computeThreadMoveAvailability(input).get("env-w:a1")).toEqual({
+      canMoveUp: false,
+      canMoveDown: true,
+    });
+    expect(computeThreadMoveAvailability(input).get("env-w:a3")).toEqual({
+      canMoveUp: true,
+      canMoveDown: false,
+    });
+  });
+
   it("agrees across randomized sections (keys, holes, non-writable rows, hidden keys)", () => {
     for (let seed = 1; seed <= 4_000; seed += 1) {
       const rng = makeRng(seed);

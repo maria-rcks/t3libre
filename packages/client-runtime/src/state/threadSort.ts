@@ -290,13 +290,41 @@ export function generateSpreadPinOrderKeys(count: number): string[] {
   return keys;
 }
 
+/** Reuse a group's key range so its leading key, and shelf position, stay put.
+ * Legacy keyless/corrupt groups materialize only their own rows. */
+export function groupedThreadOrderKeys(
+  orderedIds: readonly string[],
+  keysById: ReadonlyMap<string, string | null | undefined>,
+  retainedKeys?: ReadonlySet<string>,
+): string[] {
+  const keys = [
+    ...new Set(
+      orderedIds.flatMap((id) => {
+        const key = keysById.get(id);
+        return key != null && isValidPinOrderKey(key) ? [key] : [];
+      }),
+    ),
+  ].sort();
+  if (keys.length === orderedIds.length) return keys;
+  const reserved =
+    retainedKeys ?? new Set([...keysById.values()].flatMap((key) => (key == null ? [] : [key])));
+  const prefix = keys.at(-1) ?? "";
+  for (const suffix of generateSpreadPinOrderKeys(orderedIds.length - keys.length)) {
+    let key = prefix + suffix;
+    while (reserved.has(key)) key += "n";
+    keys.push(key);
+  }
+  return keys;
+}
+
 /**
  * Assignments needed to realize a new pinned order. When the moved thread
  * sits between two keyed (or absent) neighbors, this is a single write to
  * the moved thread. When a neighbor is keyless (threads pinned before
  * reordering shipped), the whole section gets fresh spread keys — a
  * one-time materialization; every move after that is single-write. Active
- * reordering uses the same planner with activeOrderKey values.
+ * reordering uses the same planner with activeOrderKey values. Grouped
+ * moves permute only that group's keys to preserve its shelf position.
  */
 export function planPinnedReorder(input: {
   /** Thread ids in the desired visual order (after the move). */
@@ -304,10 +332,20 @@ export function planPinnedReorder(input: {
   /** Include retained keys from hidden rows; only orderedIds receive writes. */
   readonly keysById: ReadonlyMap<string, string | null | undefined>;
   readonly movedId: string;
-  /** Grouped views can put unchanged rows outside their saved key order. */
-  readonly requireOrderedKeys?: boolean;
+  /** Grouped arrangements write only the moved row's project/checkout. */
+  readonly groupById?: ReadonlyMap<string, string>;
 }): ReadonlyArray<{ readonly id: string; readonly orderKey: string }> {
   const { orderedIds, keysById, movedId } = input;
+  if (input.groupById) {
+    if (!orderedIds.includes(movedId)) return [];
+    const group = input.groupById.get(movedId);
+    if (group === undefined) return [];
+    const ids = orderedIds.filter((id) => input.groupById!.get(id) === group);
+    const keys = groupedThreadOrderKeys(ids, keysById);
+    return ids.flatMap((id, index) =>
+      keysById.get(id) === keys[index] ? [] : [{ id, orderKey: keys[index]! }],
+    );
+  }
   const visibleIds = new Set(orderedIds);
   const reservedKeys = new Set(
     [...keysById].flatMap(([id, key]) => (!visibleIds.has(id) && key != null ? [key] : [])),
@@ -320,13 +358,7 @@ export function planPinnedReorder(input: {
   const afterKey = afterId != null ? (keysById.get(afterId) ?? null) : null;
   const beforeUsable = beforeId === null || beforeKey != null;
   const afterUsable = afterId === null || afterKey != null;
-  const remainingKeys = input.requireOrderedKeys
-    ? orderedIds.filter((id) => id !== movedId).map((id) => keysById.get(id))
-    : [];
-  const remainingKeysOrdered = remainingKeys.every(
-    (key, index) => key != null && (index === 0 || remainingKeys[index - 1]! < key),
-  );
-  if (beforeUsable && afterUsable && remainingKeysOrdered) {
+  if (beforeUsable && afterUsable) {
     let key = pinOrderKeyBetween(beforeKey, afterKey);
     while (key !== null && reservedKeys.has(key)) key = pinOrderKeyBetween(key, afterKey);
     if (key !== null) return [{ id: movedId, orderKey: key }];

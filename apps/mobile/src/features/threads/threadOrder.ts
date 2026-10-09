@@ -1,6 +1,7 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import {
   generateSpreadPinOrderKeys,
+  groupedThreadOrderKeys,
   pinOrderKeyBetween,
   planPinnedReorder,
 } from "@t3tools/client-runtime/state/thread-sort";
@@ -113,9 +114,12 @@ export function createThreadMovePlanner(input: {
     if (nextIds === null) return null;
     const assignments = planPinnedReorder({
       orderedIds: nextIds,
-      keysById,
+      keysById:
+        input.groupById && !orderedIds.includes(movedId)
+          ? new Map(keysById).set(movedId, null)
+          : keysById,
       movedId,
-      requireOrderedKeys: input.groupById !== undefined,
+      ...(input.groupById ? { groupById: input.groupById } : {}),
     });
     return assignments === null ||
       assignments.length === 0 ||
@@ -172,6 +176,46 @@ export function computeThreadMoveAvailability(input: {
     keysById.set(id, rowOrder(row, input.section).key);
     if (input.reorderableEnvironmentIds.has(row.environmentId)) writableIds.add(id);
   }
+  if (input.groupById) {
+    const retainedKeys = new Set(
+      [...keysById.values()].flatMap((key) => (key == null ? [] : [key])),
+    );
+    const groups = new Map<string, string[]>();
+    for (const id of orderedIds) {
+      const group = input.groupById.get(id) ?? id;
+      const ids = groups.get(group);
+      if (ids) ids.push(id);
+      else groups.set(group, [id]);
+    }
+    for (const ids of groups.values()) {
+      const keys = groupedThreadOrderKeys(ids, keysById, retainedKeys);
+      let writes = 0;
+      let deniedWrites = 0;
+      ids.forEach((id, index) => {
+        if (keysById.get(id) !== keys[index]) writes += 1;
+        if (!writableIds.has(id) && keysById.get(id) !== keys[index]) deniedWrites += 1;
+      });
+      ids.forEach((id, index) => {
+        const available = (neighbor: number) => {
+          if (!writableIds.has(id) || neighbor < 0 || neighbor >= ids.length) return false;
+          let denied = deniedWrites;
+          let nextWrites = writes;
+          for (const position of [index, neighbor]) {
+            const other = position === index ? neighbor : index;
+            const row = ids[position]!;
+            if (keysById.get(row) !== keys[position]) nextWrites -= 1;
+            if (keysById.get(row) !== keys[other]) nextWrites += 1;
+            if (writableIds.has(row)) continue;
+            if (keysById.get(row) !== keys[position]) denied -= 1;
+            if (keysById.get(row) !== keys[other]) denied += 1;
+          }
+          return denied === 0 && nextWrites > 0;
+        };
+        result.set(id, { canMoveUp: available(index - 1), canMoveDown: available(index + 1) });
+      });
+    }
+    return result;
+  }
   // Read after the loop so a duplicate id reserves only its final key.
   const reservedKeys = new Set<string>();
   keysById.forEach((key, id) => {
@@ -206,24 +250,6 @@ export function computeThreadMoveAvailability(input: {
     .filter((key) => !reservedKeys.has(key))
     .slice(0, orderedIds.length);
   const currentKeys = orderedIds.map((id) => keysById.get(id) ?? null);
-  // Check the unchanged rows after removing any one row in constant time.
-  const prefixOrdered = [true];
-  const suffixOrdered = [true];
-  if (input.groupById) {
-    suffixOrdered[currentKeys.length] = true;
-    for (let index = 0; index < currentKeys.length; index += 1) {
-      const key = currentKeys[index] ?? null;
-      prefixOrdered[index + 1] =
-        prefixOrdered[index]! && key !== null && (index === 0 || currentKeys[index - 1]! < key);
-    }
-    for (let index = currentKeys.length - 1; index >= 0; index -= 1) {
-      const key = currentKeys[index] ?? null;
-      suffixOrdered[index] =
-        suffixOrdered[index + 1]! &&
-        key !== null &&
-        (index === currentKeys.length - 1 || key < currentKeys[index + 1]!);
-    }
-  }
   const writableRow = orderedIds.map((id) => writableIds.has(id));
   let baselineWrites = 0;
   let baselineUnwritableWrites = 0;
@@ -266,11 +292,6 @@ export function computeThreadMoveAvailability(input: {
     const adjacentAvailable = (towardUp: boolean): boolean => {
       const shifted = index + (towardUp ? -1 : 1);
       if (shifted < 0 || shifted >= orderedIds.length) return false;
-      if (
-        input.groupById &&
-        input.groupById.get(movedId) !== input.groupById.get(orderedIds[shifted]!)
-      )
-        return false;
       // The swap exchanges the row with its neighbor; afterwards the moved row
       // sits at `shifted` between `beforeIndex` and `afterIndex` of the OLD
       // order: moving up it lands between old(index-2) and old(index-1),
@@ -281,18 +302,7 @@ export function computeThreadMoveAvailability(input: {
       const afterId = afterIndex >= orderedIds.length ? null : (orderedIds[afterIndex] ?? null);
       const beforeKey = beforeId === null ? null : (keysById.get(beforeId) ?? null);
       const afterKey = afterId === null ? null : (keysById.get(afterId) ?? null);
-      const remainingKeysOrdered =
-        !input.groupById ||
-        (prefixOrdered[index]! &&
-          suffixOrdered[index + 1]! &&
-          (index === 0 ||
-            index === currentKeys.length - 1 ||
-            currentKeys[index - 1]! < currentKeys[index + 1]!));
-      if (
-        remainingKeysOrdered &&
-        (beforeId === null || beforeKey != null) &&
-        (afterId === null || afterKey != null)
-      ) {
+      if ((beforeId === null || beforeKey != null) && (afterId === null || afterKey != null)) {
         const key = fastPathKey(beforeKey, afterKey);
         // A fresh key is a single-write plan for the (writable) moved row.
         if (key !== null) return true;
