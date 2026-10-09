@@ -12,6 +12,7 @@ export type ServicePreflightResult =
       readonly status: "blocked";
       readonly version: string;
       readonly reason: string;
+      readonly ownershipProtocol?: 1;
     };
 
 export function runServicePreflight(input: {
@@ -27,6 +28,7 @@ export function runServicePreflight(input: {
       version,
       reason:
         "This release requires a newer T3 Code service launcher. Update it on the server machine.",
+      ownershipProtocol: 1,
     };
   }
 
@@ -60,7 +62,12 @@ export function decodeServicePreflightResult(value: unknown): ServicePreflightRe
     typeof record.version === "string" &&
     typeof record.reason === "string"
   ) {
-    return { status: "blocked", version: record.version, reason: record.reason };
+    return {
+      status: "blocked",
+      version: record.version,
+      reason: record.reason,
+      ...(record.ownershipProtocol === 1 ? { ownershipProtocol: 1 as const } : {}),
+    };
   }
   return undefined;
 }

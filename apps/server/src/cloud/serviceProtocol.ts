@@ -14,6 +14,33 @@ export const SERVICE_STOP_MARKER_FILE = ".service-stopping";
     it when it starts (whoever restarted the service), so while it exists the
     service is known to be behind its unit and status reports it that way. */
 export const SERVICE_RESTART_PENDING_FILE = ".restart-pending";
+export const BOOT_SERVICE_UNIT_FILE = "t3code.service";
+// `.service` suffix keeps the label distinct from the desktop app's bundle id
+// (com.t3tools.t3code), so launchd and TCC records never collide.
+export const BOOT_SERVICE_LAUNCHD_LABEL = "com.t3tools.t3code.service";
+export const BOOT_SERVICE_PLIST_FILE = `${BOOT_SERVICE_LAUNCHD_LABEL}.plist`;
+
+/**
+ * Reads `T3CODE_HOME` back out of a rendered unit or plist. Only values the
+ * boot service writes are expected, so a quoted systemd value is unquoted and
+ * unescaped the same way `quoteSystemdValue` in bootService.ts produced it.
+ */
+export function bootServiceBaseDirOf(contents: string): string | undefined {
+  const systemd = /^Environment=T3CODE_HOME=(.*)$/m.exec(contents)?.[1];
+  if (systemd !== undefined) {
+    const raw = systemd.trim();
+    const unquoted =
+      raw.startsWith('"') && raw.endsWith('"')
+        ? raw.slice(1, -1).replaceAll('\\"', '"').replaceAll("\\\\", "\\")
+        : raw;
+    return unquoted.replaceAll("%%", "%");
+  }
+  const plist = /<key>T3CODE_HOME<\/key>\s*<string>([^<]*)<\/string>/.exec(contents)?.[1];
+  if (plist !== undefined) {
+    return plist.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+  }
+  return undefined;
+}
 
 export interface PendingServiceUpdate {
   readonly id: string;
