@@ -21,6 +21,7 @@ describe("AcpStderr", () => {
         "Visit http://localhost:5733/pair#token=ABCDEF for pairing",
         "key=sk-abcdefghijklmnopqrstuv",
       ].join("\n"),
+      "/home/server",
       { HOME: "/Users/ada" },
     );
 
@@ -44,6 +45,8 @@ describe("AcpStderr", () => {
         "Authorization: Basic dXNlcjpwYXNz",
         "x-api-key: ant-api-key-value",
       ].join("\n"),
+      "/Users/ada",
+      {},
     );
 
     expect(excerpt).toContain("[redacted]");
