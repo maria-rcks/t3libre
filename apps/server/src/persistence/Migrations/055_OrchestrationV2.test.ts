@@ -168,6 +168,6 @@ layer("055_OrchestrationV2", (it) => {
           AND pull_request_count = 2
       `;
       assert.deepStrictEqual(rows, [{ thread_id: "sweep-thread" }]);
-    }),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });
