@@ -32,6 +32,15 @@ function isClassComposer(node: Extract<ESTree.Node, { type: "CallExpression" }>)
   return Option.isSome(name) && CLASS_COMPOSERS.has(name.value);
 }
 
+function isClassWrapper(node: ESTree.Node | null) {
+  return (
+    node?.type === "TSAsExpression" ||
+    node?.type === "TSSatisfiesExpression" ||
+    node?.type === "TSNonNullExpression" ||
+    node?.type === "ParenthesizedExpression"
+  );
+}
+
 /** Collect only fragments that a composition always includes, leaving conditional variants apart. */
 function staticClassText(node: ESTree.Node): string {
   if (node.type === "Literal" && typeof node.value === "string") return node.value;
@@ -53,28 +62,14 @@ function staticClassText(node: ESTree.Node): string {
   if (node.type === "CallExpression" && isClassComposer(node)) {
     return node.arguments.map(staticClassText).join(" ");
   }
-  if (
-    node.type === "TSAsExpression" ||
-    node.type === "TSSatisfiesExpression" ||
-    node.type === "TSNonNullExpression" ||
-    node.type === "ParenthesizedExpression"
-  ) {
-    return staticClassText(node.expression);
-  }
+  if (isClassWrapper(node)) return staticClassText(node.expression);
   return "__t3_dynamic_class__";
 }
 
 /** Check joined strings at their outer boundary, so partial tokens are never separate classes. */
 function isJoinedClassFragment(node: ESTree.Node) {
   let parent = node.parent;
-  while (
-    parent?.type === "TSAsExpression" ||
-    parent?.type === "TSSatisfiesExpression" ||
-    parent?.type === "TSNonNullExpression" ||
-    parent?.type === "ParenthesizedExpression"
-  ) {
-    parent = parent.parent;
-  }
+  while (isClassWrapper(parent)) parent = parent.parent;
   return (
     parent?.type === "TemplateLiteral" ||
     (parent?.type === "BinaryExpression" && parent.operator === "+")
@@ -155,10 +150,13 @@ function classUtility(token: string) {
       start = index + 1;
     }
   }
+  const variant = token.slice(0, start);
   return {
-    variant: token.slice(0, start),
+    variant,
     variants,
     utility: token.slice(start).replace(/^!|!$/gu, ""),
+    target: elementTarget(variants),
+    state: isStateVariant(variant),
   };
 }
 
@@ -175,12 +173,13 @@ function elementTarget(variants: string[]) {
 }
 
 /** Conditions may be added, but an inset must still address the same element or pseudo-element. */
-function variantCovers(inset: string, target: string) {
-  const insetVariants = classUtility(inset).variants;
-  const targetVariants = classUtility(target).variants;
+function variantCovers(
+  inset: ReturnType<typeof classUtility>,
+  target: ReturnType<typeof classUtility>,
+) {
   return (
-    elementTarget(insetVariants) === elementTarget(targetVariants) &&
-    insetVariants.every((variant) => targetVariants.includes(variant))
+    inset.target === target.target &&
+    inset.variants.every((variant) => target.variants.includes(variant))
   );
 }
 
@@ -214,6 +213,10 @@ function isRingWidth(utility: string) {
   return isWidthUtility(utility, "ring") && pixelLength(utility.slice("ring-".length)) !== 0;
 }
 
+function outlineWidth(utility: string) {
+  return utility === "outline" ? 1 : pixelLength(utility.slice("outline-".length));
+}
+
 function isColorUtility(utility: string, prefix: "ring" | "outline") {
   if (!utility.startsWith(`${prefix}-`) || isWidthUtility(utility, prefix)) return false;
   return prefix === "ring"
@@ -225,11 +228,7 @@ function isColorUtility(utility: string, prefix: "ring" | "outline") {
 function isInlineStyleProperty(node: Extract<ESTree.Node, { type: "Property" }>) {
   let expression: ESTree.Node = node.parent;
   if (expression.type !== "ObjectExpression") return false;
-  while (
-    expression.parent?.type === "TSAsExpression" ||
-    expression.parent?.type === "TSSatisfiesExpression" ||
-    expression.parent?.type === "ParenthesizedExpression"
-  ) {
+  while (isClassWrapper(expression.parent) && expression.parent.type !== "TSNonNullExpression") {
     expression = expression.parent;
   }
   const container = expression.parent;
@@ -247,102 +246,77 @@ function outsetOverrides(text: string, companions: string) {
   const hasBaseRing = classes.some(
     (candidate) => candidate.variant === "" && isRingWidth(candidate.utility),
   );
-  const insetVariants = classes
-    .filter((candidate) => candidate.utility === "ring-inset")
-    .map((candidate) => candidate.variant);
-  const hasInset = (variant: string) =>
-    insetVariants.some((inset) => variantCovers(inset, variant));
-  const baseRingStateColors = classes.filter(
-    (candidate) =>
-      isStateVariant(candidate.variant) &&
-      variantCovers("", candidate.variant) &&
-      isColorUtility(candidate.utility, "ring"),
-  );
+  const insets = classes.filter((candidate) => candidate.utility === "ring-inset");
+  const hasInset = (target: ReturnType<typeof classUtility>) =>
+    insets.some((inset) => variantCovers(inset, target));
+  const baseStateColors = (prefix: "ring" | "outline") =>
+    classes.filter(
+      (candidate) =>
+        candidate.state && candidate.target === "" && isColorUtility(candidate.utility, prefix),
+    );
+  const baseRingStateColors = baseStateColors("ring");
+  const baseOutlineStateColors = baseStateColors("outline");
+  const outlineWidths = classes.filter((candidate) => isWidthUtility(candidate.utility, "outline"));
   const baseOutlineWidth = Math.max(
     2,
-    ...classes
-      .filter(
-        (candidate) => candidate.variant === "" && isWidthUtility(candidate.utility, "outline"),
-      )
-      .map((candidate) =>
-        candidate.utility === "outline"
-          ? 1
-          : (pixelLength(candidate.utility.slice("outline-".length)) ?? Infinity),
-      ),
+    ...outlineWidths
+      .filter((candidate) => candidate.variant === "")
+      .map((candidate) => outlineWidth(candidate.utility) ?? Infinity),
   );
-  const hasInwardOutlineOffset = (variant: string, width: number | undefined) =>
+  const hasInwardOutlineOffset = (
+    target: ReturnType<typeof classUtility>,
+    width: number | undefined,
+  ) =>
     classes.some((candidate) => {
-      if (!variantCovers(candidate.variant, variant)) return false;
+      if (!variantCovers(candidate, target)) return false;
       if (!candidate.utility.startsWith("-outline-offset-")) return false;
       const offset = pixelLength(candidate.utility.slice("-outline-offset-".length));
       return width !== undefined && offset !== undefined && offset >= width;
     });
-  const hasStateRing = (variants: string[]) =>
+  const hasStateRing = (target: ReturnType<typeof classUtility>) =>
     classes.some(
       (candidate) =>
-        isStateVariant(candidate.variant) &&
-        elementTarget(candidate.variants) === elementTarget(variants) &&
+        candidate.state &&
+        candidate.target === target.target &&
         (isRingWidth(candidate.utility) ||
           candidate.utility === "ring-inset" ||
-          (hasBaseRing &&
-            variantCovers("", candidate.variant) &&
-            isColorUtility(candidate.utility, "ring"))),
+          (hasBaseRing && candidate.target === "" && isColorUtility(candidate.utility, "ring"))),
     );
   const offenders: string[] = [];
-  for (const { utility, variant, variants } of ownClasses) {
-    const state = isStateVariant(variant);
-    if (state && isRingWidth(utility) && !hasInset(variant)) {
-      offenders.push(`${variant}${utility}`);
-      continue;
-    }
+  for (const token of ownClasses) {
+    const { utility, variant, state, target } = token;
     if (
-      !hasInset("") &&
-      ((state &&
-        variantCovers("", variant) &&
-        isColorUtility(utility, "ring") &&
-        hasBaseRing &&
-        !hasInset(variant)) ||
-        (variant === "" &&
-          isRingWidth(utility) &&
-          baseRingStateColors.some((color) => !hasInset(color.variant))))
+      (state &&
+        (isRingWidth(utility) ||
+          (target === "" && hasBaseRing && isColorUtility(utility, "ring"))) &&
+        !hasInset(token)) ||
+      (variant === "" &&
+        isRingWidth(utility) &&
+        baseRingStateColors.some((color) => !hasInset(color)))
     ) {
       offenders.push(`${variant}${utility}`);
       continue;
     }
     if (
-      (utility === "ring-outset" && (state || hasStateRing(variants))) ||
+      (utility === "ring-outset" && (state || hasStateRing(token))) ||
       (utility.startsWith("[--tw-ring-inset:") && utility !== "[--tw-ring-inset:inset]")
     ) {
       offenders.push(utility);
       continue;
     }
 
-    if (state && (isWidthUtility(utility, "outline") || isColorUtility(utility, "outline"))) {
-      const width = isWidthUtility(utility, "outline")
-        ? utility === "outline"
-          ? 1
-          : pixelLength(utility.slice("outline-".length))
-        : variantCovers("", variant)
-          ? baseOutlineWidth
-          : 2;
-      if ((width === undefined || width > 2) && !hasInwardOutlineOffset(variant, width)) {
-        offenders.push(`${variant}${utility}`);
-      }
-    }
-    if (variant === "" && isWidthUtility(utility, "outline")) {
-      const width = utility === "outline" ? 1 : pixelLength(utility.slice("outline-".length));
-      if (
-        (width === undefined || width > 2) &&
-        classes.some(
-          (candidate) =>
-            isStateVariant(candidate.variant) &&
-            variantCovers("", candidate.variant) &&
-            isColorUtility(candidate.utility, "outline") &&
-            !hasInwardOutlineOffset(candidate.variant, width),
-        )
-      ) {
-        offenders.push(utility);
-      }
+    const isOutlineWidth = isWidthUtility(utility, "outline");
+    const outline = isOutlineWidth ? outlineWidth(utility) : target === "" ? baseOutlineWidth : 2;
+    if (
+      (outline === undefined || outline > 2) &&
+      ((state &&
+        (isOutlineWidth || isColorUtility(utility, "outline")) &&
+        !hasInwardOutlineOffset(token, outline)) ||
+        (variant === "" &&
+          isOutlineWidth &&
+          baseOutlineStateColors.some((color) => !hasInwardOutlineOffset(color, outline))))
+    ) {
+      offenders.push(`${variant}${utility}`);
     }
 
     // Arbitrary declarations bypass the shared inward offset entirely.
@@ -354,19 +328,10 @@ function outsetOverrides(text: string, companions: string) {
     const offset = /^(-?)outline-offset-(.+)$/u.exec(utility);
     if (!offset) continue;
     const amount = pixelLength(offset[2] ?? "");
-    const widths = classes.filter(
-      (candidate) =>
-        variantCovers(candidate.variant, variant) && isWidthUtility(candidate.utility, "outline"),
-    );
+    const widths = outlineWidths.filter((candidate) => variantCovers(candidate, token));
     // Without a guaranteed width in this composition, the shared focus outline defaults to 2px.
     const width = widths.length
-      ? Math.max(
-          ...widths.map((candidate) =>
-            candidate.utility === "outline"
-              ? 1
-              : (pixelLength(candidate.utility.slice("outline-".length)) ?? Infinity),
-          ),
-        )
+      ? Math.max(...widths.map((candidate) => outlineWidth(candidate.utility) ?? Infinity))
       : 2;
     if (offset[1] !== "-" || amount === undefined || amount < width) {
       offenders.push(utility);
@@ -386,27 +351,19 @@ export default defineRule({
   create(context) {
     const message = (utility: string) =>
       `${utility} can paint a focus or selection indicator outside its element, where an ancestor may clip it. Pair state ring widths with ring-inset under the same variant. For state colors using a base ring width, add ring-inset to that base. Remove outline offset overrides to use the shared inward default, or use a negative offset at least as large as its outline width.`;
+    const checkClasses = (node: ESTree.Node) => {
+      if (isJoinedClassFragment(node) || !isClassString(node)) return;
+      for (const utility of outsetOverrides(staticClassText(node), companionClassText(node))) {
+        context.report({ node, message: message(utility) });
+      }
+    };
     return {
       Literal(node) {
-        if (typeof node.value !== "string" || isJoinedClassFragment(node) || !isClassString(node)) {
-          return;
-        }
-        for (const utility of outsetOverrides(node.value, companionClassText(node))) {
-          context.report({ node, message: message(utility) });
-        }
+        if (typeof node.value === "string") checkClasses(node);
       },
-      TemplateLiteral(node) {
-        if (isJoinedClassFragment(node) || !isClassString(node)) return;
-        const text = staticClassText(node);
-        for (const utility of outsetOverrides(text, companionClassText(node))) {
-          context.report({ node, message: message(utility) });
-        }
-      },
+      TemplateLiteral: checkClasses,
       BinaryExpression(node) {
-        if (node.operator !== "+" || isJoinedClassFragment(node) || !isClassString(node)) return;
-        for (const utility of outsetOverrides(staticClassText(node), companionClassText(node))) {
-          context.report({ node, message: message(utility) });
-        }
+        if (node.operator === "+") checkClasses(node);
       },
       Property(node) {
         const name = getPropertyName(node.key);

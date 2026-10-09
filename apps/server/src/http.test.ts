@@ -340,7 +340,7 @@ describe("generated HTML focus protection", () => {
         expect(head.status).toBe(200);
         expect(get.headers.get("content-type")).toBe("text/html; charset=utf-8");
         expect(get.headers.get("content-security-policy")).toBe(
-          "sandbox allow-scripts allow-forms allow-popups",
+          "sandbox allow-scripts allow-forms allow-popups allow-downloads",
         );
         expect(get.headers.get("cache-control")).toBe("private, no-store");
         expect(head.headers.get("cache-control")).toBe("private, no-store");
