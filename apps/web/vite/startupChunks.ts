@@ -12,10 +12,6 @@ const STARTUP_MODULES = {
   "chat-draft": "src/routes/_chat.draft.$draftId.tsx?tsr-split=component",
   "chat-thread": "src/routes/_chat.$environmentId.$threadId.tsx?tsr-split=component",
 };
-// Rolldown measures modules before minification. This keeps startup to a
-// handful of requests while the browser still compiles pieces in parallel.
-const STARTUP_CHUNK_MAX_BYTES = 3 * 1024 * 1024;
-
 /**
  * Groups the startup graphs into a few chunks while preserving route boundaries.
  *
@@ -64,6 +60,8 @@ export function startupChunksPlugin(): Plugin {
             },
             output: {
               codeSplitting: {
+                // Keep each graph whole: size splitting creates chunk cycles inside Effect's
+                // eagerly initialized runtime and can run consumers before their dependencies.
                 groups: Object.keys(STARTUP_MODULES).map((name) => ({
                   name: `startup-${name}`,
                   tags: ["$initial"],
@@ -73,7 +71,6 @@ export function startupChunksPlugin(): Plugin {
                   entriesAware: false,
                   // Otherwise excluded bootstrap helpers are recaptured through main's imports.
                   includeDependenciesRecursively: false,
-                  maxSize: STARTUP_CHUNK_MAX_BYTES,
                 })),
               },
             },

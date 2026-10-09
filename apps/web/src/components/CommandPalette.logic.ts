@@ -360,7 +360,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
     return Object.assign(
       {
         kind: "action" as const,
-        value: `thread:${thread.id}`,
+        value: `thread:${thread.environmentId}:${thread.id}`,
         searchTerms: [
           thread.title,
           ...threadPullRequestSearchTerms(thread),
