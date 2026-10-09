@@ -1204,7 +1204,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         executeGit(
           "GitVcsDriver.resolveRepositoryPaths.currentBranch",
           cwd,
-          ["branch", "--show-current"],
+          ["symbolic-ref", "--quiet", "--short", "HEAD"],
           {
             timeoutMs: 5_000,
             allowNonZeroExit: true,
@@ -1444,9 +1444,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     cwd: string,
     branchName: string,
   ) {
-    if (yield* branchExists(cwd, branchName)) {
-      return branchName;
-    }
     const remoteNames = yield* listRemoteNames(cwd).pipe(Effect.orElseSucceed(() => []));
     const parsedRemoteRef = parseRemoteRefWithRemoteNames(branchName, remoteNames);
     return parsedRemoteRef?.branchName ?? branchName;
@@ -1532,7 +1529,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   // `allowRemoteOfCurrent` lets the review diff compare the default branch with its remote copy.
-  // Full refs keep local branches and tags from shadowing the comparison base.
   const resolveBaseBranchForNoUpstream = Effect.fn("resolveBaseBranchForNoUpstream")(function* (
     cwd: string,
     refName: string,
@@ -1581,7 +1577,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             refName: normalizedCandidate,
           }))
         ) {
-          return `refs/remotes/${primaryRemoteName}/${normalizedCandidate}`;
+          return `${primaryRemoteName}/${normalizedCandidate}`;
         }
         continue;
       }
@@ -1594,11 +1590,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           refName: normalizedCandidate,
         }))
       ) {
-        return `refs/remotes/${primaryRemoteName}/${normalizedCandidate}`;
+        return `${primaryRemoteName}/${normalizedCandidate}`;
       }
 
       if (yield* branchExists(cwd, normalizedCandidate)) {
-        return `refs/heads/${normalizedCandidate}`;
+        return normalizedCandidate;
       }
     }
 
@@ -1632,7 +1628,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const branchResult = yield* executeGitWithStableDiagnostics(
       "GitVcsDriver.statusDetailsRemote.branch",
       cwd,
-      ["branch", "--show-current"],
+      ["rev-parse", "--abbrev-ref", "HEAD"],
       { allowNonZeroExit: true },
     ).pipe(
       Effect.catchTags({
@@ -1644,23 +1640,35 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (branchResult === null) {
       return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
     }
+    let branch: string | null;
     if (branchResult.exitCode !== 0) {
       if (isNonRepositoryGitStderr(branchResult.stderr)) {
         return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
       }
-      return yield* new GitCommandError({
-        ...gitCommandContext({
-          operation: "GitVcsDriver.statusDetailsRemote.branch",
-          cwd,
-          args: ["branch", "--show-current"],
-        }),
-        detail: "Git branch lookup failed.",
-        exitCode: branchResult.exitCode,
-        stdoutLength: branchResult.stdout.length,
-        stderrLength: branchResult.stderr.length,
-      });
+      if (!isUnbornHeadStderr(branchResult.stderr)) {
+        return yield* new GitCommandError({
+          ...gitCommandContext({
+            operation: "GitVcsDriver.statusDetailsRemote.branch",
+            cwd,
+            args: ["rev-parse", "--abbrev-ref", "HEAD"],
+          }),
+          detail: "Git branch lookup failed.",
+          exitCode: branchResult.exitCode,
+          stdoutLength: branchResult.stdout.length,
+          stderrLength: branchResult.stderr.length,
+        });
+      }
+
+      const branchValue = yield* runGitStdout(
+        "GitVcsDriver.statusDetailsRemote.unbornBranch",
+        cwd,
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+      );
+      branch = branchValue.trim() || null;
+    } else {
+      const branchValue = branchResult.stdout.trim();
+      branch = branchValue.length > 0 && branchValue !== "HEAD" ? branchValue : null;
     }
-    const branch = branchResult.stdout.trim() || null;
     const upstream = yield* resolveCurrentUpstream(cwd);
     const upstreamRef = upstream?.upstreamRef ?? null;
     let aheadCount = 0;
@@ -2719,9 +2727,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       {
         id: "branch-range",
         kind: "branch-range",
-        title: review.baseRef
-          ? `Changes vs ${review.baseRef.replace(/^refs\/(?:heads|remotes)\//, "")}`
-          : "Changes",
+        title: review.baseRef ? `Changes vs ${review.baseRef}` : "Changes",
         baseRef: review.baseRef,
         // For display only. The new side is the working tree.
         headRef: repository.currentBranch ?? "HEAD",
@@ -3758,7 +3764,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       "branch",
       "--list",
       "--no-column",
-      "--format=%(refname:lstrip=2)",
+      "--format=%(refname:short)",
     ]).pipe(
       Effect.map((stdout) => {
         const branchNames: Array<string> = [];
