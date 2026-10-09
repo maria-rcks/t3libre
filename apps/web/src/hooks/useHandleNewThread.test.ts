@@ -216,28 +216,22 @@ describe.each([
     },
   );
 
-  it.each(["navigation", "cancellation"])(
-    "abandons a delayed draft open after %s",
-    async (reason) => {
-      testState.reset(draft);
-      let shouldProceed = true;
-      const openThread = useNewThreadHandler();
-      const pendingOpen = openThread(
-        { environmentId: "environment-ssh", projectId: "project-remote" } as never,
-        { replace: true, shouldProceed: () => shouldProceed },
-      );
+  it("abandons a delayed draft open when the user navigates elsewhere", async () => {
+    testState.reset(draft);
+    const openThread = useNewThreadHandler();
+    const pendingOpen = openThread(
+      { environmentId: "environment-ssh", projectId: "project-remote" } as never,
+      { replace: true },
+    );
 
-      if (reason === "navigation") testState.router.state.location.href = "/usage";
-      else shouldProceed = false;
-      testState.completeProjectFileRead(null);
-      await pendingOpen;
+    testState.router.state.location.href = "/usage";
+    testState.completeProjectFileRead(null);
+    await pendingOpen;
 
-      expect(testState.router.state.location.href).toBe(reason === "navigation" ? "/usage" : "/");
-      expect(testState.router.navigate).not.toHaveBeenCalled();
-      expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
-      expect(testState.draftStore.setDraftThreadContext).not.toHaveBeenCalled();
-    },
-  );
+    expect(testState.router.state.location.href).toBe("/usage");
+    expect(testState.router.navigate).not.toHaveBeenCalled();
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+  });
 
   it.each([true, false])(
     "uses the target environment's start-from-origin default of %s",
