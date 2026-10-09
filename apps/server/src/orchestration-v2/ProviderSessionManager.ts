@@ -1669,6 +1669,7 @@ export const layerWithOptions = (
         >,
       ): ProviderAdapter.ProviderAdapterV2SessionRuntime => {
         const providerSessionId = runtime.providerSessionId;
+        const prepareTurn = runtime.prepareTurn;
         const subscribeEvents = makeEventSubscription(eventSubscribers);
         // Every provider's turn operations pass through here, so this is where they are
         // counted. Only turn starts are timed: until the provider accepts the turn.
@@ -1828,6 +1829,14 @@ export const layerWithOptions = (
                 ),
               ),
             ),
+          ...(prepareTurn === undefined
+            ? {}
+            : {
+                prepareTurn: (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
+                  observeActivity(providerSessionId, touchActivity(providerSessionId)).pipe(
+                    Effect.andThen(prepareTurn(input)),
+                  ),
+              }),
           steerTurn: (input) =>
             observeActivity(providerSessionId, touchActivity(providerSessionId)).pipe(
               Effect.andThen(runtime.steerTurn(input).pipe(turnMetrics("steer"))),

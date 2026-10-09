@@ -1045,6 +1045,108 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
   );
 });
 
+describe("ClaudeAdapterV2 prepareTurn", () => {
+  const runPrepareScenario = (input: { readonly startModel: string }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-claude-prepare-turn-",
+        });
+        const queries: Array<{ offers: number; closed: boolean; model: string | undefined }> = [];
+        const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CLAUDE_SETTINGS,
+          environment: {},
+          attachmentsDir,
+          fileSystem,
+          path: yield* Path.Path,
+          crypto: yield* Crypto.Crypto,
+          idAllocator,
+          queryRunner: {
+            allocateSessionId: Effect.succeed("native-thread-claude-prepare-turn"),
+            open: (openInput) =>
+              Effect.sync(() => {
+                const query = { offers: 0, closed: false, model: openInput.options.model };
+                queries.push(query);
+                return {
+                  messages: Stream.never,
+                  offer: () =>
+                    Effect.sync(() => {
+                      query.offers += 1;
+                    }),
+                  setModel: () => Effect.void,
+                  setPermissionMode: () => Effect.void,
+                  interrupt: Effect.void,
+                  close: Effect.sync(() => {
+                    query.closed = true;
+                  }),
+                };
+              }),
+            forkSession: () => Effect.die("unused"),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            assertComplete: Effect.void,
+          },
+        });
+        const threadId = ThreadId.make("thread-claude-prepare-turn");
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-claude-prepare-turn"),
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+        });
+        const now = yield* DateTime.now;
+        const turnInput = (model: string) =>
+          makeClaudeTestTurnInput({
+            threadId,
+            providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-prepare-turn"),
+            text: "Reply with ok.",
+            attachments: [],
+            modelSelection: { ...CLAUDE_TEST_MODEL_SELECTION, model },
+          });
+        assert.isFunction(runtime.prepareTurn);
+        yield* runtime.prepareTurn!(turnInput(CLAUDE_TEST_MODEL_SELECTION.model));
+        // The CLI is started, but nothing reaches it before the turn starts.
+        assert.deepEqual(
+          queries.map((query) => query.offers),
+          [0],
+        );
+        yield* runtime.startTurn(turnInput(input.startModel));
+        return queries;
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    );
+
+  it.effect("starts the turn on the process it started before the prompt", () =>
+    Effect.gen(function* () {
+      const queries = yield* runPrepareScenario({ startModel: CLAUDE_TEST_MODEL_SELECTION.model });
+      assert.equal(queries.length, 1);
+      assert.equal(queries[0]?.offers, 1);
+    }),
+  );
+
+  it.effect("replaces a prepared process the turn would not have opened", () =>
+    Effect.gen(function* () {
+      const queries = yield* runPrepareScenario({ startModel: "claude-haiku-4-5" });
+      assert.equal(queries.length, 2);
+      assert.isTrue(queries[0]?.closed);
+      assert.equal(queries[0]?.offers, 0);
+      assert.equal(queries[1]?.offers, 1);
+    }),
+  );
+});
+
 describe("ClaudeAdapterV2 approval cancellation", () => {
   it.effect("observes an approval signal that was already aborted", () =>
     Effect.gen(function* () {
