@@ -1068,10 +1068,7 @@ export function TerminalViewport({
     if (panelResizeEpoch === 0) return;
     const terminal = terminalRef.current;
     if (!terminal || !visibleRef.current) return;
-    // The panel's drag-end epoch runs after the final DOM width commits, before
-    // paint. Flush even if ResizeObserver has already fitted the local grid.
-    // The drawer's own resizeEpoch also advances on every window resize event,
-    // so it stays on the debounced path above.
+    // Drag end: send the final grid to the PTY now instead of after the debounce.
     if (terminal.fit()) terminal.flushResize();
   }, [panelResizeEpoch]);
   return (
