@@ -158,7 +158,8 @@ describe("makeManagedServerProvider", () => {
           checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
             Effect.as(refreshedSnapshot),
           ),
-          enrichSnapshot: ({ settings }) => Deferred.succeed(enrichedWith, settings),
+          enrichSnapshot: ({ settings }) =>
+            Deferred.succeed(enrichedWith, settings).pipe(Effect.asVoid),
           refreshInterval: "1 hour",
         }).pipe(
           Effect.provideService(ProviderHost.ProviderHost, {
