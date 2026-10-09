@@ -887,8 +887,8 @@ export const layer: Layer.Layer<
                           ? Effect.failCause(cause)
                           : Effect.logWarning(
                               "orchestration V2 provider turn preparation failed; starting it with the turn",
-                              { runId: input.run.id, cause: Cause.pretty(cause) },
-                            ),
+                              cause,
+                            ).pipe(Effect.annotateLogs({ runId: input.run.id })),
                       ),
                     ),
               ],

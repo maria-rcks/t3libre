@@ -81,12 +81,13 @@ const make = Effect.gen(function* () {
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.void
-            : Effect.logWarning("failed to refresh workspace after run completion", {
-                threadId: input.threadId,
-                runId: input.runId,
-                cwd,
-                cause: Cause.pretty(cause),
-              }),
+            : Effect.logWarning("failed to refresh workspace after run completion", cause).pipe(
+                Effect.annotateLogs({
+                  threadId: input.threadId,
+                  runId: input.runId,
+                  cwd,
+                }),
+              ),
         ),
         Effect.forkIn(refreshScope),
       );
