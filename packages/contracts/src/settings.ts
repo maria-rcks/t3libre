@@ -1052,6 +1052,8 @@ export const StorageCleanupReportEntry = Schema.Struct({
   path: Schema.NullOr(Schema.String),
   threadId: Schema.NullOr(ThreadId),
   threadTitle: Schema.NullOr(Schema.String),
+  bytes: Schema.NullOr(Schema.Number).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  files: Schema.NullOr(Schema.Number).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
 export type StorageCleanupReportEntry = typeof StorageCleanupReportEntry.Type;
 export const StorageCleanupReport = Schema.Struct({
@@ -1061,6 +1063,7 @@ export const StorageCleanupReport = Schema.Struct({
   entries: Schema.Array(StorageCleanupReportEntry),
   counts: Schema.Struct({ removed: Schema.Number, kept: Schema.Number, failed: Schema.Number }),
   omittedCount: Schema.Number,
+  bytesFreed: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
 });
 export type StorageCleanupReport = typeof StorageCleanupReport.Type;
 

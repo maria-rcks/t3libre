@@ -53,13 +53,15 @@ const decodeCleanupSession = Schema.decodeUnknownEffect(
 );
 
 const DAY_MS = 86_400_000;
+
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const REPORT_ENTRY_LIMIT = 200;
 const isGitCommandError = Schema.is(GitCommandError);
 
 function cleanupFailureReason(error: { readonly message: string }) {
   return isGitCommandError(error)
     ? `${error.command}: ${error.detail.split(/\r?\n/)[0]}${error.reason ? ` (${error.reason})` : ""}`
-    : error.message.split(/\r?\n/)[0];
+    : (error.message.split(/\r?\n/)[0] ?? error.message);
 }
 
 const worktreeCleanupEnabled = (rules: WorktreeCleanupRules) =>
@@ -204,6 +206,47 @@ const make = Effect.gen(function* () {
         );
       });
 
+  const measureWorktree = (worktreePath: string) =>
+    Effect.gen(function* () {
+      const root = yield* fs.realPath(worktreePath);
+      const pending = [root];
+      let entries = 1;
+      let bytes = 0;
+      while (pending.length > 0) {
+        const target = pending.pop()!;
+        // Effect's stat follows links. Probe with readLink first to get lstat
+        // semantics, including skipping dangling links and directory links.
+        const isLink = yield* fs.readLink(target).pipe(
+          Effect.as(true),
+          Effect.catchIf(
+            (error) =>
+              error.cause instanceof Error &&
+              "code" in error.cause &&
+              error.cause.code === "EINVAL",
+            () => Effect.succeed(false),
+          ),
+        );
+        if (isLink) continue;
+        if ((yield* fs.realPath(target)) !== target) return null;
+        const stat = yield* fs.stat(target);
+        if (stat.type === "File") bytes += Number(stat.size);
+        else if (stat.type === "Directory") {
+          const names = yield* fs.readDirectory(target);
+          entries += names.length;
+          if (entries > 2_000_000) return null;
+          for (const name of names) {
+            const child = path.join(target, name);
+            if (!inside(root, child)) return null;
+            pending.push(child);
+          }
+        }
+      }
+      return bytes;
+    }).pipe(
+      Effect.timeout("30 seconds"),
+      Effect.orElseSucceed(() => null),
+    );
+
   const readThreads = Effect.fn("StorageCleanup.readThreads")(function* () {
     const active = yield* projections.getShellSnapshot();
     const archived = yield* projections.getShellSnapshot({ location: "archive" });
@@ -344,8 +387,10 @@ const make = Effect.gen(function* () {
         path: worktreePath,
         threadId: thread.id,
         threadTitle: thread.title,
+        bytes: null,
+        files: null,
       };
-      const keep = (reason: string) => entries.push({ ...entry, reason: `Kept: ${reason}` });
+      const keep = (reason: string) => entries.push({ ...entry, reason: sentence(reason) });
       yield* Effect.gen(function* () {
         if (!(yield* fs.exists(worktreePath))) return;
         if (deleted && !settings.worktreeOnDelete) return keep("no rules apply");
@@ -500,6 +545,7 @@ const make = Effect.gen(function* () {
           )
         )
           return keep("settings changed since check");
+        const bytes = yield* measureWorktree(worktreePath);
         // Clean only untracked files; Git must still refuse removal if a tracked
         // edit arrives after our last status check.
         if (settings.worktreeKeepWhen === "tracked-changes")
@@ -509,7 +555,7 @@ const make = Effect.gen(function* () {
           ["-c", "status.showUntrackedFiles=normal", "worktree", "remove", worktreePath],
           "git worktree remove",
         );
-        entries.push({ ...entry, outcome: "removed", reason: `Removed: ${removalReason}` });
+        entries.push({ ...entry, outcome: "removed", reason: sentence(removalReason), bytes });
         yield* gitManager.invalidateStatus(project.workspaceRoot);
         // Preserve branch and path: ProviderTurnStartService recreates the checkout
         // from that branch when the thread is resumed.
@@ -521,7 +567,7 @@ const make = Effect.gen(function* () {
             entries.push({
               ...entry,
               outcome: "failed",
-              reason: `Failed: ${cleanupFailureReason(error)}`,
+              reason: cleanupFailureReason(error),
             });
             yield* Effect.logWarning("storage cleanup failed for worktree", {
               threadId: thread.id,
@@ -539,10 +585,10 @@ const make = Effect.gen(function* () {
     now: number,
     rotatedLogs: boolean,
   ) {
-    if (days === null || !(yield* fs.exists(root))) return 0;
-    let removed = 0;
+    const removed = { files: 0, bytes: 0 };
+    if (days === null || !(yield* fs.exists(root))) return removed;
     const realRoot = yield* fs.realPath(root);
-    if (realRoot !== path.resolve(root)) return 0;
+    if (realRoot !== path.resolve(root)) return removed;
     const visit = Effect.fn("StorageCleanup.visitFiles")(function* (
       directory: string,
     ): Effect.fn.Return<void, PlatformError | ServerSettingsError> {
@@ -559,7 +605,8 @@ const make = Effect.gen(function* () {
             if ((rotatedLogs ? current.logsAfterDays : current.browserArtifactsAfterDays) !== days)
               return;
             yield* fs.remove(target);
-            removed++;
+            removed.files++;
+            removed.bytes += Number(stat.size);
           }
         }
       }
@@ -582,10 +629,12 @@ const make = Effect.gen(function* () {
           entries.push({
             kind: "worktree",
             outcome: "failed",
-            reason: `Failed: ${cleanupFailureReason(error)}`,
+            reason: cleanupFailureReason(error),
             path: null,
             threadId: null,
             threadTitle: null,
+            bytes: null,
+            files: null,
           });
           yield* Effect.logWarning("worktree cleanup failed", { error });
         }),
@@ -607,14 +656,16 @@ const make = Effect.gen(function* () {
     ]) {
       if (category.days === null) continue;
       yield* cleanFiles(category.root, category.days, now, category.kind === "logs").pipe(
-        Effect.map((count) =>
+        Effect.map(({ files, bytes }) =>
           entries.push({
             kind: category.kind,
-            outcome: count > 0 ? "removed" : "kept",
-            reason: count === 0 ? "Kept: no expired files" : `Removed ${count} ${category.label}`,
+            outcome: files > 0 ? "removed" : "kept",
+            reason: files === 0 ? "No expired files" : `Removed ${files} ${category.label}`,
             path: null,
             threadId: null,
             threadTitle: null,
+            bytes: files > 0 ? bytes : null,
+            files: files > 0 ? files : null,
           }),
         ),
         Effect.catch((error) =>
@@ -622,10 +673,12 @@ const make = Effect.gen(function* () {
             entries.push({
               kind: category.kind,
               outcome: "failed",
-              reason: `Failed: ${cleanupFailureReason(error)}`,
+              reason: cleanupFailureReason(error),
               path: null,
               threadId: null,
               threadTitle: null,
+              bytes: null,
+              files: null,
             });
             yield* Effect.logWarning("storage file cleanup failed", { kind: category.kind, error });
           }),
@@ -633,7 +686,11 @@ const make = Effect.gen(function* () {
       );
     }
     const counts = { removed: 0, kept: 0, failed: 0 };
-    for (const entry of entries) counts[entry.outcome]++;
+    let bytesFreed = 0;
+    for (const entry of entries) {
+      counts[entry.outcome]++;
+      if (entry.outcome === "removed") bytesFreed += entry.bytes ?? 0;
+    }
     const priority = { failed: 0, removed: 1, kept: 2 };
     const latestReport: StorageCleanupReport = {
       trigger,
@@ -643,6 +700,7 @@ const make = Effect.gen(function* () {
         .sort((a, b) => priority[a.outcome] - priority[b.outcome])
         .slice(0, REPORT_ENTRY_LIMIT),
       counts,
+      bytesFreed,
       omittedCount: Math.max(0, entries.length - REPORT_ENTRY_LIMIT),
     };
     yield* SubscriptionRef.set(reportRef, latestReport);

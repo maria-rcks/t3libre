@@ -7,11 +7,12 @@ import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import { useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
-import { CheckIcon, CircleAlertIcon, MinusIcon } from "lucide-react";
+import { CheckIcon, CircleAlertIcon, MinusIcon, Trash2Icon } from "lucide-react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { formatBytes } from "../../lib/formatBytes";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -34,6 +35,8 @@ import {
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
+  SettingsSearchTarget,
+  useRelativeTimeTick,
 } from "./settingsLayout";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
 import type { ScopedSettingsTarget } from "./scopedSettings";
@@ -167,12 +170,93 @@ const KEEP_WHEN_LABELS = {
   "tracked-changes": "Edited tracked files",
 } as const;
 
-function cleanupSummary(report: StorageCleanupReport | null) {
-  if (report === null) return "Hasn't run yet";
-  return `Last ${report.trigger} run ${formatRelativeTimeLabel(report.finishedAt)}: removed ${report.counts.removed}, kept ${report.counts.kept}, ${report.counts.failed} failed`;
+const CLEANUP_OUTCOMES = [
+  { outcome: "failed", label: "Failed", Icon: CircleAlertIcon, color: "text-destructive" },
+  { outcome: "removed", label: "Removed", Icon: CheckIcon, color: "text-success-foreground" },
+  { outcome: "kept", label: "Kept", Icon: MinusIcon, color: "text-muted-foreground" },
+] as const;
+
+function CleanupResults({ report }: { report: StorageCleanupReport }) {
+  return (
+    <div className="space-y-4">
+      {CLEANUP_OUTCOMES.map(({ outcome, label, Icon, color }) => {
+        const entries = report.entries.filter((entry) => entry.outcome === outcome);
+        if (entries.length === 0) return null;
+        return (
+          <div key={outcome}>
+            <h3 className="mb-1 text-xs font-medium text-muted-foreground">{label}</h3>
+            <ul className="divide-y divide-border/50">
+              {entries.map((entry, index) => {
+                const name =
+                  entry.kind === "worktree"
+                    ? (entry.path?.split(/[\\/]/).findLast(Boolean) ?? "Worktrees")
+                    : entry.kind === "logs"
+                      ? "Rotated logs"
+                      : "Browser artifacts";
+                return (
+                  <li
+                    key={`${entry.path ?? entry.kind}:${entry.threadId ?? index}`}
+                    className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 py-2.5"
+                  >
+                    <Icon aria-hidden="true" className={`mt-0.5 size-4 ${color}`} />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                        <div className="min-w-0 flex-1 text-sm font-medium text-foreground">
+                          {entry.path ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={<span tabIndex={0} className="wrap-anywhere" />}
+                              >
+                                {name}
+                              </TooltipTrigger>
+                              <TooltipPopup>{entry.path}</TooltipPopup>
+                            </Tooltip>
+                          ) : (
+                            name
+                          )}
+                        </div>
+                        {outcome === "removed" && entry.bytes !== null && (
+                          <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                            {entry.kind !== "worktree" && entry.files !== null
+                              ? `${entry.files.toLocaleString()} ${entry.files === 1 ? "file" : "files"} · `
+                              : ""}
+                            {formatBytes(entry.bytes)}
+                          </span>
+                        )}
+                      </div>
+                      {entry.threadTitle && (
+                        <p className="mt-0.5 wrap-anywhere text-xs text-muted-foreground">
+                          {entry.threadTitle}
+                        </p>
+                      )}
+                      <p
+                        className={`mt-1 wrap-anywhere text-xs ${outcome === "failed" ? "text-destructive" : "text-muted-foreground"}`}
+                      >
+                        {entry.reason}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+      {report.omittedCount > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {report.omittedCount.toLocaleString()} more results. Recovered space includes all removed
+          items.
+        </p>
+      )}
+      {report.entries.length === 0 && report.omittedCount === 0 && (
+        <p className="text-xs text-muted-foreground">Nothing needed cleanup.</p>
+      )}
+    </div>
+  );
 }
 
 function CleanupSection() {
+  useRelativeTimeTick(60_000);
   const { connectedEnvironments } = useSettingsScope();
   const [pending, setPending] = useState(false);
   const run = useAtomCommand(serverEnvironment.runStorageCleanup);
@@ -234,12 +318,12 @@ function CleanupSection() {
       environment,
       report,
       description: report
-        ? cleanupSummary(report)
+        ? `${report.trigger === "manual" ? "Manual" : "Automatic"} run · ${formatRelativeTimeLabel(report.finishedAt)}`
         : query?.failed
           ? "Could not load the last run"
           : query?.loading
             ? "Loading last run…"
-            : "Hasn't run yet",
+            : "Cleanup hasn't run yet",
     };
   });
   const deleteNow = async () => {
@@ -272,84 +356,75 @@ function CleanupSection() {
   };
   return (
     <SettingsSection id="storage-cleanup" title="Cleanup">
-      <SettingsRow
-        {...searchableSetting("storage-delete-now")}
-        description={
-          <span className="space-y-1">
-            {summaries.map(({ environment, description }) => (
-              <span key={environment.environmentId} className="block">
-                {supported.length > 1 ? `${environment.label}: ` : ""}
-                {description}
-              </span>
+      <SettingsSearchTarget id={searchableSetting("storage-delete-now").id}>
+        <div className="flex flex-wrap items-start justify-between gap-4 px-3 py-4 sm:px-4">
+          <div className="min-w-0 flex-1 space-y-4" aria-live="polite">
+            {summaries.map(({ environment, report, description }) => (
+              <div key={environment.environmentId} className="space-y-1.5">
+                {supported.length > 1 && (
+                  <p className="wrap-anywhere text-sm font-medium">{environment.label}</p>
+                )}
+                {report ? (
+                  <>
+                    <p className="text-2xl font-semibold tabular-nums tracking-tight">
+                      {formatBytes(report.bytesFreed)}{" "}
+                      <span className="text-sm font-normal tracking-normal text-muted-foreground">
+                        recovered
+                      </span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">{description}</p>
+                    <dl className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs">
+                      {(["removed", "kept", "failed"] as const).map((outcome) => (
+                        <div key={outcome} className="flex items-baseline gap-1.5">
+                          <dt className="text-muted-foreground">{outcome}</dt>
+                          <dd
+                            className={`order-first font-medium tabular-nums ${outcome === "failed" && report.counts.failed > 0 ? "text-destructive" : "text-foreground"}`}
+                          >
+                            {report.counts[outcome].toLocaleString()}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">{description}</p>
+                )}
+              </div>
             ))}
-          </span>
-        }
-        control={
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={pending || !hasRules || state.some((entry) => !entry.allowed)}
-            onClick={() => void deleteNow()}
-          >
-            {pending ? "Deleting…" : "Delete now"}
-          </Button>
-        }
-      />
-      <div aria-live="polite">
-        {summaries.map(({ environment, report }) =>
-          report && report.entries.length > 0 ? (
-            <ul
-              key={environment.environmentId}
-              aria-label={`Cleanup results for ${environment.label}`}
-              className="max-h-80 space-y-3 overflow-y-auto border-t border-border px-3 py-3 sm:px-4"
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pending || !hasRules || state.some((entry) => !entry.allowed)}
+              onClick={() => void deleteNow()}
             >
-              {report.entries.map((entry, index) => {
-                const Icon =
-                  entry.outcome === "failed"
-                    ? CircleAlertIcon
-                    : entry.outcome === "removed"
-                      ? CheckIcon
-                      : MinusIcon;
-                const name =
-                  entry.kind === "worktree"
-                    ? (entry.path?.split(/[\\/]/).findLast(Boolean) ?? "Worktrees")
-                    : entry.kind === "logs"
-                      ? "Rotated logs"
-                      : "Browser artifacts";
-                return (
-                  <li
-                    key={`${entry.path ?? entry.kind}:${entry.threadId ?? index}`}
-                    className="flex items-start gap-2 text-xs"
-                  >
-                    <Icon
-                      aria-hidden="true"
-                      className={`mt-0.5 size-3.5 shrink-0 ${entry.outcome === "failed" ? "text-destructive" : entry.outcome === "removed" ? "text-success-foreground" : "text-muted-foreground"}`}
-                    />
-                    <div className="min-w-0">
-                      <Tooltip>
-                        <TooltipTrigger render={<p className="break-words text-foreground" />}>
-                          {supported.length > 1 ? `${environment.label} · ` : ""}
-                          {name}
-                          {entry.threadTitle ? ` · ${entry.threadTitle}` : ""}
-                        </TooltipTrigger>
-                        {entry.path && <TooltipPopup>{entry.path}</TooltipPopup>}
-                      </Tooltip>
-                      <p
-                        className={`break-words ${entry.outcome === "failed" ? "text-destructive" : "text-muted-foreground"}`}
-                      >
-                        {entry.reason}
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-              {report.omittedCount > 0 && (
-                <li className="text-xs text-muted-foreground">and {report.omittedCount} more</li>
-              )}
-            </ul>
-          ) : null,
-        )}
-      </div>
+              <Trash2Icon aria-hidden="true" />
+              {pending ? "Deleting…" : "Delete now"}
+            </Button>
+            {!hasRules && <p className="text-xs text-muted-foreground">No cleanup rules are on.</p>}
+          </div>
+        </div>
+      </SettingsSearchTarget>
+      {summaries.some(({ report }) => report !== null) && (
+        <div className="max-h-80 space-y-5 overflow-y-auto px-3 py-3 sm:px-4">
+          {summaries.map(
+            ({ environment, report }) =>
+              report && (
+                <div
+                  key={environment.environmentId}
+                  role="region"
+                  aria-label={`Cleanup results for ${environment.label}`}
+                >
+                  {supported.length > 1 && (
+                    <p className="mb-3 wrap-anywhere text-sm font-medium">{environment.label}</p>
+                  )}
+                  <CleanupResults report={report} />
+                </div>
+              ),
+          )}
+        </div>
+      )}
     </SettingsSection>
   );
 }

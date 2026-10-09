@@ -6,8 +6,13 @@ import * as Layer from "effect/Layer";
 import type * as Path from "effect/Path";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import { DEFAULT_SERVER_SETTINGS, type WorktreeKeepWhen } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  StorageCleanupReport,
+  type WorktreeKeepWhen,
+} from "@t3tools/contracts";
 import * as ServerConfig from "./config.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -36,6 +41,7 @@ import {
 
 const NOW_MS = Date.parse("2026-06-10T12:00:00.000Z");
 const DAY_MS = 24 * 60 * 60 * 1_000;
+const decodeCleanupReport = Schema.decodeSync(StorageCleanupReport);
 
 function at(offsetMs: number): DateTime.Utc {
   return DateTime.makeUnsafe(NOW_MS + offsetMs);
@@ -324,6 +330,67 @@ const runCleanupTest = <A, E>(
 ) => effect.pipe(Effect.provide(cleanupTestLayer), Effect.scoped);
 
 describe("storage cleanup reports and local file policies", () => {
+  it.live("measures nested regular files without following symlinks", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, worktree, setPolicy } = yield* cleanupFixture;
+        setPolicy("tracked-changes");
+        const sizes = yield* Effect.forEach(yield* fs.readDirectory(worktree), (name) =>
+          fs.stat(`${worktree}/${name}`).pipe(Effect.map((stat) => Number(stat.size))),
+        );
+        const outside = yield* fs.makeTempDirectoryScoped();
+        yield* fs.writeFileString(`${outside}/external`, "must not count");
+        yield* fs.makeDirectory(`${worktree}/node_modules/nested`, { recursive: true });
+        yield* fs.writeFileString(`${worktree}/node_modules/nested/file`, "count me");
+        yield* fs.symlink(outside, `${worktree}/node_modules/directory-link`);
+        yield* fs.symlink(`${outside}/external`, `${worktree}/node_modules/file-link`);
+        yield* fs.symlink(`${outside}/missing`, `${worktree}/node_modules/dangling-link`);
+        const report = yield* service.runNow;
+        const bytes = sizes.reduce((sum, size) => sum + size, 8);
+        expect(report.entries[0]).toMatchObject({ outcome: "removed", bytes, files: null });
+        expect(report.bytesFreed).toBe(bytes);
+        expect(yield* fs.readFileString(`${outside}/external`)).toBe("must not count");
+      }),
+    ),
+  );
+  it.live("still removes a worktree when measuring its size fails", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const { service, worktree } = yield* cleanupFixture.pipe(
+          Effect.provideService(FileSystem.FileSystem, {
+            ...fs,
+            readDirectory: (directory) => fs.readDirectory(`${directory}/missing-directory`),
+          }),
+        );
+        const report = yield* service.runNow;
+        expect(report.entries[0]).toMatchObject({ outcome: "removed", bytes: null, files: null });
+        expect(report.bytesFreed).toBe(0);
+        expect(yield* fs.exists(worktree)).toBe(false);
+      }),
+    ),
+  );
+  it("decodes reports from servers without size fields", () => {
+    const report = decodeCleanupReport({
+      trigger: "manual",
+      startedAt: "2026-06-10T12:00:00.000Z",
+      finishedAt: "2026-06-10T12:00:01.000Z",
+      entries: [
+        {
+          kind: "worktree",
+          outcome: "removed",
+          reason: "Removed",
+          path: null,
+          threadId: null,
+          threadTitle: null,
+        },
+      ],
+      counts: { removed: 1, kept: 0, failed: 0 },
+      omittedCount: 0,
+    });
+    expect(report.bytesFreed).toBe(0);
+    expect(report.entries[0]).toMatchObject({ bytes: null, files: null });
+  });
   it.live.each([
     ["any-local-files", ".env", "kept"],
     ["uncommitted-changes", ".env", "removed"],
@@ -341,12 +408,24 @@ describe("storage cleanup reports and local file policies", () => {
         setPolicy(policy);
         expect(yield* service.latestReport).toBeNull();
         yield* fs.writeFileString(`${worktree}/${file}`, "local data\n");
+        const sizes = yield* Effect.forEach(yield* fs.readDirectory(worktree), (name) =>
+          fs.stat(`${worktree}/${name}`).pipe(Effect.map((stat) => Number(stat.size))),
+        );
+        const bytes = sizes.reduce((sum, size) => sum + size, 0);
         const report = yield* service.runNow;
         yield* service.drain;
         expect(report.trigger).toBe("manual");
         expect(report.entries.filter((entry) => entry.kind === "worktree")).toMatchObject([
-          { outcome, path: worktree, threadId: "thread-1", threadTitle: "Thread" },
+          {
+            outcome,
+            path: worktree,
+            threadId: "thread-1",
+            threadTitle: "Thread",
+            bytes: outcome === "removed" ? bytes : null,
+            files: null,
+          },
         ]);
+        expect(report.bytesFreed).toBe(outcome === "removed" ? bytes : 0);
         expect(yield* fs.exists(worktree)).toBe(outcome === "kept");
         expect(yield* service.latestReport).toEqual(report);
         if (outcome === "kept")
@@ -364,7 +443,8 @@ describe("storage cleanup reports and local file policies", () => {
         fixture.editBeforeRemoval();
         yield* fixture.fs.writeFileString(`${fixture.worktree}/notes.txt`, "untracked\n");
         const report = yield* fixture.service.runNow;
-        expect(report.entries[0]?.outcome).toBe("failed");
+        expect(report.entries[0]).toMatchObject({ outcome: "failed", bytes: null, files: null });
+        expect(report.bytesFreed).toBe(0);
         expect(report.entries[0]?.reason).toContain("contains modified or untracked files");
         expect(yield* fixture.fs.readFileString(`${fixture.worktree}/tracked.txt`)).toBe(
           "late edit\n",
@@ -412,6 +492,8 @@ describe("storage cleanup reports and local file policies", () => {
         expect(report.omittedCount).toBe(6);
         expect(report.counts).toEqual({ removed: 1, kept: 205, failed: 0 });
         expect(report.entries[0]?.outcome).toBe("removed");
+        expect(report.entries[0]?.bytes).toBeGreaterThan(0);
+        expect(report.bytesFreed).toBe(report.entries[0]?.bytes);
       }),
     ),
   );
@@ -424,7 +506,7 @@ describe("storage cleanup reports and local file policies", () => {
         yield* command(worktree, ["add", "tracked.txt"]);
         expect((yield* service.runNow).entries[0]).toMatchObject({
           outcome: "kept",
-          reason: "Kept: has uncommitted changes (1 file)",
+          reason: "Has uncommitted changes (1 file)",
         });
         expect(yield* fs.exists(worktree)).toBe(true);
       }),
@@ -438,12 +520,12 @@ describe("storage cleanup reports and local file policies", () => {
           const fixture = yield* cleanupFixture;
           const { service, fs, worktree, setThreads } = fixture;
           setThreads([shell({ branch: "feature", worktreePath: worktree, status: "running" })]);
-          expect((yield* service.runNow).entries[0]?.reason).toContain("thread is running");
+          expect((yield* service.runNow).entries[0]?.reason).toContain("Thread is running");
           setThreads([
             shell({ branch: "feature", worktreePath: worktree }),
             shell({ id: ThreadId.make("thread-2"), branch: "feature", worktreePath: worktree }),
           ]);
-          expect((yield* service.runNow).entries[0]?.reason).toBe("Kept: shared by 2 threads");
+          expect((yield* service.runNow).entries[0]?.reason).toBe("Shared by 2 threads");
           fixture.disable();
           expect((yield* service.runNow).entries).toEqual([]);
           yield* fs.remove(worktree, { recursive: true });
@@ -488,9 +570,22 @@ describe("storage cleanup reports and local file policies", () => {
         }
         const report = yield* service.runNow;
         expect(report.entries.filter((entry) => entry.kind !== "worktree")).toMatchObject([
-          { kind: "browser-artifacts", outcome: "removed", reason: "Removed 2 browser artifacts" },
-          { kind: "logs", outcome: "removed", reason: "Removed 2 rotated logs" },
+          {
+            kind: "browser-artifacts",
+            outcome: "removed",
+            reason: "Removed 2 browser artifacts",
+            bytes: 14,
+            files: 2,
+          },
+          {
+            kind: "logs",
+            outcome: "removed",
+            reason: "Removed 2 rotated logs",
+            bytes: 6,
+            files: 2,
+          },
         ]);
+        expect(report.bytesFreed).toBe(20);
         expect(yield* fs.readDirectory(config.browserArtifactsDir)).toEqual([]);
         expect(yield* fs.exists(config.logsDir + "/server.log")).toBe(true);
         expect(yield* fs.exists(config.logsDir + "/server.log.1")).toBe(false);
@@ -506,7 +601,7 @@ describe("storage cleanup reports and local file policies", () => {
         yield* command(worktree, ["worktree", "lock", worktree]);
         const report = yield* service.runNow;
         expect(report.entries[0]).toMatchObject({ outcome: "failed" });
-        expect(report.entries[0]?.reason).toContain("Failed: git worktree remove: fatal:");
+        expect(report.entries[0]?.reason).toContain("git worktree remove: fatal:");
         expect(report.entries.map((entry) => entry.kind)).toEqual([
           "worktree",
           "browser-artifacts",

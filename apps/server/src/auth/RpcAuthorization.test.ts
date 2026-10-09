@@ -430,6 +430,7 @@ it.effect("denies manual cleanup before the handler without settings permission"
                 entries: [],
                 counts: { removed: 0, kept: 0, failed: 0 },
                 omittedCount: 0,
+                bytesFreed: 0,
               };
             }),
           ),
