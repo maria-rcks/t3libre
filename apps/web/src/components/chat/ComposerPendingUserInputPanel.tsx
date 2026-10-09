@@ -13,6 +13,7 @@ import ChatMarkdown from "../ChatMarkdown";
 
 interface PendingUserInputPanelProps {
   pendingUserInputs: PendingUserInput[];
+  disabled?: boolean;
   respondingRequestIds: RuntimeRequestId[];
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
@@ -23,6 +24,7 @@ interface PendingUserInputPanelProps {
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
   pendingUserInputs,
+  disabled = false,
   respondingRequestIds,
   answers,
   questionIndex,
@@ -38,6 +40,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
     <ComposerPendingUserInputCard
       key={activePrompt.requestId}
       prompt={activePrompt}
+      disabled={disabled}
       isResponding={respondingRequestIds.includes(activePrompt.requestId)}
       answers={answers}
       questionIndex={questionIndex}
@@ -50,6 +53,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
 
 const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard({
   prompt,
+  disabled,
   isResponding,
   answers,
   questionIndex,
@@ -58,6 +62,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   onDismiss,
 }: {
   prompt: PendingUserInput;
+  disabled: boolean;
   isResponding: boolean;
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
@@ -67,7 +72,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 }) {
   // Message-mode requests remain answerable after their provider turn ends.
   const canRespond = prompt.responseCapability !== "not_resumable";
-  const responseDisabled = isResponding || !canRespond;
+  const responseDisabled = disabled || isResponding || !canRespond;
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = prompt.questions[progress.questionIndex];
   const autoAdvanceTimerRef = useRef<number | null>(null);
@@ -80,8 +85,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     questionId: string;
     optionIndex: number;
   } | null>(null);
-  // Answer values can repeat, so retain the selected index per question.
-  const [selectedOptionIndices, setSelectedOptionIndices] = useState<Record<string, number>>({});
   // Collapsing hides everything but the header so a tall prompt stops covering
   // the thread the user is trying to read. Scoped to a single question: the card
   // is keyed by request id so the next prompt starts expanded, and storing the
@@ -98,6 +101,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   useEffect(() => {
     onAdvanceRef.current = onAdvance;
   }, [onAdvance]);
+
+  useEffect(() => {
+    if (disabled && autoAdvanceTimerRef.current !== null) {
+      window.clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+  }, [disabled]);
 
   useEffect(() => {
     if (!activeQuestion || activeQuestion.multiSelect || !optimisticSingleSelect) {
@@ -131,8 +141,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   const handleOptionSelection = useCallback(
     (questionId: string, optionValue: string, optionIndex: number) => {
+      if (disabled || isResponding) return;
       setFocusedOption({ questionId, optionIndex });
-      setSelectedOptionIndices((current) => ({ ...current, [questionId]: optionIndex }));
       if (activeQuestion?.multiSelect) {
         onToggleOption(questionId, optionValue);
         return;
@@ -147,7 +157,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         onAdvanceRef.current();
       }, 200);
     },
-    [activeQuestion, onToggleOption],
+    [activeQuestion, disabled, isResponding, onToggleOption],
   );
 
   // Keyboard shortcut: number keys 1-9 select corresponding options when focus is
@@ -186,16 +196,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }
 
   const customAnswerActive = progress.customAnswer.trim().length > 0;
+  // The focused option previews; otherwise the selected one, or the first before any answer.
   const selectedOptionValue = progress.selectedOptionValues.at(-1);
-  const matchingSelectedOptionIndices = activeQuestion.options.flatMap((option, index) =>
-    (option.value ?? option.label) === selectedOptionValue ? [index] : [],
-  );
-  const rememberedOptionIndex = selectedOptionIndices[activeQuestion.id];
-  const selectedOptionIndex = matchingSelectedOptionIndices.includes(rememberedOptionIndex ?? -1)
-    ? rememberedOptionIndex
-    : matchingSelectedOptionIndices.length === 1
-      ? matchingSelectedOptionIndices[0]
-      : -1;
   const previewOptionIndex =
     focusedOption?.questionId === activeQuestion.id
       ? focusedOption.optionIndex
@@ -203,7 +205,9 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         ? -1
         : selectedOptionValue === undefined
           ? 0
-          : (selectedOptionIndex ?? -1);
+          : activeQuestion.options.findIndex(
+              (option) => (option.value ?? option.label) === selectedOptionValue,
+            );
   const previewOption = activeQuestion.options[previewOptionIndex];
 
   return (
@@ -280,12 +284,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   (!customAnswerActive && progress.selectedOptionValues.includes(optionValue));
                 const shortcutKey = index < 9 ? index + 1 : null;
                 const className = cn(
-                  "group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-primary/25",
+                  "group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
                   isSelected
                     ? "bg-muted/55 text-foreground"
                     : "bg-transparent text-foreground/85 hover:bg-muted/30",
-                  isResponding && "opacity-50 cursor-not-allowed",
-                  !isResponding && "cursor-pointer",
+                  (disabled || isResponding) && "opacity-50 cursor-not-allowed",
+                  !disabled && !isResponding && "cursor-pointer",
                 );
                 const content = (
                   <>
@@ -310,9 +314,9 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 );
                 return (
                   <button
-                    key={`${activeQuestion.id}:${optionValue}:${index}`}
+                    key={`${activeQuestion.id}:${optionValue}`}
                     type="button"
-                    disabled={isResponding}
+                    disabled={disabled || isResponding}
                     onMouseEnter={() =>
                       setFocusedOption({ questionId: activeQuestion.id, optionIndex: index })
                     }
