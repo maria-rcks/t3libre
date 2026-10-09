@@ -5,6 +5,7 @@ import {
   ThreadId,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
@@ -20,7 +21,16 @@ it.effect("refreshes workspace after checkpoint capture without reading history"
   const runId = RunId.make("run_finalize");
   const scopeId = CheckpointScopeId.make("scope_finalize");
   const capture = vi.fn(() => Effect.void);
-  const refresh = vi.fn(() => Effect.void);
+  const refreshStarted = Deferred.makeUnsafe<void>();
+  const releaseRefresh = Deferred.makeUnsafe<void>();
+  const refreshFinished = Deferred.makeUnsafe<void>();
+  const refresh = vi.fn(() =>
+    Deferred.succeed(refreshStarted, undefined).pipe(
+      Effect.andThen(Deferred.await(releaseRefresh)),
+      Effect.andThen(Deferred.succeed(refreshFinished, undefined)),
+      Effect.asVoid,
+    ),
+  );
   const checkpointContext = {
     runs: [],
     checkpointScopes: [{ id: scopeId, runId, kind: "root_run" as const, cwd: "/repo" }],
@@ -44,9 +54,15 @@ it.effect("refreshes workspace after checkpoint capture without reading history"
   );
   return Effect.gen(function* () {
     const service = yield* RunFinalization.RunFinalizationService;
+    // Finalize returns while the refresh is still blocked: the thread's effect
+    // lane is free for the next turn as soon as the checkpoint commits.
     yield* service.finalize({ threadId, runId, scopeId });
     assert.equal(capture.mock.calls.length, 1);
+    yield* Deferred.await(refreshStarted);
     assert.deepEqual(refresh.mock.calls[0], [{ cwd: "/repo", threadId, runId }]);
+    assert.isFalse(yield* Deferred.isDone(refreshFinished));
+    yield* Deferred.succeed(releaseRefresh, undefined);
+    yield* Deferred.await(refreshFinished);
   }).pipe(Effect.provide(layer));
 });
 
