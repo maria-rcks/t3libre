@@ -5497,7 +5497,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   autoSettleDisabledAt: thread.autoSettleDisabledAt ?? null,
                   snoozedUntil: thread.snoozedUntil ?? null,
                   snoozedAt: thread.snoozedAt ?? null,
-                  lastSnoozeWakeAt: thread.lastSnoozeWakeAt ?? null,
                   status,
                   latestRunId,
                   latestRunRequestedAt:

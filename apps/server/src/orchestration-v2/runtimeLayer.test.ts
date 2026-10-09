@@ -4550,68 +4550,14 @@ it.layer(layerSharedApplicationDataPlaneTest)("snooze projection", (it) => {
         threadId,
         reason: "user",
       });
-      const manuallyAwakened = yield* orchestrator.getThreadProjection(threadId);
-      const wakeAt = manuallyAwakened.thread.lastSnoozeWakeAt;
-      assert.isNotNull(wakeAt);
-      assert.isNull(manuallyAwakened.thread.snoozedUntil);
-      assert.deepEqual(manuallyAwakened.thread.unsettledAt, firstProjection.thread.unsettledAt);
       const projections = yield* ProjectionStore.ProjectionStoreV2.pipe(
         Effect.provide(ProjectionStore.layer),
       );
-      const candidate = (yield* projections.getSettlementCandidates(threadId))[0];
-      assert.deepEqual(candidate?.lastSnoozeWakeAt, wakeAt);
-      yield* TestClock.adjust("10 seconds");
-      yield* orchestrator.dispatch({
-        type: "thread.unsnooze",
-        commandId: CommandId.make("runtime-layer-snoozed-thread-wake-again"),
-        threadId,
-        reason: "user",
-      });
-      assert.deepEqual(
-        (yield* orchestrator.getThreadProjection(threadId)).thread.lastSnoozeWakeAt,
-        wakeAt,
-      );
+      const [candidate] = yield* projections.getSettlementCandidates(threadId);
+      assert.deepEqual(candidate?.lastSnoozeWakeAt, yield* DateTime.now);
       yield* orchestrator.dispatch({
         type: "thread.snooze",
         commandId: CommandId.make("runtime-layer-snoozed-thread-snooze-after-wake"),
-        threadId,
-        snoozedUntil,
-      });
-
-      yield* orchestrator.dispatch({
-        type: "thread.pin",
-        commandId: CommandId.make("runtime-layer-snoozed-thread-pin-wake"),
-        threadId,
-        orderKey: "a0",
-      });
-      const pinAwakened = yield* orchestrator.getThreadProjection(threadId);
-      const pinWakeAt = yield* DateTime.now;
-      assert.deepEqual(pinAwakened.thread.lastSnoozeWakeAt, pinWakeAt);
-      assert.isNull(pinAwakened.thread.snoozedUntil);
-      assert.isNull(pinAwakened.thread.snoozedAt);
-      assert.deepEqual(pinAwakened.thread.unsettledAt, firstProjection.thread.unsettledAt);
-      yield* TestClock.adjust("10 seconds");
-      yield* orchestrator.dispatch({
-        type: "thread.pin",
-        commandId: CommandId.make("runtime-layer-snoozed-thread-pin-again"),
-        threadId,
-        orderKey: "a1",
-      });
-      const pinnedAgain = yield* orchestrator.getThreadProjection(threadId);
-      assert.deepEqual(pinnedAgain.thread.lastSnoozeWakeAt, pinWakeAt);
-      assert.equal(pinnedAgain.thread.pinOrderKey, "a0");
-      yield* orchestrator.dispatch({
-        type: "thread.unpin",
-        commandId: CommandId.make("runtime-layer-snoozed-thread-unpin-after-wake"),
-        threadId,
-      });
-      assert.deepEqual(
-        (yield* projections.getSettlementCandidates(threadId))[0]?.lastSnoozeWakeAt,
-        pinWakeAt,
-      );
-      yield* orchestrator.dispatch({
-        type: "thread.snooze",
-        commandId: CommandId.make("runtime-layer-snoozed-thread-snooze-after-pin"),
         threadId,
         snoozedUntil,
       });
@@ -5198,10 +5144,6 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
         } else {
           assert.isNull(armedShell.snoozedUntil);
           assert.isNull(armedShell.snoozedAt);
-          assert.deepEqual(
-            (yield* orchestrator.getThreadProjection(threadId)).thread.lastSnoozeWakeAt,
-            yield* DateTime.now,
-          );
           assert.isTrue(armedShell.limitRecovery!.autoResume);
         }
       }

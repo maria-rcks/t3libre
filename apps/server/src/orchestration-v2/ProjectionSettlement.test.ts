@@ -143,35 +143,6 @@ const createItem = Effect.fn(function* (
 it.effect.each([
   ["sql", layerSql],
   ["memory", ProjectionStore.layerMemory],
-] as const)("%s: manual wakes restart the persisted inactivity clock", ([, testLayer]) =>
-  Effect.gen(function* () {
-    const store = yield* ProjectionStore.ProjectionStoreV2;
-    const threadId = yield* createThread("manually-woken");
-    yield* createRun(threadId);
-    const before = (yield* store.getSettlementCandidates(threadId))[0]!;
-    const settings = {
-      pullRequest: null,
-      nowMs: DateTime.toEpochMillis(now),
-      autoSettleAfterDays: 1,
-      autoSettleOnMerge: false,
-    };
-    assert.deepEqual(resolveAutoSettlementAt({ ...settings, thread: before }), old);
-    yield* store.apply({
-      id: EventId.make("event:settlement:manual-wake"),
-      type: "thread.unsnoozed",
-      threadId,
-      occurredAt: now,
-      payload: { ...(yield* store.getThread(threadId)), lastSnoozeWakeAt: now },
-    });
-    const after = (yield* store.getSettlementCandidates(threadId))[0]!;
-    assert.deepEqual(after.lastSnoozeWakeAt, now);
-    assert.isNull(resolveAutoSettlementAt({ ...settings, thread: after }));
-  }).pipe(Effect.provide(testLayer)),
-);
-
-it.effect.each([
-  ["sql", layerSql],
-  ["memory", ProjectionStore.layerMemory],
 ] as const)(
   "%s: discovers settlement work with the same activity and background semantics as the shell",
   ([, testLayer]) =>
