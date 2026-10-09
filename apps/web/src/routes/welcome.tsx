@@ -46,15 +46,13 @@ function WelcomeRouteView() {
           localAvailable={localAvailable}
           resumeEnvironmentId={resumeEnvironmentId}
           onDone={async (projectRef) => {
+            setDismissed(true);
             if (projectRef !== undefined) {
-              const opened = await openNewThread(projectRef, { replace: true }).catch(() =>
+              await openNewThread(projectRef, { replace: true }).catch(() =>
                 navigate({ to: "/", replace: true }),
               );
-              if (opened === null) return false;
-              setDismissed(true);
               return;
             }
-            setDismissed(true);
             await navigate({ to: "/", replace: true });
           }}
         />

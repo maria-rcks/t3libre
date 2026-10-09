@@ -16,19 +16,15 @@ const commands = vi.hoisted(() => ({
   snooze: vi.fn(),
   unsnooze: vi.fn(),
 }));
-const router = vi.hoisted(() => {
-  const location = { href: "/", state: { __TSR_key: "initial" } };
-  return {
-    navigate: vi.fn(async () => {}),
-    state: { location, matches: [{ params: {} as Record<string, string> }] },
-    history: {
-      location,
-      replace: vi.fn(() => {
-        location.state.__TSR_key += "-replaced";
-      }),
-    },
-  };
-});
+const router = vi.hoisted(() => ({
+  navigate: vi.fn(async () => {}),
+  state: { matches: [{ params: {} as Record<string, string> }] },
+}));
+vi.mock("../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => vi.fn() }));
+vi.mock("../state/session", async (original) => ({
+  ...(await original<typeof import("../state/session")>()),
+  readEnvironmentScope: () => true,
+}));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useCallback: (callback: unknown) => callback,
@@ -100,9 +96,6 @@ beforeEach(() => {
     command.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
   }
   router.navigate.mockClear();
-  router.state.location.href = "/";
-  router.state.location.state.__TSR_key = "initial";
-  router.history.replace.mockClear();
   router.state.matches[0]!.params = {};
   threadShell.pinnedAt = null;
   threadShell.snoozedUntil = null;

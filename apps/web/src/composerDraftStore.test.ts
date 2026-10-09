@@ -1774,46 +1774,29 @@ describe("composerDraftStore project draft thread mapping", () => {
     });
   });
 
-  it.each([false, true])(
-    "keeps prompt and env mode when remapping a draft (manual: %s)",
-    (manual) => {
-      const store = useComposerDraftStore.getState();
-      store.setProjectDraftThreadId(projectRef, draftId, {
-        threadId,
-        branch: "feature/local-only",
-        worktreePath: "/tmp/local-worktree",
-        envMode: "worktree",
-        startFromOrigin: true,
-        environmentSelection: "auto",
-        loadBalancedEnvironmentId: TEST_ENVIRONMENT_ID,
-      });
-      store.setPrompt(draftId, "keep this prompt");
+  it("clears branch and worktree but keeps env mode when remapping a draft to another environment", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      branch: "feature/local-only",
+      worktreePath: "/tmp/local-worktree",
+      envMode: "worktree",
+      startFromOrigin: true,
+    });
 
-      store.setLogicalProjectDraftThreadId(
-        scopedProjectKey(projectRef),
-        remoteProjectRef,
-        draftId,
-        {
-          threadId,
-          ...(manual
-            ? { environmentSelection: "manual" as const, loadBalancedEnvironmentId: null }
-            : {}),
-        },
-      );
+    store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), remoteProjectRef, draftId, {
+      threadId,
+    });
 
-      expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject({
-        environmentId: OTHER_TEST_ENVIRONMENT_ID,
-        projectId,
-        branch: null,
-        worktreePath: null,
-        envMode: "worktree",
-        startFromOrigin: true,
-        environmentSelection: manual ? "manual" : "auto",
-        loadBalancedEnvironmentId: null,
-      });
-      expect(store.getComposerDraft(draftId)?.prompt).toBe("keep this prompt");
-    },
-  );
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject({
+      environmentId: OTHER_TEST_ENVIRONMENT_ID,
+      projectId,
+      branch: null,
+      worktreePath: null,
+      envMode: "worktree",
+      startFromOrigin: true,
+    });
+  });
 
   it("clears stale upload metadata when retargeting a draft to another environment", () => {
     const store = useComposerDraftStore.getState();

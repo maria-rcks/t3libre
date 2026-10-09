@@ -1,6 +1,6 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import ChatView from "./ChatView";
@@ -38,7 +38,6 @@ import {
  */
 export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   const navigate = useNavigate();
-  const archiveDraftRetry = useLocation({ select: (location) => location.state.archiveDraftRetry });
   const draftId = target.kind === "draft" ? target.draftId : null;
   const draftSession = useComposerDraftStore((store) =>
     draftId === null ? null : store.getDraftSession(draftId),
@@ -152,21 +151,11 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     if (renderState === "missing") {
       const { clearPendingFileDropsForThread } = useSidebarPendingFileDropStore.getState();
       clearPendingFileDropsForThread(target.threadRef);
-      if (archiveDraftRetry && scopedThreadKey(archiveDraftRetry.threadRef) === serverThreadKey) {
-        void navigate({ to: "/", replace: true, state: { archiveDraftRetry } });
-      } else if (environmentHasAnyThreads) {
+      if (environmentHasAnyThreads) {
         void navigate({ to: "/", replace: true });
       }
     }
-  }, [
-    archiveDraftRetry,
-    bootstrapComplete,
-    environmentHasAnyThreads,
-    navigate,
-    renderState,
-    serverThreadKey,
-    target,
-  ]);
+  }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
 
   useEffect(() => {
     if (target.kind !== "server" || !serverThreadStarted || !draftThread) {

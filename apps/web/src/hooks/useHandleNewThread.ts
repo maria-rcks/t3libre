@@ -34,9 +34,6 @@ import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
-import { appAtomRegistry } from "../rpc/atomRegistry";
-import { environmentPresentations } from "../state/presentation";
-import { stackedThreadToast, toastManager } from "../components/ui/toast";
 
 interface NewThreadWorkspaceOptions {
   branch?: string | null;
@@ -75,28 +72,13 @@ export function useNewThreadHandler() {
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
         replace?: boolean;
+        // Pin the draft to this checkout instead of letting load balancing move it.
         environmentSelection?: "manual";
-        // Stale requests also return null; only this branch needs recovery.
-        onUnavailable?: () => void;
       },
       // Which draft the thread ended up in, so a caller that has something to put in it — a
       // prepared checkout, a task to write — addresses that one rather than looking the project
       // up again and finding whichever draft it happens to hold.
     ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
-      const environment = appAtomRegistry.get(
-        environmentPresentations.presentationAtom(projectRef.environmentId),
-      );
-      if (environment?.connection.phase !== "connected") {
-        options?.onUnavailable?.();
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Environment unavailable",
-            description: `${environment?.entry.target.label ?? "The selected environment"} is not connected. Choose a connected checkout from New thread in...`,
-          }),
-        );
-        return Promise.resolve(null);
-      }
       const projects = readProjects();
       const targetServerSettings =
         environmentServerConfigs.get(projectRef.environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;
@@ -111,35 +93,27 @@ export function useNewThreadHandler() {
         setModelSelection,
       } = useComposerDraftStore.getState();
       const requestingRouteHref = router.state.location.href;
-      const requestingHistoryKey = router.history.location.state.__TSR_key;
-      const routeChangedSinceRequest = () =>
-        router.state.location.href !== requestingRouteHref ||
-        router.history.location.state.__TSR_key !== requestingHistoryKey;
+      const routeChangedSinceRequest = () => router.state.location.href !== requestingRouteHref;
       const currentRouteTarget = getCurrentRouteTarget();
-      const archiveDraftRetry = router.history.location.state.archiveDraftRetry;
-      const recoveryThreadRef =
-        currentRouteTarget === null &&
-        archiveDraftRetry?.cancelled !== true &&
-        archiveDraftRetry?.projectRef.environmentId === projectRef.environmentId &&
-        archiveDraftRetry.projectRef.projectId === projectRef.projectId
-          ? archiveDraftRetry.threadRef
-          : null;
-      const carryThreadRef =
-        currentRouteTarget?.kind === "server" ? currentRouteTarget.threadRef : recoveryThreadRef;
       // A new thread carries the user's working mode from the thread being
       // viewed. The target project's configured model still wins; interaction
       // mode carries independently. Permissions, branch, worktree, and env mode
       // come from configured defaults unless the caller passes them explicitly.
-      const carrySourceShell = carryThreadRef ? readThreadShell(carryThreadRef) : null;
+      const carrySourceShell =
+        currentRouteTarget?.kind === "server"
+          ? readThreadShell(currentRouteTarget.threadRef)
+          : null;
       const carrySourceDraft =
         currentRouteTarget?.kind === "draft" ? getDraftSession(currentRouteTarget.draftId) : null;
       // Composer overrides win over the persisted thread state — they are
       // what the user currently sees in the composer controls.
-      const carrySourceComposer = carryThreadRef
-        ? getComposerDraft(carryThreadRef)
-        : currentRouteTarget?.kind === "draft"
-          ? getComposerDraft(currentRouteTarget.draftId)
-          : null;
+      const carrySourceComposer = currentRouteTarget
+        ? getComposerDraft(
+            currentRouteTarget.kind === "server"
+              ? currentRouteTarget.threadRef
+              : currentRouteTarget.draftId,
+          )
+        : null;
       const composerActiveProvider = carrySourceComposer?.activeProvider ?? null;
       const composerModelSelection = composerActiveProvider
         ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)

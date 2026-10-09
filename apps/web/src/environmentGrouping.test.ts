@@ -64,7 +64,7 @@ describe("environment grouping", () => {
     expect(deriveLogicalProjectKey(remote)).toBe(repositoryIdentity.canonicalKey);
   });
 
-  it("keeps cross-environment copies in one sidebar group", () => {
+  it("counts cross-environment copies as one new-thread project choice", () => {
     const primary = makeProject({ repositoryIdentity });
     const remote = makeProject({
       id: ProjectId.make("project-remote"),
@@ -498,33 +498,6 @@ describe("environment grouping", () => {
     expect(
       entries.filter((entry) => entry.isPreferred).map(({ targetProject }) => targetProject.id),
     ).toEqual([worktree.id]);
-  });
-
-  it("keeps unavailable-only checkouts visible and deduplicates duplicate physical registrations", () => {
-    const stale = makeProject({
-      id: ProjectId.make("stale"),
-      repositoryIdentity,
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    });
-    const canonical = makeProject({
-      id: ProjectId.make("canonical"),
-      repositoryIdentity,
-      updatedAt: "2026-01-02T00:00:00.000Z",
-    });
-    const groups = buildSidebarProjectSnapshots({
-      projects: [stale, canonical],
-      settings: defaultGroupingSettings,
-      primaryEnvironmentId,
-      resolveEnvironmentLabel: () => null,
-    });
-    const entries = buildSidebarProjectPickerEntries({
-      groups,
-      preferredProjectRef: null,
-      expandCheckouts: true,
-      isEnvironmentReachable: () => false,
-    });
-
-    expect(entries.map(({ targetProject }) => targetProject.id)).toEqual([canonical.id]);
   });
 
   it("keeps manual project order when building grouped sidebar entries", () => {

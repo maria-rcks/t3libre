@@ -1,6 +1,6 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, Link, useLocation, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -40,14 +40,10 @@ function ChatIndexRouteView() {
  * end. Falls back to an add-project hero when no project exists yet.
  */
 function IndexDraftLanding() {
-  const router = useRouter();
   const projects = useProjects();
   const threads = useThreadShells();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const handleNewThread = useNewThreadHandler();
-  const archiveDraftRetry = useLocation({ select: (location) => location.state.archiveDraftRetry });
-  const retryRouteHref = router.state.location.href;
-  const retryHistoryKey = router.history.location.state.__TSR_key;
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
 
@@ -58,79 +54,27 @@ function IndexDraftLanding() {
         : null,
     [bootstrapped, projects, threads],
   );
-  const recoveryProjectMissing =
-    bootstrapped &&
-    archiveDraftRetry !== undefined &&
-    !projects.some(
-      (project) =>
-        project.environmentId === archiveDraftRetry.projectRef.environmentId &&
-        project.id === archiveDraftRetry.projectRef.projectId,
-    );
-  const retryCancelled = archiveDraftRetry?.cancelled === true;
-  const retryDisabled =
-    archiveDraftRetry !== undefined && (!bootstrapped || recoveryProjectMissing);
 
   useEffect(() => {
-    const projectRef =
-      archiveDraftRetry?.projectRef ??
-      (mostRecentProject
-        ? scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id)
-        : null);
-    if (
-      projectRef === null ||
-      startingRef.current ||
-      retryCancelled ||
-      retryDisabled ||
-      !bootstrapped
-    ) {
+    if (mostRecentProject === null || startingRef.current) {
       return;
     }
     startingRef.current = true;
-    void handleNewThread(projectRef, {
+    void handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
       replace: true,
-    })
-      .then((opened) => {
-        if (opened === null) {
-          startingRef.current = archiveDraftRetry !== undefined;
-          setStartState((state) => ({ ...state, failed: true }));
-        }
-      })
-      .catch(() => {
-        startingRef.current = archiveDraftRetry !== undefined;
-        setStartState((state) => ({ ...state, failed: true }));
-      });
-  }, [
-    archiveDraftRetry,
-    bootstrapped,
-    handleNewThread,
-    mostRecentProject,
-    retryCancelled,
-    retryDisabled,
-    startState.retryRequest,
-  ]);
+    }).catch(() => {
+      startingRef.current = false;
+      setStartState((state) => ({ ...state, failed: true }));
+    });
+  }, [handleNewThread, mostRecentProject, startState.retryRequest]);
 
-  if (!bootstrapped && archiveDraftRetry === undefined) {
+  if (!bootstrapped) {
     return null;
   }
-  if (archiveDraftRetry !== undefined || mostRecentProject !== null) {
-    return startState.failed || retryCancelled || retryDisabled ? (
+  if (mostRecentProject !== null) {
+    return startState.failed ? (
       <DraftStartError
-        disabled={retryDisabled}
-        projectMissing={recoveryProjectMissing}
         onRetry={() => {
-          if (
-            router.state.location.href !== retryRouteHref ||
-            router.history.location.state.__TSR_key !== retryHistoryKey
-          ) {
-            return;
-          }
-          if (archiveDraftRetry?.cancelled === true) {
-            router.history.replace(retryRouteHref, {
-              ...router.history.location.state,
-              archiveDraftRetry: { ...archiveDraftRetry, cancelled: undefined },
-            });
-          }
-          startingRef.current = false;
           setStartState((state) => ({
             failed: false,
             retryRequest: state.retryRequest + 1,
@@ -144,15 +88,7 @@ function IndexDraftLanding() {
   return <NoProjectsHero />;
 }
 
-function DraftStartError({
-  onRetry,
-  disabled = false,
-  projectMissing = false,
-}: {
-  readonly onRetry: () => void;
-  readonly disabled?: boolean;
-  readonly projectMissing?: boolean;
-}) {
+function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       {isElectron ? <WorkspacePageHeader electron /> : null}
@@ -160,14 +96,10 @@ function DraftStartError({
         <EmptyHeader className="max-w-md">
           <EmptyTitle>Couldn’t start a new thread</EmptyTitle>
           <EmptyDescription>
-            {projectMissing
-              ? "This checkout is no longer registered. Choose another checkout from New thread in..."
-              : disabled
-                ? "Waiting for this checkout to become available."
-                : "Try opening the draft again when its environment is connected."}
+            The project is still available. Try opening the draft again.
           </EmptyDescription>
           <div className="mt-5 flex justify-center">
-            <Button size="sm" onClick={onRetry} disabled={disabled}>
+            <Button size="sm" onClick={onRetry}>
               <RefreshIcon size="md" />
               Try again
             </Button>
