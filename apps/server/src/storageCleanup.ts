@@ -584,8 +584,9 @@ const make = Effect.gen(function* () {
     days: number | null,
     now: number,
     rotatedLogs: boolean,
+    // Owned by the caller so files removed before a failure still count.
+    removed: { files: number; bytes: number },
   ) {
-    const removed = { files: 0, bytes: 0 };
     if (days === null || !(yield* fs.exists(root))) return removed;
     const realRoot = yield* fs.realPath(root);
     if (realRoot !== path.resolve(root)) return removed;
@@ -655,7 +656,8 @@ const make = Effect.gen(function* () {
       },
     ]) {
       if (category.days === null) continue;
-      yield* cleanFiles(category.root, category.days, now, category.kind === "logs").pipe(
+      const removed = { files: 0, bytes: 0 };
+      yield* cleanFiles(category.root, category.days, now, category.kind === "logs", removed).pipe(
         Effect.map(({ files, bytes }) =>
           entries.push({
             kind: category.kind,
@@ -677,8 +679,8 @@ const make = Effect.gen(function* () {
               path: null,
               threadId: null,
               threadTitle: null,
-              bytes: null,
-              files: null,
+              bytes: removed.files > 0 ? removed.bytes : null,
+              files: removed.files > 0 ? removed.files : null,
             });
             yield* Effect.logWarning("storage file cleanup failed", { kind: category.kind, error });
           }),
@@ -689,7 +691,7 @@ const make = Effect.gen(function* () {
     let bytesFreed = 0;
     for (const entry of entries) {
       counts[entry.outcome]++;
-      if (entry.outcome === "removed") bytesFreed += entry.bytes ?? 0;
+      bytesFreed += entry.bytes ?? 0;
     }
     const priority = { failed: 0, removed: 1, kept: 2 };
     const latestReport: StorageCleanupReport = {

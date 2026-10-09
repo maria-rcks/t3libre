@@ -215,7 +215,7 @@ function CleanupResults({ report }: { report: StorageCleanupReport }) {
                             name
                           )}
                         </div>
-                        {outcome === "removed" && entry.bytes !== null && (
+                        {entry.bytes !== null && (
                           <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
                             {entry.kind !== "worktree" && entry.files !== null
                               ? `${entry.files.toLocaleString()} ${entry.files === 1 ? "file" : "files"} · `
