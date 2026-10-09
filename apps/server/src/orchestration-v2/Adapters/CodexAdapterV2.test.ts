@@ -224,6 +224,36 @@ describe("CodexAdapterV2 assistant message streaming", () => {
     }),
   );
 
+  it.effect("shows an item's first text without waiting for the flush interval", () =>
+    Effect.gen(function* () {
+      const updates = yield* Ref.make<ReadonlyArray<ProviderTextDeltaUpdate>>([]);
+      const coalescer = yield* makeProviderTextDeltaCoalescer({
+        flushIntervalMs: 50,
+        emit: (update) => Ref.update(updates, (current) => [...current, update]),
+      });
+
+      yield* coalescer.append({ turnId: "turn-1", itemId: "message-1", delta: "first" });
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      assert.deepEqual(
+        (yield* Ref.get(updates)).map((update) => update.text),
+        ["first"],
+      );
+
+      // Later deltas of the same item wait for the interval and coalesce.
+      yield* coalescer.append({ turnId: "turn-1", itemId: "message-1", delta: " second" });
+      yield* coalescer.append({ turnId: "turn-1", itemId: "message-1", delta: " third" });
+      yield* Effect.yieldNow;
+      assert.equal((yield* Ref.get(updates)).length, 1);
+      yield* TestClock.adjust("50 millis");
+      yield* Effect.yieldNow;
+      assert.deepEqual(
+        (yield* Ref.get(updates)).map((update) => update.text),
+        ["first", "first second third"],
+      );
+    }),
+  );
+
   it.effect("coalesces multiple token deltas into one assistant update per interval", () =>
     Effect.gen(function* () {
       const updates = yield* Ref.make<ReadonlyArray<ProviderTextDeltaUpdate>>([]);
