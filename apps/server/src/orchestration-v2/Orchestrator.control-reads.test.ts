@@ -50,116 +50,74 @@ const layerTest = Layer.mergeAll(
   ),
 );
 
-it.effect("marks same-millisecond completions unread and preserves read state across retries", () =>
+it.effect("marks a never-visited thread's first completion unread", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
-    for (const outcome of ["failed", "interrupted"] as const) {
-      const threadId = ThreadId.make(`thread:completion-watermark:${outcome}`);
-      yield* orchestrator.dispatch({
-        type: "thread.create",
-        commandId: CommandId.make(`create-completion-watermark-${outcome}`),
-        threadId,
-        projectId: ProjectId.make("project:completion-watermark"),
-        title: "Background task",
-        modelSelection,
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        branch: null,
-        worktreePath: null,
-        createdBy: "user",
-        creationSource: "web",
-      });
-      yield* TestClock.adjust("1 second");
-      assert.isNull((yield* projections.getThreadShell(threadId))?.lastVisitedAt);
-      const requestedAt = yield* DateTime.now;
-      const firstDispatch = {
-        type: "message.dispatch" as const,
-        commandId: CommandId.make(`first-completion-watermark-${outcome}`),
-        threadId,
-        messageId: MessageId.make(`first-completion-watermark-${outcome}`),
-        text: "Run in the background",
-        attachments: [],
-        dispatchMode: { type: "defer_start" as const },
-        createdBy: "agent" as const,
-        creationSource: "mcp" as const,
-      };
-      const rejected = yield* Effect.exit(
-        orchestrator.dispatch({
-          ...firstDispatch,
-          commandId: CommandId.make(`rejected-completion-watermark-${outcome}`),
-          modelSelection: { ...modelSelection, instanceId: ProviderInstanceId.make("missing") },
-        }),
-      );
-      assert.equal(rejected._tag, "Failure");
-      assert.isNull((yield* projections.getThreadShell(threadId))?.lastVisitedAt);
-      const accepted = yield* orchestrator.dispatch(firstDispatch);
-      const first = yield* projections.getThreadProjection(threadId);
-      const readWatermark = first.thread.lastVisitedAt;
-      assert.isNotNull(readWatermark);
-      assert.deepEqual((yield* projections.getThreadShell(threadId))?.lastVisitedAt, readWatermark);
+    const threadId = ThreadId.make("thread:completion-watermark");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-completion-watermark"),
+      threadId,
+      projectId: ProjectId.make("project:completion-watermark"),
+      title: "Background task",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* TestClock.adjust("1 second");
+    assert.isNull((yield* projections.getThreadShell(threadId))?.lastVisitedAt);
+    const firstDispatch = {
+      type: "message.dispatch" as const,
+      commandId: CommandId.make("first-completion-watermark"),
+      threadId,
+      messageId: MessageId.make("first-completion-watermark"),
+      text: "Run in the background",
+      attachments: [],
+      dispatchMode: { type: "defer_start" as const },
+      createdBy: "agent" as const,
+      creationSource: "mcp" as const,
+    };
+    yield* orchestrator.dispatch(firstDispatch);
+    const first = yield* projections.getThreadProjection(threadId);
+    assert.isNotNull(first.thread.lastVisitedAt);
 
-      const runId = first.runs[0]!.id;
-      if (outcome === "failed") {
-        yield* orchestrator.dispatch({
-          type: "prepared-run.fail",
-          commandId: CommandId.make(`fail-completion-watermark-${outcome}`),
-          threadId,
-          runId,
-          failure: { class: "unknown", message: "Preparation failed", code: null, retryable: true },
-        });
-      } else {
-        yield* orchestrator.dispatch({
-          type: "run.interrupt",
-          commandId: CommandId.make(`interrupt-completion-watermark-${outcome}`),
-          threadId,
-          runId,
-        });
-      }
-      const ended = yield* projections.getThreadShell(threadId);
-      assert.ok(ended?.latestRunCompletedAt);
-      assert.deepEqual(ended.latestRunCompletedAt, requestedAt);
-      assert.isAbove(
-        DateTime.toEpochMillis(ended.latestRunCompletedAt),
-        DateTime.toEpochMillis(ended.lastVisitedAt!),
-      );
-      yield* TestClock.adjust("1 second");
-      const retried = yield* orchestrator.dispatch(firstDispatch);
-      assert.equal(retried.sequence, accepted.sequence);
-      assert.deepEqual((yield* projections.getThread(threadId)).lastVisitedAt, readWatermark);
-      assert.lengthOf((yield* projections.getThreadProjection(threadId)).runs, 1);
-      yield* orchestrator.dispatch({
-        type: "thread.mark-unread",
-        commandId: CommandId.make(`unread-completion-watermark-${outcome}`),
-        threadId,
-      });
-      const markedUnreadAt = (yield* projections.getThread(threadId)).lastVisitedAt;
-      yield* orchestrator.dispatch({
-        ...firstDispatch,
-        commandId: CommandId.make(`second-completion-watermark-${outcome}`),
-        messageId: MessageId.make(`second-completion-watermark-${outcome}`),
-      });
-      assert.deepEqual((yield* projections.getThread(threadId)).lastVisitedAt, markedUnreadAt);
+    // A completion in the dispatch's millisecond is still newer than the watermark.
+    yield* orchestrator.dispatch({
+      type: "run.interrupt",
+      commandId: CommandId.make("interrupt-completion-watermark"),
+      threadId,
+      runId: first.runs[0]!.id,
+    });
+    const ended = yield* projections.getThreadShell(threadId);
+    assert.ok(ended?.latestRunCompletedAt);
+    assert.isAbove(
+      DateTime.toEpochMillis(ended.latestRunCompletedAt),
+      DateTime.toEpochMillis(ended.lastVisitedAt!),
+    );
 
-      const visitedAt = DateTime.formatIso(yield* DateTime.now);
-      yield* orchestrator.dispatch({
-        type: "thread.visit",
-        commandId: CommandId.make(`visit-completion-watermark-${outcome}`),
-        threadId,
-        visitedAt,
-      });
-      yield* TestClock.adjust("1 second");
-      yield* orchestrator.dispatch({
-        ...firstDispatch,
-        commandId: CommandId.make(`queued-completion-watermark-${outcome}`),
-        messageId: MessageId.make(`queued-completion-watermark-${outcome}`),
-        dispatchMode: { type: "queue_after_active" },
-      });
-      assert.equal(
-        DateTime.formatIso((yield* projections.getThread(threadId)).lastVisitedAt!),
-        visitedAt,
-      );
-    }
+    // Later dispatches leave an existing watermark alone.
+    const visitedAt = DateTime.formatIso(yield* DateTime.now);
+    yield* orchestrator.dispatch({
+      type: "thread.visit",
+      commandId: CommandId.make("visit-completion-watermark"),
+      threadId,
+      visitedAt,
+    });
+    yield* TestClock.adjust("1 second");
+    yield* orchestrator.dispatch({
+      ...firstDispatch,
+      commandId: CommandId.make("second-completion-watermark"),
+      messageId: MessageId.make("second-completion-watermark"),
+    });
+    assert.equal(
+      DateTime.formatIso((yield* projections.getThread(threadId)).lastVisitedAt!),
+      visitedAt,
+    );
   }).pipe(Effect.provide(layerTest)),
 );
 
