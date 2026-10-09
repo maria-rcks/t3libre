@@ -1103,8 +1103,10 @@ export default function GitActionsControl({
         ? store.getDraftThreadByRef(activeThreadRef)
         : null,
   );
+  // The projection is only a fallback for a thread without a shell. Reading it
+  // while the shell exists re-rendered this control on every streamed delta.
   const activeServerThreadProjection = useThreadProjection(
-    activeDraftThread !== null && activeServerThreadShell === null ? null : activeThreadRef,
+    activeDraftThread === null && activeServerThreadShell === null ? activeThreadRef : null,
   );
   const activeServerThread =
     activeServerThreadShell ?? activeServerThreadProjection?.projection.thread ?? null;

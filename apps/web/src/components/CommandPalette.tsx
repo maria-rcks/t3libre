@@ -129,7 +129,7 @@ import {
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
-import { onOpenCommandPalette } from "../commandPaletteBus";
+import { COMMAND_PALETTE_ELEMENT_ID, onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
@@ -222,7 +222,7 @@ import {
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
 } from "../sidebarProjectGrouping";
-import type { Project } from "../types";
+import type { Project, SidebarThreadSummary } from "../types";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 
@@ -663,6 +663,7 @@ function CommandPaletteDialog(props: {
             : "Command palette"
       }
       className={cn("overflow-hidden", props.mode === "content" && "h-105")}
+      id={COMMAND_PALETTE_ELEMENT_ID}
       data-command-palette="true"
       data-palette-mode={props.mode}
       data-testid="command-palette"
@@ -1418,42 +1419,82 @@ function OpenCommandPaletteDialog(props: {
     startScratchThread,
   ]);
 
-  const allThreadItems = useMemo(
-    () =>
+  const threadItemOptions = useMemo(
+    () => ({
+      ...(activeThreadId ? { activeThreadId } : {}),
+      projectTitleById,
+      sortOrder: clientSettings.sidebarThreadSortOrder,
+      icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+      renderLeadingContent: (thread: (typeof threads)[number]) => (
+        <ThreadRowLeadingStatus thread={thread} />
+      ),
+      renderTrailingContent: (thread: (typeof threads)[number]) => (
+        <ThreadRowTrailingStatus thread={thread} />
+      ),
+      renderDescription: (
+        thread: (typeof threads)[number],
+        { projectTitle }: { projectTitle: string | undefined },
+      ) => {
+        const modelInstanceId =
+          thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
+        const providerEntry =
+          providerEntryByEnvironmentAndInstanceId.get(
+            `${thread.environmentId}:${modelInstanceId}`,
+          ) ?? null;
+        return (
+          <ThreadCommandSubtitle
+            project={projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null}
+            projectTitle={projectTitle ?? null}
+            environmentLabel={
+              projectEnvironmentLocationById.get(thread.environmentId)?.label ?? "Remote"
+            }
+            branch={thread.branch}
+            worktreePath={thread.worktreePath}
+            isCurrent={thread.id === activeThreadId}
+            driverKind={providerEntry?.driverKind ?? null}
+            providerDisplayName={
+              thread.runtime?.providerName ?? providerEntry?.displayName ?? modelInstanceId
+            }
+            acpRegistryAgentId={providerEntry?.acpRegistryAgentId}
+            acpRegistryIconUrl={providerEntry?.acpRegistryIconUrl}
+          />
+        );
+      },
+      runThread: async (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) => {
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
+        });
+      },
+    }),
+    [
+      activeThreadId,
+      clientSettings.sidebarThreadSortOrder,
+      navigate,
+      projectByKey,
+      projectEnvironmentLocationById,
+      projectTitleById,
+      providerEntryByEnvironmentAndInstanceId,
+    ],
+  );
+  const baseThreadItems = useMemo(
+    () => buildThreadActionItems({ threads, ...threadItemOptions }),
+    [threadItemOptions, threads],
+  );
+  // Message matches arrive per keystroke. Only the matched threads get new
+  // items; the rest keep their identity, so their rows skip re-rendering.
+  const allThreadItems = useMemo(() => {
+    if (threadContentMatchByKey.size === 0) return baseThreadItems;
+    const matchedThreads = threads.filter((thread) =>
+      threadContentMatchByKey.has(
+        threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+      ),
+    );
+    if (matchedThreads.length === 0) return baseThreadItems;
+    const matchedItems = new Map(
       buildThreadActionItems({
-        threads,
-        ...(activeThreadId ? { activeThreadId } : {}),
-        projectTitleById,
-        sortOrder: clientSettings.sidebarThreadSortOrder,
-        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-        renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
-        renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
-        renderDescription: (thread, { projectTitle }) => {
-          const modelInstanceId =
-            thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
-          const providerEntry =
-            providerEntryByEnvironmentAndInstanceId.get(
-              `${thread.environmentId}:${modelInstanceId}`,
-            ) ?? null;
-          return (
-            <ThreadCommandSubtitle
-              project={projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null}
-              projectTitle={projectTitle ?? null}
-              environmentLabel={
-                projectEnvironmentLocationById.get(thread.environmentId)?.label ?? "Remote"
-              }
-              branch={thread.branch}
-              worktreePath={thread.worktreePath}
-              isCurrent={thread.id === activeThreadId}
-              driverKind={providerEntry?.driverKind ?? null}
-              providerDisplayName={
-                thread.runtime?.providerName ?? providerEntry?.displayName ?? modelInstanceId
-              }
-              acpRegistryAgentId={providerEntry?.acpRegistryAgentId}
-              acpRegistryIconUrl={providerEntry?.acpRegistryIconUrl}
-            />
-          );
-        },
+        threads: matchedThreads,
+        ...threadItemOptions,
         getContentMatch: (thread) => {
           const match = threadContentMatchByKey.get(
             threadSearchMatchKey({
@@ -1469,27 +1510,10 @@ function OpenCommandPaletteDialog(props: {
               }
             : undefined;
         },
-        runThread: async (thread) => {
-          await navigate({
-            to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
-          });
-        },
-      }),
-    [
-      activeThreadId,
-      clientSettings.sidebarThreadSortOrder,
-      navigate,
-      projectCwdById,
-      projectByKey,
-      projectEnvironmentLocationById,
-      projectTitleById,
-      providerEntryByEnvironmentAndInstanceId,
-      threadContentMatchByKey,
-      threadSearch.query,
-      threads,
-    ],
-  );
+      }).map((item) => [item.value, item]),
+    );
+    return baseThreadItems.map((item) => matchedItems.get(item.value) ?? item);
+  }, [baseThreadItems, threadContentMatchByKey, threadItemOptions, threadSearch.query, threads]);
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
 
   const pushPaletteView = useCallback(
@@ -3440,6 +3464,15 @@ function OpenCommandPaletteDialog(props: {
       </Tooltip>
     ) : null;
 
+  // One callback for the palette's lifetime, so result rows whose item did not
+  // change skip re-rendering on every keystroke.
+  const executeItemRef = useRef(executeItem);
+  executeItemRef.current = executeItem;
+  const executeLatestItem = useCallback(
+    (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => executeItemRef.current(item),
+    [],
+  );
+
   const footerActionLabel =
     newProjectFlow !== null
       ? highlightedItemValue === null
@@ -3566,7 +3599,7 @@ function OpenCommandPaletteDialog(props: {
         highlightedItemValue={highlightedItemValue}
         isActionsOnly={isActionsOnly}
         keybindings={keybindings}
-        onExecuteItem={executeItem}
+        onExecuteItem={executeLatestItem}
         {...(addProjectCloneFlow?.step === "repository"
           ? {
               emptyStateMessage:

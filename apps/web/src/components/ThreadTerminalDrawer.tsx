@@ -1421,23 +1421,24 @@ export default function ThreadTerminalDrawer({
     };
   }, []);
 
-  const handleResizePointerMove = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      const resizeState = resizeStateRef.current;
-      if (!resizeState || resizeState.pointerId !== event.pointerId) return;
-      event.preventDefault();
-      const clampedHeight = clampDrawerHeight(
-        resizeState.startHeight + (resizeState.startY - event.clientY),
-      );
-      if (clampedHeight === drawerHeightRef.current) {
-        return;
-      }
-      didResizeDuringDragRef.current = true;
-      drawerHeightRef.current = clampedHeight;
-      setDrawerHeight(clampedHeight);
-    },
-    [setDrawerHeight],
-  );
+  const handleResizePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const resizeState = resizeStateRef.current;
+    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const clampedHeight = clampDrawerHeight(
+      resizeState.startHeight + (resizeState.startY - event.clientY),
+    );
+    if (clampedHeight === drawerHeightRef.current) {
+      return;
+    }
+    didResizeDuringDragRef.current = true;
+    drawerHeightRef.current = clampedHeight;
+    // Size the drawer directly while dragging; re-rendering it on every move
+    // dropped frames. The surfaces refit through their own resize observers,
+    // and the height is committed to state when the drag ends.
+    const drawer = event.currentTarget.parentElement;
+    if (drawer) drawer.style.height = `${clampedHeight}px`;
+  }, []);
 
   const handleResizePointerEnd = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1450,10 +1451,11 @@ export default function ThreadTerminalDrawer({
       if (!didResizeDuringDragRef.current) {
         return;
       }
+      setDrawerHeight(drawerHeightRef.current);
       syncHeight(drawerHeightRef.current);
       setResizeEpoch((value) => value + 1);
     },
-    [syncHeight],
+    [setDrawerHeight, syncHeight],
   );
 
   useEffect(() => {

@@ -479,6 +479,8 @@ interface MessagesTimelineProps {
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   routeThreadKey: string;
   displayThreadKey?: string;
+  /** Another thread's held snapshot stands in while this one loads; its scroll is not remembered. */
+  paintOnly?: boolean;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   parentThreadLink?: {
@@ -622,6 +624,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onIsAtEndChange,
   onContentOverflowChange,
   liveFollowEnabled,
+  paintOnly = false,
   onToolOutputCollapsedAtEnd,
   onManualNavigation,
   cancelPositionRestoreRef,
@@ -1180,7 +1183,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     if (restoringThreadPosition || state?.data !== rows) return;
     const isAtEnd = resolveTimelineIsAtEnd(state);
     const position = state?.data?.length ? resolveWorkGroupScrollAnchor(state) : undefined;
-    if (position && state && isAtEnd !== undefined) {
+    if (position && state && isAtEnd !== undefined && !paintOnly) {
       const index = state.indexByKey(position.rowId);
       const row = index === undefined ? undefined : state.elementAtIndex(index);
       const element = listRef.current?.getScrollableNode();
@@ -1190,7 +1193,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
           // DOM geometry includes the header and the virtualizer's layout adjustment.
           offsetWithinRow: element.getBoundingClientRect().top - row.getBoundingClientRect().top,
           scrollOffset: element.scrollTop,
-          atEnd: isAtEnd,
+          // Live follow only ends on a user scroll gesture. Layout changes
+          // (the composer inset, a thread switch) can still move the list off
+          // the end without the reader leaving it, and a revisit must land
+          // at the end then rather than at that transient offset.
+          atEnd: isAtEnd || liveFollowEnabled,
           disclosures: {
             runs: paintedExpandedRunIds,
             workGroups: paintedExpandedWorkGroupIds,
@@ -1249,6 +1256,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     workGroupViewState,
     rows,
     listIdentityKey,
+    liveFollowEnabled,
+    paintOnly,
     restoringThreadPosition,
     listRef,
     minimapItems,

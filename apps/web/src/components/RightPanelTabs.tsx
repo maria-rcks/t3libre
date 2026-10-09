@@ -1051,11 +1051,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     if (!viewport) return;
 
     const content = viewport.firstElementChild;
+    // The observer's first callback reports the initial sizes once layout has
+    // run, so there is no synchronous read here forcing an early layout.
     const resizeObserver = new ResizeObserver(updateTabScrollState);
     resizeObserver.observe(viewport);
     if (content) resizeObserver.observe(content);
     viewport.addEventListener("scroll", updateTabScrollState, { passive: true });
-    updateTabScrollState();
 
     return () => {
       resizeObserver.disconnect();

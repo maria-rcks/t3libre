@@ -31,9 +31,12 @@ export function onOpenCommandPalette(
   return () => window.removeEventListener(COMMAND_PALETTE_OPEN_EVENT, handler);
 }
 
+/** Element id of the mounted palette popup. An id lookup is O(1); keydown handlers call this per key. */
+export const COMMAND_PALETTE_ELEMENT_ID = "t3-command-palette";
+
 /** Read at event time so consumers do not subscribe to transient dialog state. */
 export function isCommandPaletteOpen(): boolean {
   return (
-    typeof document !== "undefined" && document.querySelector("[data-command-palette]") !== null
+    typeof document !== "undefined" && document.getElementById(COMMAND_PALETTE_ELEMENT_ID) !== null
   );
 }

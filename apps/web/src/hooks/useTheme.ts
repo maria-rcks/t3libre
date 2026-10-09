@@ -354,15 +354,32 @@ function applyTheme(theme: Theme, { suppressTransitions = false, preservePreview
   applyThemePalette(resolveThemeHalf(theme, themeHalves, resolvedAppearance), resolvedAppearance);
   document.documentElement.classList.toggle("dark", resolvedAppearance === "dark");
   lastAppliedTheme = { theme, systemDark, followSystem, appearanceMode, themeHalves };
-  syncBrowserChromeTheme();
   syncDesktopTheme(theme, followSystem, appearanceMode);
   if (suppressTransitions) {
-    // Force a reflow so the no-transitions class takes effect before removal
-    void document.documentElement.offsetHeight;
+    settleThemeAfterPaint();
+  } else {
+    syncBrowserChromeTheme();
+  }
+}
+
+let themeSettlePending = false;
+
+/**
+ * Finish a transition-suppressed theme change once the next frame has painted
+ * it. Reading computed colors or removing `no-transitions` any earlier forces
+ * an extra full-document style recalc before the new theme reaches the screen.
+ * The frame itself computes styles with transitions off, so nothing animates.
+ */
+function settleThemeAfterPaint() {
+  if (themeSettlePending) return;
+  themeSettlePending = true;
+  requestAnimationFrame(() => {
     requestAnimationFrame(() => {
+      themeSettlePending = false;
+      syncBrowserChromeTheme();
       document.documentElement.classList.remove("no-transitions");
     });
-  }
+  });
 }
 
 export async function syncDesktopThemePreference(
