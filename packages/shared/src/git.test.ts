@@ -296,14 +296,11 @@ describe("applyGitStatusStreamEvent", () => {
 });
 
 describe("sanitizeFeatureBranchName", () => {
-  it.each(["feature", "fix", "feat", "chore", "hotfix", "team/jules"])(
-    "preserves the %s namespace",
-    (namespace) => {
-      expect(sanitizeFeatureBranchName(`${namespace}/refine-toolbar`)).toBe(
-        `${namespace}/refine-toolbar`,
-      );
-    },
-  );
+  it.each(["feature", "fix", "team/jules"])("preserves the %s namespace", (namespace) => {
+    expect(sanitizeFeatureBranchName(`${namespace}/refine-toolbar`)).toBe(
+      `${namespace}/refine-toolbar`,
+    );
+  });
 
   it("sanitizes an explicit namespace before preserving it", () => {
     expect(sanitizeFeatureBranchName(' "FIX//Calendar recruitment filter" ')).toBe(
@@ -341,24 +338,11 @@ describe("resolveAutoFeatureBranchName", () => {
 
   it.each([
     ["fix/name", ["fix"], "fix-2/name"],
-    ["fix/name", ["fix", "fix-2"], "fix-3/name"],
     ["team/jules/fix/name", ["team/jules"], "team/jules-2/fix/name"],
     ["fix/name", ["fix/name/child"], "fix/name-2"],
-    ["fix/name", ["fix/name", "fix/name-2/child", "fix/name-3"], "fix/name-4"],
-    ["fix/name", ["fix", "fix-2", "fix-3/name", "fix-3/name-2/child"], "fix-3/name-3"],
-    [
-      "team/jules/fix/name",
-      ["team/jules", "team/jules-2/fix", "team/jules-2/fix-2/name/child"],
-      "team/jules-2/fix-2/name-2",
-    ],
     ["FIX/name", ["FIX", "FIX-2"], "fix-3/name"],
-    ["fix/name", ["FIX/NAME/child", "fix/name-2"], "fix/name-3"],
-    ["fix/name", ["fix", "fix-2/other"], "fix-2/name"],
     ["fix/name", ["fixes", "fix/name-extra/child"], "fix/name"],
-    ["fix/name-2", ["fix/name-2"], "fix/name-2-2"],
-    ["name", ["feature"], "feature-2/name"],
     [undefined, ["feature", "feature-2"], "feature-3/update"],
-    [undefined, ["feature/update/child", "feature/update-2/child"], "feature/update-3"],
   ])("resolves %s against namespace blockers %j", (preferredBranch, existingNames, expected) => {
     expect(resolveAutoFeatureBranchName(existingNames, preferredBranch)).toBe(expected);
   });

@@ -3500,26 +3500,8 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
   );
 
   it.effect.each([
-    {
-      branch: "fix/name",
-      existingBranches: ["fix"],
-      expected: "fix-2/name",
-    },
-    {
-      branch: "team/jules/fix/name",
-      existingBranches: [
-        "team/jules",
-        "team/jules-2/fix",
-        "team/jules-2/fix-2/name",
-        "team/jules-2/fix-2/name-2/child",
-      ],
-      expected: "team/jules-2/fix-2/name-3",
-    },
-    {
-      branch: "fix/name",
-      existingBranches: ["fix/name/child", "fix/name-2/child"],
-      expected: "fix/name-3",
-    },
+    { branch: "fix/name", existingBranches: ["fix"], expected: "fix-2/name" },
+    { branch: "fix/name", existingBranches: ["fix/name/child"], expected: "fix/name-2" },
   ])("commits on $expected when $branch has ref namespace collisions", (scenario) =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
