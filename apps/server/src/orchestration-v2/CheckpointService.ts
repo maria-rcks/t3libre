@@ -394,21 +394,42 @@ export const layer: Layer.Layer<
             });
           }
 
-          const captured = yield* checkpointStore
-            .captureCheckpoint({
-              cwd: input.scope.cwd,
-              checkpointRef,
-            })
-            .pipe(
-              Effect.as(true),
-              Effect.catch((cause) =>
-                Effect.logWarning("orchestration V2 checkpoint capture failed", {
-                  scopeId: input.scope.id,
+          // The previous ref is read while this one is written, so the lookup
+          // costs no extra round of Git processes on the way to "done".
+          const [captured, previousExists] = yield* Effect.all(
+            [
+              checkpointStore
+                .captureCheckpoint({
+                  cwd: input.scope.cwd,
                   checkpointRef,
-                  cause: String(cause),
-                }).pipe(Effect.as(false)),
-              ),
-            );
+                })
+                .pipe(
+                  Effect.as(true),
+                  Effect.catch((cause) =>
+                    Effect.logWarning("orchestration V2 checkpoint capture failed", {
+                      scopeId: input.scope.id,
+                      checkpointRef,
+                      cause: String(cause),
+                    }).pipe(Effect.as(false)),
+                  ),
+                ),
+              checkpointStore
+                .hasCheckpointRef({
+                  cwd: input.scope.cwd,
+                  checkpointRef: previousCheckpointRef,
+                })
+                .pipe(
+                  Effect.catch((cause) =>
+                    Effect.logWarning("orchestration V2 previous checkpoint ref lookup failed", {
+                      scopeId: input.scope.id,
+                      checkpointRef: previousCheckpointRef,
+                      cause: String(cause),
+                    }).pipe(Effect.as(false)),
+                  ),
+                ),
+            ],
+            { concurrency: "unbounded" },
+          );
 
           if (!captured) {
             return makeCheckpoint({
@@ -426,20 +447,6 @@ export const layer: Layer.Layer<
             });
           }
 
-          const previousExists = yield* checkpointStore
-            .hasCheckpointRef({
-              cwd: input.scope.cwd,
-              checkpointRef: previousCheckpointRef,
-            })
-            .pipe(
-              Effect.catch((cause) =>
-                Effect.logWarning("orchestration V2 previous checkpoint ref lookup failed", {
-                  scopeId: input.scope.id,
-                  checkpointRef: previousCheckpointRef,
-                  cause: String(cause),
-                }).pipe(Effect.as(false)),
-              ),
-            );
           const files = previousExists
             ? yield* checkpointStore
                 .diffCheckpoints({

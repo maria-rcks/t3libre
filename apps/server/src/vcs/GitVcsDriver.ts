@@ -580,8 +580,35 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
   const detectRepository: VcsDriver.VcsDriver["Service"]["detectRepository"] = Effect.fn(
     "detectRepository",
   )(function* (cwd) {
-    if (!(yield* isInsideWorkTree(cwd))) {
+    // One process answers the usual work tree. `--is-inside-work-tree` prints
+    // first, so anything but "true" means no work tree. Output that does not
+    // parse as one path per line takes the separate probes below.
+    const combined = yield* gitCommand(
+      vcsProcess,
+      "GitVcsDriver.detectRepository",
+      cwd,
+      ["rev-parse", "--is-inside-work-tree", "--show-toplevel", "--git-common-dir"],
+      { allowNonZeroExit: true, timeoutMs: 5_000, maxOutputBytes: 64 * 1024 },
+    );
+    const [insideWorkTree, rootPath, metadataPath, ...rest] = combined.stdout
+      .replace(/\n$/, "")
+      .split("\n");
+    if (insideWorkTree?.trim() !== "true") {
       return null;
+    }
+    if (
+      combined.exitCode === 0 &&
+      rootPath !== undefined &&
+      rootPath.trim().length > 0 &&
+      metadataPath !== undefined &&
+      rest.length === 0
+    ) {
+      return {
+        kind: "git" as const,
+        rootPath: rootPath.trim(),
+        metadataPath: metadataPath.trim() || null,
+        freshness: yield* nowFreshness(),
+      };
     }
 
     const root = yield* gitCommand(vcsProcess, "GitVcsDriver.detectRepository.root", cwd, [
@@ -816,7 +843,27 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         "-c",
         "sparse.expectFilesOutsideOfPatterns=false",
       ];
-      const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
+      // These reads are independent, so they share one round of Git processes.
+      // The index path is only used when HEAD exists; failing to read it only
+      // skips index reuse, as before.
+      const [gitCommonDir, headExists, sparseConfig, sourceIndexPath] = yield* Effect.all(
+        [
+          resolveGitCommonDir(input.cwd),
+          hasHeadCommit(input.cwd),
+          execute({
+            operation,
+            cwd: input.cwd,
+            args: ["config", "--bool", "core.sparseCheckout"],
+            allowNonZeroExit: true,
+          }),
+          execute({
+            operation,
+            cwd: input.cwd,
+            args: ["rev-parse", "--path-format=absolute", "--git-path", "index"],
+          }).pipe(Effect.option),
+        ],
+        { concurrency: "unbounded" },
+      );
       const indexId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
       const tempIndexPath = path.join(gitCommonDir, `t3-checkpoint-index-${indexId}`);
       const commitEnv: NodeJS.ProcessEnv = {
@@ -836,13 +883,6 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       );
 
       yield* Effect.gen(function* () {
-        const headExists = yield* hasHeadCommit(input.cwd);
-        const sparseConfig = yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["config", "--bool", "core.sparseCheckout"],
-          allowNonZeroExit: true,
-        });
         let sparseCheckout = sparseConfig.stdout.trim() === "true";
         if (sparseCheckout) {
           const help = yield* execute({
@@ -855,11 +895,8 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         }
         if (headExists) {
           const reusedIndex = yield* Effect.gen(function* () {
-            const indexPath = yield* execute({
-              operation,
-              cwd: input.cwd,
-              args: ["rev-parse", "--path-format=absolute", "--git-path", "index"],
-            });
+            if (Option.isNone(sourceIndexPath)) return false;
+            const indexPath = sourceIndexPath.value;
             const { mtime } = yield* fileSystem.stat(indexPath.stdout.trim());
             if (Option.isNone(mtime)) return false;
             // Stay below the source timestamp even if Date rounded up, preserving Git's racy check.
