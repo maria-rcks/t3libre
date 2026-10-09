@@ -323,14 +323,11 @@ export function htmlRenderThemeMessage(theme: HtmlRenderTheme) {
 
 // The frame scrolls a page taller than itself, but a scrollbar inside the
 // reply reads as a box within the thread, so it stays hidden.
-// Authored pages choose their focus color; the frame owns containment.
 const BASE_CSS =
   "html{background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}" +
   "html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}" +
-  ":where(:focus-visible){outline:2px solid var(--ring);outline-offset:-2px}@media(forced-colors:active){:where(:focus-visible){outline-color:Highlight}}";
-
-const FOCUS_STYLE =
-  '<style id="t3-focus">:where(:focus-visible){outline-style:solid!important;outline-width:2px!important;outline-offset:-2px!important}</style>';
+  // Focus outlines paint inside the element, so the frame edge never clips them.
+  ":where(:focus-visible){outline:2px solid var(--ring)}:focus-visible{outline-width:2px!important;outline-offset:-2px!important}";
 
 function rootRule(theme: HtmlRenderTheme): string {
   const declarations = Object.entries(theme.variables)
@@ -362,7 +359,6 @@ function bootstrapMarkup(markup: string): string {
       ? ""
       : '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<style id="t3-theme">${defaultCss}</style>`,
-    FOCUS_STYLE,
     `<script>${BOOTSTRAP_SCRIPT}</script>`,
   ].join("");
 }
@@ -394,68 +390,6 @@ const blankNonMarkup = (html: string) => {
   parts.push(scan.slice(at));
   return parts.join("");
 };
-
-/** Refreshes a generated page's focus policy without changing its stored bytes or theme bootstrap. */
-export function injectHtmlRenderFocusStyles(html: string): string | undefined {
-  const tags = /<(\/?)([a-z][^\t\n\f\r />]*)(?=[\t\n\f\r />])|<!--|<!|<\?/gi;
-  let themeAt: number | undefined;
-  let hasFocus = false;
-  let templateDepth = 0;
-  for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
-    // Declaration payloads cannot identify our generated head bootstrap, even
-    // where HTML parses CDATA as a bogus comment rather than foreign text.
-    if (html.startsWith("<!--", tag.index) || html.startsWith("<![CDATA[", tag.index)) {
-      const end = html.indexOf(html.startsWith("<!--", tag.index) ? "-->" : "]]>", tags.lastIndex);
-      tags.lastIndex = end < 0 ? html.length : end + 3;
-      continue;
-    }
-    // Consume the complete opening before looking for another tag, including quoted > and <.
-    let end = tags.lastIndex;
-    let quote = "";
-    for (; end < html.length; end++) {
-      const character = html[end];
-      if (quote) {
-        if (character === quote) quote = "";
-      } else if (character === '"' || character === "'") {
-        quote = character;
-      } else if (character === ">") {
-        break;
-      }
-    }
-    if (end === html.length) break;
-    const name = tag[2]?.toLowerCase();
-    const closing = tag[1] === "/";
-    if (name === "template") {
-      templateDepth = closing ? Math.max(0, templateDepth - 1) : templateDepth + 1;
-    }
-    if (name === "style" && !closing && templateDepth === 0) {
-      const attributes = html.slice(tags.lastIndex, end);
-      for (const attribute of attributes.matchAll(
-        /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g,
-      )) {
-        if (attribute[1]?.toLowerCase() !== "id") continue;
-        const id = attribute[2] ?? attribute[3] ?? attribute[4];
-        if (id === "t3-theme") themeAt ??= tag.index;
-        if (id === "t3-focus") hasFocus = true;
-        break;
-      }
-    }
-    tags.lastIndex = end + 1;
-    if (!closing && name === "plaintext") break;
-    if (
-      !closing &&
-      /^(?:script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)$/u.test(name ?? "")
-    ) {
-      const rawEnd = new RegExp(`</${name}(?=[\\t\\n\\f\\r />])`, "gi");
-      rawEnd.lastIndex = tags.lastIndex;
-      const closed = rawEnd.exec(html);
-      tags.lastIndex = closed ? closed.index : html.length;
-    }
-  }
-  if (themeAt === undefined) return undefined;
-  if (hasFocus) return html;
-  return html.slice(0, themeAt) + FOCUS_STYLE + html.slice(themeAt);
-}
 
 /**
  * Inserts the theme bootstrap at the start of the document head, so a page's

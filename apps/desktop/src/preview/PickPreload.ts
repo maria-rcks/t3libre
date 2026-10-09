@@ -276,7 +276,7 @@ function isAnnotationNode(element: Element): boolean {
 function pickFromPoint(clientX: number, clientY: number): Element | null {
   for (const candidate of document.elementsFromPoint(clientX, clientY)) {
     if (!(candidate instanceof Element)) continue;
-    if (isAnnotationNode(candidate)) return null;
+    if (isAnnotationNode(candidate)) continue;
     if (candidate === document.documentElement || candidate === document.body) continue;
     return candidate;
   }
@@ -305,8 +305,7 @@ function createBox(color: string, fill: string): HTMLDivElement {
   node.style.cssText = [
     "position:fixed",
     "pointer-events:none",
-    `outline:2px solid ${color}`,
-    "outline-offset:-2px",
+    `border:2px solid ${color}`,
     `background:${fill}`,
     "border-radius:3px",
     "box-sizing:border-box",
@@ -327,173 +326,28 @@ function positionBox(node: HTMLElement, rect: PreviewAnnotationRect): void {
   node.style.height = `${rect.height}px`;
 }
 
-/** Nested SVG client dimensions are zero; map its viewport back through the viewBox. */
-function nestedSvgViewportRect(element: SVGSVGElement): DOMRect {
-  const matrix = element.getScreenCTM();
-  if (!matrix) return element.getBoundingClientRect();
-  let x = 0;
-  let y = 0;
-  let width = element.width.animVal.value;
-  let height = element.height.animVal.value;
-  if (width <= 0 || height <= 0) return new DOMRect();
-  const viewBox = element.viewBox.animVal;
-  if (viewBox.width > 0 && viewBox.height > 0) {
-    x = viewBox.x;
-    y = viewBox.y;
-    const ratio = element.preserveAspectRatio.animVal;
-    if (ratio.align === SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_NONE) {
-      width = viewBox.width;
-      height = viewBox.height;
-    } else {
-      const scale = (
-        ratio.meetOrSlice === SVGPreserveAspectRatio.SVG_MEETORSLICE_SLICE ? Math.max : Math.min
-      )(width / viewBox.width, height / viewBox.height);
-      width /= scale;
-      height /= scale;
-      const alignment = ratio.align - SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_XMINYMIN;
-      x -= ((width - viewBox.width) * (alignment % 3)) / 2;
-      y -= ((height - viewBox.height) * Math.floor(alignment / 3)) / 2;
-    }
-  }
-  const points = [
-    new DOMPoint(x, y),
-    new DOMPoint(x + width, y),
-    new DOMPoint(x, y + height),
-    new DOMPoint(x + width, y + height),
-  ].map((point) => point.matrixTransform(matrix));
-  const left = Math.min(...points.map((point) => point.x));
-  const top = Math.min(...points.map((point) => point.y));
-  return new DOMRect(
-    left,
-    top,
-    Math.max(...points.map((point) => point.x)) - left,
-    Math.max(...points.map((point) => point.y)) - top,
-  );
-}
-
-/** Paint the visible portion without changing the element bounds used in the annotation. */
+/** Clamps a box to the viewport and clipping ancestors, so its border is never painted off-screen. */
 function visibleElementRect(element: Element): PreviewAnnotationRect {
   const rect = element.getBoundingClientRect();
-  const rootStyle = getComputedStyle(document.documentElement);
   let left = Math.max(0, rect.left);
   let top = Math.max(0, rect.top);
   let right = Math.min(document.documentElement.clientWidth, rect.right);
   let bottom = Math.min(document.documentElement.clientHeight, rect.bottom);
-  let position = getComputedStyle(element).position;
-  let clips = position !== "fixed" && position !== "absolute";
-  for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
-    const style = getComputedStyle(ancestor);
-    // Positioned descendants escape overflow between themselves and their containing block.
-    clips ||=
-      (position === "absolute" && style.position !== "static") ||
-      style.transform !== "none" ||
-      style.translate !== "none" ||
-      style.scale !== "none" ||
-      style.rotate !== "none" ||
-      style.perspective !== "none" ||
-      style.filter !== "none" ||
-      style.backdropFilter !== "none" ||
-      style.contentVisibility === "auto" ||
-      /(?:paint|layout|strict|content)/.test(style.contain) ||
-      /(?:transform|translate|scale|rotate|perspective|filter)/.test(style.willChange);
-    const clipThisAncestor = clips;
-    if (clipThisAncestor && (style.position === "fixed" || style.position === "absolute")) {
-      position = style.position;
-      clips = false;
-    }
-    if (!clipThisAncestor) continue;
-    if (
-      ancestor instanceof SVGElement &&
-      !(ancestor instanceof SVGSVGElement || ancestor instanceof SVGForeignObjectElement)
-    )
-      continue;
-    const paintClip =
-      style.contentVisibility === "auto" || /(?:paint|strict|content)/.test(style.contain);
-    // Root overflow, and uncontained body overflow on a visible HTML root,
-    // apply to the viewport already intersected above rather than their box.
-    const viewportOverflow =
-      ancestor === document.documentElement ||
-      (ancestor === document.body &&
-        ancestor instanceof HTMLBodyElement &&
-        ancestor.parentElement instanceof HTMLHtmlElement &&
-        rootStyle.overflowX === "visible" &&
-        rootStyle.overflowY === "visible" &&
-        [rootStyle, style].every(
-          (candidate) =>
-            candidate.contain === "none" &&
-            candidate.contentVisibility === "visible" &&
-            !/(?:^|\s)(?:size|inline-size)(?:\s|$)/.test(candidate.containerType),
-        ));
-    const clipsX = paintClip || (!viewportOverflow && style.overflowX !== "visible");
-    const clipsY = paintClip || (!viewportOverflow && style.overflowY !== "visible");
-    if (!clipsX && !clipsY) continue;
-    const svgViewport =
-      ancestor instanceof SVGSVGElement && ancestor.ownerSVGElement
-        ? nestedSvgViewportRect(ancestor)
-        : ancestor instanceof SVGElement
-          ? ancestor.getBoundingClientRect()
-          : null;
-    const bounds = svgViewport ?? ancestor.getBoundingClientRect();
-    const scaleX = ancestor.offsetWidth > 0 ? bounds.width / ancestor.offsetWidth : 1;
-    const scaleY = ancestor.offsetHeight > 0 ? bounds.height / ancestor.offsetHeight : 1;
-    const clipMargin = viewportOverflow
-      ? []
-      : style.getPropertyValue("overflow-clip-margin").split(/\s+/);
-    const margin = Number.parseFloat(clipMargin.at(-1) ?? "") || 0;
-    const clipBox = clipMargin[0];
-    if (clipsX) {
-      const scrollStart = bounds.left + ancestor.clientLeft * scaleX;
-      const scrollEnd =
-        svgViewport?.right ??
-        (ancestor === document.documentElement
-          ? bounds.right - Number.parseFloat(style.borderRightWidth) * scaleX
-          : scrollStart + ancestor.clientWidth * scaleX);
-      let start = scrollStart;
-      let end = scrollEnd;
-      if (style.overflowX === "clip" || paintClip) {
-        if (clipBox === "content-box") {
-          start += Number.parseFloat(style.paddingLeft) * scaleX;
-          end -= Number.parseFloat(style.paddingRight) * scaleX;
-        } else if (clipBox === "border-box") {
-          start = bounds.left;
-          end = bounds.right;
-        }
-        start -= margin * scaleX;
-        end += margin * scaleX;
+  if (getComputedStyle(element).position !== "fixed") {
+    for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor === document.body || ancestor === document.documentElement) break;
+      const style = getComputedStyle(ancestor);
+      const bounds = ancestor.getBoundingClientRect();
+      const clipLeft = bounds.left + ancestor.clientLeft;
+      const clipTop = bounds.top + ancestor.clientTop;
+      if (style.overflowX !== "visible") {
+        left = Math.max(left, clipLeft);
+        right = Math.min(right, clipLeft + ancestor.clientWidth);
       }
-      if (style.overflowX !== "clip" && style.overflowX !== "visible") {
-        start = Math.max(start, scrollStart);
-        end = Math.min(end, scrollEnd);
+      if (style.overflowY !== "visible") {
+        top = Math.max(top, clipTop);
+        bottom = Math.min(bottom, clipTop + ancestor.clientHeight);
       }
-      left = Math.max(left, start);
-      right = Math.min(right, end);
-    }
-    if (clipsY) {
-      const scrollStart = bounds.top + ancestor.clientTop * scaleY;
-      const scrollEnd =
-        svgViewport?.bottom ??
-        (ancestor === document.documentElement
-          ? bounds.bottom - Number.parseFloat(style.borderBottomWidth) * scaleY
-          : scrollStart + ancestor.clientHeight * scaleY);
-      let start = scrollStart;
-      let end = scrollEnd;
-      if (style.overflowY === "clip" || paintClip) {
-        if (clipBox === "content-box") {
-          start += Number.parseFloat(style.paddingTop) * scaleY;
-          end -= Number.parseFloat(style.paddingBottom) * scaleY;
-        } else if (clipBox === "border-box") {
-          start = bounds.top;
-          end = bounds.bottom;
-        }
-        start -= margin * scaleY;
-        end += margin * scaleY;
-      }
-      if (style.overflowY !== "clip" && style.overflowY !== "visible") {
-        start = Math.max(start, scrollStart);
-        end = Math.min(end, scrollEnd);
-      }
-      top = Math.max(top, start);
-      bottom = Math.min(bottom, end);
     }
   }
   return { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
@@ -789,8 +643,6 @@ function startAnnotation(sendEnabled: boolean): void {
   editor.appendChild(stylePanel);
 
   const selected = new Map<Element, SelectedElement>();
-  let hoveredElement: Element | null = null;
-  let hoverPoint: PreviewAnnotationPoint | null = null;
   const regions: PreviewAnnotationRegionTarget[] = [];
   const strokes: PreviewAnnotationStrokeTarget[] = [];
   const styleChanges = new Map<string, PreviewAnnotationStyleChange>();
@@ -836,7 +688,7 @@ function startAnnotation(sendEnabled: boolean): void {
       button.classList.toggle("text-primary", active);
       button.classList.toggle("text-foreground", !active);
     }
-    if (tool !== "select") clearHoverOutline();
+    if (tool !== "select") hoverOutline.style.display = "none";
     if (tool !== "marquee") marqueeBox.style.display = "none";
     document.documentElement.setAttribute("data-t3code-annotation-tool", tool);
   };
@@ -849,7 +701,6 @@ function startAnnotation(sendEnabled: boolean): void {
       }
     }
     selected.delete(target.element);
-    syncResizeTargets();
     target.outline.remove();
     target.label.remove();
     for (const [key, change] of styleChanges) {
@@ -868,7 +719,6 @@ function startAnnotation(sendEnabled: boolean): void {
       baselineStyles: new Map(),
     };
     selected.set(element, target);
-    syncResizeTargets();
     root.append(target.outline, target.label);
     updateSelectedVisual(target);
     updateStatus();
@@ -1291,32 +1141,10 @@ function startAnnotation(sendEnabled: boolean): void {
 
   const repaint = (): void => {
     for (const target of selected.values()) updateSelectedVisual(target);
-    if (hoverPoint && tool === "select" && dragStart === null) updateHoverOutline();
     queueEditorLayout();
   };
-
-  const resizeObserver = new ResizeObserver(repaint);
-  const observedElements = new Set<Element>();
-  const syncResizeTargets = (): void => {
-    const next = new Set<Element>([document.documentElement]);
-    for (const element of [...selected.keys(), ...(hoveredElement ? [hoveredElement] : [])]) {
-      for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
-        next.add(ancestor);
-      }
-    }
-    for (const element of observedElements) {
-      if (!next.has(element)) {
-        resizeObserver.unobserve(element);
-        observedElements.delete(element);
-      }
-    }
-    for (const element of next) {
-      if (!observedElements.has(element)) {
-        resizeObserver.observe(element);
-        observedElements.add(element);
-      }
-    }
-  };
+  // A scrollbar appearing narrows the viewport without a window resize.
+  const rootResizeObserver = new ResizeObserver(repaint);
 
   const removeTargetAtPoint = (x: number, y: number): boolean => {
     for (const target of Array.from(selected.values()).toReversed()) {
@@ -1391,21 +1219,7 @@ function startAnnotation(sendEnabled: boolean): void {
   };
 
   const clearHoverOutline = (): void => {
-    hoveredElement = null;
-    hoverPoint = null;
     hoverOutline.style.display = "none";
-    syncResizeTargets();
-  };
-
-  const updateHoverOutline = (): void => {
-    if (!hoverPoint) return;
-    const target = pickFromPoint(hoverPoint.x, hoverPoint.y);
-    if (target !== hoveredElement) {
-      hoveredElement = target;
-      syncResizeTargets();
-    }
-    if (target) positionBox(hoverOutline, visibleElementRect(target));
-    else hoverOutline.style.display = "none";
   };
 
   const onPointerMove = (event: PointerEvent): void => {
@@ -1414,8 +1228,9 @@ function startAnnotation(sendEnabled: boolean): void {
       return;
     }
     if (tool === "select" && dragStart === null) {
-      hoverPoint = { x: event.clientX, y: event.clientY };
-      updateHoverOutline();
+      const target = pickFromPoint(event.clientX, event.clientY);
+      if (target) positionBox(hoverOutline, visibleElementRect(target));
+      else clearHoverOutline();
       return;
     }
     clearHoverOutline();
@@ -1532,7 +1347,7 @@ function startAnnotation(sendEnabled: boolean): void {
   const teardown = (notifyMain: boolean): void => {
     if (finished) return;
     finished = true;
-    resizeObserver.disconnect();
+    rootResizeObserver.disconnect();
     restoreStyles();
     window.removeEventListener("pointermove", onPointerMove, true);
     window.removeEventListener("pointerdown", onPointerDown, true);
@@ -1668,7 +1483,7 @@ function startAnnotation(sendEnabled: boolean): void {
   ipcRenderer.on(CANCEL_PICK_CHANNEL, onCancel);
   ipcRenderer.on(ANNOTATION_CAPTURED_CHANNEL, onCaptured);
   document.documentElement.appendChild(host);
-  syncResizeTargets();
+  rootResizeObserver.observe(document.documentElement);
   refreshToolButtons();
   updateStatus();
   activeSession = {

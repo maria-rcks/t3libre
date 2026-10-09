@@ -2240,17 +2240,6 @@ code {
   outline: none;
 }
 
-/* Forced colors removes box shadows, so focused controls need an outline. */
-@media (forced-colors: active) {
-  :focus-visible,
-  .composer-tiptap:focus-visible,
-  .composer-tiptap .ProseMirror:focus-visible,
-  [data-settings-page-scroll] .settings-search-target-pulse:focus {
-    outline: 2px solid Highlight;
-    outline-offset: -2px;
-  }
-}
-
 .composer-tiptap :not(pre) > code {
   font-family: var(--font-mono);
   font-size: 0.92em;
