@@ -317,7 +317,6 @@ import {
 
 interface TimelineRowSharedState {
   citationRequest: AssistantCitationTarget | null;
-  headerInset: number;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;
@@ -1313,7 +1312,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       citationRequest: readyCitationRequest,
-      headerInset,
       listRef,
       timestampFormat,
       routeThreadKey,
@@ -1353,7 +1351,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
     }),
     [
       readyCitationRequest,
-      headerInset,
       listRef,
       timestampFormat,
       routeThreadKey,
@@ -4306,7 +4303,6 @@ function AssistantChangedFilesSectionInner({
 
   return (
     <ChangedFilesCard
-      headerInset={ctx.headerInset}
       runId={turnSummary.runId}
       files={checkpointFiles}
       allDirectoriesExpanded={allDirectoriesExpanded}
