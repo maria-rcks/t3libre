@@ -3264,7 +3264,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       assert.equal(completed?.beforeTokenCount, 1500);
       assert.equal(completed?.afterTokenCount, 400);
       assert.isNotNull(completed?.completedAt);
-    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, IdAllocator.layer))),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
   );
 
   it.effect.each(["completed", "failed", "interrupted", "stop", "query_exit"] as const)(
@@ -3334,7 +3339,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           terminal.status === "completed" ? "failed" : terminal.status,
         );
         assert.isNotNull(updates[1]?.completedAt);
-      }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, IdAllocator.layer))),
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
   );
 
   it.effect("titles Claude reads, searches, and skills on tool completion", () =>
