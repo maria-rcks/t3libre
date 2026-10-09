@@ -22,7 +22,9 @@ export function useComposerTypingGuard(scope: string, requestIds: readonly strin
       scope,
       requestsKey,
       state: updateComposerTypingGuard(
-        current.scope === scope ? current.state : createComposerTypingGuardState(),
+        current.scope === scope
+          ? current.state
+          : { ...createComposerTypingGuardState(), focused: current.state.focused },
         { type: "requests", requestIds, now: Date.now() },
       ),
     }));

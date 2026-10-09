@@ -3934,6 +3934,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         );
       } else {
         setPrompt(next.text);
+        onTypingGuardDraftChange();
       }
       setComposerCursor(nextCursor);
       setComposerTrigger(
@@ -3956,6 +3957,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activePendingUserInput,
       isLiteralPendingAnswer,
       onChangeActivePendingUserInputCustomAnswer,
+      onTypingGuardDraftChange,
       promptRef,
       setPrompt,
       setComposerTrigger,
