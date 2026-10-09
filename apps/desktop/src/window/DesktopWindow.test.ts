@@ -645,7 +645,7 @@ describe("DesktopWindow", () => {
     );
   });
 
-  it.effect("keeps application titles on load and falls back for empty or external titles", () =>
+  it.effect("keeps thread titles on load and keeps branding for bootstrap or external titles", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
       const createCount = yield* Ref.make(0);
@@ -670,7 +670,7 @@ describe("DesktopWindow", () => {
         vi.mocked(fakeWindow.window.webContents.getTitle).mockReturnValue(title);
         finishLoad();
         assert.equal(vi.mocked(fakeWindow.window.setTitle).mock.lastCall?.[0], title);
-        updateTitle(event, "  ");
+        updateTitle(event, "T3 Code (Alpha)");
         assert.equal(
           vi.mocked(fakeWindow.window.setTitle).mock.lastCall?.[0],
           environment.displayName,

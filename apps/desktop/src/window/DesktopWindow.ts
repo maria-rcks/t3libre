@@ -702,7 +702,9 @@ export const make = Effect.gen(function* () {
         applicationUrl,
         navigationUrl: window.webContents.getURL(),
       });
-      window.setTitle(trusted && title.trim() ? title : environment.displayName);
+      // Only thread context ("project / thread") replaces desktop branding; the
+      // page bootstrap title and app-only titles carry the wrong build stage.
+      window.setTitle(trusted && title.includes(" / ") ? title : environment.displayName);
     };
     window.on("page-title-updated", (event, title) => {
       event.preventDefault();
