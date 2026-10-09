@@ -812,15 +812,33 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       }),
     );
 
-  const resolveGitCommonDir = (cwd: string) =>
+  // One process for both: `--verify` applies to HEAD only, so an unborn branch
+  // still prints the common dir and exits 1, the same answer `hasHeadCommit` gives.
+  const resolveGitCommonDirAndHead = (cwd: string) =>
     Effect.gen(function* () {
+      const operation = "GitVcsDriver.checkpoints.resolveGitCommonDir";
       const result = yield* execute({
-        operation: "GitVcsDriver.checkpoints.resolveGitCommonDir",
+        operation,
         cwd,
-        args: ["rev-parse", "--git-common-dir"],
+        args: ["rev-parse", "--git-common-dir", "--verify", "--quiet", "HEAD"],
+        allowNonZeroExit: true,
       });
-      const gitCommonDir = result.stdout.trim();
-      return path.isAbsolute(gitCommonDir) ? gitCommonDir : path.resolve(cwd, gitCommonDir);
+      const gitCommonDir = result.stdout.split("\n")[0]?.trim() ?? "";
+      if (gitCommonDir.length === 0 || (result.exitCode !== 0 && result.exitCode !== 1)) {
+        return yield* new VcsProcessExitError({
+          operation,
+          command: "git rev-parse",
+          cwd,
+          exitCode: result.exitCode,
+          detail: result.stderr.trim() || "git rev-parse --git-common-dir failed",
+        });
+      }
+      return {
+        gitCommonDir: path.isAbsolute(gitCommonDir)
+          ? gitCommonDir
+          : path.resolve(cwd, gitCommonDir),
+        headExists: result.exitCode === 0,
+      };
     });
 
   // Git renames loose objects and refs into place without fsync by default, so
@@ -846,10 +864,9 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       // These reads are independent, so they share one round of Git processes.
       // The index path is only used when HEAD exists; failing to read it only
       // skips index reuse, as before.
-      const [gitCommonDir, headExists, sparseConfig, sourceIndexPath] = yield* Effect.all(
+      const [{ gitCommonDir, headExists }, sparseConfig, sourceIndexPath] = yield* Effect.all(
         [
-          resolveGitCommonDir(input.cwd),
-          hasHeadCommit(input.cwd),
+          resolveGitCommonDirAndHead(input.cwd),
           execute({
             operation,
             cwd: input.cwd,
