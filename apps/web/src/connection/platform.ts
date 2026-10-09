@@ -46,7 +46,6 @@ import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAu
 import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer";
 import {
   readPrimaryEnvironmentTarget,
-  readPrimaryEnvironmentTargetResult,
   type PrimaryEnvironmentTarget,
 } from "../environments/primary/target";
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";

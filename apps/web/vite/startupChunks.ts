@@ -1,6 +1,6 @@
 import * as NodePath from "node:path";
 
-import type { HtmlTagDescriptor, Plugin, Rolldown } from "vite-plus";
+import { normalizePath, type HtmlTagDescriptor, type Plugin, type Rolldown } from "vite-plus";
 
 // What a cold open runs before its first commit: the app, then the chat
 // layout, home, a draft, or a thread. Keep in sync with src/routes.
@@ -43,7 +43,7 @@ export function startupChunksPlugin(): Plugin {
     name: "t3code:startup-chunks",
     apply: "build",
     config: (config) => {
-      root = NodePath.resolve(config.root ?? process.cwd());
+      root = normalizePath(NodePath.resolve(config.root ?? process.cwd()));
       return {
         build: {
           modulePreload: {
@@ -52,11 +52,11 @@ export function startupChunksPlugin(): Plugin {
           },
           rolldownOptions: {
             input: {
-              index: NodePath.join(root, "index.html"),
+              index: normalizePath(NodePath.join(root, "index.html")),
               ...Object.fromEntries(
                 Object.entries(STARTUP_MODULES).map(([name, id]) => [
                   name,
-                  NodePath.join(root, id),
+                  normalizePath(NodePath.join(root, id)),
                 ]),
               ),
             },
@@ -84,7 +84,8 @@ export function startupChunksPlugin(): Plugin {
     },
     buildEnd(error) {
       if (error) return;
-      const html = [...this.getModuleIds()].find((id) => id === NodePath.join(root, "index.html"));
+      const htmlId = normalizePath(NodePath.join(root, "index.html"));
+      const html = [...this.getModuleIds()].find((id) => id === htmlId);
       const closure = new Set<string>();
       const pending = html ? [html] : [];
       for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
@@ -113,9 +114,11 @@ export function startupChunksPlugin(): Plugin {
         };
         // index.html already loads the bootstrap entry and its imports.
         const bootstrapFiles = importClosure(
-          chunks.filter((chunk) => chunk.facadeModuleId === NodePath.join(root, "index.html")),
+          chunks.filter(
+            (chunk) => chunk.facadeModuleId === normalizePath(NodePath.join(root, "index.html")),
+          ),
         );
-        const mainId = NodePath.join(root, STARTUP_MODULES.main);
+        const mainId = normalizePath(NodePath.join(root, STARTUP_MODULES.main));
         if (
           [...bootstrapFiles].some((file) => {
             const chunk = bundle[file];
