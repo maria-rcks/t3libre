@@ -356,9 +356,7 @@ function ComposerBannerStackAlert({
         </ComposerBanner.Icon>
         <ComposerBanner.Content className="whitespace-nowrap">
           <span className="min-w-0 truncate font-medium leading-7 sm:leading-6">{item.title}</span>
-          {item.description ? (
-            <NoticeDescription>{item.description}</NoticeDescription>
-          ) : null}
+          {item.description ? <NoticeDescription>{item.description}</NoticeDescription> : null}
         </ComposerBanner.Content>
         {item.actions || item.onDismiss ? (
           <ComposerBanner.Actions>
