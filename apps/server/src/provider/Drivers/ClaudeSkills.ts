@@ -7,8 +7,8 @@
  * matching the CLI. `.agents/skills` is a Codex location: verified against the
  * CLI, a skill that lives only there is answered with `Unknown command`, so it
  * is not scanned here.
- * Enabled installed plugins contribute namespaced skills from their cache
- * and manifest-declared directories, with installation ownership preserved.
+ * Enabled installed plugins contribute namespaced skills from their install's
+ * `skills/` directory and manifest-declared directories.
  * The Agent SDK init handshake surfaces skills only as slash commands without
  * their filesystem paths, so the provider snapshot scans the same locations
  * directly, mirroring how the Codex app-server reports its skills.
@@ -329,15 +329,11 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
   configDirPath: string,
   cwd: string | undefined,
   enabledPlugins: ReadonlyMap<string, boolean>,
-  environment: NodeJS.ProcessEnv,
 ): Effect.fn.Return<ReadonlyArray<ClaudeSkillRoot>, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const pluginRoot = environment.CLAUDE_CODE_PLUGIN_CACHE_DIR
-    ? path.resolve(cwd ?? ".", environment.CLAUDE_CODE_PLUGIN_CACHE_DIR)
-    : path.join(configDirPath, "plugins");
   const installed = yield* fileSystem
-    .readFileString(path.join(pluginRoot, "installed_plugins.json"))
+    .readFileString(path.join(configDirPath, "plugins", "installed_plugins.json"))
     .pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(InstalledPlugins)),
       Effect.orElseSucceed(() => undefined),
@@ -348,24 +344,18 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
 
   for (const [key, entries] of Object.entries(installed?.plugins ?? {}).sort()) {
     if (enabledPlugins.get(key) !== true) continue;
+    // Project and local installs only apply to their own workspace; the narrowest wins.
     const install = entries
-      .flatMap((entry) => {
-        const record = Option.getOrUndefined(decodeInstalledPlugin(entry));
-        if (!record) return [];
-        if (
-          record.scope !== "user" &&
-          (record.projectPath === undefined || path.resolve(record.projectPath) !== workspace)
-        ) {
-          return [];
-        }
-        return [record];
-      })
+      .flatMap((entry) => Option.toArray(decodeInstalledPlugin(entry)))
+      .filter(
+        (record) =>
+          record.scope === "user" ||
+          (record.projectPath !== undefined && path.resolve(record.projectPath) === workspace),
+      )
       .sort((left, right) => scopePriority[right.scope] - scopePriority[left.scope])[0];
     if (!install) continue;
     const scope = install.scope === "user" ? "user" : "project";
 
-    // Plugins such as mattpocock-skills declare individual nested folders;
-    // a declared path can also be a directory containing several skills.
     const manifest = yield* fileSystem
       .readFileString(path.join(install.installPath, ".claude-plugin", "plugin.json"))
       .pipe(
@@ -374,34 +364,12 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
       );
     const prefix = manifest?.name ?? key.split("@")[0];
     if (!prefix) continue;
-    const skillsDirectory = path.join(install.installPath, "skills");
-    roots.push({ directory: skillsDirectory, scope, prefix });
-    if (!(yield* fileSystem.exists(skillsDirectory).pipe(Effect.orElseSucceed(() => false)))) {
-      roots.push({ directory: install.installPath, scope, prefix, singleSkill: true });
-    }
-    const installRoot = path.resolve(install.installPath);
-    const canonicalInstallRoot = yield* fileSystem
-      .realPath(installRoot)
-      .pipe(Effect.orElseSucceed(() => undefined));
+    roots.push({ directory: path.join(install.installPath, "skills"), scope, prefix });
+    // Plugins such as mattpocock-skills declare individual nested skill folders;
+    // a declared path can also be a directory containing several skills.
     const declared = manifest?.skills;
     for (const relative of typeof declared === "string" ? [declared] : (declared ?? [])) {
-      const directory = path.resolve(installRoot, relative);
-      const canonicalDirectory = yield* fileSystem
-        .realPath(directory)
-        .pipe(Effect.orElseSucceed(() => undefined));
-      if (!canonicalInstallRoot || !canonicalDirectory) continue;
-      if (
-        [
-          path.relative(installRoot, directory),
-          path.relative(canonicalInstallRoot, canonicalDirectory),
-        ].some(
-          (fromInstall) =>
-            fromInstall === ".." ||
-            fromInstall.startsWith(`..${path.sep}`) ||
-            path.isAbsolute(fromInstall),
-        )
-      )
-        continue;
+      const directory = path.resolve(install.installPath, relative);
       const singleSkill = yield* fileSystem
         .exists(path.join(directory, "SKILL.md"))
         .pipe(Effect.orElseSucceed(() => false));
@@ -467,12 +435,7 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
   const roots: ReadonlyArray<ClaudeSkillRoot> = [
     { directory: path.join(configDirPath, "skills"), scope: "user" },
     ...(cwd ? [{ directory: path.join(cwd, ".claude", "skills"), scope: "project" as const }] : []),
-    ...(yield* discoverPluginSkillRoots(
-      configDirPath,
-      cwd,
-      enabledPlugins,
-      environment ?? process.env,
-    )),
+    ...(yield* discoverPluginSkillRoots(configDirPath, cwd, enabledPlugins)),
   ];
 
   const skillsByName = new Map<string, ServerProviderSkill>();
