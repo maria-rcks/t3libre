@@ -169,7 +169,15 @@ export function createEnvironmentThreadShellAtoms(input: {
           }
         }
       }
-      if (arrayElementsEqual(previous, next)) return previous;
+      // Indicators read only ids and titles, so other shell updates keep the old array.
+      if (
+        previous.length === next.length &&
+        previous.every(
+          (thread, index) => thread.id === next[index]?.id && thread.title === next[index]?.title,
+        )
+      ) {
+        return previous;
+      }
       previous = next;
       return next;
     }).pipe(Atom.withLabel(`environment-child-thread-inputs:${key}`));
