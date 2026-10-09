@@ -136,6 +136,8 @@ describe("t3code/no-outset-state-indicators", () => {
       "an inset in a nested conditional composer": `const value = cn(enabled && cn("focus-visible:ring-2", "focus-visible:ring-inset"));`,
       "outlines covered by the inward default": `const el = <button className="focus-visible:outline-2 focus-visible:outline-ring" />;`,
       "wider outlines with a matching inward offset": `const el = <button className="focus-visible:outline-3 focus-visible:-outline-offset-3" />;`,
+      "arbitrary pixel outlines with a matching inward offset": `const el = <button className="focus-visible:outline-[3px] focus-visible:-outline-offset-3" />;`,
+      "arbitrary outline colors": `const el = <button className="focus-visible:outline-[#243c5a]" />;`,
       "decorative rings without a state": `const el = <img className="ring-2 ring-background" />;`,
       prose: `const note = "the focus ring stays visible";`,
     }),

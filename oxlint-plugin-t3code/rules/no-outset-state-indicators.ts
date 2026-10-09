@@ -4,7 +4,8 @@ const CLASS_COMPOSERS = new Set(["cn", "clsx", "classNames", "cva", "twMerge"]);
 const STATE_VARIANT =
   /(?:^|[^\w])(?:focus(?:-visible|-within)?|selected|checked|pressed)(?=$|[^\w])/u;
 const RING_WIDTH = /^ring(?:-(?:[1-9]\d*|\[[^\]]+\]|\(length:[^)]+\)))?$/u;
-const OUTLINE_WIDTH = /^outline-(\d+|\[[^\]]+\]|\(length:[^)]+\))$/u;
+// Pixel widths only; arbitrary values like `outline-[#243c5a]` are colors.
+const OUTLINE_WIDTH = /^outline-(?:(\d+)|\[(?:length:)?(\d+(?:\.\d+)?)px\])$/u;
 const INWARD_OFFSET = /^-outline-offset-(\d+)$/u;
 
 /** Splits `dark:[&_a]:ring-2!` into its variants and utility, ignoring colons inside brackets. */
@@ -83,7 +84,7 @@ function offenders(text: string, node: ESTree.Node) {
     }
     const outline = OUTLINE_WIDTH.exec(utility);
     if (outline) {
-      const width = Number(outline[1]);
+      const width = Number(outline[1] ?? outline[2]);
       if (width <= 2) continue;
       scope ??= scopeClasses(node, own);
       const inward = scope.some((other) => {

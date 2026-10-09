@@ -1030,8 +1030,9 @@ function startAnnotation(sendEnabled: boolean): void {
   const getAnnotationBounds = (): PreviewAnnotationRect | null =>
     unionRects(
       [
-        ...Array.from(selected.values(), (target) =>
-          rectFromDomRect(target.element.getBoundingClientRect()),
+        // Follow the visible outline, so a clipped selection does not anchor the editor off-screen.
+        ...Array.from(selected.values(), (target) => visibleElementRect(target.element)).filter(
+          (rect) => rect.width > 0 && rect.height > 0,
         ),
         ...regions.map((region) => region.rect),
         ...strokes.map((stroke) => stroke.bounds),
