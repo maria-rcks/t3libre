@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Vite build hooks run outside an Effect runtime.
 import * as NodeFs from "node:fs/promises";
 import * as NodePath from "node:path";
 import { promisify } from "node:util";

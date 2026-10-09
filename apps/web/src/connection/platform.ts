@@ -378,9 +378,10 @@ const loadPrimaryConnectionRegistration = Effect.fn(
 )(function* (resolved: PrimaryEnvironmentTarget) {
   const prefetch = primaryDescriptorPrefetch;
   primaryDescriptorPrefetch = null;
+  const now = yield* Clock.currentTimeMillis;
   const prefetched =
     prefetch?.httpBaseUrl === resolved.target.httpBaseUrl &&
-    Date.now() - prefetch.startedAt <= PREFETCHED_DESCRIPTOR_MAX_AGE_MS
+    now - prefetch.startedAt <= PREFETCHED_DESCRIPTOR_MAX_AGE_MS
       ? yield* Effect.promise(() => prefetch.settled)
       : null;
   const descriptor =

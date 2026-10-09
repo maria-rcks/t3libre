@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Vite resolves module paths before an Effect runtime exists.
 import * as NodePath from "node:path";
 
 import { normalizePath, type HtmlTagDescriptor, type Plugin, type Rolldown } from "vite-plus";
