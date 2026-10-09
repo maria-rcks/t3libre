@@ -251,6 +251,13 @@ const bootstrap = Effect.gen(function* () {
     }
     yield* primaryBackend.start;
     yield* logBootstrapInfo("bootstrap backend start requested");
+    // The renderer loads bundled assets and can connect while the backend
+    // boots. Starting first makes its endpoint and bootstrap credential
+    // available before the preload reads them. WSL-only retains its splash
+    // until the primary has a usable endpoint.
+    if (!(settings.wslOnly === true && settings.wslBackendEnabled === true)) {
+      yield* desktopWindow.ensureMain;
+    }
     yield* appActivation.start.pipe(
       Effect.tap(() => logBootstrapInfo("desktop app control socket ready")),
       Effect.catch((error) => logStartupError("desktop app control socket unavailable", { error })),
