@@ -1053,7 +1053,14 @@ it.effect("starts the provider when checkpoint baseline capture fails", () =>
   }),
 );
 
-it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as const)(
+it.effect.each([
+  "failure",
+  "interruption",
+  "stale-attempt",
+  "start-guard",
+  "late-start-guard",
+  "baseline-interruption",
+] as const)(
   "handles %s before the provider turn starts",
   (scenario) =>
     Effect.gen(function* () {
@@ -1070,6 +1077,14 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
         id: CheckpointScopeId.make("checkpoint-scope:run-execution-settings-failure"),
       } as OrchestrationV2CheckpointScope;
       const providerStarts = yield* Ref.make(0);
+      const preparations = yield* Ref.make(0);
+      const preparationCloses = yield* Ref.make(0);
+      const preparationStarted = yield* Deferred.make<void>();
+      const startGuards = yield* Ref.make(0);
+      const prepares =
+        scenario === "start-guard" ||
+        scenario === "late-start-guard" ||
+        scenario === "baseline-interruption";
       const refreshes = yield* Ref.make(0);
       const guardedWrites = yield* Ref.make(0);
       const writes = yield* Ref.make<ReadonlyArray<ReadonlyArray<OrchestrationV2DomainEvent>>>([]);
@@ -1079,7 +1094,11 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
             McpAppModelContext.layerEmpty,
             Layer.mock(CheckpointService.CheckpointServiceV2)({
               captureBaseline: () =>
-                scenario === "start-guard" ? Effect.void : Effect.die("not reached"),
+                scenario === "baseline-interruption"
+                  ? Deferred.await(preparationStarted).pipe(Effect.andThen(Effect.interrupt))
+                  : prepares
+                    ? Effect.void
+                    : Effect.die("not reached"),
             }),
             Layer.mock(EventSink.EventSinkV2)({
               writeIfRunCurrent: (input) =>
@@ -1100,7 +1119,7 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
             Layer.mock(ProviderEventIngestor.ProviderEventIngestorV2)({
               ingestNormalized: () => Effect.succeed([]),
             }),
-            scenario === "start-guard"
+            prepares
               ? ServerSettings.layerTest()
               : Layer.mock(ServerSettings.ServerSettingsService)({
                   getSettings:
@@ -1130,6 +1149,13 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
           providerSessionId,
           session: {
             events: Stream.never,
+            prepareTurn: () =>
+              Effect.acquireRelease(
+                Ref.update(preparations, (count) => count + 1).pipe(
+                  Effect.andThen(Deferred.succeed(preparationStarted, undefined)),
+                ),
+                () => Ref.update(preparationCloses, (count) => count + 1),
+              ).pipe(Effect.asVoid),
             startTurn: () => Ref.update(providerStarts, (count) => count + 1),
           } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime,
           run: {
@@ -1153,8 +1179,13 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
           attemptId,
           providerTurnOrdinal: 1,
           // A declined start is a normal exit, not a preparation failure.
-          ...(scenario === "start-guard"
-            ? { shouldStartProviderTurn: () => Effect.succeed(false) }
+          ...(scenario === "start-guard" || scenario === "late-start-guard"
+            ? {
+                shouldStartProviderTurn: () =>
+                  Ref.updateAndGet(startGuards, (count) => count + 1).pipe(
+                    Effect.map((count) => scenario === "late-start-guard" && count === 1),
+                  ),
+              }
             : {}),
           message: {
             messageId: MessageId.make("message:run-execution-settings-failure"),
@@ -1179,8 +1210,10 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
       }).pipe(Effect.provide(layerTest), Effect.exit);
 
       assert.equal(yield* Ref.get(providerStarts), 0);
+      assert.equal(yield* Ref.get(preparations), prepares ? 1 : 0);
+      assert.equal(yield* Ref.get(preparationCloses), prepares ? 1 : 0);
       const events = (yield* Ref.get(writes)).flat();
-      if (scenario === "interruption") {
+      if (scenario === "interruption" || scenario === "baseline-interruption") {
         assert.isTrue(Exit.isFailure(result));
         if (Exit.isFailure(result)) assert.isTrue(Cause.hasInterruptsOnly(result.cause));
         assert.equal(yield* Ref.get(guardedWrites), 0);
@@ -1189,7 +1222,8 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
         return;
       }
       assert.isTrue(Exit.isSuccess(result));
-      if (scenario === "start-guard") {
+      if (scenario === "start-guard" || scenario === "late-start-guard") {
+        assert.equal(yield* Ref.get(startGuards), scenario === "late-start-guard" ? 2 : 1);
         assert.equal(yield* Ref.get(guardedWrites), 0);
         assert.equal(yield* Ref.get(refreshes), 0);
         assert.isEmpty(events);

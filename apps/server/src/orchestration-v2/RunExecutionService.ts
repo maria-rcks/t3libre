@@ -1485,7 +1485,7 @@ export const layer: Layer.Layer<
               ),
             ),
           );
-        }),
+        }).pipe(Effect.scoped),
     } satisfies RunExecutionServiceV2Shape);
   }),
 );

@@ -1046,7 +1046,10 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
 });
 
 describe("ClaudeAdapterV2 prepareTurn", () => {
-  const runPrepareScenario = (input: { readonly startModel: string }) =>
+  const runPrepareScenario = (input: {
+    readonly startModel: string;
+    readonly abandon?: "scope-end" | "interruption" | "stop" | "superseded";
+  }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -1113,13 +1116,59 @@ describe("ClaudeAdapterV2 prepareTurn", () => {
             modelSelection: { ...CLAUDE_TEST_MODEL_SELECTION, model },
           });
         assert.isFunction(runtime.prepareTurn);
-        yield* runtime.prepareTurn!(turnInput(CLAUDE_TEST_MODEL_SELECTION.model));
-        // The CLI is started, but nothing reaches it before the turn starts.
-        assert.deepEqual(
-          queries.map((query) => query.offers),
-          [0],
-        );
-        yield* runtime.startTurn(turnInput(input.startModel));
+        const preparation = turnInput(CLAUDE_TEST_MODEL_SELECTION.model);
+        const start = turnInput(input.startModel);
+        if (input.abandon === "superseded") {
+          const firstScope = yield* Scope.make();
+          const secondScope = yield* Scope.make();
+          const replacementAttemptId = RunAttemptId.make("replacement-claude-prepare-turn");
+          yield* runtime.prepareTurn!(preparation).pipe(Scope.provide(firstScope));
+          yield* runtime.prepareTurn!({
+            ...preparation,
+            attemptId: replacementAttemptId,
+          }).pipe(Scope.provide(secondScope));
+          yield* Scope.close(firstScope, Exit.void);
+          assert.isTrue(queries[0]?.closed);
+          assert.isFalse(queries[1]?.closed);
+          yield* runtime.startTurn({ ...start, attemptId: replacementAttemptId });
+          yield* Scope.close(secondScope, Exit.void);
+          assert.isFalse(queries[1]?.closed);
+          return queries;
+        }
+        const preparationExit = yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* runtime.prepareTurn!(preparation);
+            // The CLI is started, but nothing reaches it before the turn starts.
+            assert.deepEqual(
+              queries.map((query) => query.offers),
+              [0],
+            );
+            if (input.abandon === "interruption") return yield* Effect.interrupt;
+            if (input.abandon === "stop") {
+              yield* runtime.interruptTurn({
+                providerThread,
+                providerTurnId: ProviderTurnId.make("not-started-claude-prepare-turn"),
+                requestRuntimeRestart: true,
+              });
+              assert.isTrue(queries[0]?.closed);
+              return;
+            }
+            if (input.abandon === "scope-end") return;
+            yield* runtime.startTurn(start);
+          }),
+        ).pipe(Effect.exit);
+        if (input.abandon === "interruption") {
+          assert.isTrue(Exit.isFailure(preparationExit));
+        } else {
+          assert.isTrue(Exit.isSuccess(preparationExit));
+        }
+        if (input.abandon !== undefined) {
+          assert.isTrue(queries[0]?.closed);
+          assert.equal(queries[0]?.offers, 0);
+          // A cancelled preparation cannot be adopted by the next prompt.
+          yield* runtime.startTurn(start);
+        }
+        assert.isFalse(queries.at(-1)?.closed);
         return queries;
       }).pipe(
         Effect.provide(
@@ -1141,6 +1190,32 @@ describe("ClaudeAdapterV2 prepareTurn", () => {
       const queries = yield* runPrepareScenario({ startModel: "claude-haiku-4-5" });
       assert.equal(queries.length, 2);
       assert.isTrue(queries[0]?.closed);
+      assert.equal(queries[0]?.offers, 0);
+      assert.equal(queries[1]?.offers, 1);
+    }),
+  );
+
+  it.effect.each(["scope-end", "interruption", "stop"] as const)(
+    "closes an unprompted process after %s",
+    (abandon) =>
+      Effect.gen(function* () {
+        const queries = yield* runPrepareScenario({
+          startModel: CLAUDE_TEST_MODEL_SELECTION.model,
+          abandon,
+        });
+        assert.equal(queries.length, 2);
+        assert.equal(queries[0]?.offers, 0);
+        assert.equal(queries[1]?.offers, 1);
+      }),
+  );
+
+  it.effect("closing a superseded start leaves replacement preparation and adoption alive", () =>
+    Effect.gen(function* () {
+      const queries = yield* runPrepareScenario({
+        startModel: CLAUDE_TEST_MODEL_SELECTION.model,
+        abandon: "superseded",
+      });
+      assert.equal(queries.length, 2);
       assert.equal(queries[0]?.offers, 0);
       assert.equal(queries[1]?.offers, 1);
     }),

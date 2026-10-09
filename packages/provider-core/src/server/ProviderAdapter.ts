@@ -589,12 +589,13 @@ export interface ProviderAdapterV2SessionRuntime {
    * a CLI process) without sending the prompt, so it overlaps the baseline
    * checkpoint. It must not deliver the prompt, so the agent cannot act before
    * the baseline exists. `startTurn` with the same input reuses what it
-   * started. Best effort: a
-   * failure leaves `startTurn` to do the work itself.
+   * started. Pending work belongs to the caller's start scope and must close
+   * if that scope ends before `startTurn` adopts it. Best effort: a failure
+   * leaves `startTurn` to do the work itself.
    */
   readonly prepareTurn?: (
     input: ProviderAdapterV2TurnInput,
-  ) => Effect.Effect<void, ProviderAdapterV2Error>;
+  ) => Effect.Effect<void, ProviderAdapterV2Error, Scope.Scope>;
   readonly startTurn: (
     input: ProviderAdapterV2TurnInput,
   ) => Effect.Effect<void, ProviderAdapterV2Error>;

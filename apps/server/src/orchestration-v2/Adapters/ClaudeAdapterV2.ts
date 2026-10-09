@@ -3096,6 +3096,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         // next `openQuery` with the same open key adopts it; any other closes it.
         const prewarmedQuery = yield* Ref.make<{
           readonly key: string;
+          readonly nativeThreadId: string;
           readonly query: ClaudeAgentSdkQuerySession;
         } | null>(null);
         const openedNativeThreads = yield* Ref.make(new Set<string>());
@@ -7346,11 +7347,16 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           };
         });
 
-        const closePrewarmedQuery = Ref.getAndSet(prewarmedQuery, null).pipe(
-          Effect.flatMap((prewarmed) =>
-            prewarmed === null ? Effect.void : prewarmed.query.close.pipe(Effect.ignore),
-          ),
-        );
+        const closePrewarmedQuery = (nativeThreadId?: string) =>
+          Ref.modify(prewarmedQuery, (current) =>
+            nativeThreadId === undefined || current?.nativeThreadId === nativeThreadId
+              ? [current, null]
+              : [null, current],
+          ).pipe(
+            Effect.flatMap((prewarmed) =>
+              prewarmed === null ? Effect.void : prewarmed.query.close.pipe(Effect.ignore),
+            ),
+          );
 
         const openQuery = Effect.fnUntraced(function* (
           turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
@@ -7362,7 +7368,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           if (existing !== null) {
             // `prepareTurn` only prewarms while no process is live, so a
             // prewarmed process here is stale whatever this turn does next.
-            yield* closePrewarmedQuery;
+            yield* closePrewarmedQuery();
           }
           // A continuation prompts nothing: it drains output the live process
           // already produced, so it keeps that process whatever its selection.
@@ -7544,14 +7550,33 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             }
             const nativeThreadId = yield* getNativeThreadId(turnInput.providerThread);
             const plan = yield* planQueryOpen(turnInput, nativeThreadId);
-            if ((yield* Ref.get(prewarmedQuery))?.key === plan.openKey) return;
-            const query = yield* queryRunner.open({
-              threadId: turnInput.threadId,
-              providerSessionId: input.providerSessionId,
-              options: plan.queryOptions,
-            });
-            const replaced = yield* Ref.getAndSet(prewarmedQuery, { key: plan.openKey, query });
-            if (replaced !== null) yield* replaced.query.close.pipe(Effect.ignore);
+            yield* Effect.acquireRelease(
+              Effect.gen(function* () {
+                const query = yield* queryRunner.open({
+                  threadId: turnInput.threadId,
+                  providerSessionId: input.providerSessionId,
+                  options: plan.queryOptions,
+                });
+                const replaced = yield* Ref.getAndSet(prewarmedQuery, {
+                  key: plan.openKey,
+                  nativeThreadId,
+                  query,
+                });
+                if (replaced !== null) yield* replaced.query.close.pipe(Effect.ignore);
+                return query;
+              }),
+              (query) =>
+                // Adoption atomically removes this entry. A cancelled start
+                // only closes its own pending process, never a live query or
+                // another attempt's replacement preparation.
+                Ref.modify(prewarmedQuery, (current) =>
+                  current?.query === query ? [current, null] : [null, current],
+                ).pipe(
+                  Effect.flatMap((pending) =>
+                    pending === null ? Effect.void : pending.query.close.pipe(Effect.ignore),
+                  ),
+                ),
+            );
           },
           (effect, turnInput) =>
             effect.pipe(
@@ -7769,6 +7794,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             const existing = yield* Ref.get(queryContext);
             const currentTurn = yield* Ref.get(activeTurn);
             const nativeThreadId = turnInput.providerThread.nativeThreadRef?.nativeId ?? null;
+            if (nativeThreadId !== null) yield* closePrewarmedQuery(nativeThreadId);
             if (currentTurn === null && turnInput.requestRuntimeRestart === true) {
               // Stop after the turn settled. With no CLI process of this
               // native thread left, nothing it started is still running: its
@@ -7905,7 +7931,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           if (existing !== null) {
             yield* existing.query.close.pipe(Effect.ignore);
           }
-          yield* closePrewarmedQuery;
+          yield* closePrewarmedQuery();
           yield* Effect.yieldNow;
           yield* queryRunner.assertComplete.pipe(
             Effect.catchCause((cause) =>
