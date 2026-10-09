@@ -9,13 +9,15 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import {
   clampPercent,
   makeUnavailableUsageLimits,
   makeUsageLimits,
 } from "@t3tools/provider-core/server/usageLimits";
-import { readMacCursorAccessToken } from "./keychainToken.ts";
+import * as CursorKeychain from "./CursorKeychain.ts";
 
 const CursorCredentials = Schema.Struct({ accessToken: Schema.optional(Schema.String) });
 const DEFAULT_CURSOR_API_ENDPOINT = "https://api2.cursor.sh";
@@ -64,7 +66,6 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
   settings: Pick<CursorSettings, "apiEndpoint">,
   environment: NodeJS.ProcessEnv = process.env,
   allowKeychain = false,
-  keychainToken: () => Promise<string | null> = readMacCursorAccessToken,
 ) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   return yield* Effect.gen(function* () {
@@ -104,7 +105,8 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
           message: "Cursor account usage requires the default Cursor endpoint when using Keychain.",
         });
       }
-      token = (yield* Effect.tryPromise(keychainToken))?.trim();
+      const keychain = yield* CursorKeychain.CursorKeychain;
+      token = (yield* keychain.accessToken)?.trim();
     } else if (!token) {
       const home =
         (platform === "win32" ? environment.USERPROFILE : environment.HOME) || NodeOS.homedir();
