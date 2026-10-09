@@ -13,6 +13,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
@@ -42,13 +43,18 @@ const layerTestProcessRunner = Layer.succeed(ProcessRunner.ProcessRunner, {
   run: processProbeFailure,
 });
 
+/** A host without `/proc`, so a missing `lsof` leaves only configured URLs. */
+const layerNoProc = FileSystem.layerNoop({});
+
 const layerProbeFailure = (
   run: ProcessRunner.ProcessRunner["Service"]["run"],
   fetch: typeof globalThis.fetch = globalThis.fetch,
+  fileSystem: Layer.Layer<FileSystem.FileSystem> = layerNoProc,
 ) =>
   PortScanner.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        fileSystem,
         Layer.succeed(ProcessRunner.ProcessRunner, { run }),
         Layer.succeed(HostProcessPlatform, "linux"),
         FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
@@ -59,6 +65,7 @@ const layerProbeFailure = (
 const layerTestPortDiscovery = PortScanner.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
+      layerNoProc,
       layerTestProcessRunner,
       Layer.succeed(HostProcessPlatform, "win32"),
       FetchHttpClient.layer,
@@ -68,17 +75,29 @@ const layerTestPortDiscovery = PortScanner.layer.pipe(
 
 const LSOF_TEST_PORT = 43_123;
 
+/** The scanner with `processIds` registered to a T3 terminal, so their listeners get probes. */
+const ownedScanner = (processIds: ReadonlyArray<number> = [1234]) =>
+  Effect.tap(PortScanner.PortDiscovery, (scanner) =>
+    scanner.registerTerminalProcesses({
+      threadId: "scanner-thread",
+      terminalId: "scanner-terminal",
+      processIds,
+    }),
+  );
+
 const layerLsofScanner = (input: {
   readonly pid: () => number;
   readonly fetch: typeof globalThis.fetch;
+  readonly stdout?: () => string;
 }) =>
   PortScanner.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        layerNoProc,
         Layer.succeed(ProcessRunner.ProcessRunner, {
           run: () =>
             Effect.succeed({
-              stdout: `p${input.pid()}\ncnode\nn*:${LSOF_TEST_PORT}\n`,
+              stdout: input.stdout?.() ?? `p${input.pid()}\ncnode\nn*:${LSOF_TEST_PORT}\n`,
               stderr: "",
               code: null,
               timedOut: false,
@@ -124,7 +143,7 @@ const openCommonDevServer = Effect.fn("PortScannerTest.openCommonDevServer")(fun
   const server = yield* openServer(0, onConnection);
   const address = server?.address();
   if (!server || !address || typeof address === "string") {
-    return yield* Effect.die(new Error("Could not open the preview scanner listener"));
+    return yield* Effect.die(new Error("Could not open the preview scanner test listener"));
   }
   return { port: address.port, server };
 });
@@ -148,16 +167,15 @@ const commonNonHttpServer = Effect.acquireRelease(
 
 /**
  * Integration tests against a real TCP listener. We provide the Windows host
- * platform so the tests exercise configured URLs without depending on
- * `lsof` being installed.
+ * platform with a failing listener probe so the tests exercise configured URLs
+ * without depending on `lsof` being installed.
  */
 effectIt.layer(layerTestPortDiscovery)("PortDiscovery integration (configured URLs)", (it) => {
   it.effect(
-    "scan() finds an explicitly configured HTTP server when ownership discovery fails",
+    "scan() returns a configured HTTP server we just opened",
     Effect.fn("PortScannerTest.scanFindsCommonDevServer")(function* () {
       const { port } = yield* commonDevServer;
       const scanner = yield* PortScanner.PortDiscovery;
-      expect(yield* scanner.scan()).toHaveLength(0);
       const result = yield* scanner.scan([`http://localhost:${port}`]);
       const found = result.find((server) => server.port === port);
       expect(found).toBeDefined();
@@ -206,12 +224,7 @@ effectIt.effect("revalidates a successful HTML probe after its cache entry expir
   const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
-    const scanner = yield* PortScanner.PortDiscovery;
-    yield* scanner.registerTerminalProcesses({
-      threadId: "scanner-thread",
-      terminalId: "scanner-terminal",
-      processIds: [1234],
-    });
+    const scanner = yield* ownedScanner();
     expect(yield* scanner.scan()).toHaveLength(1);
     expect(yield* scanner.scan()).toHaveLength(1);
     expect(requests).toEqual([`http://localhost:${LSOF_TEST_PORT}/`]);
@@ -445,12 +458,7 @@ effectIt.effect("shares a configured root probe with discovered-root classificat
   const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
-    const scanner = yield* PortScanner.PortDiscovery;
-    yield* scanner.registerTerminalProcesses({
-      threadId: "scanner-thread",
-      terminalId: "scanner-terminal",
-      processIds: [1234],
-    });
+    const scanner = yield* ownedScanner();
     expect(yield* scanner.scan([rootUrl])).toHaveLength(1);
     expect(requests).toEqual([rootUrl]);
 
@@ -479,12 +487,7 @@ effectIt.effect("starts fresh cache entries after the probing batch completes", 
     const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
     yield* Effect.gen(function* () {
-      const scanner = yield* PortScanner.PortDiscovery;
-      yield* scanner.registerTerminalProcesses({
-        threadId: "scanner-thread",
-        terminalId: "scanner-terminal",
-        processIds: [1234],
-      });
+      const scanner = yield* ownedScanner();
       expect(yield* scanner.scan()).toHaveLength(1);
       expect(yield* scanner.scan()).toHaveLength(1);
       expect(requests).toHaveLength(1);
@@ -504,12 +507,7 @@ effectIt.effect("caches a failed web probe until its bounded cache entry expires
   const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
-    const scanner = yield* PortScanner.PortDiscovery;
-    yield* scanner.registerTerminalProcesses({
-      threadId: "scanner-thread",
-      terminalId: "scanner-terminal",
-      processIds: [1234],
-    });
+    const scanner = yield* ownedScanner();
     expect(yield* scanner.scan()).toHaveLength(0);
     expect(yield* scanner.scan()).toHaveLength(0);
     expect(requests).toHaveLength(2);
@@ -534,12 +532,7 @@ effectIt.effect("falls back to HTTPS and does not follow redirects while probing
   const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
-    const scanner = yield* PortScanner.PortDiscovery;
-    yield* scanner.registerTerminalProcesses({
-      threadId: "scanner-thread",
-      terminalId: "scanner-terminal",
-      processIds: [1234],
-    });
+    const scanner = yield* ownedScanner();
     const servers = yield* scanner.scan();
     expect(servers).toHaveLength(1);
     expect(servers[0]?.url).toBe(`https://localhost:${LSOF_TEST_PORT}`);
@@ -547,30 +540,50 @@ effectIt.effect("falls back to HTTPS and does not follow redirects while probing
   }).pipe(Effect.provide(layer));
 });
 
+effectIt.effect("probes a port only while T3 terminals own every listener on it", () => {
+  const owned = `p1234\ncnode\nn[::1]:${LSOF_TEST_PORT}\n`;
+  const unowned = `p5678\ncrpc\nn127.0.0.1:${LSOF_TEST_PORT}\n`;
+  let stdout = unowned;
+  const requests: string[] = [];
+  const fetchFn = ((input: Parameters<typeof globalThis.fetch>[0]) => {
+    requests.push(String(input));
+    return Promise.resolve(new Response("app", { headers: { "content-type": "text/html" } }));
+  }) as typeof globalThis.fetch;
+  const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn, stdout: () => stdout });
+
+  return Effect.gen(function* () {
+    const scanner = yield* ownedScanner();
+    expect(yield* scanner.scan()).toHaveLength(0);
+    stdout = `${owned}${unowned}`;
+    expect(yield* scanner.scan()).toHaveLength(0);
+    expect(requests).toEqual([]);
+
+    stdout = owned;
+    expect(yield* scanner.scan()).toHaveLength(1);
+    expect(requests).toEqual([`http://localhost:${LSOF_TEST_PORT}/`]);
+
+    yield* scanner.unregisterTerminal({
+      threadId: "scanner-thread",
+      terminalId: "scanner-terminal",
+    });
+    expect(yield* scanner.scan()).toHaveLength(0);
+    expect(requests).toHaveLength(1);
+  }).pipe(Effect.provide(layer));
+});
+
 effectIt.effect(
-  "only classifies terminal-owned listeners and stops after terminal ownership is removed",
+  "excludes HTTP errors, non-navigation responses, and successful non-documents",
   () => {
     let pid = 1;
-    const requests: string[] = [];
     let makeResponse = () =>
       new Response("not found", { status: 404, headers: { "content-type": "text/html" } });
-    const fetchFn = ((input: Parameters<typeof globalThis.fetch>[0]) => {
-      requests.push(String(input));
-      return Promise.resolve(makeResponse());
-    }) as typeof globalThis.fetch;
+    const fetchFn = ((_input: Parameters<typeof globalThis.fetch>[0]) =>
+      Promise.resolve(makeResponse())) as typeof globalThis.fetch;
     const layer = layerLsofScanner({ pid: () => pid, fetch: fetchFn });
 
     return Effect.gen(function* () {
-      const scanner = yield* PortScanner.PortDiscovery;
+      const scanner = yield* ownedScanner([1, 2, 3, 4, 5, 6, 7]);
       expect(yield* scanner.scan()).toHaveLength(0);
-      expect(requests).toHaveLength(0);
-      yield* scanner.registerTerminalProcesses({
-        threadId: "scanner-thread",
-        terminalId: "scanner-terminal",
-        processIds: [1, 2, 3, 4, 5, 6, 7],
-      });
-      expect(yield* scanner.scan()).toHaveLength(0);
-      expect(requests).toHaveLength(2);
 
       pid += 1;
       makeResponse = () =>
@@ -602,94 +615,9 @@ effectIt.effect(
           headers: { "content-type": "application/xhtml+xml; charset=utf-8" },
         });
       expect(yield* scanner.scan()).toHaveLength(1);
-      const requestCount = requests.length;
-      yield* scanner.unregisterTerminal({
-        threadId: "scanner-thread",
-        terminalId: "scanner-terminal",
-      });
-      expect(yield* scanner.scan()).toHaveLength(0);
-      expect(requests).toHaveLength(requestCount);
     }).pipe(Effect.provide(layer));
   },
 );
-
-for (const platform of ["linux", "win32"] as const) {
-  for (const ownedFirst of [true, false]) {
-    effectIt.effect(
-      `does not probe mixed-ownership ports on ${platform} with the owned listener ${ownedFirst ? "first" : "last"}`,
-      () => {
-        const port = LSOF_TEST_PORT;
-        const owned =
-          platform === "win32" ? `::1|${port}|1234|node` : `p1234\ncnode\nn[::1]:${port}`;
-        const unowned =
-          platform === "win32"
-            ? `127.0.0.1|${port}|5678|binary`
-            : `p5678\ncbinary\nn127.0.0.1:${port}`;
-        let stdout = (ownedFirst ? [owned, unowned] : [unowned, owned]).join("\n");
-        let mixedOwnership = true;
-        const requests: string[] = [];
-        const explicitUrl = `http://[::1]:${port}/app?mode=preview`;
-        const fetchFn = ((input: Parameters<typeof globalThis.fetch>[0]) => {
-          const url = String(input);
-          requests.push(url);
-          if (mixedOwnership && url !== explicitUrl) {
-            return Promise.reject(new TypeError("binary listener"));
-          }
-          return Promise.resolve(new Response("app", { headers: { "content-type": "text/html" } }));
-        }) as typeof globalThis.fetch;
-        const layer = PortScanner.layer.pipe(
-          Layer.provide(
-            Layer.mergeAll(
-              Layer.succeed(ProcessRunner.ProcessRunner, {
-                run: () =>
-                  Effect.succeed({
-                    stdout,
-                    stderr: "",
-                    code: null,
-                    timedOut: false,
-                    stdoutTruncated: false,
-                    stderrTruncated: false,
-                    stdoutInvalidUtf8: false,
-                    stderrInvalidUtf8: false,
-                  }),
-              }),
-              Layer.succeed(HostProcessPlatform, platform),
-              FetchHttpClient.layer.pipe(
-                Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchFn)),
-              ),
-            ),
-          ),
-        );
-
-        return Effect.gen(function* () {
-          const scanner = yield* PortScanner.PortDiscovery;
-          yield* scanner.registerTerminalProcesses({
-            threadId: "scanner-thread",
-            terminalId: "scanner-terminal",
-            processIds: [1234],
-          });
-          expect(yield* scanner.scan()).toHaveLength(0);
-          expect(requests).toEqual([]);
-          const configured = yield* scanner.scan([explicitUrl]);
-          expect(configured).toHaveLength(1);
-          expect(configured[0]?.url).toBe(explicitUrl);
-          expect(configured[0]?.terminal).toBeNull();
-          expect(requests).toEqual([explicitUrl]);
-
-          stdout = `${owned}\n${owned}`;
-          mixedOwnership = false;
-          expect(yield* scanner.scan()).toHaveLength(1);
-          expect(requests).toEqual([explicitUrl, `http://localhost:${port}/`]);
-
-          stdout = (ownedFirst ? [owned, unowned] : [unowned, owned]).join("\n");
-          mixedOwnership = true;
-          expect(yield* scanner.scan()).toHaveLength(0);
-          expect(requests).toEqual([explicitUrl, `http://localhost:${port}/`]);
-        }).pipe(Effect.provide(layer));
-      },
-    );
-  }
-}
 
 effectIt.effect("aborts HTTP and HTTPS probes when they time out", () => {
   const aborted: string[] = [];
@@ -712,12 +640,7 @@ effectIt.effect("aborts HTTP and HTTPS probes when they time out", () => {
   const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
-    const scanner = yield* PortScanner.PortDiscovery;
-    yield* scanner.registerTerminalProcesses({
-      threadId: "scanner-thread",
-      terminalId: "scanner-terminal",
-      processIds: [1234],
-    });
+    const scanner = yield* ownedScanner();
     const scanFiber = yield* Effect.forkChild(scanner.scan());
     yield* TestClock.adjust(Duration.seconds(2));
     expect(yield* Fiber.join(scanFiber)).toHaveLength(0);
@@ -745,6 +668,111 @@ effectIt.effect("does not swallow process probe defects", () =>
     }
   }),
 );
+
+// /proc/net/tcp: 127.0.0.1:8765 and 0.0.0.0:22 listening, an established
+// connection, and a non-loopback listener; /proc/net/tcp6 adds [::]:3001.
+const PROC_NET_TCP = `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:223D 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 5001 1 0000000000000000 100 0 0 10 0
+   1: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 5002 1 0000000000000000 100 0 0 10 0
+   2: 0100007F:223D 0100007F:C350 01 00000000:00000000 00:00000000 00000000  1000        0 5003 1 0000000000000000 20 4 30 10 -1
+   3: 0A00000F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 5005 1 0000000000000000 100 0 0 10 0
+`;
+const PROC_NET_TCP6 = `  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000000000000000000000000000:0BB9 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 5004 1 0000000000000000 100 0 0 10 0
+`;
+
+effectIt.effect(
+  "reads Linux listeners from /proc when lsof is missing, and stops spawning it",
+  () => {
+    let lsofSpawns = 0;
+    const fdWalks: string[] = [];
+    const procFiles: Record<string, string> = {
+      "/proc/net/tcp": PROC_NET_TCP,
+      "/proc/net/tcp6": PROC_NET_TCP6,
+      "/proc/4242/comm": "python3\n",
+    };
+    const procFds: Record<string, Record<string, string>> = {
+      "4242": { "0": "/dev/null", "3": "socket:[5001]" },
+      "77": { "5": "socket:[9999]" },
+    };
+    const missing = FileSystem.makeNoop({});
+    const fileSystem = FileSystem.layerNoop({
+      readFileString: (path) => {
+        const content = procFiles[path];
+        return content === undefined ? missing.readFileString(path) : Effect.succeed(content);
+      },
+      readDirectory: (path) => {
+        if (path === "/proc") return Effect.succeed(["self", "77", "4242"]);
+        const pid = /^\/proc\/(\d+)\/fd$/.exec(path)?.[1];
+        const fds = pid === undefined ? undefined : procFds[pid];
+        if (pid === undefined || fds === undefined) return missing.readDirectory(path);
+        fdWalks.push(pid);
+        return Effect.succeed(Object.keys(fds));
+      },
+      readLink: (path) => {
+        const [, pid, fd] = /^\/proc\/(\d+)\/fd\/(\d+)$/.exec(path) ?? [];
+        const target = pid && fd ? procFds[pid]?.[fd] : undefined;
+        return target === undefined ? missing.readLink(path) : Effect.succeed(target);
+      },
+    });
+    const fetchFn = (() =>
+      Promise.resolve(
+        new Response("hello", { headers: { "content-type": "text/html" } }),
+      )) as typeof globalThis.fetch;
+    const layer = layerProbeFailure(
+      (input) => {
+        lsofSpawns += 1;
+        return processProbeFailure(input);
+      },
+      fetchFn,
+      fileSystem,
+    );
+
+    return Effect.gen(function* () {
+      const scanner = yield* ownedScanner([4242]);
+      const first = yield* scanner.scan();
+      // Ports 22 and 3001 have no known owner, so they never receive probes.
+      expect(first.map(({ port, pid, processName }) => ({ port, pid, processName }))).toEqual([
+        { port: 8765, pid: 4242, processName: "python3" },
+      ]);
+      yield* scanner.scan();
+      expect(lsofSpawns).toBe(1);
+      // Ports 22 and 3001 have no readable owner, so the second scan walks
+      // again; it stops at 77, which holds no listener, once nothing is left.
+      expect(fdWalks).toEqual(["77", "4242", "77", "4242"]);
+      yield* scanner.scan();
+      yield* scanner.scan();
+      // Unresolved owners are retried a bounded number of times.
+      expect(fdWalks).toEqual(["77", "4242", "77", "4242", "77", "4242"]);
+    }).pipe(Effect.provide(layer));
+  },
+);
+
+effectIt.effect("keeps spawning lsof after a spawn failure that is not a missing command", () => {
+  let lsofSpawns = 0;
+  const layer = layerProbeFailure((input) => {
+    lsofSpawns += 1;
+    return Effect.fail(
+      new ProcessRunner.ProcessSpawnError({
+        command: input.command,
+        argumentCount: input.args.length,
+        cwd: input.cwd,
+        cause: PlatformError.systemError({
+          _tag: "Unknown",
+          module: "ChildProcess",
+          method: "spawn",
+          description: "EAGAIN",
+        }),
+      }),
+    );
+  });
+  return Effect.gen(function* () {
+    const scanner = yield* PortScanner.PortDiscovery;
+    yield* scanner.scan();
+    yield* scanner.scan();
+    expect(lsofSpawns).toBe(2);
+  }).pipe(Effect.provide(layer));
+});
 
 effectIt.effect("does not swallow process probe interruption", () =>
   Effect.gen(function* () {
