@@ -823,7 +823,11 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         args: ["rev-parse", "--git-common-dir", "--verify", "--quiet", "HEAD"],
         allowNonZeroExit: true,
       });
-      const gitCommonDir = result.stdout.split("\n")[0]?.trim() ?? "";
+      const output = result.stdout.trimEnd();
+      // HEAD is the final line; the common directory can itself contain newlines.
+      const gitCommonDir = (
+        result.exitCode === 0 ? output.slice(0, output.lastIndexOf("\n")) : output
+      ).trim();
       if (gitCommonDir.length === 0 || (result.exitCode !== 0 && result.exitCode !== 1)) {
         return yield* new VcsProcessExitError({
           operation,
