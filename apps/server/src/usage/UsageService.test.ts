@@ -996,7 +996,7 @@ describe("UsageService", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.live.skipIf(HostProcessPlatform.defaultValue() === "win32" || process.getuid?.() === 0)(
+  it.live.skipIf(HostProcess.Platform.defaultValue() === "win32" || process.getuid?.() === 0)(
     "reports unreadable transcripts as partial and recovers once they can be read",
     () =>
       Effect.gen(function* () {
