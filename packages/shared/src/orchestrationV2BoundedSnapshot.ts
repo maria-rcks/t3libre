@@ -107,7 +107,7 @@ export function omitCheckpointItemFiles(projection: OrchestrationV2ThreadProject
 }
 
 /** Client half of `omitCheckpointItemFiles`, before reducers or caches see the projection. */
-export function restoreCheckpointItemFiles(
+function restoreCheckpointItemFiles(
   projection: OrchestrationV2ThreadProjection,
   itemIds: ReadonlyArray<TurnItemId>,
 ): OrchestrationV2ThreadProjection {

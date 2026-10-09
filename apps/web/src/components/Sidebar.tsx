@@ -98,6 +98,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useParams, useRouter } from "@tanstack/react-router";
 
 import { useRightPanelStore } from "../rightPanelStore";
@@ -2688,30 +2689,40 @@ export default function Sidebar() {
   }, [allProjectSnapshotsReady, projectScopeKey, scopedProjectGroup, setProjectScopeKey]);
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
-  // subscription. Selecting a number keeps typing in a draft composer from
-  // re-rendering the whole sidebar. Approximates the block's row filter
+  // subscription. Selecting counts and session presence keeps typing in a draft
+  // composer from re-rendering the whole sidebar. The total approximates the row filter
   // (every non-promoted session with content); it can overcount by one for
   // an open never-left draft, which only softens the empty state.
   const routeDraftIdForRows = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
-  const visibleDraftSessionCount = useComposerDraftStore((store) => {
-    let count = 0;
-    for (const [draftKey, session] of Object.entries(store.draftThreadsByThreadKey)) {
-      if (session.promotedTo != null) {
-        continue;
-      }
-      if (!composerDraftHasUserContent(store.draftsByThreadKey[draftKey])) {
-        continue;
-      }
-      if (
-        scopedProjectKeys !== null &&
-        !scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)
-      ) {
-        continue;
-      }
-      count += 1;
-    }
-    return count;
-  });
+  const [visibleDraftSessionCount, inactiveDraftSessionCount, activeDraftSessionPresent] =
+    useComposerDraftStore(
+      useShallow((store) => {
+        let count = 0;
+        let inactiveCount = 0;
+        let activePresent = false;
+        for (const [draftKey, session] of Object.entries(store.draftThreadsByThreadKey)) {
+          if (session.promotedTo != null) {
+            continue;
+          }
+          if (
+            scopedProjectKeys !== null &&
+            !scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)
+          ) {
+            continue;
+          }
+          const isActive = draftKey === routeDraftIdForRows;
+          // The active row is frozen or absent while typing. Its live session still
+          // controls send/discard removal, independently of whether it has content.
+          if (isActive) activePresent = true;
+          if (!composerDraftHasUserContent(store.draftsByThreadKey[draftKey])) {
+            continue;
+          }
+          count += 1;
+          if (!isActive) inactiveCount += 1;
+        }
+        return [count, inactiveCount, activePresent] as const;
+      }),
+    );
   // Scope flips drop the selection: rows selected under the old scope may be
   // hidden now, and bulk actions must never count or touch invisible rows.
   useEffect(() => {
@@ -3861,6 +3872,7 @@ export default function Sidebar() {
     // sortable preview; rows glide from their released positions instead.
     // Later thread actions can animate while writes settle.
     // Draft navigation can reveal a frozen row without changing the draft count.
+    // Typing into a never-left draft changes the empty-state count, not the rows.
     void sidebarListOrderKey;
     listMotionRef.current?.update(
       listMotionArmedRef.current && !listMotionPaused && sidebarListHasRows,
@@ -3872,7 +3884,8 @@ export default function Sidebar() {
     shellsBootstrapped,
     sidebarListHasRows,
     sidebarListOrderKey,
-    visibleDraftSessionCount,
+    inactiveDraftSessionCount,
+    activeDraftSessionPresent,
   ]);
   const handleThreadDragOver = useCallback(
     (event: DragOverEvent) => {
