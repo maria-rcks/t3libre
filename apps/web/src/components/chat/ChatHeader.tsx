@@ -100,15 +100,11 @@ export const ChatHeader = memo(function ChatHeader({
       const gap = Number.parseFloat(getComputedStyle(list).columnGap) || 0;
       const width = Array.from(list.children).reduce(
         (total, item) => {
-          const content = item.firstElementChild;
-          if (!content) return total;
-          const label = content.matches('[data-slot="workspace-breadcrumb-text"]')
-            ? content
-            : content.querySelector<HTMLElement>('[data-slot="workspace-breadcrumb-text"]');
-          const ellipsis = content.querySelector("[data-parent-breadcrumb-ellipsis]");
+          const label = item.querySelector('[data-slot="workspace-breadcrumb-text"]');
+          const ellipsis = item.querySelector("[data-parent-breadcrumb-ellipsis]");
           return (
             total +
-            content.getBoundingClientRect().width +
+            (item.firstElementChild?.getBoundingClientRect().width ?? 0) +
             (label ? label.scrollWidth - label.clientWidth : 0) -
             (ellipsis?.getBoundingClientRect().width ?? 0)
           );
