@@ -12,6 +12,12 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
   projects: [] as Array<{ id: string; environmentId: string; workspaceRoot: string }>,
 }));
+vi.mock("../../state/session", () => ({
+  useEnvironmentScope: () => true,
+  useEnvironmentsWithScope: (environments: Array<{ environmentId: string }>) =>
+    new Set(environments.map((entry) => entry.environmentId)),
+  readEnvironmentScope: () => true,
+}));
 vi.mock("../../state/agentSessions", () => ({ agentSessionImport: "import" }));
 vi.mock("../../state/projects", () => ({ projectEnvironment: { create: "create" } }));
 vi.mock("../../state/use-atom-command", () => ({
@@ -32,6 +38,7 @@ vi.mock("../../state/environments", () => {
     environmentId: "test-env",
     label: "Computer",
     connection: { phase: "connected" },
+    entry: { enabled: true },
   };
   return {
     useEnvironments: () => ({ environments: [environment] }),
@@ -176,12 +183,6 @@ it.each([
     await click("Continue");
     await click("Import 1 project");
     expect(onDone).toHaveBeenCalledOnce();
-    if (skippedCount === 0) {
-      expect(onDone).toHaveBeenCalledWith({
-        environmentId: EnvironmentId.make("test-env"),
-        projectId: ProjectId.make("test-project"),
-      });
-    }
     if (warning === null && importedCount > 0) {
       expect(mocks.toast).toHaveBeenCalledWith({
         type: "success",

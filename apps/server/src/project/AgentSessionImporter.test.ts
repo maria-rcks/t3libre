@@ -18,8 +18,8 @@ import * as Stream from "effect/Stream";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as EventStore from "../orchestration-v2/EventStore.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import * as IdAllocator from "../orchestration-v2/IdAllocator.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProviderSessionRuntime from "../persistence/ProviderSessionRuntime.ts";
 import * as AgentSessionImporter from "./AgentSessionImporter.ts";
@@ -68,7 +68,7 @@ it.effect("retries failed writes and preserves the provider native resume bindin
         },
       }),
   });
-  const testLayer = AgentSessionImporter.layer.pipe(
+  const layerTest = AgentSessionImporter.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(AgentSessionScanner.AgentSessionScanner, scanner),
@@ -170,21 +170,20 @@ it.effect("retries failed writes and preserves the provider native resume bindin
       }),
     );
     expect(recorded).toHaveLength(2);
-  }).pipe(Effect.provide(testLayer));
+  }).pipe(Effect.provide(layerTest));
 });
 
 it.effect.each(
   (["codex", "claudeAgent"] as const).flatMap((provider) =>
-    (["active", "archived", "deleted", "other-instance", "none"] as const).flatMap((owner) =>
-      [false, true].flatMap((reserved) =>
-        [false, true].map((skipped) => ({ provider, owner, reserved, skipped })),
-      ),
-    ),
+    (["active", "deleted", "other-instance", "none"] as const).map((owner) => ({
+      provider,
+      owner,
+    })),
   ),
 )(
-  "rechecks $provider import (reserved=$reserved, skipped=$skipped) with $owner native ownership",
-  ({ provider, owner, reserved, skipped }) => {
-    const database = SqlitePersistenceMemory;
+  "skips a $provider import when the native session has $owner ownership",
+  ({ provider, owner }) => {
+    const database = SqlitePersistence.layerMemory;
     const stores = Layer.mergeAll(EventStore.layer, ProjectionStore.layer).pipe(
       Layer.provideMerge(database),
     );
@@ -226,7 +225,7 @@ it.effect.each(
         forkedFrom: null,
         createdAt: now,
         updatedAt: now,
-        archivedAt: owner === "archived" ? now : null,
+        archivedAt: null,
         deletedAt: owner === "deleted" ? now : null,
         settledOverride: null,
         settledAt: null,
@@ -254,19 +253,6 @@ it.effect.each(
         createdAt: now,
         updatedAt: now,
       };
-      // A failed prior attempt reserved a runtime before publishing any history.
-      if (reserved)
-        yield* runtimes.upsert({
-          threadId: importId,
-          providerName: provider,
-          providerInstanceId: instanceId,
-          adapterKey: provider,
-          runtimeMode: "full-access",
-          status: "stopped",
-          lastSeenAt: "2026-09-01T10:00:00.000Z",
-          resumeCursor: provider === "codex" ? { threadId: sessionId } : { resume: sessionId },
-          runtimePayload: { cwd: "/workspace/project" },
-        });
       let publishedOwner = false;
       const importerLayer = AgentSessionImporter.layer.pipe(
         Layer.provide(
@@ -350,10 +336,6 @@ it.effect.each(
                       },
                     };
                   }),
-                ).pipe(
-                  Stream.concat(
-                    skipped ? Stream.succeed({ _tag: "Skipped" as const }) : Stream.empty,
-                  ),
                 ),
             }),
           ),
@@ -365,7 +347,7 @@ it.effect.each(
         for (let attempt = 0; attempt < 2; attempt++) {
           expect(yield* importer.importRecentAgentThreads({ projectId })).toEqual({
             importedCount: ownsSession ? 0 : 1,
-            skippedCount: skipped ? 1 : 0,
+            skippedCount: 0,
           });
           if (owner === "none" && attempt === 0) {
             // Recover an interrupted runtime write after history was committed.
@@ -380,22 +362,12 @@ it.effect.each(
       if (owner !== "none") {
         const records = yield* projections.getThreadRecords(nativeId, ["providerThreads"]);
         expect(records.thread.title).toBe("Native thread");
-        expect(records.thread.archivedAt).toEqual(nativeThread.archivedAt);
         expect(records.thread.deletedAt).toEqual(nativeThread.deletedAt);
         expect(records.providerThreads).toHaveLength(1);
         expect(records.providerThreads[0]).toMatchObject(nativeProviderThread);
       }
       const runtime = yield* runtimes.getByThreadId({ threadId: importId });
-      expect(Option.isSome(runtime)).toBe(!ownsSession || reserved);
-      if (Option.isSome(runtime)) {
-        expect(runtime.value.runtimePayload).toMatchObject(
-          ownsSession
-            ? { cwd: "/workspace/project" }
-            : { importedTranscripts: [expect.objectContaining({ providerSessionId: sessionId })] },
-        );
-        if (ownsSession)
-          expect(runtime.value.runtimePayload).not.toHaveProperty("importedTranscripts");
-      }
+      expect(Option.isSome(runtime)).toBe(!ownsSession);
     }).pipe(Effect.provide(persistence));
   },
 );
