@@ -1297,21 +1297,28 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       </RowPressable>
     );
 
-  if (!canOperateThread) return rowContent(() => {});
+  const groupHeading = props.branchGroupStart ? (
+    <Text
+      accessibilityRole="header"
+      className="px-5 pb-1 pt-3 text-xs font-medium text-foreground-muted"
+      numberOfLines={1}
+    >
+      {props.projectTitle ?? props.project?.title ?? "Project"} / {threadBranchGroupLabel(thread)}
+      {props.environmentLabel ? ` · ${props.environmentLabel}` : null}
+    </Text>
+  ) : null;
+
+  if (!canOperateThread)
+    return (
+      <>
+        {groupHeading}
+        {rowContent(() => {})}
+      </>
+    );
 
   return (
     <View collapsable={false}>
-      {props.branchGroupStart ? (
-        <Text
-          accessibilityRole="header"
-          className="px-5 pb-1 pt-3 text-xs font-medium text-foreground-muted"
-          numberOfLines={1}
-        >
-          {props.projectTitle ?? props.project?.title ?? "Project"} /{" "}
-          {threadBranchGroupLabel(thread)}
-          {props.environmentLabel ? ` · ${props.environmentLabel}` : null}
-        </Text>
-      ) : null}
+      {groupHeading}
       {customSnoozeOpen && (
         <CustomSnoozeSheet onClose={() => setCustomSnoozeOpen(false)} onSnooze={handleSnooze} />
       )}

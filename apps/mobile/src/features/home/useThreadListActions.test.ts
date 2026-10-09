@@ -92,6 +92,8 @@ vi.mock("../../state/use-atom-command", () => ({
 // Stubbed at the direct dependency: the real outbox pulls the Expo file-system
 // storage into a test that only reads which threads are queued.
 vi.mock("../../state/use-thread-outbox", () => ({ queuedThreadKeysAtom: "queued-thread-keys" }));
+// Same for preferences, which pull in Expo storage; grouping stays off here.
+vi.mock("../../state/preferences", () => ({ mobilePreferencesAtom: "mobile-preferences" }));
 // The real hold lives in a module-level atom that would leak between cases.
 vi.mock("../../state/thread-order", () => ({
   threadDropBusyAtom: "thread-drop-busy",
