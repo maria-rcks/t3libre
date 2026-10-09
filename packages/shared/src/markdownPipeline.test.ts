@@ -23,6 +23,7 @@ type TreeNode = {
   tagName?: string;
   value?: string;
   position?: unknown;
+  properties?: Record<string, unknown>;
   children?: TreeNode[];
 };
 
@@ -31,19 +32,35 @@ type TreeNode = {
  * text joins, and whitespace between blocks collapses.
  */
 const text = (value: string): TreeNode => ({ type: "text", value: value.trim() ? value : "\n" });
-function rendered(node: TreeNode): TreeNode {
-  if (node.type === "text") return text(node.value ?? "");
+function rendered(node: TreeNode, preserveWhitespace = false): TreeNode {
+  if (node.type === "text") {
+    return text(preserveWhitespace ? (node.value ?? "") : (node.value ?? "").replace(/\s+/g, " "));
+  }
   if (!node.children) return node;
+  const literal = preserveWhitespace || node.tagName === "pre";
   const table = ["table", "thead", "tbody", "tfoot", "tr"].includes(node.tagName ?? "");
   const children: TreeNode[] = [];
-  for (const child of node.children.map(rendered)) {
+  for (const child of node.children.map((child) => rendered(child, literal))) {
     if (table && child.type === "text" && child.value?.trim() === "") continue;
     const last = children.at(-1);
     if (child.type === "text" && last?.type === "text") {
       children[children.length - 1] = text(`${last.value}${child.value}`);
     } else children.push(child);
   }
-  return { ...node, children };
+  return {
+    type: node.type,
+    ...(node.tagName ? { tagName: node.tagName } : {}),
+    ...(node.properties
+      ? {
+          properties: Object.fromEntries(
+            Object.entries(node.properties)
+              .filter(([, value]) => value !== false)
+              .map(([key, value]) => [key, key.startsWith("data") && value === true ? "" : value]),
+          ),
+        }
+      : {}),
+    children,
+  };
 }
 
 it("preserves in-app thread links through the shared Markdown sanitizer", () => {
