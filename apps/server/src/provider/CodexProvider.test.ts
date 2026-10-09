@@ -119,12 +119,11 @@ it("uses standard routing when the catalog has no default service tier", () => {
   ]);
 });
 
-it("displays the global Codex tier across models and leaves unreadable tiers unknown", () => {
+it("applies the global Codex service tier to every model", () => {
   const models = ["gpt-6-luna", "gpt-6-astra"].map((slug) => ({
     slug,
     name: slug,
     isCustom: false,
-    isDefault: slug === "gpt-6-luna",
     capabilities: mapCodexModelCapabilities({
       additionalSpeedTiers: [],
       defaultReasoningEffort: "low",
@@ -133,13 +132,10 @@ it("displays the global Codex tier across models and leaves unreadable tiers unk
       displayName: slug,
       hidden: false,
       id: slug,
-      isDefault: slug === "gpt-6-luna",
+      isDefault: false,
       model: slug,
       serviceTiers: [{ id: "priority", name: "Fast", description: "Lower latency" }],
-      supportedReasoningEfforts: [
-        { description: "Low", reasoningEffort: "low" },
-        { description: "Medium", reasoningEffort: "medium" },
-      ],
+      supportedReasoningEfforts: [],
     }),
   }));
 
@@ -148,8 +144,7 @@ it("displays the global Codex tier across models and leaves unreadable tiers unk
     ["fast", "Fast", "priority"],
     ["default", "Standard", "default"],
     [undefined, "Standard", "default"],
-    [null, undefined, undefined],
-    ["unsupported", undefined, undefined],
+    ["unsupported", "Standard", "default"],
   ] as const) {
     const result = applyCodexServiceTierDefault(models, tier);
     for (const model of result) {
@@ -161,11 +156,6 @@ it("displays the global Codex tier across models and leaves unreadable tiers unk
       if (descriptor?.type === "select") {
         assert.equal(descriptor.options.find((option) => option.isDefault)?.id, expectedValue);
       }
-      assert.equal(model.isDefault, model.slug === "gpt-6-luna");
-      assert.equal(
-        model.capabilities?.optionDescriptors?.[0]?.currentValue,
-        model.slug === "gpt-6-astra" ? "medium" : "low",
-      );
     }
   }
 });

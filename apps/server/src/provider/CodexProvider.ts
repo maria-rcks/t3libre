@@ -50,7 +50,6 @@ import {
 import packageJson from "../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 const RATE_LIMITS_PROBE_TIMEOUT_MS = 3_000;
-const CONFIG_PROBE_TIMEOUT_MS = 3_000;
 
 type CodexRateLimitsProbe =
   | {
@@ -260,30 +259,29 @@ export function applyPreferredCodexDefaultModel(
   });
 }
 
-/** A null tier means config/read failed, so the catalog cannot establish the effective tier. */
+/** Codex's configured service tier is global, so it is the default for every model. */
 export function applyCodexServiceTierDefault(
   models: ReadonlyArray<ServerProviderModel>,
-  serviceTier: string | null | undefined,
+  serviceTier: string | undefined,
 ): ReadonlyArray<ServerProviderModel> {
-  if (serviceTier === undefined) return models;
-
-  // Codex's service tier is global, including when T3 selects a different model.
+  if (!serviceTier) return models;
   return models.map((model) => {
-    if (!model.capabilities) return model;
+    if (!model.capabilities?.optionDescriptors) return model;
     return {
       ...model,
       capabilities: {
         ...model.capabilities,
-        optionDescriptors: (model.capabilities.optionDescriptors ?? []).map((descriptor) => {
+        optionDescriptors: model.capabilities.optionDescriptors.map((descriptor) => {
           if (descriptor.id !== "serviceTier" || descriptor.type !== "select") return descriptor;
+          // Codex config spells Priority as "fast"; older catalogs advertise "fast" directly.
           const value = descriptor.options.find(
             (option) =>
               option.id === serviceTier || (serviceTier === "fast" && option.id === "priority"),
           )?.id;
-          const { currentValue: _currentValue, ...rest } = descriptor;
+          if (!value) return descriptor;
           return {
-            ...rest,
-            ...(value ? { currentValue: value } : {}),
+            ...descriptor,
+            currentValue: value,
             options: descriptor.options.map(({ isDefault: _isDefault, ...option }) =>
               option.id === value ? { ...option, isDefault: true } : option,
             ),
@@ -482,10 +480,10 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
       // The shared catalog must exclude config from the server's launch project.
       client.request("config/read", { includeLayers: false }).pipe(
         Effect.map((response) => response.config.service_tier ?? undefined),
-        Effect.timeoutOption(Duration.millis(CONFIG_PROBE_TIMEOUT_MS)),
-        Effect.map(Option.getOrElse(() => null)),
+        Effect.timeoutOption(Duration.millis(RATE_LIMITS_PROBE_TIMEOUT_MS)),
+        Effect.map(Option.getOrUndefined),
         Effect.catch((error) =>
-          Effect.logDebug("Codex config read failed.", { cause: error }).pipe(Effect.as(null)),
+          Effect.logDebug("Codex config read failed.", { cause: error }).pipe(Effect.as(undefined)),
         ),
       ),
       // Usage is an enrichment: a failure or a slow answer degrades to "no
