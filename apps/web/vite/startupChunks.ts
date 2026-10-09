@@ -25,8 +25,8 @@ const STARTUP_CHUNK_MAX_BYTES = 3 * 1024 * 1024;
  * both arrive as hundreds of small shared chunks.
  *
  * Listing main and the startup routes as build inputs lets Rolldown tag their
- * static graphs `$initial` after tree shaking. Entry-aware groups merge only
- * modules with the same reachability, so settings and pairing do not download
+ * static graphs `$initial` after tree shaking. Shared modules belong to the
+ * first startup graph that imports them, so settings and pairing do not download
  * chat code. index.html preloads main's static graph; the router preloads the
  * initial location's route chunks alongside authentication.
  * The bootstrap entry keeps its own modules, so it never statically imports
@@ -36,6 +36,7 @@ export function startupChunksPlugin(): Plugin {
   let root = process.cwd();
   let base = "/";
   let bootstrapModules: ReadonlySet<string> = new Set();
+  let startupModuleOwners: ReadonlyMap<string, string> = new Map();
   let startupFiles: ReadonlyArray<string> = [];
   let startupFileSet: ReadonlySet<string> = new Set();
   let startupCss: ReadonlyArray<string> = [];
@@ -63,17 +64,17 @@ export function startupChunksPlugin(): Plugin {
             },
             output: {
               codeSplitting: {
-                groups: [
-                  {
-                    name: "startup",
-                    tags: ["$initial"],
-                    test: (id: string) => !id.startsWith("\0") && !bootstrapModules.has(id),
-                    entriesAware: true,
-                    // Otherwise excluded bootstrap helpers are recaptured through main's imports.
-                    includeDependenciesRecursively: false,
-                    maxSize: STARTUP_CHUNK_MAX_BYTES,
-                  },
-                ],
+                groups: Object.keys(STARTUP_MODULES).map((name) => ({
+                  name: `startup-${name}`,
+                  tags: ["$initial"],
+                  test: (id: string) =>
+                    !id.startsWith("\0") && startupModuleOwners.get(normalizePath(id)) === name,
+                  // Dynamic settings/theme entries must not fragment the startup graphs.
+                  entriesAware: false,
+                  // Otherwise excluded bootstrap helpers are recaptured through main's imports.
+                  includeDependenciesRecursively: false,
+                  maxSize: STARTUP_CHUNK_MAX_BYTES,
+                })),
               },
             },
           },
@@ -85,16 +86,27 @@ export function startupChunksPlugin(): Plugin {
     },
     buildEnd(error) {
       if (error) return;
-      const htmlId = normalizePath(NodePath.join(root, "index.html"));
-      const html = [...this.getModuleIds()].find((id) => id === htmlId);
-      const closure = new Set<string>();
-      const pending = html ? [html] : [];
-      for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
-        if (closure.has(id)) continue;
-        closure.add(id);
-        pending.push(...(this.getModuleInfo(id)?.importedIds ?? []));
+      const moduleIds = new Map([...this.getModuleIds()].map((id) => [normalizePath(id), id]));
+      const staticClosure = (entryId: string) => {
+        const closure = new Set<string>();
+        const entry = moduleIds.get(entryId);
+        const pending = entry === undefined ? [] : [entry];
+        for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
+          const normalizedId = normalizePath(id);
+          if (closure.has(normalizedId)) continue;
+          closure.add(normalizedId);
+          pending.push(...(this.getModuleInfo(id)?.importedIds ?? []));
+        }
+        return closure;
+      };
+      bootstrapModules = staticClosure(normalizePath(NodePath.join(root, "index.html")));
+      const owners = new Map<string, string>();
+      for (const [name, entry] of Object.entries(STARTUP_MODULES)) {
+        for (const id of staticClosure(normalizePath(NodePath.join(root, entry)))) {
+          if (!bootstrapModules.has(id) && !owners.has(id)) owners.set(id, name);
+        }
       }
-      bootstrapModules = closure;
+      startupModuleOwners = owners;
     },
     generateBundle: {
       order: "pre",
@@ -125,7 +137,9 @@ export function startupChunksPlugin(): Plugin {
             const chunk = bundle[file];
             return (
               chunk?.type === "chunk" &&
-              chunk.moduleIds.some((id) => !id.startsWith("\0") && !bootstrapModules.has(id))
+              chunk.moduleIds.some(
+                (id) => !id.startsWith("\0") && !bootstrapModules.has(normalizePath(id)),
+              )
             );
           })
         ) {
