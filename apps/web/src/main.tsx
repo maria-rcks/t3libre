@@ -7,7 +7,7 @@ import "./index.css";
 import { prepareProviderAuthDelivery } from "./providerAuthDelivery";
 import { isElectron } from "./env";
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
-import { getRouter } from "./router";
+import { getRouter, preloadInitialRouteChunks } from "./router";
 import {
   syncDocumentElectronPlatformClasses,
   syncDocumentWindowControlsOverlayClass,
@@ -21,6 +21,7 @@ prepareProviderAuthDelivery();
 const history = isElectron ? createHashHistory() : createBrowserHistory();
 
 const router = getRouter(history);
+preloadInitialRouteChunks(router);
 
 if (isElectron) {
   syncDocumentElectronPlatformClasses(navigator.platform);

@@ -153,6 +153,7 @@ import {
 import {
   readThreadShell,
   useAllEnvironmentProjectSnapshotsReady,
+  useAllEnvironmentShellsBootstrapped,
   useProjects,
   useThreadShells,
 } from "../state/entities";
@@ -2384,6 +2385,9 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 
 export default function Sidebar() {
   const projects = useProjects();
+  // Before every environment's cached or live shell lands, an empty list
+  // means "not loaded yet", not "no projects".
+  const shellsBootstrapped = useAllEnvironmentShellsBootstrapped();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
   const router = useRouter();
@@ -3849,16 +3853,23 @@ export default function Sidebar() {
     [sidebarListItems],
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
+  // The rows that arrive with the first cached or live shell are the initial
+  // list, so they paint in place instead of fading in.
+  const listMotionArmedRef = useRef(false);
   useLayoutEffect(() => {
     // Drag release clears the baseline, so its commit cannot replay the
     // sortable preview; rows glide from their released positions instead.
     // Later thread actions can animate while writes settle.
     // Draft navigation can reveal a frozen row without changing the draft count.
     void sidebarListOrderKey;
-    listMotionRef.current?.update(!listMotionPaused && sidebarListHasRows);
+    listMotionRef.current?.update(
+      listMotionArmedRef.current && !listMotionPaused && sidebarListHasRows,
+    );
+    listMotionArmedRef.current = shellsBootstrapped;
   }, [
     listMotionPaused,
     routeDraftIdForRows,
+    shellsBootstrapped,
     sidebarListHasRows,
     sidebarListOrderKey,
     visibleDraftSessionCount,
@@ -5546,7 +5557,8 @@ export default function Sidebar() {
               </DndContext>
             </TooltipProvider>
           ) : null}
-          {!isSearchingThreads &&
+          {shellsBootstrapped &&
+          !isSearchingThreads &&
           visibleDraftSessionCount === 0 &&
           pinnedThreads.length +
             activeThreads.length +

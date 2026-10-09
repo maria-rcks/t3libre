@@ -29,10 +29,13 @@ export function useComposerMultilinePrompt(body: HTMLElement | null): boolean {
       const next = measureComposerMultilinePrompt(body);
       if (next !== null) setIsMultiline(next);
     };
-    measure();
+    const editor = body.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+    // An empty prompt is one line. Skipping the read keeps a fresh composer from forcing
+    // a layout mid-commit; the observers below still measure once layout settles.
+    if (editor && editor.childElementCount <= 1 && editor.textContent === "") setIsMultiline(false);
+    else measure();
     const resizeObserver = new ResizeObserver(measure);
     resizeObserver.observe(body);
-    const editor = body.querySelector<HTMLElement>('[data-testid="composer-editor"]');
     if (editor) resizeObserver.observe(editor);
     const mutationObserver = new MutationObserver(measure);
     mutationObserver.observe(body, { childList: true, characterData: true, subtree: true });

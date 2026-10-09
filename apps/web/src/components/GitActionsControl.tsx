@@ -522,6 +522,12 @@ function GitActionSuccessButtonContent({ success }: { success: InlineGitActionSu
 
 interface PublishRepositoryDialogProps {
   readonly open: boolean;
+  /**
+   * Whether publishing is on offer, so the provider scan is ready when the
+   * dialog opens. The scan probes git and every provider CLI on the server,
+   * so a checkout that already has a remote never runs it.
+   */
+  readonly publishAvailable: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly environmentId: ScopedThreadRef["environmentId"] | null;
   /** Thread the dialog was opened from, so the new repository can open beside it. */
@@ -533,7 +539,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
   const openLink = useOpenLink(props.threadRef);
   const navigate = useNavigate();
   const sourceControlDiscovery = useEnvironmentQuery(
-    props.environmentId === null
+    props.environmentId === null || !(props.open || props.publishAvailable)
       ? null
       : sourceControlEnvironment.discovery({
           environmentId: props.environmentId,
@@ -2160,6 +2166,7 @@ export default function GitActionsControl({
 
       <PublishRepositoryDialog
         open={isPublishDialogOpen}
+        publishAvailable={canPublishRepository || quickAction.kind === "open_publish"}
         onOpenChange={setIsPublishDialogOpen}
         environmentId={activeEnvironmentId}
         threadRef={activeThreadRef}

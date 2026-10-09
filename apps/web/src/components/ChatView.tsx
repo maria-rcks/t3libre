@@ -149,6 +149,7 @@ import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
 import {
+  type ComponentProps,
   Fragment,
   lazy,
   memo,
@@ -267,7 +268,6 @@ import { resolveDiscoveredServerUrl } from "../browser/browserTargetResolver";
 import { previewRuntimeTabId } from "../browser/previewRuntimeTabId";
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
-import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
 import { usePreviewSession } from "./preview/usePreviewSession";
 import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
@@ -282,12 +282,10 @@ import {
   pullRequestPanelContext,
   threadPullRequestPanelTarget,
 } from "./pullRequest/pullRequestDetail.logic";
-import { PullRequestDetailPanel } from "./pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavailableState";
 import { RightPanelTabs } from "./RightPanelTabs";
 import { LinkPullRequestDialogHost } from "./pullRequest/LinkPullRequestDialog";
-import { ThreadPullRequestsPanel } from "./pullRequest/ThreadPullRequestsPanel";
 import { useDeviceState } from "~/state/device";
 import { DeviceSetup } from "./device/DeviceSetup";
 import { Dialog } from "./ui/dialog";
@@ -297,7 +295,6 @@ import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { isEditableFocused } from "../lib/editableFocus";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { resolveChatShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
   CheckCircle2Icon,
@@ -459,7 +456,8 @@ import {
   RightPanelMaximizeControl,
 } from "./chat/PanelLayoutControls";
 import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
-import { ThreadDetailsPanel, type ThreadDetailsPanelProps } from "./chat/ThreadDetailsPanel";
+import type { ThreadDetailsPanelProps } from "./chat/ThreadDetailsPanel";
+import { ThreadDetailsCard } from "./chat/ThreadDetailsCard";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import {
   type EnvironmentOption,
@@ -707,6 +705,62 @@ const DevicePanel = lazy(() =>
   import("./device/DevicePanel").then((module) => ({ default: module.DevicePanel })),
 );
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+// Panels that only some threads open load on first use, keeping them out of the
+// chunks that must arrive before the composer can paint.
+const LazyPullRequestDetailPanel = lazy(() =>
+  import("./pullRequest/PullRequestDetailPanel").then((module) => ({
+    default: module.PullRequestDetailPanel,
+  })),
+);
+function PullRequestDetailPanel(props: ComponentProps<typeof LazyPullRequestDetailPanel>) {
+  return (
+    <Suspense fallback={<PullRequestDetailGhost />}>
+      <LazyPullRequestDetailPanel {...props} />
+    </Suspense>
+  );
+}
+const ThreadPullRequestsPanel = lazy(() =>
+  import("./pullRequest/ThreadPullRequestsPanel").then((module) => ({
+    default: module.ThreadPullRequestsPanel,
+  })),
+);
+const LazyThreadTerminalDrawer = lazy(() => import("./ThreadTerminalDrawer"));
+function ThreadTerminalDrawer(props: ComponentProps<typeof LazyThreadTerminalDrawer>) {
+  // Keep existing terminal sessions mounted when hidden, but an empty closed drawer
+  // has no terminal to render or synchronize and need not load its renderer.
+  if (props.visible === false && props.terminalIds.length === 0) return null;
+  return (
+    <Suspense fallback={null}>
+      <LazyThreadTerminalDrawer {...props} />
+    </Suspense>
+  );
+}
+const ThreadPreviewMiniPlayer = lazy(() =>
+  import("./preview/ThreadPreviewMiniPlayer").then((module) => ({
+    default: module.ThreadPreviewMiniPlayer,
+  })),
+);
+const ThreadDetailsPanelContent = lazy(() =>
+  import("./chat/ThreadDetailsPanel").then((module) => ({
+    default: module.ThreadDetailsPanelContent,
+  })),
+);
+function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
+  return (
+    <ThreadDetailsCard
+      threadRef={{ environmentId: props.environmentId, threadId: props.threadId }}
+      anchor={props.anchor}
+      handle={props.handle}
+      onPresentationChange={props.onPresentationChange}
+    >
+      {(density) => (
+        <Suspense fallback={null}>
+          <ThreadDetailsPanelContent {...props} density={density} />
+        </Suspense>
+      )}
+    </ThreadDetailsCard>
+  );
+}
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -11087,7 +11141,9 @@ export default function ChatView(props: ChatViewProps) {
         }
       />
     ) : renderedRightPanelSurface?.kind === "pull-requests" && activeThreadRef ? (
-      <ThreadPullRequestsPanel threadRef={activeThreadRef} />
+      <Suspense fallback={null}>
+        <ThreadPullRequestsPanel threadRef={activeThreadRef} />
+      </Suspense>
     ) : renderedRightPanelSurface?.kind === "device" ? (
       <Suspense fallback={null}>
         <DevicePanel
@@ -11876,11 +11932,13 @@ export default function ChatView(props: ChatViewProps) {
             activePreviewMiniPlayer &&
             previewMiniPlayerVisible &&
             (activePreviewMiniPlayer.source.kind === "device" || canOperatePreview) ? (
-              <ThreadPreviewMiniPlayer
-                key={`${activeThreadKey}:${previewMiniPlayerSourceKey(activePreviewMiniPlayer.source)}`}
-                threadRef={activeThreadRef}
-                miniPlayer={activePreviewMiniPlayer}
-              />
+              <Suspense fallback={null}>
+                <ThreadPreviewMiniPlayer
+                  key={`${activeThreadKey}:${previewMiniPlayerSourceKey(activePreviewMiniPlayer.source)}`}
+                  threadRef={activeThreadRef}
+                  miniPlayer={activePreviewMiniPlayer}
+                />
+              </Suspense>
             ) : null}
 
             <AlertDialog open={branchRestoreConfirmOpen} onOpenChange={setBranchRestoreConfirmOpen}>

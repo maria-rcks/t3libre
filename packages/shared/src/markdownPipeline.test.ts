@@ -1,19 +1,55 @@
-import { expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
-import { CHAT_MARKDOWN_REHYPE_PLUGINS, CHAT_MARKDOWN_REMARK_PLUGINS } from "./markdownPipeline.ts";
+import rehypeRaw from "rehype-raw";
+import {
+  CHAT_MARKDOWN_REMARK_PLUGINS,
+  chatMarkdownRehypePlugins,
+  markdownMayContainRawHtml,
+} from "./markdownPipeline.ts";
 
-it("preserves in-app thread links through the shared Markdown sanitizer", () => {
+function chatMarkdownTree(markdown: string, rawHtml: boolean) {
   const processor = unified()
     .use(remarkParse)
     .use(CHAT_MARKDOWN_REMARK_PLUGINS)
     .use(remarkRehype, { allowDangerousHtml: true })
-    .use(CHAT_MARKDOWN_REHYPE_PLUGINS);
-  const tree = processor.runSync(
-    processor.parse(
-      '[Open thread](t3-thread://v1/environment/thread)\n\n<a href="javascript:alert(1)">Unsafe</a>',
-    ),
+    .use(chatMarkdownRehypePlugins(rawHtml ? rehypeRaw : null));
+  return processor.runSync(processor.parse(markdown));
+}
+
+type TreeNode = {
+  type: string;
+  tagName?: string;
+  value?: string;
+  position?: unknown;
+  children?: TreeNode[];
+};
+
+/**
+ * What the renderer shows: text positions and table whitespace are dropped, adjacent
+ * text joins, and whitespace between blocks collapses.
+ */
+const text = (value: string): TreeNode => ({ type: "text", value: value.trim() ? value : "\n" });
+function rendered(node: TreeNode): TreeNode {
+  if (node.type === "text") return text(node.value ?? "");
+  if (!node.children) return node;
+  const table = ["table", "thead", "tbody", "tfoot", "tr"].includes(node.tagName ?? "");
+  const children: TreeNode[] = [];
+  for (const child of node.children.map(rendered)) {
+    if (table && child.type === "text" && child.value?.trim() === "") continue;
+    const last = children.at(-1);
+    if (child.type === "text" && last?.type === "text") {
+      children[children.length - 1] = text(`${last.value}${child.value}`);
+    } else children.push(child);
+  }
+  return { ...node, children };
+}
+
+it("preserves in-app thread links through the shared Markdown sanitizer", () => {
+  const tree = chatMarkdownTree(
+    '[Open thread](t3-thread://v1/environment/thread)\n\n<a href="javascript:alert(1)">Unsafe</a>',
+    true,
   );
   expect(tree.children[0]).toMatchObject({
     tagName: "p",
@@ -26,4 +62,42 @@ it("preserves in-app thread links through the shared Markdown sanitizer", () => 
     ],
   });
   expect(JSON.stringify(tree)).not.toContain("javascript:");
+});
+
+describe("raw HTML detection", () => {
+  it("flags every way markdown can start raw HTML", () => {
+    for (const markdown of ["<br>", "a</b>", "<!-- note -->", "<?php ?>", "<![CDATA[x]]>"]) {
+      expect(markdownMayContainRawHtml(markdown)).toBe(true);
+    }
+  });
+
+  it("renders tag-free markdown the same without rehype-raw", () => {
+    const markdown = [
+      "# Title & *emphasis*",
+      "",
+      "- [ ] task",
+      "- [x] done with `code` and a [link](https://example.com 'Title')",
+      "",
+      "| a | b |",
+      "| - | -: |",
+      "| 1 < 2 | x |",
+      "",
+      "> [!NOTE]",
+      "> An alert with ~~strike~~ and footnote[^1].",
+      "",
+      "```ts title=example.ts",
+      "const a = 1 < 2;",
+      "```",
+      "",
+      "![shot](C:\\Users\\me\\.t3\\shot.png)",
+      "",
+      "Entities &amp; &copy; and https://autolink.example",
+      "",
+      "[^1]: The footnote.",
+    ].join("\n");
+    expect(markdownMayContainRawHtml(markdown)).toBe(false);
+    expect(rendered(chatMarkdownTree(markdown, false)).children).toEqual(
+      rendered(chatMarkdownTree(markdown, true)).children,
+    );
+  });
 });

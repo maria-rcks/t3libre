@@ -28,6 +28,7 @@ import {
   type DesktopEnvironmentBootstrap,
   type DesktopSshEnvironmentTarget,
   type EnvironmentId,
+  type ExecutionEnvironmentDescriptor,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
@@ -45,6 +46,7 @@ import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAu
 import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer";
 import {
   readPrimaryEnvironmentTarget,
+  readPrimaryEnvironmentTargetResult,
   type PrimaryEnvironmentTarget,
 } from "../environments/primary/target";
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
@@ -341,15 +343,55 @@ const layerCapabilities = Layer.effectContext(
   }),
 );
 
+let primaryDescriptorPrefetchStarted = false;
+let primaryDescriptorPrefetch: {
+  readonly httpBaseUrl: string;
+  readonly startedAt: number;
+  readonly settled: Promise<ExecutionEnvironmentDescriptor | null>;
+} | null = null;
+
+/**
+ * Reads the primary environment's descriptor alongside the boot auth check,
+ * before route chunks queue on the browser's connections. The first primary
+ * registration reuses the answer instead of fetching it again.
+ */
+export function prefetchPrimaryEnvironmentDescriptor(): void {
+  if (primaryDescriptorPrefetchStarted) return;
+  primaryDescriptorPrefetchStarted = true;
+  const read = readPrimaryEnvironmentTargetResult();
+  if (read._tag === "Failure" || read.target === null) return;
+  const httpBaseUrl = read.target.target.httpBaseUrl;
+  primaryDescriptorPrefetch = {
+    httpBaseUrl,
+    startedAt: Date.now(),
+    settled: Effect.runPromise(
+      fetchRemoteEnvironmentDescriptor({ httpBaseUrl }).pipe(
+        Effect.provide(PrimaryEnvironmentHttpLayer.layer),
+      ),
+    ).catch(() => null),
+  };
+}
+
+const PREFETCHED_DESCRIPTOR_MAX_AGE_MS = 10_000;
+
 const loadPrimaryConnectionRegistration = Effect.fn(
   "web.connectionPlatform.loadPrimaryConnectionRegistration",
 )(function* (resolved: PrimaryEnvironmentTarget) {
-  const descriptor = yield* fetchRemoteEnvironmentDescriptor({
-    httpBaseUrl: resolved.target.httpBaseUrl,
-  }).pipe(
-    Effect.provide(PrimaryEnvironmentHttpLayer.layer),
-    Effect.mapError(mapRemoteEnvironmentError),
-  );
+  const prefetch = primaryDescriptorPrefetch;
+  primaryDescriptorPrefetch = null;
+  const prefetched =
+    prefetch?.httpBaseUrl === resolved.target.httpBaseUrl &&
+    Date.now() - prefetch.startedAt <= PREFETCHED_DESCRIPTOR_MAX_AGE_MS
+      ? yield* Effect.promise(() => prefetch.settled)
+      : null;
+  const descriptor =
+    prefetched ??
+    (yield* fetchRemoteEnvironmentDescriptor({
+      httpBaseUrl: resolved.target.httpBaseUrl,
+    }).pipe(
+      Effect.provide(PrimaryEnvironmentHttpLayer.layer),
+      Effect.mapError(mapRemoteEnvironmentError),
+    ));
   return new PrimaryConnectionRegistration({
     target: new PrimaryConnectionTarget({
       environmentId: descriptor.environmentId,
