@@ -2704,6 +2704,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           event.type !== "thread.visited" &&
           event.type !== "thread.visit-recorded" &&
           event.type !== "thread.pull-request-link-synced" &&
+          event.type !== "thread.pull-request-synced" &&
           event.type !== "thread.marked-unread" &&
           event.type !== "thread.metadata-updated" &&
           event.type !== "thread.runtime-mode-updated" &&

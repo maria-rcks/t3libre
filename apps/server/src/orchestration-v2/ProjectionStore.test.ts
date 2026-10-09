@@ -4787,7 +4787,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           id: EventId.make(`event:watched-pull-request:${id}`),
           type: "thread.pull-request-synced",
           threadId,
-          occurredAt: at,
+          occurredAt: DateTime.add(at, { seconds: 1 }),
           payload: { ...thread, pullRequests },
         });
       const project = { title: "Project" };
@@ -4825,6 +4825,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         },
       ]);
       assert.equal(yield* phase, "running");
+      assert.deepEqual((yield* store.getThread(threadId)).updatedAt, at);
 
       const snapshot = {
         state: "open" as const,
