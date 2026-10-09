@@ -96,6 +96,7 @@ export const ChatHeader = memo(function ChatHeader({
     if (!list || !parentThreadLink) return;
     // Measure the untruncated labels, including a collapsed parent's hidden
     // text, so expanding and collapsing never change the fit calculation.
+    // Width-capped labels (the project) never grow, so their overflow is skipped.
     const measure = () => {
       const gap = Number.parseFloat(getComputedStyle(list).columnGap) || 0;
       const width = Array.from(list.children).reduce(
@@ -105,7 +106,9 @@ export const ChatHeader = memo(function ChatHeader({
           return (
             total +
             (item.firstElementChild?.getBoundingClientRect().width ?? 0) +
-            (label ? label.scrollWidth - label.clientWidth : 0) -
+            (label && getComputedStyle(label).maxWidth === "none"
+              ? label.scrollWidth - label.clientWidth
+              : 0) -
             (ellipsis?.getBoundingClientRect().width ?? 0)
           );
         },
