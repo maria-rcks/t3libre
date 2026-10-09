@@ -276,7 +276,9 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     ),
   ).pipe(Effect.forkScoped);
 
-  yield* applySnapshot(initialSettings, { forceRefresh: true }).pipe(
+  // Until it lands, clients see the cached or pending snapshot.
+  yield* (host.awaitStartupProbe ?? Effect.void).pipe(
+    Effect.andThen(refreshSnapshot()),
     Effect.ignoreCause({ log: true }),
     Effect.forkScoped,
   );

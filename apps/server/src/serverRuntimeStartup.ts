@@ -24,6 +24,7 @@ import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "./config.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
@@ -43,7 +44,7 @@ import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
-import { forkParked, forkParkedFiber } from "./serverActivation.ts";
+import { forkBackground, forkParked, forkParkedFiber } from "./serverActivation.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
@@ -146,15 +147,18 @@ export const makeCommandGate = Effect.gen(function* () {
 const recordStartupHeartbeat = Effect.gen(function* () {
   const analytics = yield* AnalyticsService.AnalyticsService;
   const projects = yield* ProjectService.ProjectService;
-  const threads = yield* ThreadManagement.ThreadManagementService;
+  const sql = yield* SqlClient.SqlClient;
 
   const { threadCount, projectCount } = yield* Effect.all({
     projects: projects.snapshot,
-    threads: threads.getShellSnapshot(),
+    // The threads the shell snapshot lists, counted without building it.
+    threads: sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count FROM orchestration_v2_projection_threads WHERE deleted_at IS NULL
+    `,
   }).pipe(
-    Effect.map(({ projects: projectSnapshot, threads: shellSnapshot }) => ({
+    Effect.map(({ projects: projectSnapshot, threads: rows }) => ({
       projectCount: projectSnapshot.projects.length,
-      threadCount: shellSnapshot.threads.length + shellSnapshot.archivedThreads.length,
+      threadCount: rows[0]?.count ?? 0,
     })),
     Effect.catch((cause) =>
       Effect.logWarning("failed to gather V2 startup counts for telemetry", {
@@ -579,15 +583,15 @@ const make = (options?: StartupOptions) =>
           : importPendingTranscripts
       ).pipe(forkParked);
 
+      yield* forkBackground(
+        recordStartupHeartbeat.pipe(
+          Effect.annotateSpans({ "startup.phase": "heartbeat.record" }),
+          Effect.withSpan("server.startup.heartbeat.record"),
+          Effect.ignoreCause({ log: true }),
+        ),
+      );
       yield* forkParked(
         Effect.gen(function* () {
-          yield* Effect.logDebug("startup phase: recording startup heartbeat");
-          yield* recordStartupHeartbeat.pipe(
-            Effect.withSpan("server.startup.heartbeat.record", {
-              attributes: { "startup.phase": "heartbeat.record" },
-            }),
-            Effect.ignoreCause({ log: true }),
-          );
           if (serverConfig.startupPresentation === "headless") {
             yield* Effect.logDebug("startup phase: headless access info");
             const accessInfo = yield* issueHeadlessServeAccessInfo();
