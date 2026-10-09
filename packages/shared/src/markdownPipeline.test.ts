@@ -44,7 +44,8 @@ function rendered(node: TreeNode, preserveWhitespace = false): TreeNode {
     if (table && child.type === "text" && child.value?.trim() === "") continue;
     const last = children.at(-1);
     if (child.type === "text" && last?.type === "text") {
-      children[children.length - 1] = text(`${last.value}${child.value}`);
+      const joined = `${last.value}${child.value}`;
+      children[children.length - 1] = text(literal ? joined : joined.replace(/\s+/g, " "));
     } else children.push(child);
   }
   return {
