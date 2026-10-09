@@ -6,8 +6,10 @@ import {
   HostProcessIsExecutable,
   HostProcessPlatform,
 } from "@t3tools/shared/hostProcess";
+import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Hex from "effect/encoding/Hex";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -22,7 +24,6 @@ import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import * as NodeCrypto from "node:crypto";
 
 import * as AntigravityInstallation from "./AntigravityInstallation.ts";
 import { ANTIGRAVITY_AUTH_BROWSER_MARKER } from "./antigravityAuthSupport.ts";
@@ -71,14 +72,15 @@ const executableName = hostPlatform === "win32" ? "agy_acp_server.exe" : "agy_ac
 const harnessName =
   hostPlatform === "win32" ? "localharness_external.exe" : "localharness_external";
 
-function releaseAsset(
+const releaseAsset = Effect.fn("test.antigravityReleaseAsset")(function* (
   archive: Uint8Array = completeArchive,
   platform: NodeJS.Platform = hostPlatform,
 ) {
+  const crypto = yield* Crypto.Crypto;
   return {
     version: "fixture-new",
     url: "https://dl.google.com/antigravity-test.zip",
-    sha256: NodeCrypto.createHash("sha256").update(archive).digest("hex"),
+    sha256: Hex.encode(yield* crypto.digest("SHA-256", archive).pipe(Effect.orDie)),
     archiveBytes: archive.byteLength,
     executable: {
       name: platform === "win32" ? "agy_acp_server.exe" : "agy_acp_server.par",
@@ -89,7 +91,7 @@ function releaseAsset(
       bytes: Buffer.byteLength(harnessContents),
     },
   } satisfies AntigravityReleaseAsset;
-}
+});
 
 const writeRelease = Effect.fn("test.writeAntigravityRelease")(function* (
   managedDirectory: string,
@@ -147,11 +149,12 @@ const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
     options.baseDir ?? (yield* fs.makeTempDirectoryScoped({ prefix: "t3-agy-test-" }));
   const platform = options.platform ?? hostPlatform;
   const archive = options.archive ?? completeArchive;
-  const asset = options.asset === undefined ? releaseAsset(archive, platform) : options.asset;
+  const asset =
+    options.asset === undefined ? yield* releaseAsset(archive, platform) : options.asset;
   const managedDirectory = path.join(baseDir, "tools", "antigravity-acp", `${platform}-x64`);
   if (options.previous) {
     yield* writeRelease(managedDirectory, {
-      ...releaseAsset(archive, platform),
+      ...(yield* releaseAsset(archive, platform)),
       sha256: previousReleaseId,
       version: previousVersion,
     });
@@ -302,9 +305,9 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
       expect(yield* fs.readFileString(selected.executablePath)).toBe(serverContents);
       expect(yield* fs.readFileString(selected.harnessPath)).toBe(harnessContents);
       expect(yield* fs.readDirectory(path.join(installation.managedDirectory, "versions"))).toEqual(
-        expect.arrayContaining([previousReleaseId, releaseAsset().sha256]),
+        expect.arrayContaining([previousReleaseId, (yield* releaseAsset()).sha256]),
       );
-      expect(requests).toEqual([releaseAsset().url]);
+      expect(requests).toEqual([(yield* releaseAsset()).url]);
     }),
   );
 
@@ -538,12 +541,12 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
   );
 
   it.effect.each([
-    { name: "checksum mismatch", asset: { ...releaseAsset(), sha256: "2".repeat(64) } },
-    { name: "short download", archive: completeArchive.subarray(0, -1), asset: releaseAsset() },
+    { name: "checksum mismatch", completeAsset: { sha256: "2".repeat(64) } },
+    { name: "short download", archive: completeArchive.subarray(0, -1), completeAsset: {} },
     {
       name: "oversized download",
       archive: Buffer.concat([completeArchive, Buffer.from("extra")]),
-      asset: releaseAsset(),
+      completeAsset: {},
     },
     { name: "wrong Content-Length", contentLength: completeArchive.byteLength + 1 },
     { name: "missing harness", archive: Buffer.from(zipFixtures.missingHarness, "base64") },
@@ -551,10 +554,14 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
     { name: "path traversal", archive: Buffer.from(zipFixtures.traversal, "base64") },
     { name: "symbolic link", archive: Buffer.from(zipFixtures.symlink, "base64") },
     { name: "oversized member", archive: Buffer.from(zipFixtures.oversizedMember, "base64") },
-  ])("rejects $name before runtime validation", (options) =>
+  ])("rejects $name before runtime validation", ({ completeAsset, ...options }) =>
     Effect.gen(function* () {
+      // Pin the asset to the complete archive so the download itself is what disagrees.
+      const asset =
+        completeAsset === undefined ? undefined : { ...(yield* releaseAsset()), ...completeAsset };
       const { installation, validations, stagingReleased, fs, path } = yield* makeHarness({
         ...options,
+        ...(asset === undefined ? {} : { asset }),
         previous: true,
       });
       yield* installation.start;
@@ -962,7 +969,7 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const archive = Buffer.from(zipFixtures.windows, "base64");
-        const asset = releaseAsset(archive, "win32");
+        const asset = yield* releaseAsset(archive, "win32");
         let denyPointerRename = true;
         const renameTargets: string[] = [];
         const { installation, requests, validations } = yield* makeHarness({
