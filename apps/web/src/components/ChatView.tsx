@@ -7420,7 +7420,9 @@ export default function ChatView(props: ChatViewProps) {
   const childThreadInputs = useChildThreadInputs(activeThreadRef);
   const childInputBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     const first = childThreadInputs[0];
-    if (!first || activePendingApproval || activePendingUserInput) return null;
+    const parentAwaitingUser =
+      activePendingApproval || activePendingUserInput || activeThreadShell?.hasPendingUserInput;
+    if (!first || parentAwaitingUser) return null;
     return {
       id: `child-input:${first.id}`,
       variant: "info",
@@ -7444,7 +7446,13 @@ export default function ChatView(props: ChatViewProps) {
         </Button>
       ),
     };
-  }, [childThreadInputs, activePendingApproval, activePendingUserInput, onOpenRelatedThread]);
+  }, [
+    childThreadInputs,
+    activePendingApproval,
+    activePendingUserInput,
+    activeThreadShell?.hasPendingUserInput,
+    onOpenRelatedThread,
+  ]);
 
   // Commands such as /compact and /goal clear run as their own turn. The draft
   // and its attachments stay local.
