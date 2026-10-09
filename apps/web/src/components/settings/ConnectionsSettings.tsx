@@ -2132,8 +2132,7 @@ export function ConnectionsSettings() {
     [primaryEnvironment, savedEnvironments],
   );
   const savedDesktopSshEnvironmentKeys = useMemo(() => {
-    const aliases = new Set<string>();
-    const addresses = new Set<string>();
+    const keys = new Set<string>();
     for (const environment of savedEnvironments) {
       const profile = environment.entry.profile;
       if (
@@ -2144,10 +2143,10 @@ export function ConnectionsSettings() {
         continue;
       }
       const target = profile.value.target;
-      aliases.add(target.alias);
-      addresses.add(formatDesktopSshTarget(target));
+      keys.add(target.alias);
+      keys.add(formatDesktopSshTarget(target));
     }
-    return { aliases, addresses };
+    return keys;
   }, [savedEnvironments]);
   const [desktopServerExposureMutationError, setDesktopServerExposureMutationError] = useState<
     string | null
@@ -2269,7 +2268,15 @@ export function ConnectionsSettings() {
   const isLoadingWslState = desktopWsl.isPending && desktopWsl.data === null;
   const discoveredSshHosts = desktopSshHosts.data ?? EMPTY_DISCOVERED_SSH_HOSTS;
   const unsavedDiscoveredSshHosts = useMemo(
-    () => filterDiscoveredSshHosts(discoveredSshHosts, "", savedDesktopSshEnvironmentKeys),
+    () =>
+      discoveredSshHosts.filter((target) => {
+        const address = formatDesktopSshTarget(target);
+        return (
+          !savedDesktopSshEnvironmentKeys.has(target.alias) &&
+          // A configured alias keeps its own settings even when its hostname is saved.
+          (target.source === "ssh-config" || !savedDesktopSshEnvironmentKeys.has(address))
+        );
+      }),
     [discoveredSshHosts, savedDesktopSshEnvironmentKeys],
   );
   const filteredDiscoveredSshHosts = useMemo(

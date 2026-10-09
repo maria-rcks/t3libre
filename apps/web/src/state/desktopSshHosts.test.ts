@@ -20,7 +20,7 @@ describe("filterDiscoveredSshHosts", () => {
   const suggestions: ReadonlyArray<DesktopDiscoveredSshHost> = [
     {
       alias: "grape",
-      hostname: "prod.example.com",
+      hostname: "grape",
       port: null,
       source: "known-hosts",
       username: null,
@@ -75,7 +75,6 @@ describe("filterDiscoveredSshHosts", () => {
       suggestions[3],
       suggestions[4],
       suggestions[5],
-      suggestions[0],
       suggestions[2],
     ]);
   });
@@ -92,35 +91,12 @@ describe("filterDiscoveredSshHosts", () => {
     expect(filterDiscoveredSshHosts(suggestions, "PINOT")).toEqual([suggestions[1]]);
   });
 
-  it.each(["devbox", "DEVBOX.LOCAL", "box.local"])(
-    "finds a configured alias by its alias or target %j",
-    (query) => {
-      expect(filterDiscoveredSshHosts(hosts, query)).toEqual(hosts);
-    },
-  );
+  it("finds a configured alias by its hostname", () => {
+    expect(filterDiscoveredSshHosts(hosts, "box.LOCAL")).toEqual(hosts);
+  });
 
   it("returns an empty array when no hosts match", () => {
     expect(filterDiscoveredSshHosts(suggestions, "merlot")).toEqual([]);
-  });
-
-  it("keeps distinct configured aliases when their hostname is already saved", () => {
-    const alias = { ...hosts[0]!, alias: "deploy", hostname: "shared.example.com" };
-    const otherAlias = { ...alias, alias: "deploy-other" };
-    const direct = { ...alias, alias: alias.hostname, source: "known-hosts" as const };
-    const saved = {
-      aliases: new Set(["shared.example.com", "deploy-other"]),
-      addresses: new Set(["shared.example.com", "alice@shared.example.com:22"]),
-    };
-    expect(filterDiscoveredSshHosts([alias, otherAlias, direct], "", saved)).toEqual([alias]);
-    expect(
-      filterDiscoveredSshHosts([alias, otherAlias, direct], "shared.example.com", saved),
-    ).toEqual([alias]);
-    expect(
-      filterDiscoveredSshHosts([alias, otherAlias, direct], "", {
-        aliases: new Set(["another-alias"]),
-        addresses: new Set(["deploy"]),
-      }),
-    ).toEqual([alias, otherAlias, direct]);
   });
 });
 
