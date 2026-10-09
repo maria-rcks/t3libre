@@ -2185,14 +2185,22 @@ export default function ChatView(props: ChatViewProps) {
   const dismissWarningsForNow = useCallback(
     (ids: ReadonlyArray<string>) => {
       if (!serverRunId) return;
+      // Dismissals from this environment's earlier server runs no longer apply.
+      const environmentPrefix = `${warningEnvironmentId}\u0000`;
+      const runPrefix = `${serverRunId}\u0000`;
       setWarningDismissals((current) => ({
         ...current,
         temporary: [
-          ...new Set([...current.temporary, ...ids.map((id) => `${serverRunId}\u0000${id}`)]),
+          ...new Set([
+            ...current.temporary.filter(
+              (id) => !id.startsWith(environmentPrefix) || id.startsWith(runPrefix),
+            ),
+            ...ids.map((id) => `${runPrefix}${id}`),
+          ]),
         ],
       }));
     },
-    [serverRunId, setWarningDismissals],
+    [serverRunId, setWarningDismissals, warningEnvironmentId],
   );
   const dismissWarningsForever = useCallback(
     (ids: ReadonlyArray<string>) => {

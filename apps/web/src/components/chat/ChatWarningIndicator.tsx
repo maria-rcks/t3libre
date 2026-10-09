@@ -1,15 +1,13 @@
 import {
-  type ContextMenuItem,
   type EnvironmentId,
   type OrchestrationV2ProviderFailureClass,
   type ProviderInstanceId,
   type ServerProvider,
 } from "@t3tools/contracts";
 import { CircleAlertIcon } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
+import { memo } from "react";
 
 import { cn } from "~/lib/utils";
-import { readLocalApi } from "~/localApi";
 import { formatProviderDriverKindLabel } from "~/providerModels";
 import { Button, InlineButton } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
@@ -27,13 +25,6 @@ export interface ChatWarning {
   readonly severity: "warning" | "error";
   readonly providerSetupInstanceId?: ProviderInstanceId;
 }
-
-type ContextMenuAction =
-  | `warning:${number}`
-  | `dismiss-now:${number}`
-  | `dismiss-forever:${number}`
-  | "dismiss-all-now"
-  | "dismiss-all-forever";
 
 export function resolveProviderChatWarning(
   environmentId: EnvironmentId,
@@ -77,30 +68,6 @@ export function resolveThreadErrorChatWarning(
     : null;
 }
 
-function contextMenuItems(
-  warnings: ReadonlyArray<ChatWarning>,
-  canDismissForNow: boolean,
-): ReadonlyArray<ContextMenuItem<ContextMenuAction>> {
-  const actions = (index: number): ReadonlyArray<ContextMenuItem<ContextMenuAction>> => [
-    ...(canDismissForNow
-      ? ([{ id: `dismiss-now:${index}`, label: "Dismiss for now" }] as const)
-      : []),
-    { id: `dismiss-forever:${index}`, label: "Don't show again" },
-  ];
-  if (warnings.length === 1) return actions(0);
-  return [
-    ...warnings.map((warning, index): ContextMenuItem<ContextMenuAction> => ({
-      id: `warning:${index}`,
-      label: warning.title,
-      children: actions(index),
-    })),
-    ...(canDismissForNow
-      ? ([{ id: "dismiss-all-now", label: "Dismiss all for now", separatorBefore: true }] as const)
-      : []),
-    { id: "dismiss-all-forever", label: "Don't show these again" },
-  ];
-}
-
 export const ChatWarningIndicator = memo(function ChatWarningIndicator({
   warnings,
   canDismissForNow,
@@ -114,56 +81,6 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
   readonly onDismissForever: (warningIds: ReadonlyArray<string>) => void;
   readonly onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
 }) {
-  const menuRequest = useRef(0);
-  const menuOpen = useRef(false);
-  const warningKey = JSON.stringify(warnings);
-  useEffect(
-    () => () => {
-      menuRequest.current++;
-      if (menuOpen.current) {
-        menuOpen.current = false;
-        void readLocalApi()?.contextMenu.close();
-      }
-    },
-    [warningKey, canDismissForNow, onDismissForNow, onDismissForever],
-  );
-
-  const handleContextMenu = useCallback(
-    async (event: ReactMouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const api = readLocalApi();
-      if (!api) return;
-      const request = ++menuRequest.current;
-      menuOpen.current = true;
-      let action: ContextMenuAction | null;
-      try {
-        action = await api.contextMenu.show(contextMenuItems(warnings, canDismissForNow), {
-          x: event.clientX,
-          y: event.clientY,
-        });
-      } catch {
-        // The native menu can disappear when its window closes.
-        return;
-      } finally {
-        if (request === menuRequest.current) menuOpen.current = false;
-      }
-      if (request !== menuRequest.current || action === null) return;
-      if (action === "dismiss-all-now") return onDismissForNow(warnings.map(({ id }) => id));
-      if (action === "dismiss-all-forever") {
-        return onDismissForever(warnings.map(({ id }) => id));
-      }
-      const dismissForNow = action.startsWith("dismiss-now:");
-      const warning = warnings[Number(action.slice(action.indexOf(":") + 1))];
-      if (!warning) return;
-      if (dismissForNow && canDismissForNow) onDismissForNow([warning.id]);
-      if (!dismissForNow && action.startsWith("dismiss-forever:")) {
-        onDismissForever([warning.id]);
-      }
-    },
-    [canDismissForNow, onDismissForNow, onDismissForever, warnings],
-  );
-
   if (warnings.length === 0) return null;
 
   const severity = warnings.some((warning) => warning.severity === "error") ? "error" : "warning";
@@ -186,8 +103,7 @@ export const ChatWarningIndicator = memo(function ChatWarningIndicator({
             <Button
               variant={isError ? "ghost-error-icon" : "ghost-warning-icon"}
               size="icon-circle-xs"
-              aria-label={`${warnings.length} ${isSingle ? "warning" : "warnings"}. Right-click to dismiss.`}
-              onContextMenu={(event) => void handleContextMenu(event)}
+              aria-label={`${warnings.length} ${isSingle ? "warning" : "warnings"}`}
             />
           }
         >
