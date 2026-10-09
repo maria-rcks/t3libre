@@ -1,6 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import type * as Path from "effect/Path";
@@ -367,6 +369,47 @@ describe("storage cleanup reports and local file policies", () => {
         expect(report.entries[0]).toMatchObject({ outcome: "removed", bytes: null, files: null });
         expect(report.bytesFreed).toBe(0);
         expect(yield* fs.exists(worktree)).toBe(false);
+      }),
+    ),
+  );
+  it.live("keeps a worktree when its thread starts during size measurement", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const measuring = yield* Deferred.make<void>();
+        const resume = yield* Deferred.make<void>();
+        let measuredPath: string | undefined;
+        const fixture = yield* cleanupFixture.pipe(
+          Effect.provideService(FileSystem.FileSystem, {
+            ...fs,
+            readDirectory: (directory) =>
+              Effect.gen(function* () {
+                if (directory === measuredPath) {
+                  yield* Deferred.succeed(measuring, undefined);
+                  yield* Deferred.await(resume);
+                }
+                return yield* fs.readDirectory(directory);
+              }),
+          }),
+        );
+        measuredPath = yield* fs.realPath(fixture.worktree);
+        fixture.setPolicy("tracked-changes");
+        yield* fs.writeFileString(`${fixture.worktree}/notes.txt`, "untracked\n");
+        const cleanup = yield* fixture.service.runNow.pipe(Effect.forkChild);
+        yield* Deferred.await(measuring);
+        fixture.setThreads([
+          shell({ branch: "feature", worktreePath: fixture.worktree, status: "running" }),
+        ]);
+        yield* Deferred.succeed(resume, undefined);
+        const report = yield* Fiber.join(cleanup);
+        expect(report.entries[0]).toMatchObject({
+          outcome: "kept",
+          reason: "Thread activity or shared worktree changed since check",
+          bytes: null,
+        });
+        expect(report.bytesFreed).toBe(0);
+        expect(yield* fs.exists(fixture.worktree)).toBe(true);
+        expect(yield* fs.readFileString(`${fixture.worktree}/notes.txt`)).toBe("untracked\n");
       }),
     ),
   );

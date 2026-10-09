@@ -478,8 +478,9 @@ const make = Effect.gen(function* () {
                 ? "not merged"
                 : "has commits beyond the default branch",
           );
-        // Re-read after Git/host calls so a queued turn, resumed session or new
-        // thread sharing this path cancels the removal.
+        const bytes = yield* measureWorktree(worktreePath);
+        // Re-read after Git/host calls and size measurement so a queued turn,
+        // resumed session or new thread sharing this path cancels the removal.
         const latestSnapshot = yield* readThreads();
         if (yield* containsProjectRoot(worktreePath, [project, ...latestSnapshot.projects]))
           return keep("contains a project checkout");
@@ -545,7 +546,6 @@ const make = Effect.gen(function* () {
           )
         )
           return keep("settings changed since check");
-        const bytes = yield* measureWorktree(worktreePath);
         // Clean only untracked files; Git must still refuse removal if a tracked
         // edit arrives after our last status check.
         if (settings.worktreeKeepWhen === "tracked-changes")
