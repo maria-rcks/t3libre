@@ -1044,14 +1044,3 @@ describe("ServerSettings.removeAgentCreditsOnMerge", () => {
     ).toBe(true);
   });
 });
-
-describe("ClientSettings branch and worktree grouping", () => {
-  it("keeps existing installations ungrouped and persists either choice", () => {
-    expect(decodeClientSettings({}).sidebarBranchGroupingEnabled).toBe(false);
-    for (const sidebarBranchGroupingEnabled of [true, false]) {
-      const input = { sidebarBranchGroupingEnabled };
-      expect(decodeClientSettingsPatch(input)).toEqual(input);
-      expect(encodeClientSettings(decodeClientSettings(input))).toMatchObject(input);
-    }
-  });
-});

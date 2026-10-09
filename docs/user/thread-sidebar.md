@@ -45,12 +45,10 @@ and worktree while you stay in the new thread composer. This requires a Git proj
 
 ## Group related threads
 
-Enable **Group threads by branch and worktree** in **Settings → General** on web
-and desktop, or **Group by branch and worktree** in **Settings → Thread behavior**
-on mobile. Threads stay in their existing sections and group within their project
-and machine. Pinned threads keep their order, and search keeps its usual results.
-Move threads within their group; pinning or settling still moves them between
-sections. Turn grouping off to return to the saved thread order.
+Turn on **Group threads by branch and worktree** in **Settings → General**, or
+**Group by branch and worktree** in **Settings → Thread behavior** on mobile. Each
+section groups its threads by project, branch, and worktree. Pinned threads and
+search results keep their order, and threads move only within their group.
 
 ## Pin and reorder threads
 

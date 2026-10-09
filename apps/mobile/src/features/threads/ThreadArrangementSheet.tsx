@@ -183,6 +183,7 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
       now,
       queuedThreadKeys,
       pendingOrder,
+      branchGroupingEnabled,
       settlementEnvironmentIds: new Set(
         [...configs].flatMap(([id, config]) =>
           config.environment.capabilities.threadSettlement ? [id] : [],
@@ -195,11 +196,7 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
       ),
     };
     const pinned = getThreadListV2OrderedSection({ ...shared, section: "pinned" });
-    const active = getThreadListV2OrderedSection({
-      ...shared,
-      section: "active",
-      branchGroupingEnabled,
-    });
+    const active = getThreadListV2OrderedSection({ ...shared, section: "active" });
     const visible = new Set([...pinned, ...active].map(keyOf));
     const parked = threads.filter(
       (thread) => thread.archivedAt === null && !visible.has(keyOf(thread)),
@@ -225,10 +222,10 @@ export function ThreadArrangementSheet(props: { onClose: () => void }) {
   const planners = useMemo(() => {
     const planner = (section: "pinned" | "active") =>
       createThreadMovePlanner({
-        groupById:
-          branchGroupingEnabled && section === "active"
-            ? threadListV2BranchGroupKeys(threads)
-            : undefined,
+        groupById: threadListV2BranchGroupKeys(
+          threads,
+          branchGroupingEnabled && section === "active",
+        ),
         ordered: sections[section],
         allThreads: threads,
         section,

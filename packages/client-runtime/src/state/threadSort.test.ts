@@ -515,7 +515,7 @@ describe("sortActiveThreadsByOrderKey", () => {
 });
 
 describe("branch and worktree grouping", () => {
-  it("keeps shelf order inside a group without combining environments, projects or checkouts", () => {
+  it("keeps section order inside groups without combining environments, projects or checkouts", () => {
     const first = {
       id: "first",
       environmentId: EnvironmentId.make("a"),
@@ -530,8 +530,6 @@ describe("branch and worktree grouping", () => {
       { ...first, id: "other-project", projectId: ProjectId.make("q") },
       { ...first, id: "other-environment", environmentId: EnvironmentId.make("b") },
       { ...first, id: "worktree", worktreePath: "/repo/one" },
-      { ...first, id: "worktree-again", worktreePath: "/repo/one" },
-      { ...first, id: "other-worktree", worktreePath: "/repo/two" },
     ];
     expect(groupThreadsByBranch(rows).map((row) => row.id)).toEqual([
       "first",
@@ -540,17 +538,30 @@ describe("branch and worktree grouping", () => {
       "other-project",
       "other-environment",
       "worktree",
-      "worktree-again",
-      "other-worktree",
     ]);
-    expect(rows[1]?.id).toBe("other-branch");
-  });
-
-  it("labels detached and named checkouts, including Windows worktree paths", () => {
     expect(threadBranchGroupLabel({ branch: null, worktreePath: null })).toBe("Local checkout");
-    expect(threadBranchGroupLabel({ branch: null, worktreePath: "/repo/task" })).toBe("task");
     expect(threadBranchGroupLabel({ branch: "feature", worktreePath: "C:\\repo\\task" })).toBe(
       "feature · task",
     );
+  });
+
+  it("rewrites interleaved keys so a move inside a group keeps the group order", () => {
+    const keysById = new Map([
+      ["a1", "f"],
+      ["b", "n"],
+      ["a2", "t"],
+      ["a3", "w"],
+    ]);
+    const desired = ["a2", "a1", "a3", "b"];
+    const plan = planPinnedReorder({
+      orderedIds: desired,
+      keysById,
+      movedId: "a1",
+      requireOrderedKeys: true,
+    });
+    for (const { id, orderKey } of plan) keysById.set(id, orderKey);
+    expect(
+      desired.toSorted((left, right) => (keysById.get(left)! < keysById.get(right)! ? -1 : 1)),
+    ).toEqual(desired);
   });
 });

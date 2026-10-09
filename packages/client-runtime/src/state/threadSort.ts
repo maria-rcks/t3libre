@@ -320,25 +320,18 @@ export function planPinnedReorder(input: {
   const afterKey = afterId != null ? (keysById.get(afterId) ?? null) : null;
   const beforeUsable = beforeId === null || beforeKey != null;
   const afterUsable = afterId === null || afterKey != null;
-  let remainingKeysOrdered = true;
-  if (input.requireOrderedKeys) {
-    let previousKey: string | null = null;
-    for (const id of orderedIds) {
-      if (id === movedId) continue;
-      const key = keysById.get(id);
-      if (key == null || (previousKey !== null && previousKey >= key)) {
-        remainingKeysOrdered = false;
-        break;
-      }
-      previousKey = key;
-    }
-  }
+  const remainingKeys = input.requireOrderedKeys
+    ? orderedIds.filter((id) => id !== movedId).map((id) => keysById.get(id))
+    : [];
+  const remainingKeysOrdered = remainingKeys.every(
+    (key, index) => key != null && (index === 0 || remainingKeys[index - 1]! < key),
+  );
   if (beforeUsable && afterUsable && remainingKeysOrdered) {
     let key = pinOrderKeyBetween(beforeKey, afterKey);
     while (key !== null && reservedKeys.has(key)) key = pinOrderKeyBetween(key, afterKey);
     if (key !== null) return [{ id: movedId, orderKey: key }];
   }
-  // Keyless, corrupt or interleaved keys: rewrite the section in the new order.
+  // Keyless neighbor (or corrupt keys): rewrite the section in the new order.
   const keys = generateSpreadPinOrderKeys(orderedIds.length + reservedKeys.size)
     .filter((key) => !reservedKeys.has(key))
     .slice(0, orderedIds.length);

@@ -2771,6 +2771,8 @@ export default function Sidebar() {
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
+  // Search results stay in their usual flat order.
+  const groupByBranch = branchGroupingEnabled && !isSearchingThreads;
   const {
     pinnedThreads,
     draggableThreadKeys,
@@ -2857,7 +2859,7 @@ export default function Sidebar() {
     // web and mobile from the same data.
     const sortedPinned = sortPinnedThreadsForSidebar(pinned);
     const arrange = (rows: EnvironmentThreadShell[]) =>
-      branchGroupingEnabled && !isSearchingThreads ? groupThreadsByBranch(rows) : rows;
+      groupByBranch ? groupThreadsByBranch(rows) : rows;
     const sortedActive = workingShelfEnabled
       ? sortInboxThreadsByReturn(active, inboxReturns.returnedAt)
       : sortThreadsForSidebar(active);
@@ -2895,8 +2897,7 @@ export default function Sidebar() {
       snoozeNow: preciseNow,
     };
   }, [
-    branchGroupingEnabled,
-    isSearchingThreads,
+    groupByBranch,
     nowMinute,
     optimisticDrop,
     scopedProjectKeys,
@@ -3897,10 +3898,8 @@ export default function Sidebar() {
       ...settledThreads.filter((candidate) => key(candidate) !== dragState.activeKey),
       applySidebarThreadDrop(thread, "settled", dragState.occurredAt),
     ]);
-    return (
-      branchGroupingEnabled && !isSearchingThreads ? groupThreadsByBranch(sorted) : sorted
-    ).map(key);
-  }, [branchGroupingEnabled, isSearchingThreads, dragState, settledThreads, threadByKey]);
+    return (groupByBranch ? groupThreadsByBranch(sorted) : sorted).map(key);
+  }, [groupByBranch, dragState, settledThreads, threadByKey]);
   // Working beta: the inbox is time-ordered too, so the preview shows the
   // slot a drop will land in, not the slot under the pointer.
   const draggedActiveOrder = useMemo(() => {
@@ -3915,17 +3914,8 @@ export default function Sidebar() {
       ],
       inboxReturns.returnedAt,
     );
-    return (
-      branchGroupingEnabled && !isSearchingThreads ? groupThreadsByBranch(sorted) : sorted
-    ).map(key);
-  }, [
-    branchGroupingEnabled,
-    isSearchingThreads,
-    activeThreads,
-    dragState,
-    threadByKey,
-    workingShelfEnabled,
-  ]);
+    return (groupByBranch ? groupThreadsByBranch(sorted) : sorted).map(key);
+  }, [groupByBranch, activeThreads, dragState, threadByKey, workingShelfEnabled]);
   const sidebarSortingStrategy = useMemo(
     () =>
       createSidebarSortingStrategy({
@@ -5452,12 +5442,11 @@ export default function Sidebar() {
                           if (branchGroupingEnabled && item.section !== "pinned") {
                             const group = `${item.section}:${threadBranchGroupKey(thread)}`;
                             if (group !== previousBranchGroup) {
+                              const projectKey =
+                                `${thread.environmentId}:${thread.projectId}` as const;
                               const projectTitle =
-                                projectDisplayNameByKey.get(
-                                  `${thread.environmentId}:${thread.projectId}`,
-                                ) ??
-                                projectByKey.get(`${thread.environmentId}:${thread.projectId}`)
-                                  ?.title ??
+                                projectDisplayNameByKey.get(projectKey) ??
+                                projectByKey.get(projectKey)?.title ??
                                 "Project";
                               const environment = environmentLabelById.get(thread.environmentId);
                               items.push(

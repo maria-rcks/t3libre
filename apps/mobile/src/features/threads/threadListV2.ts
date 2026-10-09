@@ -229,7 +229,12 @@ export function sortThreadsForListV2<
   return sortActiveThreadsByOrderKey(threads);
 }
 
-export function threadListV2BranchGroupKeys(threads: readonly EnvironmentThreadShell[]) {
+/** Move planners keep grouped rows inside their branch group. */
+export function threadListV2BranchGroupKeys(
+  threads: readonly EnvironmentThreadShell[],
+  grouped: boolean,
+) {
+  if (!grouped) return undefined;
   return new Map(
     threads.map((thread) => [`${thread.environmentId}:${thread.id}`, threadBranchGroupKey(thread)]),
   );
@@ -795,11 +800,19 @@ export function buildThreadListV2Items(input: {
       : orderedSnoozed.filter(
           (thread) => `${thread.environmentId}:${thread.id}` === selectedThreadKey,
         );
-  const sortedSettled = sortSettledThreadsReusingLast(settled);
-  const orderedSettled =
-    input.branchGroupingEnabled && query.length === 0
-      ? groupThreadsByBranch(sortedSettled)
-      : sortedSettled;
+  // Grouping keeps each section's order inside its groups; search stays flat.
+  const grouped = input.branchGroupingEnabled === true && query.length === 0;
+  const arrange = (threads: readonly EnvironmentThreadShell[]) =>
+    grouped ? groupThreadsByBranch(threads) : threads;
+  let previousGroup: string | null = null;
+  const groupStart = (section: string, thread: EnvironmentThreadShell) => {
+    if (!grouped) return {};
+    const group = `${section}:${threadBranchGroupKey(thread)}`;
+    const branchGroupStart = group !== previousGroup;
+    previousGroup = group;
+    return { branchGroupStart };
+  };
+  const orderedSettled = arrange(sortSettledThreadsReusingLast(settled));
   const settledLimit = input.settledLimit ?? Number.POSITIVE_INFINITY;
   const limitedSettled =
     orderedSettled.length > settledLimit ? orderedSettled.slice(0, settledLimit) : orderedSettled;
@@ -819,41 +832,62 @@ export function buildThreadListV2Items(input: {
         );
 
   const items: ThreadListV2Item[] = [];
-  const appendSection = (
-    threads: readonly EnvironmentThreadShell[],
-    variant: "card" | "slim",
-    snoozed = false,
-    pinned = false,
-  ) => {
-    const grouped = input.branchGroupingEnabled && !pinned && input.searchQuery.trim().length === 0;
-    const ordered = grouped ? groupThreadsByBranch(threads) : threads;
-    let previousGroup: string | null = null;
-    for (const thread of ordered) {
-      const group = grouped ? threadBranchGroupKey(thread) : null;
-      items.push({
-        thread,
-        variant,
-        snoozed,
-        pinned,
-        isLast: false,
-        ...(grouped ? { branchGroupStart: group !== previousGroup } : {}),
-      });
-      previousGroup = group;
-    }
-  };
-  appendSection(
-    applyPendingThreadOrder(sortPinnedThreadsByOrderKey(pinned), "pinned", pending),
-    "card",
-    false,
-    true,
-  );
-  appendSection(orderedActive, "card");
+  for (const thread of applyPendingThreadOrder(
+    sortPinnedThreadsByOrderKey(pinned),
+    "pinned",
+    pending,
+  )) {
+    items.push({
+      thread,
+      variant: "card",
+      snoozed: false,
+      pinned: true,
+      isLast: false,
+    });
+  }
+  for (const thread of arrange(orderedActive)) {
+    items.push({
+      ...groupStart("active", thread),
+      thread,
+      variant: "card",
+      snoozed: false,
+      pinned: false,
+      isLast: false,
+    });
+  }
   const workingShelfHeaderIndex = orderedWorking.length > 0 ? items.length : null;
-  appendSection(visibleWorking, "card");
+  for (const thread of arrange(visibleWorking)) {
+    items.push({
+      ...groupStart("working", thread),
+      thread,
+      variant: "card",
+      snoozed: false,
+      pinned: false,
+      isLast: false,
+    });
+  }
   const snoozedShelfHeaderIndex = orderedSnoozed.length > 0 ? items.length : null;
-  appendSection(visibleSnoozed, "slim", true);
+  for (const thread of arrange(visibleSnoozed)) {
+    items.push({
+      ...groupStart("snoozed", thread),
+      thread,
+      variant: "slim",
+      snoozed: true,
+      pinned: false,
+      isLast: false,
+    });
+  }
   const settledShelfHeaderIndex = orderedSettled.length > 0 ? items.length : null;
-  appendSection(visibleSettled, "slim");
+  for (const thread of arrange(visibleSettled)) {
+    items.push({
+      ...groupStart("settled", thread),
+      thread,
+      variant: "slim",
+      snoozed: false,
+      pinned: false,
+      isLast: false,
+    });
+  }
   const last = items.at(-1);
   if (last) {
     items[items.length - 1] = { ...last, isLast: true };

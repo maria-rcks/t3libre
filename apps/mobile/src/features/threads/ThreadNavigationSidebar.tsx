@@ -335,10 +335,10 @@ function ThreadNavigationSidebarPane(
   const threadMoveAvailability = useMemo(() => {
     const sectionAvailability = (section: "pinned" | "active") =>
       computeThreadMoveAvailability({
-        groupById:
-          branchGroupingEnabled && section === "active"
-            ? threadListV2BranchGroupKeys(threads)
-            : undefined,
+        groupById: threadListV2BranchGroupKeys(
+          threads,
+          branchGroupingEnabled && section === "active",
+        ),
         allThreads: threads,
         section,
         pendingOrder,
@@ -848,7 +848,7 @@ function ThreadNavigationSidebarPane(
       workingShelfEnabled,
     ],
   );
-  // Project menu options scope the list, so only the environment and project
+  // The list ignores sort/group options, so only the environment and project
   // filters can light the "customized" state.
   const filterCustomized = options.selectedEnvironmentId !== null || selectedProjectKey !== null;
   const filterIcon = filterCustomized

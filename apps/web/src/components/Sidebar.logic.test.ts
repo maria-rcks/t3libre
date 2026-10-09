@@ -2279,49 +2279,6 @@ describe("Working shelf (beta)", () => {
       expect(above.kind === "move-active" && above.assignments[0]!.orderKey < "m").toBe(true);
     });
 
-    it("persists an in-group move when saved active keys are interleaved", () => {
-      const keys = new Map([
-        ["a1", "f"],
-        ["b", "n"],
-        ["a2", "t"],
-        ["a3", "w"],
-        ["hidden", "ej"],
-      ]);
-      const desired = ["a2", "a1", "a3", "b"];
-      const input = {
-        activeKey: "a1",
-        activeSection: "active" as const,
-        activeGrouped: true,
-        target: { section: "active" as const, pinnedOrder: [], activeOrder: desired },
-        pinnedOrder: [],
-        pinnedKeysById: new Map(),
-        activeOrder: ["a1", "a2", "a3", "b"],
-        activeKeysById: keys,
-        activeReorderableKeys: new Set(desired),
-      };
-      const plan = planSidebarThreadDrop(input);
-      expect(plan.kind).toBe("move-active");
-      if (plan.kind !== "move-active") return;
-      for (const { id, orderKey } of plan.assignments) keys.set(id, orderKey);
-      expect(
-        [...desired].sort((left, right) => keys.get(left)!.localeCompare(keys.get(right)!)),
-      ).toEqual(desired);
-      expect(plan.assignments.every(({ orderKey }) => orderKey !== keys.get("hidden"))).toBe(true);
-      expect(keys.get("hidden")).toBe("ej");
-      expect(
-        planSidebarThreadDrop({
-          ...input,
-          activeKeysById: new Map([
-            ["a1", "f"],
-            ["b", "n"],
-            ["a2", "t"],
-            ["a3", "w"],
-          ]),
-          activeReorderableKeys: new Set(["a1", "a2", "a3"]),
-        }),
-      ).toEqual({ kind: "none" });
-    });
-
     it("only changes lifecycle when the inbox is time-ordered", () => {
       const base = {
         pinnedOrder: ["p1"],

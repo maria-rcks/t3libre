@@ -319,6 +319,7 @@ export function planSidebarThreadDrop(input: {
   readonly activeReorderableKeys?: ReadonlySet<string>;
   /** Working beta: the inbox sorts by time, so drops only change lifecycle. */
   readonly activeTimeOrdered?: boolean;
+  /** Branch grouping can show active rows outside their saved key order. */
   readonly activeGrouped?: boolean;
 }): SidebarThreadDropPlan {
   const {
@@ -333,6 +334,7 @@ export function planSidebarThreadDrop(input: {
     activeOrder,
     activeKeysById,
     activeReorderableKeys,
+    activeGrouped,
   } = input;
   if (input.supportsSettlement === false && (target.section === "settled" || activeSettled)) {
     return { kind: "none" };
@@ -347,19 +349,12 @@ export function planSidebarThreadDrop(input: {
     writable: ReadonlySet<string> | undefined,
     requireOrderedKeys = false,
   ) => {
-    if (!writable)
-      return planPinnedReorder({
-        orderedIds: order,
-        keysById,
-        movedId: activeKey,
-        requireOrderedKeys,
-      });
+    const plan = { keysById, movedId: activeKey, requireOrderedKeys };
+    if (!writable) return planPinnedReorder({ ...plan, orderedIds: order });
     if (!writable.has(activeKey)) return null;
     const assignments = planPinnedReorder({
+      ...plan,
       orderedIds: order.filter((key) => writable.has(key) || keysById.get(key) != null),
-      keysById,
-      movedId: activeKey,
-      requireOrderedKeys,
     });
     return assignments.every(({ id }) => writable.has(id)) ? assignments : null;
   };
@@ -387,12 +382,7 @@ export function planSidebarThreadDrop(input: {
       ) {
         return { kind: "none" };
       }
-      const assignments = arrange(
-        order,
-        activeKeysById,
-        activeReorderableKeys,
-        input.activeGrouped,
-      );
+      const assignments = arrange(order, activeKeysById, activeReorderableKeys, activeGrouped);
       if (assignments === null) return { kind: "none" };
       return {
         kind: "move-active",

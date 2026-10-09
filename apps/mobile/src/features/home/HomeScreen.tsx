@@ -533,10 +533,10 @@ export function HomeScreen(props: HomeScreenProps) {
   const threadMoveAvailability = useMemo(() => {
     const sectionAvailability = (section: "pinned" | "active") =>
       computeThreadMoveAvailability({
-        groupById:
-          branchGroupingEnabled && section === "active"
-            ? threadListV2BranchGroupKeys(props.threads)
-            : undefined,
+        groupById: threadListV2BranchGroupKeys(
+          props.threads,
+          branchGroupingEnabled && section === "active",
+        ),
         allThreads: props.threads,
         section,
         pendingOrder,

@@ -651,10 +651,10 @@ export function useThreadListActions(): {
         ),
       });
       const assignments = createThreadMovePlanner({
-        groupById:
-          branchGroupingEnabled && section === "active"
-            ? threadListV2BranchGroupKeys(shells)
-            : undefined,
+        groupById: threadListV2BranchGroupKeys(
+          shells,
+          branchGroupingEnabled && section === "active",
+        ),
         allThreads: shells,
         ordered,
         section,
