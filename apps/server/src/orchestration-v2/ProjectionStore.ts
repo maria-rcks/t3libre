@@ -12,7 +12,10 @@ import {
   threadErrorSummary,
   usageLimitRunPresentedAsLatest,
 } from "@t3tools/shared/orchestrationV2ThreadError";
-import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
+import {
+  applyThreadPullRequestLinkSync,
+  threadPullRequestsOf,
+} from "@t3tools/shared/threadPullRequests";
 import type {
   OrchestrationV2AppThread,
   OrchestrationV2CheckpointScope,
@@ -716,6 +719,11 @@ export function applyToProjection(
         ...base,
         thread: event.payload,
       };
+    case "thread.pull-request-link-synced":
+      return {
+        ...base,
+        thread: applyThreadPullRequestLinkSync(projection.thread, event.payload),
+      };
     // Visited tracking is read state, not activity: skip the updatedAt bump so
     // viewing a thread does not surface it as recently active.
     case "thread.visited":
@@ -723,6 +731,11 @@ export function applyToProjection(
       return {
         ...projection,
         thread: event.payload,
+      };
+    case "thread.visit-recorded":
+      return {
+        ...projection,
+        thread: { ...projection.thread, lastVisitedAt: event.payload.lastVisitedAt },
       };
     case "run.created":
     case "run.updated":
@@ -1835,6 +1848,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 updated_at,
                 archived_at,
                 deleted_at,
+                settled_at,
+                settled_override,
+                pinned_at,
+                auto_settle_disabled_at,
+                forked_from_run_thread_id,
+                pull_request_count,
                 payload_json
               )
               VALUES (
@@ -1850,6 +1869,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 ${stringField(payload, "updatedAt")},
                 ${nullableStringField(payload, "archivedAt")},
                 ${nullableStringField(payload, "deletedAt")},
+                ${nullableStringField(payload, "settledAt")},
+                ${nullableStringField(payload, "settledOverride")},
+                ${nullableStringField(payload, "pinnedAt")},
+                ${nullableStringField(payload, "autoSettleDisabledAt")},
+                ${event.payload.forkedFrom?.type === "run" ? event.payload.forkedFrom.threadId : null},
+                ${event.payload.pullRequests?.length ?? 0},
                 ${payloadJson}
               )
               ON CONFLICT(thread_id)
@@ -1865,7 +1890,41 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 updated_at = excluded.updated_at,
                 archived_at = excluded.archived_at,
                 deleted_at = excluded.deleted_at,
+                settled_at = excluded.settled_at,
+                settled_override = excluded.settled_override,
+                pinned_at = excluded.pinned_at,
+                auto_settle_disabled_at = excluded.auto_settle_disabled_at,
+                forked_from_run_thread_id = excluded.forked_from_run_thread_id,
+                pull_request_count = excluded.pull_request_count,
                 payload_json = excluded.payload_json
+            `;
+            break;
+          }
+          // These events carry one field rather than the thread, so they patch the stored row.
+          // A link sync keeps the thread's activity timestamp, just like its legacy event.
+          case "thread.pull-request-link-synced":
+          case "thread.visit-recorded": {
+            const rows = yield* sql<PayloadRow>`
+              SELECT payload_json
+              FROM orchestration_v2_projection_threads
+              WHERE thread_id = ${event.threadId}
+              LIMIT 1
+            `;
+            const row = rows[0];
+            if (row === undefined) break;
+            const thread = yield* decodeThreadPayload(row.payload_json);
+            const updatedThread =
+              event.type === "thread.visit-recorded"
+                ? { ...thread, lastVisitedAt: event.payload.lastVisitedAt }
+                : applyThreadPullRequestLinkSync(thread, event.payload);
+            const payloadJson = yield* encodeThreadPayload(updatedThread);
+            yield* sql`
+              UPDATE orchestration_v2_projection_threads
+              SET
+                updated_at = ${stringField(parseEncodedPayload(payloadJson), "updatedAt")},
+                pull_request_count = ${updatedThread.pullRequests?.length ?? 0},
+                payload_json = ${payloadJson}
+              WHERE thread_id = ${event.threadId}
             `;
             break;
           }
@@ -2643,6 +2702,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           event.type !== "thread.unpinned" &&
           event.type !== "thread.pin-reordered" &&
           event.type !== "thread.visited" &&
+          event.type !== "thread.visit-recorded" &&
+          event.type !== "thread.pull-request-link-synced" &&
           event.type !== "thread.marked-unread" &&
           event.type !== "thread.metadata-updated" &&
           event.type !== "thread.runtime-mode-updated" &&
@@ -3485,11 +3546,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             LIMIT 1
           )
           WHERE t.deleted_at IS NULL
-            AND json_extract(t.payload_json, '$.archivedAt') IS NULL
-            AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
+            AND t.archived_at IS NULL
+            AND t.settled_override IS NOT 'settled'
+            AND t.thread_id IN (
+              SELECT thread_id FROM orchestration_v2_projection_runs WHERE status = 'failed'
+            )
             AND json_extract(item.payload_json, '$.failure.class') = 'usage_limit'
             AND json_extract(item.payload_json, '$.failure.resetAt') IS NOT NULL
-            AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) > julianday(COALESCE(r.completed_at, json_extract(t.payload_json, '$.updatedAt')))
+            AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) > julianday(COALESCE(r.completed_at, t.updated_at))
             AND (
               (
                 json_extract(t.payload_json, '$.limitRecovery.runId') IS r.run_id
@@ -5120,11 +5184,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             SELECT
               t.thread_id,
               t.payload_json,
-              CASE
-                WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
-                  THEN json_extract(t.payload_json, '$.forkedFrom.threadId')
-                ELSE NULL
-              END AS forked_from_run_source_thread_id,
+              t.forked_from_run_thread_id AS forked_from_run_source_thread_id,
               presented.run_id AS latest_run_id,
               presented.status AS latest_run_status,
               presented.requested_at AS latest_run_requested_at,
@@ -5291,13 +5351,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ) AND blocked.status = 'failed'
             WHERE t.deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND t.thread_id = ${threadId}`}${
               location === "active"
-                ? sql` AND json_extract(t.payload_json, '$.archivedAt') IS NULL`
+                ? sql` AND t.archived_at IS NULL`
                 : location === "archive"
-                  ? sql` AND json_extract(t.payload_json, '$.archivedAt') IS NOT NULL`
+                  ? sql` AND t.archived_at IS NOT NULL`
                   : sql``
             }${
               unsettledOnly
-                ? sql` AND json_extract(t.payload_json, '$.settledAt') IS NULL AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'`
+                ? sql` AND t.settled_at IS NULL AND t.settled_override IS NOT 'settled'`
                 : sql``
             }
             ORDER BY t.updated_at ASC, t.thread_id ASC
@@ -5462,10 +5522,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               LIMIT 1
             )
             WHERE t.deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND t.thread_id = ${threadId}`}
-              AND json_extract(t.payload_json, '$.archivedAt') IS NULL
-              AND json_extract(t.payload_json, '$.settledOverride') IS NULL
-              AND json_extract(t.payload_json, '$.pinnedAt') IS NULL
-              AND json_extract(t.payload_json, '$.autoSettleDisabledAt') IS NULL
+              AND t.archived_at IS NULL
+              AND t.settled_override IS NULL
+              AND t.pinned_at IS NULL
+              AND t.auto_settle_disabled_at IS NULL
               AND NOT EXISTS (
                 SELECT 1 FROM orchestration_v2_projection_runs active
                 WHERE active.thread_id = t.thread_id
@@ -5548,8 +5608,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           SELECT payload_json
           FROM orchestration_v2_projection_threads
           WHERE deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND thread_id = ${threadId}`}
-            AND json_extract(payload_json, '$.archivedAt') IS NULL
-            AND json_array_length(payload_json, '$.pullRequests') > 0
+            AND archived_at IS NULL
+            AND pull_request_count > 0
           ORDER BY updated_at ASC, thread_id ASC
         `;
         return yield* Effect.forEach(rows, (row) =>

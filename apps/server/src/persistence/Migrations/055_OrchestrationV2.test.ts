@@ -13,7 +13,7 @@ layer("055_OrchestrationV2", (it) => {
     Effect.sync(() => {
       assert.deepStrictEqual(
         migrationEntries.map(([id]) => id),
-        Array.from({ length: 60 }, (_, index) => index + 1),
+        Array.from({ length: 61 }, (_, index) => index + 1),
       );
     }),
   );
@@ -32,6 +32,7 @@ layer("055_OrchestrationV2", (it) => {
         [58, "WebhookRelayDeliveries"],
         [59, "McpAppModelContext"],
         [60, "ThreadSnapshotWindowIndexes"],
+        [61, "ProjectionThreadSweepColumns"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
@@ -58,6 +59,7 @@ layer("055_OrchestrationV2", (it) => {
         { migration_id: 58, name: "WebhookRelayDeliveries" },
         { migration_id: 59, name: "McpAppModelContext" },
         { migration_id: 60, name: "ThreadSnapshotWindowIndexes" },
+        { migration_id: 61, name: "ProjectionThreadSweepColumns" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`
@@ -129,6 +131,43 @@ layer("055_OrchestrationV2", (it) => {
           "orchestration_v2_projection_turn_items_shell_pending_idx",
         ],
       );
+    }),
+  );
+
+  it.effect("preserves existing thread filters when adding sweep columns", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 60 });
+      const payload = JSON.stringify({
+        settledAt: "2026-07-24T00:00:00.000Z",
+        settledOverride: "settled",
+        pinnedAt: "2026-07-23T00:00:00.000Z",
+        autoSettleDisabledAt: "2026-07-22T00:00:00.000Z",
+        forkedFrom: { type: "run", threadId: "source-thread" },
+        pullRequests: [{ number: 1 }, { number: 2 }],
+      });
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_threads (
+          thread_id, project_id, title, default_provider, provider_instance_id,
+          runtime_mode, interaction_mode, created_at, updated_at, payload_json
+        ) VALUES (
+          'sweep-thread', 'sweep-project', 'Sweep thread', 'codex', 'codex',
+          'full-access', 'default', '2026-07-24T00:00:00.000Z',
+          '2026-07-24T00:00:00.000Z', ${payload}
+        )
+      `;
+      yield* runMigrations();
+      const rows = yield* sql<{ readonly thread_id: string }>`
+        SELECT thread_id FROM orchestration_v2_projection_threads
+        WHERE deleted_at IS NULL AND archived_at IS NULL
+          AND settled_at = '2026-07-24T00:00:00.000Z'
+          AND settled_override = 'settled'
+          AND pinned_at = '2026-07-23T00:00:00.000Z'
+          AND auto_settle_disabled_at = '2026-07-22T00:00:00.000Z'
+          AND forked_from_run_thread_id = 'source-thread'
+          AND pull_request_count = 2
+      `;
+      assert.deepStrictEqual(rows, [{ thread_id: "sweep-thread" }]);
     }),
   );
 });

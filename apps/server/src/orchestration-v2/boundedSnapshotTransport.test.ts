@@ -344,6 +344,55 @@ function itemIds(projection: OrchestrationV2ThreadProjection): string[] {
 }
 
 it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
+  it.effect("keeps compact visits current for legacy and opted-in thread subscribers", () =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const at = yield* DateTime.now;
+      const event: OrchestrationV2DomainEvent = {
+        id: EventId.make("event:compact-transport:visit"),
+        type: "thread.visit-recorded",
+        threadId: PARENT,
+        occurredAt: at,
+        payload: { lastVisitedAt: at },
+      };
+      yield* projections.apply(event);
+      const liveManagement = Layer.mock(ThreadManagementService.ThreadManagementService)({
+        ensureLegacyTranscript: () => Effect.void,
+        getThreadSnapshot: (id) => projections.getThreadSnapshot(id).pipe(Effect.orDie),
+        getThreadSnapshotWindow: (id, options) =>
+          projections.getThreadSnapshotWindow(id, options).pipe(Effect.orDie),
+        getThreadRecords: (id, fields, filter) =>
+          projections.getThreadRecords(id, fields, filter).pipe(Effect.orDie),
+        streamStoredEventsFrom: () => Stream.make({ sequence: 1, commandId: null, event }),
+      });
+      for (const acceptThreadFieldEvents of [false, true]) {
+        const items = yield* subscribeOrchestrationV2Thread({
+          threadId: PARENT,
+          acceptThreadFieldEvents,
+        }).pipe(
+          Effect.flatMap((stream) => Stream.take(stream, 2).pipe(Stream.runCollect)),
+          Effect.provide(liveManagement),
+        );
+        const live = items[1];
+        assert.equal(live?.kind, "event");
+        if (live?.kind !== "event") return;
+        const decoded = decodeStreamItem(JSON.parse(JSON.stringify(encodeStreamItem(live))));
+        assert.equal(decoded.kind, "event");
+        if (decoded.kind !== "event") return;
+        assert.equal(
+          decoded.event.type,
+          acceptThreadFieldEvents ? "thread.visit-recorded" : "thread.visited",
+        );
+        if (
+          decoded.event.type === "thread.visited" ||
+          decoded.event.type === "thread.visit-recorded"
+        ) {
+          assert.deepEqual(decoded.event.payload.lastVisitedAt, at);
+        }
+      }
+    }),
+  );
+
   describe.each([
     ["fork", FORK],
     ["long run with a retained interrupt request", LONG],

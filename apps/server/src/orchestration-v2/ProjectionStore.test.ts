@@ -1940,6 +1940,18 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       assert.deepEqual(visited.thread.updatedAt, createdAt);
 
       yield* projectionStore.apply({
+        id: EventId.make("event:projection-read-state:visit-recorded"),
+        type: "thread.visit-recorded",
+        threadId,
+        occurredAt: markedUnreadOccurredAt,
+        payload: { lastVisitedAt: visitedOccurredAt },
+      });
+      const recorded = yield* projectionStore.getThreadProjection(threadId);
+      assert.deepEqual(recorded.thread.lastVisitedAt, visitedOccurredAt);
+      assert.deepEqual(recorded.thread.updatedAt, createdAt);
+      assert.equal(recorded.thread.title, thread.title);
+
+      yield* projectionStore.apply({
         id: EventId.make("event:projection-read-state:marked-unread"),
         type: "thread.marked-unread",
         threadId,
@@ -2632,7 +2644,9 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         ["settledOverride", "settled"],
       ]) {
         yield* sql`UPDATE orchestration_v2_projection_threads
-          SET payload_json = json_set(payload_json, ${`$.${field}`}, ${value})
+          SET payload_json = json_set(payload_json, ${`$.${field}`}, ${value}),
+            archived_at = CASE WHEN ${field} = 'archivedAt' THEN ${value} ELSE archived_at END,
+            settled_override = CASE WHEN ${field} = 'settledOverride' THEN ${value} ELSE settled_override END
           WHERE thread_id = ${threadId}`;
         assert.isUndefined(
           (yield* store.getLimitRecoveryCandidates({ now, autoResume: true, snooze: false })).find(
@@ -2640,7 +2654,8 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           ),
         );
         yield* sql`UPDATE orchestration_v2_projection_threads
-          SET payload_json = ${originalRow!.payload_json} WHERE thread_id = ${threadId}`;
+          SET payload_json = ${originalRow!.payload_json}, archived_at = NULL, settled_override = NULL
+          WHERE thread_id = ${threadId}`;
       }
       yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = ${DateTime.formatIso(now)} WHERE thread_id = ${threadId}`;
       assert.isUndefined(
@@ -4810,6 +4825,50 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         },
       ]);
       assert.equal(yield* phase, "running");
+
+      const snapshot = {
+        state: "open" as const,
+        title: "Updated pull request",
+        headBranch: "feature",
+        baseBranch: "main",
+        isDraft: false,
+        updatedAt: DateTime.formatIso(at),
+        syncedAt: DateTime.formatIso(at),
+      };
+      yield* store.apply({
+        id: EventId.make("event:watched-pull-request:link-synced"),
+        type: "thread.pull-request-link-synced",
+        threadId,
+        occurredAt: DateTime.add(at, { seconds: 1 }),
+        payload: {
+          host: link.host,
+          repository: link.repository,
+          number: link.number,
+          snapshot,
+          stack: null,
+        },
+      });
+      const synced = yield* store.getThread(threadId);
+      assert.deepEqual(synced.pullRequests?.[0]?.snapshot, snapshot);
+      assert.isDefined(synced.pullRequests?.[0]?.watch);
+      assert.deepEqual(synced.updatedAt, at);
+      assert.equal(yield* phase, "running");
+      assert.equal((yield* store.getThreadsWithPullRequests()).length, 1);
+
+      yield* store.apply({
+        id: EventId.make("event:watched-pull-request:missing-link-synced"),
+        type: "thread.pull-request-link-synced",
+        threadId,
+        occurredAt: DateTime.add(at, { seconds: 2 }),
+        payload: {
+          host: link.host,
+          repository: link.repository,
+          number: 999,
+          snapshot,
+          stack: null,
+        },
+      });
+      assert.deepEqual((yield* store.getThread(threadId)).pullRequests, synced.pullRequests);
 
       yield* syncPullRequests("unwatched", [link]);
       assert.deepEqual((yield* store.getThreadShell(threadId))?.pendingBackgroundTasks, []);

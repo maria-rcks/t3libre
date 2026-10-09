@@ -607,6 +607,7 @@ export const make = Effect.gen(function* () {
       case "thread.settled":
         return cleanUpSettledThread(event.threadId);
       case "thread.pull-request-synced":
+      case "thread.pull-request-link-synced":
       case "provider-session.detached":
         return worker.enqueue(event.threadId);
       case "provider-session.updated":

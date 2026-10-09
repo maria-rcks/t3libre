@@ -2293,19 +2293,58 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const movesForward =
       thread.lastVisitedAt === null ||
       DateTime.toEpochMillis(visitedAt.value) > DateTime.toEpochMillis(thread.lastVisitedAt);
-    // Viewing a thread changes read state only. Loading its transcript (or
-    // bumping updatedAt) makes a routine read receipt scale with its history.
+    // Viewing a thread changes read state only. Loading its transcript, bumping
+    // updatedAt, or recording the whole thread makes a routine read receipt
+    // scale with its history.
     yield* emit(
       events,
       command,
     )({
-      type: "thread.visited",
+      type: "thread.visit-recorded",
       threadId: command.threadId,
       providerInstanceId: thread.providerInstanceId,
       occurredAt: yield* DateTime.now,
-      payload: movesForward ? { ...thread, lastVisitedAt: visitedAt.value } : thread,
+      payload: { lastVisitedAt: movesForward ? visitedAt.value : thread.lastVisitedAt },
     });
   });
+
+  // The sync reactor writes one of these per linked thread whenever a pull request changes on
+  // its host, so the event records only that link's snapshot, not the thread.
+  const dispatchPullRequestLinkSync = Effect.fn("orchestrationV2.dispatch.pullRequestLinkSync")(
+    function* (
+      command: Extract<OrchestrationV2Command, { readonly type: "thread.pull-request-link.sync" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      const thread = yield* projectionStore
+        .getThread(command.threadId)
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      if (thread.deletedAt !== null) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} is deleted.`,
+        });
+      }
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "thread.pull-request-link-synced",
+        threadId: command.threadId,
+        providerInstanceId: thread.providerInstanceId,
+        occurredAt: yield* DateTime.now,
+        payload: {
+          ...normalizeThreadPullRequestKey(command),
+          snapshot: command.snapshot,
+          stack: command.stack,
+        },
+      });
+    },
+  );
 
   // Checked under the thread lock: the watch or the thread can change while the host is read.
   // The watch is recorded first so the wake's own thread events carry it.
@@ -2384,7 +2423,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.metadata.update"
           | "thread.pull-request.link"
           | "thread.pull-request.unlink"
-          | "thread.pull-request-link.sync"
           | "thread.pull-request.watch"
           | "thread.pull-request-watch.sync"
           | "thread.pull-request.sync"
@@ -2977,8 +3015,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           };
         }
         case "thread.pull-request.link":
-        case "thread.pull-request.unlink":
-        case "thread.pull-request-link.sync": {
+        case "thread.pull-request.unlink": {
           const key = normalizeThreadPullRequestKey(command);
           const links = threadPullRequestsOf(thread);
           const existing = links.find((link) => threadPullRequestKeysEqual(link, key));
@@ -3022,7 +3059,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               ...links.filter((entry) => !threadPullRequestKeysEqual(entry, key)),
               link,
             ];
-          } else if (command.type === "thread.pull-request.unlink") {
+          } else {
             if (!existing) return thread;
             const belongsToStack =
               existing.source === "stack" ||
@@ -3043,13 +3080,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     : link,
                 )
               : links.filter((link) => link !== existing);
-          } else {
-            if (!existing) return thread;
-            pullRequests = links.map((link) =>
-              link === existing
-                ? { ...link, snapshot: command.snapshot, stack: command.stack }
-                : link,
-            );
           }
           return {
             ...thread,
@@ -3066,7 +3096,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               )
                 ? thread.linkedPullRequest
                 : null,
-            updatedAt: command.type === "thread.pull-request-link.sync" ? thread.updatedAt : now,
+            updatedAt: now,
           };
         }
         case "thread.pull-request.watch":
@@ -3212,7 +3242,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return "thread.metadata-updated" as const;
         case "thread.pull-request.link":
         case "thread.pull-request.unlink":
-        case "thread.pull-request-link.sync":
         case "thread.pull-request.watch":
         case "thread.pull-request-watch.sync":
         case "thread.pull-request.sync":
@@ -10232,7 +10261,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.metadata.update":
       case "thread.pull-request.link":
       case "thread.pull-request.unlink":
-      case "thread.pull-request-link.sync":
       case "thread.pull-request.watch":
       case "thread.pull-request.sync":
       case "thread.title.regeneration.complete":
@@ -10241,6 +10269,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.model-selection.set":
       case "provider.switch":
         yield* dispatchThreadMutation(command, events, effects);
+        break;
+      case "thread.pull-request-link.sync":
+        yield* dispatchPullRequestLinkSync(command, events);
         break;
       case "thread.pull-request-watch.sync":
         yield* dispatchPullRequestWatchSync(command, events, effects);
