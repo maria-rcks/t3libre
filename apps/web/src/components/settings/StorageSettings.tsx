@@ -1,6 +1,23 @@
-import type { StorageCleanupSettings, WorktreeCleanupRules } from "@t3tools/contracts";
+import type {
+  StorageCleanupReport,
+  StorageCleanupSettings,
+  WorktreeCleanupRules,
+} from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
+import { CheckIcon, CircleAlertIcon, MinusIcon } from "lucide-react";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { Button } from "../ui/button";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import { toastManager } from "../ui/toast";
 
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -144,6 +161,199 @@ function RetentionControl({
   );
 }
 
+const KEEP_WHEN_LABELS = {
+  "any-local-files": "Any local files",
+  "uncommitted-changes": "Uncommitted changes",
+  "tracked-changes": "Edited tracked files",
+} as const;
+
+function cleanupSummary(report: StorageCleanupReport | null) {
+  if (report === null) return "Hasn't run yet";
+  return `Last ${report.trigger} run ${formatRelativeTimeLabel(report.finishedAt)}: removed ${report.counts.removed}, kept ${report.counts.kept}, ${report.counts.failed} failed`;
+}
+
+function CleanupSection() {
+  const { connectedEnvironments } = useSettingsScope();
+  const [pending, setPending] = useState(false);
+  const run = useAtomCommand(serverEnvironment.runStorageCleanup);
+  const supported = connectedEnvironments.filter(
+    (environment) => environment.serverConfig?.environment.capabilities.storageCleanupRun === true,
+  );
+  const state = useAtomValue(
+    useMemo(
+      () =>
+        Atom.make((get) =>
+          connectedEnvironments.flatMap((environment) => {
+            if (environment.serverConfig?.environment.capabilities.storageCleanupRun !== true)
+              return [];
+            const query = get(
+              serverEnvironment.storageCleanupReport({
+                environmentId: environment.environmentId,
+                input: {},
+              }),
+            );
+            return [
+              {
+                environmentId: environment.environmentId,
+                allowed: get(
+                  serverEnvironment.runStorageCleanup.permissionAtom(environment.environmentId),
+                ),
+                report: query._tag === "Success" ? query.value : null,
+                loading: query.waiting,
+                failed: query._tag === "Failure",
+              },
+            ];
+          }),
+        ),
+      [connectedEnvironments],
+    ),
+  );
+  const hasRules = supported.some((environment) => {
+    const settings = environment.serverConfig?.settings;
+    if (!settings) return false;
+    const enabled = (rules: WorktreeCleanupRules) =>
+      rules.worktreeAfterDays !== null ||
+      rules.worktreeOnMerge ||
+      rules.worktreeOnDelete ||
+      rules.worktreeUnchanged;
+    return (
+      settings.storageCleanup.browserArtifactsAfterDays !== null ||
+      settings.storageCleanup.logsAfterDays !== null ||
+      enabled(resolveWorktreeCleanup(settings, null)) ||
+      Object.values(settings.projectSettingsOverrides).some(
+        (override) =>
+          override.worktreeCleanup?.mode === "custom" && enabled(override.worktreeCleanup.rules),
+      )
+    );
+  });
+  if (supported.length === 0) return null;
+  const summaries = supported.map((environment) => {
+    const query = state.find((entry) => entry.environmentId === environment.environmentId);
+    const report = query?.report ?? null;
+    return {
+      environment,
+      report,
+      description: report
+        ? cleanupSummary(report)
+        : query?.failed
+          ? "Could not load the last run"
+          : query?.loading
+            ? "Loading last run…"
+            : "Hasn't run yet",
+    };
+  });
+  const deleteNow = async () => {
+    if (pending) return;
+    setPending(true);
+    try {
+      await Promise.all(
+        supported.map(async (environment) => {
+          const result = await run({ environmentId: environment.environmentId, input: {} });
+          if (result._tag === "Success") {
+            const failures = result.value.entries.filter((entry) => entry.outcome === "failed");
+            if (failures.length > 0)
+              toastManager.add({
+                type: "error",
+                title: `Cleanup failed on ${environment.label}`,
+                description: failures[0]!.reason,
+              });
+          } else if (!isAtomCommandInterrupted(result)) {
+            toastManager.add({
+              type: "error",
+              title: `Could not run cleanup on ${environment.label}`,
+              description: String(squashAtomCommandFailure(result)),
+            });
+          }
+        }),
+      );
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <SettingsSection id="storage-cleanup" title="Cleanup">
+      <SettingsRow
+        {...searchableSetting("storage-delete-now")}
+        description={
+          <span className="space-y-1">
+            {summaries.map(({ environment, description }) => (
+              <span key={environment.environmentId} className="block">
+                {supported.length > 1 ? `${environment.label}: ` : ""}
+                {description}
+              </span>
+            ))}
+          </span>
+        }
+        control={
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pending || !hasRules || state.some((entry) => !entry.allowed)}
+            onClick={() => void deleteNow()}
+          >
+            {pending ? "Deleting…" : "Delete now"}
+          </Button>
+        }
+      />
+      <div aria-live="polite">
+        {summaries.map(({ environment, report }) =>
+          report && report.entries.length > 0 ? (
+            <ul
+              key={environment.environmentId}
+              aria-label={`Cleanup results for ${environment.label}`}
+              className="max-h-80 space-y-3 overflow-y-auto border-t border-border px-3 py-3 sm:px-4"
+            >
+              {report.entries.map((entry, index) => {
+                const Icon =
+                  entry.outcome === "failed"
+                    ? CircleAlertIcon
+                    : entry.outcome === "removed"
+                      ? CheckIcon
+                      : MinusIcon;
+                const name =
+                  entry.kind === "worktree"
+                    ? (entry.path?.split(/[\\/]/).findLast(Boolean) ?? "Worktrees")
+                    : entry.kind === "logs"
+                      ? "Rotated logs"
+                      : "Browser artifacts";
+                return (
+                  <li
+                    key={`${entry.path ?? entry.kind}:${entry.threadId ?? index}`}
+                    className="flex items-start gap-2 text-xs"
+                  >
+                    <Icon
+                      aria-hidden="true"
+                      className={`mt-0.5 size-3.5 shrink-0 ${entry.outcome === "failed" ? "text-destructive" : entry.outcome === "removed" ? "text-success-foreground" : "text-muted-foreground"}`}
+                    />
+                    <div className="min-w-0">
+                      <Tooltip>
+                        <TooltipTrigger render={<p className="break-words text-foreground" />}>
+                          {supported.length > 1 ? `${environment.label} · ` : ""}
+                          {name}
+                          {entry.threadTitle ? ` · ${entry.threadTitle}` : ""}
+                        </TooltipTrigger>
+                        {entry.path && <TooltipPopup>{entry.path}</TooltipPopup>}
+                      </Tooltip>
+                      <p
+                        className={`break-words ${entry.outcome === "failed" ? "text-destructive" : "text-muted-foreground"}`}
+                      >
+                        {entry.reason}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+              {report.omittedCount > 0 && (
+                <li className="text-xs text-muted-foreground">and {report.omittedCount} more</li>
+              )}
+            </ul>
+          ) : null,
+        )}
+      </div>
+    </SettingsSection>
+  );
+}
+
 export function StorageSettingsPanel() {
   const { scope, connectedEnvironments, targets, target } = useSettingsScope();
   const scopedSettings = useScopedSettings();
@@ -263,7 +473,7 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete worktrees with deleted threads"
               status={ruleStatus("worktreeOnDelete")}
-              description="Remove unused worktrees when active or archived threads are deleted. Worktrees with local changes are kept."
+              description="Remove unused worktrees when active or archived threads are deleted. The local changes rule controls which files are kept."
               serverScoped={!isProjectScope}
               control={
                 <Switch
@@ -312,6 +522,49 @@ export function StorageSettingsPanel() {
                 />
               }
             />
+            {connectedEnvironments.every(
+              (environment) =>
+                environment.serverConfig?.environment.capabilities.storageCleanupRun === true,
+            ) && (
+              <SettingsRow
+                {...searchableSetting("storage-worktree-keep-when")}
+                status={ruleStatus("worktreeKeepWhen")}
+                description={
+                  settings.worktreeKeepWhen === "any-local-files"
+                    ? "Keep worktrees containing local files, including ignored files except node_modules."
+                    : settings.worktreeKeepWhen === "tracked-changes"
+                      ? "Keep edited tracked files. Untracked and ignored files, including .env and build output, are deleted with the worktree."
+                      : "Keep tracked edits and untracked files. Ignored files, including .env and build output, are deleted with the worktree."
+                }
+                serverScoped={!isProjectScope}
+                control={
+                  <Select
+                    value={ruleStatus("worktreeKeepWhen") ? null : settings.worktreeKeepWhen}
+                    onValueChange={(next) => {
+                      if (
+                        next === "any-local-files" ||
+                        next === "uncommitted-changes" ||
+                        next === "tracked-changes"
+                      )
+                        updateWorktree({ worktreeKeepWhen: next });
+                    }}
+                  >
+                    <SelectTrigger size="sm" aria-label="Keep worktrees with local changes">
+                      <SelectValue>
+                        {ruleStatus("worktreeKeepWhen")
+                          ? "Mixed"
+                          : KEEP_WHEN_LABELS[settings.worktreeKeepWhen]}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end" alignItemWithTrigger={false}>
+                      <SelectItem value="any-local-files">Any local files</SelectItem>
+                      <SelectItem value="uncommitted-changes">Uncommitted changes</SelectItem>
+                      <SelectItem value="tracked-changes">Edited tracked files</SelectItem>
+                    </SelectPopup>
+                  </Select>
+                }
+              />
+            )}
           </>
         )}
       </SettingsSection>
@@ -346,6 +599,7 @@ export function StorageSettingsPanel() {
           />
         </SettingsSection>
       )}
+      {!isProjectScope && <CleanupSection />}
     </SettingsPageContainer>
   );
 }
