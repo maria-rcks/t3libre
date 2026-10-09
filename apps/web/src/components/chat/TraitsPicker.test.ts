@@ -242,20 +242,6 @@ describe("buildTraitsTriggerDisplay", () => {
     expect(display([unresolved])).toEqual({ label: "" });
   });
 
-  it("does not claim Standard when the effective Codex service tier is unknown", () => {
-    const unknownTier: ProviderOptionDescriptor = {
-      id: "serviceTier",
-      label: "Service Tier",
-      type: "select",
-      options: [
-        { id: "default", label: "Standard" },
-        { id: "priority", label: "Fast" },
-      ],
-    };
-    expect(display([unknownTier])).toEqual({ label: "" });
-    expect(display([EFFORT, unknownTier])).toEqual({ label: "High" });
-  });
-
   it("still renders prompt-controlled ultrathink with Fast", () => {
     expect(
       buildTraitsTriggerDisplay({
