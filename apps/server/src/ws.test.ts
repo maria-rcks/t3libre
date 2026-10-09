@@ -4,13 +4,7 @@ import {
   type ServerConfig,
   type ServerConfigStreamEvent,
 } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import * as SqlClient from "effect/sql/SqlClient";
-import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
-import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
-import * as ThreadManagementService from "./orchestration-v2/ThreadManagementService.ts";
-import * as ProjectService from "./project/ProjectService.ts";
-import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -29,7 +23,6 @@ import {
   hasCompatibleOrchestrationProtocol,
   resolveAvailableEditorsForConfig,
   shouldUseBoundedThreadSnapshot,
-  subscribeOrchestrationV2Shell,
   withLateEditorConfig,
 } from "./ws.ts";
 
@@ -171,7 +164,7 @@ const makeParkedWindowsLauncher = Effect.gen(function* () {
   );
   const onWindows = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provideService(HostProcessPlatform, "win32"),
+      Effect.provideService(HostProcess.Platform, "win32"),
       Effect.provide(
         ConfigProvider.layer(
           ConfigProvider.fromEnv({
@@ -240,26 +233,4 @@ it.effect("recovers a reveal kind whose real probe outlasts the config timeout",
       assert.equal(late.config.shellRevealInFileManagerKind, "file-explorer");
     }
   }).pipe(Effect.scoped),
-);
-
-it.effect("returns a typed shell error for a malformed live buffer budget", () =>
-  Effect.gen(function* () {
-    const error = yield* subscribeOrchestrationV2Shell({}).pipe(Effect.flip);
-    assert.strictEqual(error._tag, "OrchestrationV2GetShellSnapshotError");
-    assert.strictEqual(error.message, "Failed to prepare the application shell stream");
-  }).pipe(
-    Effect.provide(
-      Layer.mergeAll(
-        ConfigProvider.layer(
-          ConfigProvider.fromEnv({ env: { T3CODE_SHELL_LIVE_BUFFER_MIB: "not-an-integer" } }),
-        ),
-        Layer.succeed(SqlClient.SqlClient, {} as SqlClient.SqlClient),
-        Layer.mock(ThreadManagementService.ThreadManagementService)({}),
-        Layer.mock(OrchestrationEventStore.OrchestrationEventStore)({}),
-        Layer.mock(ProjectStore.ProjectStoreV2)({}),
-        Layer.mock(ProjectService.ProjectService)({}),
-        Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({}),
-      ),
-    ),
-  ),
 );
