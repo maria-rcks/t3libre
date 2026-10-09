@@ -141,6 +141,40 @@ const enrichedSnapshotSecond: ServerProvider = {
 };
 
 describe("makeManagedServerProvider", () => {
+  it.effect("parks the initial probe and reads settings again when startup releases it", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const host = yield* ProviderHost.ProviderHost;
+        const startup = yield* Deferred.make<void>();
+        const settings = yield* Ref.make<TestSettings>({ enabled: true });
+        const checkCalls = yield* Ref.make(0);
+        const enrichedWith = yield* Deferred.make<TestSettings>();
+        yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Ref.get(settings),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
+            Effect.as(refreshedSnapshot),
+          ),
+          enrichSnapshot: ({ settings }) => Deferred.succeed(enrichedWith, settings),
+          refreshInterval: "1 hour",
+        }).pipe(
+          Effect.provideService(ProviderHost.ProviderHost, {
+            ...host,
+            awaitStartupProbe: Deferred.await(startup),
+          }),
+        );
+        assert.strictEqual(yield* Ref.get(checkCalls), 0);
+        yield* Ref.set(settings, { enabled: false });
+        yield* Deferred.succeed(startup, undefined);
+        assert.deepStrictEqual(yield* Deferred.await(enrichedWith), { enabled: false });
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
   it.effect(
     "runs the initial provider check in the background and streams the refreshed snapshot",
     () =>
