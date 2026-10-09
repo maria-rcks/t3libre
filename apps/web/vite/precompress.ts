@@ -1,13 +1,13 @@
 // @effect-diagnostics nodeBuiltinImport:off - Vite build hooks run outside an Effect runtime.
-import * as NodeFs from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { promisify } from "node:util";
+import * as NodeUtil from "node:util";
 import * as NodeZlib from "node:zlib";
 
 import type { Plugin } from "vite-plus";
 
-const brotli = promisify(NodeZlib.brotliCompress);
-const gzip = promisify(NodeZlib.gzip);
+const brotli = NodeUtil.promisify(NodeZlib.brotliCompress);
+const gzip = NodeUtil.promisify(NodeZlib.gzip);
 
 // Same types and floor as the server's on-the-fly compression.
 const COMPRESSIBLE_FILE = /\.(?:js|mjs|css|json|svg|wasm|txt|xml)$/;
@@ -32,7 +32,7 @@ export function precompressPlugin(): Plugin {
       await Promise.all(
         files.map(async (fileName) => {
           const filePath = NodePath.join(outDir, fileName);
-          const source = await NodeFs.readFile(filePath);
+          const source = await NodeFSP.readFile(filePath);
           if (source.byteLength < MIN_BYTES) return;
           const [br, gz] = await Promise.all([
             brotli(source, {
@@ -48,10 +48,10 @@ export function precompressPlugin(): Plugin {
           ]);
           await Promise.all([
             br.byteLength < source.byteLength
-              ? NodeFs.writeFile(`${filePath}.br`, br)
+              ? NodeFSP.writeFile(`${filePath}.br`, br)
               : Promise.resolve(),
             gz.byteLength < source.byteLength
-              ? NodeFs.writeFile(`${filePath}.gz`, gz)
+              ? NodeFSP.writeFile(`${filePath}.gz`, gz)
               : Promise.resolve(),
           ]);
         }),

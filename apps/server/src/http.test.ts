@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import { describe, vi } from "vite-plus/test";
-import { brotliCompressSync, gzipSync } from "node:zlib";
+import * as NodeZlib from "node:zlib";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -153,8 +153,8 @@ it.layer(
       yield* fs.makeDirectory(path.join(staticDir, "assets"));
       const body = 'export const build = "precompressed";\n'.repeat(100);
       const asset = "assets/app-1234abcd.js";
-      const br = brotliCompressSync(body);
-      const gz = gzipSync(body);
+      const br = NodeZlib.brotliCompressSync(body);
+      const gz = NodeZlib.gzipSync(body);
       yield* fs.writeFileString(path.join(staticDir, asset), body);
       yield* fs.writeFile(path.join(staticDir, `${asset}.br`), br);
       yield* fs.writeFile(path.join(staticDir, `${asset}.gz`), gz);
