@@ -54,6 +54,7 @@ import {
   sanitizeFeatureBranchName,
 } from "@t3tools/shared/git";
 import {
+  canonicalRepositoryKey,
   getChangeRequestTerminologyForKind,
   isSshRemoteUrl,
   type ChangeRequestTerminology,
@@ -966,20 +967,34 @@ export const make = Effect.gen(function* () {
           })
           .pipe(
             // Azure DevOps, GitLab and Bitbucket publish no `refs/pull/<n>/head`. A head in the
-            // same repository is a branch on the primary remote, so it is fetched by name instead.
+            // same repository is a branch on the primary remote, so it is fetched by name instead,
+            // but only when that remote is the pull request's own repository: Azure finds a pull
+            // request by number anywhere in the organization.
             Effect.catch((cause) =>
               pullRequest.isCrossRepository === true
                 ? Effect.fail(cause)
-                : gitCore.resolvePrimaryRemoteName(cwd).pipe(
-                    Effect.flatMap((remoteName) =>
-                      gitCore.fetchRemoteBranch({
-                        cwd,
-                        remoteName,
-                        remoteBranch: pullRequest.headBranch,
-                        localBranch,
-                      }),
-                    ),
-                  ),
+                : Effect.gen(function* () {
+                    const remoteName = yield* gitCore.resolvePrimaryRemoteName(cwd);
+                    const remoteUrl = yield* gitCore.readConfigValue(
+                      cwd,
+                      `remote.${remoteName}.url`,
+                    );
+                    const pullRequestKey = pullRequestRepositoryKey(pullRequest.url);
+                    if (
+                      remoteUrl === null ||
+                      pullRequestKey === null ||
+                      canonicalRepositoryKey(pullRequestKey) !==
+                        canonicalRepositoryKey(normalizeGitRemoteUrl(remoteUrl))
+                    ) {
+                      return yield* cause;
+                    }
+                    yield* gitCore.fetchRemoteBranch({
+                      cwd,
+                      remoteName,
+                      remoteBranch: pullRequest.headBranch,
+                      localBranch,
+                    });
+                  }),
             ),
           );
         return;

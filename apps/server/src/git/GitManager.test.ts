@@ -4955,6 +4955,34 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const headSha = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout.trim();
       yield* runGit(repoDir, ["checkout", "main"]);
       yield* runGit(repoDir, ["branch", "-D", "feature/no-pull-ref"]);
+      // The remote keeps its Azure spelling, which is what the pull request is compared with.
+      const remoteUrl = "https://dev.azure.com/org/project/_git/repo";
+      yield* runGit(repoDir, ["remote", "set-url", "origin", remoteUrl]);
+      yield* runGit(repoDir, ["config", `url.${remoteDir}.insteadOf`, remoteUrl]);
+
+      // A pull request of another repository in the organization is not this remote's branch.
+      const { manager: otherRepositoryManager } = yield* makeManager({
+        ghScenario: {
+          pullRequest: {
+            number: 79,
+            title: "Another repository's PR",
+            url: "https://dev.azure.com/org/project/_git/other/pullrequest/79",
+            baseRefName: "main",
+            headRefName: "feature/no-pull-ref",
+            state: "open",
+            isCrossRepository: false,
+          },
+        },
+      });
+      yield* Effect.flip(
+        preparePullRequestThread(otherRepositoryManager, {
+          cwd: repoDir,
+          reference: "79",
+          mode: "worktree",
+        }),
+      );
+      const localBranches = (yield* runGit(repoDir, ["branch", "--list"])).stdout;
+      expect(localBranches).not.toContain("feature/no-pull-ref");
 
       const { manager } = yield* makeManager({
         ghScenario: {
