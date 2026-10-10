@@ -540,14 +540,19 @@ describe("pools", () => {
       "hub:x.json",
     ]);
     expect(accounts[0]?.limits.windows[0]?.usedPercent).toBe(8);
-    // One hub file name in two workspaces stays two distinct keys.
+    // One hub file name in two workspaces stays two accounts, even without an
+    // email to tell them apart.
+    const withoutEmail = (id: string, workspaceId: string) => {
+      const { email: _email, ...account } = hubAccount(id, workspaceId);
+      return account;
+    };
     const sameFile = new Map([
       [
         EnvironmentId.make("env-a"),
         {
           ...laptop,
           serverConfig: {
-            usageLimitSources: [{ ...source, accounts: [hubAccount("a.json", "ws-1")] }],
+            usageLimitSources: [{ ...source, accounts: [withoutEmail("a.json", "ws-1")] }],
           },
         },
       ],
@@ -556,7 +561,7 @@ describe("pools", () => {
         {
           ...laptop,
           serverConfig: {
-            usageLimitSources: [{ ...source, accounts: [hubAccount("a.json", "ws-2")] }],
+            usageLimitSources: [{ ...source, accounts: [withoutEmail("a.json", "ws-2")] }],
           },
         },
       ],
