@@ -958,11 +958,30 @@ export const make = Effect.gen(function* () {
       const repositoryNameWithOwner = resolveHeadRepositoryNameWithOwner(pullRequest) ?? "";
 
       if (repositoryNameWithOwner.length === 0) {
-        yield* gitCore.fetchPullRequestBranch({
-          cwd,
-          prNumber: pullRequest.number,
-          branch: localBranch,
-        });
+        yield* gitCore
+          .fetchPullRequestBranch({
+            cwd,
+            prNumber: pullRequest.number,
+            branch: localBranch,
+          })
+          .pipe(
+            // Azure DevOps, GitLab and Bitbucket publish no `refs/pull/<n>/head`. A head in the
+            // same repository is a branch on the primary remote, so it is fetched by name instead.
+            Effect.catch((cause) =>
+              pullRequest.isCrossRepository === true
+                ? Effect.fail(cause)
+                : gitCore.resolvePrimaryRemoteName(cwd).pipe(
+                    Effect.flatMap((remoteName) =>
+                      gitCore.fetchRemoteBranch({
+                        cwd,
+                        remoteName,
+                        remoteBranch: pullRequest.headBranch,
+                        localBranch,
+                      }),
+                    ),
+                  ),
+            ),
+          );
         return;
       }
 
