@@ -86,17 +86,18 @@ import { installDesktopPasteAsText } from "../lib/desktopPasteAsText";
 import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
 
 // These optional notices mount with the shell. A stale chunk still gets the
-// `vite:preloadError` reload first; a chunk that keeps failing renders nothing
+// `vite:preloadError` reload first, and while that reload is pending Vite
+// resolves the import to undefined. A chunk that keeps failing renders nothing
 // instead of replacing the shell with the route error view.
 const renderNothing = () => null;
 const ConnectOnboardingDialog = lazy(() =>
   import("../components/cloud/ConnectOnboardingDialog")
-    .then((module) => ({ default: module.ConnectOnboardingDialog }))
+    .then((module) => ({ default: module?.ConnectOnboardingDialog ?? renderNothing }))
     .catch(() => ({ default: renderNothing })),
 );
 const NightlyMobileBetaNotice = lazy(() =>
   import("../components/NightlyMobileBeta")
-    .then((module) => ({ default: module.NightlyMobileBetaNotice }))
+    .then((module) => ({ default: module?.NightlyMobileBetaNotice ?? renderNothing }))
     .catch(() => ({ default: renderNothing })),
 );
 

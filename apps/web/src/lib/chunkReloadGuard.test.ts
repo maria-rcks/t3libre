@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./chunkReloadGuard";
+import { reloadOnceForChunkLoadError } from "./chunkReloadGuard";
 
 function createStorageStub(): Storage {
   const store = new Map<string, string>();
@@ -21,25 +21,26 @@ function createStorageStub(): Storage {
 }
 
 describe("reloadOnceForChunkLoadError", () => {
-  it("reloads on the first failure and lets the second one surface", () => {
+  it("reloads on the first failure and lets failures within the next minute surface", () => {
     const storage = createStorageStub();
     const reload = vi.fn();
 
-    expect(reloadOnceForChunkLoadError(() => storage, reload)).toBe(true);
+    expect(reloadOnceForChunkLoadError(() => storage, reload, 1_000_000)).toBe(true);
     expect(reload).toHaveBeenCalledTimes(1);
 
-    expect(reloadOnceForChunkLoadError(() => storage, reload)).toBe(false);
+    // The reloaded page requests the same failing chunk during its first render.
+    expect(reloadOnceForChunkLoadError(() => storage, reload, 1_002_000)).toBe(false);
+    expect(reloadOnceForChunkLoadError(() => storage, reload, 1_059_999)).toBe(false);
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it("reloads again after a successful boot cleared the guard", () => {
+  it("reloads again for a stale deploy a minute after the last reload", () => {
     const storage = createStorageStub();
     const reload = vi.fn();
 
-    reloadOnceForChunkLoadError(() => storage, reload);
-    clearChunkReloadGuard(() => storage);
+    reloadOnceForChunkLoadError(() => storage, reload, 1_000_000);
 
-    expect(reloadOnceForChunkLoadError(() => storage, reload)).toBe(true);
+    expect(reloadOnceForChunkLoadError(() => storage, reload, 1_060_000)).toBe(true);
     expect(reload).toHaveBeenCalledTimes(2);
   });
 
@@ -51,6 +52,5 @@ describe("reloadOnceForChunkLoadError", () => {
 
     expect(reloadOnceForChunkLoadError(blocked, reload)).toBe(false);
     expect(reload).not.toHaveBeenCalled();
-    expect(() => clearChunkReloadGuard(blocked)).not.toThrow();
   });
 });
