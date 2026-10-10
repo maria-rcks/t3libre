@@ -671,6 +671,39 @@ describe("DesktopWindow", () => {
     }),
   );
 
+  it.effect("keeps a window closed during a cold start closed until activation", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = layerTest({ window: fakeWindow.window, createCount, mainWindow });
+      const readyUrl = new URL("http://127.0.0.1:3773");
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        const closeMain = Effect.suspend(() => {
+          const closed = fakeWindow.windowListeners.get("closed");
+          return closed ? Effect.sync(() => closed()) : Effect.die("closed listener missing");
+        });
+
+        yield* desktopWindow.ensureMain;
+        yield* closeMain;
+        yield* desktopWindow.handleBackendReady(readyUrl);
+        assert.equal(yield* Ref.get(createCount), 1);
+        yield* desktopWindow.activate;
+        assert.equal(yield* Ref.get(createCount), 2);
+
+        // A dock click while the backend restarts reopens the window at readiness.
+        yield* desktopWindow.handleBackendNotReady;
+        yield* closeMain;
+        yield* desktopWindow.activate;
+        assert.equal(yield* Ref.get(createCount), 2);
+        yield* desktopWindow.handleBackendReady(readyUrl);
+        assert.equal(yield* Ref.get(createCount), 3);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect(
     "opens and reopens the window without backend readiness when local execution is disabled",
     () =>
