@@ -20,28 +20,67 @@ function createStorageStub(): Storage {
   };
 }
 
+const BUILD_B = "https://app.t3.codes/assets/index-B.js";
+const failedImport = (asset: string) =>
+  `${BUILD_B} TypeError: Failed to fetch dynamically imported module: https://app.t3.codes/assets/${asset}`;
+
 describe("reloadOnceForChunkLoadError", () => {
-  it("reloads on the first failure and lets failures within the next minute surface", () => {
+  it("reloads once for a chunk that fails on every boot, then lets it surface", () => {
     const storage = createStorageStub();
     const reload = vi.fn();
 
-    expect(reloadOnceForChunkLoadError(() => storage, reload, 1_000_000)).toBe(true);
+    expect(reloadOnceForChunkLoadError(failedImport("chat-1.js"), () => storage, reload)).toBe(
+      true,
+    );
     expect(reload).toHaveBeenCalledTimes(1);
 
-    // The reloaded page requests the same failing chunk during its first render.
-    expect(reloadOnceForChunkLoadError(() => storage, reload, 1_002_000)).toBe(false);
-    expect(reloadOnceForChunkLoadError(() => storage, reload, 1_059_999)).toBe(false);
+    // Every later boot requests the same failing chunk during its first render.
+    expect(reloadOnceForChunkLoadError(failedImport("chat-1.js"), () => storage, reload)).toBe(
+      false,
+    );
+    expect(reloadOnceForChunkLoadError(failedImport("chat-1.js"), () => storage, reload)).toBe(
+      false,
+    );
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it("reloads again for a stale deploy a minute after the last reload", () => {
+  it("reloads for each deploy that fails a chunk, however soon after the last reload", () => {
     const storage = createStorageStub();
     const reload = vi.fn();
 
-    reloadOnceForChunkLoadError(() => storage, reload, 1_000_000);
-
-    expect(reloadOnceForChunkLoadError(() => storage, reload, 1_060_000)).toBe(true);
+    // Deploy B fails a chunk of the open build, then deploy C, seconds later,
+    // fails a chunk of the build B reload loaded.
+    expect(
+      reloadOnceForChunkLoadError(
+        "https://app.t3.codes/assets/index-A.js TypeError: Failed to fetch dynamically imported module: https://app.t3.codes/assets/settings-a.js",
+        () => storage,
+        reload,
+      ),
+    ).toBe(true);
+    expect(reloadOnceForChunkLoadError(failedImport("diff-b.js"), () => storage, reload)).toBe(
+      true,
+    );
     expect(reload).toHaveBeenCalledTimes(2);
+
+    // A chunk of build B that keeps failing still stops after its one reload.
+    expect(reloadOnceForChunkLoadError(failedImport("diff-b.js"), () => storage, reload)).toBe(
+      false,
+    );
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops reloading once a tab has used its reloads", () => {
+    const storage = createStorageStub();
+    const reload = vi.fn();
+
+    for (let index = 0; index < 20; index += 1) {
+      reloadOnceForChunkLoadError(failedImport(`chunk-${index}.js`), () => storage, reload);
+    }
+
+    expect(reloadOnceForChunkLoadError(failedImport("chunk-20.js"), () => storage, reload)).toBe(
+      false,
+    );
+    expect(reload).toHaveBeenCalledTimes(20);
   });
 
   it("never reloads when storage is blocked, so a persistent failure cannot loop", () => {
@@ -50,7 +89,7 @@ describe("reloadOnceForChunkLoadError", () => {
       throw new DOMException("blocked", "SecurityError");
     };
 
-    expect(reloadOnceForChunkLoadError(blocked, reload)).toBe(false);
+    expect(reloadOnceForChunkLoadError(failedImport("chat-1.js"), blocked, reload)).toBe(false);
     expect(reload).not.toHaveBeenCalled();
   });
 });
