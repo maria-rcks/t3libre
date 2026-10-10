@@ -51,6 +51,7 @@ import {
 } from "../components/ui/toast";
 import { isElectron } from "../env";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
+import { useConnectOnboardingRequest } from "../cloud/connectOnboarding";
 import { cn } from "../lib/utils";
 import { applyAppearanceFontVariables } from "~/appearanceFonts";
 import { applyAppearanceContrast } from "~/appearanceContrast";
@@ -100,6 +101,17 @@ const NightlyMobileBetaNotice = lazy(() =>
     .then((module) => ({ default: module?.NightlyMobileBetaNotice ?? renderNothing }))
     .catch(() => ({ default: renderNothing })),
 );
+
+// Sign-ins are observed here, outside the lazy wizard chunk, so one that
+// completes while the chunk loads still opens the wizard.
+function ConnectOnboarding() {
+  const request = useConnectOnboardingRequest();
+  return (
+    <Suspense fallback={null}>
+      <ConnectOnboardingDialog {...request} />
+    </Suspense>
+  );
+}
 
 export const Route = createRootRoute({
   beforeLoad: async ({ location }) => {
@@ -254,11 +266,7 @@ function RootRouteView() {
           {primaryEnvironmentAuthenticated ? <DesktopWebLinkCoordinator /> : null}
           {isElectron ? <RunningThreadKeepAlive /> : null}
           <RelayClientInstallDialog />
-          {hasCloudPublicConfig() ? (
-            <Suspense fallback={null}>
-              <ConnectOnboardingDialog />
-            </Suspense>
-          ) : null}
+          {hasCloudPublicConfig() ? <ConnectOnboarding /> : null}
           <SshPasswordPromptDialog />
           <SnapShotCoordinator />
           <ThreadNotificationCoordinator />
