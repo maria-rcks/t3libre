@@ -1675,19 +1675,6 @@ export function claudeEffectiveQueryPolicyKey(
   });
 }
 
-// Identifies how a CLI process was opened, so a process started before its
-// prompt is reused only by a turn that would open it the same way.
-function claudeQueryOpenKey(input: {
-  readonly nativeThreadId: string;
-  readonly queryPolicyKey: string;
-  readonly selectionKey: string;
-  readonly shouldResume: boolean;
-  readonly resumeSessionAt: string | null;
-  readonly cwd: string | null;
-}): string {
-  return JSON.stringify(input);
-}
-
 type ClaudeToolItemType = Extract<
   OrchestrationV2TurnItem["type"],
   "command_execution" | "file_change" | "dynamic_tool" | "web_search"
@@ -3120,13 +3107,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         const interruptedTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const steeredTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const queryContext = yield* Ref.make<ClaudeLiveQueryContext | null>(null);
-        // A CLI started by `prepareTurn` before its first prompt exists. The
-        // next `openQuery` with the same open key adopts it; any other closes it.
-        const prewarmedQuery = yield* Ref.make<{
-          readonly key: string;
-          readonly nativeThreadId: string;
-          readonly query: ClaudeAgentSdkQuerySession;
-        } | null>(null);
         const openedNativeThreads = yield* Ref.make(new Set<string>());
         const latestPlanByKind = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact>());
         const planIdsByNativeItem = yield* Ref.make(
@@ -7305,10 +7285,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           return false;
         });
 
-        // Everything a new CLI process for this turn is opened with. `openKey`
-        // covers every input that varies by turn, so a prewarmed process is
-        // adopted only when it was opened exactly as this turn would open one.
-        const planQueryOpen = Effect.fnUntraced(function* (
+        const openQuery = Effect.fnUntraced(function* (
           turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
           nativeThreadId: string,
         ) {
@@ -7324,80 +7301,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const queryPolicyKey = claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides);
           const compiledSelection = compileClaudeModelSelection(turnInput.modelSelection);
           const resumeSessionAt = yield* getNativeConversationHeadId(turnInput.providerThread);
-          const openedWithResume = (yield* Ref.get(openedNativeThreads)).has(nativeThreadId);
-          // openedNativeThreads is per session instance and is lost when the
-          // provider session is idle-released. A prior turn on this native id
-          // requires resume; sessionId would fail with "already in use".
-          // A fresh-session fallback keeps provider-thread history but binds
-          // a new native id, which must be created before it can be resumed.
-          const hasPersistedProviderTurn =
-            turnInput.nativeThreadHasTurns ?? turnInput.providerTurnOrdinal > 1;
-          const shouldResume =
-            resumeSessionAt !== undefined || openedWithResume || hasPersistedProviderTurn;
-          const queryOptions = makeClaudeQueryOptions({
-            modelSelection: turnInput.modelSelection,
-            nativeThreadId,
-            resume: shouldResume,
-            ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
-            cwd: turnInput.runtimePolicy.cwd,
-            attachmentsDir,
-            settings: adapterOptions.settings,
-            environment: { ...adapterOptions.environment, ...mcpOverrides.mcpEnvironment },
-            tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
-            ...(mcpOverrides.allowedTools === undefined
-              ? {}
-              : { allowedTools: mcpOverrides.allowedTools }),
-            ...(mcpOverrides.mcpServers === undefined
-              ? {}
-              : { mcpServers: mcpOverrides.mcpServers }),
-            permissionMode: queryPolicy.permissionMode,
-            ...(queryPolicy.allowDangerouslySkipPermissions === undefined
-              ? {}
-              : {
-                  allowDangerouslySkipPermissions: queryPolicy.allowDangerouslySkipPermissions,
-                }),
-            canUseTool,
-            onUserDialog,
-            supportedDialogKinds: ["resume_return"],
-          });
-          return {
-            queryPolicyKey,
-            selectionKey: compiledSelection.queryIdentity,
-            queryOptions,
-            openKey: claudeQueryOpenKey({
-              nativeThreadId,
-              queryPolicyKey,
-              selectionKey: compiledSelection.queryIdentity,
-              shouldResume,
-              resumeSessionAt: resumeSessionAt ?? null,
-              cwd: turnInput.runtimePolicy.cwd ?? null,
-            }),
-          };
-        });
-
-        const closePrewarmedQuery = (nativeThreadId?: string) =>
-          Ref.modify(prewarmedQuery, (current) =>
-            nativeThreadId === undefined || current?.nativeThreadId === nativeThreadId
-              ? [current, null]
-              : [null, current],
-          ).pipe(
-            Effect.flatMap((prewarmed) =>
-              prewarmed === null ? Effect.void : prewarmed.query.close.pipe(Effect.ignore),
-            ),
-          );
-
-        const openQuery = Effect.fnUntraced(function* (
-          turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
-          nativeThreadId: string,
-        ) {
-          const plan = yield* planQueryOpen(turnInput, nativeThreadId);
-          const { queryPolicyKey } = plan;
           const existing = yield* Ref.get(queryContext);
-          if (existing !== null) {
-            // `prepareTurn` only prewarms while no process is live, so a
-            // prewarmed process here is stale whatever this turn does next.
-            yield* closePrewarmedQuery();
-          }
           // A continuation prompts nothing: it drains output the live process
           // already produced, so it keeps that process whatever its selection.
           if (
@@ -7411,7 +7315,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             existing !== null &&
             existing.nativeThreadId === nativeThreadId &&
             existing.queryPolicyKey === queryPolicyKey &&
-            existing.selectionKey === plan.selectionKey
+            existing.selectionKey === compiledSelection.queryIdentity
           ) {
             // Claude can switch its own mode mid-session (EnterPlanMode), and
             // a denied ExitPlanMode leaves it there. Put the live process back
@@ -7453,36 +7357,65 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             }
           }
 
-          const { queryOptions } = plan;
-          const prewarmed = yield* Ref.getAndSet(prewarmedQuery, null);
-          if (prewarmed !== null && prewarmed.key !== plan.openKey) {
-            yield* prewarmed.query.close.pipe(Effect.ignore);
-          }
-          const querySession = yield* (
-            prewarmed !== null && prewarmed.key === plan.openKey
-              ? Effect.succeed(prewarmed.query)
-              : queryRunner.open({
-                  threadId: turnInput.threadId,
-                  providerSessionId: input.providerSessionId,
-                  options: queryOptions,
-                })
-          ).pipe(
-            // An interrupted open leaves the old process just as dead.
-            Effect.onError(() =>
-              // Same-native-thread replacement: the old process is already
-              // dead, so its process-scoped roster is not authoritative.
-              // First-ever failed open (no prior live query) must not invent
-              // native-session reset events.
-              closedExistingNativeThreadId === nativeThreadId
-                ? Effect.gen(function* () {
-                    yield* clearWakeStateForNativeThread(nativeThreadId);
-                    yield* resetBackgroundTaskStateForNativeThreadProcess(nativeThreadId, {
-                      status: "idle",
-                    });
-                  })
-                : Effect.void,
-            ),
-          );
+          const openedWithResume = (yield* Ref.get(openedNativeThreads)).has(nativeThreadId);
+          // openedNativeThreads is per session instance and is lost when the
+          // provider session is idle-released. A prior turn on this native id
+          // requires resume; sessionId would fail with "already in use".
+          // A fresh-session fallback keeps provider-thread history but binds
+          // a new native id, which must be created before it can be resumed.
+          const hasPersistedProviderTurn =
+            turnInput.nativeThreadHasTurns ?? turnInput.providerTurnOrdinal > 1;
+          const shouldResume =
+            resumeSessionAt !== undefined || openedWithResume || hasPersistedProviderTurn;
+          const queryOptions = makeClaudeQueryOptions({
+            modelSelection: turnInput.modelSelection,
+            nativeThreadId,
+            resume: shouldResume,
+            ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
+            cwd: turnInput.runtimePolicy.cwd,
+            attachmentsDir,
+            settings: adapterOptions.settings,
+            environment: { ...adapterOptions.environment, ...mcpOverrides.mcpEnvironment },
+            tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
+            ...(mcpOverrides.allowedTools === undefined
+              ? {}
+              : { allowedTools: mcpOverrides.allowedTools }),
+            ...(mcpOverrides.mcpServers === undefined
+              ? {}
+              : { mcpServers: mcpOverrides.mcpServers }),
+            permissionMode: queryPolicy.permissionMode,
+            ...(queryPolicy.allowDangerouslySkipPermissions === undefined
+              ? {}
+              : {
+                  allowDangerouslySkipPermissions: queryPolicy.allowDangerouslySkipPermissions,
+                }),
+            canUseTool,
+            onUserDialog,
+            supportedDialogKinds: ["resume_return"],
+          });
+          const querySession = yield* queryRunner
+            .open({
+              threadId: turnInput.threadId,
+              providerSessionId: input.providerSessionId,
+              options: queryOptions,
+            })
+            .pipe(
+              // An interrupted open leaves the old process just as dead.
+              Effect.onError(() =>
+                // Same-native-thread replacement: the old process is already
+                // dead, so its process-scoped roster is not authoritative.
+                // First-ever failed open (no prior live query) must not invent
+                // native-session reset events.
+                closedExistingNativeThreadId === nativeThreadId
+                  ? Effect.gen(function* () {
+                      yield* clearWakeStateForNativeThread(nativeThreadId);
+                      yield* resetBackgroundTaskStateForNativeThreadProcess(nativeThreadId, {
+                        status: "idle",
+                      });
+                    })
+                  : Effect.void,
+              ),
+            );
           // Marked only after a successful open: a failed create must not
           // leave the runtime believing the native session exists, or the
           // retry would resume a session that was never created.
@@ -7509,7 +7442,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             nativeThreadId,
             query: querySession,
             queryPolicyKey,
-            selectionKey: plan.selectionKey,
+            selectionKey: compiledSelection.queryIdentity,
             closed,
             promptEchoMode: "unknown",
             openedPermissionMode: queryOptions.permissionMode,
@@ -7566,60 +7499,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           );
           return context;
         });
-
-        // Starts the CLI process for a turn that will need a new one, without a
-        // prompt. The SDK spawns the CLI when the query opens and the CLI emits
-        // nothing until it reads a prompt, so its ~1.3 s boot overlaps the
-        // baseline checkpoint. `startTurn` adopts it through `openQuery`.
-        const prepareTurn = Effect.fn("ClaudeAdapterV2.prepareTurn")(
-          function* (turnInput: ProviderAdapter.ProviderAdapterV2TurnInput) {
-            if ((yield* Ref.get(queryContext)) !== null || (yield* Ref.get(activeTurn)) !== null) {
-              return;
-            }
-            const nativeThreadId = yield* getNativeThreadId(turnInput.providerThread);
-            const plan = yield* planQueryOpen(turnInput, nativeThreadId);
-            yield* Effect.acquireRelease(
-              Effect.gen(function* () {
-                const query = yield* queryRunner.open({
-                  threadId: turnInput.threadId,
-                  providerSessionId: input.providerSessionId,
-                  options: plan.queryOptions,
-                });
-                const replaced = yield* Ref.getAndSet(prewarmedQuery, {
-                  key: plan.openKey,
-                  nativeThreadId,
-                  query,
-                });
-                if (replaced !== null) yield* replaced.query.close.pipe(Effect.ignore);
-                return query;
-              }),
-              (query) =>
-                // Adoption atomically removes this entry. A cancelled start
-                // only closes its own pending process, never a live query or
-                // another attempt's replacement preparation.
-                Ref.modify(prewarmedQuery, (current) =>
-                  current?.query === query ? [current, null] : [null, current],
-                ).pipe(
-                  Effect.flatMap((pending) =>
-                    pending === null ? Effect.void : pending.query.close.pipe(Effect.ignore),
-                  ),
-                ),
-            );
-          },
-          (effect, turnInput) =>
-            effect.pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ProviderAdapter.ProviderAdapterTurnStartError({
-                    driver: CLAUDE_PROVIDER,
-                    threadId: turnInput.threadId,
-                    providerThreadId: turnInput.providerThread.id,
-                    runId: turnInput.runId,
-                    cause,
-                  }),
-              ),
-            ),
-        );
 
         const startTurn = Effect.fn("ClaudeAdapterV2.startTurn")(
           function* (turnInput: ProviderAdapter.ProviderAdapterV2TurnInput) {
@@ -7822,7 +7701,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             const existing = yield* Ref.get(queryContext);
             const currentTurn = yield* Ref.get(activeTurn);
             const nativeThreadId = turnInput.providerThread.nativeThreadRef?.nativeId ?? null;
-            if (nativeThreadId !== null) yield* closePrewarmedQuery(nativeThreadId);
             if (currentTurn === null && turnInput.requestRuntimeRestart === true) {
               // Stop after the turn settled. With no CLI process of this
               // native thread left, nothing it started is still running: its
@@ -7959,7 +7837,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           if (existing !== null) {
             yield* existing.query.close.pipe(Effect.ignore);
           }
-          yield* closePrewarmedQuery();
           yield* Effect.yieldNow;
           yield* queryRunner.assertComplete.pipe(
             Effect.catchCause((cause) =>
@@ -8100,7 +7977,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 ),
               ),
           ),
-          prepareTurn,
           startTurn,
           compactThread: (turnInput) =>
             startTurn({

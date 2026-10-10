@@ -830,27 +830,6 @@ export const layer: Layer.Layer<
             failure,
             threadDisposition: "reusable",
           });
-          const baseTurnInput: ProviderAdapter.ProviderAdapterV2TurnInput = {
-            appThread: input.appThread,
-            threadId: input.run.threadId,
-            runId: input.run.id,
-            runOrdinal: input.run.ordinal,
-            providerTurnOrdinal: input.providerTurnOrdinal,
-            ...(input.nativeThreadHasTurns === undefined
-              ? {}
-              : { nativeThreadHasTurns: input.nativeThreadHasTurns }),
-            ...(input.run.restartContinuationOfRunId === undefined
-              ? {}
-              : {
-                  restartContinuationOfRunId: input.run.restartContinuationOfRunId,
-                }),
-            attemptId: input.attemptId,
-            rootNodeId: input.rootNode.id,
-            providerThread: input.providerThread,
-            message: input.message,
-            modelSelection: input.modelSelection,
-            runtimePolicy: input.runtimePolicy,
-          };
           const responseStreamingMode = yield* Effect.gen(function* () {
             const responseStreamingMode = yield* serverSettings.getSettings.pipe(
               Effect.map(
@@ -859,41 +838,24 @@ export const layer: Layer.Layer<
                     .responseStreamingMode,
               ),
             );
-            // The prompt is delivered only after the baseline exists. Native
-            // startup that cannot act on the workspace (a CLI boot) runs beside it.
-            const prepareTurn = input.session.prepareTurn;
-            yield* Effect.all(
-              [
-                checkpointService
-                  .captureBaseline({
-                    scope: input.checkpointScope,
-                    ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
-                  })
-                  .pipe(
-                    Effect.catchCause((cause) =>
-                      Cause.hasInterruptsOnly(cause)
-                        ? Effect.failCause(cause)
-                        : Effect.logWarning(
-                            "orchestration V2 checkpoint baseline capture failed; starting provider without a baseline",
-                            { runId: input.run.id },
-                          ),
-                    ),
-                  ),
-                prepareTurn === undefined
-                  ? Effect.void
-                  : prepareTurn(baseTurnInput).pipe(
-                      Effect.catchCause((cause) =>
-                        Cause.hasInterruptsOnly(cause)
-                          ? Effect.failCause(cause)
-                          : Effect.logWarning(
-                              "orchestration V2 provider turn preparation failed; starting it with the turn",
-                              cause,
-                            ).pipe(Effect.annotateLogs({ runId: input.run.id })),
+            // Nothing provider-side may start before the baseline exists:
+            // opening a Claude process already runs the user's SessionStart
+            // hooks and MCP servers, which can edit the workspace.
+            yield* checkpointService
+              .captureBaseline({
+                scope: input.checkpointScope,
+                ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
+              })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.failCause(cause)
+                    : Effect.logWarning(
+                        "orchestration V2 checkpoint baseline capture failed; starting provider without a baseline",
+                        { runId: input.run.id },
                       ),
-                    ),
-              ],
-              { concurrency: "unbounded", discard: true },
-            );
+                ),
+              );
             if (
               input.shouldStartProviderTurn !== undefined &&
               !(yield* input.shouldStartProviderTurn())
@@ -1415,8 +1377,28 @@ export const layer: Layer.Layer<
             key: `mcp_app_${entry.itemId.replace(/[^\w.-]/g, "_")}`,
             text: entry.text,
           }));
-          const turnInput =
-            appContext.length === 0 ? baseTurnInput : { ...baseTurnInput, appContext };
+          const turnInput = {
+            appThread: input.appThread,
+            threadId: input.run.threadId,
+            runId: input.run.id,
+            runOrdinal: input.run.ordinal,
+            providerTurnOrdinal: input.providerTurnOrdinal,
+            ...(input.nativeThreadHasTurns === undefined
+              ? {}
+              : { nativeThreadHasTurns: input.nativeThreadHasTurns }),
+            ...(input.run.restartContinuationOfRunId === undefined
+              ? {}
+              : {
+                  restartContinuationOfRunId: input.run.restartContinuationOfRunId,
+                }),
+            attemptId: input.attemptId,
+            rootNodeId: input.rootNode.id,
+            providerThread: input.providerThread,
+            message: input.message,
+            modelSelection: input.modelSelection,
+            runtimePolicy: input.runtimePolicy,
+            ...(appContext.length === 0 ? {} : { appContext }),
+          };
           const compact =
             input.message.attachments.length === 0 &&
             input.message.text.trim().toLowerCase() === "/compact";
@@ -1485,7 +1467,7 @@ export const layer: Layer.Layer<
               ),
             ),
           );
-        }).pipe(Effect.scoped),
+        }),
     } satisfies RunExecutionServiceV2Shape);
   }),
 );
