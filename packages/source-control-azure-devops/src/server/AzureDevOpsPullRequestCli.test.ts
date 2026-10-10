@@ -475,8 +475,9 @@ layer("AzureDevOpsPullRequestCli.layer", (it) => {
 
       assert.strictEqual(yield* cli.getViewer({ cwd: "/w" }), "bilal@acme.dev");
       expect(argsOfCall(1)).toEqual(expect.arrayContaining(["--creator", "me", "--top", "1"]));
-      // Someone who has opened nothing is still `me` to `--creator` and `--reviewer`.
-      assert.strictEqual(yield* cli.getViewer({ cwd: "/w" }), "me");
+      // Someone who has opened nothing has no name to compare rows against.
+      const error = yield* Effect.flip(cli.getViewer({ cwd: "/w" }));
+      assert.strictEqual(error._tag, "AzureDevOpsViewerUnavailableError");
     }),
   );
 
