@@ -433,18 +433,19 @@ export interface OpenCode2Workspace {
 }
 
 /**
- * Built-in catalogs can appear before a directory's project scan ends.
- * Listen for `scanned` before the first read starts that scan; subsequent
- * reads of a directory already loaded by this connection skip the wait.
+ * A server scans a directory it has not served yet in the background: its
+ * first read lists no commands at all (not even the built-ins), and
+ * `command.updated` plus `skill.updated` for the directory end the scan. A
+ * directory it already serves lists everything at once. `scanned` must be
+ * listening before `read` runs, since the read is what starts the scan.
  */
 export const loadOpenCode2Workspace = <E>(
   read: Effect.Effect<OpenCode2Workspace, E>,
   scanned: Effect.Effect<void>,
-  alreadyLoaded = false,
 ) =>
   Effect.gen(function* () {
     const first = yield* read;
-    if (alreadyLoaded) return first;
+    if (first.commands.length > 0) return first;
     yield* scanned.pipe(Effect.timeoutOption("10 seconds"));
     return yield* read;
   });
