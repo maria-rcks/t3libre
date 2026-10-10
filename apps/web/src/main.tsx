@@ -31,15 +31,14 @@ if (isElectron) {
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
 
 // A failed split-chunk fetch usually means the hashed assets went stale under
-// a deploy; one guarded reload picks up the fresh index.html. The failure key
-// pairs this build's entry URL with the error, which names the asset (except
-// in Safari), so each failed asset of each build gets one reload. Later
+// a deploy; one guarded reload picks up the fresh index.html. This build's
+// entry URL names the build, and the error names the asset (except in
+// Safari), so each failed asset of each build gets one reload. Later
 // failures while that reload is pending keep their rejection and their reload.
 let reloadScheduled = false;
 window.addEventListener("vite:preloadError", (event) => {
   if (reloadScheduled) return;
-  const failure = `${import.meta.url} ${String(event.payload)}`;
-  if (reloadOnceForChunkLoadError(failure)) {
+  if (reloadOnceForChunkLoadError(import.meta.url, String(event.payload))) {
     reloadScheduled = true;
     event.preventDefault();
   }
