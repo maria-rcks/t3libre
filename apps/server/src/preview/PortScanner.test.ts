@@ -6,7 +6,7 @@ import {
   PREVIEW_URL_MAX_LENGTH,
   type DiscoveredLocalServer,
 } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
@@ -56,7 +56,7 @@ const layerProbeFailure = (
       Layer.mergeAll(
         fileSystem,
         Layer.succeed(ProcessRunner.ProcessRunner, { run }),
-        Layer.succeed(HostProcessPlatform, "linux"),
+        Layer.succeed(HostProcess.Platform, "linux"),
         FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
       ),
     ),
@@ -67,7 +67,7 @@ const layerTestPortDiscovery = PortScanner.layer.pipe(
     Layer.mergeAll(
       layerNoProc,
       layerTestProcessRunner,
-      Layer.succeed(HostProcessPlatform, "win32"),
+      Layer.succeed(HostProcess.Platform, "win32"),
       FetchHttpClient.layer,
     ),
   ),
@@ -107,7 +107,7 @@ const layerLsofScanner = (input: {
               stderrInvalidUtf8: false,
             }),
         }),
-        Layer.succeed(HostProcessPlatform, "linux"),
+        Layer.succeed(HostProcess.Platform, "linux"),
         FetchHttpClient.layer.pipe(
           Layer.provide(Layer.succeed(FetchHttpClient.Fetch, input.fetch)),
         ),
