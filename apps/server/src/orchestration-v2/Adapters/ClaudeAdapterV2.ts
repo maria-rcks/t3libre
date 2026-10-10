@@ -31,7 +31,8 @@ import type {
   WebSearchOutput,
 } from "@anthropic-ai/claude-agent-sdk/sdk-tools";
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import { AgentScope } from "@t3tools/shared/AgentScope";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
 import {
   CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
@@ -178,6 +179,8 @@ export function claudeProviderTurnTokenUsage(
 }
 export const CLAUDE_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(CLAUDE_PROVIDER);
 const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
+// Entry extensions the Claude SDK runs through node instead of executing.
+const CLAUDE_SCRIPT_EXTENSIONS = [".js", ".mjs", ".tsx", ".ts", ".jsx"];
 
 export const ClaudeProviderCapabilitiesV2 = {
   sessions: {
@@ -605,6 +608,7 @@ export const layerQueryRunner: Layer.Layer<
   Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
     const { native: nativeEventLogger } = yield* ProviderEventLoggers.ProviderEventLoggers;
+    const agentScope = yield* AgentScope;
 
     return ClaudeAgentSdkQueryRunner.of({
       allocateSessionId: crypto.randomUUIDv4.pipe(
@@ -627,11 +631,35 @@ export const layerQueryRunner: Layer.Layer<
           ),
           Stream.toAsyncIterable,
         );
+        // The SDK spawns a native binary as `path ...executableArgs ...sdkArgs`,
+        // which lets the agent scope wrapper go in front of the CLI while the
+        // SDK keeps its own stderr capture and exit reporting. The SDK runs a
+        // script entry through node instead, so those launch unwrapped.
+        const binaryPath = input.options.pathToClaudeCodeExecutable;
+        const launch =
+          binaryPath === undefined ||
+          CLAUDE_SCRIPT_EXTENSIONS.some((ext) => binaryPath.endsWith(ext))
+            ? undefined
+            : yield* agentScope.wrap({
+                command: binaryPath,
+                args: [],
+                name: "claude",
+                threadId: input.threadId,
+                env: input.options.env,
+              });
+        const options =
+          launch === undefined || launch.args.length === 0
+            ? input.options
+            : {
+                ...input.options,
+                pathToClaudeCodeExecutable: launch.command,
+                executableArgs: [...launch.args, ...(input.options.executableArgs ?? [])],
+              };
         const queryRuntime = yield* Effect.try({
           try: () =>
             query({
               prompt,
-              options: input.options,
+              options,
             }),
           catch: (cause) => queryRunnerError(cause, "query"),
         });
@@ -8176,17 +8204,17 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
   ) {
     const { instanceId, environment, enabled, config } = input;
     const fileSystem = yield* FileSystem.FileSystem;
-    const hostEnvironment = yield* HostProcessEnvironment;
+    const hostEnvironment = yield* HostProcess.Environment;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const queryRunner = yield* ClaudeAgentSdkQueryRunner;
     const serverConfig = yield* ServerConfig.ServerConfig;
     const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
-    const baseEnvironment = mergeProviderInstanceEnvironment(environment, hostEnvironment);
+    const baseEnvironment = yield* mergeProviderInstanceEnvironment(environment, hostEnvironment);
     const claudeEnvironment = yield* makeClaudeEnvironment(config, baseEnvironment);
     const path = yield* Path.Path;
     const crypto = yield* Crypto.Crypto;
     const binaryPath = yield* resolveClaudeSdkExecutablePath(
-      expandHomePath(config.binaryPath),
+      expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
       claudeEnvironment,
     );
     return yield* makeClaudeAdapterV2({
@@ -8231,7 +8259,7 @@ const makeDefaultClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2.layer")(function* 
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
-  const hostEnvironment = yield* HostProcessEnvironment;
+  const hostEnvironment = yield* HostProcess.Environment;
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
   const queryRunner = yield* ClaudeAgentSdkQueryRunner;
   const serverConfig = yield* ServerConfig.ServerConfig;
