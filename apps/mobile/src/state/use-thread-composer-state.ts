@@ -677,8 +677,18 @@ export function useThreadComposerState() {
         alternateModifier: followUpOverride !== undefined && followUpOverride !== followUpBehavior,
         activeTurnDefault: followUpBehavior,
       });
-      const followUpDispatchMode =
-        followUpAction === "auto" ? null : followUpAction === "queue" ? "queue" : "auto";
+      // A send while the worktree is still being set up waits behind that setup,
+      // so the server can hold it if the setup ends without a worktree.
+      const setupRunning =
+        selectedThreadActivityRun?.status === "preparing" ||
+        selectedThreadActivityRun?.status === "starting";
+      const followUpDispatchMode = setupRunning
+        ? "queue"
+        : followUpAction === "auto"
+          ? null
+          : followUpAction === "queue"
+            ? "queue"
+            : "auto";
 
       const metadata = makeQueuedMessageMetadata();
       const messageId = MessageId.make(metadata.messageId);
@@ -735,6 +745,7 @@ export function useThreadComposerState() {
       saveQueuedRunEdit,
       selectedEnvironmentRuntime?.connectionState,
       selectedEnvironmentRuntime?.serverConfig,
+      selectedThreadActivityRun?.status,
       selectedThreadCreation,
       selectedThreadShell,
       uploadThreadFeedback,
