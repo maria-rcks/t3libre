@@ -147,12 +147,13 @@ describe("makeManagedServerProvider", () => {
         const host = yield* ProviderHost.ProviderHost;
         const startup = yield* Deferred.make<void>();
         const settings = yield* Ref.make<TestSettings>({ enabled: true });
+        const settingsChanges = yield* PubSub.unbounded<TestSettings>();
         const checkCalls = yield* Ref.make(0);
         const enrichedWith = yield* Deferred.make<TestSettings>();
         yield* makeManagedServerProvider<TestSettings>({
           resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Ref.get(settings),
-          streamSettings: Stream.empty,
+          streamSettings: Stream.fromPubSub(settingsChanges),
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
           initialSnapshot: () => Effect.succeed(initialSnapshot),
           checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
@@ -167,8 +168,13 @@ describe("makeManagedServerProvider", () => {
             awaitStartupProbe: Deferred.await(startup),
           }),
         );
+        yield* Effect.yieldNow;
         assert.strictEqual(yield* Ref.get(checkCalls), 0);
         yield* Ref.set(settings, { enabled: false });
+        // A settings change while parked does not probe early.
+        yield* PubSub.publish(settingsChanges, { enabled: false });
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 0);
         yield* Deferred.succeed(startup, undefined);
         assert.deepStrictEqual(yield* Deferred.await(enrichedWith), { enabled: false });
         assert.strictEqual(yield* Ref.get(checkCalls), 1);
