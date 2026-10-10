@@ -1426,13 +1426,15 @@ it.effect.each(["fails", "is interrupted"] as const)(
   "holds a message queued during setup when the workspace preparation %s",
   (ending) =>
     Effect.gen(function* () {
+      const fetchEntered = yield* Deferred.make<void>();
       const allowFetch = yield* Deferred.make<void>();
       let fetchFailures = 1;
       const harness = makeHarness({
         fetchRemote: () =>
           fetchFailures-- <= 0
             ? Effect.void
-            : Deferred.await(allowFetch).pipe(
+            : Deferred.succeed(fetchEntered, undefined).pipe(
+                Effect.andThen(Deferred.await(allowFetch)),
                 Effect.andThen(
                   Effect.fail(
                     new GitCommandError({
@@ -1457,6 +1459,7 @@ it.effect.each(["fails", "is interrupted"] as const)(
             workspace: { type: "worktree", baseRef: "main", startFromOrigin: true },
           }),
         );
+        yield* Deferred.await(fetchEntered);
         const queued = yield* threads.sendToThread({
           projectId,
           commandId: CommandId.make(`command:launch:queued-setup-${ending}:follow-up`),
@@ -1510,10 +1513,11 @@ it.effect.each(["fails", "is interrupted"] as const)(
 it.effect.each(["failed", "interrupted"] as const)(
   "holds a message queued during setup that arrives after the setup %s",
   (ending) => {
+    let fetchEntered: Deferred.Deferred<void> | null = null;
     const harness = makeHarness({
       fetchRemote: () =>
         ending === "interrupted"
-          ? Effect.never
+          ? Deferred.succeed(fetchEntered!, undefined).pipe(Effect.andThen(Effect.never))
           : Effect.fail(
               new GitCommandError({
                 operation: "GitVcsDriver.fetchRemote",
@@ -1525,6 +1529,7 @@ it.effect.each(["failed", "interrupted"] as const)(
             ),
     });
     return Effect.gen(function* () {
+      fetchEntered = yield* Deferred.make<void>();
       const launches = yield* ThreadLaunch.ThreadLaunchService;
       const threads = yield* ThreadManagement.ThreadManagementService;
       const launched = yield* launches.launch(
@@ -1536,6 +1541,7 @@ it.effect.each(["failed", "interrupted"] as const)(
         }),
       );
       if (ending === "interrupted") {
+        yield* Deferred.await(fetchEntered);
         // An agent stop does not ask to hold the queue.
         yield* threads.dispatch({
           type: "run.interrupt",
