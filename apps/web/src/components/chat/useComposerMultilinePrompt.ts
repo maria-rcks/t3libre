@@ -1,4 +1,5 @@
 import { useLayoutEffect, useState } from "react";
+import { observeResize } from "../../lib/observeResize";
 
 export function measureComposerMultilinePrompt(body: HTMLElement): boolean | null {
   const editor = body.querySelector<HTMLElement>('[data-testid="composer-editor"]');
@@ -34,13 +35,11 @@ export function useComposerMultilinePrompt(body: HTMLElement | null): boolean {
     // a layout mid-commit; the observers below still measure once layout settles.
     if (editor && editor.childElementCount <= 1 && editor.textContent === "") setIsMultiline(false);
     else measure();
-    const resizeObserver = new ResizeObserver(measure);
-    resizeObserver.observe(body);
-    if (editor) resizeObserver.observe(editor);
+    const stopObserving = observeResize(editor ? [body, editor] : body, measure);
     const mutationObserver = new MutationObserver(measure);
     mutationObserver.observe(body, { childList: true, characterData: true, subtree: true });
     return () => {
-      resizeObserver.disconnect();
+      stopObserving();
       mutationObserver.disconnect();
     };
   }, [body]);
