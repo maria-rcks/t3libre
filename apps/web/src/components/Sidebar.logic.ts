@@ -1089,6 +1089,16 @@ export function firstValidTimestampMs(
   return 0;
 }
 
+/** Soonest wake first, before grouping the snoozed shelf. */
+export function sortSnoozedThreadsForSidebar<T extends { readonly snoozedUntil: string | null }>(
+  threads: readonly T[],
+): T[] {
+  return threads.toSorted(
+    (left, right) =>
+      firstValidTimestampMs(left.snoozedUntil) - firstValidTimestampMs(right.snoozedUntil),
+  );
+}
+
 export { sortActiveThreadsByOrderKey as sortThreadsForSidebar } from "@t3tools/client-runtime/state/thread-sort";
 // The Working section beta folds and orders the inbox the same way on mobile.
 export {

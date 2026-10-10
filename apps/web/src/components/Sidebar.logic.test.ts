@@ -49,6 +49,7 @@ import {
   resolveSidebarDropTarget,
   planSidebarThreadDrop,
   sortPinnedThreadsForSidebar,
+  sortSnoozedThreadsForSidebar,
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
   sortSidebarV2ProjectGroups,
@@ -1979,6 +1980,20 @@ describe("pinOrderKeyBetween", () => {
     expect(pinOrderKeyBetween("A!", null)).toBeNull();
     expect(pinOrderKeyBetween(null, "ma")).toBeNull();
     expect(pinOrderKeyBetween("m", "m")).toBeNull();
+  });
+});
+
+describe("sortSnoozedThreadsForSidebar", () => {
+  it("orders by soonest wake and preserves the source order for equal wake times", () => {
+    const rows = [
+      { id: "b", snoozedUntil: "2099-01-01T02:00:00.000Z" },
+      { id: "a2", snoozedUntil: "2099-01-01T02:00:00.000Z" },
+      { id: "a1", snoozedUntil: "2099-01-01T01:00:00.000Z" },
+    ];
+    expect(sortSnoozedThreadsForSidebar(rows).map((row) => row.id)).toEqual(["a1", "b", "a2"]);
+    expect(
+      sortSnoozedThreadsForSidebar(rows.filter((row) => row.id !== "a1")).map((row) => row.id),
+    ).toEqual(["b", "a2"]);
   });
 });
 

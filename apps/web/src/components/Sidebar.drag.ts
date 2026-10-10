@@ -104,7 +104,8 @@ export function createSidebarSortingStrategy(input: {
   items: readonly SidebarListItem[];
   /** Suspend the reorder preview while the thread is dragged out as context. */
   enabled?: boolean;
-  settledOrder: readonly string[];
+  settledOrder: readonly string[] | ((target: SidebarDropTarget) => readonly string[]);
+  snoozedOrder?: readonly string[];
   /** Canonical landing order; grouped manual drops depend on the target. */
   activeOrder?: readonly string[] | ((target: SidebarDropTarget) => readonly string[]);
   branchGroupByKey?: ReadonlyMap<string, string>;
@@ -159,12 +160,14 @@ export function createSidebarSortingStrategy(input: {
     cardHeight ??= 82 * scale;
     slimHeight ??= 36 * scale;
     const labelHeight = (input.boundaryLabelHeight ?? 0) * scale;
+    const projectedSettledOrder =
+      typeof input.settledOrder === "function" ? input.settledOrder(target) : input.settledOrder;
     const group = groups[target.section];
     let order =
       target.section === "pinned"
         ? target.pinnedOrder
         : target.section === "settled"
-          ? input.settledOrder
+          ? projectedSettledOrder
           : typeof input.activeOrder === "function"
             ? input.activeOrder(target)
             : (input.activeOrder ?? target.activeOrder);
@@ -186,8 +189,14 @@ export function createSidebarSortingStrategy(input: {
       const byKey = new Map(groups.active.map((item) => [item.key, item]));
       groups.active = activeOrder.flatMap((key) => byKey.get(key) ?? []);
     }
+    if (input.snoozedOrder) {
+      const byKey = new Map(groups.snoozed.map((item) => [item.key, item]));
+      groups.snoozed = input.snoozedOrder.flatMap((key) => byKey.get(key) ?? []);
+    }
     const settledOrder = (
-      input.settledOrder.length > 0 ? input.settledOrder : groups.settled.map((item) => item.key)
+      projectedSettledOrder.length > 0
+        ? projectedSettledOrder
+        : groups.settled.map((item) => item.key)
     ).filter((key) => key !== active.key || target.section === "settled");
     const visible = input.settledExpanded
       ? settledOrder.slice(0, input.settledVisibleCount ?? settledOrder.length)

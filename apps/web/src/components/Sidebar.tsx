@@ -193,7 +193,6 @@ import {
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
   formatWorkingDurationLabel,
-  firstValidTimestampMs,
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
   isSidebarThreadWorking,
@@ -222,6 +221,7 @@ import {
   sidebarThreadKeyAtY,
   sortInboxThreadsByReturn,
   sortPinnedThreadsForSidebar,
+  sortSnoozedThreadsForSidebar,
   sortSidebarV2ProjectGroups,
   sortThreadsForSidebar,
   sortWorkingThreadsBySend,
@@ -2903,13 +2903,7 @@ export default function Sidebar() {
       // Newest send first; finishing and waking again do not move a row.
       workingThreads: arrange(sortWorkingThreadsBySend(working)),
       // Soonest wake first: "what comes back next" is the shelf's question.
-      snoozedThreads: arrange(
-        snoozed.toSorted(
-          (left, right) =>
-            firstValidTimestampMs(left.snoozedUntil ?? null) -
-            firstValidTimestampMs(right.snoozedUntil ?? null),
-        ),
-      ),
+      snoozedThreads: arrange(sortSnoozedThreadsForSidebar(snoozed)),
       settledThreads: arrange(sortSettledThreads(settled)),
       snoozeNow: preciseNow,
     };
@@ -3919,12 +3913,27 @@ export default function Sidebar() {
     if (dragState === null || thread === undefined) return [];
     const key = (candidate: EnvironmentThreadShell) =>
       scopedThreadKey(scopeThreadRef(candidate.environmentId, candidate.id));
-    const sorted = sortSettledThreads([
-      ...settledThreads.filter((candidate) => key(candidate) !== dragState.activeKey),
-      applySidebarThreadDrop(thread, "settled", dragState.occurredAt),
-    ]);
-    return (groupByBranch ? groupThreadsByBranch(sorted) : sorted).map(key);
+    const remaining = settledThreads.filter((candidate) => key(candidate) !== dragState.activeKey);
+    return (target: SidebarDropTarget) => {
+      const sorted = sortSettledThreads(
+        target.section === "settled"
+          ? [...remaining, applySidebarThreadDrop(thread, "settled", dragState.occurredAt)]
+          : remaining,
+      );
+      return (groupByBranch ? groupThreadsByBranch(sorted) : sorted).map(key);
+    };
   }, [groupByBranch, dragState, settledThreads, threadByKey]);
+  const draggedSnoozedOrder = useMemo(() => {
+    if (!groupByBranch || dragState?.activeSection !== "snoozed") return undefined;
+    const key = (candidate: EnvironmentThreadShell) =>
+      scopedThreadKey(scopeThreadRef(candidate.environmentId, candidate.id));
+    // Equal wake times retain the original shell order, before grouping.
+    const snoozedKeys = new Set(snoozedThreads.map(key));
+    const remaining = threads.filter(
+      (candidate) => snoozedKeys.has(key(candidate)) && key(candidate) !== dragState.activeKey,
+    );
+    return groupThreadsByBranch(sortSnoozedThreadsForSidebar(remaining)).map(key);
+  }, [groupByBranch, dragState, snoozedThreads, threads]);
   // Working beta: the inbox is time-ordered too, so the preview shows the
   // slot a drop will land in, not the slot under the pointer.
   const draggedActiveOrder = useMemo(() => {
@@ -3988,6 +3997,7 @@ export default function Sidebar() {
         enabled: !isContextDrag,
         boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
         settledOrder: draggedSettledOrder,
+        ...(draggedSnoozedOrder === undefined ? {} : { snoozedOrder: draggedSnoozedOrder }),
         ...(branchGroupByKey ? { branchGroupByKey } : {}),
         ...(draggedActiveOrder === undefined ? {} : { activeOrder: draggedActiveOrder }),
         settledExpanded: settledShelfExpanded,
@@ -3999,6 +4009,7 @@ export default function Sidebar() {
       branchGroupByKey,
       draggedActiveOrder,
       draggedSettledOrder,
+      draggedSnoozedOrder,
       isContextDrag,
       routeThreadKey,
       settledShelfExpanded,

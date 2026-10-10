@@ -1,15 +1,25 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { closestCenter, type CollisionDetection } from "@dnd-kit/core";
 import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sortable";
+import { ThreadId } from "@t3tools/contracts";
+import {
+  groupThreadsByBranch,
+  sortSettledThreads,
+  threadBranchGroupKey,
+} from "@t3tools/client-runtime/state/thread-sort";
+import { makeThreadFixture } from "../test-fixtures";
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
   restrictBelowSidebarLabel,
 } from "./Sidebar.drag";
 import {
+  applySidebarThreadDrop,
   resolveSidebarDropTarget,
   sidebarListItemId,
   sidebarMarkerId,
+  sortSnoozedThreadsForSidebar,
+  type SidebarDropTarget,
   type SidebarListItem,
   type SidebarListMarker,
   type SidebarSection,
@@ -253,6 +263,97 @@ describe("sidebar collision detection", () => {
 });
 
 describe("sidebar drag projection", () => {
+  it("keeps settled groups in committed order during a pinned reorder", () => {
+    const rows = ["a", "b", "p2"].map((id, index) =>
+      makeThreadFixture({
+        id: ThreadId.make(id),
+        branch: id === "p2" ? "b" : id,
+        settledOverride: id === "p2" ? null : "settled",
+        settledAt: id === "p2" ? null : `2026-10-10T0${9 - index}:00:00.000Z`,
+      }),
+    );
+    const branchGroupByKey = new Map(
+      rows.map((row) => [String(row.id), threadBranchGroupKey(row)]),
+    );
+    const aHeader = marker(`branch:settled:${branchGroupByKey.get("a")!}`);
+    const bHeader = marker(`branch:settled:${branchGroupByKey.get("b")!}`);
+    const items = [
+      pinnedHeader,
+      thread("p1", "pinned"),
+      thread("p2", "pinned"),
+      divider,
+      thread("inbox", "active"),
+      settledHeader,
+      aHeader,
+      thread("a", "settled"),
+      bHeader,
+      thread("b", "settled"),
+    ];
+    const settledOrder = (target: SidebarDropTarget) =>
+      groupThreadsByBranch(
+        sortSettledThreads(
+          target.section === "settled"
+            ? [
+                ...rows.slice(0, 2),
+                applySidebarThreadDrop(rows[2]!, "settled", "2026-10-10T10:00:00.000Z"),
+              ]
+            : rows.slice(0, 2),
+        ),
+      ).map((row) => row.id);
+    const result = preview(
+      { items, settledOrder, settledExpanded: true, branchGroupByKey },
+      "p2",
+      "p1",
+    );
+    expect(result.get(sidebarListItemId(aHeader))).toEqual(stationary);
+    expect(result.get("a")).toEqual(stationary);
+    expect(result.get(sidebarListItemId(bHeader))).toEqual(stationary);
+    expect(result.get("b")).toEqual(stationary);
+  });
+
+  it("regroups snoozed rows in wake order after the leading row leaves", () => {
+    const rows = ["a1", "b", "a2"].map((id, index) =>
+      makeThreadFixture({
+        id: ThreadId.make(id),
+        branch: id.startsWith("a") ? "a" : "b",
+        snoozedUntil: `2099-01-01T0${index + 1}:00:00.000Z`,
+      }),
+    );
+    const branchGroupByKey = new Map(
+      rows.map((row) => [String(row.id), threadBranchGroupKey(row)]),
+    );
+    const aHeader = marker(`branch:snoozed:${branchGroupByKey.get("a1")!}`);
+    const bHeader = marker(`branch:snoozed:${branchGroupByKey.get("b")!}`);
+    const items = [
+      pinnedHeader,
+      thread("p", "pinned"),
+      divider,
+      thread("inbox", "active"),
+      marker("snoozed-header"),
+      aHeader,
+      thread("a1", "snoozed"),
+      thread("a2", "snoozed"),
+      bHeader,
+      thread("b", "snoozed"),
+      settledHeader,
+      marker("settled-placeholder"),
+    ];
+    const input = {
+      items,
+      settledOrder: [],
+      settledExpanded: false,
+      branchGroupByKey,
+      snoozedOrder: groupThreadsByBranch(
+        sortSnoozedThreadsForSidebar(rows.filter((row) => row.id !== "a1")),
+      ).map((row) => row.id),
+    };
+    const result = preview(input, "a1", "p");
+    expect(result.get(sidebarListItemId(bHeader))?.y).toBe(-24);
+    expect(result.get("b")?.y).toBe(-24);
+    expect(result.get(sidebarListItemId(aHeader))?.y).toBe(153);
+    expect(result.get("a2")?.y).toBe(116);
+  });
+
   it.each([
     { active: "a1", over: "a2", aHeader: 48, a2: -35, bHeader: 48 },
     { active: "a1", over: "p", aHeader: 247, a2: 164, bHeader: -68 },
