@@ -5161,7 +5161,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           ),
         );
 
-    // The settlement filters and fork source spell the sweep index's expressions (migration 064)
+    // The settlement filters and fork source spell the sweep index's expressions (migration 061)
     // exactly, so a scan of active threads reads them from the index instead of each payload.
     const selectShellThreadRows = (
       threadId?: ThreadId,
@@ -5514,7 +5514,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               LIMIT 1
             )
             WHERE t.deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND t.thread_id = ${threadId}`}
-              -- These match the sweep index (migration 064), which holds the values.
+              -- These match the sweep index (migration 061), which holds the values.
               AND t.archived_at IS NULL
               AND json_extract(t.payload_json, '$.settledOverride') IS NULL
               AND json_extract(t.payload_json, '$.pinnedAt') IS NULL
@@ -5602,7 +5602,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           FROM orchestration_v2_projection_threads
           WHERE deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND thread_id = ${threadId}`}
             AND archived_at IS NULL
-            -- Read from the sweep index (migration 064) rather than each payload.
+            -- Read from the sweep index (migration 061) rather than each payload.
             AND json_array_length(payload_json, '$.pullRequests') > 0
           ORDER BY updated_at ASC, thread_id ASC
         `;
