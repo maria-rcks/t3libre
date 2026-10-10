@@ -15,7 +15,7 @@ import {
   getNewProjectPathPreview,
   normalizePastedCloneUrl,
 } from "@t3tools/client-runtime/operations/projects";
-import { connectionStatusText } from "@t3tools/client-runtime/connection";
+import { connectionStatusText, connectionStatusTitle } from "@t3tools/client-runtime/connection";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
 import {
@@ -1390,8 +1390,8 @@ function OpenCommandPaletteDialog(props: {
               {isEnvironmentReachable(project.environmentId) ? null : (
                 <>
                   <CommandPaletteMetaDot />
-                  <span>
-                    {environment ? connectionStatusText(environment.connection) : "Unavailable"}
+                  <span className="shrink-0">
+                    {environment ? connectionStatusTitle(environment.connection) : "Unavailable"}
                   </span>
                 </>
               )}
