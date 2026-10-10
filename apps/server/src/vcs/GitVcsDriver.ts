@@ -834,7 +834,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           command: "git rev-parse",
           cwd,
           exitCode: result.exitCode,
-          detail: result.stderr.trim() || "git rev-parse --git-common-dir failed",
+          detail: "git rev-parse --git-common-dir failed",
         });
       }
       return {
