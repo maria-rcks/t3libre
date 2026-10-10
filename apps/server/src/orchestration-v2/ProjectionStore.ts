@@ -1849,12 +1849,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 updated_at,
                 archived_at,
                 deleted_at,
-                settled_at,
-                settled_override,
-                pinned_at,
-                auto_settle_disabled_at,
-                forked_from_run_thread_id,
-                pull_request_count,
                 payload_json
               )
               VALUES (
@@ -1870,12 +1864,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 ${stringField(payload, "updatedAt")},
                 ${nullableStringField(payload, "archivedAt")},
                 ${nullableStringField(payload, "deletedAt")},
-                ${nullableStringField(payload, "settledAt")},
-                ${nullableStringField(payload, "settledOverride")},
-                ${nullableStringField(payload, "pinnedAt")},
-                ${nullableStringField(payload, "autoSettleDisabledAt")},
-                ${event.payload.forkedFrom?.type === "run" ? event.payload.forkedFrom.threadId : null},
-                ${event.payload.pullRequests?.length ?? 0},
                 ${payloadJson}
               )
               ON CONFLICT(thread_id)
@@ -1891,12 +1879,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 updated_at = excluded.updated_at,
                 archived_at = excluded.archived_at,
                 deleted_at = excluded.deleted_at,
-                settled_at = excluded.settled_at,
-                settled_override = excluded.settled_override,
-                pinned_at = excluded.pinned_at,
-                auto_settle_disabled_at = excluded.auto_settle_disabled_at,
-                forked_from_run_thread_id = excluded.forked_from_run_thread_id,
-                pull_request_count = excluded.pull_request_count,
                 payload_json = excluded.payload_json
             `;
             break;
@@ -1923,7 +1905,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               UPDATE orchestration_v2_projection_threads
               SET
                 updated_at = ${stringField(parseEncodedPayload(payloadJson), "updatedAt")},
-                pull_request_count = ${updatedThread.pullRequests?.length ?? 0},
                 payload_json = ${payloadJson}
               WHERE thread_id = ${event.threadId}
             `;
@@ -3525,7 +3506,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ORDER BY session.updated_at DESC, session.provider_session_id DESC
               LIMIT 1
             ) AS last_error
+          -- The sweep index holds settledOverride, so failed threads' payloads are not parsed.
           FROM orchestration_v2_projection_threads t
+            INDEXED BY orchestration_v2_projection_threads_active_idx
           INNER JOIN orchestration_v2_projection_runs r ON r.run_id = (
             SELECT latest.run_id FROM orchestration_v2_projection_runs latest
             WHERE latest.thread_id = t.thread_id
@@ -3549,7 +3532,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           )
           WHERE t.deleted_at IS NULL
             AND t.archived_at IS NULL
-            AND t.settled_override IS NOT 'settled'
+            AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
             AND t.thread_id IN (
               SELECT thread_id FROM orchestration_v2_projection_runs WHERE status = 'failed'
             )
@@ -5177,6 +5160,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           ),
         );
 
+    // The settlement filters and fork source spell the sweep index's expressions (migration 061)
+    // exactly, so a scan of active threads reads them from the index instead of each payload.
     const selectShellThreadRows = (
       threadId?: ThreadId,
       location?: "active" | "archive",
@@ -5186,7 +5171,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             SELECT
               t.thread_id,
               t.payload_json,
-              t.forked_from_run_thread_id AS forked_from_run_source_thread_id,
+              CASE
+                WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
+                  THEN json_extract(t.payload_json, '$.forkedFrom.threadId')
+                ELSE NULL
+              END AS forked_from_run_source_thread_id,
               presented.run_id AS latest_run_id,
               presented.status AS latest_run_status,
               presented.requested_at AS latest_run_requested_at,
@@ -5359,7 +5348,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   : sql``
             }${
               unsettledOnly
-                ? sql` AND t.settled_at IS NULL AND t.settled_override IS NOT 'settled'`
+                ? sql` AND json_extract(t.payload_json, '$.settledAt') IS NULL AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'`
                 : sql``
             }
             ORDER BY t.updated_at ASC, t.thread_id ASC
@@ -5524,10 +5513,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               LIMIT 1
             )
             WHERE t.deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND t.thread_id = ${threadId}`}
+              -- These match the sweep index (migration 061), which holds the values.
               AND t.archived_at IS NULL
-              AND t.settled_override IS NULL
-              AND t.pinned_at IS NULL
-              AND t.auto_settle_disabled_at IS NULL
+              AND json_extract(t.payload_json, '$.settledOverride') IS NULL
+              AND json_extract(t.payload_json, '$.pinnedAt') IS NULL
+              AND json_extract(t.payload_json, '$.autoSettleDisabledAt') IS NULL
               AND NOT EXISTS (
                 SELECT 1 FROM orchestration_v2_projection_runs active
                 WHERE active.thread_id = t.thread_id
@@ -5611,7 +5601,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           FROM orchestration_v2_projection_threads
           WHERE deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND thread_id = ${threadId}`}
             AND archived_at IS NULL
-            AND pull_request_count > 0
+            -- Read from the sweep index (migration 061) rather than each payload.
+            AND json_array_length(payload_json, '$.pullRequests') > 0
           ORDER BY updated_at ASC, thread_id ASC
         `;
         return yield* Effect.forEach(rows, (row) =>

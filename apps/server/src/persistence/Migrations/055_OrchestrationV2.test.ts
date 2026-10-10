@@ -32,7 +32,7 @@ layer("055_OrchestrationV2", (it) => {
         [58, "WebhookRelayDeliveries"],
         [59, "McpAppModelContext"],
         [60, "ThreadSnapshotWindowIndexes"],
-        [61, "ProjectionThreadSweepColumns"],
+        [61, "ProjectionThreadSweepIndexes"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
@@ -59,7 +59,7 @@ layer("055_OrchestrationV2", (it) => {
         { migration_id: 58, name: "WebhookRelayDeliveries" },
         { migration_id: 59, name: "McpAppModelContext" },
         { migration_id: 60, name: "ThreadSnapshotWindowIndexes" },
-        { migration_id: 61, name: "ProjectionThreadSweepColumns" },
+        { migration_id: 61, name: "ProjectionThreadSweepIndexes" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`
@@ -134,7 +134,7 @@ layer("055_OrchestrationV2", (it) => {
     }),
   );
 
-  it.effect("preserves existing thread filters when adding sweep columns", () =>
+  it.effect("indexes sweep filters for existing threads and later payload-only writes", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* runMigrations({ toMigrationInclusive: 60 });
@@ -157,17 +157,31 @@ layer("055_OrchestrationV2", (it) => {
         )
       `;
       yield* runMigrations();
-      const rows = yield* sql<{ readonly thread_id: string }>`
-        SELECT thread_id FROM orchestration_v2_projection_threads
+      const sweep = sql<{ readonly thread_id: string; readonly pull_requests: number }>`
+        SELECT thread_id, json_array_length(payload_json, '$.pullRequests') AS pull_requests
+        FROM orchestration_v2_projection_threads
+          INDEXED BY orchestration_v2_projection_threads_active_idx
         WHERE deleted_at IS NULL AND archived_at IS NULL
-          AND settled_at = '2026-07-24T00:00:00.000Z'
-          AND settled_override = 'settled'
-          AND pinned_at = '2026-07-23T00:00:00.000Z'
-          AND auto_settle_disabled_at = '2026-07-22T00:00:00.000Z'
-          AND forked_from_run_thread_id = 'source-thread'
-          AND pull_request_count = 2
+          AND json_extract(payload_json, '$.settledOverride') IS NULL
+          AND json_extract(payload_json, '$.pinnedAt') = '2026-07-23T00:00:00.000Z'
+          AND CASE
+            WHEN json_extract(payload_json, '$.forkedFrom.type') = 'run'
+              THEN json_extract(payload_json, '$.forkedFrom.threadId')
+            ELSE NULL
+          END = 'source-thread'
       `;
-      assert.deepStrictEqual(rows, [{ thread_id: "sweep-thread" }]);
+      assert.deepStrictEqual(yield* sweep, []);
+      // An older build rewrites the payload alone; the index follows it.
+      yield* sql`
+        UPDATE orchestration_v2_projection_threads
+        SET payload_json = json_set(
+          json_remove(payload_json, '$.settledOverride'),
+          '$.pullRequests',
+          json('[{"number":1},{"number":2},{"number":3}]')
+        )
+        WHERE thread_id = 'sweep-thread'
+      `;
+      assert.deepStrictEqual(yield* sweep, [{ thread_id: "sweep-thread", pull_requests: 3 }]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

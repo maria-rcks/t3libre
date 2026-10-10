@@ -2645,8 +2645,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       ]) {
         yield* sql`UPDATE orchestration_v2_projection_threads
           SET payload_json = json_set(payload_json, ${`$.${field}`}, ${value}),
-            archived_at = CASE WHEN ${field} = 'archivedAt' THEN ${value} ELSE archived_at END,
-            settled_override = CASE WHEN ${field} = 'settledOverride' THEN ${value} ELSE settled_override END
+            archived_at = CASE WHEN ${field} = 'archivedAt' THEN ${value} ELSE archived_at END
           WHERE thread_id = ${threadId}`;
         assert.isUndefined(
           (yield* store.getLimitRecoveryCandidates({ now, autoResume: true, snooze: false })).find(
@@ -2654,7 +2653,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           ),
         );
         yield* sql`UPDATE orchestration_v2_projection_threads
-          SET payload_json = ${originalRow!.payload_json}, archived_at = NULL, settled_override = NULL
+          SET payload_json = ${originalRow!.payload_json}, archived_at = NULL
           WHERE thread_id = ${threadId}`;
       }
       yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = ${DateTime.formatIso(now)} WHERE thread_id = ${threadId}`;
@@ -4870,6 +4869,18 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         },
       });
       assert.deepEqual((yield* store.getThread(threadId)).pullRequests, synced.pullRequests);
+
+      // An older build sharing the database writes only the payload; the sweep still follows it.
+      const sql = yield* SqlClient.SqlClient;
+      const [stored] = yield* sql<{ readonly payload_json: string }>`
+        SELECT payload_json FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}`;
+      yield* sql`UPDATE orchestration_v2_projection_threads
+        SET payload_json = json_set(payload_json, '$.pullRequests', json('[]'))
+        WHERE thread_id = ${threadId}`;
+      assert.deepEqual(yield* store.getThreadsWithPullRequests(), []);
+      yield* sql`UPDATE orchestration_v2_projection_threads
+        SET payload_json = ${stored!.payload_json} WHERE thread_id = ${threadId}`;
+      assert.equal((yield* store.getThreadsWithPullRequests()).length, 1);
 
       yield* syncPullRequests("unwatched", [link]);
       assert.deepEqual((yield* store.getThreadShell(threadId))?.pendingBackgroundTasks, []);
