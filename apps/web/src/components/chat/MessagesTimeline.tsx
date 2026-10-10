@@ -1197,7 +1197,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         });
       }
     }
-    if (isAtEnd !== undefined && !citationPositioning) {
+    if (isAtEnd !== undefined && !citationPositioning && !paintOnly) {
       onIsAtEndChange(isAtEnd);
     }
     reportContentOverflow();
