@@ -57,8 +57,10 @@ export function holdRequestsUntilServing<T extends NodeHttp.Server>(server: T): 
       if (name !== event) return;
       server.off("newListener", onNewListener);
       server.off(event, park);
-      // "newListener" fires before the listener is added.
-      setImmediate(() => {
+      // "newListener" fires before the listener is added. A microtask runs
+      // once it is, and before any later connection's I/O callback, so parked
+      // requests still reach the handler in arrival order.
+      queueMicrotask(() => {
         for (const args of parked.splice(0)) server.emit(event, ...args);
       });
     };

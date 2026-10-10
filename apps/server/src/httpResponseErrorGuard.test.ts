@@ -152,4 +152,21 @@ describe("holdRequestsUntilServing", () => {
     await expect(response).resolves.toBe(204);
     await expect(upgradeResponse).resolves.toBe("HTTP/1.1 101 Switching Protocols");
   });
+
+  it("hands parked requests to the handler before later ones", async () => {
+    const server = holdRequestsUntilServing(NodeHttp.createServer());
+    const received: Array<unknown> = [];
+    server.emit("request", "parked");
+    // A request whose I/O callback is already queued when the handler attaches.
+    const laterEmitted = new Promise<void>((resolve) =>
+      setImmediate(() => {
+        server.emit("request", "later");
+        resolve();
+      }),
+    );
+    server.on("request", (request) => received.push(request));
+    await laterEmitted;
+
+    expect(received).toEqual(["parked", "later"]);
+  });
 });
