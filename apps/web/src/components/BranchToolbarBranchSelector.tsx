@@ -122,6 +122,10 @@ export function BranchToolbarBranchSelector({
     threadEnvironment.updateMetadata,
     "thread metadata update",
   );
+  // An automatic default loses to any launch that lands first; that rejection is expected.
+  const updateEmptyThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
+    reportFailure: false,
+  });
   const switchRef = useAtomCommand(vcsEnvironment.switchRef, {
     reportFailure: false,
   });
@@ -188,12 +192,14 @@ export function BranchToolbarBranchSelector({
         });
       }
       if (hasServerThread) {
-        void updateThreadMetadata({
+        void (automatic ? updateEmptyThreadMetadata : updateThreadMetadata)({
           environmentId,
           input: {
             threadId: activeThreadId,
             branch,
             worktreePath,
+            // A launched thread records its own worktree; a late default must not reset it.
+            ...(automatic ? { expectedEmpty: true } : {}),
           },
         });
       }
@@ -228,6 +234,7 @@ export function BranchToolbarBranchSelector({
       effectiveEnvMode,
       draftThread?.environmentSelection,
       stopThreadSession,
+      updateEmptyThreadMetadata,
       updateThreadMetadata,
     ],
   );
