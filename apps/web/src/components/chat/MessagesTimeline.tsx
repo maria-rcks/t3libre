@@ -515,6 +515,11 @@ interface MessagesTimelineProps {
    */
   liveFollowEnabled: boolean;
   /**
+   * Whether the reader follows the live edge, as opposed to reading a new
+   * turn anchored at the top or history. Read when the scroll position is remembered.
+   */
+  isFollowingEnd?: () => boolean;
+  /**
    * Whether the real rows extend past the viewport above the composer.
    * Reported after scrolls, row size changes, and viewport resizes.
    */
@@ -614,6 +619,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onIsAtEndChange,
   onContentOverflowChange,
   liveFollowEnabled,
+  isFollowingEnd,
   paintOnly = false,
   onToolOutputCollapsedAtEnd,
   onManualNavigation,
@@ -1186,8 +1192,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
           // Live follow only ends on a user scroll gesture. Layout changes
           // (the composer inset, a thread switch) can still move the list off
           // the end without the reader leaving it, and a revisit must land
-          // at the end then rather than at that transient offset.
-          atEnd: isAtEnd || liveFollowEnabled,
+          // at the end then rather than at that transient offset. A reply
+          // anchored below its message keeps the reader where they are.
+          atEnd: isAtEnd || (liveFollowEnabled && (isFollowingEnd?.() ?? true)),
           disclosures: {
             runs: paintedExpandedRunIds,
             workGroups: paintedExpandedWorkGroupIds,
@@ -1247,6 +1254,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     rows,
     listIdentityKey,
     liveFollowEnabled,
+    isFollowingEnd,
     paintOnly,
     restoringThreadPosition,
     listRef,
