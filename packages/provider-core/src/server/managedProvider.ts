@@ -160,9 +160,11 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
         const previous = state.snapshot.auth;
         const differs = (a: string | undefined, b: string | undefined) =>
           a !== undefined && b !== undefined && a !== b;
+        // Limits read without a workspace cannot be attributed to a new one.
         const switchedAccount =
           differs(probedSnapshot.auth.email?.toLowerCase(), previous.email?.toLowerCase()) ||
-          differs(probedSnapshot.auth.workspaceId, previous.workspaceId);
+          (probedSnapshot.auth.workspaceId !== undefined &&
+            probedSnapshot.auth.workspaceId !== previous.workspaceId);
         const usageLimits = switchedAccount
           ? probedSnapshot.usageLimits
           : resolveUsageLimitsAfterProbe({
