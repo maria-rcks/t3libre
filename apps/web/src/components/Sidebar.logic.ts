@@ -1078,7 +1078,7 @@ export function shouldShowSidebarV2Duration(status: SidebarThreadStatus): boolea
 /** First VALID timestamp wins: `a ?? b` falls through on null, but a present-
     yet-malformed string must also fall through to the next candidate rather
     than sink the row to the epoch. */
-export function firstValidTimestampMs(
+function firstValidTimestampMs(
   ...candidates: ReadonlyArray<string | null | undefined>
 ): number {
   for (const candidate of candidates) {
