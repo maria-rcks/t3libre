@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
   useSyncExternalStore,
+  type ComponentType,
   type CSSProperties,
   type ReactNode,
 } from "react";
@@ -58,11 +59,23 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 // Only the sidebar the legacy setting picks should be in the startup graph.
-const LegacyThreadSidebar = lazy(() => import("./LegacySidebar"));
-const SettingsSidebarNav = lazy(() =>
-  import("./settings/SettingsSidebarNav").then((module) => ({
-    default: module.SettingsSidebarNav,
-  })),
+// While a sidebar chunk loads, or if it fails, the column keeps its chrome
+// header; a stale deploy gets its `vite:preloadError` reload first.
+function SidebarChromeShell() {
+  return <SidebarChromeHeader isElectron={isElectron} />;
+}
+const renderNoSettingsNav = (_props: { pathname: string }) => null;
+const LegacyThreadSidebar = lazy(() =>
+  import("./LegacySidebar")
+    .then((module) => ({ default: module?.default ?? SidebarChromeShell }))
+    .catch(() => ({ default: SidebarChromeShell })),
+);
+/** The settings route loads the nav alongside its own chunks instead of after its first paint. */
+export const loadSettingsSidebarNav = () => import("./settings/SettingsSidebarNav");
+const SettingsSidebarNav = lazy<ComponentType<{ pathname: string }>>(() =>
+  loadSettingsSidebarNav()
+    .then((module) => ({ default: module?.SettingsSidebarNav ?? renderNoSettingsNav }))
+    .catch(() => ({ default: renderNoSettingsNav })),
 );
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
@@ -346,7 +359,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
               </Suspense>
             </>
           ) : legacySidebarEnabled ? (
-            <Suspense fallback={null}>
+            <Suspense fallback={<SidebarChromeShell />}>
               <LegacyThreadSidebar />
             </Suspense>
           ) : (
