@@ -6,13 +6,18 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useReducer,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 
-import { onOpenCommandPalette } from "../commandPaletteBus";
+import {
+  COMMAND_PALETTE_ELEMENT_ID,
+  onOpenCommandPalette,
+  setCommandPaletteRequested,
+} from "../commandPaletteBus";
 import { ComposerHandleContext } from "../composerHandleContext";
 import { useTheme } from "../hooks/useTheme";
 import { resolveShortcutCommand } from "../keybindings";
@@ -25,14 +30,25 @@ import { resolveThreadRouteTarget } from "../threadRoutes";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
 import { reduceCommandPaletteUiState, type SearchOverlayMode } from "./CommandPalette.logic";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
+import { RenderErrorBoundary } from "./RenderErrorBoundary";
 import { CommandDialog } from "./ui/command";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
 // The palette's views pull in project browsing, search, and syntax highlighting.
-// Only the shortcut handling stays in the startup graph; the dialog loads on first open.
-const CommandPaletteDialog = lazy(() =>
-  import("./CommandPalette").then((module) => ({ default: module.CommandPaletteDialog })),
-);
+// Only the shortcut handling stays in the startup graph; the dialog loads on first
+// open, or once the app is idle after boot.
+const loadCommandPalette = () => import("./CommandPalette");
+const lazyCommandPaletteDialog = () =>
+  lazy(() => loadCommandPalette().then((module) => ({ default: module.CommandPaletteDialog })));
+const COMMAND_PALETTE_PRELOAD_DELAY_MS = 3_000;
+
+// A failed load closes the palette instead of replacing the app with the route
+// error view. A stale deploy gets its `vite:preloadError` reload first; otherwise
+// the next open requests the chunk again.
+function CommandPaletteUnavailable({ onUnavailable }: { onUnavailable: () => void }) {
+  useEffect(() => onUnavailable(), [onUnavailable]);
+  return null;
+}
 
 const OVERLAY_MODE_BY_COMMAND = {
   "commandPalette.toggle": "command",
@@ -71,9 +87,17 @@ export function CommandPaletteHost({ children }: { children: ReactNode }) {
     openIntent: null,
   });
   // Stays mounted after the first open so closing still animates out.
-  const [dialogMounted, setDialogMounted] = useState(false);
-  if (state.open && !dialogMounted) setDialogMounted(true);
+  const [CommandPaletteDialog, setCommandPaletteDialog] = useState<ReturnType<
+    typeof lazyCommandPaletteDialog
+  > | null>(null);
+  if (state.open && CommandPaletteDialog === null) {
+    setCommandPaletteDialog(() => lazyCommandPaletteDialog());
+  }
   const setOpen = useCallback((open: boolean) => dispatch({ _tag: "SetOpen", open }), []);
+  const closeUnavailablePalette = useCallback(() => {
+    setCommandPaletteDialog(null);
+    setOpen(false);
+  }, [setOpen]);
   const toggleMode = useCallback(
     (mode: SearchOverlayMode) => dispatch({ _tag: "ToggleMode", mode }),
     [],
@@ -99,6 +123,57 @@ export function CommandPaletteHost({ children }: { children: ReactNode }) {
       ? selectActiveRightPanel(state.byThreadKey, routeThreadRef) === "preview"
       : false,
   );
+
+  // Keyboard handlers outside the palette ignore keys from the moment it is
+  // requested, including while its chunk loads.
+  useLayoutEffect(() => {
+    setCommandPaletteRequested(state.open);
+    return () => setCommandPaletteRequested(false);
+  }, [state.open]);
+
+  useEffect(() => {
+    let idleCallback: number | null = null;
+    const timeout = window.setTimeout(() => {
+      const preload = () => void loadCommandPalette().catch(() => undefined);
+      if (typeof window.requestIdleCallback === "function") {
+        idleCallback = window.requestIdleCallback(preload);
+      } else {
+        preload();
+      }
+    }, COMMAND_PALETTE_PRELOAD_DELAY_MS);
+    return () => {
+      window.clearTimeout(timeout);
+      if (idleCallback !== null) window.cancelIdleCallback(idleCallback);
+    };
+  }, []);
+
+  // While the chunk loads, the app behind the palette is inert and nothing has
+  // focus. Text typed then becomes the palette's query, and Escape closes it.
+  const loadingQuery =
+    state.openIntent === null
+      ? ""
+      : state.openIntent.kind === "search"
+        ? state.openIntent.query
+        : null;
+  useLayoutEffect(() => {
+    if (!state.open || state.mode !== "command" || loadingQuery === null) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (document.getElementById(COMMAND_PALETTE_ELEMENT_ID) !== null) return;
+      if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key !== "Escape" && event.key !== "Backspace" && event.key.length !== 1) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      const query =
+        event.key === "Backspace" ? loadingQuery.slice(0, -1) : loadingQuery + event.key;
+      dispatch({ _tag: "OpenSearch", query });
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [loadingQuery, setOpen, state.mode, state.open]);
 
   useEffect(() => {
     if (!state.open || state.mode === "command") return;
@@ -228,16 +303,20 @@ export function CommandPaletteHost({ children }: { children: ReactNode }) {
         <div className="contents" inert={state.open}>
           {children}
         </div>
-        {dialogMounted ? (
-          <Suspense fallback={null}>
-            <CommandPaletteDialog
-              mode={state.mode}
-              openIntent={state.openIntent}
-              setOpen={setOpen}
-              openOverlayMode={toggleMode}
-              clearOpenIntent={clearOpenIntent}
-            />
-          </Suspense>
+        {CommandPaletteDialog ? (
+          <RenderErrorBoundary
+            fallback={<CommandPaletteUnavailable onUnavailable={closeUnavailablePalette} />}
+          >
+            <Suspense fallback={null}>
+              <CommandPaletteDialog
+                mode={state.mode}
+                openIntent={state.openIntent}
+                setOpen={setOpen}
+                openOverlayMode={toggleMode}
+                clearOpenIntent={clearOpenIntent}
+              />
+            </Suspense>
+          </RenderErrorBoundary>
         ) : null}
       </CommandDialog>
     </ComposerHandleContext>
