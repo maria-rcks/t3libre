@@ -3672,6 +3672,8 @@ export default function ChatView(props: ChatViewProps) {
   // starts on its own instead of being refused.
   const sendQueuesBehindSetup =
     isServerThread && (activeRunPreparing || activeActivityRun?.status === "starting");
+  // Such a send skips the local dispatch, so this keeps the composer busy while it is in flight.
+  const [setupQueueSendInFlight, setSetupQueueSendInFlight] = useState(false);
   useEffect(() => {
     attachmentPreviewHandoffByMessageIdRef.current = attachmentPreviewHandoffByMessageId;
   }, [attachmentPreviewHandoffByMessageId]);
@@ -9432,7 +9434,9 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     // A send queued behind setup leaves the first send's dispatch and setup card alone.
-    if (!sendQueuesBehindSetup) {
+    if (sendQueuesBehindSetup) {
+      setSetupQueueSendInFlight(true);
+    } else {
       beginLocalDispatch({
         preparingWorktree: multipleModelSelections !== null || Boolean(baseBranchForWorktree),
         // Only a draft has a background submission to hide behind its hero.
@@ -10117,6 +10121,7 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
     sendInFlightRef.current = false;
+    setSetupQueueSendInFlight(false);
     if (!turnStartSucceeded) {
       setDockedDraftHeroThreadKey((currentThreadKey) =>
         currentThreadKey === activeThreadKey ? null : currentThreadKey,
@@ -11630,6 +11635,7 @@ export default function ChatView(props: ChatViewProps) {
                               isConnecting={isConnecting}
                               isSendBusy={
                                 (isSendBusy && !sendQueuesBehindSetup) ||
+                                setupQueueSendInFlight ||
                                 isSavingQueuedEdit ||
                                 isResuming
                               }
