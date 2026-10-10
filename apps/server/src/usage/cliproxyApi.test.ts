@@ -128,7 +128,7 @@ describe("CLIProxyAPI built-in management API", () => {
           { availableCount: 2, nextCreditId: "first", nextExpiresAt: "2099-01-01T00:00:00.000Z" },
         ]);
         expect(result[0]?.usageLimits.windows).toMatchObject([
-          { id: "secondary", usedPercent: 78, kind: "weekly" },
+          { id: "weekly", usedPercent: 78, kind: "weekly" },
         ]);
         const calls = test.requests.filter((request) => request.body?.url);
         expect(calls.map((request) => request.body?.auth_index).sort()).toEqual([

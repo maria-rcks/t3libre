@@ -65,7 +65,8 @@ function labelForKind(kind: ServerProviderUsageWindow["kind"]): string {
 /**
  * `primary` / `secondary` are positions, not durations. Codex usually sends
  * `windowDurationMins`; when it does not, paid plans expose the 5-hour and
- * weekly pair and Free/Go expose one monthly allowance.
+ * weekly pair and Free/Go expose one monthly allowance. Windows are named by
+ * kind, so a weekly-only plan's weekly window pools with other accounts'.
  */
 function codexRateLimitsToWindows(
   snapshot: CodexRateLimitSnapshot,
@@ -79,14 +80,14 @@ function codexRateLimitsToWindows(
     ["secondary", snapshot.secondary, WEEK_MINS],
   ] as const;
   const windows: ServerProviderUsageWindow[] = [];
-  for (const [id, window, fallbackMins] of positions) {
+  for (const [position, window, fallbackMins] of positions) {
     if (!window || !Number.isFinite(window.usedPercent)) continue;
     const windowDurationMins =
       typeof window.windowDurationMins === "number" ? window.windowDurationMins : fallbackMins;
     const kind = kindForDuration(windowDurationMins);
     const resetsAt = isoFromEpochSeconds(window.resetsAt);
     windows.push({
-      id,
+      id: windows.some((existing) => existing.id === kind) ? position : kind,
       kind,
       label: labelForKind(kind),
       usedPercent: clampPercent(window.usedPercent),
