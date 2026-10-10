@@ -8114,9 +8114,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         type: "run.updated",
         payload: { ...state.run, status: "preparing", completedAt: null },
       });
-      // Messages held when this preparation failed follow the run again.
+      // Messages held when this preparation failed follow the run again. A hold
+      // from a later run (a stop, say) is not this failure's to release.
+      const failureOwnsQueue = latestExecutedRun(projection.runs)?.id === state.run.id;
       for (const run of projection.runs) {
-        if (run.status !== "queued" || run.queueHeld !== true) continue;
+        if (!failureOwnsQueue || run.status !== "queued" || run.queueHeld !== true) continue;
         yield* emitEvent({
           type: "run.updated",
           threadId: command.threadId,
