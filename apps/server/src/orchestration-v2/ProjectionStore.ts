@@ -3506,9 +3506,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ORDER BY session.updated_at DESC, session.provider_session_id DESC
               LIMIT 1
             ) AS last_error
-          -- The sweep index holds settledOverride, so failed threads' payloads are not parsed.
           FROM orchestration_v2_projection_threads t
-            INDEXED BY orchestration_v2_projection_threads_active_idx
           INNER JOIN orchestration_v2_projection_runs r ON r.run_id = (
             SELECT latest.run_id FROM orchestration_v2_projection_runs latest
             WHERE latest.thread_id = t.thread_id
@@ -3530,9 +3528,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ORDER BY error.updated_at DESC, error.ordinal DESC, error.turn_item_id DESC
             LIMIT 1
           )
+          -- Threads with a failed run drive the scan through their primary key. settledOverride is
+          -- checked after decoding: here it would parse each of those payloads, though the
+          -- latest-run join drops most of them.
           WHERE t.deleted_at IS NULL
             AND t.archived_at IS NULL
-            AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
             AND t.thread_id IN (
               SELECT thread_id FROM orchestration_v2_projection_runs WHERE status = 'failed'
             )
@@ -3570,6 +3570,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         const candidates: Array<ProjectionLimitRecoveryCandidate> = [];
         for (const row of rows) {
           const thread = yield* decodeThreadPayload(row.payload_json);
+          if (thread.settledOverride === "settled") continue;
           const item = yield* decodeTurnItemPayload(row.failure_payload_json);
           const summary = threadErrorSummary(
             item.type === "error" ? item.failure : null,
@@ -5160,7 +5161,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           ),
         );
 
-    // The settlement filters and fork source spell the sweep index's expressions (migration 061)
+    // The settlement filters and fork source spell the sweep index's expressions (migration 064)
     // exactly, so a scan of active threads reads them from the index instead of each payload.
     const selectShellThreadRows = (
       threadId?: ThreadId,
@@ -5513,7 +5514,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               LIMIT 1
             )
             WHERE t.deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND t.thread_id = ${threadId}`}
-              -- These match the sweep index (migration 061), which holds the values.
+              -- These match the sweep index (migration 064), which holds the values.
               AND t.archived_at IS NULL
               AND json_extract(t.payload_json, '$.settledOverride') IS NULL
               AND json_extract(t.payload_json, '$.pinnedAt') IS NULL
@@ -5601,7 +5602,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           FROM orchestration_v2_projection_threads
           WHERE deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND thread_id = ${threadId}`}
             AND archived_at IS NULL
-            -- Read from the sweep index (migration 061) rather than each payload.
+            -- Read from the sweep index (migration 064) rather than each payload.
             AND json_array_length(payload_json, '$.pullRequests') > 0
           ORDER BY updated_at ASC, thread_id ASC
         `;

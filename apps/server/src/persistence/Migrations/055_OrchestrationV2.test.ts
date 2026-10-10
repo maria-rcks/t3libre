@@ -9,11 +9,11 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 layer("055_OrchestrationV2", (it) => {
-  it.effect("keeps released migrations contiguous", () =>
+  it.effect("keeps released migrations contiguous apart from ids claimed elsewhere", () =>
     Effect.sync(() => {
       assert.deepStrictEqual(
         migrationEntries.map(([id]) => id),
-        Array.from({ length: 61 }, (_, index) => index + 1),
+        [...Array.from({ length: 60 }, (_, index) => index + 1), 64],
       );
     }),
   );
@@ -32,7 +32,7 @@ layer("055_OrchestrationV2", (it) => {
         [58, "WebhookRelayDeliveries"],
         [59, "McpAppModelContext"],
         [60, "ThreadSnapshotWindowIndexes"],
-        [61, "ProjectionThreadSweepIndexes"],
+        [64, "ProjectionThreadSweepIndexes"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
@@ -59,7 +59,7 @@ layer("055_OrchestrationV2", (it) => {
         { migration_id: 58, name: "WebhookRelayDeliveries" },
         { migration_id: 59, name: "McpAppModelContext" },
         { migration_id: 60, name: "ThreadSnapshotWindowIndexes" },
-        { migration_id: 61, name: "ProjectionThreadSweepIndexes" },
+        { migration_id: 64, name: "ProjectionThreadSweepIndexes" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`
@@ -183,5 +183,29 @@ layer("055_OrchestrationV2", (it) => {
       `;
       assert.deepStrictEqual(yield* sweep, [{ thread_id: "sweep-thread", pull_requests: 3 }]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  // Published previews ran PeerLinks as 61. Earlier builds of this change ran 61 and indexed
+  // copied columns under the same index name.
+  it.effect.each(["PeerLinks", "ProjectionThreadSweepColumns"])(
+    "builds the sweep index over a database that ran %s as 61",
+    (recorded) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations({ toMigrationInclusive: 60 });
+        yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (61, ${recorded})`;
+        if (recorded === "ProjectionThreadSweepColumns") {
+          yield* sql`
+            CREATE INDEX orchestration_v2_projection_threads_active_idx
+            ON orchestration_v2_projection_threads(updated_at, thread_id)
+            WHERE deleted_at IS NULL AND archived_at IS NULL
+          `;
+        }
+        assert.deepStrictEqual(yield* runMigrations(), [[64, "ProjectionThreadSweepIndexes"]]);
+        const [index] = yield* sql<{ readonly sql: string }>`
+          SELECT sql FROM sqlite_master WHERE name = 'orchestration_v2_projection_threads_active_idx'
+        `;
+        assert.include(index!.sql, "json_extract(payload_json, '$.settledOverride')");
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

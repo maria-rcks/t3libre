@@ -13,8 +13,11 @@ import * as SqlClient from "effect/sql/SqlClient";
  */
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  // Development builds of this change created an index of the same name over copied columns.
+  // Replace it so every database gets this definition.
+  yield* sql`DROP INDEX IF EXISTS orchestration_v2_projection_threads_active_idx`;
   yield* sql`
-    CREATE INDEX IF NOT EXISTS orchestration_v2_projection_threads_active_idx
+    CREATE INDEX orchestration_v2_projection_threads_active_idx
     ON orchestration_v2_projection_threads(
       updated_at,
       thread_id,
