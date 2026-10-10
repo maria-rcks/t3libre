@@ -52,6 +52,8 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_IDLE_PIN_MS = 4 * 60 * 60 * 1000;
+const PIN_EXPIRED_RELEASE_DETAIL =
+  "Stopped background work that reported no progress for too long. Send a message to resume.";
 const RELEASE_SCOPE_CLOSE_TIMEOUT_MS = 30 * 1000;
 
 const busyTurnPrefix = (providerThreadId: ProviderThreadId) => `${providerThreadId}#`;
@@ -656,7 +658,10 @@ export const layerWithOptions = (
             lastError:
               input.reason === "runtime_error"
                 ? (input.detail ?? "Provider runtime failed.")
-                : null,
+                : // Only a pin expiry gives an idle release a detail: work was cut off.
+                  input.reason === "idle_timeout"
+                  ? (input.detail ?? null)
+                  : null,
           };
           yield* writeProviderSessionEvents({
             runtime: input.entry.runtime,
@@ -1112,6 +1117,9 @@ export const layerWithOptions = (
           yield* releaseEntry({
             providerSessionId: input.providerSessionId,
             reason: "idle_timeout",
+            // Past the pin cap this stops work that is still running, so the
+            // session records why instead of looking like it finished.
+            ...(hasPendingWork ? { detail: PIN_EXPIRED_RELEASE_DETAIL } : {}),
             cancelIdleFiber: false,
             onlyIfIdleGeneration: input.generation,
           }).pipe(
@@ -1139,7 +1147,13 @@ export const layerWithOptions = (
           ),
         );
 
-      const scheduleIdleReleaseInternal = (providerSessionId: ProviderSessionId) =>
+      // Provider activity restarts the pin budget, so background work that keeps
+      // reporting progress (a long Claude workflow) is never cut off; only work
+      // that went silent for maxIdlePinMs is released.
+      const scheduleIdleReleaseInternal = (
+        providerSessionId: ProviderSessionId,
+        options?: { readonly providerActivity?: boolean },
+      ) =>
         Effect.gen(function* () {
           const key = sessionKey(providerSessionId);
           const current = yield* Ref.get(sessions);
@@ -1166,6 +1180,7 @@ export const layerWithOptions = (
               idleGeneration: generation,
               idleFiber,
               lastActivityAtMs,
+              ...(options?.providerActivity === true ? { pinnedSinceMs: null } : {}),
             });
             return updated;
           });
@@ -1174,7 +1189,10 @@ export const layerWithOptions = (
       const scheduleIdleRelease = (providerSessionId: ProviderSessionId) =>
         withActivityError(providerSessionId, scheduleIdleReleaseInternal(providerSessionId));
 
-      const touchActivity = (providerSessionId: ProviderSessionId) =>
+      const touchActivity = (
+        providerSessionId: ProviderSessionId,
+        options?: { readonly providerActivity?: boolean },
+      ) =>
         withActivityError(
           providerSessionId,
           Effect.gen(function* () {
@@ -1191,7 +1209,7 @@ export const layerWithOptions = (
               });
               return updated;
             });
-            yield* scheduleIdleReleaseInternal(providerSessionId);
+            yield* scheduleIdleReleaseInternal(providerSessionId, options);
           }),
         );
 
@@ -1895,7 +1913,7 @@ export const layerWithOptions = (
                     event.providerThreadId,
                     event.runOrdinal,
                   )
-                : touchActivity(entry.runtime.providerSessionId),
+                : touchActivity(entry.runtime.providerSessionId, { providerActivity: true }),
             ).pipe(
               Effect.andThen(
                 event.type === "provider_session.updated"
