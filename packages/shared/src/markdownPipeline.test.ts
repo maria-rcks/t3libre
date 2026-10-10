@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
@@ -117,5 +117,22 @@ describe("raw HTML detection", () => {
     expect(rendered(chatMarkdownTree(markdown, false)).children).toEqual(
       rendered(chatMarkdownTree(markdown, true)).children,
     );
+  });
+});
+
+describe("loadRehypeRaw", () => {
+  it("keeps a failed load so every render waits on the same settled promise", async () => {
+    vi.resetModules();
+    vi.doMock("rehype-raw", () => {
+      throw new Error("chunk failed");
+    });
+    try {
+      const { loadRehypeRaw } = await import("./markdownPipeline.ts");
+      const failed = loadRehypeRaw();
+      await expect(failed).rejects.toThrow();
+      expect(loadRehypeRaw()).toBe(failed);
+    } finally {
+      vi.doUnmock("rehype-raw");
+    }
   });
 });

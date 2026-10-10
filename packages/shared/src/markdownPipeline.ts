@@ -206,15 +206,12 @@ export function chatMarkdownRehypePlugins(rawHtml: Pluggable | null): PluggableL
 let rehypeRaw: Pluggable | undefined;
 let rehypeRawPromise: Promise<Pluggable> | undefined;
 
-/** Loads rehype-raw for clients that keep parse5 out of their startup bundle. */
+/**
+ * Loads rehype-raw for clients that keep parse5 out of their startup bundle. A failed
+ * load stays cached: browsers cache a failed dynamic import, so a retry cannot succeed.
+ */
 export function loadRehypeRaw(): Promise<Pluggable> {
-  rehypeRawPromise ??= import("rehype-raw").then(
-    (module) => (rehypeRaw = module.default),
-    (error: unknown) => {
-      rehypeRawPromise = undefined;
-      throw error;
-    },
-  );
+  rehypeRawPromise ??= import("rehype-raw").then((module) => (rehypeRaw = module.default));
   return rehypeRawPromise;
 }
 

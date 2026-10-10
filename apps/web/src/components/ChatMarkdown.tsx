@@ -1887,12 +1887,13 @@ function withRawHtml(rehypeRaw: NonNullable<ReturnType<typeof loadedRehypeRaw>>)
 }
 
 // rehype-raw brings parse5, so it loads with the first message that has a tag.
+// After a failed load, messages keep rendering without their HTML: `use()` needs
+// this same settled promise on every render, and the failed import stays failed.
 function loadRawHtmlRehypePlugins(): Promise<RehypePlugins> {
-  rawHtmlRehypePluginsPromise ??= loadRehypeRaw().then(withRawHtml, () => {
-    // Retry on the next render; meanwhile the message renders without its HTML.
-    rawHtmlRehypePluginsPromise = null;
-    return CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS;
-  });
+  rawHtmlRehypePluginsPromise ??= loadRehypeRaw().then(
+    withRawHtml,
+    () => CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS,
+  );
   return rawHtmlRehypePluginsPromise;
 }
 
