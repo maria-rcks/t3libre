@@ -21,13 +21,22 @@ const STARTUP_MODULES = {
  * both arrive as hundreds of small shared chunks.
  *
  * Listing main and the startup routes as build inputs lets Rolldown tag their
- * static graphs `$initial` after tree shaking. Shared modules belong to the
- * first startup graph that imports them, so settings and pairing do not download
- * chat code. index.html preloads main's static graph; the router preloads the
- * initial location's route chunks alongside authentication.
+ * static graphs `$initial` after tree shaking. A module belongs to the first
+ * startup graph that imports it. Chat modules that other pages (settings, usage,
+ * welcome) or the shell's lazy parts (the root notices, the command palette)
+ * also import move into one chunk per set of those users. A settings or welcome
+ * cold open then downloads only the chat code it uses, and a chat cold open
+ * fetches those few extra chunks in the same wave. index.html preloads main's
+ * static graph; the router preloads the initial location's route chunks
+ * alongside authentication.
  * The bootstrap entry keeps its own modules, so it never statically imports
  * a startup chunk and can still report a failed load.
  */
+// Transformed code size below which a set of shared chat modules joins main.
+const MAIN_SHARED_SET_SIZE = 100_000;
+const sharedChunkName = (owner: string | undefined) =>
+  owner === undefined || owner in STARTUP_MODULES ? null : owner;
+
 export function startupChunksPlugin(): Plugin {
   let root = process.cwd();
   let base = "/";
@@ -62,16 +71,30 @@ export function startupChunksPlugin(): Plugin {
               codeSplitting: {
                 // Keep each graph whole: size splitting creates chunk cycles inside Effect's
                 // eagerly initialized runtime and can run consumers before their dependencies.
-                groups: Object.keys(STARTUP_MODULES).map((name) => ({
-                  name: `startup-${name}`,
-                  tags: ["$initial"],
-                  test: (id: string) =>
-                    !id.startsWith("\0") && startupModuleOwners.get(normalizePath(id)) === name,
-                  // Dynamic settings/theme entries must not fragment the startup graphs.
-                  entriesAware: false,
-                  // Otherwise excluded bootstrap helpers are recaptured through main's imports.
-                  includeDependenciesRecursively: false,
-                })),
+                groups: [
+                  ...Object.keys(STARTUP_MODULES).map((name) => ({
+                    name: `startup-${name}`,
+                    tags: ["$initial" as const],
+                    test: (id: string) =>
+                      !id.startsWith("\0") && startupModuleOwners.get(normalizePath(id)) === name,
+                    // Dynamic settings/theme entries must not fragment the startup graphs.
+                    entriesAware: false,
+                    // Otherwise excluded bootstrap helpers are recaptured through main's imports.
+                    includeDependenciesRecursively: false,
+                  })),
+                  {
+                    // The chat modules other pages also render; see buildEnd.
+                    name: (id: string) =>
+                      sharedChunkName(startupModuleOwners.get(normalizePath(id))),
+                    debugName: "startup-shared",
+                    tags: ["$initial" as const],
+                    test: (id: string) =>
+                      !id.startsWith("\0") &&
+                      sharedChunkName(startupModuleOwners.get(normalizePath(id))) !== null,
+                    entriesAware: false,
+                    includeDependenciesRecursively: false,
+                  },
+                ],
               },
             },
           },
@@ -84,10 +107,9 @@ export function startupChunksPlugin(): Plugin {
     buildEnd(error) {
       if (error) return;
       const moduleIds = new Map([...this.getModuleIds()].map((id) => [normalizePath(id), id]));
-      const staticClosure = (entryId: string) => {
+      const staticClosure = (...entryIds: ReadonlyArray<string>) => {
         const closure = new Set<string>();
-        const entry = moduleIds.get(entryId);
-        const pending = entry === undefined ? [] : [entry];
+        const pending = entryIds.flatMap((entryId) => moduleIds.get(entryId) ?? []);
         for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
           const normalizedId = normalizePath(id);
           if (closure.has(normalizedId)) continue;
@@ -103,6 +125,71 @@ export function startupChunksPlugin(): Plugin {
           if (!bootstrapModules.has(id) && !owners.has(id)) owners.set(id, name);
         }
       }
+      const codeLength = (id: string) =>
+        this.getModuleInfo(moduleIds.get(id) ?? id)?.code?.length ?? 0;
+      // Other pages and the app shell also load chat modules: route pages outside
+      // the chat layout, grouped by family since settings.general renders inside
+      // settings, and the shell's lazy parts, such as the root notices.
+      const startupEntries = new Set(
+        Object.values(STARTUP_MODULES).map((entry) => normalizePath(NodePath.join(root, entry))),
+      );
+      const routesDir = normalizePath(NodePath.join(root, "src/routes/"));
+      const families = new Map<string, Array<string>>();
+      for (const id of staticClosure(normalizePath(NodePath.join(root, STARTUP_MODULES.main)))) {
+        for (const lazyId of this.getModuleInfo(moduleIds.get(id) ?? id)?.dynamicallyImportedIds ??
+          []) {
+          const entry = normalizePath(lazyId);
+          const route = entry.startsWith(routesDir)
+            ? entry.slice(routesDir.length).split(/[.?]/)[0]
+            : undefined;
+          // `_` routes render inside the chat layout.
+          if (startupEntries.has(entry) || route?.startsWith("_")) continue;
+          const family = route ?? entry;
+          families.set(family, [...(families.get(family) ?? []), entry]);
+        }
+      }
+      const familyGraphs = [...families].map(
+        ([family, entries]) =>
+          [NodePath.basename(family).split(".")[0], staticClosure(...entries)] as const,
+      );
+      // Each set of families that uses a chat module gets one chunk, so a page or
+      // lazy part downloads only the chat code it uses. A set's chunk imports only
+      // chunks of its supersets, which every family in it also needs.
+      const setSizes = new Map<string, number>();
+      for (const [id, owner] of owners) {
+        if (owner === "main") continue;
+        const users = familyGraphs.filter(([, graph]) => graph.has(id)).map(([family]) => family);
+        if (users.length === 0) continue;
+        const set = `${[...new Set(users)].sort().join("-")}-shared`;
+        owners.set(id, set);
+        setSizes.set(set, (setSizes.get(set) ?? 0) + codeLength(id));
+      }
+      // Small sets join main instead of adding requests to every chat cold open.
+      // A module moves only when everything it imports is in main or moves too,
+      // so main never imports a shared chunk.
+      const toMain = new Set(
+        [...owners].flatMap(([id, owner]) =>
+          (setSizes.get(owner) ?? Infinity) < MAIN_SHARED_SET_SIZE ? [id] : [],
+        ),
+      );
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const id of toMain) {
+          const imports = this.getModuleInfo(moduleIds.get(id) ?? id)?.importedIds ?? [];
+          if (
+            imports.some((dependency) => {
+              const owner = owners.get(normalizePath(dependency));
+              return (
+                owner !== undefined && owner !== "main" && !toMain.has(normalizePath(dependency))
+              );
+            })
+          ) {
+            toMain.delete(id);
+            changed = true;
+          }
+        }
+      }
+      for (const id of toMain) owners.set(id, "main");
       startupModuleOwners = owners;
     },
     generateBundle: {
