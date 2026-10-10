@@ -362,20 +362,20 @@ function applyTheme(theme: Theme, { suppressTransitions = false, preservePreview
   }
 }
 
-let themeSettlePending = false;
+let themeSettleGeneration = 0;
 
 /**
  * Finish a transition-suppressed theme change once the next frame has painted
  * it. Reading computed colors or removing `no-transitions` any earlier forces
  * an extra full-document style recalc before the new theme reaches the screen.
  * The frame itself computes styles with transitions off, so nothing animates.
+ * Another change before then restarts the wait so it paints without transitions too.
  */
 function settleThemeAfterPaint() {
-  if (themeSettlePending) return;
-  themeSettlePending = true;
+  const generation = ++themeSettleGeneration;
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      themeSettlePending = false;
+      if (generation !== themeSettleGeneration) return;
       syncBrowserChromeTheme();
       document.documentElement.classList.remove("no-transitions");
     });
