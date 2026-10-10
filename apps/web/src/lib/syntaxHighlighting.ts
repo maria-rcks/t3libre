@@ -27,7 +27,6 @@ export function getSyntaxHighlighterPromise(language: string): Promise<DiffsHigh
     )
     .catch((error) => {
       if (language === "text") {
-        highlighterPromiseCache.delete(language);
         // "text" itself failed — Shiki cannot initialize at all, surface the error
         throw error;
       }
@@ -35,5 +34,9 @@ export function getSyntaxHighlighterPromise(language: string): Promise<DiffsHigh
       return getSyntaxHighlighterPromise("text");
     });
   highlighterPromiseCache.set(language, promise);
+  // A failed load, such as a chunk that did not arrive, retries on the next highlight.
+  void promise.catch(() => {
+    if (highlighterPromiseCache.get(language) === promise) highlighterPromiseCache.delete(language);
+  });
   return promise;
 }

@@ -85,15 +85,19 @@ import { getDesktopSnapShotBridge } from "../lib/desktopSnapShot";
 import { installDesktopPasteAsText } from "../lib/desktopPasteAsText";
 import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
 
+// These optional notices mount with the shell. A stale chunk still gets the
+// `vite:preloadError` reload first; a chunk that keeps failing renders nothing
+// instead of replacing the shell with the route error view.
+const renderNothing = () => null;
 const ConnectOnboardingDialog = lazy(() =>
-  import("../components/cloud/ConnectOnboardingDialog").then((module) => ({
-    default: module.ConnectOnboardingDialog,
-  })),
+  import("../components/cloud/ConnectOnboardingDialog")
+    .then((module) => ({ default: module.ConnectOnboardingDialog }))
+    .catch(() => ({ default: renderNothing })),
 );
 const NightlyMobileBetaNotice = lazy(() =>
-  import("../components/NightlyMobileBeta").then((module) => ({
-    default: module.NightlyMobileBetaNotice,
-  })),
+  import("../components/NightlyMobileBeta")
+    .then((module) => ({ default: module.NightlyMobileBetaNotice }))
+    .catch(() => ({ default: renderNothing })),
 );
 
 export const Route = createRootRoute({

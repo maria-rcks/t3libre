@@ -122,7 +122,13 @@ function CustomSnoozeDialog() {
                       <Label htmlFor={`${id}-date`}>Date</Label>
                       <Popover
                         open={calendarOpen && Calendar !== undefined}
-                        onOpenChange={setCalendarOpen}
+                        onOpenChange={(open) => {
+                          setCalendarOpen(open);
+                          // A failed calendar load retries when the picker is asked for again.
+                          if (open && Calendar === undefined) {
+                            void loadCalendar().then(setCalendar, () => undefined);
+                          }
+                        }}
                       >
                         <PopoverTrigger
                           render={
