@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
+import { primaryEnvironmentMissingAtom } from "../connection/platform";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { isHostedStaticApp } from "../hostedPairing";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
@@ -32,10 +33,12 @@ export const allEnvironmentShellsBootstrappedAtom = Atom.make((get) => {
     return false;
   }
   // The persisted catalog emits before platform discovery registers the
-  // primary environment. Until it does, an empty workspace is unknown.
+  // primary environment. Until it does, an empty workspace is unknown. A
+  // discovery that ends without the primary settles the landing without it.
   if (
     !isHostedStaticApp() &&
     !isLocalEnvironmentDisabled() &&
+    !get(primaryEnvironmentMissingAtom) &&
     !Array.from(catalog.value.entries.values()).some(
       (entry) => entry.target._tag === "PrimaryConnectionTarget",
     )
