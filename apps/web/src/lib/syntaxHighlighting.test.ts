@@ -27,13 +27,18 @@ it("caches the recovered text highlighter for unsupported languages", async () =
   expect(getSharedHighlighter).toHaveBeenCalledTimes(2);
 });
 
-it("retries a language whose load and text fallback both failed", async () => {
+it("keeps a failed load cached so render-time callers get one stable rejection", async () => {
   vi.resetModules();
   const { getSyntaxHighlighterPromise: load } = await import("./syntaxHighlighting");
-  const highlighter = {} as DiffsHighlighter;
   getSharedHighlighter.mockRejectedValue(new Error("chunk failed"));
-  await expect(load("typescript")).rejects.toThrow("chunk failed");
+  const failed = load("typescript");
+  await expect(failed).rejects.toThrow("chunk failed");
+  const failedText = load("text");
+  await expect(failedText).rejects.toThrow("chunk failed");
+  const calls = getSharedHighlighter.mock.calls.length;
 
-  getSharedHighlighter.mockResolvedValue(highlighter);
-  await expect(load("typescript")).resolves.toBe(highlighter);
+  getSharedHighlighter.mockResolvedValue({} as DiffsHighlighter);
+  expect(load("typescript")).toBe(failed);
+  expect(load("text")).toBe(failedText);
+  expect(getSharedHighlighter).toHaveBeenCalledTimes(calls);
 });

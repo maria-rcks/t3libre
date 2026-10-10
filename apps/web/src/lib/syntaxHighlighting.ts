@@ -33,10 +33,9 @@ export function getSyntaxHighlighterPromise(language: string): Promise<DiffsHigh
       // Language not supported by Shiki — fall back to "text"
       return getSyntaxHighlighterPromise("text");
     });
+  // A failure stays cached too. Callers pass this promise to React `use()`, which needs the
+  // same promise on every render to reach the error boundary's plain-text fallback, and
+  // Chromium caches a failed dynamic import, so a retry of the same chunk cannot succeed.
   highlighterPromiseCache.set(language, promise);
-  // A failed load, such as a chunk that did not arrive, retries on the next highlight.
-  void promise.catch(() => {
-    if (highlighterPromiseCache.get(language) === promise) highlighterPromiseCache.delete(language);
-  });
   return promise;
 }
