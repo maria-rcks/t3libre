@@ -3672,8 +3672,9 @@ export default function ChatView(props: ChatViewProps) {
   // starts on its own instead of being refused.
   const sendQueuesBehindSetup =
     isServerThread && (activeRunPreparing || activeActivityRun?.status === "starting");
-  // Such a send skips the local dispatch, so this keeps the composer busy while it is in flight.
-  const [setupQueueSendInFlight, setSetupQueueSendInFlight] = useState(false);
+  // Such a send skips the local dispatch, so this keeps its thread's composer busy while it is
+  // in flight.
+  const [setupQueueSendThreadKey, setSetupQueueSendThreadKey] = useState<string | null>(null);
   useEffect(() => {
     attachmentPreviewHandoffByMessageIdRef.current = attachmentPreviewHandoffByMessageId;
   }, [attachmentPreviewHandoffByMessageId]);
@@ -9435,7 +9436,7 @@ export default function ChatView(props: ChatViewProps) {
     }
     // A send queued behind setup leaves the first send's dispatch and setup card alone.
     if (sendQueuesBehindSetup) {
-      setSetupQueueSendInFlight(true);
+      setSetupQueueSendThreadKey(activeThreadKey);
     } else {
       beginLocalDispatch({
         preparingWorktree: multipleModelSelections !== null || Boolean(baseBranchForWorktree),
@@ -10121,7 +10122,7 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
     sendInFlightRef.current = false;
-    setSetupQueueSendInFlight(false);
+    setSetupQueueSendThreadKey((current) => (current === activeThreadKey ? null : current));
     if (!turnStartSucceeded) {
       setDockedDraftHeroThreadKey((currentThreadKey) =>
         currentThreadKey === activeThreadKey ? null : currentThreadKey,
@@ -11635,7 +11636,8 @@ export default function ChatView(props: ChatViewProps) {
                               isConnecting={isConnecting}
                               isSendBusy={
                                 (isSendBusy && !sendQueuesBehindSetup) ||
-                                setupQueueSendInFlight ||
+                                (setupQueueSendThreadKey !== null &&
+                                  setupQueueSendThreadKey === activeThreadKey) ||
                                 isSavingQueuedEdit ||
                                 isResuming
                               }

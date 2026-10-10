@@ -1422,66 +1422,89 @@ it.effect("retries a failed workspace preparation on the same run", () => {
   }).pipe(Effect.provide(harness.layer));
 });
 
-it.effect("holds a message queued during setup when the workspace preparation fails", () =>
-  Effect.gen(function* () {
-    const allowFetch = yield* Deferred.make<void>();
-    const harness = makeHarness({
-      fetchRemote: () =>
-        Deferred.await(allowFetch).pipe(
-          Effect.andThen(
-            Effect.fail(
-              new GitCommandError({
-                operation: "GitVcsDriver.fetchRemote",
-                command: "git",
-                cwd: project.workspaceRoot,
-                detail: "Git could not reach the remote.",
-                exitCode: 128,
-              }),
-            ),
-          ),
-        ),
-    });
-    yield* Effect.gen(function* () {
-      const launches = yield* ThreadLaunch.ThreadLaunchService;
-      const threads = yield* ThreadManagement.ThreadManagementService;
-      const launched = yield* launches.launch(
-        launchInput({
-          command: "command:launch:queued-failed-setup",
-          thread: "thread:launch:queued-failed-setup",
-          message: "First message",
-          workspace: { type: "worktree", baseRef: "main", startFromOrigin: true },
-        }),
-      );
-      const queued = yield* threads.sendToThread({
-        projectId,
-        commandId: CommandId.make("command:launch:queued-failed-setup:follow-up"),
-        threadId: launched.threadId,
-        messageId: MessageId.make("message:launch:queued-failed-setup:follow-up"),
-        text: "Sent during setup",
-        attachments: [],
-        mode: "queue",
-        createdBy: "user",
-        creationSource: "web",
+it.effect.each(["fails", "is interrupted"] as const)(
+  "holds a message queued during setup when the workspace preparation %s",
+  (ending) =>
+    Effect.gen(function* () {
+      const allowFetch = yield* Deferred.make<void>();
+      let fetchFailures = 1;
+      const harness = makeHarness({
+        fetchRemote: () =>
+          fetchFailures-- <= 0
+            ? Effect.void
+            : Deferred.await(allowFetch).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    new GitCommandError({
+                      operation: "GitVcsDriver.fetchRemote",
+                      command: "git",
+                      cwd: project.workspaceRoot,
+                      detail: "Git could not reach the remote.",
+                      exitCode: 128,
+                    }),
+                  ),
+                ),
+              ),
       });
-      assert.equal(queued.delivery, "queued");
-      yield* Deferred.succeed(allowFetch, undefined);
+      yield* Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        const launched = yield* launches.launch(
+          launchInput({
+            command: `command:launch:queued-setup-${ending}`,
+            thread: `thread:launch:queued-setup-${ending}`,
+            message: "First message",
+            workspace: { type: "worktree", baseRef: "main", startFromOrigin: true },
+          }),
+        );
+        const queued = yield* threads.sendToThread({
+          projectId,
+          commandId: CommandId.make(`command:launch:queued-setup-${ending}:follow-up`),
+          threadId: launched.threadId,
+          messageId: MessageId.make(`message:launch:queued-setup-${ending}:follow-up`),
+          text: "Sent during setup",
+          attachments: [],
+          mode: "queue",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        assert.equal(queued.delivery, "queued");
+        if (ending === "fails") {
+          yield* Deferred.succeed(allowFetch, undefined);
+        } else {
+          // An agent stop does not ask to hold the queue.
+          yield* threads.dispatch({
+            type: "run.interrupt",
+            commandId: CommandId.make("command:launch:queued-setup-interrupt"),
+            threadId: launched.threadId,
+            runId: launched.projection.runs[0]!.id,
+          });
+        }
 
-      // Without its worktree the follow-up would start in the project checkout.
-      yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
-        Stream.filter(
-          (stored) =>
-            stored.event.type === "run.updated" && stored.event.payload.queueHeld === true,
-        ),
-        Stream.runHead,
-      );
-      const projection = yield* threads.getThreadProjection(launched.threadId);
-      assert.deepEqual(
-        projection.runs.map((run) => run.status),
-        ["failed", "queued"],
-      );
-      assert.equal(projection.thread.worktreePath, null);
-    }).pipe(Effect.provide(harness.layer));
-  }),
+        // Without its worktree the follow-up would start in the project checkout.
+        yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "run.updated" && stored.event.payload.queueHeld === true,
+          ),
+          Stream.runHead,
+        );
+        const projection = yield* threads.getThreadProjection(launched.threadId);
+        assert.equal(projection.runs.at(-1)?.status, "queued");
+        assert.equal(projection.thread.worktreePath, null);
+
+        if (ending === "fails") {
+          // A successful retry lets the held message follow the first turn again.
+          yield* launches.retryPreparation({
+            commandId: CommandId.make("command:launch:queued-setup-retry"),
+            threadId: launched.threadId,
+            runId: launched.projection.runs[0]!.id,
+          });
+          const retried = yield* threads.getThreadProjection(launched.threadId);
+          assert.equal(retried.runs.at(-1)?.queueHeld, false);
+        }
+      }).pipe(Effect.provide(harness.layer));
+    }),
 );
 
 it.effect("a retry reuses a recorded worktree without undoing its branch rename", () => {

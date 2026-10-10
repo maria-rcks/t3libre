@@ -1263,7 +1263,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ]);
     });
 
-  const startNextQueuedRun = (threadId: ThreadId, options?: { readonly failedRunId?: RunId }) =>
+  const startNextQueuedRun = (
+    threadId: ThreadId,
+    options?: { readonly failedRunId?: RunId; readonly endedRunId?: RunId },
+  ) =>
     Effect.gen(function* () {
       // Every terminal run checks the queue. Only a deliverable queued run
       // needs the transcript for provider handoff and legacy import context.
@@ -1306,7 +1309,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ? latestRootProviderFailure(failedRun, projection.turnItems)?.class
           : undefined;
       const worktreeMissing =
-        failedRun?.id === options?.failedRunId &&
+        failedRun?.id === options?.endedRunId &&
         failedRun?.workspacePreparation?.type === "worktree" &&
         projection.thread.worktreePath === null;
       if (
@@ -8111,6 +8114,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         type: "run.updated",
         payload: { ...state.run, status: "preparing", completedAt: null },
       });
+      // Messages held when this preparation failed follow the run again.
+      for (const run of projection.runs) {
+        if (run.status !== "queued" || run.queueHeld !== true) continue;
+        yield* emitEvent({
+          type: "run.updated",
+          threadId: command.threadId,
+          runId: run.id,
+          providerInstanceId: run.providerInstanceId,
+          occurredAt: now,
+          payload: { ...run, queueHeld: false },
+        });
+      }
     });
 
   /**
@@ -10656,8 +10671,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           threadId,
           startNextQueuedRun(
             threadId,
-            stored.event.type === "run.updated" && stored.event.payload.status === "failed"
-              ? { failedRunId: stored.event.payload.id }
+            stored.event.type === "run.updated"
+              ? {
+                  endedRunId: stored.event.payload.id,
+                  ...(stored.event.payload.status === "failed"
+                    ? { failedRunId: stored.event.payload.id }
+                    : {}),
+                }
               : undefined,
           ),
         )
