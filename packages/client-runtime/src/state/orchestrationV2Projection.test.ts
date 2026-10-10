@@ -157,6 +157,7 @@ describe("applyOrchestrationV2ProjectionEvent", () => {
     expect(next?.thread.pullRequests?.[0]?.snapshot).toEqual(snapshot);
     expect(next?.thread.pullRequests?.[1]).toBe(other);
     expect(next?.thread.updatedAt).toEqual(now);
+    expect(next?.updatedAt).toEqual(now);
     expect(next?.turnItems).toBe(projection.turnItems);
   });
 

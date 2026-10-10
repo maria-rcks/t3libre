@@ -719,9 +719,10 @@ export function applyToProjection(
         ...base,
         thread: event.payload,
       };
+    // A host refresh is not activity, matching the stored projection.
     case "thread.pull-request-link-synced":
       return {
-        ...base,
+        ...projection,
         thread: applyThreadPullRequestLinkSync(projection.thread, event.payload),
       };
     // Visited tracking is read state, not activity: skip the updatedAt bump so

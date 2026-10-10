@@ -182,8 +182,12 @@ export function applyOrchestrationV2ProjectionEvent(
     case "thread.model-selection-updated":
     case "thread.provider-switched":
       return { ...base, thread: event.payload };
+    // A host refresh is not activity, matching the server projection.
     case "thread.pull-request-link-synced":
-      return { ...base, thread: applyThreadPullRequestLinkSync(projection.thread, event.payload) };
+      return {
+        ...projection,
+        thread: applyThreadPullRequestLinkSync(projection.thread, event.payload),
+      };
     // Visited tracking is read state, not activity: skip the updatedAt bump.
     case "thread.visited":
     case "thread.marked-unread":
