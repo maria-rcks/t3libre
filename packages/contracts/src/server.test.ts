@@ -38,14 +38,6 @@ describe("ServerProvider", () => {
       slashCommands: [{ name: "compact" }],
       ...(pending === undefined ? {} : { slashCommandsPending: pending }),
       skills: [{ name: "project", path: "/workspace/project/SKILL.md", enabled: true }],
-      optionDescriptors: [
-        {
-          id: "agent",
-          label: "Agent",
-          type: "select",
-          options: [{ id: "readonly", label: "Readonly" }],
-        },
-      ],
     };
     const parsed = decodeServerProvider({
       ...baseProviderSnapshot,

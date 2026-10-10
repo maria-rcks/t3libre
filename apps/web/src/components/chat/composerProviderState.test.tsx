@@ -1,9 +1,6 @@
-import { resolveProviderForCwd } from "@t3tools/client-runtime/providerSkills";
 import { describe, expect, it } from "vite-plus/test";
 import {
   ProviderDriverKind,
-  ProviderInstanceId,
-  type ServerProvider,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   type ServerProviderModel,
@@ -76,55 +73,6 @@ const ULTRATHINK_FRAME_CLASSES = {
 } as const;
 
 describe("getComposerProviderState", () => {
-  it("dispatches a project agent from its cwd catalog with legacy plan mode disabled", () => {
-    const provider: ServerProvider = {
-      instanceId: ProviderInstanceId.make("opencode"),
-      driver: ProviderDriverKind.make("opencode"),
-      enabled: true,
-      installed: true,
-      status: "ready",
-      version: "2.0.18",
-      auth: { status: "authenticated" },
-      checkedAt: "2026-01-01T00:00:00.000Z",
-      skills: [],
-      slashCommands: [],
-      models: modelWith([
-        selectDescriptor("agent", [{ id: "build", label: "Build", isDefault: true }]),
-      ]),
-      workspaceSnapshots: [
-        {
-          cwd: "/work",
-          checkedAt: "2026-01-01T00:00:00.000Z",
-          skills: [],
-          slashCommands: [],
-          optionDescriptors: [
-            selectDescriptor("agent", [
-              { id: "build", label: "Build", isDefault: true },
-              { id: "plan", label: "Plan" },
-              { id: "readonly", label: "Readonly" },
-            ]),
-          ],
-        },
-      ],
-    };
-    const scoped = resolveProviderForCwd(provider, "/work");
-    const state = getComposerProviderState({
-      provider: provider.driver,
-      model: MODEL,
-      models: scoped.models,
-      modelOptions: selections(["agent", "readonly"]),
-      planModeEnabled: false,
-    });
-    expect(state.modelOptionsForDispatch).toEqual(selections(["agent", "readonly"]));
-    const global = getComposerProviderState({
-      provider: provider.driver,
-      model: MODEL,
-      models: provider.models,
-      modelOptions: selections(["agent", "readonly"]),
-      planModeEnabled: false,
-    });
-    expect(global.modelOptionsForDispatch).toEqual(selections(["agent", "build"]));
-  });
   it("derives a stable prompt injection state for ordinary prompt edits", () => {
     expect(getComposerPromptInjectionState("Investigate this failure")).toBe("none");
     expect(getComposerPromptInjectionState("Ultrathink:\nInvestigate this failure")).toBe(
