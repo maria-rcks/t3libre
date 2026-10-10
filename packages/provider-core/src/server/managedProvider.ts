@@ -155,12 +155,19 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
         const generation = input.enrichSnapshot
           ? state.enrichmentGeneration + 1
           : state.enrichmentGeneration;
+        const usageLimits = resolveUsageLimitsAfterProbe({
+          published: state.snapshot.usageLimits,
+          probed: probedSnapshot.usageLimits,
+        });
+        // Retained limits keep the workspace they were read for, so they are
+        // not pooled into another workspace on the same email.
+        const workspaceId =
+          usageLimits === probedSnapshot.usageLimits ? undefined : state.snapshot.auth.workspaceId;
         const snapshot = withUsageLimits(
-          probedSnapshot,
-          resolveUsageLimitsAfterProbe({
-            published: state.snapshot.usageLimits,
-            probed: probedSnapshot.usageLimits,
-          }),
+          workspaceId && !probedSnapshot.auth.workspaceId
+            ? { ...probedSnapshot, auth: { ...probedSnapshot.auth, workspaceId } }
+            : probedSnapshot,
+          usageLimits,
         );
         return [
           { snapshot, generation },
