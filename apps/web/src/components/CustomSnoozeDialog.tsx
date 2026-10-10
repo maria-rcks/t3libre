@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { create } from "zustand";
 import {
   localSnoozeDate,
@@ -33,7 +33,6 @@ import {
 
 // react-day-picker and date-fns load with the dialog, not with the app.
 const loadCalendar = () => import("./ui/calendar");
-const Calendar = lazy(() => loadCalendar().then((module) => ({ default: module.Calendar })));
 
 type SnoozeChoice = { readonly snoozedUntil: string };
 type Request = { readonly resolve: (choice: SnoozeChoice | null) => void };
@@ -58,8 +57,11 @@ export function CustomSnoozeDialogHost() {
 
 function CustomSnoozeDialog() {
   const id = useId();
-  // Fetch the calendar while the user reads the dialog so the date picker opens ready.
-  useEffect(() => void loadCalendar().catch(() => undefined), []);
+  // Fetch the calendar while the user reads the dialog. Base UI sizes a popover once, as it
+  // opens, so the date picker waits for the calendar instead of opening around a placeholder.
+  const [calendar, setCalendar] = useState<Awaited<ReturnType<typeof loadCalendar>> | null>(null);
+  useEffect(() => void loadCalendar().then(setCalendar, () => undefined), []);
+  const Calendar = calendar?.Calendar;
   const [initial] = useState(() => new Date(Date.now() + 3_600_000));
   const [mode, setMode] = useState<CustomSnoozeInput["mode"]>("date");
   const [date, setDate] = useState(initial);
@@ -118,7 +120,10 @@ function CustomSnoozeDialog() {
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="flex min-w-0 flex-col gap-1.5">
                       <Label htmlFor={`${id}-date`}>Date</Label>
-                      <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+                      <Popover
+                        open={calendarOpen && Calendar !== undefined}
+                        onOpenChange={setCalendarOpen}
+                      >
                         <PopoverTrigger
                           render={
                             <Button
@@ -136,7 +141,7 @@ function CustomSnoozeDialog() {
                           <CalendarIcon className="size-4 text-muted-foreground" />
                         </PopoverTrigger>
                         <PopoverPopup align="start" aria-label="Choose snooze date">
-                          <Suspense fallback={null}>
+                          {Calendar && (
                             <Calendar
                               mode="single"
                               required
@@ -150,7 +155,7 @@ function CustomSnoozeDialog() {
                                 setError(null);
                               }}
                             />
-                          </Suspense>
+                          )}
                         </PopoverPopup>
                       </Popover>
                     </div>
