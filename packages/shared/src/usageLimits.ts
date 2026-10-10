@@ -442,7 +442,7 @@ export function collectLimitPools(
       .sort((left, right) => WINDOW_KIND_ORDER[left.kind] - WINDOW_KIND_ORDER[right.kind])[0];
     const orderReset = (account: LimitAccount) => {
       const window = account.limits.windows.find(
-        (window) => window.kind === orderWindow?.kind && window.id === orderWindow.id,
+        (window) => orderWindow && poolKey(driver, window) === poolKey(driver, orderWindow),
       );
       return (window ? resetMillis(window) : null) ?? Number.POSITIVE_INFINITY;
     };
@@ -460,11 +460,24 @@ function accountSortName(account: LimitAccount): string {
   return (account.displayName ?? account.email ?? account.key).toLowerCase();
 }
 
+/**
+ * Codex ids are slots, not allowances: a weekly-only plan reports its weekly
+ * window as `primary`, other plans as `secondary`. Its windows pool by kind;
+ * other drivers' ids name distinct allowances.
+ */
+function poolKey(driver: ServerProvider["driver"], window: ServerProviderUsageWindow): string {
+  return driver === "codex" ? window.kind : `${window.kind}:${window.id}`;
+}
+
 function poolWindows(accounts: readonly LimitAccount[], now: number): readonly LimitPoolWindow[] {
   const byKey = new Map<string, LimitPoolMember[]>();
   for (const account of accounts) {
     for (const window of account.limits.windows) {
-      const key = `${window.kind}:${window.id}`;
+      const pooled = poolKey(account.driver, window);
+      // An account with two windows of one kind keeps the second apart.
+      const key = byKey.get(pooled)?.some((member) => member.account === account)
+        ? `${window.kind}:${window.id}`
+        : pooled;
       const list = byKey.get(key);
       if (list) list.push({ account, window });
       else byKey.set(key, [{ account, window }]);

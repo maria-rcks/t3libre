@@ -27,7 +27,7 @@ describe("codexRateLimitsToLimits", () => {
       checkedAt,
       windows: [
         {
-          id: "session",
+          id: "primary",
           kind: "session",
           label: "Session",
           usedPercent: 12,
@@ -35,7 +35,7 @@ describe("codexRateLimitsToLimits", () => {
           resetsAt: "2026-07-14T03:33:20.000Z",
         },
         {
-          id: "weekly",
+          id: "secondary",
           kind: "weekly",
           label: "Weekly",
           usedPercent: 47,
@@ -54,7 +54,7 @@ describe("codexRateLimitsToLimits", () => {
       }).windows,
     ).toEqual([
       {
-        id: "monthly",
+        id: "primary",
         kind: "monthly",
         label: "Monthly",
         usedPercent: 80,
@@ -80,7 +80,7 @@ describe("codexRateLimitsToLimits", () => {
       }).windows,
     ).toEqual([
       {
-        id: "weekly",
+        id: "secondary",
         kind: "weekly",
         label: "Weekly",
         usedPercent: 42,
@@ -121,7 +121,7 @@ describe("codexRateLimitsToUpdate", () => {
     ).toEqual({
       windows: [
         {
-          id: "weekly",
+          id: "secondary",
           kind: "weekly",
           label: "Weekly",
           usedPercent: 51,
@@ -147,7 +147,7 @@ describe("codexRateLimitsToUpdate", () => {
       })?.windows,
     ).toEqual([
       {
-        id: "weekly",
+        id: "secondary",
         kind: "weekly",
         label: "Weekly",
         usedPercent: 42,

@@ -658,6 +658,40 @@ describe("pools", () => {
     expect(accounts[0]?.displayName).toBe("claude-team-seat");
   });
 
+  it("pools Codex windows by kind, whichever slot reported them", () => {
+    const codexAccount = (id: string, slot: string, usedPercent: number) => ({
+      id,
+      driver: ProviderDriverKind.make("codex"),
+      usageLimits: { checkedAt, windows: [{ ...weekly, id: slot, usedPercent }] },
+    });
+    const input = new Map([
+      [
+        EnvironmentId.make("env-a"),
+        {
+          ...laptop,
+          serverConfig: {
+            usageLimitSources: [
+              {
+                ...source,
+                accounts: [
+                  // A weekly-only plan reports weekly as `primary`.
+                  codexAccount("business", "primary", 8),
+                  codexAccount("plus", "secondary", 26),
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    ]);
+    const windows = collectLimitPools(collectLimitAccounts(input), now)[0]?.windows;
+    expect(windows).toHaveLength(1);
+    expect(windows?.[0]?.members.map((member) => member.account.displayName)).toEqual([
+      "business",
+      "plus",
+    ]);
+  });
+
   it("pools windows by id across accounts and orders resets by when they land", () => {
     const input = new Map([
       [
