@@ -1507,6 +1507,57 @@ it.effect.each(["fails", "is interrupted"] as const)(
     }),
 );
 
+it.effect("holds a message queued during setup that arrives after the setup failed", () => {
+  const harness = makeHarness({
+    fetchRemote: () =>
+      Effect.fail(
+        new GitCommandError({
+          operation: "GitVcsDriver.fetchRemote",
+          command: "git",
+          cwd: project.workspaceRoot,
+          detail: "Git could not reach the remote.",
+          exitCode: 128,
+        }),
+      ),
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launched = yield* launches.launch(
+      launchInput({
+        command: "command:launch:late-queued-follow-up",
+        thread: "thread:launch:late-queued-follow-up",
+        message: "First message",
+        workspace: { type: "worktree", baseRef: "main", startFromOrigin: true },
+      }),
+    );
+    yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
+      Stream.filter(
+        (stored) => stored.event.type === "run.updated" && stored.event.payload.status === "failed",
+      ),
+      Stream.runHead,
+    );
+
+    // Queued while setup ran, delivered only after it failed: it must not start
+    // in the project checkout.
+    const queued = yield* threads.sendToThread({
+      projectId,
+      commandId: CommandId.make("command:launch:late-queued-follow-up:send"),
+      threadId: launched.threadId,
+      messageId: MessageId.make("message:launch:late-queued-follow-up:send"),
+      text: "Sent during setup",
+      attachments: [],
+      mode: "queue",
+      createdBy: "user",
+      creationSource: "web",
+    });
+    assert.equal(queued.delivery, "queued");
+    const projection = yield* threads.getThreadProjection(launched.threadId);
+    assert.equal(projection.runs.at(-1)?.status, "queued");
+    assert.equal(projection.runs.at(-1)?.queueHeld, true);
+  }).pipe(Effect.provide(harness.layer));
+});
+
 it.effect("a retry reuses a recorded worktree without undoing its branch rename", () => {
   let setupFailures = 1;
   const harness = makeHarness({

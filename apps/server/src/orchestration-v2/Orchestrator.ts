@@ -4855,9 +4855,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         (candidate) => candidate.id === projection.thread.activeProviderThreadId,
       );
       const activeRun = projection.runs.find(isBlockingRun);
+      // A message queued during worktree setup can arrive after that setup failed
+      // without a worktree. It waits, held, like the messages queued before the
+      // failure, instead of starting in the project checkout.
+      const latestRun = latestExecutedRun(projection.runs);
+      const worktreeMissingRun =
+        activeRun === undefined &&
+        dispatchMode.type === "queue_after_active" &&
+        latestRun?.status === "failed" &&
+        latestRun.workspacePreparation?.type === "worktree" &&
+        projection.thread.worktreePath === null
+          ? latestRun
+          : undefined;
+      const queueBehindRun = activeRun ?? worktreeMissingRun;
       const pendingMergeBackTransfers = pendingMergeBackTransfersForThread(projection);
       const shouldQueue =
-        activeRun !== undefined &&
+        queueBehindRun !== undefined &&
         (dispatchMode.type === "defer_start" ||
           dispatchMode.type === "start_immediately" ||
           dispatchMode.type === "queue_after_active");
@@ -4872,13 +4885,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const queueProviderThread =
           activeProviderThread ??
           projection.providerThreads.find(
-            (candidate) => candidate.id === activeRun.providerThreadId,
+            (candidate) => candidate.id === queueBehindRun.providerThreadId,
           );
         if (queueProviderThread === undefined) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
             commandType: command.type,
-            cause: `Active run ${activeRun.id} has no provider thread for queued dispatch.`,
+            cause: `Active run ${queueBehindRun.id} has no provider thread for queued dispatch.`,
           });
         }
         const now = yield* DateTime.now;
@@ -4932,7 +4945,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const attemptId = idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 });
         const rootNodeId = idAllocator.derive.rootNode({ runId });
         const checkpointScope =
-          activeRun.status === "preparing"
+          queueBehindRun.status === "preparing" || worktreeMissingRun !== undefined
             ? null
             : yield* runtimePolicy.resolve({ thread: projection.thread, modelSelection }).pipe(
                 Effect.flatMap((resolvedRuntimePolicy) =>
@@ -4969,7 +4982,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           rootNodeId,
           activeAttemptId: attemptId,
           status: "queued",
-          ...(projection.runs.some(
+          ...(worktreeMissingRun !== undefined ||
+          projection.runs.some(
             (candidate) => candidate.status === "queued" && candidate.queueHeld === true,
           )
             ? { queueHeld: true }
