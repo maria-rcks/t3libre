@@ -659,37 +659,42 @@ describe("pools", () => {
   });
 
   it("pools Codex windows by kind, whichever slot reported them", () => {
-    const codexAccount = (id: string, slot: string, usedPercent: number) => ({
+    const codexAccount = (id: string, slots: readonly string[]) => ({
       id,
       driver: ProviderDriverKind.make("codex"),
-      usageLimits: { checkedAt, windows: [{ ...weekly, id: slot, usedPercent }] },
+      usageLimits: {
+        checkedAt,
+        windows: slots.map((slot) => ({ ...weekly, id: slot, usedPercent: 50 })),
+      },
     });
-    const input = new Map([
-      [
-        EnvironmentId.make("env-a"),
-        {
-          ...laptop,
-          serverConfig: {
-            usageLimitSources: [
-              {
-                ...source,
-                accounts: [
-                  // A weekly-only plan reports weekly as `primary`.
-                  codexAccount("business", "primary", 8),
-                  codexAccount("plus", "secondary", 26),
-                ],
-              },
+    const pooled = (accounts: ReturnType<typeof codexAccount>[]) =>
+      collectLimitPools(
+        collectLimitAccounts(
+          new Map([
+            [
+              EnvironmentId.make("env-a"),
+              { ...laptop, serverConfig: { usageLimitSources: [{ ...source, accounts }] } },
             ],
-          },
-        },
-      ],
-    ]);
-    const windows = collectLimitPools(collectLimitAccounts(input), now)[0]?.windows;
-    expect(windows).toHaveLength(1);
-    expect(windows?.[0]?.members.map((member) => member.account.displayName)).toEqual([
-      "business",
-      "plus",
-    ]);
+          ]),
+        ),
+        now,
+      )[0]?.windows ?? [];
+    // A weekly-only plan reports weekly as `primary`. The pool keeps one id
+    // whichever account sorts first.
+    for (const order of [
+      [codexAccount("business", ["primary"]), codexAccount("plus", ["secondary"])],
+      [codexAccount("plus", ["secondary"]), codexAccount("business", ["primary"])],
+    ]) {
+      const windows = pooled(order);
+      expect(windows.map((window) => window.id)).toEqual(["weekly"]);
+      expect(windows[0]?.members).toHaveLength(2);
+    }
+    // A second window of the same kind on one account stays apart, with its own id.
+    expect(
+      pooled([codexAccount("a", ["secondary"]), codexAccount("b", ["primary", "secondary"])]).map(
+        (window) => window.id,
+      ),
+    ).toEqual(["weekly", "weekly:secondary"]);
   });
 
   it("pools windows by id across accounts and orders resets by when they land", () => {

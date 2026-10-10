@@ -483,9 +483,12 @@ function poolWindows(accounts: readonly LimitAccount[], now: number): readonly L
       else byKey.set(key, [{ account, window }]);
     }
   }
-  const pools = [...byKey.values()].map((members): LimitPoolWindow => {
+  const pools = [...byKey].map(([key, members]): LimitPoolWindow => {
     const memberByAccount = new Map(members.map((member) => [member.account.key, member]));
     const first = members[0]!.window;
+    // Pooled Codex slots take the pool's own key, so the id stays the same
+    // whichever account sorts first.
+    const id = members[0]!.account.driver === "codex" ? key : first.id;
     const usedPercent = members.reduce((sum, m) => sum + m.window.usedPercent, 0) / members.length;
     // Pace compares spend against the clock, so it is judged only over the
     // members that have a clock; a window with no reset would otherwise
@@ -512,7 +515,7 @@ function poolWindows(accounts: readonly LimitAccount[], now: number): readonly L
       })
       .sort((left, right) => left.at - right.at);
     return {
-      id: first.id,
+      id,
       kind: first.kind,
       label: first.label,
       members,
