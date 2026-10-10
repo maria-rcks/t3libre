@@ -496,6 +496,98 @@ describe("pools", () => {
     expect(account?.redeem?.environmentId).toBe("env-2");
   });
 
+  it("keeps one email in two workspaces apart while merging each workspace's duplicates", () => {
+    const login = (instanceId: string, workspaceId: string, usedPercent: number) =>
+      provider({
+        instanceId: ProviderInstanceId.make(instanceId),
+        auth: { status: "authenticated", email: "same@example.com", workspaceId },
+        usageLimits: { checkedAt, windows: [{ ...weekly, usedPercent }] },
+      });
+    const hubAccount = (id: string, workspaceId?: string) => ({
+      id,
+      driver: ProviderDriverKind.make("codex"),
+      email: "same@example.com",
+      ...(workspaceId ? { workspaceId } : {}),
+      usageLimits: { checkedAt, windows: [{ ...weekly, usedPercent: 50 }] },
+    });
+    const input = new Map([
+      [
+        EnvironmentId.make("env-a"),
+        {
+          ...laptop,
+          serverConfig: {
+            providers: [login("business", "ws-business", 8), login("personal", "ws-plus", 26)],
+            usageLimitSources: [
+              // A hub that names the workspace joins it; one that does not
+              // cannot say which of the two it read, so it keeps its own row.
+              { ...source, accounts: [hubAccount("plus.json", "ws-plus"), hubAccount("x.json")] },
+            ],
+          },
+        },
+      ],
+      [
+        EnvironmentId.make("env-b"),
+        {
+          entry: { target: { label: "Desktop" } },
+          serverConfig: { providers: [login("personal", "ws-plus", 26)] },
+        },
+      ],
+    ]);
+    const accounts = collectLimitAccounts(input);
+    expect(accounts.map((account) => account.key)).toEqual([
+      "env-a:business",
+      "env-a:personal",
+      "hub:x.json",
+    ]);
+    expect(accounts[0]?.limits.windows[0]?.usedPercent).toBe(8);
+    expect(accounts[1]?.environments.map((environment) => environment.label)).toEqual([
+      "Laptop",
+      "Desktop",
+    ]);
+  });
+
+  it("joins a report without a workspace to the only workspace signed in with its email", () => {
+    const native = provider({
+      driver: claude,
+      auth: { status: "authenticated", email: "same@example.com", workspaceId: "org-a" },
+      usageLimits: { checkedAt, windows: [window] },
+    });
+    const hubAccount = {
+      id: "claude.json",
+      driver: claude,
+      email: "same@example.com",
+      usageLimits: { checkedAt, windows: [window] },
+    };
+    const withOther = (other: ServerProvider) =>
+      new Map([
+        [
+          EnvironmentId.make("env-a"),
+          {
+            ...laptop,
+            serverConfig: {
+              providers: [native, other],
+              usageLimitSources: [{ ...source, accounts: [hubAccount] }],
+            },
+          },
+        ],
+      ]);
+    const unrelated = provider({ instanceId: ProviderInstanceId.make("codex-2") });
+    expect(collectLimitAccounts(withOther(unrelated)).map((account) => account.key)).toEqual([
+      "env-a:codex",
+    ]);
+    // A second org whose limits could not be read still makes the hub ambiguous.
+    const unreadable = provider({
+      ...native,
+      instanceId: ProviderInstanceId.make("team"),
+      auth: { ...native.auth, workspaceId: "org-b" },
+      usageLimits: { checkedAt, windows: [], unavailable: { reason: "probeFailed" } },
+    });
+    expect(collectLimitAccounts(withOther(unreadable)).map((account) => account.key)).toEqual([
+      "env-a:codex",
+      "hub:claude.json",
+    ]);
+  });
+
   it("names an environment once however many of its instances share the account", () => {
     const shared = provider({
       auth: { status: "authenticated", email: "same@example.com" },
@@ -908,6 +1000,35 @@ describe("/usage-limits", () => {
       accountId: "oss",
       creditId: "oss-credit",
     });
+  });
+
+  it("gives a hub credit to no native row when its email is signed in to two workspaces", () => {
+    const workspaces = ["ws-a", "ws-b"].map((workspaceId) =>
+      provider({
+        instanceId: ProviderInstanceId.make(workspaceId),
+        usageLimits: limits,
+        auth: { status: "authenticated", email: "same@example.com", workspaceId },
+      }),
+    );
+    const hub = [
+      {
+        ...sources[0]!,
+        accounts: [
+          {
+            id: "duplicate",
+            driver: selected.driver,
+            email: "same@example.com",
+            usageLimits: { ...limits, resetCredits: { availableCount: 2, nextCreditId: "c" } },
+          },
+        ],
+      },
+    ];
+    const report = collectProviderUsageLimits(workspaces[0]!.instanceId, workspaces, hub, now);
+    expect(report?.accounts.map((account) => account.resetCreditInput)).toEqual([
+      { instanceId: "ws-a" },
+      { instanceId: "ws-b" },
+      { sourceId: "hub", accountId: "duplicate", creditId: "c" },
+    ]);
   });
 
   it("redeems a native duplicate through the hub even when the native snapshot is fresher", () => {
