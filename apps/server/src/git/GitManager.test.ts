@@ -4981,6 +4981,27 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           mode: "worktree",
         }),
       );
+      // Nor is the branch of a closed one, which may have moved past the head it closed with.
+      const { manager: mergedManager } = yield* makeManager({
+        ghScenario: {
+          pullRequest: {
+            number: 77,
+            title: "Merged PR",
+            url: "https://dev.azure.com/org/project/_git/repo/pullrequest/77",
+            baseRefName: "main",
+            headRefName: "feature/no-pull-ref",
+            state: "merged",
+            isCrossRepository: false,
+          },
+        },
+      });
+      yield* Effect.flip(
+        preparePullRequestThread(mergedManager, {
+          cwd: repoDir,
+          reference: "77",
+          mode: "worktree",
+        }),
+      );
       const localBranches = (yield* runGit(repoDir, ["branch", "--list"])).stdout;
       expect(localBranches).not.toContain("feature/no-pull-ref");
 

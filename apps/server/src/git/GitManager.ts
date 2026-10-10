@@ -969,9 +969,10 @@ export const make = Effect.gen(function* () {
             // Azure DevOps, GitLab and Bitbucket publish no `refs/pull/<n>/head`. A head in the
             // same repository is a branch on the primary remote, so it is fetched by name instead,
             // but only when that remote is the pull request's own repository: Azure finds a pull
-            // request by number anywhere in the organization.
+            // request by number anywhere in the organization. Only while it is open, too: the
+            // branch of a closed one may have moved on past the head it was closed with.
             Effect.catch((cause) =>
-              pullRequest.isCrossRepository === true
+              pullRequest.isCrossRepository === true || pullRequest.state !== "open"
                 ? Effect.fail(cause)
                 : Effect.gen(function* () {
                     const remoteName = yield* gitCore.resolvePrimaryRemoteName(cwd);
