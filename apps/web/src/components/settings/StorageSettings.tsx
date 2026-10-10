@@ -66,7 +66,9 @@ function WorktreesDirectoryRow() {
   return (
     <SettingsRow
       {...searchableSetting("storage-worktrees-location")}
-      description={"New worktrees only. Leave empty to use the T3 home folder."}
+      description={
+        "Folder where new worktrees are created, on any drive, such as D:\\worktrees or ~/worktrees. Existing worktrees stay where they are. Leave empty to use the T3 home folder."
+      }
       serverScoped
       settingKeys={["worktreesDirectory"]}
       resetAction={
@@ -513,6 +515,7 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete worktrees with deleted threads"
               status={ruleStatus("worktreeOnDelete")}
+              description="Remove unused worktrees when active or archived threads are deleted. Worktrees with local changes are kept."
               serverScoped={!isProjectScope}
               control={
                 <Switch
@@ -538,7 +541,7 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete merged worktrees"
               status={ruleStatus("worktreeOnMerge")}
-              description="Only after the PR's commits reach the default branch."
+              description="Remove worktrees whose pull request is merged and whose commits are included in the default branch."
               serverScoped={!isProjectScope}
               control={
                 <Switch
@@ -551,7 +554,7 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete unchanged worktrees"
               status={ruleStatus("worktreeUnchanged")}
-              description="No commits beyond the default branch."
+              description="Remove worktrees with no commits beyond the default branch."
               serverScoped={!isProjectScope}
               control={
                 <Switch
