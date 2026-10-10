@@ -704,6 +704,23 @@ describe("DesktopWindow", () => {
     }),
   );
 
+  it.effect("opens the main window at readiness when the early open failed", () =>
+    Effect.gen(function* () {
+      const main = makeFakeBrowserWindow();
+      const scenario = yield* makeSplashScenario([null, main.window]);
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        const earlyExit = yield* Effect.exit(desktopWindow.ensureMain);
+        assert.equal(earlyExit._tag, "Failure");
+
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        assert.equal(yield* Ref.get(scenario.createCalls), 2);
+        assert.equal(Option.getOrThrow(yield* Ref.get(scenario.mainWindow)), main.window);
+      }).pipe(Effect.provide(scenario.layer));
+    }),
+  );
+
   it.effect(
     "opens and reopens the window without backend readiness when local execution is disabled",
     () =>
