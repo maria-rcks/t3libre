@@ -59,8 +59,10 @@ function CustomSnoozeDialog() {
   const id = useId();
   // Fetch the calendar while the user reads the dialog. Base UI sizes a popover once, as it
   // opens, so the date picker waits for the calendar instead of opening around a placeholder.
+  // Chromium caches a failed dynamic import, so a failed load swaps in a typed date field.
   const [calendar, setCalendar] = useState<Awaited<ReturnType<typeof loadCalendar>> | null>(null);
-  useEffect(() => void loadCalendar().then(setCalendar, () => undefined), []);
+  const [calendarFailed, setCalendarFailed] = useState(false);
+  useEffect(() => void loadCalendar().then(setCalendar, () => setCalendarFailed(true)), []);
   const Calendar = calendar?.Calendar;
   const [initial] = useState(() => new Date(Date.now() + 3_600_000));
   const [mode, setMode] = useState<CustomSnoozeInput["mode"]>("date");
@@ -120,50 +122,60 @@ function CustomSnoozeDialog() {
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="flex min-w-0 flex-col gap-1.5">
                       <Label htmlFor={`${id}-date`}>Date</Label>
-                      <Popover
-                        open={calendarOpen && Calendar !== undefined}
-                        onOpenChange={(open) => {
-                          setCalendarOpen(open);
-                          // A failed calendar load retries when the picker is asked for again.
-                          if (open && Calendar === undefined) {
-                            void loadCalendar().then(setCalendar, () => undefined);
-                          }
-                        }}
-                      >
-                        <PopoverTrigger
-                          render={
-                            <Button
-                              id={`${id}-date`}
-                              variant="outline"
-                              className="w-full justify-between"
-                            />
-                          }
+                      {calendarFailed ? (
+                        <Input
+                          nativeInput
+                          id={`${id}-date`}
+                          className="h-9 sm:h-8"
+                          type="date"
+                          required
+                          min={localSnoozeDate(new Date())}
+                          defaultValue={localSnoozeDate(date)}
+                          onChange={(event) => {
+                            setDate(new Date(`${event.target.value}T00:00:00`));
+                            setError(null);
+                          }}
+                        />
+                      ) : (
+                        <Popover
+                          open={calendarOpen && Calendar !== undefined}
+                          onOpenChange={setCalendarOpen}
                         >
-                          {date.toLocaleDateString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })}
-                          <CalendarIcon className="size-4 text-muted-foreground" />
-                        </PopoverTrigger>
-                        <PopoverPopup align="start" aria-label="Choose snooze date">
-                          {Calendar && (
-                            <Calendar
-                              mode="single"
-                              required
-                              selected={date}
-                              defaultMonth={date}
-                              {...(weekStartsOn === undefined ? {} : { weekStartsOn })}
-                              disabled={{ before: new Date(new Date().setHours(0, 0, 0, 0)) }}
-                              onSelect={(selected) => {
-                                setDate(selected);
-                                setCalendarOpen(false);
-                                setError(null);
-                              }}
-                            />
-                          )}
-                        </PopoverPopup>
-                      </Popover>
+                          <PopoverTrigger
+                            render={
+                              <Button
+                                id={`${id}-date`}
+                                variant="outline"
+                                className="w-full justify-between"
+                              />
+                            }
+                          >
+                            {date.toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
+                            <CalendarIcon className="size-4 text-muted-foreground" />
+                          </PopoverTrigger>
+                          <PopoverPopup align="start" aria-label="Choose snooze date">
+                            {Calendar && (
+                              <Calendar
+                                mode="single"
+                                required
+                                selected={date}
+                                defaultMonth={date}
+                                {...(weekStartsOn === undefined ? {} : { weekStartsOn })}
+                                disabled={{ before: new Date(new Date().setHours(0, 0, 0, 0)) }}
+                                onSelect={(selected) => {
+                                  setDate(selected);
+                                  setCalendarOpen(false);
+                                  setError(null);
+                                }}
+                              />
+                            )}
+                          </PopoverPopup>
+                        </Popover>
+                      )}
                     </div>
                     <Label className="flex min-w-0 flex-col items-stretch" htmlFor={`${id}-time`}>
                       Time
@@ -225,6 +237,11 @@ function CustomSnoozeDialog() {
                 )}
               </div>
             </div>
+            {mode === "date" && calendarFailed && (
+              <p role="alert" className="text-destructive">
+                The calendar could not load. Type the date instead.
+              </p>
+            )}
             {error && (
               <p role="alert" className="text-destructive">
                 {error}
